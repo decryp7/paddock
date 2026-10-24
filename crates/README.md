@@ -833,8 +833,10 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   every minute. `paddock_shell::Builder::service(|app| Ok(ServicePart::new(Setup::new(manager).health("agent"))))`
   wires it and the `pd.login` "Start at login" section (only a change by the user acts). The UI is
   `@decryp7/paddock-ui/shell/service` (Settings > Background service).
-- **The shell demo's agent** (`apps/shell-demo/src-tauri/src/agent.rs`, binary `shell-demo-agent`): a heartbeat-only
-  per-user agent, bundled with its generated plist and NSIS hooks, so the page, the health entry and
+- **The shell demo's agent** (crate `apps/shell-demo/src-tauri/agent`, binary `shell-demo-agent`): a heartbeat-only
+  per-user agent, bundled as Tauri's `externalBin` (`agent/sidecar.mjs` builds it per target triple in
+  `beforeBuildCommand`; the bundle check starts it from the built app with `--self-test`, rule 23), with its generated
+  plist and NSIS hooks, so the page, the health entry and
   `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
 - Not here: Task Scheduler entries (no app uses them).
 
@@ -922,3 +924,8 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   error shapes, scripted pairing, failures with `Retry-After`, held and dying streams. It waits on conditions, never on the clock.
   `tests/contract.rs` runs the client against it; with `PADDOCK_PITWALL_HTTP_RS=<pitwall>/crates/pitwall-server/src/http.rs` it also
   checks that Pitwall's router still has every route (Pitwall's CI should set it).
+- `AiSnapshot` (`Session::snapshot`): the one value the shared `<pd-needs-ai>` draws (`@decryp7/paddock-ui/shell/pitwall`): state,
+  the engine's sentence and buttons, the waiting pairing code, whether the app has an engine of its own. The app registers the
+  four commands of `status::COMMANDS` (`pitwall_state`, `pitwall_connect`, `pitwall_cancel_pairing`, `pitwall_use_builtin`) over
+  its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
+  by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.

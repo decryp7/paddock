@@ -587,6 +587,69 @@
       <trans-unit id="pd.pathText.copy" datatype="html">
         <source>Copy the full path</source>
       </trans-unit>
+      <trans-unit id="pd.pitwall.approve" datatype="html">
+        <source>Approve <x id="app"/> in Pitwall &gt; Apps &amp; keys and check that it shows this code.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.builtin-failed" datatype="html">
+        <source>The built-in engine could not be switched on.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.cancel-failed" datatype="html">
+        <source>The pairing could not be cancelled.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.code-label" datatype="html">
+        <source>Pairing code</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.connect-failed" datatype="html">
+        <source>Pitwall could not be reached to connect.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.no-state" datatype="html">
+        <source>Pitwall's state could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.on-builtin" datatype="html">
+        <source>This session uses the built-in engine.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.open-settings" datatype="html">
+        <source>Open AI settings</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.state-unknown" datatype="html">
+        <source>Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.install" datatype="html">
+        <source>Get Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.model" datatype="html">
+        <source>Download a model in Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.pair" datatype="html">
+        <source>Connect to Pitwall…</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.permissions" datatype="html">
+        <source>Change permissions in Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.start" datatype="html">
+        <source>Open Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.update-app" datatype="html">
+        <source>Update this app</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.update-pitwall" datatype="html">
+        <source>Update Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.title" datatype="html">
+        <source><x id="feature"/> needs local AI</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.use-builtin" datatype="html">
+        <source>Use the built-in engine</source>
+      </trans-unit>
       <trans-unit id="pd.service.actions" datatype="html">
         <source>Service actions</source>
       </trans-unit>

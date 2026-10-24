@@ -285,27 +285,14 @@ impl Conn {
                     self.buf.extend_from_slice(&tmp[..n]);
                     return Ok(true);
                 }
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
-                    ) =>
-                {
-                    if Instant::now() >= deadline {
-                        return Err(HttpError::Timeout(what));
+                Err(e) => match classify_read_error(&e)? {
+                    ReadFailure::Retry => {
+                        if Instant::now() >= deadline {
+                            return Err(HttpError::Timeout(what));
+                        }
                     }
-                }
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        ErrorKind::ConnectionReset
-                            | ErrorKind::ConnectionAborted
-                            | ErrorKind::BrokenPipe
-                    ) =>
-                {
-                    return Ok(false);
-                }
-                Err(e) => return Err(HttpError::Protocol(e.to_string())),
+                    ReadFailure::Ended => return Ok(false),
+                },
             }
         }
     }
@@ -346,6 +333,36 @@ impl Conn {
     }
 }
 
+/// What a failed socket read means (when it is not fatal).
+#[derive(Debug, PartialEq, Eq)]
+enum ReadFailure {
+    /// Nothing arrived within the slice (or the call was interrupted): look at the deadline and Cancel, then read again.
+    Retry,
+    /// The peer reset or closed the connection: the stream ended.
+    Ended,
+}
+
+fn classify_read_error(e: &std::io::Error) -> Result<ReadFailure, HttpError> {
+    match e.kind() {
+        ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted => {
+            Ok(ReadFailure::Retry)
+        }
+        ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe => {
+            Ok(ReadFailure::Ended)
+        }
+        // Anything else cannot be trusted.
+        _ => Err(HttpError::Protocol(e.to_string())),
+    }
+}
+
+/// A failed connect: a limit that ran out, or nothing listening.
+fn connect_error(e: &std::io::Error) -> HttpError {
+    match e.kind() {
+        ErrorKind::TimedOut | ErrorKind::WouldBlock => HttpError::Timeout("connecting"),
+        _ => HttpError::Refused(e.to_string()),
+    }
+}
+
 /// Sends `req` to `127.0.0.1:port` and reads the status and headers. The body is read from the [`Response`].
 pub fn send(
     port: u16,
@@ -376,10 +393,7 @@ pub fn send_as(
         ));
     }
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let stream = TcpStream::connect_timeout(&addr, t.connect).map_err(|e| match e.kind() {
-        ErrorKind::TimedOut | ErrorKind::WouldBlock => HttpError::Timeout("connecting"),
-        _ => HttpError::Refused(e.to_string()),
-    })?;
+    let stream = TcpStream::connect_timeout(&addr, t.connect).map_err(|e| connect_error(&e))?;
     let _ = stream.set_nodelay(true);
     stream
         .set_read_timeout(Some(SLICE))
@@ -688,6 +702,74 @@ mod tests {
             HttpError::Protocol("p".into())
                 .to_string()
                 .contains("unexpected")
+        );
+    }
+
+    #[test]
+    fn socket_errors_mean_what_they_should() {
+        use std::io::Error;
+        for k in [
+            ErrorKind::WouldBlock,
+            ErrorKind::TimedOut,
+            ErrorKind::Interrupted,
+        ] {
+            assert_eq!(
+                classify_read_error(&Error::from(k)),
+                Ok(ReadFailure::Retry),
+                "{k:?}"
+            );
+        }
+        for k in [
+            ErrorKind::ConnectionReset,
+            ErrorKind::ConnectionAborted,
+            ErrorKind::BrokenPipe,
+        ] {
+            assert_eq!(
+                classify_read_error(&Error::from(k)),
+                Ok(ReadFailure::Ended),
+                "{k:?}"
+            );
+        }
+        assert!(matches!(
+            classify_read_error(&Error::from(ErrorKind::InvalidData)),
+            Err(HttpError::Protocol(_))
+        ));
+        assert_eq!(
+            connect_error(&Error::from(ErrorKind::TimedOut)),
+            HttpError::Timeout("connecting")
+        );
+        assert_eq!(
+            connect_error(&Error::from(ErrorKind::WouldBlock)),
+            HttpError::Timeout("connecting")
+        );
+        assert!(matches!(
+            connect_error(&Error::from(ErrorKind::ConnectionRefused)),
+            HttpError::Refused(_)
+        ));
+    }
+
+    #[test]
+    fn a_server_that_resets_the_connection_ends_the_answer_not_the_process() {
+        // The server takes the request and closes without reading it: the unread bytes make the OS send a reset.
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let (got_tx, got_rx) = mpsc::channel();
+        let h = std::thread::spawn(move || {
+            let (s, _) = l.accept().unwrap();
+            // Wait until the request is in the socket (without reading it), then close.
+            let mut one = [0u8; 1];
+            let _ = s.peek(&mut one);
+            let _ = got_tx.send(());
+            drop(s);
+        });
+        let body = vec![b'x'; 64 * 1024];
+        let r = send(port, &Request::post("/c", body), Timeouts::QUICK, None);
+        got_rx.recv().unwrap();
+        h.join().unwrap();
+        let err = r.err();
+        assert!(
+            matches!(err, Some(HttpError::Closed | HttpError::Protocol(_))),
+            "{err:?}"
         );
     }
 
