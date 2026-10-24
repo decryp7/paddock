@@ -12,6 +12,12 @@ Conventional Commits; one semver tag for the whole repo.
   relying on a fresh worker.
 
 ### Changed
+- BREAKING (X51, unreleased crates): one `ProtocolVersion` and one `GrantRef`. `paddock-plugin-package` drops its own
+  `ProtocolVersion` (and the `version` module) and re-exports `paddock_ipc::ProtocolVersion`; `paddock_ipc` gains `Skew`,
+  `ProtocolVersion::skew` and `introduced_in`, which `paddock-plugin-api`'s `HostInfo` now builds on instead of a second copy of
+  the rule. `Manifest::check_compatible` and `paddock_plugin_api::compat::protocol_of` are removed (use `HostInfo`).
+  `paddock_view::GrantRef` is now the validated type of `paddock-plugin-package` (private field, `GrantRef::new`; still a plain
+  string in JSON, postcard and TypeScript), re-exported by the package; the view validator no longer re-checks it.
 - X21 review 3: the resting "..." button shows the full subtle text on a selected row (the rest mix was 2.71:1 on the tint; the
   token test now covers the selected tint and surface-2); paths are cut at segment boundaries and keep their trailing segments
   (`…/Debrief/plugins/viewer/plugin-1.bin`); the donut total is one line; chart loading shows muted bars and a label (never an empty
