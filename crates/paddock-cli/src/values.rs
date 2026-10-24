@@ -90,7 +90,7 @@ mod tests {
         assert_eq!(format_size(1023), "1023 B");
         assert_eq!(format_size(1536), "1.5 KB");
         assert_eq!(format_size(3 * (1 << 30)), "3.0 GB");
-        assert_eq!(format_size(u64::MAX), "16384.0 TB");
+        assert_eq!(format_size(u64::MAX), "16777216.0 TB");
         assert_eq!(parse_size("512").unwrap(), 512);
         assert_eq!(parse_size("64k").unwrap(), 64 * 1024);
         assert_eq!(parse_size("10MB").unwrap(), 10 << 20);
