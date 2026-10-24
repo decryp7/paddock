@@ -54,7 +54,7 @@ pub fn rig() -> Rig {
 }
 
 /// Sends one request through a session and parses the reply.
-pub fn rpc(server: &Server, session: &mut Session, request: Value) -> Value {
+pub fn rpc(server: &Server, session: &Session, request: Value) -> Value {
     let line = server
         .handle(session, &request.to_string())
         .expect("a request gets an answer");
@@ -64,17 +64,17 @@ pub fn rpc(server: &Server, session: &mut Session, request: Value) -> Value {
 
 /// A session that has completed the handshake.
 pub fn ready(server: &Server) -> Session {
-    let mut s = Session::new("tester");
+    let s = Session::new("tester");
     let r = rpc(
         server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}),
     );
     assert!(r["result"].is_object(), "{r}");
     assert!(
         server
             .handle(
-                &mut s,
+                &s,
                 r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
             )
             .is_none()
@@ -82,7 +82,7 @@ pub fn ready(server: &Server) -> Session {
     s
 }
 
-pub fn call(server: &Server, s: &mut Session, id: i64, name: &str, args: Value) -> Value {
+pub fn call(server: &Server, s: &Session, id: i64, name: &str, args: Value) -> Value {
     rpc(
         server,
         s,

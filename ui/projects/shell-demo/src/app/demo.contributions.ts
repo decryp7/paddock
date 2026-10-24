@@ -351,6 +351,15 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       load: () => import('./pages/schedule-page').then((m) => m.SchedulePage),
     }),
     definePage<DemoContext>({
+      id: 'sd.files',
+      title: msg('sd.page.files', 'Files'),
+      icon: 'pd:folder',
+      order: 260,
+      when: (ctx) => ctx.developer(),
+      providers: () => import('./files.providers').then((m) => m.FILES_PROVIDERS),
+      load: () => import('./pages/files-page').then((m) => m.FilesPage),
+    }),
+    definePage<DemoContext>({
       id: 'sd.keys',
       title: msg('sd.page.keys', 'Keyboard'),
       icon: 'pd:keyboard',

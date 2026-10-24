@@ -548,3 +548,69 @@
     margin-inline-start: 2px;
   }
 }
+
+// ---- Popup menus (the data table's row and column menus, any CDK menu): surface-3 with shadow-2 (design guide §8). Items keep the
+// pointer's 5 % hover fill, but the keyboard's focus is the family's 2 px ring inset in the item, 3:1 or better (SC 2.4.11), so the
+// item Enter will run is always visible. When some item has an icon, every item reserves the 14 px slot (`.pd-popmenu__icon`).
+.pd-popmenu {
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: var(--pd-space-1);
+  border: 1px solid var(--pd-border-strong);
+  border-radius: var(--pd-radius-popover);
+  background: var(--pd-surface-3);
+  box-shadow: var(--pd-shadow-2);
+}
+
+.pd-popmenu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--pd-space-2);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--pd-space-3);
+  border: 0;
+  border-radius: var(--pd-radius-tag);
+  background: transparent;
+  color: var(--pd-text);
+  font: inherit;
+  font-size: var(--pd-text-body);
+  text-align: start;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--pd-hover);
+  }
+
+  &:focus-visible {
+    background: var(--pd-hover);
+    outline: 2px solid var(--pd-focus-ring);
+    outline-offset: -2px;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.pd-popmenu__icon {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--pd-text-muted);
+}
+
+.pd-popmenu__item--danger,
+.pd-popmenu__item--danger .pd-popmenu__icon {
+  color: var(--pd-danger);
+}
+
+.pd-popmenu__sep {
+  height: 1px;
+  margin: var(--pd-space-1) 0;
+  background: var(--pd-hairline);
+}
