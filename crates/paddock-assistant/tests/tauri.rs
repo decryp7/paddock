@@ -1,6 +1,7 @@
 //! The adapter on Tauri's mock runtime: the commands behind the shell's guard, events to every window. No window reaches the
 //! desktop, files live in a temp folder, waits are channel waits.
 
+#[path = "it/support.rs"]
 mod support;
 use ::tauri::ipc::{CallbackFn, InvokeBody};
 use ::tauri::test::{

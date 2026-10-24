@@ -2,8 +2,8 @@
 
 use paddock_testplan::*;
 
-const PLAN: &str = include_str!("../fixtures/settings.sighterplan");
-const RESULT: &str = include_str!("../fixtures/settings.sighterresult");
+const PLAN: &str = include_str!("../../fixtures/settings.sighterplan");
+const RESULT: &str = include_str!("../../fixtures/settings.sighterresult");
 
 fn plan() -> Plan {
     parse_plan(PLAN.as_bytes()).unwrap()

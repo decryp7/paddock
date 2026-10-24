@@ -22,6 +22,14 @@ Conventional Commits; one semver tag for the whole repo.
   "needs update"), and starts it detached with the paths or one deep link of its scheme (`pitcrew://show/machine/mac-mini`);
   "not installed" is a plain `Outcome`. The receiving side parses with `Handoff::from_paths` / `from_link`. `testing` has a file
   system and a spawner that start nothing.
+- Undo and an activity journal (plan X44). `paddock_jobs::journal`: a bounded (at most 5,000 entries, cut texts), persisted (paddock-env
+  versioned file, user-only permissions, a damaged file kept, a newer one never overwritten) log of what the app did on the user's
+  behalf, each entry `NotUndoable`, `Available`, `Undone` or `Expired`; `record`, `mark`, `expire_before`, `entries`, listeners for
+  pushing changes, a save failure kept for the app to show. Undoing stays the app's work. UI: `@decryp7/paddock-ui/shell/undo` with
+  `UndoStore` (the history of the user's edits: labels, merge keys, groups, limit 100; port of Debrief's `UndoStack`), Edit > Undo and
+  Redo (`UNDO_CONTRIBUTIONS`, Mod+Z / Mod+Shift+Z), the `pd-undo-toast` "Done, Undo" toast, `ActivityStore`, the Activity page
+  (`ACTIVITY_CONTRIBUTIONS`) and `TauriActivityBackend` / `MemoryActivityBackend`. The shell demo shows all of it (Say hello is
+  undoable). `paddock-jobs` now depends on `paddock-env`.
 - `paddock-chromium` and `paddock-runtime` (plan X14). `paddock-chromium` is the one Chromium driver, merged from Debrief's
   `chromium-driver` and Spotter's `spotter-render`: one command-line builder with the start page always last, `Sandbox::decide`
   (root plus an explicit opt-in only), launch as a `paddock-proc` supervised tree with a time limit on an injected clock and a

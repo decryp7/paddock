@@ -1,6 +1,6 @@
 //! The stdio and loopback transports, on in-memory pipes and a real loopback socket (port chosen by the OS).
 
-mod common;
+use crate::common;
 
 use common::*;
 use paddock_mcp::{KeyStore, Limits, client, jsonrpc, serve_loopback, serve_stdio};
