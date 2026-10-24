@@ -352,3 +352,15 @@ Chromium's arguments were assembled in three places; after two branches merged, 
 page on Linux as root (only CI runs as root, so the macOS gate never saw it). **Rule:** one function builds the whole
 command line, puts positional arguments last, and is tested for every combination of options on any OS (inject
 "is root"/sandbox as a value).
+
+## On macOS, an accepted socket inherits a non-blocking listener's flag (2026-10-25, Debrief)
+
+A blocking test fake used a non-blocking listener; on macOS each accepted connection inherited the flag, so a request
+that arrived a moment late read as "would block" and the fake dropped the connection — a client then saw "not
+running". Linux does not inherit the flag, so only the Mac flaked. **Rule:** a blocking fake sets every accepted
+connection back to blocking, and its test sends the request only after the fake has started reading.
+
+## Compare mechanisms in tests, timings in benchmarks (2026-10-25, Debrief)
+
+"Four connections are faster than one" failed 30 of 30 times under load. **Rule:** a test asserts the mechanism (four
+requests held open at once), and the speed comparison lives in a benchmark with a budget (rule 16, `paddock-bench`).
