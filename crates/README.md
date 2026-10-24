@@ -139,7 +139,7 @@ tauri::Builder::default()
 - `route(jobs, other)` sends the table's commands to the jobs handler and the rest to the app's, for an app without the
   `paddock-shell` plugin (which serves these commands itself; `invoke_handler()` is the unguarded handler it composes).
 - Generated TypeScript in `ui/projects/paddock-ui/shell/jobs/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs
-  --features tauri --test tauri generated`): `jobs-commands.ts` (`JOBS_COMMANDS`, `JobsCommand`) and `jobs-fixtures.ts`
+  --features tauri --test it tauri::generated`): `jobs-commands.ts` (`JOBS_COMMANDS`, `JobsCommand`) and `jobs-fixtures.ts`
   (one snapshot of every shape, written by the real reporter, decoded by the UI's specs).
 
 ## `paddock_jobs::time` (plan X20)
