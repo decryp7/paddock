@@ -79,7 +79,7 @@ pub use error::{DownloadError, TransportError, TransportErrorKind, human_bytes};
 pub use fetch::Fetch;
 pub use hosts::{DEFAULT_HOST_CAP, HostCaps, MAX_HOST_CAP};
 #[cfg(feature = "http")]
-pub use http::{HttpConfig, HttpTransport, ProxyMode, ureq_agent};
+pub use http::{HttpConfig, HttpTransport, ProxyMode, ureq_agent, ureq_config};
 pub use proxy::{
     MAX_NO_PROXY_ENTRIES, MAX_PROXY_TEXT, NoProxy, ProxyCredentials, ProxyRules, ProxyScheme,
     ProxyServer,

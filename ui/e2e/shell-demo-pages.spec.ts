@@ -56,7 +56,7 @@ test.describe('pages frame (plan S14)', () => {
     const host = page.locator('sd-runners-page');
     await expect(host).toHaveAttribute('data-visit', /^\d+$/);
     const first = Number(await host.getAttribute('data-visit'));
-    await expect(page.getByRole('table').getByRole('row')).toHaveCount(5);
+    await expect(page.getByRole('grid', { name: 'Runners' }).getByRole('row')).toHaveCount(5);
     // The page's component and its providers were fetched only now.
     expect(scripts.length).toBeGreaterThan(0);
     await expect(page.getByRole('heading', { name: 'No jobs' })).toBeVisible();

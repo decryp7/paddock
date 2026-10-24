@@ -29,7 +29,7 @@ pub mod time;
 mod walk;
 mod workers;
 
-pub use cancel::{CancelReason, CancelToken, Cancelled};
+pub use cancel::{CancelReason, CancelToken, Cancelled, OnCancel};
 pub use error::JobError;
 pub use eta::EtaEstimator;
 pub use hash::{CHUNK, HashingWriter, copy_hashed, hex};
@@ -40,7 +40,8 @@ pub use model::{
 };
 pub use pipeline::pipeline_ordered;
 pub use pool::{
-    HANDLER_BUDGET_MS, JobHandle, JobPool, Offload, PoolClosed, SlowHandler, assert_nonblocking,
+    BLOCKED_AFTER, Blocked, JobHandle, JobPool, Offload, PoolClosed, PoolHold, assert_nonblocking,
+    assert_nonblocking_within,
 };
 pub use reporter::{Counter, DEFAULT_MIN_INTERVAL_MS, EventSink, Reporter, UncancellableGuard};
 pub use time::{Clock, FakeClock, SystemClock};
