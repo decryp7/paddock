@@ -85,7 +85,8 @@ export const HOVER_HIDE_MS = 300;
           (focusout)="focusOut($event)"
         >
           <header class="pd-dock-ah-head">
-            <span class="pd-dock-ah-title">{{ item.title }}</span>
+            <!-- The strip tab already names the panel: the header repeats nothing (the region's aria-label still does). -->
+            <span class="pd-dock-ah-spacer"></span>
             <button type="button" class="pd-dock-action pd-dock-ah-pin" [attr.aria-label]="pinLabel(item.title)" aria-pressed="true" [attr.title]="pinTitle" (click)="dock.pin(item.id)">
               <pd-icon name="pd:pin" />
             </button>
@@ -103,10 +104,10 @@ export const HOVER_HIDE_MS = 300;
     }
     @if (menus.state(); as menu) {
       <div class="pd-dock-menu-backdrop" (pointerdown)="menus.close()"></div>
-      <ul class="pd-dock-menu" role="menu" data-testid="pd-dock-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" (keydown)="menuKey($event, menu.items)">
+      <ul class="pd-dock-menu pd-popmenu" role="menu" data-testid="pd-dock-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" (keydown)="menuKey($event, menu.items)">
         @for (item of menu.items; track item.label) {
           <li role="none">
-            <button type="button" role="menuitem" [disabled]="item.disabled ?? false" (click)="menus.choose(item)">{{ item.label }}</button>
+            <button type="button" role="menuitem" class="pd-popmenu__item" [disabled]="item.disabled ?? false" (click)="menus.choose(item)"><span class="pd-popmenu__label">{{ item.label }}</span></button>
           </li>
         }
       </ul>
