@@ -50,6 +50,63 @@
       <trans-unit id="pd.about.version" datatype="html">
         <source>Version <x id="version"/></source>
       </trans-unit>
+      <trans-unit id="pd.activity.badAnswer" datatype="html">
+        <source>The app did not answer with the entry.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.cannot" datatype="html">
+        <source>That action cannot be undone any more.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.what" datatype="html">
+        <source>What happened</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.when" datatype="html">
+        <source>When</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.emptyDescription" datatype="html">
+        <source>Actions the app takes for you will be listed here.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.emptyHeading" datatype="html">
+        <source>Nothing yet</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.expired" datatype="html">
+        <source>No longer possible</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.gone" datatype="html">
+        <source>That entry is no longer in the log.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.noAnswer" datatype="html">
+        <source>The activity log did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.page" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.readFailed" datatype="html">
+        <source>The activity log could not be read</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.subtitle" datatype="html">
+        <source>What the app did for you, and what you can take back.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.title" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undoFailed" datatype="html">
+        <source>The action could not be undone.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undoNamed" datatype="html">
+        <source>Undo: <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undone" datatype="html">
+        <source>Undone</source>
+      </trans-unit>
       <trans-unit id="pd.category.app" datatype="html">
         <source>Application</source>
       </trans-unit>
@@ -1669,6 +1726,51 @@
       </trans-unit>
       <trans-unit id="pd.ui.sparkline" datatype="html">
         <source>Trend</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.actionFailed" datatype="html">
+        <source><x id="label"/> failed: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.category" datatype="html">
+        <source>Edit</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.redo" datatype="html">
+        <source>Redo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.nothingToRedo" datatype="html">
+        <source>Nothing to redo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.nothingToUndo" datatype="html">
+        <source>Nothing to undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.notification.failed" datatype="html">
+        <source>Could not undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.redoFailed" datatype="html">
+        <source>Could not redo <x id="label"/>: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.redone" datatype="html">
+        <source>Redone: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.close" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.done" datatype="html">
+        <source>Done: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.undoFailed" datatype="html">
+        <source>Could not undo <x id="label"/>: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.undone" datatype="html">
+        <source>Undone: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.unknown" datatype="html">
+        <source>something went wrong</source>
       </trans-unit>
       <trans-unit id="pd.updates.asking" datatype="html">
         <source>Asking the updater…</source>
