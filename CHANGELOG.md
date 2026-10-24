@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-view` (plan X51, ADR 0002): the declarative view model plugins return. `ViewDoc` with `Node`/`NodeKind` (stack, text,
+  table, tree, graph, diagram, form, review list, matrix, chart, badge, progress, empty, needs-AI, link), `ActionRef` (with a
+  label), `ViewAction`, `ViewPatch` and `apply_patch`; JSON (camelCase) and postcard codecs with a size limit and a decode depth
+  guard; `validate` with the ADR limits (errors name the node path; http and https links only; every interactive node labelled);
+  a never-panics property test and a cargo-fuzz target (`crates/paddock-view/fuzz`); generated TypeScript in
+  `@decryp7/paddock-ui` (`view/generated/view.ts`, stale-checked by a test). The `<pd-view>` renderer is the next step.
 - `paddock-chromium` and `paddock-runtime` (plan X14). `paddock-chromium` is the one Chromium driver, merged from Debrief's
   `chromium-driver` and Spotter's `spotter-render`: one command-line builder with the start page always last, `Sandbox::decide`
   (root plus an explicit opt-in only), launch as a `paddock-proc` supervised tree with a time limit on an injected clock and a

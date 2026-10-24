@@ -94,7 +94,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-assistant` | the assistant (plan W6): `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for writes, the bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, Tauri commands and the `paddock://assistant` event | yes (Pacenotes, Sighter; Debrief's chat moves onto it); built |
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
-| `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
+| `paddock-view` | the declarative view model plugins return (ADR 0002, plan X51): `ViewDoc`, nodes, actions, patches, JSON + postcard, the limits validator, generated TypeScript | yes (Debrief, Pacenotes, Dyno tier 3); built |
+| `paddock-guard`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
@@ -891,6 +892,30 @@ let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // 
   secret. SMTP does not use the HTTP proxy.
 - Tests use `FakePoster` / `FakeMail` (scripted, recording) or an in-process loopback server; the real adapters are tested
   against those servers only.
+## `paddock-view` (plan X51, ADR 0002)
+
+The declarative view model a plugin returns instead of web code: pure data, validated in Rust, rendered by the host's generic
+components. Depends on `paddock-ipc` (for `Json`, the arguments of an action) and serde only.
+
+- `ViewDoc { schema, title, root, etag }`; `Node { id, kind: NodeKind }` with `Stack`, `Text`, `Table`, `Tree` (flat, pre-order
+  `depth`), `Graph`, `Diagram`, `Form`, `ReviewList`, `Matrix`, `Chart`, `Badge`, `Progress`, `Empty`, `NeedsAi` and `Link`.
+  `ActionRef { id, label, confirm, args, writes }` carries the text label that makes every interactive node accessible;
+  `Link` is an action or `OpenInBrowser { url, label }`. Icons, tones and text styles are closed enums.
+- Wire: JSON (camelCase, externally tagged enums) and postcard, no `untagged`/`flatten`/internal or adjacent tags (postcard
+  cannot decode those) and no `skip_serializing_if`; variants only appended. `to_json`/`from_json`/`to_postcard`/`from_postcard`
+  refuse more than 1 MiB and stop nesting at 64 nodes while decoding (postcard has no recursion limit of its own).
+- `validate(&ViewDoc) -> Result<(), ViewError>`: depth 16, 20,000 nodes (nodes, tree nodes, graph nodes, diagram elements,
+  table rows, findings, matrix cells, fields), 1 MiB encoded, strings 8 KiB, ids 128 bytes and unique, graphs and diagrams
+  5,000 nodes / 20,000 edges with edges naming existing nodes, inline rows 2,000 (more: `RowSource::Paged`), charts 20,000
+  values, `u64`s below 2^53, links `http`/`https` without user information. `validate_action` bounds a `ViewAction`.
+- `apply_patch(&mut ViewDoc, ViewPatch)`: `Replace { base_etag, etag, id, node }` (a stale base or an unchanged etag is refused) or
+  `Doc` (a new etag); all or nothing, and the result is validated.
+- Host-added action arguments: `row` (table row), `page`, `node` (tree/graph node, `expand`), `finding` (and `reason`), `values`
+  (form), `column`/`descending` (`sort`).
+- Generated TypeScript: `ui/projects/paddock-ui/view/generated/view.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-view --lib
+  generated`; a test fails on a stale file). The Angular `<pd-view>` renderer is not built yet.
+- Fuzz: `crates/paddock-view/fuzz` (`cargo +nightly fuzz run decode` from `crates/paddock-view`).
+
 ## `paddock-ipc` (plan X13, ADR 0001 step 1)
 
 The family's one IPC between an app and its own processes (workers, plugins, agents, services), from Debrief's
