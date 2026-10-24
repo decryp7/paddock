@@ -128,6 +128,24 @@ mod tests {
     use paddock_settings::Settings;
     use serde_json::json;
 
+    /// The section as `settings_overview` answers it, written for the shell demo's browser build (no Rust engine there).
+    #[test]
+    fn the_generated_fixture_is_current() {
+        use paddock_commands::testing::{WriteMode, sync_generated};
+        let settings = Settings::in_memory();
+        settings.register(Arc::new(schema())).unwrap();
+        let section = serde_json::to_string_pretty(&settings.overview().sections[0]).unwrap();
+        let text = format!(
+            "// Generated from paddock-shell's own code by its tests (Rust round trips). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-shell --lib notifications.\n\n\
+             import type {{ SectionView }} from './settings';\n\n\
+             /** The \"Notifications\" settings section at its defaults, as `settings_overview` answers it. */\n\
+             export const NOTIFICATIONS_SECTION_FIXTURE: SectionView = {section};\n"
+        );
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../ui/projects/paddock-ui/shell/settings/generated/notifications-fixture.ts");
+        sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+    }
+
     #[test]
     fn the_schema_is_valid_and_its_defaults_are_the_notifiers() {
         let s = schema();

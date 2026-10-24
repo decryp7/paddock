@@ -315,6 +315,11 @@ health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.
     else goes to the window as `paddock://notifications-action` (`NoticeActionEvent`; the UI runs it like the centre's own
     button). Where an OS reports no clicks the old fallback stays: the app gaining the focus within 2 minutes opens the
     last toast's message; a reported click supersedes it.
+  - Quiet-hours digest: causes held back by quiet hours are counted (distinct, at most 512); when quiet hours are over
+    `OsNotifier::pending_digest` says how many and `tauri::poll_digest` posts one quiet message ("N notifications held
+    during quiet hours", cause `os:quiet-digest`, merged across nights) and one toast, rate-limited like any other cause. A
+    user who is looking at the window gets the message in the centre only. `Setup::os_digest_every(d)` polls on a thread that
+    ends with the app (quiet hours end by the clock, not an event); a window gaining the focus polls too.
   - Tests never post a notification: `FakeToaster` records toasts, plays clicks and permission answers (public, for the
     apps' wiring tests); `FixedOffset` stands for the user's zone, `ManualClock` for time.
 

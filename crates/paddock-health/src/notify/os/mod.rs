@@ -41,8 +41,14 @@ pub use toast::{
 
 use crate::clock::Clock;
 use crate::notify::centre::Notice;
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::{Arc, Mutex};
+
+/// The cause key of the quiet-hours digest message.
+pub const DIGEST_CAUSE: &str = "os:quiet-digest";
+/// The most distinct causes counted as held during quiet hours.
+pub const MAX_HELD: usize = 512;
 
 /// The OS refused or failed to show a toast.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +117,8 @@ pub struct OsNotifier {
     local: Arc<dyn LocalTime>,
     toaster: Arc<dyn Toaster>,
     labels: ActionLabels,
+    /// Causes whose toast quiet hours held back, for the digest.
+    held: Mutex<HashSet<String>>,
 }
 
 impl OsNotifier {
@@ -124,6 +132,7 @@ impl OsNotifier {
             local: Arc::new(SystemLocalTime),
             toaster,
             labels: ActionLabels::default(),
+            held: Mutex::new(HashSet::new()),
         }
     }
 
@@ -156,6 +165,15 @@ impl OsNotifier {
         let settings = self.settings.get();
         let now = self.clock.now_ms();
         if let Err(skip) = screen(&settings, notice.severity, seen, self.local.clock_time(now)) {
+            if skip == Skip::QuietHours {
+                let mut held = self
+                    .held
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if held.len() < MAX_HELD {
+                    held.insert(notice.cause.clone());
+                }
+            }
             return Outcome::Skipped(skip);
         }
         let reservation = {
@@ -177,6 +195,83 @@ impl OsNotifier {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .undo(reservation);
                 log::warn!(target: "paddock_health", "The OS notification could not be shown: {e}");
+                Outcome::Failed(e)
+            }
+        }
+    }
+
+    /// How many causes quiet hours held back and are due a digest now: quiet hours are over (or off), notifications are
+    /// on, and the limits would allow a toast. `None` while quiet hours last, when nothing was held, or when the limits
+    /// hold the digest back (ask again later). Turning notifications off forgets what was held.
+    pub fn pending_digest(&self) -> Option<u32> {
+        let settings = self.settings.get();
+        let now = self.clock.now_ms();
+        if settings.level == OsLevel::Off {
+            self.held
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+            return None;
+        }
+        if settings
+            .quiet_hours
+            .is_some_and(|q| q.contains(self.local.clock_time(now)))
+        {
+            return None;
+        }
+        let n = self
+            .held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len();
+        if n == 0 {
+            return None;
+        }
+        let mut limiter = self
+            .limiter
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        limiter.check(&settings, DIGEST_CAUSE, now).ok()?;
+        u32::try_from(n).ok()
+    }
+
+    /// Shows the digest toast for `notice` (the message [`pending_digest`](Self::pending_digest) was posted as) and
+    /// forgets what was held. When the user already sees the window the digest is dropped; when the limits or the OS
+    /// hold it back, what was held stays for the next try. Rate-limited under [`DIGEST_CAUSE`] like any other toast.
+    pub fn send_digest(&self, notice: &Notice, seen: bool) -> Outcome {
+        let clear = || {
+            self.held
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear()
+        };
+        if seen {
+            clear();
+            return Outcome::Skipped(Skip::Seen);
+        }
+        let settings = self.settings.get();
+        let reservation = {
+            let mut limiter = self
+                .limiter
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match limiter.allow(&settings, DIGEST_CAUSE, self.clock.now_ms()) {
+                Ok(r) => r,
+                Err(limited) => return Outcome::Skipped(limited.into()),
+            }
+        };
+        let toast = toast_for(notice, &self.labels);
+        match self.toaster.show(&toast) {
+            Ok(()) => {
+                clear();
+                Outcome::Shown(toast)
+            }
+            Err(e) => {
+                self.limiter
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .undo(reservation);
+                log::warn!(target: "paddock_health", "The quiet-hours digest could not be shown: {e}");
                 Outcome::Failed(e)
             }
         }

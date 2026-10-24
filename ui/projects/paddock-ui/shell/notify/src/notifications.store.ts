@@ -3,9 +3,8 @@ import { patchState, signalStore, withComputed, withHooks, withMethods, withStat
 import type { ShellNotice } from '@decryp7/paddock-ui/shell';
 import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { NotificationsBackend, type Unlisten } from './backends';
-import { NoticeActions } from './notice-actions';
 import { NOTIFY_CLOCK } from './notify-config';
-import { EMPTY_NOTICES, type Notice, type NoticeActionEvent, type NoticesEvent, type NoticesSnapshot } from './wire.types';
+import { EMPTY_NOTICES, type Notice, type NoticesEvent, type NoticesSnapshot } from './wire.types';
 
 /** Which messages the centre lists. */
 export type ReadFilter = 'all' | 'unread';
@@ -66,7 +65,7 @@ export const NotificationsStore = signalStore(
       }),
     };
   }),
-  withMethods((store, backend = inject(NotificationsBackend), actions = inject(NoticeActions, { optional: true }), clock = inject(NOTIFY_CLOCK)) => {
+  withMethods((store, backend = inject(NotificationsBackend), clock = inject(NOTIFY_CLOCK)) => {
     let localIds = 0;
     const call = async <T>(f: () => Promise<T>): Promise<T | null> => {
       try {
@@ -178,17 +177,6 @@ export const NotificationsStore = signalStore(
       setFocus(id: number | null): void {
         patchState(store, { focus: id });
       },
-
-      /**
-       * A button of an OS notification was clicked and the engine left the action to this window (`openSettings`, an
-       * app action): runs it as the centre's own button would, then reads the message. A failure is a notice of the
-       * window, not a silent click.
-       */
-      async runFromOs(e: NoticeActionEvent): Promise<void> {
-        const notice = store.all().find((n) => n.id === e.id);
-        const why = actions && notice ? await actions.run(e.action, notice) : $localize`:@@pd.notifications.action-gone:That notification is no longer listed.`;
-        if (why !== null) await post({ level: 'error', message: why, kind: 'notification-action' });
-      },
     };
   }),
   withHooks((store, backend = inject(NotificationsBackend)) => {
@@ -203,7 +191,6 @@ export const NotificationsStore = signalStore(
       onInit() {
         void backend.listen((e) => store.apply(e)).then(keep).catch(warn);
         void backend.onOpen((id) => store.setFocus(id)).then(keep).catch(warn);
-        void backend.onAction((e) => void store.runFromOs(e)).then(keep).catch(warn);
         void store.load();
       },
       onDestroy() {
