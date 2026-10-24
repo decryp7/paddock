@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // The shell demo in the generated pseudo-locale (plan S15, ADR 0012 §6): accented, longer, bracketed (⟦…⟧) text. A smoke
 // test of runtime translation loading and the guard against unmarked English in every part the shell draws: the menu
@@ -219,4 +219,26 @@ test('choosing the pseudo-locale from the menu saves it and reloads the window i
   await page.locator('button.cmd[data-command="sd.pseudo-locale"]').click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
   await expect(page.getByRole('menubar', { name: 'Application menu' })).toBeVisible();
+});
+
+test('Settings > Language lists the languages the demo ships, saves a choice at once and offers the restart (plan X48)', async ({ app, page, pageErrors }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('paddock.e2e.seeded')) return;
+    sessionStorage.setItem('paddock.e2e.seeded', '1');
+    localStorage.clear();
+  });
+  await app.settings.open({ page: 'pd.language' });
+  const win = page.locator('pd-settings-window');
+  await expect(win.getByTestId('language-page')).toBeVisible();
+  await expect(win.getByRole('radio')).toHaveCount(3);
+  await expect(win.getByRole('radio', { name: 'System default' })).toBeChecked();
+  expect(await axeViolations(page)).toEqual([]);
+  await expect(win.getByTestId('language-restart')).toHaveCount(0);
+  await win.getByRole('radio', { name: 'Pseudo-locale (for testing)' }).check();
+  expect(JSON.parse((await page.evaluate((k) => localStorage.getItem(k), LANGUAGE_KEY)) ?? '{}')).toEqual({ version: 1, language: 'pseudo' });
+  await expect(win.getByTestId('language-restart')).toContainText('The new language applies after the window restarts.');
+  // Restarting the window runs it in the chosen language.
+  await win.getByTestId('language-restart-now').click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en-XA');
+  expect(pageErrors).toEqual([]);
 });

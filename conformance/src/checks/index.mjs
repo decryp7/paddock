@@ -13,9 +13,10 @@ import C28 from './C28-baseline.mjs';
 import C29 from './C29-window-weight.mjs';
 import C30 from './C30-wall-clock.mjs';
 import C31 from './C31-adr-numbers.mjs';
-import C32 from './C32-sidecar-self-test.mjs';
-import C33 from './C33-untimed-calls.mjs';
-import C34 from './C34-parser-hardening.mjs';
+import C32 from './C32-i18n-catalogs.mjs';
+import C33 from './C33-sidecar-self-test.mjs';
+import C34 from './C34-untimed-calls.mjs';
+import C35 from './C35-parser-hardening.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35];

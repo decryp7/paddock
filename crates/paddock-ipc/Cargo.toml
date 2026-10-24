@@ -28,6 +28,7 @@ serde = { version = "1", features = ["derive"] }
 # one unit in the last place each time it crossed).
 serde_json = { version = "1", features = ["float_roundtrip"] }
 subtle = "2.6"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
