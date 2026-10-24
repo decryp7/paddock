@@ -9,6 +9,7 @@ publish = ["decryp7"]
 
 [dependencies]
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

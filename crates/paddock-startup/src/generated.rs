@@ -87,6 +87,7 @@ fn the_table_has_the_contract_commands() {
             "recovery_restore",
             "recovery_start_fresh",
             "recovery_safe_mode",
+            "app_relaunch",
             "window_pong"
         ]
     );

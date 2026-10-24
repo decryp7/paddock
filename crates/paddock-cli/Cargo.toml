@@ -13,3 +13,4 @@ scaffold = true
 [dependencies]
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }

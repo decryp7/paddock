@@ -169,21 +169,21 @@ export class Diagram {
       let x = 64;
       const parts = [];
       for (const it of this.legendItems) {
-        const lw = tw(it.label, 12) + 4;
-        parts.push({ it, x, lw });
-        x += 28 + 8 + lw + 24;
+        const lw = tw(it.label, 12) + 4, sw = it.kind === 'tag' ? tw('planned', 11, true) + 14 : 28; // swatch width
+        parts.push({ it, x, lw, sw });
+        x += sw + 8 + lw + 24;
       }
       const total = x - 24 - 64 + 32;
       this.raw(`<mxCell id="legend" value="" style="rounded=1;absoluteArcSize=1;arcSize=14;strokeWidth=1;strokeColor=${ld(this.t.group.s)};fillColor=none;" vertex="1" parent="1"><mxGeometry x="48" y="${y}" width="${total}" height="40" as="geometry"/></mxCell>`);
-      for (const { it, x: lx, lw } of parts) {
+      for (const { it, x: lx, lw, sw } of parts) {
         const cy = y + 12;
         if (it.kind === 'line' || it.kind === 'dashline') this.line([lx, cy + 8], [lx + 28, cy + 8], { dash: it.kind === 'dashline' });
-        else if (it.kind === 'tag') this.tag(lx + 28, cy - 1, 'planned');
+        else if (it.kind === 'tag') this.tag(lx + sw, cy - 1, 'planned', it.role); // role: the stroke of the tagged nodes
         else {
           const planned = it.kind === 'planned';
           this.raw(`<mxCell id="${this.id()}" value="" style="${this.styleFor(planned ? 'accent' : it.kind, { planned, sw: 1.5, arc: 4 })}" vertex="1" parent="1"><mxGeometry x="${lx}" y="${cy}" width="28" height="16" as="geometry"/></mxCell>`);
         }
-        this.text(this.id(), [lx + 36, cy - 1, lw, 18], it.label, { color: 'muted' });
+        this.text(this.id(), [lx + sw + 8, cy - 1, lw, 18], it.label, { color: 'muted' });
       }
     }
     const right = Math.max(0, ...Object.values(this.rect).map(([x, , w]) => x + w));

@@ -34,6 +34,19 @@ runs:
       run: |
         set -euo pipefail
         command -v rustup >/dev/null || { echo "::error::rustup is not installed on this runner"; exit 1; }
+        # In the Paddock CI image (it writes /etc/paddock-ci-release) the stable toolchain and its components are already
+        # there: skip the network round trip unless this job asks for extra targets or a component the image lacks.
+        if [ -f /etc/paddock-ci-release ] && [ "$TOOLCHAIN" = stable ] && [ -z "$TARGETS" ]; then
+          installed=$(rustup component list --installed 2>/dev/null || true)
+          missing=0
+          for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
+          if [ "$missing" = 0 ]; then
+            echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+            rustc --version
+            cargo --version
+            exit 0
+          fi
+        fi
         args=(--profile minimal)
         for c in $COMPONENTS; do args+=(--component "$c"); done
         for t in $TARGETS; do args+=(--target "$t"); done

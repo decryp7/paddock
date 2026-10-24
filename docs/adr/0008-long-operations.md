@@ -94,8 +94,9 @@ command registers the job, submits it and returns the id; progress and result ar
   which is the app's concurrency limit); `shutdown`/drop drains the queue.
 - `JobPool::offload(f)`: a runtime-agnostic future that runs a blocking closure on the pool, for async commands (Tauri async
   commands, tokio) so the runtime's threads never block; panics come back as `JobError::Panicked`.
-- Detection: `assert_nonblocking(budget, || handler(...))` (budget `HANDLER_BUDGET_MS` = 50) is the test helper every command test uses;
-  a handler that does I/O or heavy work inline fails with a message pointing to the pool. A static lint is not feasible in stable
+- Detection: `assert_nonblocking(&pool, || handler(...))` is the test helper every command test uses: it runs the handler while
+  the pool is held, so a handler that waits for its job never returns and fails (after a 30 s hang guard) with a message pointing
+  to the pool. Structural, never a wall-clock budget (revised 2026-10-25, lessons "Tests that measure the wall clock"). A static lint is not feasible in stable
   clippy (blocking is a runtime property); each app adds this assertion to the test of every command and a grep-based CI check
   (`std::fs`, `std::thread::sleep`, `reqwest::blocking`, `Command::output` inside `#[tauri::command]` bodies) as a second net.
 - Use multiple threads wherever work can be split (walk, hash, parse, redact, compress, compact); the helpers above are the means.
