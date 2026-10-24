@@ -220,18 +220,13 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     };
     let mut line = serde_json::to_string(&bootstrap).map_err(|e| IpcError::Spawn(e.to_string()))?;
     line.push('\n');
-    let written = match stdin.as_mut() {
-        Some(s) => s.write_all(line.as_bytes()).and_then(|()| s.flush()),
-        None => Err(io::Error::other("the child has no stdin")),
-    };
-    // On failure `process` is dropped, which ends its tree.
-    written.map_err(|e| {
-        IpcError::Spawn(format!(
-            "{} did not take its bootstrap ({e})",
-            spec.peer.label
-        ))
-    })?;
     let label = spec.peer.label.clone();
+    let no_stdin = || Err(io::Error::from(io::ErrorKind::BrokenPipe));
+    let written = stdin.as_mut().map_or_else(no_stdin, |s| {
+        s.write_all(line.as_bytes()).and_then(|()| s.flush())
+    });
+    // On failure `process` is dropped, which ends its tree.
+    written.map_err(|e| IpcError::Spawn(format!("{label} did not take its bootstrap ({e})")))?;
     let conn = host.accept_while(Some(pid), spec.start_timeout, &mut || {
         if process.is_running() {
             Ok(())

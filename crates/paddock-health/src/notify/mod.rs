@@ -152,7 +152,7 @@ impl NotificationCentre {
             projects: Mutex::new(HashMap::new()),
             caps,
             writer: file.map(|path| {
-                Debounced::new(SAVE_DELAY, move |notices: Vec<Notice>| {
+                Debounced::on_clock(clock.clone(), SAVE_DELAY, move |notices: Vec<Notice>| {
                     if let Err(e) = persist::save_file(&path, &notices) {
                         log::warn!(target: "paddock_health", "The notifications could not be saved: {e}");
                     }

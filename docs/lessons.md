@@ -327,7 +327,7 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
 - A Rust test binary that links `tauri-plugin-dialog` does not load on Windows (0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND):
   the plugin imports `TaskDialogIndirect` from Common Controls v6, and Tauri embeds that manifest into app binaries
   only. Every crate whose tests can link the plugin embeds it in its `build.rs` (`/MANIFEST:EMBED` plus the
-  Common-Controls `/MANIFESTDEPENDENCY`, windows-msvc only); `paddock-startup/tests/common_controls_manifest.rs` checks
+  Common-Controls `/MANIFESTDEPENDENCY`, windows-msvc only); `paddock-startup/tests/it/common_controls_manifest.rs` checks
   that on every OS, so a new crate fails locally instead of first on the Windows runner. Whether the binary needs it
   depends on what the linker keeps, so a crate can pass by luck (paddock-shell did) until a test reaches the dialog.
 - An e2e assertion that matches a transient value passes on a fast machine and fails on a slow one: the narrow status
@@ -367,3 +367,43 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   unless `float_roundtrip` is on). A value must cross an IPC unchanged; the fuzz target asserts decode(encode(x)) == x.
 - One oversized message must not take the connection down: read past it without allocating it (the length is in the
   prefix), and fail only the call its first bytes name. A length beyond the hard limit is garbage and ends the link.
+
+## SMAppService on a fresh Mac (Paddock C21 VM smoke, 2026-10-25)
+- `SMAppService.status` is `.notFound` for an agent the app has never registered: Background Task Management has no
+  record of the app until the first `register()` (`backgroundtaskmanagementd`: "effectiveItemDisposition: record not
+  found"; after `unregister()` it reads `.notRegistered`). paddock-service treated NotFound as "cannot be registered from
+  here" and refused Install without ever calling `register()`, so the first install failed on every fresh Mac, not only in
+  the VM (a drag-install to /Applications hits it too). NotFound is "not installed"; only a failing `register()` means
+  "cannot register from here". The tart `exec` session, the helper (not the main executable) calling `register()`, ad-hoc
+  signing and /Applications vs ~/Applications were all fine: a helper in `Contents/MacOS` registered at once from `tart
+  exec`, which runs in the user's Aqua session (`launchctl managername` = Aqua).
+- Read launchd's report by structure, not by `grep`: macOS 26's `launchctl print` adds `resource coalition` and
+  `jetsam coalition` blocks with their own `state = active` after the job's `state = running`, so a line scan saw a
+  stopped job and, with `has LWCR`, called a healthy agent "refused" (Repair offered for nothing). Only the job's own
+  level counts. Pitwall's and Pitcrew's `service_repair.rs` have the same line scan; fix them when they are next touched.
+- Before blaming the harness, look at what the OS was actually asked: the log had one `status` and no `register` call. A
+  ten-line Swift probe in the bundle (`status`, `register`, `status`) answered in a minute what five harness changes had not.
+- The simulation is only as good as its fidelity: the launchd simulation said "never registered = NotRegistered", so every
+  scenario passed while the real first install failed. Fakes copy the real OS's answers, captured from a VM, including
+  the odd ones.
+- An update smoke needs both versions everywhere: the N+1 build bumped only the app's Cargo.toml, so the agent still said
+  0.1.0 and could never report the new version. Check the built binaries' versions before booting a VM.
+
+## Test and build speed (2026-10-24)
+
+- Linking dominated the Rust test cycle: Debrief had 239 test binaries (181 integration). One `tests/it/main.rs` binary
+  per crate (239 -> 99) cut "touch the engine, rebuild every test" from 145 s to 92 s and the nextest run from 301 s to
+  196 s wall on the Mac mini. Tests that measure the process (resident memory, a global allocator) or install a
+  process-wide logger keep a binary of their own; the rest serialise process-wide changes or re-run themselves in a child.
+- Folding tests changes module paths (`scoped` becomes `it::scoped`), so any output that includes the target changes
+  length: a log-budget test that passed by byte-count luck failed and exposed a real bug (a short line still fitted after
+  the "only errors" notice). Assert the rule, not a byte count that happens to work.
+- nextest needs every test binary to answer `--list --format terse`: a `harness = false` test answers it itself (a few
+  lines in `main`) or nextest cannot list the crate.
+- mold gains little in CI: x86_64 Linux links with rust-lld by default since Rust 1.90 (mold saves about 0.025 s per test
+  binary), and an extra apt install costs more than it saves. It still pays on aarch64 Linux (GNU ld) and in jobs that
+  already run apt.
+- cargo-hakari must leave Tauri out: unifying its features puts the webview runtime (wry) into every crate, pure cores
+  included. A workspace-hack crate also cannot be published; `cargo hakari publish` drops the dependency for the upload,
+  which edits a manifest, so the lock file is checked separately instead of `--locked`.
+- Measure under a quiet machine and in back-to-back pairs: at a 1-minute load of 30-50 the same build varied by 60%.
