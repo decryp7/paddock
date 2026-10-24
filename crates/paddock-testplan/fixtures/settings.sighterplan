@@ -1,0 +1,93 @@
+format = "sighterplan"
+version = 1
+id = "settings-smoke"
+title = "Settings smoke test"
+
+[app]
+name = "Demo Notes"
+version = "2.4.0"
+
+[generated_by]
+tool = "Pacenotes"
+version = "1.0.0"
+
+[[requirements]]
+id = "REQ-142"
+title = "The user can change the theme"
+acceptance = ["The theme list shows Light and Dark", "Choosing Dark applies at once"]
+source = "https://tracker.example.test/issue/142"
+
+[[requirements]]
+id = "REQ-143"
+title = "Sign in"
+
+[[screens]]
+name = "Main"
+title = "Demo Notes"
+contains = ["Notes", "Settings"]
+
+[[screens]]
+name = "Settings"
+contains = ["Appearance"]
+
+[[data]]
+name = "logins"
+columns = [{ name = "user" }, { name = "pass", secret = true }]
+rows = [
+  ["ada", "ADA_PASSWORD"],
+  ["grace", "GRACE_PASSWORD"],
+]
+
+[[cases]]
+id = "TC-1"
+title = "Switch to the dark theme"
+requirements = ["REQ-142", "REQ-142#AC-2"]
+priority = "high"
+tags = ["smoke", "theme"]
+
+[[cases.steps]]
+action = "click"
+target = { text = "Settings", class = "button", inside = "Main" }
+
+[[cases.steps]]
+action = "assert_screen"
+expect_screen = "Settings"
+timeout_ms = 3000
+
+[[cases.steps]]
+action = "select"
+target = { name = "Theme", class = "combo_box", nth = 0 }
+option = "Dark"
+
+[[cases.steps]]
+action = "assert_text"
+text = "Dark"
+
+[[cases]]
+id = "TC-2"
+title = "Sign in with each account"
+requirements = ["REQ-143"]
+data = "logins"
+
+[[cases.steps]]
+action = "type"
+target = { name = "User", near = { text = "Sign in" } }
+value = "{{data.user}}"
+
+[[cases.steps]]
+action = "type"
+target = { name = "Password" }
+value = "{{data.pass}}"
+
+[[cases.steps]]
+action = "press"
+keys = "Enter"
+
+[[cases.steps]]
+action = "wait_for"
+target = { text = "Welcome" }
+timeout_ms = 5000
+
+[[cases.steps]]
+action = "wait"
+ms = 250

@@ -256,7 +256,8 @@
     "sd.keys",
     "sd.lab",
     "sd.pitwall",
-    "sd.runners"
+    "sd.runners",
+    "sd.schedule"
   ],
   "statusItems": [
     "sd.runners"
@@ -484,6 +485,7 @@
     "sd.page.lab": "Lab",
     "sd.page.pitwall": "Local AI",
     "sd.page.runners": "Runners",
+    "sd.page.schedule": "Schedules",
     "sd.pseudo-locale": "Pseudo-locale",
     "sd.reset": "Reset greetings",
     "sd.settings.general": "General",

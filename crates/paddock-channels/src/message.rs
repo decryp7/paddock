@@ -12,6 +12,8 @@ const MAX_SHORT: usize = 64;
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
 )]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "MinSeverity"))]
 #[serde(rename_all = "camelCase")]
 pub enum Severity {
     /// Informational.
