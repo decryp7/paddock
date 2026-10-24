@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workbench-main",
+  "description": "Top-level windows (main, w-<n>): the shell's and the workbench's main sets and Tauri's events. The guard narrows each command to its window classes.",
+  "windows": ["main", "w-*"],
+  "permissions": ["core:event:default", "paddock-shell:main", "paddock-workbench:main"]
+}

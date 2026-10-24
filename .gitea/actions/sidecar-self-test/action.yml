@@ -1,0 +1,44 @@
+name: sidecar-self-test
+description: "Rule 23 on Linux and Windows bundles: starts every sidecar of the built app with --self-test (paddock-sidecar self-test) and fails when one does not load, answer or exit 0. A .deb is unpacked into a scratch folder, never installed; the app itself is never started. macOS bundles use macos-verify."
+inputs:
+  sidecars:
+    description: "Sidecar names, one per line (the file stem without the target triple)."
+    required: true
+  deb:
+    description: "A .deb (a glob is fine): unpacked into a scratch folder; the sidecars are looked up in deb-dir inside it."
+    default: ""
+  deb-dir:
+    description: "Where the .deb keeps its sidecars."
+    default: usr/bin
+  dir:
+    description: "A folder holding the sidecars (Windows: the copy the installer bundles, e.g. src-tauri/binaries). Used when deb is empty."
+    default: ""
+  timeout-ms:
+    description: "Per sidecar."
+    default: "30000"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SIDECARS: ${{ inputs.sidecars }}
+        DEB: ${{ inputs.deb }}
+        DEB_DIR: ${{ inputs.deb-dir }}
+        DIR: ${{ inputs.dir }}
+        TIMEOUT: ${{ inputs.timeout-ms }}
+      run: |
+        set -euo pipefail
+        folder="$DIR"
+        if [ -n "$DEB" ]; then
+          deb=$(ls $DEB | head -1)
+          [ -n "$deb" ] || { echo "::error::no .deb matches $DEB"; exit 1; }
+          unpacked=$(mktemp -d)
+          dpkg-deb -x "$deb" "$unpacked"
+          folder="$unpacked/$DEB_DIR"
+        fi
+        [ -n "$folder" ] || { echo "::error::give deb or dir"; exit 1; }
+        args=()
+        while IFS= read -r s; do
+          if [ -n "$s" ]; then args+=(--sidecar "$s"); fi
+        done <<< "$SIDECARS"
+        node "${{ github.action_path }}/../../../conformance/bin/paddock-sidecar.mjs" self-test --dir "$folder" --timeout "$TIMEOUT" "${args[@]}"

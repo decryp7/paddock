@@ -23,5 +23,7 @@ toml = "0.9"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
+# The never-panics test of the parsers (conformance check C36).
+paddock-testkit = { workspace = true }
 tempfile = "3"
 jsonschema = { version = "0.33", default-features = false }

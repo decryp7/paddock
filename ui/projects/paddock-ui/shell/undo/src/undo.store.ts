@@ -2,10 +2,11 @@ import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { errorMessage } from '@decryp7/paddock-ui/shell/store';
+import { UNDO_NOTICE_KINDS } from './undo-kinds';
 import { MERGE_WINDOW_MS, UNDO_CLOCK, UNDO_LIMIT, UNDO_TOAST_MS } from './undo-config';
 
-/** The notification kinds the store posts (registered by `UNDO_CONTRIBUTIONS`). */
-export const UNDO_NOTICE_KINDS = { failed: 'pd.undo.failed' } as const;
+/** The notification kinds the store posts (registered by `UNDO_CONTRIBUTIONS`; defined in `undo-kinds`). */
+export { UNDO_NOTICE_KINDS };
 
 /** One user edit that can be taken back: `do` (re)applies it, `undo` restores what was there before. */
 export interface UndoableAction {

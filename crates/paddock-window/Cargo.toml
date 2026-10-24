@@ -34,6 +34,8 @@ windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "
 webview2-com = { version = "0.39", optional = true }
 
 [dev-dependencies]
+# The never-panics test of the parsers (conformance check C36).
+paddock-testkit = { workspace = true }
 # The adapter is tested on Tauri's mock runtime: no window, tray icon or single-instance lock reaches the desktop.
 tauri = { workspace = true, features = ["test"] }
 # Builds monitors for the popover and bounds on the mock runtime.

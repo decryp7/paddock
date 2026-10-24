@@ -84,12 +84,19 @@ test.describe('notification channels (plan X17)', () => {
   });
 
   test('a test shows its attempt and phase while it retries, then Delivered after 2 attempts', async ({ app, page }) => {
-    await app.settings.open({ page: 'pd.channels' }, '?channels-test=retry');
+    // The demo engine's steps wait for the test (`?channels-step=manual`), so each phase is seen for as long as the test
+    // wants: a poll can miss a phase that lasts as long as a 400 ms timer.
+    await app.settings.open({ page: 'pd.channels' }, '?channels-test=retry&channels-step=manual');
+    const step = () => page.evaluate(() => (window as unknown as { __sdChannelsStep: () => void }).__sdChannelsStep());
     await page.getByRole('button', { name: 'Send a test to Team Slack' }).click();
     const progress = page.getByTestId('channel-test-progress-slack');
+    await step();
     await expect(progress).toHaveText('Attempt 1 of 3 · sending…');
+    await step();
     await expect(progress).toHaveText('Attempt 1 of 3 · waiting 4 s before the next try');
+    await step();
     await expect(progress).toHaveText('Attempt 2 of 3 · sending…');
+    await step();
     await expect(page.getByTestId('channel-test-result-slack')).toHaveText('Delivered after 2 attempts');
   });
 
