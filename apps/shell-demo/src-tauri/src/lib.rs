@@ -220,6 +220,18 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
     });
     // The first-run set-up checklist (plan X19): the service and Start at login steps of the agent above.
     builder = builder.first_run(|_| paddock_shell::FirstRun::new());
+    let files_dir = test_dir.clone();
+    // User files (plan X31): path grants, the native pickers, the recent lists in the config folder, reveal and open.
+    builder = builder.files(move |_| {
+        let dirs = dirs(files_dir.as_deref())?;
+        Ok(paddock_files::Files::for_app(
+            &dirs,
+            &[
+                paddock_files::recent::FILES,
+                paddock_files::recent::PROJECTS,
+            ],
+        ))
+    });
     let packs_dir = test_dir.clone();
     // The sample knowledge packs (plan X15/X23): the Knowledge packs page and the hot reload of the user's packs folder.
     builder = builder.packs(move |app| Ok(packs::setup(app, &dirs(packs_dir.as_deref())?)));

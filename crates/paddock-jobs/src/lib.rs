@@ -27,6 +27,8 @@ mod reporter;
 pub mod schedule;
 #[cfg(feature = "tauri")]
 pub mod tauri;
+#[cfg(feature = "tauri")]
+pub mod tauri_activity;
 pub mod time;
 mod walk;
 mod workers;

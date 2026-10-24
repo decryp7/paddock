@@ -25,11 +25,11 @@ fn it_is_off_until_the_user_turns_it_on_and_follows_policy_changes_at_once() {
     let r = rig();
     r.server.set_policy(Policy::default());
     assert!(!r.server.policy().enabled);
-    let mut s = Session::new("c");
+    let s = Session::new("c");
     for method in ["initialize", "ping", "tools/list"] {
         let reply = rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":1,"method":method}),
         );
         assert_eq!(reply["error"]["code"], -32600, "{method}");
@@ -41,14 +41,14 @@ fn it_is_off_until_the_user_turns_it_on_and_follows_policy_changes_at_once() {
         );
     }
     r.server.set_policy(Policy::read_only());
-    let mut s = ready(&r.server);
+    let s = ready(&r.server);
     assert_eq!(
-        text(&call(&r.server, &mut s, 2, "echo", json!({"text":"a"}))),
+        text(&call(&r.server, &s, 2, "echo", json!({"text":"a"}))),
         "a"
     );
     r.server.set_policy(Policy::default());
     assert_eq!(
-        call(&r.server, &mut s, 3, "echo", json!({"text":"a"}))["error"]["code"],
+        call(&r.server, &s, 3, "echo", json!({"text":"a"}))["error"]["code"],
         -32600,
         "switching off ends service on a live session"
     );
@@ -57,15 +57,15 @@ fn it_is_off_until_the_user_turns_it_on_and_follows_policy_changes_at_once() {
 #[test]
 fn an_action_works_only_after_the_user_names_it() {
     let r = rig();
-    let mut s = ready(&r.server);
+    let s = ready(&r.server);
     assert_eq!(
-        call(&r.server, &mut s, 1, "delete", json!({}))["error"]["code"],
+        call(&r.server, &s, 1, "delete", json!({}))["error"]["code"],
         -32602
     );
     r.server
         .set_policy(Policy::read_only().allow_action("delete"));
     assert_eq!(
-        text(&call(&r.server, &mut s, 2, "delete", json!({}))),
+        text(&call(&r.server, &s, 2, "delete", json!({}))),
         "deleted"
     );
     let only_echo = Policy {
@@ -74,12 +74,12 @@ fn an_action_works_only_after_the_user_names_it() {
     };
     r.server.set_policy(only_echo);
     assert_eq!(
-        call(&r.server, &mut s, 3, "delete", json!({}))["error"]["code"],
+        call(&r.server, &s, 3, "delete", json!({}))["error"]["code"],
         -32602,
         "the tool list narrows actions too"
     );
     assert_eq!(
-        call(&r.server, &mut s, 4, "boom", json!({}))["error"]["code"],
+        call(&r.server, &s, 4, "boom", json!({}))["error"]["code"],
         -32602,
         "and read-only tools"
     );
@@ -98,7 +98,7 @@ fn an_action_works_only_after_the_user_names_it() {
 #[test]
 fn tools_come_and_go_while_serving() {
     let r = rig();
-    let mut s = ready(&r.server);
+    let s = ready(&r.server);
     r.server
         .add_tool(ToolDef::read_only(
             "late",
@@ -107,10 +107,10 @@ fn tools_come_and_go_while_serving() {
             |_, _| Ok(ToolOutput::text("late")),
         ))
         .unwrap();
-    assert_eq!(text(&call(&r.server, &mut s, 1, "late", json!({}))), "late");
+    assert_eq!(text(&call(&r.server, &s, 1, "late", json!({}))), "late");
     assert!(r.server.remove_tool("late") && !r.server.remove_tool("late"));
     assert_eq!(
-        call(&r.server, &mut s, 2, "late", json!({}))["error"]["code"],
+        call(&r.server, &s, 2, "late", json!({}))["error"]["code"],
         -32602
     );
     let bad = ToolDef::read_only("bad name", "d", json!({"type":"object"}), |_, _| {
@@ -160,18 +160,18 @@ fn long_results_are_cut_and_long_lists_are_paged_with_the_cursor_handed_to_the_t
             .max_result_bytes(101),
         )
         .unwrap();
-    let mut s = ready(&r.server);
-    let first = call(&r.server, &mut s, 1, "list", json!({}));
+    let s = ready(&r.server);
+    let first = call(&r.server, &s, 1, "list", json!({}));
     assert!(
         text(&first).contains("item0\nitem1") && text(&first).contains("cursor \"p2\""),
         "{first}"
     );
     assert_eq!(first["result"]["_meta"]["paddock/nextCursor"], "p2");
-    let second = call(&r.server, &mut s, 2, "list", json!({"cursor":"p2"}));
+    let second = call(&r.server, &s, 2, "list", json!({"cursor":"p2"}));
     assert!(text(&second).contains("item2"));
-    let last = call(&r.server, &mut s, 3, "list", json!({"cursor":"p4"}));
+    let last = call(&r.server, &s, 3, "list", json!({"cursor":"p4"}));
     assert!(text(&last).starts_with("item4") && last["result"].get("_meta").is_none());
-    let bad = call(&r.server, &mut s, 4, "list", json!({"cursor":"zzz"}));
+    let bad = call(&r.server, &s, 4, "list", json!({"cursor":"zzz"}));
     assert_eq!(bad["result"]["isError"], true);
     assert!(text(&bad).contains("not a cursor"));
     assert_eq!(
@@ -183,7 +183,7 @@ fn long_results_are_cut_and_long_lists_are_paged_with_the_cursor_handed_to_the_t
             Some("zzz".to_string())
         ]
     );
-    let big = call(&r.server, &mut s, 5, "big", json!({}));
+    let big = call(&r.server, &s, 5, "big", json!({}));
     assert!(
         text(&big).starts_with("éé") && text(&big).contains("[truncated at 101 bytes"),
         "cut on a character boundary"
@@ -194,14 +194,14 @@ fn long_results_are_cut_and_long_lists_are_paged_with_the_cursor_handed_to_the_t
 #[test]
 fn a_panicking_tool_is_contained_and_the_server_goes_on() {
     let r = rig();
-    let mut s = ready(&r.server);
-    let boom = call(&r.server, &mut s, 1, "boom", json!({}));
+    let s = ready(&r.server);
+    let boom = call(&r.server, &s, 1, "boom", json!({}));
     assert_eq!(boom["result"]["isError"], true);
     assert!(text(&boom).contains("failed inside demo"));
     assert_eq!(
         text(&call(
             &r.server,
-            &mut s,
+            &s,
             2,
             "echo",
             json!({"text":"still here"})
@@ -249,11 +249,11 @@ fn a_tool_that_hangs_is_cancelled_at_its_time_limit_and_slow_calls_cannot_pile_u
         ))
         .unwrap();
     server.set_policy(Policy::read_only());
-    let mut s = ready(&server);
-    let slow = call(&server, &mut s, 1, "slow", json!({}));
+    let s = ready(&server);
+    let slow = call(&server, &s, 1, "slow", json!({}));
     assert_eq!(slow["result"]["isError"], true);
     assert!(text(&slow).contains("took longer than"), "{slow}");
-    let busy = call(&server, &mut s, 2, "quick", json!({}));
+    let busy = call(&server, &s, 2, "quick", json!({}));
     assert!(
         text(&busy).contains("busy finishing earlier slow calls"),
         "{busy}"
@@ -266,7 +266,7 @@ fn a_tool_that_hangs_is_cancelled_at_its_time_limit_and_slow_calls_cannot_pile_u
     // Once the abandoned call really ends the server takes calls again (wait for that without sleeping).
     let mut id = 3;
     let reply = loop {
-        let reply = call(&server, &mut s, id, "quick", json!({}));
+        let reply = call(&server, &s, id, "quick", json!({}));
         if reply["result"]["isError"] != true {
             break reply;
         }
@@ -290,15 +290,15 @@ fn every_call_is_audited_with_redacted_arguments_and_the_servers_clock() {
             |_, _| Ok(ToolOutput::text("found 3")),
         ))
         .unwrap();
-    let mut s = ready(&r.server);
+    let s = ready(&r.server);
     call(
         &r.server,
-        &mut s,
+        &s,
         1,
         "search",
         json!({"query":"errors","limit":5,"apiKey":"sk-live-123","content":"private file body","nested":{"password":"p"}}),
     );
-    call(&r.server, &mut s, 2, "echo", json!({"text": 7}));
+    call(&r.server, &s, 2, "echo", json!({"text": 7}));
     let entries = r.audit.entries();
     assert_eq!(entries.len(), 2);
     let e = &entries[0];
@@ -337,21 +337,21 @@ fn every_call_is_audited_with_redacted_arguments_and_the_servers_clock() {
 #[test]
 fn the_client_name_comes_from_initialize_when_the_transport_has_none() {
     let r = rig();
-    let mut s = Session::new("");
+    let s = Session::new("");
     rpc(
         &r.server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"Pitwall","version":"1"}}}),
     );
-    call(&r.server, &mut s, 2, "echo", json!({"text":"x"}));
+    call(&r.server, &s, 2, "echo", json!({"text":"x"}));
     assert_eq!(r.audit.entries()[0].client, "Pitwall");
-    let mut keyed = Session::new("from-key");
+    let keyed = Session::new("from-key");
     rpc(
         &r.server,
-        &mut keyed,
+        &keyed,
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"claims-to-be-someone-else"}}}),
     );
-    call(&r.server, &mut keyed, 2, "echo", json!({"text":"x"}));
+    call(&r.server, &keyed, 2, "echo", json!({"text":"x"}));
     assert_eq!(
         r.audit.entries()[1].client,
         "from-key",
@@ -369,5 +369,82 @@ fn an_overlong_line_has_an_answer_that_names_the_limit() {
             .as_str()
             .unwrap()
             .contains(&r.server.limits().max_line_bytes.to_string())
+    );
+}
+
+#[test]
+fn cancels_for_calls_that_never_come_are_remembered_only_up_to_a_bound() {
+    let r = rig();
+    let s = ready(&r.server);
+    for id in 0..200 {
+        let line =
+            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":id}})
+                .to_string();
+        assert!(r.server.handle(&s, &line).is_none());
+    }
+    for params in [json!({}), json!({"requestId": [1]})] {
+        let line =
+            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":params}).to_string();
+        assert!(
+            r.server.handle(&s, &line).is_none(),
+            "a cancel without a usable id is ignored"
+        );
+    }
+    // The oldest cancels were forgotten, the newest still stand: call 199 is cancelled before it starts and gets no answer,
+    // call 0 runs normally.
+    assert!(call_line(&r, &s, 0).is_some());
+    assert!(call_line(&r, &s, 199).is_none());
+}
+
+fn call_line(r: &Rig, s: &Session, id: i64) -> Option<String> {
+    let line = json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"echo","arguments":{"text":"x"}}}).to_string();
+    r.server.handle(s, &line)
+}
+
+#[test]
+fn a_cancel_that_arrives_while_the_tool_runs_stops_it_and_it_gets_no_answer() {
+    let r = rig();
+    let (started_tx, started_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let (seen_tx, seen_rx) = mpsc::channel::<bool>();
+    let (started_tx, release_rx, seen_tx) = (
+        Mutex::new(started_tx),
+        Mutex::new(release_rx),
+        Mutex::new(seen_tx),
+    );
+    r.server
+        .add_tool(ToolDef::read_only(
+            "hold",
+            "Holds.",
+            json!({"type":"object"}),
+            move |ctx, _| {
+                let _ = started_tx.lock().unwrap().send(());
+                let _ = release_rx.lock().unwrap().recv();
+                let _ = seen_tx.lock().unwrap().send(ctx.cancel.is_cancelled());
+                Ok(ToolOutput::text("late"))
+            },
+        ))
+        .unwrap();
+    let s = ready(&r.server);
+    let answer = std::thread::scope(|scope| {
+        let call = scope.spawn(|| {
+            let line =
+                json!({"jsonrpc":"2.0","id":"c1","method":"tools/call","params":{"name":"hold"}})
+                    .to_string();
+            r.server.handle(&s, &line)
+        });
+        started_rx.recv().unwrap();
+        let cancel =
+            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"c1"}})
+                .to_string();
+        assert!(r.server.handle(&s, &cancel).is_none());
+        call.join().unwrap()
+    });
+    assert!(answer.is_none(), "a cancelled call is not answered");
+    release_tx.send(()).unwrap();
+    assert!(seen_rx.recv().unwrap(), "the tool's token was cancelled");
+    assert_eq!(
+        r.audit.entries().last().unwrap().outcome,
+        Outcome::Cancelled
     );
 }

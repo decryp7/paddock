@@ -2,3 +2,4 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`.
 
 mod common_controls_manifest;
+mod never_panics;

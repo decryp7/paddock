@@ -3,6 +3,7 @@
 
 use crate::server::{Server, Session};
 use std::io::{self, BufRead, Write};
+use std::sync::{Condvar, Mutex};
 
 /// What one read produced.
 #[derive(Debug, PartialEq, Eq)]
@@ -56,36 +57,118 @@ pub(crate) fn read_line(r: &mut impl BufRead, max: usize) -> io::Result<Line> {
     }
 }
 
-/// Serves one client until its input ends: a line in, at most one line out.
-pub fn serve_lines(
-    server: &Server,
-    session: &mut Session,
-    input: &mut impl BufRead,
-    output: &mut impl Write,
-) -> io::Result<()> {
-    loop {
-        let reply = match read_line(input, server.limits().max_line_bytes)? {
-            Line::Eof => return Ok(()),
-            Line::TooLong => Some(server.too_long()),
-            Line::Text(t) if t.trim().is_empty() => None,
-            Line::Text(t) => server.handle(session, &t),
-        };
-        if let Some(r) = reply {
-            output.write_all(r.as_bytes())?;
-            output.write_all(b"\n")?;
-            output.flush()?;
+/// Lets at most `limit` calls run at once; the reader waits when the bound is reached (back-pressure on the client).
+struct Gate {
+    running: Mutex<usize>,
+    freed: Condvar,
+    limit: usize,
+}
+
+impl Gate {
+    fn acquire(&self) {
+        let mut n = self
+            .running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *n >= self.limit {
+            n = self
+                .freed
+                .wait(n)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
+        *n += 1;
+    }
+
+    fn release(&self) {
+        *self
+            .running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) -= 1;
+        self.freed.notify_one();
+    }
+}
+
+/// Serves one client until its input ends: a line in, at most one line out. Tool calls run on worker threads, up to
+/// `Limits::max_concurrent_calls` at a time, and are answered as they finish, in any order (the ids tell them apart); everything
+/// else, including `notifications/cancelled`, is handled at once by the reading thread, so a cancel reaches a running call.
+pub fn serve_lines<W: Write + Send>(
+    server: &Server,
+    session: &Session,
+    input: &mut impl BufRead,
+    output: &mut W,
+) -> io::Result<()> {
+    let out = Mutex::new(output);
+    let failed: Mutex<Option<io::Error>> = Mutex::new(None);
+    let gate = Gate {
+        running: Mutex::new(0),
+        freed: Condvar::new(),
+        limit: server.limits().max_concurrent_calls.max(1),
+    };
+    let send = |reply: String| -> io::Result<()> {
+        let mut w = out
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        w.write_all(reply.as_bytes())?;
+        w.write_all(b"\n")?;
+        w.flush()
+    };
+    let send = &send;
+    let read_result = std::thread::scope(|scope| -> io::Result<()> {
+        loop {
+            if let Some(e) = failed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+            {
+                return Err(e);
+            }
+            let line = match read_line(input, server.limits().max_line_bytes)? {
+                Line::Eof => return Ok(()),
+                Line::TooLong => {
+                    send(server.too_long())?;
+                    continue;
+                }
+                Line::Text(t) if t.trim().is_empty() => continue,
+                Line::Text(t) => t,
+            };
+            if Server::defers(&line) {
+                gate.acquire();
+                let (gate, failed) = (&gate, &failed);
+                scope.spawn(move || {
+                    if let Some(reply) = server.handle(session, &line)
+                        && let Err(e) = send(reply)
+                    {
+                        *failed
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(e);
+                    }
+                    gate.release();
+                });
+            } else if let Some(reply) = server.handle(session, &line) {
+                send(reply)?;
+            }
+        }
+    });
+    read_result?;
+    // A reply a worker could not write is reported after the connection's input ended too.
+    match failed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+    {
+        Some(e) => Err(e),
+        None => Ok(()),
     }
 }
 
 /// The stdio transport: the host starts the app's `--mcp` mode and talks over its standard input and output. The client's name
 /// comes from `initialize`. Nothing but protocol lines may ever be written to `output`; logs go to the log file.
-pub fn serve_stdio(
+pub fn serve_stdio<W: Write + Send>(
     server: &Server,
     input: &mut impl BufRead,
-    output: &mut impl Write,
+    output: &mut W,
 ) -> io::Result<()> {
-    serve_lines(server, &mut Session::new(""), input, output)
+    serve_lines(server, &Session::new(""), input, output)
 }
 
 #[cfg(test)]

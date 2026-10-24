@@ -16,7 +16,7 @@ links = "paddock-shell"
 mock-runtime = ["paddock-dialogs/mock-runtime"]
 # The start-up watchdog asks natively, and Report a Problem asks where to save, through `tauri-plugin-dialog` (the app registers
 # that plugin).
-native-dialogs = ["paddock-startup/dialog", "paddock-diag/dialog"]
+native-dialogs = ["paddock-startup/dialog", "paddock-diag/dialog", "paddock-files/dialog"]
 # The OS notification adapter (`paddock_health::tauri::native::PluginToaster`); the app registers `tauri-plugin-notification`.
 os-notify = ["paddock-health/os-notify"]
 # The installer over `tauri-plugin-updater` (the app registers that plugin).
@@ -29,6 +29,7 @@ tauri = { workspace = true }
 paddock-commands = { workspace = true, features = ["tauri"] }
 paddock-dialogs = { workspace = true, features = ["tauri"] }
 paddock-diag = { workspace = true, features = ["tauri"] }
+paddock-files = { workspace = true, features = ["tauri"] }
 paddock-download = { workspace = true, features = ["tauri"] }
 paddock-health = { workspace = true, features = ["tauri"] }
 paddock-jobs = { workspace = true, features = ["tauri"] }

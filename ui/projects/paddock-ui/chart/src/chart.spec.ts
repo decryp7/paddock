@@ -9,12 +9,15 @@ const SPEC: PdChartSpec = { kind: 'bar', x: ['A', 'B'], series: [{ name: 'Jobs',
 
 @Component({
   imports: [PdChart],
-  template: `<pd-chart label="Jobs per day" [spec]="spec()" [option]="option()" [summary]="summary()" [height]="180" (chartClick)="clicks.push($event)" />`,
+  template: `<pd-chart label="Jobs per day" [spec]="spec()" [option]="option()" [summary]="summary()" [height]="180" [showTitle]="title()" [state]="state()" errorText="Could not reach the engine." (retry)="retried = retried + 1" (chartClick)="clicks.push($event)" />`,
 })
 class Host {
   readonly spec = signal<PdChartSpec | null>(SPEC);
   readonly option = signal<Record<string, unknown> | null>(null);
   readonly summary = signal<string | null>(null);
+  readonly title = signal(true);
+  readonly state = signal<'ready' | 'loading' | 'error'>('ready');
+  retried = 0;
   readonly clicks: unknown[] = [];
 }
 
@@ -49,6 +52,35 @@ describe('pd-chart', () => {
     f.componentInstance.summary.set('Five jobs on B.');
     await settle(f);
     expect(twin?.textContent).toBe('Five jobs on B.');
+  });
+
+  it('draws the label and the unit as the visible title, unless the card around it has one', async () => {
+    const { f } = await setup();
+    expect(f.nativeElement.querySelector('[data-testid=chart-title]')?.textContent).toBe('Jobs per day, jobs');
+    f.componentInstance.spec.set({ ...SPEC, unit: undefined });
+    await settle(f);
+    expect(f.nativeElement.querySelector('[data-testid=chart-title]')?.textContent).toBe('Jobs per day');
+    f.componentInstance.title.set(false);
+    await settle(f);
+    expect(f.nativeElement.querySelector('[data-testid=chart-title]')).toBeNull();
+  });
+
+  it('shows ghosted axes while loading and the error with Retry, and measures the chart again when it comes back', async () => {
+    const { f, fake } = await setup();
+    f.componentInstance.state.set('loading');
+    await settle(f);
+    expect(f.nativeElement.querySelector('[data-testid=chart-loading]')).not.toBeNull();
+    expect(f.nativeElement.querySelector('.pd-surface').hidden).toBe(true);
+    f.componentInstance.state.set('error');
+    await settle(f);
+    expect(f.nativeElement.querySelector('[data-testid=chart-error]')?.textContent).toContain('Could not reach the engine.');
+    f.nativeElement.querySelector('.pd-retry').click();
+    expect(f.componentInstance.retried).toBe(1);
+    const before = fake.instances[0]!.resized;
+    f.componentInstance.state.set('ready');
+    await settle(f);
+    expect(f.nativeElement.querySelector('.pd-surface').hidden).toBe(false);
+    expect(fake.instances[0]!.resized).toBe(before + 1);
   });
 
   it('creates the chart once ECharts is loaded and draws the spec as an option', async () => {
