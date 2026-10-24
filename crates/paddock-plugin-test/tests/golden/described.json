@@ -1,0 +1,362 @@
+{
+  "id": "net.example.fixture",
+  "name": "Fixture",
+  "version": "0.1.0",
+  "protocol": {
+    "major": 2,
+    "minor": 0
+  },
+  "memoryLimit": null,
+  "tools": [
+    {
+      "id": "fixture.tool",
+      "title": "Fixture tool",
+      "description": "Does small things so tests can see the platform work",
+      "platforms": [],
+      "needsElevation": false,
+      "ops": [
+        {
+          "name": "echo",
+          "title": "Echo",
+          "args": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "text",
+                "schema": {
+                  "type": "text",
+                  "maxLen": 1000
+                },
+                "required": true
+              }
+            ],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "greet",
+          "title": "Greet",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "fail",
+          "title": "Fail",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "deny",
+          "title": "Deny",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "panic",
+          "title": "Panic",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "crash",
+          "title": "Crash",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "hang",
+          "title": "Hang",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "big",
+          "title": "Big",
+          "args": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "n",
+                "schema": {
+                  "type": "int",
+                  "min": 0,
+                  "max": 1073741824
+                },
+                "required": true
+              }
+            ],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "read",
+          "title": "Read a host file",
+          "args": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "id",
+                "schema": {
+                  "type": "int",
+                  "min": 0,
+                  "max": 9223372036854775807
+                },
+                "required": true
+              },
+              {
+                "name": "len",
+                "schema": {
+                  "type": "int",
+                  "min": 0,
+                  "max": 1099511627776
+                },
+                "required": true
+              }
+            ],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "task",
+          "title": "Run a task",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "save",
+          "title": "Save output",
+          "args": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "name",
+                "schema": {
+                  "type": "text",
+                  "maxLen": 100
+                },
+                "required": true
+              },
+              {
+                "name": "bytes",
+                "schema": {
+                  "type": "int",
+                  "min": 0,
+                  "max": 16777216
+                },
+                "required": true
+              }
+            ],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "lift",
+          "title": "Run elevated",
+          "args": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "op",
+                "schema": {
+                  "type": "text",
+                  "maxLen": 64
+                },
+                "required": true
+              }
+            ],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "open",
+          "title": "Open a path",
+          "args": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "path",
+                "schema": {
+                  "type": "path",
+                  "kind": "file",
+                  "access": "read"
+                },
+                "required": true
+              }
+            ],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "quit_soon",
+          "title": "End the process soon",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "log",
+          "title": "Log a line",
+          "args": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "line",
+                "schema": {
+                  "type": "text",
+                  "maxLen": 5000
+                },
+                "required": true
+              }
+            ],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": false,
+          "poll": false
+        },
+        {
+          "name": "root",
+          "title": "Elevated only",
+          "args": {
+            "type": "object",
+            "fields": [],
+            "additional": false
+          },
+          "budgetMs": 30000,
+          "elevated": true,
+          "poll": false
+        }
+      ]
+    }
+  ],
+  "settings": {
+    "id": "fixture.sample",
+    "title": "Fixture",
+    "description": "",
+    "owner": "app",
+    "fields": [
+      {
+        "key": "greeting",
+        "label": "Greeting",
+        "description": "",
+        "kind": {
+          "type": "text",
+          "maxLen": 40,
+          "pattern": null
+        },
+        "default": "hello",
+        "restartRequired": false,
+        "advanced": false
+      },
+      {
+        "key": "shout",
+        "label": "Shout",
+        "description": "",
+        "kind": {
+          "type": "bool"
+        },
+        "default": false,
+        "restartRequired": false,
+        "advanced": false
+      }
+    ]
+  },
+  "views": [
+    {
+      "id": "fixture.view",
+      "title": "Fixture view",
+      "writes": false
+    }
+  ],
+  "mcpTools": [
+    {
+      "name": "fixture_echo",
+      "description": "Echoes its text",
+      "args": {
+        "type": "object",
+        "fields": [
+          {
+            "name": "text",
+            "schema": {
+              "type": "text",
+              "maxLen": 100000
+            },
+            "required": true
+          }
+        ],
+        "additional": false
+      }
+    }
+  ],
+  "extensions": [
+    {
+      "ns": "paddock.fixture.v1",
+      "minor": 1
+    }
+  ]
+}
