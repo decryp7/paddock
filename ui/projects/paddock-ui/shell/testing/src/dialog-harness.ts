@@ -37,8 +37,8 @@ export interface DialogHarnessOptions {
   readonly baseCommands?: readonly string[];
   /** Answers of the recorded IPC by command (anything else gets a value that tolerates any use). */
   readonly answers?: Readonly<Record<string, unknown>>;
-  /** How many settle rounds a dialog may take to leave Loading (default 200). */
-  readonly maxRounds?: number;
+  /** How many macrotask turns the harness gives a window that never becomes stable before it reports it (default 200). */
+  readonly maxTurns?: number;
   /** Console errors that are expected (the mock refusing a fixture path); matched against each message. */
   readonly ignoreErrors?: readonly RegExp[];
 }
@@ -61,12 +61,17 @@ export function dialogsOf(...batches: readonly ContributionBatch<never>[]): Dial
 
 const MISSING_PROVIDER = /NG0\d+|No provider|NullInjector/;
 
-/** One macrotask, then the fixture's stability: lets loaders, timers of 0 ms and change detection run. */
-async function settle(fixture: { whenStable(): Promise<unknown> }, rounds = 1): Promise<void> {
-  for (let i = 0; i < rounds; i++) {
-    await new Promise<void>((r) => setTimeout(r, 0));
-    await fixture.whenStable();
-  }
+/**
+ * Waits for the window's stability (rule 38): the dialog shell's start (its loaders and providers), its debounced checks
+ * and any `resource` the content loads are pending tasks, so `whenStable` resolves once the window has settled. Only a
+ * window that never settles (a loader that never answers) is given up on after `maxTurns` macrotask turns, so the
+ * harness reports it instead of hanging. True when it became stable.
+ */
+async function settle(fixture: { whenStable(): Promise<unknown> }, maxTurns: number): Promise<boolean> {
+  let stable = false;
+  void fixture.whenStable().then(() => (stable = true));
+  for (let turn = 0; !stable && turn < maxTurns; turn++) await new Promise<void>((r) => setTimeout(r, 0));
+  return stable;
 }
 
 function describeArgs(args: readonly unknown[]): string {
@@ -101,9 +106,8 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     const fixture = TestBed.createComponent(DialogShell);
     const root = fixture.nativeElement as HTMLElement;
     const loading = () => root.querySelector('[data-testid=dialog-loading]');
-    await settle(fixture);
-    for (let i = 0; i < (options.maxRounds ?? 200) && loading(); i++) await settle(fixture);
-    await settle(fixture, 4);
+    const turns = options.maxTurns ?? 200;
+    await settle(fixture, turns);
 
     const failed = root.querySelector('[data-testid=dialog-error-reason]')?.textContent?.trim();
     if (failed) problems.push(`does not open: ${failed}`);
@@ -127,7 +131,7 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     // A visible way out, and Escape per kind: a modal's Cancel, a modeless window's Close; a required choice keeps both.
     if (def.requiredChoice !== true && !hasCloseAction(root)) problems.push('has no visible Close/Cancel');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-    await settle(fixture, 2);
+    await settle(fixture, turns);
     const want = def.requiredChoice === true && !failed ? [] : [undefined];
     if (io.closedWith.length !== want.length || io.closedWith.some((r) => r !== undefined)) {
       problems.push(want.length ? `does not close on Escape (closed with ${safeJson(io.closedWith)})` : 'is a required choice that Escape closed');

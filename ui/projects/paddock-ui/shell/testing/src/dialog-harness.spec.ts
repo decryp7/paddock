@@ -111,7 +111,7 @@ describe('the boot-every-dialog harness', () => {
     const report = await bootDialog(OK, { dialogs: [] });
     expect(report.problems.join('\n')).toMatch(/does not open: This dialog is not known/);
     const stuck = dialog('t.stuck', 'viewer', () => new Promise(() => undefined));
-    const never = await bootDialog(stuck, { dialogs: [stuck], maxRounds: 2 });
+    const never = await bootDialog(stuck, { dialogs: [stuck], maxTurns: 2 });
     expect(never.problems).toContain('never leaves Loading');
   });
 

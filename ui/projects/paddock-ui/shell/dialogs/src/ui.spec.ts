@@ -555,6 +555,8 @@ describe('window layout details', () => {
         await vi.advanceTimersByTimeAsync(REFIT_DEBOUNCE_MS - 1);
         expect(io.fitted.length).toBe(first);
         await vi.advanceTimersByTimeAsync(1);
+        // The checks the fit itself set off (the shell's Close check after a DOM change) run too.
+        await vi.runOnlyPendingTimersAsync();
       } finally {
         vi.useRealTimers();
       }
