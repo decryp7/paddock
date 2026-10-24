@@ -884,6 +884,9 @@ fn a_composed_table_lists_every_part_in_order_with_its_specs() {
     );
     assert!(NOTHING.specs().is_empty());
     assert_eq!(crate::table::total(&[&PART_A, &PART_B]), 3);
+    // The same at run time.
+    let specs = crate::table::concat::<3>(&[&PART_A, &PART_B]);
+    assert_eq!(specs.map(|s| s.name()), ["first", "second", "third"]);
 }
 
 #[test]

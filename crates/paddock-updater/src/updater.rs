@@ -308,14 +308,8 @@ impl Updater {
     }
 
     /// Keeps the preferences in `store` (until it applies stored ones, the updater starts with automatic checks off on
-    /// the first channel).
-    pub fn with_preference_store(self, store: Arc<dyn PreferenceStore>) -> Updater {
-        self.set_preference_store(store);
-        self
-    }
-
-    /// As [`Updater::with_preference_store`] on a shared updater (the shell, once the store's section is registered).
-    /// False when it already has one (the first store stays).
+    /// the first channel). Set on the shared updater (the shell, once the store's section is registered); false when it
+    /// already has one (the first store stays).
     pub fn set_preference_store(&self, store: Arc<dyn PreferenceStore>) -> bool {
         self.store.set(store).is_ok()
     }
