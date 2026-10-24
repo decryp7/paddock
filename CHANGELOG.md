@@ -5,6 +5,10 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- The shared CI image (plan X53, `ci-image/`): `paddock-ci` on top of garage with cargo-hakari, cargo-machete, libduckdb, a pinned Chrome for
+  Testing and sccache 0.18.0, every download checksum-verified, a verifying last build step and manifest, a manual `ci-image` workflow that
+  pushes it from CI. `ci.yml` runs its Linux jobs in it and no longer installs Node, browsers or hakari/machete per job; `setup-rust` skips the
+  toolchain install inside it.
 - `paddock-live` and `@decryp7/paddock-ui/live` (plan X29): the live feed. `Hub<S: LiveState>` (state, sequence numbers, bounded
   subscriber queues with latest-wins merging and snapshot resynchronisation of slow consumers), `Frame` (snapshot, delta, link),
   `run` (a `Source` kept connected with `Backoff` on the shared `Clock`, announcing the `Link`), `Channel`, and the `tauri` adapter
