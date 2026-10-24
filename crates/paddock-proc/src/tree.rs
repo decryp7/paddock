@@ -237,7 +237,7 @@ mod tests {
         // Both ends of the shared stdout pipe are closed only when the whole tree is dead.
         let mut rest = Vec::new();
         r.read_to_end(&mut rest).unwrap();
-        assert!(!is_alive(grand), "the grandchild survived");
+        assert!(crate::testchild::is_gone(grand), "the grandchild survived");
         assert!(s.wait().is_some());
     }
 
