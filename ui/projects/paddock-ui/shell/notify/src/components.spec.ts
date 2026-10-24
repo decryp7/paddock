@@ -2,11 +2,13 @@ import { Component, provideZonelessChangeDetection, signal } from '@angular/core
 import { TestBed } from '@angular/core/testing';
 import { ContributionRegistry, defineNotificationKind, msg, provideContributions } from '@decryp7/paddock-ui/shell';
 import { NotificationsStore } from './notifications.store';
-import { noticeTime, PdNotificationsPanel, titleWithCount } from './notifications-panel';
-import { notificationsStatusText, PdNotificationsStatus } from './notifications-status';
+import { noticeTime, notificationsStatusText, titleWithCount } from './notice-text';
+import { PdNotificationsPanel } from './notifications-panel';
+import { PdNotificationsStatus } from './notifications-status';
 import { OPEN_SETTINGS, RAISE_CAP } from './notify-config';
 import { provideNoticeAction } from './provide-notify';
-import { chipCompactText, chipText, PdServiceStatus, shortName, stateWord } from './service-status';
+import { PdServiceStatus } from './service-status';
+import { chipCompactText, chipText, shortName, stateWord } from './service-status-text';
 import { ServiceHealthStore } from './service-health.store';
 import { all, cause, notifyBed, one, settle } from './spec-helpers';
 import { PdServiceError, PdWaitingFor } from './waiting-for';

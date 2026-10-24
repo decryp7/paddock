@@ -1,10 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, inject, InjectionToken, input } from '@angular/core';
 import { FormField } from '@angular/forms/signals';
 import type { SettingsPageDef } from '@decryp7/paddock-ui/shell';
-import type { SettingField } from '../generated/settings';
+import { type SettingField, SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { PdSettingField } from './setting-field';
 import { SettingsDrafts } from './settings-drafts';
-import { SettingsStore } from './settings.store';
 
 /** The settings page a page component is shown for (its element injector has it). */
 export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTINGS_PAGE');

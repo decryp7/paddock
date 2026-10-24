@@ -70,10 +70,13 @@ export {
 } from './src/notification-host.model';
 export { NotificationsSource } from './src/notifications-source';
 export { PdNotificationHost } from './src/notification-host';
-export { PdServiceStatus, chipText, chipCompactText, shortName, stateWord } from './src/service-status';
+// The status items load on first show (chunks of their own): their classes are exported as types only (plan S16).
+export type { PdServiceStatus } from './src/service-status';
+export { chipText, chipCompactText, shortName, stateWord } from './src/service-status-text';
 export { PdWaitingFor, PdServiceError } from './src/waiting-for';
-export { PdNotificationsPanel, titleWithCount, noticeTime } from './src/notifications-panel';
-export { PdNotificationsStatus, notificationsStatusText } from './src/notifications-status';
+export type { PdNotificationsPanel } from './src/notifications-panel';
+export type { PdNotificationsStatus } from './src/notifications-status';
+export { titleWithCount, noticeTime, notificationsStatusText } from './src/notice-text';
 export {
   provideShellNotify,
   provideNotificationSource,

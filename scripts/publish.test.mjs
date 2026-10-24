@@ -118,7 +118,7 @@ describe('entry points', () => {
   });
   test('the real library: every entry point the plan names (ADR 0012 §4, ADR 0013)', () => {
     const entries = entryPoints(join(root, 'ui/projects/paddock-ui'));
-    for (const e of ['shell', 'shell/startup', 'shell/notify', 'shell/dialogs', 'shell/jobs', 'shell/settings', 'shell/about', 'shell/menu',
+    for (const e of ['shell', 'shell/startup', 'shell/notify', 'shell/dialogs', 'shell/jobs', 'shell/settings', 'shell/settings/window', 'shell/about', 'shell/menu',
       'shell/pages', 'shell/i18n', 'shell/store', 'shell/testing', 'workbench', 'workbench/dock', 'workbench/testing']) {
       assert.ok(entries.includes(e), `missing entry point ${e}`);
     }

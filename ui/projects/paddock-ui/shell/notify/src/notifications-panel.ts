@@ -4,20 +4,11 @@ import { ContributionRegistry } from '@decryp7/paddock-ui/shell';
 import { NoticeActions } from './notice-actions';
 import { LOCAL_SOURCE, NotificationsStore, type ReadFilter } from './notifications.store';
 import type { Notice, NoticeAction } from './wire.types';
+import { noticeTime, titleWithCount } from './notice-text';
 
-/** "Export failed (×4)" when it happened more than once. */
-export function titleWithCount(n: Pick<Notice, 'title' | 'count'>): string {
-  return n.count > 1 ? `${n.title} (×${n.count})` : n.title;
-}
 
 const BUILT_IN_SOURCES: Readonly<Record<string, string>> = { health: 'Services', job: 'Jobs', [LOCAL_SOURCE]: 'App' };
 
-/** "14:05" today, else "24 Oct, 14:05". */
-export function noticeTime(at: number, now: number): string {
-  const d = new Date(at);
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  return new Date(now).toDateString() === d.toDateString() ? time : `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}, ${time}`;
-}
 
 /**
  * The notification centre of the window: what happened and may need attention (the engine's messages, health outages,

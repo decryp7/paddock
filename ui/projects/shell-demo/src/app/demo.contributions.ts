@@ -87,15 +87,14 @@ export const SETTINGS_DIALOG = defineDialog({
   width: 880,
   height: 620,
   commands: ['settings_overview', 'settings_reset', 'settings_set'],
-  providers: () => import('./demo-settings').then((m) => m.DEMO_SETTINGS_WINDOW),
-  load: () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsWindow),
+  providers: () => import('./demo-settings-window').then((m) => m.DEMO_SETTINGS_WINDOW),
+  load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
 
-/** The demo's settings pages: each shows the Rust section of the same id with the shell's generic form. */
-const sectionPage = () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsSectionPage);
+/** The demo's settings pages: without a component of their own, each shows the Rust section of the same id in the shell's generic form. */
 export const DEMO_SETTINGS_PAGES = [
-  defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100, load: sectionPage }),
-  defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100, load: sectionPage }),
+  defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
+  defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100 }),
 ] as const;
 
 export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG] as const;

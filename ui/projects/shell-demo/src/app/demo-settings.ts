@@ -3,13 +3,11 @@ import {
   MemorySettingsBackend,
   SETTINGS_OVERVIEW_FIXTURE,
   SETTINGS_PROBLEM_FIXTURE,
-  settingsWindowProviders,
   TauriSettingsBackend,
   type SettingsBackend,
 } from '@decryp7/paddock-ui/shell/settings';
 import { DemoHealthEngine } from './demo-health';
 import { tauriIpc } from './demo-ipc';
-import { DEMO_SETTINGS_PAGES } from './demo.contributions';
 
 /**
  * The demo's stand-in for `paddock-settings` (the browser build has no Rust): the sections Rust wrote into the fixtures
@@ -39,6 +37,3 @@ export function demoSettingsBackend(): SettingsBackend {
   const ipc = tauriIpc();
   return ipc ? new TauriSettingsBackend(ipc) : inject(DemoSettingsEngine).backend;
 }
-
-/** The Settings window's providers (its dialog's `providers`): loaded with it, never in the main window's first paint. */
-export const DEMO_SETTINGS_WINDOW = settingsWindowProviders({ backend: demoSettingsBackend, pages: DEMO_SETTINGS_PAGES });

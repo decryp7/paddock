@@ -17,7 +17,7 @@ import { demoContext } from '../../../../shell-demo/src/app/demo-context';
 import { assertContributionsValid } from './contributions-lint';
 
 // The reference apps are the first consumers of the shell (ADR 0012 §7): their contributions pass the lint, and their
-// manifests round-trip. The lazy-import lint of their registration files runs in e2e (it reads the sources from disk).
+// manifests round-trip. The lazy-import lint of their registration files is in reference-sources.spec.ts.
 describe('shell-demo contributions', () => {
   const notices: ShellNotice[] = [];
   beforeEach(() => {

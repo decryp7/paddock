@@ -2,23 +2,12 @@ import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input
 import { formatCount } from '@decryp7/paddock-ui';
 import { STATUS_COMPACT } from '@decryp7/paddock-ui/shell';
 import { PdJobsList } from './jobs-list';
+import { jobsStatusDetail, jobsStatusText } from './jobs-status-text';
 import { JobsStore } from './jobs.store';
 
 let nextId = 0;
 
-/** What the status item says: "Jobs", or how many run and which one leads ("1 running: Update runner"). */
-export function jobsStatusText(active: number, lead: string | null): string {
-  if (active === 0) return 'Jobs';
-  const count = `${formatCount(active)} running`;
-  return lead ? `${count}: ${lead}` : count;
-}
 
-/** The status item's tooltip: the lead job and what it does now ("Still working" when it went quiet); the card owns more. */
-export function jobsStatusDetail(lead: string | null, phase: string | null, stalled: boolean): string {
-  if (!lead) return '';
-  const doing = stalled ? 'still working, this step is taking longer than usual' : phase;
-  return doing ? `${lead}: ${doing}` : lead;
-}
 
 /**
  * The jobs status item: how many jobs run and the first one's phase; it opens the Jobs list in an in-app popover (Escape

@@ -2,15 +2,13 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { defineSettingsPage, msg, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
-import { MemorySettingsBackend, type SettingsBackend } from './settings-backend';
+import { MemorySettingsBackend, type SettingsBackend } from '@decryp7/paddock-ui/shell/settings';
 import { settingsWindowProviders } from './provide-settings';
-
-const sectionPage = () => import('./settings-section').then((m) => m.PdSettingsSectionPage);
 
 /** The shell demo's pages: General (application) and Storage (features); Appearance is the shell's. */
 export const SPEC_PAGES: readonly SettingsPageDef[] = [
-  defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100, load: sectionPage }),
-  defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100, load: sectionPage }),
+  defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
+  defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100 }),
 ];
 
 /** Lets promises, resources and effects settle (zoneless). */

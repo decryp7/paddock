@@ -1,8 +1,6 @@
 import { computed, inject, Injectable, Injector, linkedSignal, untracked, type Signal, type WritableSignal } from '@angular/core';
 import { form, validate, type FieldTree } from '@angular/forms/signals';
-import type { SettingValue } from '../generated/settings';
-import { precheck, sameValue } from './settings-model';
-import { SettingsStore } from './settings.store';
+import { type SettingValue, precheck, sameValue, SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 
 /** A section's values as its form edits them. */
 export type SectionValues = Record<string, SettingValue>;

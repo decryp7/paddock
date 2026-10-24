@@ -1,11 +1,8 @@
 import { EnvironmentProviders, provideEnvironmentInitializer, Provider } from '@angular/core';
 import type { SettingsPageDef } from '@decryp7/paddock-ui/shell';
-import { followAppearance } from './appearance';
-import { SettingsBackend } from './settings-backend';
-import { SHELL_SETTINGS_PAGES } from './settings.contributions';
+import { followAppearance, SettingsBackend, SHELL_SETTINGS_PAGES, SettingsStore } from '@decryp7/paddock-ui/shell/settings';
 import { SettingsDrafts } from './settings-drafts';
 import { SETTINGS_RESTART, SETTINGS_WINDOW_PAGES } from './settings-window';
-import { SettingsStore } from './settings.store';
 
 export interface SettingsWindowOptions {
   /** Builds the window's backend (in an injection context): `new TauriSettingsBackend(ipc)` in the app, a fake in the browser. */

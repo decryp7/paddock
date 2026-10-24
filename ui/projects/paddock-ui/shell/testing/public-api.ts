@@ -5,7 +5,7 @@
  * `FakeDialogIo` and the IPC recorder. `provideShellTesting` arrives with plan S16.
  */
 export { contributionProblems, assertContributionsValid } from './src/contributions-lint';
-export { checkRegistrationSource, assertRegistrationsLazy, isRegistrationFile, staticImports } from './src/registration-lint';
+export { checkRegistrationSource, assertRegistrationsLazy, isRegistrationFile, staticImports, dynamicImports, lazyExportProblems } from './src/registration-lint';
 export {
   bootDialog,
   assertDialogBoots,

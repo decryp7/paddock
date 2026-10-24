@@ -1,13 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, linkedSignal } from '@angular/core';
 import { NotificationsStore } from './notifications.store';
 import { PdNotificationsPanel } from './notifications-panel';
+import { notificationsStatusText } from './notice-text';
 
 let nextId = 0;
 
-/** What the status item says: the unread count when there is one. */
-export function notificationsStatusText(unread: number): string {
-  return unread > 0 ? `${unread} unread` : 'Notifications';
-}
 
 /**
  * The notifications status item: a bell with the unread count that opens the centre in an in-app popover (Escape or a

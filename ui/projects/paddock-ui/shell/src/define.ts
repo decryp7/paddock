@@ -95,7 +95,12 @@ export interface StatusItemDef<T extends object = object> extends LazyPart {
 export type SettingsGroup = 'application' | 'features' | 'advanced';
 
 /** A page of the Settings window. */
-export interface SettingsPageDef<T extends object = object> extends LazyPart {
+export interface SettingsPageDef<T extends object = object> extends Omit<LazyPart, 'load'> {
+  /**
+   * The page's component; without it the page is the Rust section of the same id in the shell's generic form (the
+   * Settings window brings that form, so a registration names no settings UI and stays light).
+   */
+  readonly load?: LazyPart['load'];
   /** Also the id of the settings section in Rust (`paddock-settings`), checked through the manifest. */
   readonly id: string;
   readonly group: SettingsGroup;

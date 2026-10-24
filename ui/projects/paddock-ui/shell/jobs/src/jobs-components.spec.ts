@@ -5,7 +5,8 @@ import { Injector } from '@angular/core';
 import { JobsBackend, type Unlisten } from './jobs-backend';
 import { JOBS_CONTRIBUTIONS } from './jobs.contributions';
 import { PdJobsList } from './jobs-list';
-import { jobsStatusDetail, jobsStatusText, PdJobsStatus } from './jobs-status';
+import { PdJobsStatus } from './jobs-status';
+import { jobsStatusDetail, jobsStatusText } from './jobs-status-text';
 import { jobsBed, phase, settle, snap } from './spec-helpers';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 

@@ -11,7 +11,9 @@ export { type RequestStatus } from '@decryp7/paddock-ui/shell/store';
 export { JobsStore, JOB_NOTICE_KINDS, finishedNotice, type JobsStoreType, type JobFollowing } from './src/jobs.store';
 export { JobFollow } from './src/job-follow';
 export { PdJobsList } from './src/jobs-list';
-export { PdJobsStatus, jobsStatusText, jobsStatusDetail } from './src/jobs-status';
+// The status item loads on first show (a chunk of its own): its class is exported as a type only (plan S16).
+export type { PdJobsStatus } from './src/jobs-status';
+export { jobsStatusText, jobsStatusDetail } from './src/jobs-status-text';
 export { provideShellJobs, type ShellJobsOptions } from './src/provide-jobs';
 export { JOBS_CONTRIBUTIONS } from './src/jobs.contributions';
 export { uiTimeoutProblems, stripCommentsAndStrings, callArguments } from './src/ui-timeouts';
