@@ -9,6 +9,11 @@ Conventional Commits; one semver tag for the whole repo.
   channel (ordered delivery, nothing after the call settled, failure, handler error, last-message marker, abort). `paddock-metrics`:
   `folder_size` does not cross volumes (`other_volumes`) and reads a folder entry by entry, so a cancel or the time limit is seen
   between reads. CI: a step for `paddock-net`; `paddock-archive` and `paddock-net` take the workspace hack.
+- `paddock-mcp` (plan X22, ADR 0007): the local-only MCP server. `Server` with `ToolDef`/`ResourceDef` registration, `Policy` (off by
+  default, read-only tools, actions only by name), schema validation, result caps, cursors, time limits with cancel, panic
+  containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers
+  only, bounded lines, connection cap), `client` request builders and the shared MCP types for Pitwall; a contract test of the
+  2025-06-18 message shapes.
 - `paddock-proc` (plan X54): every `Supervised` child on Windows runs in a job object of its own with kill-on-close (and
   die-on-unhandled-exception), so the child and every helper it started end when the value is dropped or the app exits or
   crashes, also helpers that left its process tree; `Supervised::in_job`. `paddock-ipc`'s launcher gets it through

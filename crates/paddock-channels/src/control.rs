@@ -7,7 +7,7 @@
 //! a running test out (rule 12); [`ChannelsControl::cancel`] stops them.
 
 use crate::config::{ChannelConfig, Settings, secret_name_of};
-use crate::dispatch::{Delivery, Dispatcher};
+use crate::dispatch::{Delivery, Dispatcher, Phase};
 use crate::message::Message;
 use crate::{HttpPoster, MailSender};
 use paddock_env::VersionedFile;
@@ -84,6 +84,7 @@ impl SettingsStore for MemorySettings {
 
 /// What the page shows: the settings, and for every channel whether its secret is stored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelsView {
     /// The saved settings.
@@ -94,6 +95,8 @@ pub struct ChannelsView {
 
 /// Why a command did not work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ChannelsErrorCode"))]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorCode {
     /// The settings or the secret are not acceptable; the message says what to fix.
@@ -108,6 +111,7 @@ pub enum ErrorCode {
 
 /// A refused command.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelsError {
     /// The kind.
@@ -128,17 +132,56 @@ impl ChannelsError {
     }
 }
 
+/// What a running test is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum TestPhase {
+    /// Sending the message.
+    Sending,
+    /// Waiting before the next attempt (`waitSecs` says how long).
+    Waiting,
+}
+
+/// The reply of `channels_test`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct TestStarted {
+    /// Matches the `testId` of the events that report the test.
+    #[cfg_attr(test, ts(type = "number"))]
+    pub test_id: u64,
+}
+
 /// What the engine reports on `paddock://channels`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 pub enum ChannelsEvent {
+    /// A running test is making attempt `attempt` of `of`, or waiting for the next one. Attempt numbers only go up.
+    TestProgress {
+        /// The id [`ChannelsControl::test`] returned.
+        #[cfg_attr(test, ts(type = "number"))]
+        test_id: u64,
+        /// The channel.
+        channel_id: String,
+        /// The attempt under way or just made (1 to `of`).
+        attempt: u32,
+        /// The most attempts the test makes.
+        of: u32,
+        /// What it is doing.
+        phase: TestPhase,
+        /// How long the wait is, in seconds, while waiting.
+        wait_secs: Option<u32>,
+    },
     /// A test send ended.
     Test {
         /// The id [`ChannelsControl::test`] returned.
+        #[cfg_attr(test, ts(type = "number"))]
         test_id: u64,
         /// The channel.
         channel_id: String,
@@ -335,7 +378,26 @@ impl ChannelsControl {
         std::thread::spawn({
             let channel = channel.clone();
             move || {
-                let delivery = me.dispatcher().test_with(&channel, None, &me.app, &cancel);
+                let progress = |p: crate::dispatch::Progress| {
+                    let (phase, wait_secs) = match p.phase {
+                        Phase::Sending => (TestPhase::Sending, None),
+                        Phase::Waiting(d) => (
+                            TestPhase::Waiting,
+                            Some(u32::try_from(d.as_secs()).unwrap_or(u32::MAX)),
+                        ),
+                    };
+                    (me.emit)(&ChannelsEvent::TestProgress {
+                        test_id: id,
+                        channel_id: channel.id.clone(),
+                        attempt: p.attempt,
+                        of: p.of,
+                        phase,
+                        wait_secs,
+                    });
+                };
+                let delivery = me
+                    .dispatcher()
+                    .test_with_progress(&channel, None, &me.app, &cancel, &progress);
                 me.tests().running.remove(&channel.id);
                 let (ok, message) = match &delivery.result {
                     Ok(()) => (true, None),

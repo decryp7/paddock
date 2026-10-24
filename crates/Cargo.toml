@@ -21,6 +21,7 @@ members = [
     "paddock-ipc",
     "paddock-jobs",
     "paddock-log",
+    "paddock-mcp",
     "paddock-live",
     "paddock-menu",
     "paddock-metrics",
@@ -78,6 +79,7 @@ paddock-ipc = { path = "paddock-ipc", version = "0.1.0", registry = "decryp7" }
 paddock-jobs = { path = "paddock-jobs", version = "0.1.0", registry = "decryp7" }
 paddock-log = { path = "paddock-log", version = "0.1.0", registry = "decryp7" }
 paddock-names = { path = "paddock-names", version = "0.1.0", registry = "decryp7" }
+paddock-mcp = { path = "paddock-mcp", version = "0.1.0", registry = "decryp7" }
 paddock-live = { path = "paddock-live", version = "0.1.0", registry = "decryp7" }
 paddock-metrics = { path = "paddock-metrics", version = "0.1.0", registry = "decryp7" }
 paddock-menu = { path = "paddock-menu", version = "0.1.0", registry = "decryp7" }
