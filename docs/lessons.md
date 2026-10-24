@@ -324,3 +324,13 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   the fake browser reported a fixed tab count and ignored `createTarget`. Fakes must model the real system's observable
   behaviour (start pages, created targets, recorded calls) and be checked against the real thing at least once; every
   keep/close style decision logs its reason, so a silent wrong branch shows up in the user's log.
+- A Rust test binary that links `tauri-plugin-dialog` does not load on Windows (0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND):
+  the plugin imports `TaskDialogIndirect` from Common Controls v6, and Tauri embeds that manifest into app binaries
+  only. Every crate whose tests can link the plugin embeds it in its `build.rs` (`/MANIFEST:EMBED` plus the
+  Common-Controls `/MANIFESTDEPENDENCY`, windows-msvc only); `paddock-startup/tests/common_controls_manifest.rs` checks
+  that on every OS, so a new crate fails locally instead of first on the Windows runner. Whether the binary needs it
+  depends on what the linker keeps, so a crate can pass by luck (paddock-shell did) until a test reaches the dialog.
+- An e2e assertion that matches a transient value passes on a fast machine and fails on a slow one: the narrow status
+  bar test expected the bell's "1" while the demo's asynchronous commands were still posting, and the settled count is
+  2. The fast native gate saw the "1" on its first poll; CI did not. Assert the settled state (exact values, full
+  labels), never an intermediate one of asynchronous work.
