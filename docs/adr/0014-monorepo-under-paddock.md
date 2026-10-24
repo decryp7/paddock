@@ -1,6 +1,6 @@
 # 14. One monorepo under `paddock`
 
-- Status: proposed (2026-10-24)
+- Status: accepted (2026-10-24, by the user); work starts after shell 0.3.0 is tagged
 - Date: 2026-10-24
 - Decision by the user (2026-10-24): "finish 0.3.0, then monorepo under paddock". This ADR decides how.
 - Related: rules 1-4, 8, 9, 39, 41, 42, 43; ADRs 0006 (versioning and consumption, partly replaced here), 0012 §8 (the
