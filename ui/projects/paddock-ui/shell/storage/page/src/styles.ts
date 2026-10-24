@@ -24,10 +24,12 @@ export const STORAGE_STYLES = `
   .pd-storage__kind { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
   .pd-storage__note { font-size: var(--pd-text-label); }
   .pd-storage__size { text-align: end; white-space: nowrap; width: 8em; font-variant-numeric: tabular-nums; }
-  .pd-storage__actions { white-space: nowrap; text-align: end; }
+  .pd-storage__actions { width: 13em; text-align: end; }
   .pd-storage__actions .pd-storage__btn { margin-inline-start: var(--pd-space-1); }
+  .pd-storage__tree { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
+  .pd-storage__tree h3 { margin: 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
   tr:hover td { background: var(--pd-hover); }
   /* A narrow page drops the folder column (the path stays in the Show button's folder and in the tooltip of the name) and stacks the buttons. */
-  @container (max-width: 560px) { .pd-storage__folder { display: none; } .pd-storage__actions { white-space: normal; } .pd-storage__size { width: 6em; } }
+  @container (max-width: 560px) { .pd-storage__folder { display: none; }  .pd-storage__size { width: 6em; } }
   @container (max-width: 420px) { .pd-storage__summary .pd-storage__btn { flex: 1 1 100%; } }
 `;

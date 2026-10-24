@@ -61,6 +61,8 @@ pub enum Decision {
 struct GateState {
     waiting: Option<String>,
     decision: Option<bool>,
+    /// When the wait for `waiting` ends, fixed when the call was announced (not when the turn got to waiting).
+    deadline: Option<Duration>,
 }
 
 /// The rendezvous between a turn waiting for approval and `assistant_approve_tool`.
@@ -89,6 +91,18 @@ impl Gate {
         true
     }
 
+    /// Registers `call_id` as the call that is about to wait, before the UI hears of it: the decision can arrive as soon as
+    /// `ApprovalNeeded` is emitted, which may be before the turn reaches [`Gate::wait`] (regression: `decide` then answered
+    /// "not waiting" and the click was lost).
+    /// The time limit starts here too, on the injected clock: a test (or a slow machine) that moves the clock right after the
+    /// announcement must not push the deadline away.
+    fn expect(&self, call_id: &str, clock: &dyn Clock, limit: Duration) {
+        let mut s = self.lock();
+        s.waiting = Some(call_id.into());
+        s.decision = None;
+        s.deadline = Some(clock.monotonic() + limit);
+    }
+
     /// Wakes a waiting turn so it sees the stop flag.
     pub fn wake(&self) {
         let _guard = self.lock();
@@ -96,9 +110,13 @@ impl Gate {
     }
 
     fn wait(&self, call_id: &str, cancel: &Cancel, clock: &dyn Clock, limit: Duration) -> Decision {
-        let deadline = clock.monotonic() + limit;
         let mut s = self.lock();
-        s.waiting = Some(call_id.into());
+        // Normally set by `expect` already (an earlier decision is kept); a direct wait registers itself.
+        if s.waiting.as_deref() != Some(call_id) {
+            s.waiting = Some(call_id.into());
+            s.deadline = None;
+        }
+        let deadline = *s.deadline.get_or_insert_with(|| clock.monotonic() + limit);
         let outcome = loop {
             if let Some(approved) = s.decision.take() {
                 break if approved {
@@ -120,6 +138,7 @@ impl Gate {
                 .0;
         };
         s.waiting = None;
+        s.deadline = None;
         outcome
     }
 }
@@ -457,6 +476,8 @@ fn decide_and_run(
     *used += 1;
     *total += 1;
     if write {
+        turn.gate
+            .expect(&call.id, turn.clock, turn.budgets.approval_wait);
         (hooks.emit)(AssistantEvent::ApprovalNeeded {
             call_id: call.id.clone(),
             name: call.name.clone(),
@@ -489,4 +510,48 @@ fn decide_and_run(
     };
     output.text = cap(&output.text, budget.max_output_chars);
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use paddock_testkit::FakeClock;
+
+    /// Regression (CI, Linux): the decision can arrive the moment `ApprovalNeeded` is emitted, before the turn is in `wait`.
+    #[test]
+    fn a_decision_made_between_the_announcement_and_the_wait_is_not_lost() {
+        let gate = Gate::default();
+        assert!(!gate.decide("c1", true), "nothing is expected yet");
+        let clock = FakeClock::new();
+        gate.expect("c1", &clock, Duration::from_secs(60));
+        assert!(
+            !gate.decide("other", true),
+            "only the announced call can be decided"
+        );
+        assert!(
+            gate.decide("c1", true),
+            "announced, so the click counts even before the wait starts"
+        );
+        assert!(!gate.decide("c1", false), "one decision per call");
+        let cancel = Cancel::default();
+        assert_eq!(
+            gate.wait("c1", &cancel, &clock, Duration::from_secs(60)),
+            Decision::Approved
+        );
+        assert!(!gate.decide("c1", true), "nothing waits any more");
+    }
+
+    /// Regression (CI): the clock moved right after the announcement; the limit still ran from the announcement.
+    #[test]
+    fn the_limit_runs_from_the_announcement_not_from_the_start_of_the_wait() {
+        let gate = Gate::default();
+        let clock = FakeClock::new();
+        gate.expect("c1", &clock, Duration::from_secs(60));
+        clock.advance(Duration::from_secs(61));
+        let cancel = Cancel::default();
+        assert_eq!(
+            gate.wait("c1", &cancel, &clock, Duration::from_secs(60)),
+            Decision::TimedOut
+        );
+    }
 }

@@ -30,6 +30,10 @@ export const PD_ICON_PATHS = {
   clock: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 7.5V12l3 2',
   bell: 'M6 10.5a6 6 0 0 1 12 0V16l1.5 2h-15L6 16zM10 20.5a2 2 0 0 0 4 0',
   // Things
+  // File kinds (plan X31 follow-up): beside `file` (below, from the workbench) a page with lines, a page with code brackets, an archive box.
+  'file-text': 'M6 3.5h8l4.5 4.5v12.5H6zM13.5 3.5V8.5H18.5M9 12.5h6M9 16h6',
+  'file-code': 'M6 3.5h8l4.5 4.5v12.5H6zM13.5 3.5V8.5H18.5M10.5 12l-2 2 2 2M13.5 12l2 2-2 2',
+  archive: 'M4 5h16v4H4zM5.5 9v10.5h13V9M10 13h4',
   folder: 'M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z',
   globe:
     'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c-2.3 2.4-3.5 5.2-3.5 8.5s1.2 6.1 3.5 8.5c2.3-2.4 3.5-5.2 3.5-8.5S14.3 5.9 12 3.5Z',

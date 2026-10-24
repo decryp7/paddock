@@ -14,6 +14,8 @@ pub enum StorageError {
     UnknownCategory(String),
     /// The same category twice in one request.
     Duplicate(String),
+    /// This category's folder cannot be walked (not found, or outside the app's folders); the words say which.
+    Unavailable(String),
     /// The user cancelled; nothing was changed by a scan, and a clear reports what it did instead.
     Cancelled,
 }
@@ -31,6 +33,7 @@ impl fmt::Display for StorageError {
                 id.chars().take(40).collect::<String>()
             ),
             StorageError::Duplicate(id) => write!(f, "\"{id}\" is listed twice."),
+            StorageError::Unavailable(why) => f.write_str(why),
             StorageError::Cancelled => f.write_str("Stopped."),
         }
     }
@@ -46,6 +49,7 @@ impl From<StorageError> for CommandError {
                 CommandError::invalid(e.to_string())
             }
             StorageError::UnknownCategory(_) => CommandError::not_found(e.to_string()),
+            StorageError::Unavailable(_) => CommandError::unavailable(e.to_string()),
             StorageError::Cancelled => CommandError::cancelled(e.to_string()),
         }
     }
@@ -66,6 +70,10 @@ mod tests {
                 ErrorCode::NotFound,
             ),
             (StorageError::Duplicate("logs".into()), ErrorCode::Invalid),
+            (
+                StorageError::Unavailable("gone".into()),
+                ErrorCode::Unavailable,
+            ),
             (StorageError::Cancelled, ErrorCode::Cancelled),
         ];
         for (e, code) in cases {

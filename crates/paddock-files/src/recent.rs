@@ -54,6 +54,10 @@ pub struct RecentEntry {
     /// When it was last opened or saved, in milliseconds since the Unix epoch.
     #[cfg_attr(test, ts(type = "number"))]
     pub opened_at: u64,
+    /// It was a folder when it was recorded (the UI draws the folder glyph).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
+    pub folder: bool,
 }
 
 /// A list with its id, newest first.
@@ -143,10 +147,15 @@ impl Recents {
     /// Puts a granted path at the front of list `id` (deduplicated, capped); whether the lists changed. An unknown list or a
     /// path that cannot be kept changes nothing. `name` is the display name (a project's); empty gives the file's stem.
     pub fn record(&self, id: &str, granted: &GrantedPath, name: Option<&str>) -> bool {
-        self.record_path(id, &granted.text(), name)
+        self.record_entry(id, &granted.text(), name, granted.path().is_dir())
     }
 
+    #[cfg(test)]
     pub(crate) fn record_path(&self, id: &str, path: &str, name: Option<&str>) -> bool {
+        self.record_entry(id, path, name, false)
+    }
+
+    fn record_entry(&self, id: &str, path: &str, name: Option<&str>, folder: bool) -> bool {
         let Some(spec) = self.specs.iter().find(|s| s.id == id) else {
             log::warn!(List = id; "a path was recorded in a recent list the app does not declare");
             return false;
@@ -159,6 +168,7 @@ impl Recents {
             path: path.to_string(),
             name,
             opened_at: (self.clock)(),
+            folder,
         };
         self.change(id, |entries| {
             entries.retain(|e| !same(&e.path, path));
@@ -379,7 +389,16 @@ mod tests {
         let r = Recents::open(None, &[FILES]);
         assert!(r.record("files", &granted, None));
         assert!(r.has("files", &granted.text()));
-        assert!(!r.record("files", &granted, None) || r.list().entries("files").len() == 1);
+        assert!(!r.list().entries("files")[0].folder);
+        let dir = PathGrants::default()
+            .grant("main", t.path(), Access::Read, GrantSource::Dialog)
+            .unwrap();
+        r.record("files", &dir, None);
+        assert!(
+            r.list().entries("files")[0].folder,
+            "a folder is recorded as one"
+        );
+        assert_eq!(r.list().entries("files").len(), 2);
     }
 
     #[test]
@@ -474,6 +493,7 @@ mod tests {
             panic!("poison");
         })
         .join();
-        assert!(r.record_path("files", "/a", None));
+        let absolute = if cfg!(windows) { r"C:\a" } else { "/a" };
+        assert!(r.record_path("files", absolute, None));
     }
 }

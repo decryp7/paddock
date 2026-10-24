@@ -38,6 +38,7 @@ pub mod guard;
 mod model;
 mod run;
 mod storage;
+pub mod tree;
 pub mod walk;
 
 pub use category::{
@@ -45,11 +46,12 @@ pub use category::{
 };
 pub use error::StorageError;
 pub use model::{
-    CategoryClearResult, ClearChoice, ClearRequest, ItemView, Kind, Skipped, StorageCategory,
-    StorageClearResult, StorageUsage,
+    CategoryClearResult, ClearChoice, ClearRequest, ItemView, Kind, SizeNode, Skipped,
+    StorageCategory, StorageClearResult, StorageTree, StorageUsage,
 };
 pub use run::{Recorder, Run};
 pub use storage::{MAX_CATEGORIES, MAX_PREVIEW_ITEMS, RECHECK_ENTRIES, RECHECK_TIME, Storage};
+pub use tree::{TREE_DEPTH, TREE_PER_LEVEL};
 pub use walk::MAX_SKIPPED_LISTED;
 
 /// The event the outcome of a scan or a clear is sent on, to every window (a `StorageEvent` of the adapter).
@@ -65,6 +67,8 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] => tauri::storage_scan,
     /// Clears the chosen categories as a job (returns at once; the outcome is an event).
     Mutation [MAIN | DIALOG] => tauri::storage_clear,
+    /// Walks one category's folder into a bounded size tree as a job (returns at once; the outcome is an event).
+    Mutation [MAIN | DIALOG] => tauri::storage_tree,
     /// Cancels the scan or clear in progress.
     Mutation [MAIN | DIALOG] => tauri::storage_cancel,
     /// Shows a category's folder in the file manager.
