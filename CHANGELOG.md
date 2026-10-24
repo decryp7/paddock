@@ -40,6 +40,14 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- Review fixes for the files and storage UI (independent review, 2 P1, 11 P2, 9 P3). Settings > Storage is the shared `pd-table`: one
+  line per row, rows grouped by cache or the user's data with the aggregate size on the group row, hover icon buttons (What is inside,
+  Show in the file manager) and a "…" menu ending in Clear in danger text; the cache button is a normal button. The size tree no
+  longer counts a folder twice (its size is on the group row, its items are the rows, with `pd:` glyphs and a title and Close);
+  lower bounds read "at least 3.9 GB", rounded down. `pd-table` gains `groupSummary`, `groupMono` and `countLabel`. Recent files lead
+  with the file name and show the folder as a muted second line; `pd-path-text` keeps the separator beside the ellipsis. Glyphs: the
+  page fold fixed, bigger `file-code` brackets, a lighter `archive` lid, a `reveal` glyph for the action. The contact sheet is
+  1440 x 900 at 2x with 320 px, hover, menu and confirmation shots.
 - Files and storage follow-ups (plan X31/X32). `paddock-storage`: the size tree (`Storage::tree`, `storage_tree`, `StorageEvent::Tree`:
   depth 3, 12 items per folder with the rest folded, bounded in entries and time, no links, one volume) and, in `shell/storage`, a
   Folders button on the Storage page that shows it as a `pd-table` grouped by top-level folder. `paddock-files`: `Files::open_at_line` and

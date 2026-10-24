@@ -99,6 +99,9 @@ describe('table model', () => {
     expect(folded.filter((i) => i.kind === 'row')).toHaveLength(2);
     expect(folded[0]).toMatchObject({ kind: 'group', collapsed: true });
     expect(groupItems(rows, undefined, new Set()).every((i) => i.kind === 'row')).toBe(true);
+    const summed = groupItems(rows, columns[2], new Set(), (list) => ({ n: String(list.length) }));
+    expect(summed.filter((i) => i.kind === 'group').map((g) => (g.kind === 'group' ? g.cells?.['n'] : ''))).toEqual(['2', '2']);
+    expect(open.every((i) => i.kind === 'row' || i.cells === undefined)).toBe(true);
   });
 
   it('moves between lines for the navigation keys and nothing else', () => {
