@@ -33,7 +33,9 @@ pub use control::{
     ChannelsControl, ChannelsError, ChannelsEvent, ChannelsView, Emit, ErrorCode, FileSettings,
     MAX_TESTS, MemorySettings, SettingsStore,
 };
-pub use dispatch::{DEFAULT_TIMEOUT, Delivery, Dispatcher, RetryPolicy, TEST_KIND};
+pub use dispatch::{
+    DEFAULT_TIMEOUT, Delivery, Dispatcher, Phase, Progress, RetryPolicy, TEST_KIND,
+};
 pub use error::SendError;
 pub use fake::{FakeMail, FakePoster};
 pub use http::{
@@ -66,3 +68,6 @@ paddock_commands::command_table! {
 
 #[cfg(feature = "tauri")]
 pub mod tauri;
+
+#[cfg(test)]
+mod generated;
