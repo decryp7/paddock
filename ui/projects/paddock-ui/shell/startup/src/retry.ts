@@ -4,8 +4,8 @@ export interface RetryOptions {
   readonly timeoutMs: number;
   /** Attempts in all; after the last one the call waits for whichever attempt answers first, without a deadline. */
   readonly attempts: number;
-  /** Timer (tests pass a manual one). */
-  readonly setTimer?: (fn: () => void, ms: number) => unknown;
+  /** Calls `fn` every `ms` until the returned function is called (default `setInterval`; tests pass a manual one). */
+  readonly every?: (fn: () => void, ms: number) => () => void;
 }
 
 /** Per-attempt timeout and attempts of the start-up calls (ADR 0058): 4 s, 4 attempts. */
@@ -19,12 +19,22 @@ export const STARTUP_RETRY: RetryOptions = { timeoutMs: 4000, attempts: 4 };
  * up on). Only idempotent reads may use this.
  */
 export function retryUntilAnswered<T>(call: () => Promise<T>, options: RetryOptions): Promise<T> {
-  const setTimer = options.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const every =
+    options.every ??
+    ((fn: () => void, ms: number) => {
+      const handle = setInterval(fn, ms);
+      return () => clearInterval(handle);
+    });
   return new Promise<T>((resolve, reject) => {
     let settled = false;
     let sent = 0;
+    let stop: (() => void) | null = null;
     const attempt = () => {
-      if (settled) return;
+      if (settled || sent >= options.attempts) {
+        stop?.();
+        stop = null;
+        return;
+      }
       sent++;
       let p: Promise<T>;
       try {
@@ -36,16 +46,18 @@ export function retryUntilAnswered<T>(call: () => Promise<T>, options: RetryOpti
         (v) => {
           if (settled) return;
           settled = true;
+          stop?.();
           resolve(v);
         },
         (e: unknown) => {
           if (settled) return;
           settled = true;
+          stop?.();
           reject(e);
         },
       );
-      if (sent < options.attempts) setTimer(attempt, options.timeoutMs);
     };
     attempt();
+    if (!settled && sent < options.attempts) stop = every(attempt, options.timeoutMs);
   });
 }

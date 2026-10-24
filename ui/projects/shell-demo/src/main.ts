@@ -2,6 +2,7 @@ import { inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { applyPaddockAppearance } from '@decryp7/paddock-ui';
 import { provideContributions, provideShellContext, SHELL_PORTS, type ShellPorts } from '@decryp7/paddock-ui/shell';
+import { JOBS_CONTRIBUTIONS, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
 import {
   ipcBootErrorSender,
   MockStartupBackend,
@@ -15,6 +16,7 @@ import {
 import { DEMO_CONTRIBUTIONS } from './app/demo.contributions';
 import type { DemoContext } from './app/demo-context';
 import { tauriIpc } from './app/demo-ipc';
+import { DemoJobsEngine } from './app/demo-jobs';
 import { DemoNote } from './app/demo-note';
 import { DemoNotices } from './app/demo-notices';
 import { ShellDemo } from './app/shell-demo';
@@ -24,7 +26,6 @@ import { ShellDemo } from './app/shell-demo';
 import type * as shellAbout from '@decryp7/paddock-ui/shell/about';
 import type * as shellDialogs from '@decryp7/paddock-ui/shell/dialogs';
 import type * as shellI18n from '@decryp7/paddock-ui/shell/i18n';
-import type * as shellJobs from '@decryp7/paddock-ui/shell/jobs';
 import type * as shellMenu from '@decryp7/paddock-ui/shell/menu';
 import type * as shellNotify from '@decryp7/paddock-ui/shell/notify';
 import type * as shellPages from '@decryp7/paddock-ui/shell/pages';
@@ -39,6 +40,9 @@ applyPaddockAppearance(document.documentElement, { theme: 'system', accent: 'pit
 bootstrapApplication(ShellDemo, {
   providers: [
     provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
+    provideContributions(JOBS_CONTRIBUTIONS),
+    // The jobs of this window (plan S9) over the demo's simulated engine; "Still working" after 1.5 s without events.
+    provideShellJobs({ backend: () => inject(DemoJobsEngine).backend, stillWorkingAfterMs: 1_500 }),
     // The start-up contract (plan S7): ready after the first paint, liveness pings, the note kept across a recovery reload.
     provideStartupBackend(() => (ipc ? new TauriStartupBackend(ipc) : new MockStartupBackend())),
     provideStartupContract(),

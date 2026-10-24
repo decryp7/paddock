@@ -5,6 +5,29 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,
+  `problems` against the command table, kind size policy), `Grant` for the `paddock-commands` guard, pure placement on
+  the parent's monitor (mixed DPI, negative coordinates, remembered offset, never the primary display as default),
+  `Dialogs` bookkeeping with close-request and required-choice rules, and the Tauri adapter (window creation by kind
+  with title-bar buttons disabled, modality, close requests forwarded, `page_unresponsive`, fit-height grow rules, the
+  four `dialog_*` commands); generated `shell/generated/dialogs.ts`.
+- Crate `paddock-health` 0.1.0 (plan S3, ADR 0010 and 0012): the service-health model (closed `ServiceState`, `Cause`
+  with hint, detail, code and memory-cap advice, `RepairAction`, `Snapshot`), `Health` (app-registered `ServiceSpec`s,
+  one announcement per real change, repairs as shell closures on a background thread), the cause-key notification
+  centre (merge with counts, caps, read state, resolve, app file with debounced atomic writes, project records,
+  OS-notification click-through) and the Tauri adapter (`paddock://service-health`, `paddock://notifications`,
+  `health_snapshot`, `health_repair`, `notifications_*` with their `COMMANDS` table); generated TypeScript
+  `shell/generated/health.ts` and `shell/generated/health-commands.ts`. Ported from Debrief ADR 0055.
+- Jobs in the app shell (plan S9, ADR 0008 and 0012): `paddock-jobs`' `tauri` feature is the adapter (`paddock_jobs::tauri`):
+  the `Emit` sink on `paddock://jobs`, the managed `Jobs` state and `manage`, the `COMMANDS` table (`jobs_snapshot`,
+  `job_cancel`, async, returning at once) with its guarded `handler` / `handler_with_grants` and `route` in front of the
+  app's handler, and generated `shell/jobs/generated/jobs-commands.ts` plus `jobs-fixtures.ts` (Rust round trip).
+  `@decryp7/paddock-ui/shell/jobs`: the `JobsBackend` port (`TauriJobsBackend` over the app's IPC, `MemoryJobsBackend`),
+  `parseJobSnapshot`, the per-window `JobsStore` (highest `seq` per job, request status union, "Still working" without a
+  timeout, notices when a job ends), `pd-jobs-list`, `pd-jobs-status`, `JobFollow`, `provideShellJobs`,
+  `JOBS_CONTRIBUTIONS` and the `uiTimeoutProblems` grep check. `shell-demo` runs a sample job with phases, a step that
+  cannot be cancelled and a quiet job, with Chromium e2e (phases, Cancel from the list, "Still working" for ten minutes,
+  axe, no UI timeout anywhere).
 - Crate `paddock-commands` 0.1.0 (plan S1, ADR 0012): `command_table!` (kind, window classes, request limit, validated at
   compile time, optional invoke-handler macro), the shell's window label scheme, the pure `check` with the
   `DialogGrant` hook for per-dialog contracts, the Tauri `Guard` (refuses and logs before arguments are parsed),
@@ -60,6 +83,8 @@ Conventional Commits; one semver tag for the whole repo.
 - CI job for the Rust crates (fmt, clippy, test, coverage, deny).
 
 ### Changed
+- `paddock_jobs::EVENT_NAME` is `paddock://jobs` (was `paddock-job`), the shell's event scheme (ADR 0012 §3).
+- `@decryp7/paddock-ui` has `@ngrx/signals` ^22 as an optional peer dependency (the shell's stores).
 - Publishing moved from the `release` job of `ci.yml` (and `ui/scripts/release.mjs`) to `publish.yml` and
   `scripts/publish.mjs`; `npm run release` in `ui/` is still the dry run.
 - `crates/deny.toml` checks the crates with all features (the Tauri adapters) and allows file-level MPL-2.0 (Tauri's tree),

@@ -7,32 +7,43 @@ function manual<T>() {
   return { call, pending };
 }
 
-/** Timers run by hand (no sleeps). */
+/** A repeating timer run by hand (no sleeps). */
 function timers() {
-  const queue: (() => void)[] = [];
-  return { setTimer: (fn: () => void) => void queue.push(fn), fire: () => queue.shift()?.(), queue };
+  const t = {
+    fn: null as (() => void) | null,
+    stopped: false,
+    every: (fn: () => void) => {
+      t.fn = fn;
+      return () => void (t.stopped = true);
+    },
+    fire: () => t.fn?.(),
+  };
+  return t;
 }
 
 describe('retryUntilAnswered', () => {
   it('answers with the first reply and sends nothing more', async () => {
     const m = manual<number>();
     const t = timers();
-    const result = retryUntilAnswered(m.call, { timeoutMs: 10, attempts: 3, setTimer: t.setTimer });
+    const result = retryUntilAnswered(m.call, { timeoutMs: 10, attempts: 3, every: t.every });
     m.pending[0]!.resolve(7);
     await expect(result).resolves.toBe(7);
     t.fire();
     expect(m.call).toHaveBeenCalledTimes(1);
+    expect(t.stopped).toBe(true);
   });
 
   it('sends again when an attempt goes unanswered (a lost first IPC), up to the limit', async () => {
     const m = manual<number>();
     const t = timers();
-    const result = retryUntilAnswered(m.call, { timeoutMs: 10, attempts: 3, setTimer: t.setTimer });
-    t.fire();
+    const result = retryUntilAnswered(m.call, { timeoutMs: 10, attempts: 3, every: t.every });
     t.fire();
     t.fire();
     expect(m.call).toHaveBeenCalledTimes(3);
-    expect(t.queue).toHaveLength(0);
+    expect(t.stopped).toBe(false);
+    t.fire();
+    expect(m.call).toHaveBeenCalledTimes(3);
+    expect(t.stopped, 'no more attempts: the timer stops').toBe(true);
     // The second attempt answers; the late first one does not change the result.
     m.pending[1]!.resolve(2);
     m.pending[0]!.resolve(1);
@@ -43,7 +54,7 @@ describe('retryUntilAnswered', () => {
     const m = manual<string>();
     const t = timers();
     let done = false;
-    const result = retryUntilAnswered(m.call, { timeoutMs: 10, attempts: 2, setTimer: t.setTimer }).then((v) => ((done = true), v));
+    const result = retryUntilAnswered(m.call, { timeoutMs: 10, attempts: 2, every: t.every }).then((v) => ((done = true), v));
     t.fire();
     await Promise.resolve();
     expect(done).toBe(false);
@@ -54,7 +65,7 @@ describe('retryUntilAnswered', () => {
   it('rejects on the first error reply (the backend answered) and on a call that throws', async () => {
     const m = manual<number>();
     const t = timers();
-    const result = retryUntilAnswered(m.call, { timeoutMs: 10, attempts: 3, setTimer: t.setTimer });
+    const result = retryUntilAnswered(m.call, { timeoutMs: 10, attempts: 3, every: t.every });
     m.pending[0]!.reject(new Error('no'));
     await expect(result).rejects.toThrow('no');
     m.pending[0]!.resolve(1);
@@ -63,7 +74,7 @@ describe('retryUntilAnswered', () => {
       () => {
         throw new Error('sync');
       },
-      { timeoutMs: 10, attempts: 1, setTimer: t.setTimer },
+      { timeoutMs: 10, attempts: 1, every: t.every },
     );
     await expect(thrown).rejects.toThrow('sync');
   });
