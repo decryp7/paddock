@@ -5,7 +5,7 @@ import { formatBytes } from '@decryp7/paddock-ui/format';
 import { PdCell, PdMiddleText, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { fileIcon } from '@decryp7/paddock-ui/shell/files';
-import { STORAGE_CONFIRM_DIALOG_ID, StorageStore, floorBytes, treeTable, type StorageCategory, type TreeRow } from '@decryp7/paddock-ui/shell/storage';
+import { STORAGE_CONFIRM_DIALOG_ID, StorageStore, floorBytes, inSentence, treeTable, type StorageCategory, type TreeRow } from '@decryp7/paddock-ui/shell/storage';
 import { STORAGE_STYLES } from './styles';
 
 /**
@@ -95,6 +95,7 @@ import { STORAGE_STYLES } from './styles';
         [rowKey]="categoryKey"
         [groupBy]="'kind'"
         [groupSummary]="categorySummary"
+        [countLabel]="categoriesCount"
         [rowActions]="categoryActions"
         [filterable]="false"
         [maxHeight]="640"
@@ -127,14 +128,18 @@ import { STORAGE_STYLES } from './styles';
               [rowKey]="treeKey"
               [groupBy]="'group'"
               [groupSummary]="treeSummary"
-              [groupMono]="true"
+              [groupMono]="treeGroupIsName"
               [countLabel]="itemsCount"
               [filterable]="false"
               [maxHeight]="360"
             >
               <ng-template pdCell="name" let-r>
                 <span class="pd-storage__item">
-                  <pd-glyph [name]="treeIcon(r)" [size]="16" />
+                  @if (treeIcon(r); as icon) {
+                    <pd-glyph [name]="icon" [size]="16" />
+                  } @else {
+                    <span class="pd-storage__nokind" aria-hidden="true"></span>
+                  }
                   <pd-middle-text [value]="r.name" />
                 </span>
               </ng-template>
@@ -187,8 +192,7 @@ export class PdStoragePage {
     groupCache: $localize`:@@pd.storage.group-cache:Cache: rebuilt by the app`,
     groupData: $localize`:@@pd.storage.group-data:Your data: cannot be rebuilt`,
     atLeast: $localize`:@@pd.storage.at-least:At least (the walk stopped early):`,
-    treeFiles: $localize`:@@pd.storage.tree-files:Files here`,
-    treeSmaller: $localize`:@@pd.storage.tree-smaller:Smaller items`,
+    treeFiles: $localize`:@@pd.storage.tree-other:Other items`,
     treeCapped: $localize`:@@pd.storage.tree-capped:The walk stopped early (too many items or too long), so these sizes are at least that much.`,
   };
 
@@ -197,15 +201,15 @@ export class PdStoragePage {
     const id = this.openTree();
     const tree = id ? this.store.trees()[id] : undefined;
     return tree
-      ? treeTable(tree, { files: this.t.treeFiles, smaller: this.t.treeSmaller, others: (n) => this.othersText(n) })
+      ? treeTable(tree, { files: this.t.treeFiles, others: (n) => this.othersText(n) })
       : { rows: [] as readonly TreeRow[], groups: {} as Readonly<Record<string, { bytes: number; share: number }>> };
   });
   protected readonly treeKey = (row: TreeRow): string => row.key;
   protected readonly treeColumns: readonly PdColumn<TreeRow>[] = [
     { key: 'group', header: $localize`:@@pd.storage.col-group:Folder`, value: (r) => r.group, hidden: true },
     { key: 'name', header: $localize`:@@pd.storage.col-item:Item`, value: (r) => r.name, required: true, width: 'minmax(0, 3fr)' },
-    { key: 'bytes', header: $localize`:@@pd.storage.col-size:Size`, value: (r) => r.bytes, text: (r) => formatBytes(r.bytes), align: 'end', width: '8em' },
-    { key: 'share', header: $localize`:@@pd.storage.col-share:Share`, value: (r) => r.share, text: (r) => `${r.share}%`, align: 'end', width: '5em', hideBelow: 420 },
+    { key: 'bytes', header: $localize`:@@pd.storage.col-size:Size`, value: (r) => r.bytes, text: (r) => formatBytes(r.bytes), align: 'end', width: 'minmax(64px, 96px)' },
+    { key: 'share', header: $localize`:@@pd.storage.col-share:Share`, value: (r) => r.share, text: (r) => `${r.share}%`, align: 'end', width: '72px', hideBelow: 420 },
   ];
   /** The group heading's own size and share: the folder's, so its rows add up to it. */
   protected readonly treeSummary = (rows: readonly TreeRow[]): Readonly<Record<string, string>> => {
@@ -215,17 +219,21 @@ export class PdStoragePage {
   protected readonly itemsCount = (shown: number, total: number): string =>
     shown === total ? $localize`:@@pd.storage.items:${total}:total: items` : $localize`:@@pd.storage.items-of:${shown}:shown: of ${total}:total: items`;
 
-  protected treeIcon(r: TreeRow): string {
-    return r.kind === 'folder' ? 'folder' : r.kind === 'fold' ? 'more' : fileIcon(r.name);
+  /** Real folder names are set in mono; the "Other items" heading is a label, not a name. */
+  protected readonly treeGroupIsName = (group: string): boolean => group !== this.t.treeFiles;
+
+  protected treeIcon(r: TreeRow): string | null {
+    return r.kind === 'folder' ? 'folder' : r.kind === 'fold' ? null : fileIcon(r.name);
   }
 
   // The categories: one shared pd-table, one line per row, grouped by what they are.
+  protected readonly categoriesCount = (shown: number): string => $localize`:@@pd.storage.categories:${shown}:count: kinds of data`;
   protected readonly categoryKey = (c: StorageCategory): string => c.id;
   protected readonly categoryColumns: readonly PdColumn<StorageCategory>[] = [
     { key: 'kind', header: $localize`:@@pd.storage.col-kind:Kind`, value: (c) => c.kind, text: (c) => (c.kind === 'cache' ? this.t.groupCache : this.t.groupData), hidden: true },
     { key: 'label', header: $localize`:@@pd.storage.col-name:Kept`, value: (c) => c.label, required: true, width: 'minmax(0, 2fr)' },
     { key: 'path', header: $localize`:@@pd.storage.col-folder:Folder`, value: (c) => c.path ?? '', truncate: 'middle', width: 'minmax(0, 2fr)', hideBelow: 640 },
-    { key: 'size', header: $localize`:@@pd.storage.col-size:Size`, value: (c) => c.bytes, align: 'end', width: '8em', required: true },
+    { key: 'size', header: $localize`:@@pd.storage.col-size:Size`, value: (c) => c.bytes, align: 'end', width: 'minmax(64px, 96px)', required: true },
   ];
   protected readonly categorySummary = (rows: readonly StorageCategory[]): Readonly<Record<string, string>> => {
     const bytes = rows.reduce((n, c) => n + c.bytes, 0);
@@ -292,7 +300,8 @@ export class PdStoragePage {
   }
 
   protected clearLabel(c: StorageCategory): string {
-    return $localize`:@@pd.storage.clear-label:Clear ${c.label}:name:`;
+    const name = inSentence(c.label);
+    return $localize`:@@pd.storage.clear-label:Clear ${name}:name:`;
   }
 
   protected freed(bytes: number): string {

@@ -106,7 +106,7 @@ describe('the Storage page', () => {
     expect(await p.menuItems('logs')).toEqual([
       { label: 'What is inside', danger: false },
       { label: 'Show in the file manager', danger: false },
-      { label: 'Clear Logs', danger: true },
+      { label: 'Clear logs', danger: true },
     ]);
     TestBed.resetTestingModule();
     const gone = await open({ measured: true, categories: sampleCategories().map((c) => (c.id === 'models' ? { ...c, clearableItems: 0, exists: false } : c)) });
@@ -138,7 +138,7 @@ describe('the Storage page', () => {
     await p.click('storage-clear-cache');
     expect(p.h.pending()).toBe(0);
     p.dialogs.answer = true;
-    await p.menu('logs', 'Clear Logs');
+    await p.menu('logs', 'Clear logs');
     expect(p.dialogs.opened.at(-1)).toEqual({ id: STORAGE_CONFIRM_DIALOG_ID, inputs: { what: 'Logs', bytes: 5_000_000, data: true } });
     await p.h.all();
     await p.flush();
@@ -146,7 +146,7 @@ describe('the Storage page', () => {
     // A cache category clears from its own row too, without the data confirmation.
     TestBed.resetTestingModule();
     const q = await open();
-    await q.menu('cache', 'Clear Cache');
+    await q.menu('cache', 'Clear cache');
     expect(q.dialogs.opened.at(-1)?.inputs).toMatchObject({ data: false });
   });
 
@@ -160,7 +160,7 @@ describe('the Storage page', () => {
     await p.h.all();
     await p.flush();
     expect(p.q('storage-working')).toBeNull();
-    await p.menu('logs', 'Clear Logs');
+    await p.menu('logs', 'Clear logs');
     await p.h.next();
     await p.click('storage-cancel');
     await p.h.all();
@@ -219,8 +219,12 @@ describe('the Storage page', () => {
     const tree = p.q('storage-tree')!;
     expect(text(tree.querySelector('h3')!)).toBe('What is in Cache');
     const groups = Array.from(tree.querySelectorAll('.pd-group'));
-    expect(groups.map((g) => text(g.querySelector('.pd-group-name')!))).toEqual(['thumbnails', 'previews', 'Smaller items']);
+    expect(groups.map((g) => text(g.querySelector('.pd-group-name')!))).toEqual(['thumbnails', 'previews', 'Other items']);
     expect(groups[0]?.querySelector('.pd-group-name')?.classList.contains('pd-mono')).toBe(true);
+    // "Other items" is a label, not a folder name: not mono, and its fold row has no kind glyph.
+    expect(groups[2]?.querySelector('.pd-group-name')?.classList.contains('pd-mono')).toBe(false);
+    expect(tree.querySelectorAll('.pd-storage__nokind').length).toBe(1);
+    expect(text(p.el.querySelector('pd-table[data-testid="storage-table"]')!)).toContain('3 kinds of data');
     // The folder's size and share are on its heading; its two items below add up to it.
     expect(text(groups[0]!.querySelector('.pd-group-summary.pd-end')!)).toMatch(/MB/);
     expect(text(tree)).toContain('7 smaller items');

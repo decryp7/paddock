@@ -37,7 +37,7 @@ test.describe('storage (plan X32)', () => {
 
     await expect(page.getByTestId('storage-clear-cache')).not.toHaveClass(/primary/);
     await page.getByTestId('storage-clear-cache').click();
-    const confirm = page.getByRole('dialog', { name: 'Clear Cache?' });
+    const confirm = page.getByRole('dialog', { name: 'Clear cache?' });
     await expect(confirm).toContainText('The app rebuilds it when it needs it.');
     await expect(confirm.getByRole('button', { name: 'Keep' })).toBeFocused();
     expect(await axeViolations(page)).toEqual([]);
@@ -47,7 +47,7 @@ test.describe('storage (plan X32)', () => {
     await expect(page.getByTestId('storage-working')).toHaveCount(0);
 
     await page.getByTestId('storage-clear-cache').click();
-    await page.getByRole('dialog', { name: 'Clear Cache?' }).getByRole('button', { name: 'Clear', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Clear cache?' }).getByRole('button', { name: 'Clear', exact: true }).click();
     await expect(page.getByTestId('storage-working')).toContainText('Removing');
     await expect(page.getByTestId('storage-still-working')).toContainText('Still working');
     await expect(page.getByTestId('storage-result')).toContainText('freed');
@@ -59,8 +59,8 @@ test.describe('storage (plan X32)', () => {
 
   test("the user's own data names itself in the confirmation and is cleared one category at a time", async ({ app, page }) => {
     await openStorage(app, page);
-    await clearFromMenu(page, 'logs', 'Clear Logs');
-    const confirm = page.getByRole('dialog', { name: 'Clear Logs?' });
+    await clearFromMenu(page, 'logs', 'Clear logs');
+    const confirm = page.getByRole('dialog', { name: 'Clear logs?' });
     await expect(confirm.getByTestId('storage-confirm-data')).toContainText('your own data');
     await confirm.getByRole('button', { name: 'Clear', exact: true }).click();
     await expect(page.getByTestId('storage-result')).toContainText('freed');
@@ -69,8 +69,8 @@ test.describe('storage (plan X32)', () => {
 
   test('Cancel stops a clear between items and says what was done', async ({ app, page }) => {
     await openStorage(app, page);
-    await clearFromMenu(page, 'logs', 'Clear Logs');
-    await page.getByRole('dialog', { name: 'Clear Logs?' }).getByRole('button', { name: 'Clear', exact: true }).click();
+    await clearFromMenu(page, 'logs', 'Clear logs');
+    await page.getByRole('dialog', { name: 'Clear logs?' }).getByRole('button', { name: 'Clear', exact: true }).click();
     await page.getByTestId('storage-cancel').click();
     await expect(page.getByTestId('storage-result')).toContainText('Stopped');
   });
@@ -107,6 +107,11 @@ test.describe('storage (plan X32)', () => {
     // The folder's size is on its heading and the title has a Close.
     await expect(tree.locator('.pd-group-summary.pd-end').first()).toContainText('MB');
     await expect(tree).toContainText('items');
+    // A column's header and its values share one right edge, whether or not the body scrolls.
+    const edge = async (loc: import('@playwright/test').Locator): Promise<number> => Math.round((await loc.boundingBox())!.x + (await loc.boundingBox())!.width);
+    const header = await edge(tree.getByRole('columnheader', { name: /Size/ }).locator('.pd-th-text'));
+    const value = await edge(tree.locator('.pd-row[data-key] .pd-cell.pd-end .pd-text').first());
+    expect(Math.abs(header - value)).toBeLessThanOrEqual(1);
     await tree.getByTestId('storage-tree-close').click();
     await expect(tree).toHaveCount(0);
     expect(pageErrors).toEqual([]);

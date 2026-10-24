@@ -67,23 +67,32 @@ test.describe('contact sheet: files and storage', () => {
       await shoot(page, theme, 'storage-tree', 'Settings > Storage: the size tree, the folder size on its group row, glyphs on the items');
 
       await page.getByTestId('storage-clear-cache').click();
-      await expect(page.getByRole('dialog', { name: 'Clear Cache?' })).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Clear cache?' })).toBeVisible();
       await shoot(page, theme, 'storage-confirm-cache', 'The clear confirmation for the cache: Keep is the default, Clear is the danger action');
       await page.keyboard.press('Escape');
       const logs = page.locator('.pd-row[data-key="logs"]');
       await logs.hover();
       await logs.getByRole('button', { name: 'More actions' }).click();
-      await page.getByRole('menuitem', { name: 'Clear Logs' }).click();
-      await expect(page.getByRole('dialog', { name: 'Clear Logs?' })).toBeVisible();
+      await page.getByRole('menuitem', { name: 'Clear logs' }).click();
+      await expect(page.getByRole('dialog', { name: 'Clear logs?' })).toBeVisible();
       await shoot(page, theme, 'storage-confirm-data', 'The clear confirmation for the user\'s own data: it says it cannot be rebuilt');
       await page.keyboard.press('Escape');
 
+      // 320 px: a fresh page each time, so the Settings window of the shots above is not still open over the Files page.
       await page.setViewportSize({ width: 320, height: 640 });
+      await page.goto('about:blank');
       await page.goto(`${DEMO}/#/files`);
       await expect(app.frame.heading).toHaveText('Files');
-      await shoot(page, theme, 'files-320', 'Files page at 320 px: nothing scrolls sideways');
+      await expect(page.getByTestId('storage-table')).toHaveCount(0);
+      await shoot(page, theme, 'files-320', 'Files page at 320 px: nothing scrolls sideways, the name leads and the folder keeps its separator');
+      await page.goto('about:blank');
       await openStorage(page, app);
-      await shoot(page, theme, 'storage-320', 'Settings > Storage at 320 px: still one line per row, actions behind hover and the menu');
+      await page.getByTestId('storage-table').scrollIntoViewIfNeeded();
+      await shoot(page, theme, 'storage-320', 'Settings > Storage at 320 px: the table, still one line per row, actions behind the menu');
+      const narrow = page.locator('.pd-row[data-key="logs"]');
+      await narrow.hover();
+      await narrow.getByRole('button', { name: 'More actions' }).click();
+      await shoot(page, theme, 'storage-320-menu', 'Settings > Storage at 320 px: the row menu, Clear in danger text last', true);
     });
   }
 

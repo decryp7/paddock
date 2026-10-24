@@ -33,6 +33,7 @@ export {
 export { parseStorageEvent, parseStorageTree, parseStorageUsage, clearRequest } from './src/wire';
 export { treeTable, type TreeGroup, type TreeRow, type TreeRowKind, type TreeTable, type TreeWords } from './src/tree-rows';
 export { floorBytes } from './src/bytes-text';
+export { inSentence } from './src/sentence';
 export { StorageStore, type StorageStoreType, type StorageJob } from './src/storage.store';
 export {
   STORAGE_SETTINGS_PAGE,

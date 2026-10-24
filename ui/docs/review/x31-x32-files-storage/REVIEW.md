@@ -170,3 +170,104 @@ raise the dialog's height for the capture), and move the pointer away.
 
 Fix P1-1 and P1-2, then P2-1 to P2-9, and recapture per P2-10 and P2-11 (including 320 px and the confirm dialog in
 both themes). Then I would expect to approve.
+
+---
+
+# Review 2 (2026-10-25, `origin/shell/integrate` at `3bfeffc`)
+
+Same reviewer, read-only. Inputs: the 22 recaptured PNGs (1440 × 900 @2x, and 320 × 640 @2x for the narrow shots), the new
+contact sheet, and the diff `b566bdb..3bfeffc` of `icons/src/paths.ts`, `shell/storage/**`, `shell/files/src/recent-files.ts`,
+`src/lib/path-text.ts`, `table/src/{table,model}.ts` and `e2e/contact-sheet-x3x.spec.ts`.
+
+**Counts now: 0 P1, 2 P2, 6 P3 (new or left over).** Of the first review, both P1s, 10 of the 11 P2s and 6 of the 9 P3s are
+fixed. Three items were left as agreed deviations (below). P2-10 is still open because the narrow shots show the wrong
+thing.
+
+**Verdict: not approved yet, blocked on evidence only.** The glyphs, the Files list, the Storage table, the size tree and
+both confirm windows now meet the bar at 1440. They read calm and tidy, and the information is right. What still
+blocks approval is rule 18: neither 320 px shot shows the part it is named after (P2-R1). Recapture them; if the Storage
+table and the Files list are clean at 320, this is approved without another full pass. P2-R2 can ship as a follow-up.
+
+## First-review items, checked in the pixels
+
+| Item | State | Evidence |
+| --- | --- | --- |
+| P1-1 tree double-counts | **Fixed** | `*-storage-tree.png`: groups `thumbnails` 29 MB 62.5% = 31.3 + 31.3 (rounding); `previews` 25% = 12.5 + 12.5; groups add up to 62.5 + 25 + 12.5 = 100%. The self row is gone, each group row carries its size and share, and the count counts children (2). |
+| P1-2 row buttons at rest | **Fixed** | `*-storage.png`: shared `pd-table`, one 44 px line per row (name 600 + muted note on the same line), only a faint `…` at rest. `*-storage-hover.png`: layers + reveal icons on hover. `*-storage-menu.png`: "What is inside", "Show in the file manager", a divider, then "Clear Logs" last in danger. The broken divider is gone with the hand-rolled table. |
+| P2-1 `file-code` at 14/16 | **Fixed** | Brackets are now 2.5 × 5 units, lower in the page; at 14 px they read as `<>`, and at 16 px clearly. |
+| P2-2 folder = kind and action | **Fixed** | New `pd:reveal` (folder + arrow) for the action; `folder` stays the kind. `*-files-hover.png` and the menu use it. |
+| P2-3 name first | **Fixed** | `*-files*.png`: file name 14/500, parent path below in muted 12 px mono. |
+| P2-4 ellipsis drops `/` | **Fixed (by test)** | `path-text.ts` keeps the separator in its own non-shrinking span; `parts.spec.ts` asserts `/` and `\`. Not visible in the pixels, because the path fits at 1440 and the 320 shot does not show the page (P2-R1). |
+| P2-5 destructive primary | **Fixed** | "Clear cache (46 MB)…" is secondary; the section has no filled button. The Files demo's one primary is "Open a file…". |
+| P2-6 "Cache / Cache" | **Fixed, one echo left** | Kinds became group rows ("Cache: rebuilt by the app", "Your data: cannot be rebuilt"). See P3-R1. |
+| P2-7 Size header alignment | **Fixed on Storage**, 5 px off on the tree | Storage: header and values share the right edge (x 1786). Tree: "Size" ends at 1819, values at 1812 (display px), about 5 CSS px. See P3-R2. |
+| P2-8 lower bounds | **Fixed** | "The app keeps at least 3.9 GB on this computer" (rounded down); cells keep `≥ 3.9 GB`. |
+| P2-9 tree glyphs and context | **Fixed** | "What is in Cache" title with a Close link, "5 items", a `file` glyph per row, and group names in mono. |
+| P2-10 missing evidence | **Partly**: hover, menu and confirm shots are present and good; **320 is not** | See P2-R1. |
+| P2-11 capture rules | **Fixed** | 1440 × 900 @2x, subjects scrolled into view, nothing hovered by accident. |
+| P3-1 fold geometry, centring | **Fixed** | Outline `M5.75 3.5h7.75l4.75 5v12H5.75z` and fold `M13.5 3.5v5h4.75` meet exactly; the page is centred on 12. No stubs at 48 px. |
+| P3-2 folder corners | **Deviation accepted** | `folder` keeps its 1-unit radius. At 14–24 px, round joins make the difference invisible; at 48 px it is a mild mismatch, but folder shapes are rounded in every family I compared, so it is fine. |
+| P3-3 archive lid | **Fixed** | 3.5-unit lid, lighter at 14 px. |
+| P3-4 contact-sheet mono | **Fixed** | Labels in the suite mono stack. |
+| P3-5 "Clear the list" | **Fixed** | Now aligned with the name column. |
+| P3-6 "25 %" | **Fixed** | `25%`, `62.5%`. |
+| P3-7 mono for real names | **Done** through `groupMono`. The note says it was dropped, but the pixels show mono group names. See P3-R3 for a side effect. |
+| P3-8 Files demo buttons | **Fixed** | One primary, and a labelled "Demo controls" row. |
+| P3-9 Settings as an OS window | **Out of scope (agreed)** | |
+| Tooltip shot | **Deviation accepted** | A native `title` cannot be screenshotted; the unit tests that assert `title` = the full path are enough. |
+
+## New shared `pd-table` inputs
+
+- **`groupSummary`** (rows → cells by column key): this is the right shape, an aggregate drawn in the group row's own
+  cells. It only covers shown columns, leaves the first column for the name and adds the empty action cell, so the grid
+  lines up (Storage: 46 MB / ≥ 3.9 GB under Size; tree: Size and Share). Muted tabular figures for the aggregate are
+  correct: they read as a total without competing with the rows. One limit: the summary is text, so sorting groups by
+  size is not possible. That is fine until someone asks for it.
+- **`groupMono`**: it does what it should for path-like groups, but it is all or nothing (P3-R3).
+- **`countLabel`**: correct, and the tree uses it ("5 items"). The Storage categories table does not, and still says
+  "3 rows" (P3-R4).
+
+## P2
+
+### P2-R1: Neither 320 px shot shows its subject
+`*-files-320.png` shows the Settings sheet over the Files page, not the Files page. In the spec, `page.goto('#/files')`
+only changes the hash, so Settings, opened earlier for the confirm shots, stays open; `Escape` closed only the confirm
+window. `*-storage-320.png` shows Settings stacked (nav above content), with the visible part ending at "Clear
+cache (46 MB)…". The table, which is what rule 18 asks about, is below the fold, and "Measure again" is not visible
+either. Both shots also show the shell's menu bar wrapping at 320: "Help" drops onto a second line and overlaps the page
+(y≈70). That is shell, not X31/X32, but it is in these pictures and it breaks rule 18. **Fix:** close Settings (or
+reload) before `files-320`, and scroll the Storage table (and the summary row) into view for `storage-320`, plus one shot
+of the row menu open at 320. File the menu-bar wrap as its own shell item (collapse the menus into one "…" or a
+hamburger under about 400 px).
+
+### P2-R2: The confirm window says its title twice
+`*-storage-confirm-*.png`: the title "Clear Logs?" is followed by the body "Clear Logs? Up to 4.8 MB is removed."
+(pattern 7: one value per fact). **Fix:** the body starts with the facts: "Up to 4.8 MB is removed. This is your own
+data. It cannot be rebuilt, and clearing it cannot be undone." Also, the label is used mid-sentence as written ("Clear
+Cache?"); in sentence case the title is "Clear cache?". Lower-case the category label in prose, or write "Clear the
+cache?". The rest of the window is right. "Up to 4.8 MB" of 6.2 MB is honest (today's log is kept), Clear is danger,
+Keep is the default, and the dark scrim works.
+
+## P3
+
+1. **P3-R1, a group of one that repeats itself.** "Cache: rebuilt by the app · 1" holds a single row "Cache — Rebuilt
+   when the app needs it." with the same 46 MB, so the group title and the note say the same thing. The tree's
+   "Smaller items · 1" group holding "… smaller items" is the same pattern. Drop the note when the group says it, and
+   draw a fold row as a plain row, not a group of one.
+2. **P3-R2, tree "Size" header 5 CSS px right of its values.** The Share column lines up and Storage's Size column lines
+   up, so this is specific to the tree's Size column (probably a sort-indicator gap). Same fix as P2-7.
+3. **P3-R3, `groupMono` sets "Smaller items" in mono.** A synthetic label is not a path. Make it a predicate
+   (`groupMono: (key) => boolean`), or let the row model mark literal groups.
+4. **P3-R4, "3 rows" on the Storage table.** Use `countLabel` ("3 kinds", or no count at all). For a 3-row settings table,
+   the "3 rows · Columns" toolbar is chrome that buys nothing, so consider hiding the toolbar below about 6 rows.
+5. **P3-R5, the "… smaller items" row uses the same `···` glyph as the row-actions button** in the same column band, so
+   it looks like a menu. Use no glyph, or a muted `minus`/stack glyph.
+6. **P3-R6, the `reveal` arrow reaches x = 21.5,** past the set's 2.5 px safe margin (it is not one of the listed wide
+   glyphs). At 14–16 px it still reads well. Either pull the arrow in by 1 unit or add `reveal` to the wide-glyph list
+   in the `paths.ts` doc comment.
+
+## To approve
+
+Recapture `*-files-320.png` and `*-storage-320.png` per P2-R1. If the Storage table is still one line per row with
+nothing scrolling sideways and the Files list keeps the name and the `…/name` ellipsis, this is approved. P2-R2 and the
+P3s can follow in the next shell batch.
