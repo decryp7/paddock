@@ -5,6 +5,13 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `@decryp7/paddock-ui/shell/service` (plan X4): Settings > Background service. `ServiceBackend` (Tauri adapter and an in-memory
+  one that plays install, a repair's phases, failure, busy, switched-off and needs-approval), `ServiceStore` (status, the
+  `paddock://service` updates folded in, "Still working" while a repair runs and never timed out, an inline error with
+  Retry), `defineServiceSettingsPage` for the `pd.login` page and `SERVICE_SETTINGS_COMMANDS` for the Settings dialog's
+  contract, and `PdServicePage` in `shell/service/page` (a status word, the engine's message, Install, Repair and Open Login
+  Items… only where the engine says they apply, the "Start at login" switch beneath in the generic settings form). The shell
+  demo shows it (`?service=notInstalled|switchedOff|...`, `?service-outcome=fail|hang|...`).
 - `paddock-service` in the app (plan X4b): the Windows service host (`--service`: the program in the user's session,
   restarted, moved with the session, stopped gracefully) behind a `Sessions` port; `ServiceControl` and the `tauri`
   adapter (`service_status`, `service_repair`, `service_install`, `open_login_items`, the `paddock://service` event, the
