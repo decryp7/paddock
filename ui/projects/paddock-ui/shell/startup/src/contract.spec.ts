@@ -4,7 +4,7 @@ import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import type { ReadyReply } from '../generated/startup';
 import { MockStartupBackend, provideStartupBackend, StartupBackend } from './backend';
 import { startBootErrorForwarding, reportBootstrapFailure, stopBootErrorForwarding } from './boot-errors';
-import { AFTER_READY, answerPings, provideStartupContract, reportReady } from './contract';
+import { AFTER_READY, answerPings, provideStartupContract, reportReady, WindowReady } from './contract';
 import { RECOVERY_NOTICES } from './recovery';
 
 @Component({ selector: 'pd-ready-host', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>frame</p>` })
@@ -83,8 +83,11 @@ describe('provideStartupContract', () => {
     expect(reportReadySpy).toHaveBeenCalledTimes(1);
     backend.ping(1);
     expect(backend.pongs, 'no answers before ready').toEqual([]);
+    const ready = TestBed.inject(WindowReady).ready;
+    expect(ready(), 'not ready before the reply').toBe(false);
     answer({ recovered: 'unresponsive', ui: null });
     await vi.waitFor(() => expect(after).toHaveBeenCalledWith({ recovered: 'unresponsive', ui: null }));
+    expect(ready(), 'ready once the reply was handled').toBe(true);
     await vi.waitFor(() => {
       backend.ping(2);
       expect(backend.pongs).toContain(2);
@@ -107,5 +110,30 @@ describe('provideStartupContract', () => {
     await fixture.whenStable();
     await vi.waitFor(() => expect(notices.map((n) => n.message)).toEqual([RECOVERY_NOTICES.terminated.text]));
     expect(TestBed.inject(StartupBackend)).toBe(backend);
+  });
+});
+
+describe('WindowReady', () => {
+  it('is ready even when the reply handler throws, and with no reply at all', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const backend = new MockStartupBackend();
+    vi.spyOn(backend, 'reportReady').mockRejectedValue(new Error('no answer'));
+    const after = vi.fn(() => {
+      throw new Error('handler failed');
+    });
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideStartupBackend(() => backend), provideStartupContract({ retry: fast }), { provide: AFTER_READY, useValue: after }],
+    });
+    const fixture = TestBed.createComponent(Host);
+    await fixture.whenStable();
+    await vi.waitFor(() => expect(after).toHaveBeenCalledWith(null));
+    expect(TestBed.inject(WindowReady).ready()).toBe(true);
+    expect(warn).toHaveBeenCalledWith('[paddock-startup] the ready reply could not be handled', expect.any(Error));
+    // It still answers pings.
+    await vi.waitFor(() => {
+      backend.ping(7);
+      expect(backend.pongs).toContain(7);
+    });
+    warn.mockRestore();
   });
 });

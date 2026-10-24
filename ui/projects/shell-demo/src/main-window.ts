@@ -3,9 +3,9 @@ import { bootstrapApplication } from '@angular/platform-browser';
 import { applyPaddockAppearance } from '@decryp7/paddock-ui';
 import { provideContributions, provideShellContext } from '@decryp7/paddock-ui/shell';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
-import { PAGES_WINDOW_READY, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
+import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
-import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend } from '@decryp7/paddock-ui/shell/startup';
+import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS } from './app/demo.contributions';
 import type { DemoContext } from './app/demo-context';
 import { DemoIcon } from './app/demo-icon';
@@ -33,7 +33,7 @@ export function bootMainWindow(): Promise<unknown> {
       // Settings (plan S10): Settings… (Mod+,) and the shell's Appearance page, Open Settings for notices and repairs, and
       // the window's look on the Appearance settings once the window is ready (start-up sends only the contract's calls).
       provideContributions(SETTINGS_CONTRIBUTIONS),
-      provideShellSettings({ backend: demoSettingsBackend, appearance: { gate: () => inject(PAGES_WINDOW_READY).asReadonly() } }),
+      provideShellSettings({ backend: demoSettingsBackend, appearance: { gate: windowReady } }),
       provideSubmenus<DemoContext>(...DEMO_SUBMENUS),
       // The app's part of the context is a lazy chunk, loaded when the window is idle (plan §9).
       provideShellContext<DemoContext>(() => import('./app/demo-context').then((m) => m.demoContext)),
