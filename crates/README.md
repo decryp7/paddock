@@ -99,6 +99,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
+| `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
@@ -677,6 +678,35 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   when an app's tests set `PADDOCK_SECRETS_FORBID_REAL=1` (put it in the app's test environment), so a test that reaches the
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
+
+## `paddock-names` (plan X18)
+
+Rule 20 as a pure library: the user types "grafic bilder" and finds `CompanyA.Graphic.Builder.exe`, or "memory pages" and finds
+`\\Memory\\Pages/sec`. The app's engine builds a `Catalogue` and exposes `search` as a command (the palette and the assistant
+call the command; the matching is never written in TypeScript).
+
+```rust
+use paddock_names::{Candidate, Catalogue, Entry, Style, group, vocabulary_from};
+
+// Names with counts -> one group per entity (spellings joined) -> entries.
+let vocab = vocabulary_from(&candidates);                       // learns the words the data separates
+let entries = group(&candidates, &vocab).iter().map(|g| Entry::from(g).kind("process")).collect();
+let names = Catalogue::with_vocabulary(entries, Style::Path, vocab)?;
+let found = names.search("grafic bilder", 5);                  // found.matches[0].how == How::Typo, .why says so
+if let Some(q) = found.clarify { /* "By 'builder', do you mean A (process) or B (process)?" -> q.options are ids */ }
+
+// Counters, symbols, models: plain words, other fields rank below the name.
+let counters = Catalogue::text(vec![Entry::new(path, "Bytes Received/sec").fields(&["Network Interface", "lo0"])])?;
+```
+
+- `How`, best first: `UserAlias`, `Exact`, `Joined`, `Parts`, `Alias`, `Prefix`, `Words` (every word anywhere, any order),
+  `Typo` (only when nothing matches better). Order is score, then weight, then id, so results are deterministic.
+- `Style::Path` reads the last path component and drops extension, vendor prefix, version and architecture; `Style::Text`
+  drops nothing (`Pages/sec`, `lo0`).
+- Bounds: 250,000 entries (more is `NamesError::TooManyEntries`), 256 characters of a query or a name, 24 names, 8 fields and 16
+  aliases per entry, 50 matches. Nothing panics on any text.
+- Stays in the app: the entity catalogue, AI aliases (pass them as `Entry::aliases`), the user's corrections (`user_aliases`),
+  context ranking and co-occurrence merging (layer on the returned matches).
 
 ## `paddock-env` (plan X7)
 
