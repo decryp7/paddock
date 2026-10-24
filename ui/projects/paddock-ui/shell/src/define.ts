@@ -124,8 +124,8 @@ export const KIND_MODALITIES: Readonly<Record<DialogKind, readonly DialogModalit
   tool: ['modeless'],
 };
 
-/** What `defineDialog` takes: the whole contract of one dialog window. */
-export interface DialogSpec<Id extends string, R, Cmd extends string> {
+/** What `defineDialog` takes: the whole contract of one dialog window. `C` is the content component (its `input()`s type `open`'s inputs). */
+export interface DialogSpec<Id extends string, R, Cmd extends string, C = unknown> {
   /** Stable, namespaced id: the dialog window's route, its remembered bounds' key, its test id. */
   readonly id: Id;
   readonly kind: DialogKind;
@@ -152,11 +152,11 @@ export interface DialogSpec<Id extends string, R, Cmd extends string> {
   /** The providers the dialog's window boots besides the shell's base set (rule 34). */
   readonly providers?: ProvidersLoader;
   /** The content component, loaded in the dialog's window only. */
-  readonly load: ComponentLoader;
+  readonly load: ComponentLoader<C>;
 }
 
 /** A defined dialog. `modality` is resolved from the kind when the kind decides (left as declared otherwise). */
-export interface DialogDef<Id extends string = string, R = unknown, Cmd extends string = string> extends DialogSpec<Id, R, Cmd> {
+export interface DialogDef<Id extends string = string, R = unknown, Cmd extends string = string, C = unknown> extends DialogSpec<Id, R, Cmd, C> {
   readonly modality: DialogModality;
 }
 
@@ -233,9 +233,9 @@ export function defineSettingsPage<T extends object = object>(spec: SettingsPage
  * Declares one dialog window. `Cmd` is the app's generated IPC command union once it is registered in `ShellTypes`
  * (`string` until then), so a contract naming a command that does not exist fails to compile.
  */
-export function defineDialog<const Id extends string, R = void, Cmd extends string = IpcCommandName>(
-  spec: DialogSpec<Id, R, Cmd>,
-): DialogDef<Id, R, Cmd> {
+export function defineDialog<const Id extends string, R = void, Cmd extends string = IpcCommandName, C = unknown>(
+  spec: DialogSpec<Id, R, Cmd, C>,
+): DialogDef<Id, R, Cmd, C> {
   const allowed = KIND_MODALITIES[spec.kind] as readonly DialogModality[] | undefined;
   // Only an unambiguous kind decides; a form without a modality keeps none here and the lint reports it.
   const modality = spec.modality ?? (allowed?.length === 1 ? allowed[0] : undefined);
