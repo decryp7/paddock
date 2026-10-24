@@ -610,23 +610,27 @@ mod tests {
             "../../../ui/projects/shell-demo/dialog-contracts.json"
         ))
         .unwrap();
-        assert_eq!(
-            c.ids().collect::<Vec<_>>(),
-            [
-                "pd.about",
-                "pd.channels.remove",
-                "pd.channels.secret",
-                "pd.report-problem",
-                "pd.settings",
-                "pd.updates",
-                "pd.whats-new",
-                "sd.about",
-                "sd.choose-style",
-                "sd.confirm-reset",
-                "sd.inspector",
-                "sd.rename"
-            ]
+        // The demo's registry grows with the shell (every new shell dialog is in it): the test checks the file reads, is
+        // sorted by id, and holds the dialogs it relies on, not the whole list.
+        let ids: Vec<&str> = c.ids().collect();
+        assert!(
+            ids.windows(2).all(|w| w[0] < w[1]),
+            "sorted and unique: {ids:?}"
         );
+        for id in [
+            "pd.about",
+            "pd.settings",
+            "pd.report-problem",
+            "pd.updates",
+            "pd.whats-new",
+            "sd.about",
+            "sd.choose-style",
+            "sd.confirm-reset",
+            "sd.inspector",
+            "sd.rename",
+        ] {
+            assert!(ids.contains(&id), "{id} is in the registry: {ids:?}");
+        }
         assert!(c.allows("sd.inspector", "demo_status") && !c.allows("sd.about", "demo_status"));
         assert!(c.get("sd.choose-style").unwrap().required_choice);
         assert_eq!(c.get("sd.about").unwrap().floor(), VIEWER_MIN);

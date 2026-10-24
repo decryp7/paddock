@@ -670,7 +670,12 @@ fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Conn
                 l.next().and_then(|p| p.trim().parse::<u16>().ok()),
                 l.next(),
             ) {
-                return Connection::connect(port, path.trim());
+                // The file can appear a moment before the endpoint takes connections (and a slow machine shows it): a refused or
+                // half-made handshake is tried again until the start limit, not a failed launch.
+                match Connection::connect(port, path.trim()) {
+                    Err(Error::Connection(_)) if Instant::now() <= end && process.is_running() => {}
+                    done => return done,
+                }
             }
         }
         if !process.is_running() {
