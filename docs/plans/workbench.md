@@ -365,3 +365,11 @@ Debrief 1.1 wrote its own Pitwall client (debrief-ai `engine/pitwall/`: discover
 chat, health) before `paddock-pitwall` (ADR 0004) existed. Rule 39: extract it into `paddock-pitwall` during the Pitwall
 release (with Pitwall's API additions: contextPerSlot, installed-but-not-running, job ids), publish it with the next shell
 release, and move Debrief onto it in its migration (M2); Pacenotes and Sighter start on it.
+
+## 16. One downloader for every app (user, 2026-10-24)
+
+Every app's downloads go through `paddock-download` (segmented, resumable, hash-while-writing, free-space check, jobs):
+Pitwall (model and runtime downloads, in its shell move), Pitcrew (runner binaries, tools, updates) and Spotter (release
+assets, browser runtime, updates) in their shell moves now; Debrief moves its own segmented downloader onto it in its
+migration (M2); Dyno, Pacenotes (language servers, embedding models, advisory mirror) and Sighter (training runtime,
+models) use it from the start.
