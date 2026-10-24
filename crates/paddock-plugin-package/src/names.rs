@@ -1,6 +1,9 @@
 //! The validated names a manifest uses. Each is a newtype whose only constructor checks the value, and whose
 //! `Deserialize` goes through that constructor, so a value of the type is valid wherever it came from (a manifest file, a
-//! JSON description or a postcard frame) and nothing downstream re-checks it.
+//! JSON description or a postcard frame) and nothing downstream re-checks it. [`GrantRef`] is `paddock_view`'s: the view
+//! model and the manifest share the one type.
+
+pub use paddock_view::{GrantRef, MAX_NAME, valid_ident};
 
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -11,18 +14,8 @@ fn refuse(what: &str, value: &str, rule: &str) -> String {
     format!("{what} \"{shown}\" is not valid: {rule}")
 }
 
-/// Most characters of a name that is a list item (grants, programs, operations, contribution ids).
-pub const MAX_NAME: usize = 64;
 /// Longest host pattern (a DNS name).
 pub const MAX_HOST: usize = 253;
-
-/// Whether `s` is 1–`MAX_NAME` characters from `A–Z a–z 0–9 . - _`, starting with a letter or digit.
-pub fn valid_ident(s: &str) -> bool {
-    (1..=MAX_NAME).contains(&s.len())
-        && s.starts_with(|c: char| c.is_ascii_alphanumeric())
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
-}
 
 macro_rules! name_type {
     ($(#[$doc:meta])* $name:ident, $what:expr, $rule:expr, $check:expr) => {
@@ -90,14 +83,6 @@ name_type!(
         && !s.starts_with('.')
         && !s.ends_with('.')
         && s.chars().all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
-);
-
-name_type!(
-    /// The name of a grant the user chose (a folder in the app's grant list), never a raw path.
-    GrantRef,
-    "grant name",
-    "use 1-64 characters from A-Z, a-z, 0-9, '.', '-', '_'; it names a grant the user chooses, it is not a path",
-    valid_ident
 );
 
 name_type!(

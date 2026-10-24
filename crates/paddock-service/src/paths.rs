@@ -23,7 +23,9 @@ pub const SC: &str = "sc";
 fn home(vars: &dyn Vars) -> Result<PathBuf, ServiceError> {
     vars.get("HOME")
         .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
+        // `has_root`, not `is_absolute`: the launchd and systemd paths are computed (and tested) on every OS, and on Windows
+        // `/Users/ana` has a root but no drive.
+        .filter(|p| p.has_root())
         .ok_or(ServiceError::NoHome)
 }
 
@@ -59,7 +61,7 @@ pub fn systemd_unit_dir(kind: Kind, vars: &dyn Vars) -> Result<PathBuf, ServiceE
             let config = vars
                 .get("XDG_CONFIG_HOME")
                 .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
+                .filter(|p| p.has_root())
                 .map_or_else(|| home(vars).map(|h| h.join(".config")), Ok)?;
             Ok(config.join("systemd").join("user"))
         }

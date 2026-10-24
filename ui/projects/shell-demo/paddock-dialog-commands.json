@@ -45,6 +45,7 @@
         "storage_last",
         "storage_scan",
         "storage_clear",
+        "storage_tree",
         "storage_cancel",
         "storage_reveal",
         "mcp_get",

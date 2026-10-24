@@ -24,12 +24,14 @@ export {
   TauriStorageBackend,
   MemoryStorageBackend,
   sampleCategories,
+  sampleTree,
   type StorageIpc,
   type StorageProgress,
   type MemoryStorageOptions,
   type Unlisten,
 } from './src/backend';
-export { parseStorageEvent, parseStorageUsage, clearRequest } from './src/wire';
+export { parseStorageEvent, parseStorageTree, parseStorageUsage, clearRequest } from './src/wire';
+export { treeRows, type TreeRow, type TreeWords } from './src/tree-rows';
 export { StorageStore, type StorageStoreType, type StorageJob } from './src/storage.store';
 export {
   STORAGE_SETTINGS_PAGE,

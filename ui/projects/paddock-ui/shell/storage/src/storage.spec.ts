@@ -4,13 +4,14 @@ import { Injector } from '@angular/core';
 import { assertContributionsValid } from '@decryp7/paddock-ui/shell/testing';
 import { provideContributions } from '@decryp7/paddock-ui/shell';
 import { JOBS_EVENT } from '@decryp7/paddock-ui/shell/jobs';
-import { STORAGE_EVENT, type StorageEvent, type StorageUsage } from '../generated/storage';
+import { STORAGE_EVENT, type SizeNode, type StorageEvent, type StorageUsage } from '../generated/storage';
 import { STORAGE_COMMANDS, type StorageCommand } from '../generated/storage-commands';
-import { MemoryStorageBackend, StorageBackend, TauriStorageBackend, sampleCategories, type StorageIpc, type StorageProgress } from './backend';
+import { MemoryStorageBackend, StorageBackend, TauriStorageBackend, sampleCategories, sampleTree, type StorageIpc, type StorageProgress } from './backend';
 import { provideShellStorage } from './provide-storage';
 import { STORAGE_CONFIRM_DIALOG_ID, STORAGE_SETTINGS_COMMANDS, STORAGE_SETTINGS_PAGE, defineStorageConfirmDialog, defineStorageSettingsPage, storageContributions } from './storage.contributions';
 import { StorageStore } from './storage.store';
-import { clearRequest, parseStorageEvent, parseStorageUsage } from './wire';
+import { treeRows } from './tree-rows';
+import { clearRequest, parseStorageEvent, parseStorageTree, parseStorageUsage } from './wire';
 
 /** Lets the simulated engine and the stores settle (microtasks only). */
 async function settle(rounds = 12): Promise<void> {
@@ -66,7 +67,7 @@ describe('the wire', () => {
   });
 
   it('names every command of the table', () => {
-    expect(Object.keys(STORAGE_COMMANDS).sort()).toEqual(['storage_cancel', 'storage_clear', 'storage_last', 'storage_reveal', 'storage_scan']);
+    expect(Object.keys(STORAGE_COMMANDS).sort()).toEqual(['storage_cancel', 'storage_clear', 'storage_last', 'storage_reveal', 'storage_scan', 'storage_tree']);
     expect([...STORAGE_SETTINGS_COMMANDS].sort()).toEqual(Object.keys(STORAGE_COMMANDS).sort());
   });
 });
@@ -331,5 +332,82 @@ describe('the contributions', () => {
     const batch = storageContributions(page, [dialog]);
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideContributions(batch)] });
     assertContributionsValid(TestBed.inject(Injector));
+  });
+});
+
+describe('the size tree', () => {
+  const node = (name: string, bytes: number, children: SizeNode[] = [], folded = 0) => ({ name, bytes, folded, children });
+  const TREE = { id: 'cache', capped: false, root: node('Cache', 100, [node('thumbs', 60, [node('a', 40), node('b', 20)]), node('x.bin', 30), node('', 10, [], 4)]) };
+
+  it('parses a tree from known fields, to a bounded depth, and refuses the rest', () => {
+    expect(parseStorageTree({ ...TREE, extra: 1 })).toEqual(TREE);
+    expect(parseStorageEvent({ state: 'tree', tree: TREE })).toEqual({ state: 'tree', tree: TREE });
+    let deep: SizeNode = node('leaf', 1);
+    for (let i = 0; i < 12; i++) deep = node(`d${i}`, 1, [deep]);
+    for (const bad of [null, {}, { ...TREE, capped: 1 }, { ...TREE, root: null }, { ...TREE, root: node('r', -1) }, { ...TREE, root: { ...node('r', 1), children: [5] } }, { ...TREE, root: deep }, { state: 'tree' }]) {
+      expect(parseStorageTree(bad) ?? parseStorageEvent(bad)).toBeNull();
+    }
+  });
+
+  it('is flattened into rows grouped by top-level folder, with files and folds apart', () => {
+    const rows = treeRows(TREE, { files: 'Files here', smaller: 'Smaller items', others: (n) => `${n} smaller items` });
+    expect(rows.map((r) => [r.group, r.name, r.bytes, r.share])).toEqual([
+      ['thumbs', 'thumbs', 60, 60],
+      ['thumbs', 'a', 40, 40],
+      ['thumbs', 'b', 20, 20],
+      ['Files here', 'x.bin', 30, 30],
+      ['Smaller items', '4 smaller items', 10, 10],
+    ]);
+    expect(new Set(rows.map((r) => r.key)).size).toBe(rows.length);
+    expect(treeRows({ ...TREE, root: node('Empty', 0, [node('f', 0)]) }, { files: 'F', smaller: 'S', others: String })[0]?.share).toBe(0);
+    const nested = treeRows({ id: 'c', capped: false, root: node('C', 10, [node('d', 10, [node('e', 10, [node('f', 10)])])]) }, { files: 'F', smaller: 'S', others: String });
+    expect(nested.map((r) => r.name)).toEqual(['d', 'e', 'e/f']);
+  });
+
+  it('is walked as a job whose outcome is an event, and refused for an unknown or missing folder', async () => {
+    const h = held({ measured: true });
+    const events: StorageEvent[] = [];
+    await h.memory.listen((e) => events.push(e));
+    await h.memory.tree('cache');
+    await expect(h.memory.tree('cache')).rejects.toMatchObject({ code: 'busy' });
+    await h.all();
+    const done = events.at(-1);
+    expect(done?.state === 'tree' && done.tree.root.bytes).toBe(48_000_000);
+    expect(sampleTree(sampleCategories()[0]!).children.at(-1)?.folded).toBe(7);
+    await expect(h.memory.tree('nope')).rejects.toMatchObject({ code: 'notFound' });
+    const missing = held({ categories: sampleCategories().map((c) => ({ ...c, exists: false })) });
+    await expect(missing.memory.tree('cache')).rejects.toMatchObject({ code: 'unavailable' });
+    const own = held({ measured: true, trees: { cache: node('Custom', 1) } });
+    const seen: StorageEvent[] = [];
+    await own.memory.listen((e) => seen.push(e));
+    await own.memory.tree('cache');
+    await own.memory.cancel();
+    await own.all();
+    expect(seen.map((e) => e.state)).toEqual(['cancelled']);
+    await own.memory.tree('cache');
+    await own.all();
+    expect(seen.at(-1)).toMatchObject({ state: 'tree', tree: { root: { name: 'Custom' } } });
+  });
+
+  it('is asked through the store, kept per category and forgotten when the figures are measured again', async () => {
+    const h = held({ measured: true });
+    const store = bed(h.memory);
+    await settle();
+    expect(await store.tree('cache')).toBe(true);
+    expect(store.working()).toBe('tree');
+    await h.all();
+    expect(store.trees()['cache']?.root.bytes).toBe(48_000_000);
+    expect(await store.tree('nope')).toBe(false);
+    expect(store.failure()?.code).toBe('notFound');
+    await store.scan();
+    await h.all();
+    expect(store.trees()).toEqual({});
+  });
+
+  it('is sent to the engine by the Tauri backend', async () => {
+    const calls: unknown[] = [];
+    const b = new TauriStorageBackend({ invoke: (c, a) => { calls.push([c, a]); return Promise.resolve(undefined as never); }, listen: () => Promise.resolve(() => undefined) });
+    await b.tree('logs');
+    expect(calls).toEqual([['storage_tree', { id: 'logs' }]]);
   });
 });

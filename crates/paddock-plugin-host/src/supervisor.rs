@@ -21,7 +21,7 @@ use crate::status::Status;
 use paddock_guard::{CallError, Failure, Guard};
 use paddock_ipc::{Child, ChildSpec, IpcError, Json, codes};
 use paddock_jobs::time::{Backoff, Retry};
-use paddock_plugin_api::compat::{check_described, protocol_of};
+use paddock_plugin_api::compat::check_described;
 use paddock_plugin_api::extension::Contract;
 use paddock_plugin_api::protocol::{
     Described, Fail, McpBudget, PLATFORM_PROTOCOL, PlatformRequest,
@@ -887,7 +887,7 @@ fn status_for(cfg: &HostConfig, manifest: &Manifest, enabled: bool) -> Status {
     let label = manifest.id.to_string();
     let compat = cfg
         .info
-        .check_protocol(&label, protocol_of(manifest.protocol))
+        .check_protocol(&label, manifest.protocol)
         .and_then(|()| {
             manifest
                 .namespaces()

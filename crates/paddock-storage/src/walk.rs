@@ -61,13 +61,13 @@ pub struct Size {
 }
 
 #[cfg(unix)]
-fn device(meta: &std::fs::Metadata) -> u64 {
+pub(crate) fn device(meta: &std::fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
     meta.dev()
 }
 
 #[cfg(not(unix))]
-fn device(_: &std::fs::Metadata) -> u64 {
+pub(crate) fn device(_: &std::fs::Metadata) -> u64 {
     0
 }
 

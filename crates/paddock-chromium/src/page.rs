@@ -5,9 +5,11 @@ use crate::cdp::{Connection, Event};
 use crate::challenge::{self, Challenge, Signals};
 use crate::ready::{self, Observation, Readiness, Rule};
 use crate::{Error, Result};
+use paddock_jobs::CancelToken;
+use paddock_jobs::time::{Clock, Deadline};
 use serde_json::{Value, json};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const CALL: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(100);
@@ -31,6 +33,8 @@ pub struct Page {
     pub(crate) conn: Arc<Connection>,
     pub(crate) session: String,
     pub(crate) target: String,
+    /// The browser's clock (`LaunchOptions::clock`): [`Page::wait_ready`] polls and times out on it.
+    pub(crate) clock: Arc<dyn Clock>,
 }
 
 /// The address and title of a page.
@@ -83,7 +87,7 @@ pub enum Outcome {
 
 impl Page {
     /// Opens a new page (a tab beside the others) and attaches to it.
-    pub(crate) fn attach(conn: Arc<Connection>) -> Result<Page> {
+    pub(crate) fn attach(conn: Arc<Connection>, clock: Arc<dyn Clock>) -> Result<Page> {
         let t = conn.call(
             None,
             "Target.createTarget",
@@ -91,11 +95,15 @@ impl Page {
             CALL,
         )?;
         let target = str_of(&t, "targetId")?;
-        Page::adopt(conn, target)
+        Page::adopt(conn, target, clock)
     }
 
     /// Attaches to the existing page `target` (the one the browser opened with).
-    pub(crate) fn adopt(conn: Arc<Connection>, target: String) -> Result<Page> {
+    pub(crate) fn adopt(
+        conn: Arc<Connection>,
+        target: String,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Page> {
         let s = conn.call(
             None,
             "Target.attachToTarget",
@@ -109,6 +117,7 @@ impl Page {
             conn,
             session,
             target,
+            clock,
         };
         p.call("Page.enable", json!({}))?;
         p.call("Network.enable", json!({}))?;
@@ -303,7 +312,7 @@ text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
         rule: &Rule,
         timeout: Duration,
     ) -> Result<Outcome> {
-        let end = Instant::now() + timeout;
+        let end = Deadline::after(self.clock.clone(), timeout);
         loop {
             let snap = self.snapshot(selector)?;
             let last = ready::readiness(
@@ -323,10 +332,11 @@ text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
             if last == Readiness::Ready {
                 return Ok(Outcome::Ready);
             }
-            if Instant::now() >= end {
+            if end.passed() {
                 return Ok(Outcome::TimedOut(last));
             }
-            std::thread::sleep(POLL);
+            // A fresh token: nothing cancels a poll, the page's own state ends the loop.
+            let _ = self.clock.wait(POLL, &CancelToken::new());
         }
     }
 

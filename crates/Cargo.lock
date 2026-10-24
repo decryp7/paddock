@@ -3613,6 +3613,8 @@ dependencies = [
  "ed25519-compact",
  "getrandom 0.3.4",
  "paddock-env",
+ "paddock-ipc",
+ "paddock-view",
  "paddock-workspace-hack",
  "postcard",
  "proptest",
@@ -3804,7 +3806,6 @@ dependencies = [
 name = "paddock-storage"
 version = "0.1.0"
 dependencies = [
- "log",
  "paddock-commands",
  "paddock-env",
  "paddock-files",

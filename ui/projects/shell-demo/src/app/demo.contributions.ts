@@ -119,6 +119,7 @@ export const SETTINGS_DIALOG = defineDialog({
     'storage_last',
     'storage_scan',
     'storage_clear',
+    'storage_tree',
     'storage_cancel',
     'storage_reveal',
     // The AI access page's (MCP_SETTINGS_COMMANDS; the key is issued in the key dialog's window, not here).

@@ -14,7 +14,7 @@ export const STORAGE_CONFIRM_DIALOG_ID = 'pd.storage.confirm';
  * What the Settings window may call for this page, on top of the settings commands: the Settings dialog's contract lists
  * these too (write them out in the dialog, the contract check reads literals).
  */
-export const STORAGE_SETTINGS_COMMANDS = ['storage_last', 'storage_scan', 'storage_clear', 'storage_cancel', 'storage_reveal'] as const satisfies readonly StorageCommand[];
+export const STORAGE_SETTINGS_COMMANDS = ['storage_last', 'storage_scan', 'storage_clear', 'storage_tree', 'storage_cancel', 'storage_reveal'] as const satisfies readonly StorageCommand[];
 
 export interface StorageSettingsPageOptions {
   /** The providers the page boots with: `provideShellStorage` with the app's backend, from a module of its own so they stay lazy. */

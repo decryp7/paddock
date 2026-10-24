@@ -36,7 +36,11 @@ pub struct Files {
     launcher: Arc<dyn Launcher>,
     os: Os,
     folders: Vec<(AppFolder, PathBuf)>,
+    editor: Arc<Editor>,
 }
+
+/// Where the editor is: resolved when asked (an install after the app started is found).
+pub type Editor = dyn Fn() -> Option<PathBuf> + Send + Sync;
 
 impl Files {
     /// A service with these recent lists, no picker, the real launcher and no named folders.
@@ -48,6 +52,7 @@ impl Files {
             launcher: Arc::new(ProcessLauncher::default()),
             os: Os::CURRENT,
             folders: Vec::new(),
+            editor: Arc::new(open::installed_vscode),
         }
     }
 
@@ -78,6 +83,13 @@ impl Files {
     #[must_use]
     pub fn os(mut self, os: Os) -> Files {
         self.os = os;
+        self
+    }
+
+    /// Replaces how the editor is found (a fake in tests; the default is VS Code's launcher on this machine).
+    #[must_use]
+    pub fn editor(mut self, editor: impl Fn() -> Option<PathBuf> + Send + Sync + 'static) -> Files {
+        self.editor = Arc::new(editor);
         self
     }
 
@@ -187,6 +199,32 @@ impl Files {
             .ok_or_else(|| CommandError::not_found("This folder is not known to the app"))?;
         let path = canonical(path)?;
         self.start(&open::open_default(self.os, &path))
+    }
+
+    /// Opens a file the user chose in the editor at `line` (1 to [`open::MAX_LINE`]). The file is only ever an argument of the editor,
+    /// never run; a folder is refused; without an editor the error says what to install.
+    pub fn open_at_line(&self, window: &str, raw: &str, line: u32) -> Result<()> {
+        if !(1..=open::MAX_LINE).contains(&line) {
+            return Err(CommandError::invalid(format!(
+                "the line must be between 1 and {}",
+                open::MAX_LINE
+            ))
+            .field("line"));
+        }
+        let granted = self.grants.check(window, raw, Access::Read, &[])?;
+        if !granted.path().is_file() {
+            return Err(CommandError::invalid(format!(
+                "{} is not a file",
+                granted.path().display()
+            )));
+        }
+        let editor = (self.editor)().ok_or_else(|| {
+            CommandError::missing(
+                "No editor was found: Visual Studio Code ('code') is not installed",
+            )
+            .hint("Install Visual Studio Code, or open the file from the file manager")
+        })?;
+        self.start(&open::open_at_line(&editor, granted.path(), line))
     }
 
     /// Shows a folder the app itself chose (never one named by the webview) in the file manager.
@@ -432,6 +470,55 @@ mod tests {
         assert_eq!(
             gone.open_app_folder(AppFolder::Data).unwrap_err().code,
             ErrorCode::NotFound
+        );
+    }
+
+    #[test]
+    fn a_file_opens_in_the_editor_at_a_line_and_is_never_run() {
+        let t = tempfile::tempdir().unwrap();
+        let script = t.path().join("run.sh");
+        std::fs::write(&script, "x").unwrap();
+        let rec = Arc::new(Recording::default());
+        let f = files(&rec).editor(|| Some(PathBuf::from("/usr/bin/code")));
+        let ask = |line| f.open_at_line("main", &s(&script), line);
+        assert_eq!(ask(3).unwrap_err().code, ErrorCode::NotGranted);
+        f.grant_output("main", t.path()).unwrap();
+        ask(42).unwrap();
+        let started = rec.started.lock().unwrap();
+        assert_eq!(started[0].program, "/usr/bin/code");
+        assert_eq!(started[0].args[0], "-g");
+        assert!(
+            started[0].args[1].to_string_lossy().ends_with("run.sh:42"),
+            "an editor argument, not a program to run"
+        );
+        drop(started);
+        for bad in [0, open::MAX_LINE + 1] {
+            let e = ask(bad).unwrap_err();
+            assert_eq!(
+                (e.code, e.field.as_deref()),
+                (ErrorCode::Invalid, Some("line"))
+            );
+        }
+        ask(open::MAX_LINE).unwrap();
+        assert_eq!(
+            f.open_at_line("main", &s(t.path()), 1).unwrap_err().code,
+            ErrorCode::Invalid
+        );
+        assert_eq!(
+            f.open_at_line("main", &s(&t.path().join("gone.txt")), 1)
+                .unwrap_err()
+                .code,
+            ErrorCode::NotFound
+        );
+        let none = files(&rec).editor(|| None);
+        none.grant_output("main", t.path()).unwrap();
+        let e = none.open_at_line("main", &s(&script), 1).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Missing);
+        assert!(e.hint.is_some());
+        assert_eq!(
+            rec.started.lock().unwrap().len(),
+            2,
+            "nothing started without an editor"
         );
     }
 

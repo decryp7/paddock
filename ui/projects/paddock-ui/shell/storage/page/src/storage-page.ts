@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { PdPathText } from '@decryp7/paddock-ui';
 import { formatBytes } from '@decryp7/paddock-ui/format';
+import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
-import { STORAGE_CONFIRM_DIALOG_ID, StorageStore, type StorageCategory } from '@decryp7/paddock-ui/shell/storage';
+import { STORAGE_CONFIRM_DIALOG_ID, StorageStore, treeRows, type StorageCategory, type TreeRow } from '@decryp7/paddock-ui/shell/storage';
 import { STORAGE_STYLES } from './styles';
 
 /**
@@ -15,7 +16,7 @@ import { STORAGE_STYLES } from './styles';
 @Component({
   selector: 'pd-storage-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdPathText],
+  imports: [PdPathText, PdTable],
   template: `
     <section class="pd-storage__block" aria-labelledby="pd-storage-title" data-testid="storage-page">
       <h2 id="pd-storage-title">{{ t.title }}</h2>
@@ -112,6 +113,7 @@ import { STORAGE_STYLES } from './styles';
               <td class="pd-storage__size" [attr.title]="exact(c)">{{ sizeText(c) }}</td>
               <td class="pd-storage__actions">
                 @if (c.exists) {
+                  <button type="button" class="pd-storage__btn" [attr.data-testid]="'storage-tree-' + c.id" [attr.aria-label]="treeLabel(c)" [attr.aria-expanded]="openTree() === c.id" [disabled]="!!store.working()" (click)="toggleTree(c)">{{ t.folders }}</button>
                   <button type="button" class="pd-storage__btn" [attr.data-testid]="'storage-show-' + c.id" [attr.aria-label]="showLabel(c)" (click)="store.reveal(c.id)">{{ t.show }}</button>
                 }
                 @if (c.kind === 'data' && c.clearable && c.clearableItems > 0) {
@@ -122,6 +124,17 @@ import { STORAGE_STYLES } from './styles';
           }
         </tbody>
       </table>
+      @if (openTree(); as id) {
+        @if (store.trees()[id]; as tree) {
+          <section class="pd-storage__tree" [attr.aria-label]="treeTitle(label(id))" data-testid="storage-tree">
+            <h3>{{ treeTitle(label(id)) }}</h3>
+            @if (tree.capped) {
+              <p class="pd-storage__muted" data-testid="storage-tree-capped">{{ t.treeCapped }}</p>
+            }
+            <pd-table [label]="treeTitle(label(id))" [rows]="rows()" [columns]="columns" [rowKey]="rowKey" [groupBy]="'group'" [filterable]="false" [maxHeight]="360" />
+          </section>
+        }
+      }
     } @else if (store.requestError(); as problem) {
       <div class="pd-storage__notice pd-storage__notice--danger" role="alert" data-testid="storage-error">
         <span class="pd-storage__title">{{ t.noUsage }}</span>
@@ -161,8 +174,48 @@ export class PdStoragePage {
     cache: $localize`:@@pd.storage.kind-cache:Cache`,
     data: $localize`:@@pd.storage.kind-data:Your data`,
     show: $localize`:@@pd.storage.show:Show`,
+    folders: $localize`:@@pd.storage.folders:Folders`,
+    treeFiles: $localize`:@@pd.storage.tree-files:Files here`,
+    treeSmaller: $localize`:@@pd.storage.tree-smaller:Smaller items`,
+    treeCapped: $localize`:@@pd.storage.tree-capped:The walk stopped early (too many items or too long), so these sizes are at least that much.`,
     clear: $localize`:@@pd.storage.clear:Clear…`,
   };
+
+  protected readonly openTree = signal<string | null>(null);
+  protected readonly rows = computed<readonly TreeRow[]>(() => {
+    const id = this.openTree();
+    const tree = id ? this.store.trees()[id] : undefined;
+    return tree ? treeRows(tree, { files: this.t.treeFiles, smaller: this.t.treeSmaller, others: (n) => this.othersText(n) }) : [];
+  });
+  protected readonly rowKey = (row: TreeRow): string => row.key;
+  protected readonly columns: readonly PdColumn<TreeRow>[] = [
+    { key: 'group', header: $localize`:@@pd.storage.col-group:Folder`, value: (r) => r.group, hidden: true },
+    { key: 'name', header: $localize`:@@pd.storage.col-item:Item`, value: (r) => r.name, truncate: 'middle', required: true, width: 'minmax(0, 3fr)' },
+    { key: 'bytes', header: $localize`:@@pd.storage.col-size:Size`, value: (r) => r.bytes, text: (r) => formatBytes(r.bytes), align: 'end', width: '8em' },
+    { key: 'share', header: $localize`:@@pd.storage.col-share:Share`, value: (r) => r.share, text: (r) => `${r.share} %`, align: 'end', width: '5em', hideBelow: 420 },
+  ];
+
+  /** Shows (or hides) the size tree of a category; the engine walks the folder as a job. */
+  protected async toggleTree(c: StorageCategory): Promise<void> {
+    if (this.openTree() === c.id) {
+      this.openTree.set(null);
+      return;
+    }
+    this.openTree.set(c.id);
+    if (!this.store.trees()[c.id]) await this.store.tree(c.id);
+  }
+
+  protected treeLabel(c: StorageCategory): string {
+    return $localize`:@@pd.storage.tree-label:What is in ${c.label}:name:`;
+  }
+
+  protected treeTitle(name: string): string {
+    return $localize`:@@pd.storage.tree-title:What is in ${name}:name:`;
+  }
+
+  protected othersText(n: number): string {
+    return n === 1 ? $localize`:@@pd.storage.other-one:1 smaller item` : $localize`:@@pd.storage.other-many:${n}:count: smaller items`;
+  }
 
   protected label(id: string): string {
     return this.store.categories().find((c) => c.id === id)?.label ?? id;
