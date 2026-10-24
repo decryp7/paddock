@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-packs` (plan X15, decision D11): knowledge packs for all apps. `PackKind` (serde type, format number, the app's own
+  rules), `parse_pack` with `Limits` (file size, entries, string length, nesting, values, files), unknown keys as named warnings,
+  a bad pack refused whole with a reason while the rest load (last good version kept), `PackLoader`/`PackStore` (build new, then
+  swap, observers told once per real change), `Reloader` (debounced hot reload on the fake-able `Clock`), the `ChangeSource` port
+  with a `notify` adapter (feature `watch`; X23 takes it over), `Snapshot::health()` and `user_regex` (length and size caps, typed
+  errors; merges Debrief's and Spotter's copies).
 - `@decryp7/paddock-ui/shell/service` (plan X4): Settings > Background service. `ServiceBackend` (Tauri adapter and an in-memory
   one that plays install, a repair's phases, failure, busy, switched-off and needs-approval), `ServiceStore` (status, the
   `paddock://service` updates folded in, "Still working" while a repair runs and never timed out, an inline error with

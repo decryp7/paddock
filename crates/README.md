@@ -96,6 +96,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
@@ -703,6 +704,48 @@ file.save(&loaded.value)?;                                // atomic; refused whe
   clear error; older runs the `with_migration(from, step)` chain once, writes the new format and keeps `<name>.v<from>.bak`.
   Saves write a temporary file, fsync, rename; the previous good file becomes `.bak` (a damaged one never replaces it).
   `write_atomic` is the same replace for non-JSON files.
+
+## `paddock-packs` (plan X15)
+
+Knowledge packs (rule 21), from Spotter's `pack.rs`, Pitwall's `packs.rs`, Dyno's `cleanup/pack.rs` and the two `user_regex.rs` copies:
+
+```rust
+use paddock_packs::{BuiltinPack, DirSource, Limits, Origin, PackError, PackKind, PackLoader, PackStore, Reloader, user_packs_dir};
+
+struct Cleanup;
+impl PackKind for Cleanup {
+    type Raw = RawPack;                    // serde type of one file; no `deny_unknown_fields`, no `format` field
+    type Pack = Vec<Category>;             // what the app uses
+    const FORMAT: u32 = 1;
+    fn convert(raw: RawPack, origin: Origin) -> Result<Vec<Category>, PackError> { /* the app's own rules; origin tells user from built-in */ }
+}
+
+let loader = PackLoader::<Cleanup>::new(
+    vec![BuiltinPack { name: "builtin.toml", text: include_str!("builtin.toml") }],
+    Box::new(DirSource::new(user_packs_dir(&dirs))),
+    Limits::default(),
+);
+let store = Arc::new(PackStore::new(loader));
+store.observe(|snapshot| emit_packs_changed(snapshot));                    // once per real change
+let reloader = Arc::new(Reloader::new(store.clone(), Arc::new(SystemClock)));
+reloader.reload_now();                                                      // first load
+let _watch = paddock_packs::watch::spawn(reloader, &NotifySource, &user_packs_dir(&dirs))?;   // feature `watch`
+let snapshot = store.current();                                             // Arc<Snapshot>: packs, problems, warnings, health()
+```
+
+- One answer to a bad pack (decision D11): refused whole with a named reason (a syntax error names line and column); keys the
+  kind does not know are warnings naming the key (`unknown key "category.0.flavour" is ignored`). One bad pack never touches the
+  others; a pack that turns bad while running keeps its last good version and says so; a file deleted during a reload is gone,
+  not an error.
+- Limits (`Limits`, all bounded before the typed parse): file bytes (read at most max + 1), entries per list, string and key
+  length, nesting depth, values in the file, `*.toml` files in the folder. The folder source ignores dot-files, `~` files,
+  sub-folders and symbolic links. Nothing in a pack is executed or followed.
+- Reload: `Reloader` debounces on a `paddock_jobs::time::Clock` (300 ms quiet, 1.5 s at most), so a storm is one reload and
+  tests move a `FakeClock`. The new snapshot is built whole, then swapped; readers keep theirs. `watch::ChangeSource` is the
+  port (`FakeSource` for tests, `NotifySource` behind the `watch` feature); X23 (`paddock-watch`) replaces the adapter.
+- `user_regex`: `compile`, `compile_with`, `compile_set`; `RegexLimits::DEFAULT` (Debrief: 8 MiB) and `STRICT` (Spotter: 1 MiB);
+  typed `RegexError` (`TooLong`, `TooComplex`, `Invalid`) whose messages say what to fix.
+- `Snapshot::health()` gives the one line (`Ok`, `Notes`, `Degraded`) for the `packs` health or notification entry.
 
 ## `paddock-log` (plan X1)
 
