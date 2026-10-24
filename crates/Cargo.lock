@@ -3625,6 +3625,7 @@ dependencies = [
  "paddock-proc",
  "paddock-siblings",
  "paddock-window",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",
