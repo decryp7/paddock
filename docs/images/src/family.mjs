@@ -7,8 +7,8 @@ export const CODEBASE_TOOL = 'Pacenotes';
 // edit it here and regenerate. tone: ok | soon | dev | design.
 export const STATUS = {
   pitcrew: { text: 'v1.0.1', tone: 'ok' },
-  pitwall: { text: 'v1.0.2', tone: 'ok' }, // 1.0.3 is coming
-  debrief: { text: 'v1.0.0', tone: 'ok' },
+  pitwall: { text: 'v1.0.3', tone: 'ok' },
+  debrief: { text: 'v1.0.1', tone: 'ok' }, // 1.1 is coming
   spotter: { text: 'Releasing soon', tone: 'soon' },
   dyno: { text: 'In development', tone: 'dev' },
   sighter: { text: 'In design', tone: 'design' },

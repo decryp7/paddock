@@ -1,15 +1,15 @@
 // Generates docs/images/paddock-ecosystem.svg (theme-aware, transparent) and, with --png, the 2x light/dark PNGs
-// via headless Chrome. Plain Node, no dependencies:  node docs/images/src/ecosystem.mjs [--png]
+// via the pinned headless Chrome for Testing (chrome.mjs). Plain Node, no dependencies:  node docs/images/src/ecosystem.mjs [--png]
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
 import { versionPaddockDocs } from './version-links.mjs';
+import { screenshotSvg } from './chrome.mjs';
 import { CODEBASE_TOOL, STATUS } from './family.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, '..');
-const W = 1600, H = 1500;
+const W = 1600; // H follows from the layout (see the legend)
 
 
 // Layout: Pacenotes, Debrief and Sighter form a triangle on top; Pitcrew, Dyno and Spotter below; Pitwall is the band between.
@@ -111,7 +111,7 @@ links.push(hand([[SX, R3 - 2], [SX, B1 + 2]], { later: true }) + pill(SX, B1 + 7
 const T = B1 + 4, Bt = HUB - 4, H2 = HUB + HUBH + 4, T3 = R3 - 4;
 const stubs = [
   stub(cardX(0) + CW / 2, T, Bt, 'Q&amp;A, embeddings', { both: true }),
-  stub(720, T, Bt, 'Explain, research'),
+  stub(720, T, Bt, 'AI engine, paired'),
   stub(1265, T, Bt, 'Vision, planner', { both: true }),
   stub(720, T3, H2, 'Diagnosis'),
   stub(1265, T3, H2, 'What’s new'),
@@ -127,7 +127,7 @@ const cols = [
 const hubCols = cols.map(([x, h, ls]) => `<text class="vt" x="${x}" y="${HUB + 62}">${h}</text>` +
   ls.map((l, k) => `<text class="vs" x="${x}" y="${HUB + 90 + k * 23}">${l}</text>`).join('')).join('');
 const hst = STATUS.pitwall, hcw = Math.round(hst.text.length * 7.8 + 30);
-const hubTag = `<rect class="chip-${hst.tone}" x="${1420 - hcw}" y="${HUB + 20}" width="${hcw}" height="26" rx="13"/><text class="chipt-${hst.tone}" x="${1420 - hcw / 2}" y="${HUB + 38}" text-anchor="middle">${hst.text}</text>`;
+const hubTag = `<rect class="chip-${hst.tone}" x="${HX + HW - 24 - hcw}" y="${HUB + 20}" width="${hcw}" height="26" rx="13"/><text class="chipt-${hst.tone}" x="${HX + HW - 24 - hcw / 2}" y="${HUB + 38}" text-anchor="middle">${hst.text}</text>`;
 const hub = `<g><rect class="hub" x="${HX}" y="${HUB}" width="${HW}" height="${HUBH}" rx="24"/>${hubTag}
 ${icon('pitwall', HX + 28, HUB + 40, 80)}
 <rect x="${HX + 130}" y="${HUB + 44}" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
@@ -136,14 +136,31 @@ ${icon('pitwall', HX + 28, HUB + 40, 80)}
 <text class="promise" x="${HX + 130}" y="${HUB + 129}">Optional for every app.</text>
 ${hubCols}</g>`;
 
-// ---- Paddock foundation, values, legend ----
-const PX = X0, PW = HW, PY = R3 + CH + 60, PH = 100;
-const provides = ['UI kit', 'Design system', 'Diagram kit', 'Icon set', 'Release practices', 'Lessons'];
-const chips = (() => {
-  const widths = provides.map((t) => Math.round(t.length * 7.4 + 36)), gap = 14, total = widths.reduce((s, w) => s + w, 0) + gap * (provides.length - 1);
-  let x = PX + PW - 32 - total;
-  return provides.map((t, i) => { const w = widths[i]; const s = `<rect class="chip" x="${x}" y="${PY + 34}" width="${w}" height="32" rx="16"/><text class="chiplbl" x="${x + w / 2}" y="${PY + 55}" text-anchor="middle">${t}</text>`; x += w + gap; return s; }).join('');
-})();
+// ---- Paddock foundation: header with the kits, then two layers (Workbench on top of the App shell), values, legend ----
+const PX = X0, PW = HW, PY = R3 + CH + 60;
+const chipRow = (labels, right, y, cls) => {
+  const widths = labels.map((t) => Math.round(t.length * 7.4 + 32)), gap = 10, total = widths.reduce((s, w) => s + w, 0) + gap * (labels.length - 1);
+  let x = right - total;
+  return labels.map((t, i) => { const w = widths[i]; const s = `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="32" rx="16"/><text class="chiplbl" x="${x + w / 2}" y="${y + 21}" text-anchor="middle">${t}</text>`; x += w + gap; return s; }).join('');
+};
+// Two equal-width layers, Workbench (tinted) above the App shell (neutral); each names and shows the icons of its apps. All chip rows
+// share one right edge.
+const SX0 = PX + 20, SW = PW - 40, CHIPR = SX0 + SW - 24, LH = 100, LGAP = 30, L1 = PY + 96, L2 = L1 + LH + LGAP, PH = L2 + LH + 20 - PY;
+const kits = chipRow(['UI kit', 'Design system', 'Diagram kit', 'Icon set', 'Release practices', 'Lessons'], CHIPR, PY + 30, 'chip');
+const layer = (y, cls, chipCls, name, who, apps, parts) => {
+  const ix = SX0 + 24 + { Workbench: 104, 'App shell': 84 }[name] + 14; // measured title widths at 20px/600
+  const icons = apps.map((id, k) => icon(id, ix + k * 36, y + 13, 30)).join('');
+  return `<g><rect class="${cls}" x="${SX0}" y="${y}" width="${SW}" height="${LH}" rx="14"/>
+<text class="lt" x="${SX0 + 24}" y="${y + 36}">${name}</text>${icons}${who.map((l, k) => `<text class="vs" x="${SX0 + 24}" y="${y + 62 + k * 20}">${l}</text>`).join('')}
+${chipRow(parts, CHIPR, y + (LH - 32) / 2, chipCls)}</g>`;
+};
+const layers = layer(L1, 'layer wb', 'chip', 'Workbench', ['Adds IDE panes to the shell for', 'Debrief, Pacenotes, Sighter.'], ['debrief', 'pacenotes', 'sighter'],
+  ['Docked panes, layout planner', 'Activity bar', 'Explorer', 'Command palette', 'AI pane']) +
+  layer(L2, 'layer', 'chip2', 'App shell', ['The base of all seven apps. Shell only:', 'Pitcrew, Pitwall, Spotter, Dyno.'], ['pitcrew', 'pitwall', 'spotter', 'dyno'],
+    ['Startup protection', 'Notifications, service health', 'Dialogs', 'Jobs and progress', 'Settings, About, Updates', 'Theme']);
+// "Builds on": a short arrow from the Workbench down into the App shell, labelled in the gap.
+const BX = SX0 + 48;
+const buildsOn = `<path class="hand" d="M${BX} ${L1 + LH + 2} L${BX} ${L2 - 2}"/>${head(BX, L2 - 1, 'd', 'ah')}<text class="legt" x="${BX + 14}" y="${L1 + LH + LGAP / 2 + 5}">builds on</text>`;
 const values = [
   ['Local only, private by design', 'No cloud. No telemetry.'],
   ['Windows, macOS and Linux', 'One family, native on each.'],
@@ -154,7 +171,7 @@ const valueEls = values.map(([t, s], i) => {
   const x = X0 + i * (PW / 3);
   return `<rect x="${x}" y="${VY - 4}" width="2" height="44" rx="1" class="rule"/><text class="vt" x="${x + 16}" y="${VY + 14}">${t}</text><text class="vs" x="${x + 16}" y="${VY + 36}">${s}</text>`;
 }).join('');
-const LY = VY + 90;
+const LY = VY + 90, H = LY + 86;
 const legend = `<g>
 <path class="hand" d="M${X0} ${LY} L${X0 + 44} ${LY}"/>${head(X0 + 46, LY, 'r', 'ah')}<text class="legt" x="${X0 + 62}" y="${LY + 6}">Hand-off, arrow shows the direction of data</text>
 <path class="hand later" d="M${X0 + 480} ${LY} L${X0 + 524} ${LY}"/>${head(X0 + 526, LY, 'r', 'ah')}<text class="legt" x="${X0 + 542}" y="${LY + 6}">Dashed: later</text>
@@ -163,10 +180,10 @@ const legend = `<g>
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">The Paddock family</title>
-<desc id="d">Seven local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief and Pacenotes drive Sighter as MCP hosts (Debrief reproduces a bug from a video), Sighter uses Pitwall as its vision model and agent planner, Pitcrew sends job logs, Dyno sends issues, installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later.</desc>
+<desc id="d">Seven local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief and Pacenotes drive Sighter as MCP hosts (Debrief reproduces a bug from a video), Debrief uses Pitwall as its AI engine once paired (its built-in engine is the fallback), Sighter uses Pitwall as its vision model and agent planner, Pitcrew sends job logs, Dyno sends issues, installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Underneath, Paddock provides the kits (UI kit, design system, diagram kit, icon set, release practices, lessons) and two layers: the App shell every app uses (startup protection, notifications and service health, dialogs, jobs and progress, settings, about and updates, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter and Dyno use the shell with pages.</desc>
 <style>
-:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E}
-@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0}}
+:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E;--line2:#CDD3DD;--wbf:#E8EEF8;--wbs:#B3C2DB}
+@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0;--line2:#3A414D;--wbf:#1F2939;--wbs:#4A5D80}}
 text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;fill:var(--ink)}
 .eyebrow{font-size:15px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
 .h1{font-size:44px;font-weight:600;letter-spacing:-.02em}
@@ -194,6 +211,10 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .found{fill:var(--found);stroke:var(--line)}
 .chip{fill:var(--card);stroke:var(--line)}
 .chiplbl{font-size:15px;font-weight:500}
+.chip2{fill:var(--soft);stroke:var(--line)}
+.layer{fill:var(--card);stroke:var(--line2)}
+.wb{fill:var(--wbf);stroke:var(--wbs)}
+.lt{font-size:20px;font-weight:600}
 .ft{font-size:24px;font-weight:600}
 .fs{font-size:17px;fill:var(--muted)}
 .vt{font-size:17px;font-weight:600}
@@ -216,7 +237,9 @@ ${hub}
 <rect class="found" x="${PX}" y="${PY}" width="${PW}" height="${PH}" rx="20"/>
 <text class="ft" x="${PX + 32}" y="${PY + 46}">Paddock</text>
 <text class="fs" x="${PX + 32}" y="${PY + 74}">The shared foundation under every app.</text>
-${chips}
+${kits}
+${layers}
+${buildsOn}
 </g>
 
 ${valueEls}
@@ -228,13 +251,8 @@ writeFileSync(join(out, 'paddock-ecosystem.svg'), svg);
 console.log('wrote paddock-ecosystem.svg');
 
 if (process.argv.includes('--png')) {
-  const chrome = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  const tmp = process.env.TMPDIR || '/tmp';
-  for (const [theme, bg] of [['light', '#ffffff'], ['dark', '#0d1117']]) {
-    const html = join(tmp, `paddock-eco-${theme}.html`);
-    writeFileSync(html, `<!doctype html><meta name="color-scheme" content="${theme}"><style>html,body{margin:0;background:${bg};color-scheme:${theme}}img{display:block}</style><img src="file://${join(out, 'paddock-ecosystem.svg')}" width="${W}" height="${H}">`);
-    execFileSync(chrome, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=2',
-      `--force-dark-mode=${theme === 'dark'}`, `--screenshot=${join(out, `paddock-ecosystem-${theme}.png`)}`, `--window-size=${W},${H}`, `file://${html}`], { stdio: 'ignore' });
+  for (const theme of ['light', 'dark']) {
+    screenshotSvg(join(out, 'paddock-ecosystem.svg'), join(out, `paddock-ecosystem-${theme}.png`), W, H, theme);
     console.log(`wrote paddock-ecosystem-${theme}.png`);
   }
 }

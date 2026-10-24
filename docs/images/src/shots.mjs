@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+import { findChrome } from './chrome.mjs';
 
 /** tasks: [{ src, x, y, w, h, outW, q? }] in source pixels; returns data URIs in the same order. */
 export function crops(tasks) {
@@ -22,9 +22,9 @@ while(c.width>t.outW){const nw=Math.max(t.outW,Math.round(c.width/2)),nh=Math.ma
 const g=n.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(c,0,0,nw,nh);c=n;}
 out.push(c.toDataURL('image/jpeg',t.q||0.8));}
 document.getElementById('o').textContent='@@'+JSON.stringify(out)+'@@';});</script></body>`);
-  const dom = execFileSync(CHROME, ['--headless=new', '--disable-gpu', '--allow-file-access-from-files', '--dump-dom', `file://${page}`],
+  const dom = execFileSync(findChrome(), ['--headless=new', '--disable-gpu', '--allow-file-access-from-files', '--dump-dom', `file://${page}`],
     { encoding: 'utf8', maxBuffer: 1 << 29, stdio: ['ignore', 'pipe', 'ignore'] });
   const m = dom.match(/@@(\[[\s\S]*\])@@/);
-  if (!m) throw new Error('screenshot crop failed (is Chrome installed? set CHROME)');
+  if (!m) throw new Error('screenshot crop failed (check the CHROME browser)');
   return JSON.parse(m[1]);
 }

@@ -1,17 +1,24 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=f2367e55" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=72d60a6a" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
 the others. All run on Windows, macOS and Linux, are written in Rust with a Tauri 2 shell and an Angular UI, and are local
 only: no cloud, no account, no telemetry.
 
+The foundation has two layers (decided 2026-10-24). The **App shell** is what every app gets: startup protection, notifications
+and service health, dialogs as real windows, jobs and progress, Settings, About and updates, and the theme; Pitcrew, Pitwall,
+Spotter and Dyno are the shell with pages. The **Workbench** sits on top of it for the IDE-style apps, Debrief, Pacenotes and
+Sighter: docked panes with the layout planner, the activity bar, the Explorer, the command palette and the AI pane.
+
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=538a1af4) and [dark](images/paddock-ecosystem-dark.png?v=7e47372c), integrations
-[light](images/paddock-integrations-light.png?v=6c1eb46a) and [dark](images/paddock-integrations-dark.png?v=8b3853e3).
+hero [light](images/paddock-ecosystem-light.png?v=5d36711c) and [dark](images/paddock-ecosystem-dark.png?v=ee5fe350), integrations
+[light](images/paddock-integrations-light.png?v=bb3fc28b) and [dark](images/paddock-integrations-dark.png?v=68a820ad). PNGs are
+rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
+`CHROME` to override).
 
 Each app's marketing art (hero banner, feature showcase, how it works, 1280x640 social card) is generated from one data file per app
 in [`images/src/apps/`](images/src/apps/) by [`images/src/app-poster.mjs`](images/src/app-poster.mjs), into the app's own
@@ -31,12 +38,12 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 | App | Status |
 |---|---|
 | Pitcrew | **v1.0.1 released** |
-| Debrief | **v1.0.0 released** |
-| Pitwall | **v1.0.2 released** (1.0.3 coming) |
+| Debrief | **v1.0.1 released** (1.1 coming) |
+| Pitwall | **v1.0.3 released** (next after Debrief) |
 | Dyno | In development |
 | Spotter | Releasing soon |
-| Sighter | In design |
-| Pacenotes (understands code in any language) | In design |
+| Sighter | In design (after Pitwall) |
+| Pacenotes (understands code in any language) | In design (after Pitwall) |
 
 ## The apps
 
@@ -46,9 +53,9 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 - One merged timeline per instance across processes and machines, with a fast filterable grid.
 - Format detection from content, editable parsing profiles, charts and analysis views (anomalies, patterns, exceptions).
 - Rust engine with a DuckDB store: flat memory on large folders. Safe on hostile input; saved projects open without the original logs.
-- Built-in local AI as the offline fallback; can use Pitwall instead.
+- From 1.1 Pitwall is its AI engine once you pair the two explicitly; the built-in local engine stays as the fallback.
 
-Status: **v1.0.0 released**. Repo: <https://dev.decryptology.net/decryp7/debrief>
+Status: **v1.0.1 released** (1.1 coming). Repo: <https://dev.decryptology.net/decryp7/debrief>
 
 ### Pitcrew
 **Purpose.** Keeps CI runners alive, updated and clean.
@@ -69,7 +76,7 @@ Status: **v1.0.1 released**. Repo: <https://dev.decryptology.net/decryp7/pitcrew
 - MCP client and tool router for tool servers such as Pacenotes.
 - Local only by design: no cloud models, no telemetry; the only traffic is downloads you asked for.
 
-Status: **v1.0.2 released** (1.0.3 coming). Repo: <https://dev.decryptology.net/decryp7/pitwall>
+Status: **v1.0.3 released** (next after Debrief). Repo: <https://dev.decryptology.net/decryp7/pitwall>
 
 ### Dyno
 **Purpose.** Measures, explains and tunes your PC.
@@ -99,7 +106,7 @@ Status: releasing soon. Repo: <https://dev.decryptology.net/decryp7/spotter>
 - Run bundles (video plus steps) that open next to the app's logs in Debrief.
 - An MCP server (`observe`, `observe_image`, `locate`, `click`, `type`, `launch`, ...) that any family app can drive as an MCP host (Debrief reproduces a bug from a video, Pacenotes drives tests), and an agent mode with Pitwall as the local planner. Targets: this PC, or a remote PC under test over RDP from a controller PC (IP-KVM later). Pitwall stays a model server and optional.
 
-Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/sighter>
+Status: **in design** (after Pitwall). Repo: <https://dev.decryptology.net/decryp7/sighter>
 
 ### Pacenotes
 **Purpose.** Understands code in any language (v1 language packs: C, C++, C#, Java, TypeScript/JavaScript, Rust, Python, Go): a dependency graph of every link, code review with your own rules, local semantic search, and a read-only MCP server (also an MCP host) for people and AI tools.
@@ -114,12 +121,12 @@ Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/sighter>
 - Phasing: core, Understand, Review, Debrief bridge and the core language packs first; then Diagrams; then Requirements;
   then Tests and coverage.
 
-Status: **in design**. Repo: <https://dev.decryptology.net/decryp7/pacenotes>
+Status: **in design** (after Pitwall). Repo: <https://dev.decryptology.net/decryp7/pacenotes>
 
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=5466837c" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; Sighter's MCP server is driven by Debrief, Pacenotes or any MCP host; apps hand off files and deep links directly" width="100%">
+  <img src="images/paddock-integrations.svg?v=0f8eac57" alt="Integration architecture: apps call Pitwall's local HTTP API with per-app keys; Pitwall runs the engine as a child process, keeps keys in the OS credential store and acts as MCP client to Pacenotes; Sighter's MCP server is driven by Debrief, Pacenotes or any MCP host; apps hand off files and deep links directly" width="100%">
 </picture>
 
 The apps never depend on each other to do their own job. They meet in a few well-defined places:
@@ -139,7 +146,7 @@ The apps never depend on each other to do their own job. They meet in a few well
 | **Plugin platform** (planned) | Debrief, Pacenotes, later Dyno's tier-3 plugins | Debrief's plugin host, IPC and API (the ADR 0017 model) extracted into shared crates: out-of-process, Rust-only plugins. |
 | **`paddock-pitwall`** (planned) | shared crate in each app | One client for discovery, pairing, keychain keys, retries, priorities, cache headers and capability checks, so no app re-implements Pitwall access. |
 
-What each app uses Pitwall for (the dotted lines in the hero): Debrief, explain and research; Pacenotes, answers, explanations and
+What each app uses Pitwall for (the dotted lines in the hero): Debrief, its AI engine once paired (from 1.1; the built-in engine is the fallback); Pacenotes, answers, explanations and
 embeddings (a two-way link: it is an MCP server, Pitwall is the client); Sighter, vision; Spotter, "What's new" summaries; Dyno,
 diagnosis. Pitcrew does not need it.
 
@@ -157,7 +164,7 @@ diagnosis. Pitcrew does not need it.
 Pitwall is the AI hub, never a dependency. Every app's core works without it:
 
 - Without Pitwall, AI features show a clear state, "Needs local AI, set up Pitwall", never an error or a dead button.
-- Debrief keeps its built-in local AI as the offline fallback.
+- Debrief keeps its built-in local AI as the fallback when Pitwall is not paired or not running.
 - With Pitwall, interactive requests (an Explain click) run first; batch work (labelling, bulk review, extraction) runs at
   batch priority when the machine is idle.
 - Install or remove Pitwall at any time; nothing else needs reconfiguring beyond pairing.

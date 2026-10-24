@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { versionPaddockDocs } from './version-links.mjs';
+import { screenshotSvg } from './chrome.mjs';
 import { Diagram, link } from '../../../diagrams/tools/lib.mjs';
 import { CODEBASE_TOOL } from './family.mjs';
 
@@ -19,7 +20,7 @@ d.t.app = 'Paddock';
 
 // Apps that call Pitwall (left), Pitwall (centre), MCP server (right).
 d.group('apps', 48, 144, 312, 608, 'Apps on this machine');
-const apps = [['debrief', 'Debrief', 'Tauri app', 'Explain, research, summaries.'], ['spotter', 'Spotter', 'Tauri app', 'What’s-new summaries.'],
+const apps = [['debrief', 'Debrief', 'Tauri app', 'AI engine from 1.1; built-in engine as fallback.'], ['spotter', 'Spotter', 'Tauri app', 'What’s-new summaries.'],
   ['dyno', 'Dyno', 'Tauri app and agent', 'Diagnosis in plain words.'], ['sighter', 'Sighter', 'Tauri app and server', 'Vision, and the agent planner (tool calling).']];
 apps.forEach(([id, name, tech, desc], i) => d.node(id, 72, 192 + i * 112, 264, 88, 'process', { name, tech, desc, planned: id === 'sighter' }));
 d.node('lib', 72, 640, 264, 88, 'core', { name: 'paddock-pitwall', tech: 'Rust crate in each app', desc: 'Discovery, pairing, keys, retries.', planned: true });
@@ -36,7 +37,7 @@ d.note('local', 496, 664, 600, 'Local only: the sole outbound traffic is the mod
 d.node('code', 1232, 192, 248, null, 'process', { name: `${CODEBASE_TOOL}`, tech: 'MCP server, read-only', desc: 'Any language: dependency graph, review, local search. MCP server (read-only) and host.', planned: true });
 d.node('mcpc', 1232, 392, 248, 88, 'external', { name: 'Other MCP clients', tech: 'editors, scripts', desc: 'Same server, same tools.' });
 
-link(d, 'debrief', 'R', 'api', 'L', { label: 'HTTP and key' });
+link(d, 'debrief', 'R', 'api', 'L', { label: 'AI engine, paired' });
 ['spotter', 'dyno', 'sighter'].forEach((a) => link(d, a, 'R', 'api', 'L'));
 link(d, 'api', 'R', 'router', 'L');
 link(d, 'api', 'R', 'eng', 'L');
@@ -81,14 +82,10 @@ const tmp = join(process.env.TMPDIR || '/tmp', 'paddock-int');
 execFileSync(join(here, '../../../diagrams/scripts/export-diagrams.sh'), [src, tmp, 'paddock-integrations'], { env: { ...process.env, DRAWIO: drawio }, stdio: 'inherit' });
 copyFileSync(join(tmp, 'svg', 'paddock-integrations.svg'), join(out, 'paddock-integrations.svg'));
 if (process.argv.includes('--png')) {
-  const chrome = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   const m = readFileSync(join(out, 'paddock-integrations.svg'), 'utf8').match(/width="(\d+)px" height="(\d+)px"/);
   const [W, H] = [Number(m[1]), Number(m[2])];
-  for (const [theme, bg] of [['light', '#ffffff'], ['dark', '#0d1117']]) {
-    const html = join(tmp, `${theme}.html`);
-    writeFileSync(html, `<!doctype html><meta name="color-scheme" content="${theme}"><style>html,body{margin:0;background:${bg};color-scheme:${theme}}img{display:block}</style><img src="file://${join(out, 'paddock-integrations.svg')}" width="${W}" height="${H}">`);
-    execFileSync(chrome, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=2', `--force-dark-mode=${theme === 'dark'}`,
-      `--screenshot=${join(out, `paddock-integrations-${theme}.png`)}`, `--window-size=${W},${H}`, `file://${html}`], { stdio: 'ignore' });
+  for (const theme of ['light', 'dark']) {
+    screenshotSvg(join(out, 'paddock-integrations.svg'), join(out, `paddock-integrations-${theme}.png`), W, H, theme);
     console.log(`wrote paddock-integrations-${theme}.png`);
   }
 }

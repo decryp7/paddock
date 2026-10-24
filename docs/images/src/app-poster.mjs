@@ -10,8 +10,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
 import { versionFile } from './version-links.mjs';
+import { screenshotSvg } from './chrome.mjs';
 import { crops } from './shots.mjs';
 import { glyph } from './glyphs.mjs';
 import { STATUS } from './family.mjs';
@@ -255,15 +255,7 @@ ${pill(72, 568, d.planned ? 'Planned · coming soon' : STATUS[d.id]?.text ?? d.s
 }
 
 // ---- render ------------------------------------------------------------------------------------------------------------
-function png(svgPath, outPath, w, h, theme, scale) {
-  const chrome = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-  const tmp = process.env.TMPDIR || '/tmp';
-  const html = join(tmp, `paddock-poster-${theme}-${process.pid}.html`);
-  const bg = theme === 'dark' ? '#0d1117' : '#ffffff';
-  writeFileSync(html, `<!doctype html><meta name="color-scheme" content="${theme}"><style>html,body{margin:0;background:${bg};color-scheme:${theme}}img{display:block}</style><img src="file://${svgPath}" width="${w}" height="${h}">`);
-  execFileSync(chrome, ['--headless=new', '--disable-gpu', '--hide-scrollbars', `--force-device-scale-factor=${scale}`, `--force-dark-mode=${theme === 'dark'}`,
-    `--screenshot=${outPath}`, `--window-size=${w},${h}`, `file://${html}`], { stdio: 'ignore' });
-}
+const png = (svgPath, outPath, w, h, theme, scale) => screenshotSvg(svgPath, outPath, w, h, theme, scale);
 const dims = (svg) => { const m = svg.match(/<svg[^>]* width="(\d+)" height="(\d+)"/); return [+m[1], +m[2]]; };
 
 async function build(id, wantPng) {
