@@ -357,7 +357,7 @@ jobs:
       # paddock-testplan/fuzz is built by the nightly fuzz job.
       - name: paddock-testplan
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-testplan --all-targets --all-features -- -D warnings && cargo test -p paddock-testplan --all-features
+        run: cargo clippy -p paddock-testplan --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-testplan --all-features --profile ci && cargo test -p paddock-testplan --all-features --doc
 
       - name: paddock-metrics
         if: ${{ !cancelled() }}

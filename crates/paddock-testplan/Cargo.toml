@@ -11,6 +11,7 @@ publish = ["decryp7"]
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 toml = "0.9"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 proptest = "1"
