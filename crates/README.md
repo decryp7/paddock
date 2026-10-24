@@ -347,7 +347,7 @@ health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.
     user who is looking at the window gets the message in the centre only. `Setup::os_digest_every(d)` polls on a thread that
     ends with the app (quiet hours end by the clock, not an event); a window gaining the focus polls too.
   - Tests never post a notification: `FakeToaster` records toasts, plays clicks and permission answers (public, for the
-    apps' wiring tests); `FixedOffset` stands for the user's zone, `ManualClock` for time.
+    apps' wiring tests); `FixedOffset` stands for the user's zone, `FakeClock` for time.
 
 ## `paddock-startup` (plan S7 and §11)
 
@@ -714,6 +714,10 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 - `launch`/`child`: `ChildSpec` → `paddock_proc::Supervised` (no console window, own process group, tree ended on drop,
   optional `MemoryCap`, clean environment), the `Bootstrap` JSON line on stdin (stdin stays open as the lifeline), and the
   child's `serve`/`read_bootstrap`/`connect`/`lifeline`. `Bootstrap::extra` carries what an app adds (Debrief's sandbox).
+- Every limit runs on an injected clock (`PeerOptions::clock`, `Host::with_clock`, `ServerConfig::clock`); each client of a
+  `LinkServer` is authenticated on its own thread within `handshake_timeout`, so a silent client delays nobody; the server
+  caps `max_connections` and `max_handshakes` (`busy`), and `Subscriptions` push a topic's events to the connections that
+  asked for it.
 - `link`: `Discovery` (endpoint, token, pid, build, protocol; written owner-only through `paddock_env::write_atomic`, read
   bounded; `Found::Stale` for a dead pid, `Found::Untrusted` for a file others could write), `LinkServer` (accept thread,
   `peers()` for pushes, removes its file on stop), `LinkClient` (state `Connecting`/`Connected`/`Retrying`/`GaveUp`/`Stopped`,

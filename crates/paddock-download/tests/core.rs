@@ -12,7 +12,7 @@ use paddock_jobs::{CancelReason, JobError};
 use std::io::{self, Cursor, Read};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 use support::{blob, job, sha256_hex};
 
 // ---- pure parts ----
@@ -160,9 +160,9 @@ fn host_caps_count_per_host_and_clamp_their_limits() {
     );
     assert_eq!((caps.in_use("nobody"), caps.peak("nobody")), (0, 0));
     // A later back-off wins over an earlier one, an earlier one does not shorten it.
-    let now = Instant::now();
-    caps.back_off("h", now + Duration::from_secs(5));
-    caps.back_off("h", now + Duration::from_secs(1));
+    caps.back_off("h", Duration::from_secs(5));
+    caps.back_off("h", Duration::from_secs(1));
+    assert_eq!(caps.held("h"), 0);
 }
 
 #[test]

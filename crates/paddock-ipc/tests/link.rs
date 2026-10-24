@@ -389,3 +389,52 @@ fn a_companion_asked_through_the_apps_protocol_makes_way() {
     drop(client);
     launcher.started.lock().unwrap().clear();
 }
+
+#[test]
+fn stopping_ends_a_connected_or_given_up_client() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("agent.json");
+    let _server = server(&path, "b1");
+    let clock = FakeClock::new();
+    let mut connected = fake_client(&path, &clock, BackoffPolicy::default());
+    assert!(connected.wait_connected(GUARD).is_some());
+    connected.stop();
+    assert_eq!(connected.state(), LinkState::Stopped);
+    // Given up: a stop ends the wait for Retry.
+    let other = dir.path().join("none.json");
+    let policy = BackoffPolicy {
+        give_up: Some(GiveUp {
+            max_failures: 0,
+            window: Duration::from_secs(600),
+        }),
+        ..BackoffPolicy::default()
+    };
+    let mut gave_up = fake_client(&other, &clock, policy);
+    gave_up
+        .wait_for(GUARD, |s| matches!(s, LinkState::GaveUp { .. }))
+        .unwrap();
+    gave_up.stop();
+    assert_eq!(gave_up.state(), LinkState::Stopped);
+}
+
+#[test]
+fn a_companion_that_does_not_exit_is_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("agent.json");
+    // A pid no process can have: `terminate` reaches nobody, and the injected check says it still runs.
+    sample(4_000_000).write(&path).unwrap();
+    let mut c = ClientConfig::new(&path, "2.0.0", "the agent");
+    c.is_alive = Arc::new(|_| true);
+    c.start_wait = Duration::ZERO;
+    c.replace = Replace::Terminate {
+        grace: Duration::ZERO,
+    };
+    let client = LinkClient::start(c, None, None, None).unwrap();
+    let s = client
+        .wait_for(
+            GUARD,
+            |s| matches!(s, LinkState::Retrying { reason, .. } if reason.contains("did not exit")),
+        )
+        .unwrap();
+    assert!(matches!(s, LinkState::Retrying { .. }));
+}
