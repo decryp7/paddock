@@ -5,6 +5,22 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Pages frame (plan S14, ADR 0012): `@decryp7/paddock-ui/shell/pages` composes a manager app's whole main window from its
+  contributions with `provideShellPages({ appName, notify, jobs, startup, nativeMenu, dialogs, routes, paths, sidebar,
+  icon })` and `<pd-shell-frame />`: routes for the contributed pages (hash URLs by default; each page lazy with its own
+  providers through `loadPart`, `when` guarded, the first page for the empty path and anything unknown, "Page – App"
+  window titles), the sidebar (`pd-pages-sidebar`: top and bottom pages, neutral badges, arrow keys) expanded, an icon rail
+  or over the page with a scrim as `planLayout` leaves room (`sidebarFit`; the user's collapse kept under
+  `paddock.pages.sidebar`), `ShellPages` (`showPage` port, a page that stops being offered gives way), the menu bar and
+  keys (F6/Shift+F6 regions reserved), notifications, jobs, dialogs and the start-up contract with the native menu built
+  after ready. The root shell entry gains the frame parts shared with the workbench: `pd-title-bar`, `pd-status-bar`
+  (contributed status items by side and priority, the lowest hidden when narrow with "Show all status items",
+  `planStatusBar`), `pd-part-outlet` (lazy part with skeleton or error and Try again), `pd-icon` with the `SHELL_ICON`
+  port and the shell's `pd:` icons, and F6 region helpers. `planLayout` (ADR 0011) moves from Debrief to the root entry
+  with its spec. `@angular/router` (^22) is an optional peer dependency. `shell-demo` is now a full pages app (Overview,
+  Dialogs, Keyboard, Activity with page providers and a badge, a conditional Lab, About; a status item of its own; its
+  own icon component) with Chromium e2e for navigation, lazy pages, conditions, status bar parts, every width from 320 px,
+  F6 regions and axe in both themes, and screenshots in `ui/docs/screenshots/shell-demo/`.
 - Menus and keys (plan S13, ADR 0012; ported from Debrief ADR 0008 and `menu.rs`): crate `paddock-menu` 0.1.0 validates the
   UI's menu model (`parse`: limits on menus, entries, depth, ids, labels; key bindings to native accelerators), builds the
   macOS menu bar with the standard items (`native_spec`: app menu with Services and Hide and `pd.app.quit` last, Edit

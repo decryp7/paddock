@@ -1,7 +1,8 @@
 /**
  * `@decryp7/paddock-ui/shell`: the shell core. Contributions (`define*`, `provideContributions`), the registry, the
  * typed context `ShellContext<T>`, the command service and the manifest Rust checks (ADR 0012 §2; plan S2, §9).
- * The frame parts and widgets arrive with plan S14.
+ * The frame parts every frame shares (plan S14, §5.5): the title bar, the status bar with its contributed items, the lazy
+ * part outlet, the icon port and F6 region navigation; the pages frame (`shell/pages`) and the workbench compose them.
  */
 export { msg, isMessage, CONTRIBUTION_ID, type Message } from './src/message';
 export { type ShellTypes, type AppCommandName, type IpcCommandName, type TypeToken, type } from './src/types';
@@ -106,3 +107,10 @@ export {
   type ManifestNotificationKind,
   type ManifestParse,
 } from './src/manifest';
+// The frame parts shared by the pages frame and the workbench (plan S14, §5.5).
+export { PdTitleBar } from './src/frame/title-bar';
+export { PdStatusBar, PdStatusMeasure } from './src/frame/status-bar';
+export { planStatusBar, type StatusSlot, type StatusPlan } from './src/frame/status-layout';
+export { PdPartOutlet, type PartStatus } from './src/frame/part-outlet';
+export { PdIcon, PdShellIcon, SHELL_ICON, SHELL_ICON_PATHS, provideShellIcon, iconLetter } from './src/frame/icon';
+export { REGION_ATTR, REGION_KEYS, regionsOf, regionIndex, regionTarget, cycleRegions, regionKey, shown as regionShown } from './src/frame/regions';

@@ -70,7 +70,7 @@ const ping = (page: Page, seq: number) => page.evaluate((s) => (window as unknow
 const pongs = async (page: Page) =>
   (await calls(page)).filter((c) => c.cmd === 'window_pong').map((c) => ({ seq: (c.args as { seq: number }).seq, at: c.at }));
 
-const heading = (page: Page) => page.getByRole('heading', { level: 1, name: 'Paddock shell demo' });
+const heading = (page: Page) => page.getByRole('heading', { level: 1, name: 'Overview' });
 // Notices are the notification host's toasts (plan S4).
 const notices = (page: Page) => page.getByRole('region', { name: 'Notifications', exact: true });
 const note = (page: Page) => page.getByRole('textbox', { name: 'Note' });
