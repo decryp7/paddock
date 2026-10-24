@@ -196,10 +196,12 @@ describe('pd-glyph', () => {
     expect(el.getAttribute('aria-hidden')).toBe('true');
     expect(el.querySelector('svg')?.getAttribute('width')).toBe('20');
     expect(el.querySelector('path')?.getAttribute('d')).toContain('M20 12a8 8');
-    expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.8');
+    // 1.5 screen px at any size: the paths do not scale their stroke.
+    expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.5');
+    expect(el.querySelector('path')?.getAttribute('vector-effect')).toBe('non-scaling-stroke');
     f.componentRef.setInput('size', 24);
     f.detectChanges();
-    expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.75');
+    expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.5');
     f.componentRef.setInput('stroke', 3);
     f.detectChanges();
     expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('3');
@@ -209,6 +211,19 @@ describe('pd-glyph', () => {
     f.componentRef.setInput('paths', '');
     f.componentRef.setInput('name', 'nothing');
     f.detectChanges();
-    expect(el.querySelector('path')?.getAttribute('d')).toBe('');
+    expect(el.querySelector('path')).toBeNull();
+  });
+
+  it('draws the dots of a glyph as solid filled circles (no stroke)', () => {
+    const f = TestBed.createComponent(PdGlyph);
+    f.componentRef.setInput('name', 'more');
+    f.detectChanges();
+    const dots = (f.nativeElement as HTMLElement).querySelectorAll('circle');
+    expect(dots).toHaveLength(3);
+    for (const c of Array.from(dots)) {
+      expect(c.getAttribute('fill')).toBe('currentColor');
+      expect(c.getAttribute('stroke')).toBe('none');
+      expect(Number(c.getAttribute('r'))).toBeGreaterThanOrEqual(1);
+    }
   });
 });
