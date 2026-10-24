@@ -54,9 +54,78 @@ impl Verb {
     }
 }
 
+impl Verb {
+    /// What the verb does, in one line (the text of `--help`).
+    pub fn description(self) -> &'static str {
+        match self {
+            Verb::Install => "register with the OS and start",
+            Verb::Uninstall => "stop and remove the registration (succeeds when there is none)",
+            Verb::Status => {
+                "print whether it is registered and running (exit 3 when it is not running)"
+            }
+            Verb::Stop => "ask a running instance to stop",
+            Verb::PrintUnit => "print the systemd unit `install` would write",
+            Verb::PrintPlist => "print the launchd plist `install` would write",
+            Verb::WindowsService => {
+                "run under the Windows Service Control Manager (the OS starts this)"
+            }
+        }
+    }
+
+    /// Adds every verb to a program's `--help` in the family's style ([`paddock_cli::Help`]).
+    pub fn add_to_help(help: paddock_cli::Help) -> paddock_cli::Help {
+        Verb::ALL
+            .into_iter()
+            .fold(help, |h, v| h.command(v.word(), v.description()))
+    }
+
+    /// The exit code of `status`: `Ok` while it is running, `NotRunning` otherwise (scripts and the installer branch on it).
+    pub fn status_exit(running: bool) -> paddock_cli::Exit {
+        if running {
+            paddock_cli::Exit::Ok
+        } else {
+            paddock_cli::Exit::NotRunning
+        }
+    }
+
+    /// The error for a verb given arguments it does not take (`install --now`), naming the verb and the next step.
+    pub fn reject_extra<S: AsRef<str>>(self, extra: &[S]) -> Result<(), paddock_cli::CliError> {
+        match extra.first() {
+            None => Ok(()),
+            Some(a) => Err(paddock_cli::CliError::usage(format!(
+                "`{}` takes no arguments, but got `{}`.",
+                self.word(),
+                a.as_ref()
+            ))
+            .with_hint(format!("Run it as just `{}`.", self.word()))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbs_speak_the_cli_conventions() {
+        let help =
+            Verb::add_to_help(paddock_cli::Help::new("app-service", "background service")).render();
+        for v in Verb::ALL {
+            assert!(
+                help.contains(v.word()) && help.contains(v.description()),
+                "{help}"
+            );
+        }
+        assert_eq!(Verb::status_exit(true).code(), 0);
+        assert_eq!(Verb::status_exit(false).code(), 3);
+        assert!(Verb::Install.reject_extra::<&str>(&[]).is_ok());
+        let e = Verb::Install.reject_extra(&["--now"]).unwrap_err();
+        assert_eq!(e.exit, paddock_cli::Exit::Usage);
+        assert!(
+            e.text().contains("`install` takes no arguments") && e.text().contains("--now"),
+            "{e}"
+        );
+    }
 
     #[test]
     fn only_a_leading_verb_is_taken() {

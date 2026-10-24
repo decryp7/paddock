@@ -212,6 +212,8 @@ pub struct FakePitwall {
     /// The loopback port.
     pub port: u16,
     shared: Arc<Shared>,
+    /// The accept loop; `kill` waits for it, because the port is closed only when it drops the listener.
+    acceptor: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Drop for FakePitwall {
@@ -231,7 +233,7 @@ impl FakePitwall {
             gate: (Mutex::new(false), Condvar::new()),
         });
         let s = shared.clone();
-        std::thread::spawn(move || {
+        let acceptor = std::thread::spawn(move || {
             // Blocks in `accept`; `kill` connects once to wake it.
             for conn in listener.incoming() {
                 if s.stop.load(Ordering::Relaxed) {
@@ -242,7 +244,11 @@ impl FakePitwall {
                 std::thread::spawn(move || serve(conn, &s));
             }
         });
-        FakePitwall { port, shared }
+        FakePitwall {
+            port,
+            shared,
+            acceptor: Mutex::new(Some(acceptor)),
+        }
     }
 
     /// The script and the log.
@@ -271,8 +277,24 @@ impl FakePitwall {
     pub fn kill(&self) {
         self.shared.stop.store(true, Ordering::Relaxed);
         self.release();
-        // Wake the accept loop.
-        let _ = TcpStream::connect(("127.0.0.1", self.port));
+        // Wake the accept loop until it has ended: once it drops the listener the port refuses connections, so a request
+        // made after `kill` returns never reaches a half-closed server (it would read as "stopped answering", not "not
+        // running"). A wake-up that is lost (a full backlog) is repeated; the wait is bounded.
+        let acceptor = self
+            .acceptor
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
+        if let Some(acceptor) = acceptor {
+            let give_up = std::time::Instant::now() + Duration::from_secs(10);
+            while !acceptor.is_finished() && std::time::Instant::now() < give_up {
+                let _ = TcpStream::connect(("127.0.0.1", self.port));
+                std::thread::yield_now();
+            }
+            if acceptor.is_finished() {
+                let _ = acceptor.join();
+            }
+        }
     }
 
     /// The requests to `path` it saw: (method, headers, body).
