@@ -87,7 +87,7 @@ test.describe('screenshots', () => {
         const dir = join(root, theme, accent);
         mkdirSync(dir, { recursive: true });
         for (const section of SECTIONS) {
-          await page.locator(`[data-testid="${section}"]`).screenshot({ path: join(dir, `${section}.png`) });
+          await page.locator(`section[data-testid="${section}"]`).screenshot({ path: join(dir, `${section}.png`) });
         }
         if (accent === 'debrief' || accent === 'dyno') {
           await page.screenshot({ path: join(root, `gallery-${theme}-${accent}.png`), fullPage: false });
