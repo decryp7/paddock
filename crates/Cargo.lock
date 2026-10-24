@@ -3017,6 +3017,7 @@ dependencies = [
  "jsonschema",
  "paddock-cli",
  "paddock-env",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",
@@ -3044,6 +3045,7 @@ name = "paddock-cli"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "paddock-workspace-hack",
  "serde_json",
 ]
 
@@ -3410,8 +3412,10 @@ dependencies = [
  "bitflags 2.13.2",
  "block2",
  "cairo-sys-rs",
+ "chrono",
  "crc32fast",
  "deranged",
+ "email_address",
  "flate2",
  "futures-core",
  "getrandom 0.3.4",
@@ -3427,6 +3431,7 @@ dependencies = [
  "log",
  "memchr",
  "mio",
+ "num",
  "num-traits",
  "objc2",
  "objc2-app-kit",
