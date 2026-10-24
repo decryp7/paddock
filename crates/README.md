@@ -92,7 +92,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
-| `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
+| `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
+| `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
@@ -677,6 +678,49 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   when an app's tests set `PADDOCK_SECRETS_FORBID_REAL=1` (put it in the app's test environment), so a test that reaches the
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
+
+## `paddock-ipc` (plan X13, ADR 0001 step 1)
+
+The family's one IPC between an app and its own processes (workers, plugins, agents, services), from Debrief's
+`debrief-ipc` (frames, peer with credits and cancel, launcher, child loop) and Dyno's `dyno-ipc` (sync threads, token,
+endpoint, pushes), with Pitcrew's service pipe access list. Synchronous and thread-based, no async runtime; HTTP on loopback
+stays only for Pitwall's public API (D5).
+
+```rust
+// A child that connects back (a worker or plugin).
+let child = paddock_ipc::launch(&ChildSpec::new(exe, "the AI worker").arg("--worker"), Arc::new(NoCalls))?;
+let answer: Reply = child.peer().request(&Request::Ask(q), Some(Duration::from_secs(30)))?;
+// In the child's main: paddock_ipc::child::serve("Debrief", PROTOCOL, |_| Arc::new(typed(handle)), |_, _| {})
+
+// A companion the app did not necessarily start (agent, service).
+let server = LinkServer::start(ServerConfig::new(dirs.runtime().join("agent.json"), BUILD), handler)?; // companion
+let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json"), BUILD, "the agent"),
+                               None, Some(launcher), Some(on_state))?;                              // app
+```
+
+- `frame`: 4-byte length + postcard `Frame` (Debrief's frame version 2 plus `Push` at the end), `FrameLimit` 1 KiB to 64 MiB
+  (16 MiB default). A frame over the limit is skipped without being allocated and fails only its call (`IpcError::TooLarge`,
+  or a `tooLarge` failure to the other side); a length beyond 64 MiB or garbage ends the connection. `ProtocolVersion`
+  (same major, known minor) refuses with a message that says which side to update.
+- `endpoint`: a Unix socket in a 0700 folder (`Listener::bind_in(AppDirs::runtime())`, temporary folder as fallback) or a
+  named pipe with an `Access` list: `owner_only()` (D:P(A;;GA;;;OW), 0600) or `service_for_interactive_users()` (Pitcrew's
+  SDDL for a Windows service serving the user's app); fixed endpoints for services (`Listener::bind_fixed`).
+- `handshake`: `Host`/`Client`; `Hello { version, protocol, token, pid }` checked in constant time and against the pid the OS
+  reports (and the launched child's pid); refusals are `Fail { id: 0 }` with code `version` or `auth`.
+- `peer`: `call`/`request` (timeout, then cancel and `cancel_grace`), `stream`/`CallStream` (credits; drop cancels),
+  `push`/`on_push` (bounded, dropped and counted when the listener lags), `Handler`/`typed`, `CallCtx` (`send_item`,
+  `is_cancelled`, `cancel_probe`, call back into the other side), `max_concurrent_calls` (`busy`). Codes in `codes`.
+- `launch`/`child`: `ChildSpec` → `paddock_proc::Supervised` (no console window, own process group, tree ended on drop,
+  optional `MemoryCap`, clean environment), the `Bootstrap` JSON line on stdin (stdin stays open as the lifeline), and the
+  child's `serve`/`read_bootstrap`/`connect`/`lifeline`. `Bootstrap::extra` carries what an app adds (Debrief's sandbox).
+- `link`: `Discovery` (endpoint, token, pid, build, protocol; written owner-only through `paddock_env::write_atomic`, read
+  bounded; `Found::Stale` for a dead pid, `Found::Untrusted` for a file others could write), `LinkServer` (accept thread,
+  `peers()` for pushes, removes its file on stop), `LinkClient` (state `Connecting`/`Connected`/`Retrying`/`GaveUp`/`Stopped`,
+  `paddock_jobs::time::Backoff` on the injected clock, `retry()`, `Replace::{Terminate, Ask, Never}` for a companion of
+  another build; never its own process), and the pure `plan`.
+- Tests start real processes through the `paddock-ipc-test-child` binary and leave none behind; nothing sleeps or measures
+  time (gates, channels, a `FakeClock` for the back-off). `fuzz/` holds the frame-codec fuzz target
+  (`cargo +nightly fuzz run frame`).
 
 ## `paddock-env` (plan X7)
 
