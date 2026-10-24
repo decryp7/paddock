@@ -3194,6 +3194,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-metrics"
+version = "0.1.0"
+dependencies = [
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-proc",
+ "paddock-testkit",
+ "serde",
+ "serde_json",
+ "sysinfo",
+]
+
+[[package]]
 name = "paddock-names"
 version = "0.1.0"
 dependencies = [

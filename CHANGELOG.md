@@ -5,6 +5,9 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
+  dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
+  volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.
 - The app IPC kit (plan X28). `paddock_commands::CommandError` / `ErrorCode`: the one error envelope (code, message, retryable,
   hint, field, cause, kind), with constructors, `From` for `io::Error`, strings and the guard's `Refusal`, and its TypeScript
   generated into `@decryp7/paddock-ui/ipc`. `@decryp7/paddock-ui/ipc`: `toCommandError`, `CommandFailure`, `withCallTimeout` (a
