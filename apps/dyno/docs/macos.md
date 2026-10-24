@@ -29,8 +29,11 @@ Open the `.dmg`, drag Dyno to Applications and open it the first time with right
 **System Settings > General > Login Items & Extensions**. No administrator rights are needed.
 
 Why ad-hoc signing matters: `SMAppService` and launch agents refuse a linker-signed bundle (error -67056). After an update
-launchd may keep the previous code requirement and refuse the new agent ("needs LWCR update", spawn failed); Dyno detects that
-and registers again by itself.
+launchd may keep the previous code requirement and refuse the new agent ("needs LWCR update", spawn failed, exit 78 EX_CONFIG).
+Registering again over the old job does not help, so Dyno replaces it by itself: once after every version change, and whenever
+launchd reports it stale while the agent does not answer, it unregisters, runs `launchctl bootout`, waits until launchd has
+dropped the job, registers again and retries a bounded number of times (`app/src-tauri/src/service_repair.rs`; each step is in
+Dyno's log). An item you switched off in Login Items is left alone.
 
 ## 3. Verify
 

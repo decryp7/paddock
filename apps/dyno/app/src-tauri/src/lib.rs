@@ -10,6 +10,7 @@ pub mod logging;
 pub mod login;
 pub mod native_feel;
 pub mod popover;
+pub mod service_repair;
 pub mod shell;
 pub mod tray;
 pub mod tray_model;
@@ -95,12 +96,15 @@ pub fn run() {
                 window::show_main(app.handle());
             }
             // After an update launchd may refuse the registered agent (a rebuilt app has a new code identity on
-            // macOS): register it again in the background, so measuring resumes without the user's help.
+            // macOS) or keep the old job: replace the registration once per version and whenever launchd says it is
+            // stale (`service_repair`), in the background, so measuring resumes without the user's help.
             let repair = link.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(5));
-                match login::platform_service().repair(repair.connected()) {
-                    Ok(true) => logging::info("registered the agent service again (the OS refused the old registration)"),
+                match login::platform_service().repair(&|| repair.connected()) {
+                    Ok(true) => {
+                        logging::info("registered the agent service again (a new version, or launchd refused the old registration)")
+                    }
                     Ok(false) => {}
                     Err(e) => logging::info(&format!("the agent service could not be registered again: {e}")),
                 }

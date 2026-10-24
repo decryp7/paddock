@@ -46,6 +46,11 @@ impl Runner for SystemRunner {
     }
 }
 
+/// How long launchd gets to drop a booted-out job before it is bootstrapped again, and how often it is asked.
+pub const GONE_WAIT: Duration = Duration::from_secs(20);
+/// See [`GONE_WAIT`].
+pub const GONE_POLL: Duration = Duration::from_secs(1);
+
 /// A per-user service manager for the current OS.
 pub struct Service {
     exe: PathBuf,
@@ -53,6 +58,7 @@ pub struct Service {
     uid: u32,
     runner: Box<dyn Runner>,
     os: Os,
+    pause: Box<dyn FnMut(Duration) + Send>,
 }
 
 /// Which flavour of service.
@@ -98,7 +104,15 @@ impl Service {
             uid,
             runner,
             os,
+            pause: Box::new(std::thread::sleep),
         }
+    }
+
+    /// The same service waiting with `pause` instead of sleeping (tests).
+    #[must_use]
+    pub fn with_pause(mut self, pause: impl FnMut(Duration) + Send + 'static) -> Service {
+        self.pause = Box::new(pause);
+        self
     }
 
     fn plist_path(&self) -> PathBuf {
@@ -121,9 +135,15 @@ impl Service {
                 std::fs::create_dir_all(&log).map_err(|e| format!("Could not create {}: {e}", log.display()))?;
                 write(&self.plist_path(), &spec::launch_agent_plist(&self.exe, &log))?;
                 // Re-register from scratch: after an app update launchd may hold the old definition, or fail to
-                // spawn the new binary until it is bootstrapped again.
+                // spawn the new binary until it is bootstrapped again. Bootstrapping over a job launchd still holds
+                // does nothing, so wait (bounded) until it has dropped it (Paddock rule 24).
                 let target = format!("{}/{LABEL}", self.domain());
                 let _ = self.runner.run("/bin/launchctl", &["bootout", &target]);
+                let mut waited = Duration::ZERO;
+                while self.job_loaded(&target) && waited < GONE_WAIT {
+                    (self.pause)(GONE_POLL);
+                    waited += GONE_POLL;
+                }
                 let path = self.plist_path();
                 self.check("/bin/launchctl", &["bootstrap", &self.domain(), &path.to_string_lossy()])
             }
@@ -218,6 +238,13 @@ impl Service {
             }
             _ => Ok(false),
         }
+    }
+
+    /// Whether launchd still knows the job `target` (`launchctl print` succeeds and reports a state).
+    fn job_loaded(&mut self, target: &str) -> bool {
+        self.runner
+            .run("/bin/launchctl", &["print", target])
+            .is_ok_and(|(ok, out)| ok && out.contains("state = "))
     }
 
     fn check(&mut self, program: &str, args: &[&str]) -> Result<(), String> {

@@ -5,8 +5,9 @@
 //! - the agent as a per-user service: `SMAppService` on macOS (the plist inside the bundle), a systemd user unit on
 //!   Linux and the per-user `Run` entry on Windows (`dyno_agent::service`).
 //!
-//! The OS parts sit behind two small traits so the orchestration and the re-registration decision are unit-tested with
-//! fakes; nothing in the tests touches a real launch agent, unit or registry key.
+//! The OS parts sit behind two small traits so the orchestration is unit-tested with fakes; the macOS re-registration
+//! after an update is decided and run by [`crate::service_repair`] (also over fakes). Nothing in the tests touches a
+//! real launch agent, unit or registry key.
 
 use std::path::PathBuf;
 
@@ -18,8 +19,9 @@ pub trait AgentService: Send {
     fn install(&mut self) -> Result<(), String>;
     /// Stops and removes it.
     fn uninstall(&mut self) -> Result<(), String>;
-    /// Registers it again when the OS cannot start what is registered (after an update). Returns whether it did.
-    fn repair(&mut self, agent_answers: bool) -> Result<bool, String>;
+    /// Registers it again when the OS cannot start what is registered, and on macOS once after every version change
+    /// (an update). `agent_answers` asks whether the agent answers now. Returns whether it registered again.
+    fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String>;
 }
 
 /// The app's own start-at-login entry.
@@ -50,21 +52,6 @@ pub fn apply_launch_at_login(on: bool, service: &mut dyn AgentService, autostart
     } else {
         Err(format!("Your settings are saved, but {}.", problems.join("; and ")))
     }
-}
-
-/// Whether `launchctl print` of the launch agent shows a registration launchd can no longer start. macOS keeps the code
-/// requirement of the binary that was approved; a rebuilt, ad-hoc signed app has another identity, so launchd refuses
-/// the new agent ("needs LWCR update", spawn failed, exit 78 EX_CONFIG) until it is registered again.
-pub fn stale_registration(launchctl_print: &str) -> bool {
-    launchctl_print.contains("needs LWCR update")
-        || launchctl_print.contains("job state = spawn failed")
-        || launchctl_print.contains("last exit code = 78")
-}
-
-/// Whether a registered macOS agent must be registered again: it is enabled, does not answer, and launchd says its
-/// registration is stale.
-pub fn needs_reregistration(enabled: bool, agent_answers: bool, launchctl_print: Option<&str>) -> bool {
-    enabled && !agent_answers && launchctl_print.is_some_and(stale_registration)
 }
 
 /// The agent program next to the app (or `DYNO_AGENT_BIN`).
@@ -101,7 +88,7 @@ impl AgentService for CliService {
         self.service()?.uninstall()
     }
 
-    fn repair(&mut self, _agent_answers: bool) -> Result<bool, String> {
+    fn repair(&mut self, _agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
         self.service()?.ensure()
     }
 }
@@ -119,8 +106,14 @@ mod mac {
     #![allow(unsafe_code, unused_unsafe)]
 
     use super::*;
+    use crate::service_repair::{
+        keep_registered, parse_job, parse_print_disabled, plan, record_registered_version, registered_version, JobReport, Observed,
+        RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
+    };
+    use dyno_agent::service::LABEL;
     use objc2_foundation::NSString;
     use objc2_service_management::{SMAppService, SMAppServiceStatus};
+    use std::time::{Duration, Instant};
 
     const PLIST: &str = "net.decryptology.dyno.agent.plist";
 
@@ -138,18 +131,87 @@ mod mac {
         unsafe { service().status() }
     }
 
-    /// `launchctl print gui/<uid>/<label>`, bounded to a few seconds; `None` when it cannot be read.
-    fn launchctl_print() -> Option<String> {
+    fn registration_status() -> RegistrationStatus {
+        match status() {
+            SMAppServiceStatus::Enabled => RegistrationStatus::Enabled,
+            SMAppServiceStatus::RequiresApproval => RegistrationStatus::RequiresApproval,
+            SMAppServiceStatus::NotFound => RegistrationStatus::NotFound,
+            _ => RegistrationStatus::NotRegistered,
+        }
+    }
+
+    /// Registers the launch agent; with `open_settings` a missing approval opens Login Items for the user (only when
+    /// the user asked: the background repair never opens a window).
+    fn register(open_settings: bool) -> Result<(), RegisterError> {
+        let s = service();
+        // SAFETY: a method call on a valid object; the error is returned as a Retained NSError.
+        match unsafe { s.registerAndReturnError() } {
+            Ok(()) => {
+                record_version();
+                Ok(())
+            }
+            Err(e) => {
+                if status() == SMAppServiceStatus::RequiresApproval {
+                    if open_settings {
+                        // SAFETY: a class method without arguments.
+                        unsafe { SMAppService::openSystemSettingsLoginItems() };
+                    }
+                    return Err(RegisterError::NeedsApproval);
+                }
+                if status() == SMAppServiceStatus::NotFound {
+                    return Err(RegisterError::Other(
+                        "run Dyno from the Applications folder (the launch agent is part of the app bundle)".into(),
+                    ));
+                }
+                Err(RegisterError::Other(e.localizedDescription().to_string()))
+            }
+        }
+    }
+
+    fn version_file() -> PathBuf {
+        dyno_agent::paths::Dirs::current().root().join(REGISTERED_VERSION_FILE)
+    }
+
+    /// Remembers that this version registered the agent (a failure only costs one more re-registration).
+    fn record_version() {
+        if let Err(e) = record_registered_version(&version_file(), env!("CARGO_PKG_VERSION")) {
+            crate::logging::info(&format!("could not remember the registered agent version: {e}"));
+        }
+    }
+
+    /// `gui/<uid>`.
+    fn gui_domain() -> Option<String> {
         use std::os::unix::fs::MetadataExt;
-        use std::process::{Command, Stdio};
-        use std::time::{Duration, Instant};
         let home = std::env::var_os("HOME")?;
-        let uid = std::fs::metadata(home).ok()?.uid();
-        let target = format!("gui/{uid}/{}", dyno_agent::service::LABEL);
+        Some(format!("gui/{}", std::fs::metadata(home).ok()?.uid()))
+    }
+
+    /// `gui/<uid>/<label>`.
+    fn target() -> Option<String> {
+        Some(format!("{}/{LABEL}", gui_domain()?))
+    }
+
+    /// launchd's report of the job (nothing found when it cannot be read).
+    fn job_report() -> JobReport {
+        target()
+            .and_then(|t| launchctl(&["print", &t]))
+            .map(|r| parse_job(&r))
+            .unwrap_or_default()
+    }
+
+    /// Whether launchd's override database marks the agent disabled (`launchctl print-disabled gui/<uid>`).
+    fn launchd_disabled() -> Option<bool> {
+        let report = launchctl(&["print-disabled", &gui_domain()?])?;
+        parse_print_disabled(&report, LABEL)
+    }
+
+    /// `launchctl <args>`, bounded to a few seconds; `None` when it cannot be run or read.
+    fn launchctl(args: &[&str]) -> Option<String> {
+        use std::process::{Command, Stdio};
         // macOS only: no console window to hide, and the wait below is bounded.
         #[allow(clippy::disallowed_methods)]
         let mut child = Command::new("/bin/launchctl")
-            .args(["print", &target])
+            .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -172,30 +234,51 @@ mod mac {
         Some(out)
     }
 
+    /// [`RepairOps`] over `SMAppService` and `launchctl`.
+    struct MacOps<'a> {
+        answers: &'a dyn Fn() -> bool,
+    }
+
+    impl RepairOps for MacOps<'_> {
+        fn register(&mut self) -> Result<(), RegisterError> {
+            register(false)
+        }
+        fn unregister(&mut self) -> Result<(), String> {
+            SmService.uninstall()
+        }
+        fn bootout(&mut self) -> Result<(), String> {
+            let t = target().ok_or("the user's launchd domain is unknown")?;
+            launchctl(&["bootout", &t])
+                .map(|_| ())
+                .ok_or_else(|| "launchctl bootout could not be run".to_string())
+        }
+        fn job_gone(&mut self) -> bool {
+            !job_report().found
+        }
+        fn registration_stale(&mut self) -> bool {
+            job_report().stale()
+        }
+        fn service_answers(&mut self) -> bool {
+            // The app may have started an agent of its own meanwhile; launchd running the job counts too.
+            (self.answers)() || job_report().running
+        }
+        fn pause(&mut self, how_long: Duration) {
+            std::thread::sleep(how_long);
+        }
+    }
+
     impl AgentService for SmService {
         fn installed(&mut self) -> bool {
             matches!(status(), SMAppServiceStatus::Enabled | SMAppServiceStatus::RequiresApproval)
         }
 
         fn install(&mut self) -> Result<(), String> {
-            let s = service();
-            // SAFETY: a method call on a valid object; the error is returned as a Retained NSError.
-            match unsafe { s.registerAndReturnError() } {
-                Ok(()) => Ok(()),
-                Err(e) => {
-                    if status() == SMAppServiceStatus::RequiresApproval {
-                        // SAFETY: a class method without arguments.
-                        unsafe { SMAppService::openSystemSettingsLoginItems() };
-                        return Err(
-                            "macOS needs your approval: allow Dyno in System Settings > General > Login Items (opened for you)".into(),
-                        );
-                    }
-                    if status() == SMAppServiceStatus::NotFound {
-                        return Err("run Dyno from the Applications folder (the launch agent is part of the app bundle)".into());
-                    }
-                    Err(e.localizedDescription().to_string())
+            register(true).map_err(|e| match e {
+                RegisterError::NeedsApproval => {
+                    "macOS needs your approval: allow Dyno in System Settings > General > Login Items (opened for you)".into()
                 }
-            }
+                RegisterError::Other(e) => e,
+            })
         }
 
         fn uninstall(&mut self) -> Result<(), String> {
@@ -206,16 +289,27 @@ mod mac {
             unsafe { service().unregisterAndReturnError() }.map_err(|e| e.localizedDescription().to_string())
         }
 
-        fn repair(&mut self, agent_answers: bool) -> Result<bool, String> {
-            let enabled = status() == SMAppServiceStatus::Enabled;
-            let report = if enabled && !agent_answers { launchctl_print() } else { None };
-            if !needs_reregistration(enabled, agent_answers, report.as_deref()) {
-                return Ok(false);
-            }
-            // Unregistering a stale job can fail when launchd already dropped it; registering again is what matters.
-            let _ = self.uninstall();
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            self.install().map(|()| true)
+        /// After an update launchd refuses the registered agent (its stored launch constraint is the previous build's
+        /// cdhash) or keeps the old job: replace the registration when launchd reports it stale while the agent does
+        /// not answer, and once after every version change ([`crate::service_repair`]). What the user switched off in
+        /// Login Items is left alone, and nothing is registered that the user never turned on.
+        fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
+            let registered = registered_version(&version_file());
+            let observed = Observed {
+                status: registration_status(),
+                launchd_disabled: launchd_disabled(),
+                answers: agent_answers(),
+                job: job_report(),
+                registered_version: registered.as_deref(),
+                current_version: env!("CARGO_PKG_VERSION"),
+                requested: false,
+            };
+            keep_registered(
+                plan(&observed),
+                &mut MacOps { answers: agent_answers },
+                &mut record_version,
+                &mut |step| crate::logging::info(&format!("agent service: {step}")),
+            )
         }
     }
 }
@@ -273,7 +367,7 @@ mod tests {
             self.calls.lock().unwrap().push("service uninstall".into());
             Ok(())
         }
-        fn repair(&mut self, _: bool) -> Result<bool, String> {
+        fn repair(&mut self, _: &dyn Fn() -> bool) -> Result<bool, String> {
             Ok(false)
         }
     }
@@ -333,29 +427,5 @@ mod tests {
         let (r, _) = apply(true, true, true);
         assert!(r.unwrap_err().contains("; and "));
         assert!(apply(false, false, true).0.unwrap_err().contains("login items"));
-    }
-
-    #[test]
-    fn a_registration_launchd_cannot_start_is_stale() {
-        let failed = "\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n\tjob state = spawn failed\n\tproperties = partial import | keepalive | needs LWCR update | has LWCR\n";
-        assert!(stale_registration(failed));
-        assert!(stale_registration("\tproperties = keepalive | needs LWCR update\n"));
-        let healthy =
-            "\tstate = running\n\tpid = 88412\n\tlast exit code = (never exited)\n\tproperties = keepalive | runatload | has LWCR\n";
-        assert!(!stale_registration(healthy));
-        assert!(!stale_registration(""));
-    }
-
-    #[test]
-    fn it_registers_again_only_when_enabled_silent_and_stale() {
-        let stale = Some("job state = spawn failed");
-        assert!(needs_reregistration(true, false, stale));
-        assert!(
-            !needs_reregistration(false, false, stale),
-            "not registered: Dyno never installs itself unasked"
-        );
-        assert!(!needs_reregistration(true, true, stale), "the agent answers");
-        assert!(!needs_reregistration(true, false, Some("state = running")));
-        assert!(!needs_reregistration(true, false, None), "launchctl could not be read");
     }
 }
