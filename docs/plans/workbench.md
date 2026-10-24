@@ -337,3 +337,9 @@ retry and checkpoint debounce then go back to `setTimeout`. A lint must express 
   (S2/S6 follow-up before Debrief's migration, M1).
 - Once S16 narrows the timeout lint (§12), S6's and S7's coalescing workarounds go back to plain timers.
 - The boot harness yields with bounded `setTimeout(0)` rounds; move it to `whenStable` where possible (rule 38).
+- Generated TypeScript must live inside the entry point that uses it (ng-packagr refuses cross-entry relative imports):
+  S9 did this; S4 had to mirror `shell/generated/health.ts` with a two-way check. S17 moves each crate's generated file
+  into its entry point (`shell/notify/generated/`, `shell/dialogs/generated/`, …) and deletes the mirror.
+- Notices posted from a webview (`SHELL_PORTS.notify`) stay window-local because `paddock-health` has no
+  `notifications_post` command; add it (validated, bounded, cause-keyed) so the engine stays the single source of truth
+  and other windows see them (rule 34).
