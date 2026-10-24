@@ -2,6 +2,8 @@
 
 ## Layout
 
+Machine setup shared by every Paddock app (tools, build cache, worktrees, test runs): [paddock/docs/dev-setup.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/dev-setup.md). This page adds only what is specific to this app.
+
 ```
 crates/dyno-core         pure core: model, grouping, rules, diagnosis, cleanup policy, health, protocol, ports
 crates/dyno-platform     OS adapters (windows/, macos/, linux/, unix_control.rs) and test fakes
