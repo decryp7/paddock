@@ -294,6 +294,14 @@
         "about_legal"
       ]
     },
+    "pd.channels.remove": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": []
+    },
     "pd.channels.secret": {
       "kind": "form",
       "modality": "modal",
@@ -436,6 +444,7 @@
     "pd.about.title": "About",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
+    "pd.channels.remove.title": "Remove channel",
     "pd.channels.secret.title": "Channel secret",
     "pd.diag.open": "Report a problem…",
     "pd.diag.title": "Report a problem",
