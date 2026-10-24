@@ -5,6 +5,16 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-diag` and `@decryp7/paddock-ui/shell/diagnostics` (plan X2, decision D9): Report a problem, the three designs of Debrief,
+  Dyno and Pitcrew as one. A diagnostics zip of the app's log (newest part, read from the end), system facts, settings (secrets
+  masked) and crash marker, plus the sections an app adds; one `Redactor` (secrets from Pitcrew and Debrief, personal data from Dyno,
+  `paddock-log`'s field rules; a log line stays valid JSON); a preview that equals the zip, file by file with sizes; an atomic zip
+  that a cancel never leaves partial. Nothing is sent: the Tauri adapter asks where to save in a native dialog and writes the zip as a
+  job (`diagnostics_preview`, `diagnostics_save`, `diagnostics_cancel`, the `paddock://diagnostics` outcome). The UI is a decision dialog
+  (description, the file list, Save, Stop saving), a Help menu item and the "Logging" settings page. `Builder::diagnostics` in
+  `paddock-shell` installs it and registers the `pd.logging` section ("Diagnostics > Logging": level, MB per day, days kept) on the
+  `LogHandle` (the level applies at once), and the new `log_from_webview` command (with `provideWebviewLog`) puts the page's errors
+  in the engine's log with their window. The shell demo shows it (browser and desktop).
 - Shared sccache backend (plan X10): `setup-rust` takes `sccache-redis-endpoint`/`sccache-redis-db` (defaults from `vars.SCCACHE_REDIS_*`); every OS uses the shared Redis database 5 (`sccache-backend: auto|redis|local`); a pinned, checksum-verified sccache is installed when the runner has none; `CARGO_INCREMENTAL=0`, `SCCACHE_IGNORE_SERVER_IO_ERROR=1`; new `sccache-stats` action; used in Paddock CI.
 - `paddock-proc` (plan X6): child processes. `command` (no console window on Windows), `clean_env` and `lower_priority`;
   `run_bounded` (timeout, output cap, the whole tree ended, typed `RunError`); `Supervised` children (own process group,

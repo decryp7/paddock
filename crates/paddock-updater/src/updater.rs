@@ -859,6 +859,7 @@ fn get_manifest(
         range: None,
         if_range: None,
         body_timeout: Some(MANIFEST_TIMEOUT),
+        headers: &[],
     };
     let resp = transport
         .get(&get)

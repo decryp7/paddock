@@ -14,8 +14,9 @@ links = "paddock-shell"
 [features]
 # Dialogs are not parented to a native window and nothing is shown natively: for tests on Tauri's mock runtime only.
 mock-runtime = ["paddock-dialogs/mock-runtime"]
-# The start-up watchdog asks natively through `tauri-plugin-dialog` (the app registers that plugin).
-native-dialogs = ["paddock-startup/dialog"]
+# The start-up watchdog asks natively, and Report a Problem asks where to save, through `tauri-plugin-dialog` (the app registers
+# that plugin).
+native-dialogs = ["paddock-startup/dialog", "paddock-diag/dialog"]
 # The installer over `tauri-plugin-updater` (the app registers that plugin).
 install = ["paddock-updater/install"]
 # The native tray icon.
@@ -25,6 +26,7 @@ tray = ["paddock-window/tray"]
 tauri = { workspace = true }
 paddock-commands = { workspace = true, features = ["tauri"] }
 paddock-dialogs = { workspace = true, features = ["tauri"] }
+paddock-diag = { workspace = true, features = ["tauri"] }
 paddock-download = { workspace = true, features = ["tauri"] }
 paddock-health = { workspace = true, features = ["tauri"] }
 paddock-jobs = { workspace = true, features = ["tauri"] }
@@ -43,6 +45,9 @@ tauri-plugin = { version = "2.7", features = ["build"] }
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }
 paddock-dialogs = { workspace = true, features = ["tauri", "mock-runtime"] }
+# The diagnostics test installs a scoped log and folders in a temporary directory.
+paddock-log = { workspace = true }
+paddock-env = { workspace = true }
 # The permission sets are resolved through Tauri's own ACL in the tests.
 tauri-utils = "2.10"
 toml = "0.9"

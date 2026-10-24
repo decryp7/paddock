@@ -162,3 +162,45 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
   assert.doesNotMatch(ci, /dtolnay\/rust-toolchain/, 'one toolchain setup');
 });
+
+/** The first plain scalar in `text` (outside block scalars and comments) that a strict YAML parser (Gitea's go-yaml) rejects: `key: a: b`. */
+export function strictPlainScalarProblem(text) {
+  const lines = text.split('\n');
+  let blockIndent = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '') continue;
+    const indent = line.length - line.trimStart().length;
+    if (blockIndent >= 0) {
+      if (indent > blockIndent) continue;
+      blockIndent = -1;
+    }
+    if (line.trim().startsWith('#')) continue;
+    const m = /^(\s*(?:- )*)([A-Za-z0-9_.-]+):(?:\s+(.*))?$/.exec(line);
+    if (!m) continue;
+    const value = (m[3] ?? '').trim();
+    if (/^[|>][+-]?\d*(\s+#.*)?$/.test(value)) {
+      blockIndent = indent + m[1].trimStart().length; // the block's lines are indented deeper than the key itself
+      continue;
+    }
+    if (value === '' || /^["'[{&*!%@`]/.test(value)) continue;
+    if (/:(\s|$)/.test(value)) return `line ${i + 1}: unquoted ": " in a plain value (quote it): ${line.trim().slice(0, 100)}`;
+  }
+  return null;
+}
+
+test('every action and workflow parses under a strict YAML reader (no ": " inside an unquoted value)', () => {
+  const files = [
+    ...names.map((n) => join(ACTIONS, n, 'action.yml')),
+    ...readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(WORKFLOWS, f)),
+  ];
+  assert.ok(files.length >= 20);
+  for (const f of files) assert.equal(strictPlainScalarProblem(read(f)), null, f);
+});
+
+test('the strict reader check catches the sccache-stats mistake and leaves block scalars alone', () => {
+  assert.match(strictPlainScalarProblem('name: x\ndescription: use `if: always()` here\n'), /line 2/);
+  assert.equal(strictPlainScalarProblem('description: "use `if: always()` here"\n'), null);
+  assert.equal(strictPlainScalarProblem('steps:\n  - run: |\n      echo "a: b"\n      x: y\n  - name: n\n'), null);
+  assert.equal(strictPlainScalarProblem('on:\n  push:\nenv:\n  A: https://x/y\n'), null);
+});

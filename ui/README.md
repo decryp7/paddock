@@ -138,6 +138,7 @@ so a manager app never bundles the workbench:
 | `/icons`, `/format`, `/prefs`, `/select`, `/testing`, `/shell/feel` | the `pd:` icon set and `outlineIcon`; one formatting API and the middle ellipsis; guarded localStorage; the themed `pd-select`; the DOM test kit (`installTestKit`, helpers, fake ECharts); the native-feel guard | X36, X35, X12, X38 |
 | `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/shell/startup`, `/shell/dialogs`, `/shell/about` | one shell part each | S5-S11 |
+| `/shell/diagnostics` | report a problem over the `paddock-diag` adapter: `DiagnosticsBackend` (Tauri, memory), `DiagnosticsStore`, the Report a Problem decision dialog (description, every file with its size, Save through the engine's native dialog), `diagnosticsContributions` (Help item, the Logging settings page), `provideShellDiagnostics`, `provideWebviewLog` (the page's errors in the engine's log) | X2 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in

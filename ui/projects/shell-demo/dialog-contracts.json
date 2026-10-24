@@ -19,6 +19,18 @@
         "about_legal"
       ]
     },
+    "pd.report-problem": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "diagnostics_cancel",
+        "diagnostics_preview",
+        "diagnostics_save",
+        "log_from_webview"
+      ]
+    },
     "pd.settings": {
       "kind": "tool",
       "modality": "modeless",
