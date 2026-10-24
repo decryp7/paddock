@@ -4,6 +4,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "paddock-cli",
     "paddock-commands",
     "paddock-dialogs",
     "paddock-diag",
@@ -35,6 +36,7 @@ tauri = { version = "2.12", default-features = false }
 
 # The workspace's own crates, for one crate depending on another: `paddock-jobs = { workspace = true }`. The version is
 # the one published to the `decryp7` registry (keep it equal to the crate's `version`); the path is used in the workspace.
+paddock-cli = { path = "paddock-cli", version = "0.1.0", registry = "decryp7" }
 paddock-commands = { path = "paddock-commands", version = "0.1.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "decryp7" }
 paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
