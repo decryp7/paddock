@@ -85,6 +85,7 @@ pub fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::FailAfter;
 
     fn run(format: Format, r: Result<Report, CliError>) -> (Exit, String, String) {
         let (mut o, mut e) = (Vec::new(), Vec::new());
@@ -160,21 +161,12 @@ mod tests {
 
     #[test]
     fn a_closed_pipe_keeps_the_exit_code() {
-        struct Closed;
-        impl Write for Closed {
-            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-                Err(std::io::ErrorKind::BrokenPipe.into())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
         assert_eq!(
             finish(
                 Format::Json,
                 Ok(Report::new(Value::Null, "")),
-                &mut Closed,
-                &mut Closed
+                &mut FailAfter(0),
+                &mut FailAfter(0)
             ),
             Exit::Ok
         );
@@ -182,8 +174,8 @@ mod tests {
             finish(
                 Format::Json,
                 Err(CliError::usage("x")),
-                &mut Closed,
-                &mut Closed
+                &mut FailAfter(0),
+                &mut FailAfter(0)
             ),
             Exit::Usage
         );

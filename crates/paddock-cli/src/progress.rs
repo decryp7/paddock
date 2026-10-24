@@ -103,6 +103,7 @@ impl StopFlag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::FailAfter;
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
@@ -135,22 +136,16 @@ mod tests {
         q.note("n");
         assert!(q.into_inner().is_empty());
 
-        struct Closed;
-        impl Write for Closed {
-            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-                Err(std::io::ErrorKind::BrokenPipe.into())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-        let mut c = Progress::new(Closed, true).every(ms(1));
+        let mut c = Progress::new(FailAfter(0), true).every(ms(1));
         assert!(!c.update(ms(0), "a"));
         assert!(
             !c.update(ms(10), "b"),
             "stays silent after the first failure"
         );
         c.note("still silent");
+        let mut n = Progress::new(FailAfter(0), true);
+        n.note("first failure marks it broken");
+        n.note("second is skipped");
     }
 
     #[test]
