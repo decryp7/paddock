@@ -8,6 +8,21 @@ Conventional Commits; one semver tag for the whole repo.
 - `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
   macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
   deleted, one at a time, with disk and load checks (rule 7).
+- Shell demo: the sample agent is its own crate, bundled as `externalBin` on every OS (`agent/sidecar.mjs` in
+  `beforeBuildCommand`), ad-hoc sealed with the app; `shell-demo-agent --self-test` runs from the built bundle in the macOS
+  verification (which also checks every Mach-O's TeamIdentifier) and from the .deb / the bundled .exe in the release
+  workflow. `scripts/new-app.mjs` carries the agent into new apps, renamed.
+- `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
+  It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
+  actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
+  repair that does not depend on Pitwall, rule 19), Open AI settings, and `(step)` for what only the app can do (open or
+  install Pitwall, update, change permissions). `PitwallBackend` port (Tauri over the four `PITWALL_COMMANDS` and the
+  `paddock://pitwall` event, and an in-memory engine), `PitwallStore` (SignalStore, request status union, listens to the event),
+  `providePitwall`. The wire types and names are generated from Rust (`ts-rs`, stale files fail `cargo test -p paddock-pitwall`).
+  `Session::snapshot` builds the value. The shell demo has a Local AI page on a fake Pitwall (Vitest and a Chromium spec: axe,
+  320 px).
+- `paddock-pitwall` line coverage is above 99% (lcov): the socket error arms are classified by pure functions with tests, and the
+  pairing races (an approval after the request expired, a late answer for a replaced request) are tested deterministically.
 - `@decryp7/paddock-ui/shell/service` (plan X4): Settings > Background service. `ServiceBackend` (Tauri adapter and an in-memory
   one that plays install, a repair's phases, failure, busy, switched-off and needs-approval), `ServiceStore` (status, the
   `paddock://service` updates folded in, "Still working" while a repair runs and never timed out, an inline error with
