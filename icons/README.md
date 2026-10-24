@@ -11,10 +11,11 @@ Open `preview.html` to review them, or see the renders in `screenshots/`.
 | Pacenotes | Approved (2026-10-23) |
 | Paddock (umbrella mark) | Reviewed (2026-10-24) |
 | Paddock Shell Demo (a demo app, not a family member) | New (2026-10-24), awaiting independent review |
+| Paddock Workbench Demo (a demo app, not a family member) | New (2026-10-25), awaiting independent review (rule 22); a warm stone tile with a split-dock window, ink #26231E; `tools/cvd.mjs` not run for it |
 
 ## Demo apps
 
-`DEMOS` in `tools/design.mjs` are built by the same pipeline (`ONLY=shell-demo node tools/build.mjs`) but stay out of
+`DEMOS` in `tools/design.mjs` are built by the same pipeline (`ONLY=shell-demo node tools/build.mjs`; `ONLY=workbench-demo` for the workbench demo, copied to `apps/workbench-demo/src-tauri/icons`, checked by `node scripts/workbench-demo-release.mjs icons`) but stay out of
 the family sheet (`preview.html`) and the Carbon concept. Paddock Shell Demo (`apps/shell-demo`) is a neutral silver
 tile (`#D1D4DA` on a `#DDE1E7` to `#B5BCC7` gradient with a 1 px inner rim at 8 % black, so its outline holds on white; dark ink `#1E2530`, 10.4:1) with the shell itself as its glyph: a window with its title bar, the pages
 sidebar and the page. Silver is light like Spotter's tile, so it takes the dark ink and the light-tile material. Its tray template is solid

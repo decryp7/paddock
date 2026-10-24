@@ -110,6 +110,7 @@
             "browser": "projects/workbench-demo/src/main.ts",
             "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/workbench-demo/tsconfig.app.json",
+            "assets": [{ "glob": "**/*", "input": "projects/workbench-demo/public" }],
             "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "node_modules/dockview/dist/styles/dockview.css",
               "projects/workbench-demo/src/styles.css"]
           },
