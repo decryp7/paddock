@@ -1,0 +1,190 @@
+import { axeViolations, expect, expectNoHorizontalScroll, test, THEMES, WorkbenchApp } from '@decryp7/paddock-e2e';
+
+// The workbench demo is the reference consumer of @decryp7/paddock-ui/workbench (ADR 0013 §4; plan W4, W7). It uses only
+// the test kit (@decryp7/paddock-e2e): the workbench page objects and the shell's.
+
+for (const colorScheme of THEMES) {
+  test.describe(`workbench demo (${colorScheme})`, () => {
+    test.use({ colorScheme });
+
+    test('boots with the frame, the Explorer and the welcome view; axe finds no violations', async ({ page, pageErrors }) => {
+      const wb = new WorkbenchApp(page);
+      await wb.frame.open();
+      await expect(wb.explorer.node('wd.files', 'src')).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Workbench demo' })).toBeVisible();
+      expect(await axeViolations(page)).toEqual([]);
+      expect(pageErrors).toEqual([]);
+    });
+  });
+}
+
+test('no horizontal scroll at 320 px (rule 18), and the Explorer yields to the stage by the layout plan', async ({ page }) => {
+  const wb = new WorkbenchApp(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await wb.frame.open();
+  await expect.poll(() => wb.frame.explorer()).toBe('wd.files');
+  await page.setViewportSize({ width: 600, height: 800 });
+  await expect.poll(() => wb.frame.explorer()).toBe('closed');
+  await page.setViewportSize({ width: 320, height: 640 });
+  await expectNoHorizontalScroll(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect.poll(() => wb.frame.explorer()).toBe('wd.files');
+});
+
+test('F6 cycles the regions and the skip link goes to the work area', async ({ page }) => {
+  const wb = new WorkbenchApp(page);
+  await wb.frame.open();
+  const seen = new Set<string | null>();
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('F6');
+    seen.add(await wb.frame.focusedRegion());
+  }
+  expect([...seen].sort()).toEqual(['activity', 'main', 'sidebar', 'status', 'title']);
+});
+
+test.describe('activity bar and Explorer (plan W4)', () => {
+  test('the Explorer item toggles the side bar; badges are part of the name', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await expect(wb.activity.item('wd.act.problems')).toHaveAccessibleName('Problems, 3 problems');
+    await wb.activity.item('wd.act.explorer').click();
+    await expect.poll(() => wb.frame.explorer()).toBe('closed');
+    await wb.activity.item('wd.act.explorer').click();
+    await expect.poll(() => wb.frame.explorer()).toBe('wd.files');
+  });
+
+  test('the tree pages large folders, opens a context menu by keyboard, and middle-truncates long names', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.explorer.expand('wd.files', 'generated');
+    await wb.explorer.expand('wd.files', 'generated/fixtures');
+    await expect(wb.explorer.more).toContainText('40 left');
+    await wb.explorer.more.click();
+    await expect(wb.explorer.node('wd.files', 'generated/fixtures/case-240.json')).toBeVisible();
+    await wb.explorer.node('wd.files', 'README.md').click();
+    await page.keyboard.press('Shift+F10');
+    await expect(wb.explorer.menu.getByRole('menuitem', { name: 'Copy path' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await wb.explorer.expand('wd.files', 'docs');
+    const long = wb.explorer.node('wd.files', 'docs/architecture-overview-of-the-request-pipeline.md');
+    await expect(long.getByTestId('path-text')).toHaveAttribute('title', /architecture-overview-of-the-request-pipeline\.md$/);
+  });
+});
+
+test.describe('command palette (plan W5)', () => {
+  test('lists commands, runs one, suggests on a typo, and searches providers by prefix', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.palette.open();
+    await expect(wb.palette.options.first()).toContainText('Open README');
+    await wb.palette.search('>indx repositry');
+    await expect(page.getByTestId('palette-did-you-mean')).toBeVisible();
+    await wb.palette.run('Index the repository');
+    await wb.palette.open(false);
+    await wb.palette.search('request handler');
+    await expect(wb.palette.options.first()).toContainText('request_handler.rs');
+    await wb.palette.search('@handle');
+    await expect(wb.palette.options.first()).toContainText('handle_request');
+    await wb.palette.search('#listening');
+    await expect(wb.palette.options.first()).toContainText('listening on');
+    await page.keyboard.press('Escape');
+    await expect(wb.palette.dialog).toHaveCount(0);
+    expect(await axeViolations(page)).toEqual([]);
+  });
+});
+
+test.describe('dock (plan W2a, W2b)', () => {
+  const tab = (page: import('@decryp7/paddock-e2e').Page, panel: string) => page.locator(`[data-testid="pd-dock-tab"][data-panel-id="${panel}"]`);
+
+  test('opens a file from the Explorer as an instance of the Code view, and keeps the layout over a reload', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.explorer.expand('wd.files', 'src');
+    await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
+    await expect(tab(page, 'wd.code#src/main.rs')).toBeVisible();
+    await expect(page.getByTestId('code-lines')).toContainText('Server::bind');
+    await wb.explorer.node('wd.files', 'README.md').dblclick();
+    await expect(tab(page, 'wd.code#README.md')).toBeVisible();
+    // The layout is saved a moment after a change (debounced); wait for it, then reload.
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => (localStorage.getItem(k) ?? '').includes('wd.code#README.md')).length)).toBeGreaterThan(0);
+    await page.reload();
+    await expect(tab(page, 'wd.code#src/main.rs')).toBeVisible();
+    await expect(tab(page, 'wd.code#README.md')).toBeVisible();
+  });
+
+  test('switches perspectives with the keyboard and keeps each arrangement', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    const dock = page.getByTestId('pd-dock');
+    await page.locator('#pd-stage').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('ControlOrMeta+2');
+    await expect(dock).toHaveAttribute('data-perspective', 'wd.review');
+    await expect(tab(page, 'wd.problems')).toBeVisible();
+    await page.keyboard.press('ControlOrMeta+1');
+    await expect(dock).toHaveAttribute('data-perspective', 'wd.understand');
+    await expect(tab(page, 'wd.orientation')).toBeVisible();
+  });
+
+  test('the Jobs view is a status pane that slides out from the bottom edge', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.palette.open();
+    await wb.palette.search('>show jobs');
+    await wb.palette.run('Show jobs');
+    await expect(page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"], [data-testid="pd-dock-tab"][data-panel-id="pd.jobs"]').first()).toBeVisible();
+  });
+
+  for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
+    test(`every docked group is at or above its views' declared minimum at ${size.width}x${size.height} (ADR 0011)`, async ({ page }) => {
+      await page.setViewportSize(size);
+      const wb = new WorkbenchApp(page);
+      await wb.frame.open();
+      await wb.explorer.expand('wd.files', 'src');
+      await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
+      await wb.activity.item('wd.act.problems').click();
+      await wb.activity.item('wd.act.outline').click();
+      await expect(tab(page, 'wd.problems')).toBeVisible();
+      const short = await page.locator('[data-min-width]').evaluateAll((groups) =>
+        groups
+          .map((g) => ({ g, r: g.getBoundingClientRect(), w: Number(g.getAttribute('data-min-width')), h: Number(g.getAttribute('data-min-height')) }))
+          .filter(({ r }) => r.width > 0 && r.height > 0)
+          .filter(({ r, w, h }) => r.width + 1 < w || r.height + 1 < h)
+          .map(({ r, w, h }) => `${Math.round(r.width)}x${Math.round(r.height)} < ${w}x${h}`),
+      );
+      expect(short).toEqual([]);
+      await expectNoHorizontalScroll(page);
+    });
+  }
+});
+
+test.describe('assistant pane (plan W6)', () => {
+  for (const colorScheme of THEMES) {
+    test(`shows the calm "Pitwall not running" state with its fix (${colorScheme})`, async ({ page, pageErrors }) => {
+      await page.emulateMedia({ colorScheme });
+      const wb = new WorkbenchApp(page);
+      await wb.frame.open();
+      await wb.activity.item('pd.wb.assistant.activity').click();
+      const pane = page.locator('pd-assistant');
+      await expect(pane).toBeVisible();
+      await expect(pane).toContainText('not running');
+      expect(await axeViolations(page)).toEqual([]);
+      expect(pageErrors).toEqual([]);
+    });
+  }
+});
+
+test.describe('pop-out (plan W3)', () => {
+  test('moves the active panel to its own window and the dock offers it no more', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.explorer.expand('wd.files', 'src');
+    await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
+    const tab = page.locator('[data-testid="pd-dock-tab"][data-panel-id="wd.code#src/main.rs"]');
+    await expect(tab).toBeVisible();
+    await tab.click();
+    await wb.palette.open();
+    await wb.palette.search('>pop out');
+    await wb.palette.run('Pop out to window');
+    await expect(tab).toHaveCount(0);
+  });
+});

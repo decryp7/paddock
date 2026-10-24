@@ -2,7 +2,7 @@
 //! memory cap, so nothing leaks. A [`Registry`] knows every supervised tree, so [`end_all`] can end them at shutdown or
 //! in a panic hook even when the owners never get to drop them.
 
-use crate::tree::{self, kill_tree};
+use crate::tree::{self, Terminated, kill_tree};
 use crate::usage;
 use crate::watch::{MemoryEvent, MemoryListener, MemoryWatch, Verdict};
 use std::collections::BTreeSet;
@@ -177,6 +177,9 @@ impl Watcher {
 /// A child that is killed with its whole tree when dropped.
 pub struct Supervised {
     child: Option<Child>,
+    /// Windows: the kill-on-close job the child runs in (`None` when Windows refused one; the tree kill still applies).
+    #[cfg(windows)]
+    job: Option<crate::job::Job>,
     pid: u32,
     registry: Registry,
     watcher: Option<Watcher>,
@@ -203,16 +206,33 @@ impl Supervised {
         crate::sys::own_group(&mut cmd);
         let child = cmd.spawn()?;
         let pid = child.id();
+        #[cfg(windows)]
+        let job = crate::job::Job::assign(&child).ok();
         registry.add(pid);
         let shared = Arc::new(Shared::default());
         let watcher = cap.map(|c| Watcher::start(pid, c, shared.clone()));
         Ok(Supervised {
             child: Some(child),
+            #[cfg(windows)]
+            job,
             pid,
             registry: registry.clone(),
             watcher,
             shared,
         })
+    }
+
+    /// Whether the child runs in a kill-on-close job object (Windows; always false elsewhere, where the process group
+    /// plays that part).
+    pub fn in_job(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.job.is_some()
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
     }
 
     /// The process id while the child has not been killed or waited for.
@@ -267,14 +287,24 @@ impl Supervised {
     /// Asks the process to quit (SIGTERM; Windows has no polite equivalent without a window), waits up to `grace` for it,
     /// then ends the tree. For browsers, where an abrupt kill during start-up can leave a copy of the app behind on
     /// macOS. Idempotent.
-    pub fn terminate(&mut self, grace: Duration) {
-        if self.is_running() && tree::ask(self.pid) {
-            let end = Instant::now() + grace;
-            while self.is_running() && Instant::now() < end {
+    pub fn terminate(&mut self, grace: Duration) -> Terminated {
+        if !self.is_running() {
+            self.kill();
+            return Terminated::Gone;
+        }
+        if tree::ask(self.pid) {
+            let end = Instant::now().checked_add(grace);
+            while self.is_running() && end.is_some_and(|e| Instant::now() < e) {
                 std::thread::sleep(Duration::from_millis(25));
             }
         }
+        let how = if self.is_running() {
+            Terminated::Killed
+        } else {
+            Terminated::Gracefully
+        };
         self.kill();
+        how
     }
 
     /// Ends the whole process tree now and reaps it. Idempotent.
@@ -288,6 +318,9 @@ impl Supervised {
     }
 
     fn release(&mut self) {
+        // Windows: closing the job ends whatever of the tree is left (helpers that left it included).
+        #[cfg(windows)]
+        drop(self.job.take());
         self.registry.remove(self.pid);
         if let Some(w) = self.watcher.take() {
             w.finish();
@@ -327,6 +360,30 @@ mod tests {
                 return p.trim().parse().unwrap();
             }
         }
+    }
+
+    #[test]
+    fn a_windows_child_runs_in_a_kill_on_close_job() {
+        let mut s = Supervised::spawn_in(&Registry::new(), piped(Mode::Sleep), None).unwrap();
+        assert_eq!(s.in_job(), cfg!(windows));
+        s.kill();
+        assert!(!s.in_job(), "the job closed with the tree");
+    }
+
+    /// The child starts a helper and exits: the helper is an orphan no tree walk finds, but the job still holds it.
+    #[cfg(windows)]
+    #[test]
+    fn closing_the_job_ends_an_orphaned_helper() {
+        let mut s = Supervised::spawn_in(&Registry::new(), piped(Mode::Leave), None).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        let grand = pid_line(&mut r);
+        assert!(s.wait().is_some());
+        let mut rest = Vec::new();
+        r.read_to_end(&mut rest).unwrap();
+        assert!(
+            crate::testchild::is_gone(grand),
+            "the orphaned helper leaked"
+        );
     }
 
     #[test]
@@ -410,14 +467,13 @@ mod tests {
             l.clear();
             assert!(r.read_line(&mut l).unwrap() > 0);
         }
-        let t = Instant::now();
-        s.terminate(Duration::from_secs(100));
-        assert!(
-            t.elapsed() < Duration::from_secs(60),
-            "waited out the grace period"
+        // It stops by itself on the polite request: not killed after the grace period.
+        assert_eq!(
+            s.terminate(Duration::from_secs(100)),
+            Terminated::Gracefully
         );
         assert!(!s.is_running());
-        s.terminate(Duration::from_secs(1));
+        assert_eq!(s.terminate(Duration::from_secs(1)), Terminated::Gone);
     }
 
     #[cfg(unix)]
@@ -430,7 +486,7 @@ mod tests {
             l.clear();
             assert!(r.read_line(&mut l).unwrap() > 0);
         }
-        s.terminate(Duration::ZERO);
+        assert_eq!(s.terminate(Duration::ZERO), Terminated::Killed);
         assert!(!s.is_running());
     }
 

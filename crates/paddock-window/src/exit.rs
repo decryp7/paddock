@@ -10,8 +10,11 @@
 //! Ported from Debrief's `lifecycle.rs` (`teardown_step`, `arm_exit_watchdog`, `end_stalled_exit`), with the once-only
 //! flags in a value instead of process statics, so each app (and each test) has its own.
 
+use paddock_jobs::CancelToken;
+use paddock_jobs::time::{Clock, SystemClock};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Longest one teardown step may hold the exit up; it goes on in the background after that, and the app exits anyway.
 pub const TEARDOWN_STEP_LIMIT: Duration = Duration::from_secs(3);
@@ -31,21 +34,55 @@ pub enum StepEnd {
 /// Runs one step of closing the app on a thread of its own and waits at most `limit` for it, logging (at Info) that it
 /// started and how it ended. Work that may wait for the main thread never runs on it.
 pub fn teardown_step(step: &str, limit: Duration, f: impl FnOnce() + Send + 'static) -> StepEnd {
+    teardown_step_on(&SystemClock, step, limit, f)
+}
+
+/// Ends a step's wait when the step's thread finishes, normally or by a panic.
+struct Finished {
+    done: CancelToken,
+    panicked: Arc<AtomicBool>,
+}
+
+impl Drop for Finished {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.panicked.store(true, Ordering::SeqCst);
+        }
+        self.done.cancel();
+    }
+}
+
+/// [`teardown_step`] with its limit on `clock` (tests run it out with a `FakeClock`).
+pub fn teardown_step_on(
+    clock: &dyn Clock,
+    step: &str,
+    limit: Duration,
+    f: impl FnOnce() + Send + 'static,
+) -> StepEnd {
     log::info!(Step = step; "Teardown: {step}");
-    let started = Instant::now();
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let started = clock.monotonic();
+    let done = CancelToken::new();
+    let panicked = Arc::new(AtomicBool::new(false));
+    let finished = Finished {
+        done: done.clone(),
+        panicked: panicked.clone(),
+    };
     let spawned = std::thread::Builder::new()
         .name(format!("paddock-teardown-{step}"))
         .spawn(move || {
+            let _finished = finished;
             f();
-            let _ = tx.send(());
         });
-    let end = match spawned.map(|_| rx.recv_timeout(limit)) {
-        Ok(Ok(())) => StepEnd::Done,
-        Ok(Err(std::sync::mpsc::RecvTimeoutError::Timeout)) => StepEnd::TimedOut,
-        Ok(Err(std::sync::mpsc::RecvTimeoutError::Disconnected)) | Err(_) => StepEnd::Failed,
+    let end = match spawned {
+        Err(_) => StepEnd::Failed,
+        Ok(_) => match clock.wait(limit, &done) {
+            Ok(()) => StepEnd::TimedOut,
+            Err(_) if panicked.load(Ordering::SeqCst) => StepEnd::Failed,
+            Err(_) => StepEnd::Done,
+        },
     };
-    let ms = started.elapsed().as_millis() as u64;
+    let ms =
+        u64::try_from(clock.monotonic().saturating_sub(started).as_millis()).unwrap_or(u64::MAX);
     match end {
         StepEnd::Done => log::info!(Step = step, ElapsedMs = ms; "Teardown: {step} done"),
         StepEnd::TimedOut => {
@@ -120,21 +157,28 @@ mod tests {
 
     #[test]
     fn teardown_steps_are_bounded_and_say_how_they_ended() {
-        let quick = Duration::from_millis(200);
-        assert_eq!(teardown_step("quick", quick, || {}), StepEnd::Done);
-        let started = Instant::now();
-        let (release, stuck_until) = std::sync::mpsc::channel::<()>();
-        let stuck = teardown_step("stuck", quick, move || {
-            let _ = stuck_until.recv_timeout(Duration::from_secs(5));
-        });
-        assert_eq!(stuck, StepEnd::TimedOut);
-        assert!(started.elapsed() < Duration::from_secs(2));
-        drop(release);
-        // A generous limit: the panic hook can take a while in a debug build; the step ends as soon as it unwound.
+        use paddock_jobs::time::FakeClock;
+        let clock = FakeClock::new();
+        let limit = Duration::from_secs(3);
         assert_eq!(
-            teardown_step("crashing", Duration::from_secs(60), || panic!(
-                "a crash in teardown"
-            )),
+            teardown_step_on(&clock, "quick", limit, || {}),
+            StepEnd::Done
+        );
+        assert_eq!(teardown_step("quick", limit, || {}), StepEnd::Done);
+        // A step that never ends: its limit runs out on the clock, nothing waits for real.
+        let (release, stuck_until) = std::sync::mpsc::channel::<()>();
+        let c = clock.clone();
+        let stuck = std::thread::spawn(move || {
+            teardown_step_on(&c, "stuck", limit, move || {
+                let _ = stuck_until.recv();
+            })
+        });
+        assert!(clock.wait_for_started(2, Duration::from_secs(60)));
+        clock.advance(limit);
+        assert_eq!(stuck.join().unwrap(), StepEnd::TimedOut);
+        drop(release);
+        assert_eq!(
+            teardown_step_on(&clock, "crashing", limit, || panic!("a crash in teardown")),
             StepEnd::Failed
         );
     }
