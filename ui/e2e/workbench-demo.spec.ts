@@ -156,3 +156,35 @@ test.describe('dock (plan W2a, W2b)', () => {
     });
   }
 });
+
+test.describe('assistant pane (plan W6)', () => {
+  for (const colorScheme of THEMES) {
+    test(`shows the calm "Pitwall not running" state with its fix (${colorScheme})`, async ({ page, pageErrors }) => {
+      await page.emulateMedia({ colorScheme });
+      const wb = new WorkbenchApp(page);
+      await wb.frame.open();
+      await wb.activity.item('pd.wb.assistant.activity').click();
+      const pane = page.locator('pd-assistant');
+      await expect(pane).toBeVisible();
+      await expect(pane).toContainText('not running');
+      expect(await axeViolations(page)).toEqual([]);
+      expect(pageErrors).toEqual([]);
+    });
+  }
+});
+
+test.describe('pop-out (plan W3)', () => {
+  test('moves the active panel to its own window and the dock offers it no more', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.explorer.expand('wd.files', 'src');
+    await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
+    const tab = page.locator('[data-testid="pd-dock-tab"][data-panel-id="wd.code#src/main.rs"]');
+    await expect(tab).toBeVisible();
+    await tab.click();
+    await wb.palette.open();
+    await wb.palette.search('>pop out');
+    await wb.palette.run('Pop out to window');
+    await expect(tab).toHaveCount(0);
+  });
+});
