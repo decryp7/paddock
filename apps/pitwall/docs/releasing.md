@@ -14,7 +14,7 @@ The version in the tag must match `app/src-tauri/tauri.conf.json` and the worksp
 
 Status today: the Tauri shell exists (`app/src-tauri`, with `externalBin` bundling the server as a sidecar and a
 separate `tauri.<os>.conf.json` per platform), `.gitea/workflows/build.yml` checks every push on all three platforms and
-`release.yml` builds and publishes for `v*` tags. Nothing has been released and no installer has been published yet, and
+the `release` job of `build.yml` builds and publishes for `v*` tags, only after every check job passed. Nothing has been released and no installer has been published yet, and
 the installers have not been installed on real Windows and Linux machines. The server binary also builds on its own
 (`cargo build -p pitwall-server --profile dist`).
 
