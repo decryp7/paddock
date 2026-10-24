@@ -367,6 +367,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-net --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-net --all-features --profile ci && cargo test -p paddock-net --all-features --doc
 
+      - name: paddock-mcp
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-mcp --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-mcp --all-features --profile ci && cargo test -p paddock-mcp --all-features --doc
+
       - name: paddock-build
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-build --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-build --all-features --profile ci && cargo test -p paddock-build --all-features --doc
