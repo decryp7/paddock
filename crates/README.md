@@ -436,9 +436,21 @@ pool.spawn_job(ctx, move |ctx| Ok(d.download(ctx, &req)?))?;      // the command
 - Bounds: `Config::max_bytes` / `Request::max_bytes` before writing and while streaming; a pinned `Request::size` must
   match. Typed `DownloadError` (`keeps_partial()` says whether a rerun resumes); `From<DownloadError> for JobError`.
 - The network is a port (`Transport`); `HttpTransport` (feature `http`, default) is ureq with rustls and the OS
-  certificate store, a proxy only when configured, `Accept-Encoding: identity`. Feature `tauri`: `tauri::manage` puts one
+  certificate store, `Accept-Encoding: identity`, and the system proxy by default (`ProxyMode::System`:
+  `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, then macOS system configuration or Windows Internet
+  Settings/WinHTTP; loopback always direct; `ProxyMode::Direct`; `ProxyMode::explicit("http://user:pass@host:3128")` or
+  `ProxyMode::Rules(ProxyRules::all(ProxyServer::parse(..)?.with_credentials(u, p)).with_no_proxy("*.corp,10.0.0.0/8"))`;
+  logins never print). No SOCKS and no PAC scripts. Feature `tauri`: `tauri::manage` puts one
   shared `Downloader` in the app state, `tauri::downloader(app)` returns it.
-- Tests run against an in-process HTTP server and a scripted transport (no network); `cargo bench -p paddock-download`
+- Also (0.3.0): `Request::header` (an `Authorization` token or `Accept`, values never printed), `Request::resumable()`
+  (something to continue?), `Downloader::download_with_cancel` (an external `CancelToken` besides the job's),
+  `get_json`/`get_text`/`get_bytes` with `Fetch` (headers, size limit, timeout, cancel, retries, shared proxy and host caps),
+  `NotEnoughSpace { path }` naming the folder (and the drive on Windows), `phases::{ALL, *_LABEL, UNPACK, INSTALL,
+  SELF_TEST, is_download_phase}` for phases an app adds, and `Downloaded::sink_panics` (a panicking `EventSink` is contained
+  and now counted). The engine is thread-based and blocking by design (no async runtime, nothing to share with the app's):
+  from async code call it inside `spawn_blocking`, or run it as a job on the `JobPool`.
+- Tests run against an in-process HTTP server, an in-process CONNECT proxy and a scripted transport (no network);
+  `cargo bench -p paddock-download`
   compares one stream with 2, 4 and 8 connections on a server that limits each connection.
 
 ## `paddock-settings` (plan S10)

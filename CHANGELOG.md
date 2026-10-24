@@ -10,6 +10,16 @@ Conventional Commits; one semver tag for the whole repo.
   `terminate` with grace, tree ended on drop, an optional `MemoryCap` with warning, stop and peak, a `Registry` and
   `end_all` for shutdown); `process_memory` / `tree_memory` (PSS from `smaps_rollup` on Linux, thread entries skipped);
   `kill_tree`, `ask`, `end`, `terminate` for single pids; `login_path` and `merge_path`.
+- `paddock-download` gaps for 0.3.0: **system proxy** (`ProxyMode::System` is the default: `HTTPS_PROXY`/`HTTP_PROXY`/
+  `ALL_PROXY`/`NO_PROXY` in either case, then macOS system configuration (`scutil --proxy`) and Windows Internet Settings or
+  WinHTTP; loopback never proxied; `NoProxy` knows domains, `.suffix`, `*` patterns, IPs, CIDR, `<local>` and ports),
+  explicit `ProxyMode::Rules`/`ProxyMode::explicit`, authenticated proxies through `ProxyServer::with_credentials` or the
+  address (Basic, percent-decoded; the password never appears in `Debug`, `Display` or an error), `HttpTransport::reload_proxy`.
+  Also `Request::header` (validated, values hidden), `Request::resumable()`, `Downloader::download_with_cancel`,
+  `Downloader::{get_json, get_text, get_bytes}` with `Fetch`, `NotEnoughSpace.path`, `phases::{ALL, *_LABEL, UNPACK,
+  INSTALL, SELF_TEST, is_download_phase}`, `Downloaded::sink_panics` and `Reporter::sink_panics` in `paddock-jobs`
+  (an `EventSink` panic was dropped silently). The engine stays thread-based and blocking (documented: use `spawn_blocking`
+  or the `JobPool`); there is no private async runtime.
 - `paddock-env` (plan X7, decision D3): folders and state files. `AppDirs` (data, config, cache, logs, runtime per OS from an
   injectable environment; `<ID>_HOME` override in debug builds only; portable mode; Windows is Local, the old Roaming folder
   is named for the one-time move) and `VersionedFile<T>` (atomic write with fsync and `.bak`, migration chain, a damaged file
@@ -42,6 +52,10 @@ Conventional Commits; one semver tag for the whole repo.
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
 ### Changed
+- Breaking, `paddock-download`: `HttpConfig::proxy` is a `ProxyMode` (was `Option<String>`, and the environment was never read;
+  now the system's proxy is used unless `ProxyMode::Direct`); `Get` has a `headers` field and `Transport` implementations
+  must send them; `DownloadError::NotEnoughSpace` has a `path` field and its message changed; `Downloaded` has a
+  `sink_panics` field. `HttpConfig` is no longer constructible with a proxy string: use `ProxyMode::explicit(..)`.
 - The tray popover layout has one 16 px inset for its header, content and footer.
 - `pd-waiting-for` (and `pd-service-error` while it waits) draws a stopped service as an offline state: the warning icon,
   "<Service> stopped", one muted line and the status chip's repair; it spins only while a start or repair is under way
