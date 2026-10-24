@@ -59,7 +59,7 @@ jobs:
           npm run build
           npm run i18n:check
           npm run check:dialogs
-          npx ng build shell-demo
+          npm run shell-demo:build
           npx playwright install --with-deps chromium
           npx playwright test --project=shell-demo
 

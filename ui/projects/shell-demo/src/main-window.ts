@@ -9,7 +9,8 @@ import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
 import { TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
 import { TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
-import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS } from './app/demo.contributions';
+import { provideWebviewLog } from '@decryp7/paddock-ui/shell/diagnostics';
+import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS } from './app/demo.contributions';
 import { demoAboutBackend, demoUpdatesBackend } from './app/demo-about';
 import type { DemoContext } from './app/demo-context';
 import { DemoIcon } from './app/demo-icon';
@@ -53,6 +54,10 @@ export function bootMainWindow(): Promise<unknown> {
       // opens What's New once after an update.
       provideContributions(SHELL_ABOUT_CONTRIBUTIONS),
       provideShellAbout({ about: demoAboutBackend, updates: demoUpdatesBackend, main: true, ready: windowReady }),
+      // Report a problem (plan X2): Help > Report a problem…, the Logging settings page, and the page's own errors in the
+      // engine's log (desktop build only: the browser build has no log to send them to).
+      provideContributions(SHELL_DIAGNOSTICS_CONTRIBUTIONS),
+      ...(ipc ? [provideWebviewLog({ ipc: () => ({ invoke: (command, args) => ipc.invoke(command, args) }) })] : []),
       // Settings (plan S10): Settings… (Mod+,) and the shell's Appearance page, Open Settings for notices and repairs, and
       // the Appearance settings as the source of the window's look, read once the window is ready (start-up sends only
       // the contract's calls).

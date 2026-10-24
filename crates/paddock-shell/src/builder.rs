@@ -44,6 +44,8 @@ const NO_CONTRACTS: &str = r#"{"version":1,"base":[],"dialogs":{}}"#;
 
 type BoxError = Box<dyn Error + Send + Sync>;
 type Part<R, T> = Box<dyn FnOnce(&AppHandle<R>) -> T + Send>;
+type DiagSetup<R> =
+    Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
 
@@ -55,6 +57,7 @@ pub struct Builder<R: Runtime> {
     services: Vec<ServiceSpec>,
     health_setup: Option<HealthAdjust<R>>,
     settings: Option<Part<R, Settings>>,
+    diagnostics: Option<DiagSetup<R>>,
     sections: Vec<Arc<dyn Configurable>>,
     startup: Option<Startup<R>>,
     updater: Option<Part<R, UpdatesBuilder>>,
@@ -75,6 +78,7 @@ impl<R: Runtime> Builder<R> {
             services: Vec::new(),
             health_setup: None,
             settings: None,
+            diagnostics: None,
             sections: Vec::new(),
             startup: None,
             updater: None,
@@ -118,6 +122,18 @@ impl<R: Runtime> Builder<R> {
     /// The settings (default: `settings.json` in the app's config folder).
     pub fn settings(mut self, f: impl FnOnce(&AppHandle<R>) -> Settings + Send + 'static) -> Self {
         self.settings = Some(Box::new(f));
+        self
+    }
+
+    /// Report a problem and the log's Settings: the app's sections, redaction rules and log handle
+    /// (`Ok(paddock_diag::tauri::Setup::new(app_info, dirs).log(handle))`; an error fails the app's start naming this part). The shell registers the `pd.logging` settings section
+    /// on the log handle, and the Report a Problem dialog and the webview's log command work from then on. Where the user saves
+    /// the report is asked natively with the `native-dialogs` feature.
+    pub fn diagnostics(
+        mut self,
+        f: impl FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send + 'static,
+    ) -> Self {
+        self.diagnostics = Some(Box::new(f));
         self
     }
 
@@ -231,6 +247,10 @@ impl<R: Runtime> Builder<R> {
                 paddock_dialogs::tauri::invoke_handler(),
             )
             .route(
+                &paddock_diag::COMMANDS,
+                paddock_diag::tauri::invoke_handler(),
+            )
+            .route(
                 &paddock_jobs::tauri::COMMANDS,
                 paddock_jobs::tauri::invoke_handler(),
             )
@@ -300,6 +320,17 @@ impl<R: Runtime> Builder<R> {
             .register(Arc::new(paddock_settings::shell::appearance()))
             .map_err(|e| named("the Appearance settings", e))?;
 
+        if let Some(f) = self.diagnostics {
+            let native = native_picker(app);
+            let setup = f(app).map_err(|e| named("Report a problem", e))?;
+            let diagnostics = paddock_diag::tauri::install(app, setup, native);
+            if let Some(handle) = diagnostics.log_handle() {
+                settings
+                    .register(paddock_diag::logging::logging_section(handle))
+                    .map_err(|e| named("the Logging settings", e))?;
+            }
+        }
+
         let dialogs = Dialogs::from_json(self.contracts.as_deref().unwrap_or(NO_CONTRACTS))
             .map_err(|e| named("the dialog contracts", e))?;
         app.manage(dialogs);
@@ -344,6 +375,21 @@ impl<R: Runtime> Builder<R> {
         }
         Ok(())
     }
+}
+
+/// The native save dialog for reports (`native-dialogs`); without the feature the app's setup must name a picker.
+#[cfg(feature = "native-dialogs")]
+fn native_picker<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Option<Arc<dyn paddock_diag::tauri::SavePicker>> {
+    Some(Arc::new(paddock_diag::tauri::NativePicker::new(
+        app.clone(),
+    )))
+}
+
+#[cfg(not(feature = "native-dialogs"))]
+fn native_picker<R: Runtime>(_: &AppHandle<R>) -> Option<Arc<dyn paddock_diag::tauri::SavePicker>> {
+    None
 }
 
 /// A set-up error naming the part that failed.

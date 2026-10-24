@@ -1,6 +1,6 @@
 // Helpers for the tools' tests: every script runs in a scratch folder with a PATH of shims, so nothing on the machine is touched.
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,13 +35,39 @@ export const calls = (bin) => {
   }
 };
 
-/** Runs `bash <tools>/<script> args` with PATH = shims first, then only /usr/bin:/bin. */
+/** Tools the scripts probe for; a CI container has some of them in /usr/bin, so the system folder offered to a script hides them. */
+const HIDDEN = new Set(['node', 'nodejs', 'npm', 'npx', 'cargo', 'rustc', 'rustup', 'pkg-config', 'systemctl', 'sw_vers', 'xcode-select', 'docker']);
+let systemBin;
+/** A folder of links to everything in /usr/bin and /bin except the probed tools, built once per test process. */
+export function systemFolder() {
+  if (systemBin) return systemBin;
+  systemBin = scratch('paddock-sys-');
+  for (const dir of ['/usr/bin', '/bin']) {
+    let names = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const n of names) {
+      if (HIDDEN.has(n) || existsSync(join(systemBin, n))) continue;
+      try {
+        symlinkSync(join(dir, n), join(systemBin, n));
+      } catch {
+        /* a name that cannot be linked is simply not offered */
+      }
+    }
+  }
+  return systemBin;
+}
+
+/** Runs `bash <tools>/<script> args` with PATH = shims first, then the system folder without the probed tools. */
 export function run(script, args, { bin, env = {}, cwd } = {}) {
   const r = spawnSync('bash', [join(TOOLS, script), ...args], {
     cwd,
     encoding: 'utf8',
     timeout: 30_000,
-    env: { PATH: `${bin ?? ''}:/usr/bin:/bin`, HOME: cwd ?? tmpdir(), TMPDIR: tmpdir(), ...env },
+    env: { PATH: `${bin ?? ''}:${systemFolder()}`, HOME: cwd ?? tmpdir(), TMPDIR: tmpdir(), ...env },
   });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }

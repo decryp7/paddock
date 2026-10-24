@@ -338,3 +338,14 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   gets SIGPIPE and the pipeline reports failure (the shell demo's macOS verify said "DMG is not signed" for a signed
   DMG). Capture the output first (`out=$(codesign …)`), then match. Debrief's and Pitwall's verify scripts use the same
   pattern and get the same fix when next touched.
+- A SignalStore state key and a method of the same name shadow each other without a type error until a spec calls the
+  wrong one: `withState({ save })` and `withMethods({ save() })` left `store.save` a function that is also a signal. Name
+  state for what it is (`saveState`) and methods for what they do; members that start with `_` are private to the store
+  (not on its type), so a spec drives them through the backend's events, as the window does.
+- A scoped (thread-local) `tracing` subscriber does not see what a Tauri command logs: commands run on the async
+  runtime's threads, not the test's, so the line vanished and the test read an empty file. A test of a command that logs
+  installs the real log once, in a test binary of its own (`paddock-diag/tests/webview.rs`); `Logging::scoped` is for
+  code that runs on the test's thread.
+- Redaction cost grows with the input, so bound the input first: a section that handed over 100 MB was cut to the 4 MB
+  limit only after every byte had been through the regexes (debug builds took 20 s for five such files). `Collected`
+  cuts the content to the file limit before redacting and takes smaller `Limits` in tests.

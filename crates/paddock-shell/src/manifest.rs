@@ -149,6 +149,7 @@ pub fn check(manifest_json: &str, expect: &Expect<'_>) -> Vec<String> {
     let shell_sections = [
         paddock_settings::shell::APPEARANCE,
         paddock_settings::shell::UPDATES,
+        paddock_diag::logging::LOGGING,
     ];
     for id in &m.settings_forms {
         if !expect.sections.contains(&id.as_str()) && !shell_sections.contains(&id.as_str()) {
