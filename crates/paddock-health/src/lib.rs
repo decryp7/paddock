@@ -13,6 +13,7 @@
 //! - [`notify`]: the cause-key notification centre: one message per cause, updated in place, resolved when the cause
 //!   clears; app messages saved in a versioned file, window messages in the window's project. [`notify::health`] turns
 //!   a health change into its one message.
+//! - [`notify::os`]: OS notifications over the centre: one policy, rate limits, quiet hours, buttons and clicks (plan X8).
 //! - `tauri` (feature `tauri`): the `paddock://service-health` and `paddock://notifications` events to
 //!   every window, the commands (`health_snapshot`, `health_repair`, `notifications_*`) and their table.
 //!

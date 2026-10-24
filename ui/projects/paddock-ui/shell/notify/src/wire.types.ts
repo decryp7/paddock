@@ -3,7 +3,7 @@
 // helpers over them.
 import type { NoticesSnapshot, ServiceHealthSnapshot, ServiceState } from '../generated/health';
 
-export { SERVICE_HEALTH_EVENT, NOTIFICATIONS_EVENT, NOTIFICATIONS_OPEN_EVENT, healthCause } from '../generated/health';
+export { SERVICE_HEALTH_EVENT, NOTIFICATIONS_EVENT, NOTIFICATIONS_OPEN_EVENT, NOTIFICATIONS_ACTION_EVENT, healthCause } from '../generated/health';
 export type {
   ServiceState,
   RepairAction,
@@ -20,6 +20,7 @@ export type {
   Notice,
   NoticesSnapshot,
   NoticesEvent,
+  NoticeActionEvent,
   WindowNotice,
   WindowNoticeScope,
   HealthError,

@@ -10,6 +10,17 @@ Conventional Commits; one semver tag for the whole repo.
   it), `Deadline`, and `Backoff`/`BackoffPolicy`/`Retry` (Pitwall's restart policy; `retry_forever` for reconnecting
   clients). `CancelToken::with_deadline_on(clock, limit)`; `JobRegistry::register_with_deadline` now measures the limit on
   the registry's clock, so a fake clock runs a job's time limit out without sleeping.
+- OS notifications (plan X8): `paddock-health` `notify::os` and `tauri::os`/`tauri::native` (feature `os-notify`), the four
+  adapters (Debrief, Spotter, Pitcrew, Dyno) as one. One policy (`OsSettings`: level off/alerts/all, quiet hours across
+  midnight with an optional critical bypass, cool-down and burst limits), `screen` and `user_sees` pure, `RateLimiter` per
+  cause key on the injected clock, `OsNotifier` over a `Toaster` port (`PluginToaster` over `tauri-plugin-notification`,
+  `FakeToaster` for tests), toasts with up to three labelled buttons, and `route` for clicks: open the message, repair in the
+  shell, the app's handler (`Setup::on_notice_action`), or `paddock://notifications-action` to the window
+  (`NOTIFICATIONS_ACTION_EVENT`, `NotificationsBackend.onAction`, `NotificationsStore.runFromOs`). `Setup::os_notifier`
+  installs it, with a quiet-hours digest ("N notifications held during quiet hours" once when they end, rate-limited,
+  `Setup::os_digest_every`); `paddock-shell` adds the `pd.notifications` settings page (`Builder::os_notifications`) and the `os-notify`
+  feature. The shell demo shows the Notifications settings page and runs the notifier (the real plugin installed, a fake
+  toaster in tests); `OS_NOTIFICATIONS_CONTRIBUTIONS`, `NOTIFICATIONS_SECTION_FIXTURE` and `OsActionRunner` are the UI side.
 - `paddock-diag` and `@decryp7/paddock-ui/shell/diagnostics` (plan X2, decision D9): Report a problem, the three designs of Debrief,
   Dyno and Pitcrew as one. A diagnostics zip of the app's log (newest part, read from the end), system facts, settings (secrets
   masked) and crash marker, plus the sections an app adds; one `Redactor` (secrets from Pitcrew and Debrief, personal data from Dyno,

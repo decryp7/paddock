@@ -470,3 +470,43 @@ fn a_healthy_sink_reports_no_panics() {
     let (ctx, _) = job();
     assert_eq!(downloader().download(&ctx, &req).unwrap().sink_panics, 0);
 }
+
+#[test]
+fn a_fetch_takes_a_bounded_number_of_headers_and_a_timeout() {
+    let mut fetch = Fetch::new().timeout(Duration::from_secs(5));
+    let mut refused = None;
+    for i in 0..1000 {
+        match fetch.header(&format!("X-Extra-{i}"), "v") {
+            Ok(next) => fetch = next,
+            Err(e) => {
+                refused = Some(e);
+                break;
+            }
+        }
+    }
+    assert!(matches!(refused, Some(DownloadError::InvalidRequest(m)) if m.contains("at most")));
+}
+
+#[test]
+fn get_bytes_tries_again_when_the_body_is_cut_and_gives_up_when_nothing_answers() {
+    let d = downloader();
+    // The first answer promises 5000 bytes and delivers 100: another attempt.
+    let cut = Server::start(|_, n| match n {
+        0 => Resp::new(200, blob(5000)).cut(100),
+        _ => Resp::new(200, blob(5000)),
+    });
+    assert_eq!(
+        d.get_bytes(&cut.url("/"), &Fetch::new()).unwrap().len(),
+        5000
+    );
+    assert_eq!(cut.log().len(), 2);
+    // Nothing listens on the port: the connection failure is retried, then reported by host.
+    let closed = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}/", listener.local_addr().unwrap())
+    };
+    assert!(matches!(
+        d.get_bytes(&closed, &Fetch::new()),
+        Err(DownloadError::Network { .. })
+    ));
+}

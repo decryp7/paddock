@@ -3,10 +3,10 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { calls, run, scratch, shim } from './helpers.mjs';
 
-/** A fake docker: records every call; `image inspect` fails (no image yet) unless HAVE_IMAGE is set. */
+/** A fake docker: records every call; `image inspect` fails (no image yet) unless HAVE_IMAGE is set; `build` reads its Dockerfile from stdin like the real one (an unread pipe would end the script's printf with SIGPIPE). */
 function docker({ ps = '' } = {}) {
   const bin = scratch('paddock-bin-');
-  shim(bin, 'docker', `case "$1 $2" in "image inspect") [ -n "$HAVE_IMAGE" ];; "ps -aq") echo "${ps}";; esac`);
+  shim(bin, 'docker', `case "$1 $2" in "image inspect") [ -n "$HAVE_IMAGE" ];; "ps -aq") echo "${ps}";; "build "*) cat >/dev/null;; esac`);
   return bin;
 }
 const go = (bin, args, env = {}) => run('linux-container.sh', args, { bin, cwd: scratch(), env: { DOCKER: join(bin, 'docker'), ...env } });
