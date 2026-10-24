@@ -7,5 +7,7 @@ fn main() {
     if let Ok(list) = std::env::var("DEP_PADDOCK_SHELL_PERMISSION_FILES_PATH") {
         println!("cargo:rustc-env=PADDOCK_SHELL_PERMISSION_FILES={list}");
     }
-    paddock_build::Build::new().sidecars(["shell-demo-agent"]).run();
+    paddock_build::Build::new()
+        .sidecars(["shell-demo-agent"])
+        .run();
 }
