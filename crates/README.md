@@ -14,6 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-build/src/native.rs`.
   call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
@@ -101,14 +102,17 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
+| `paddock-watch` | folder watching: `Debouncer` on the shared `Clock` (quiet time plus longest wait), the `ChangeSource` port with a `notify` adapter and a watcher thread, Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`) for files that are still being written (plan X23) | yes (Debrief, Spotter, Dyno, `paddock-packs`); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
 | `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
+| `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
@@ -354,7 +358,7 @@ health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.
     user who is looking at the window gets the message in the centre only. `Setup::os_digest_every(d)` polls on a thread that
     ends with the app (quiet hours end by the clock, not an event); a window gaining the focus polls too.
   - Tests never post a notification: `FakeToaster` records toasts, plays clicks and permission answers (public, for the
-    apps' wiring tests); `FixedOffset` stands for the user's zone, `ManualClock` for time.
+    apps' wiring tests); `FixedOffset` stands for the user's zone, `FakeClock` for time.
 
 ## `paddock-startup` (plan S7 and §11)
 
@@ -808,22 +812,30 @@ let counters = Catalogue::text(vec![Entry::new(path, "Bytes Received/sec").field
 Where the apps send alerts, from Pitcrew's `notify-channels` and Spotter's `mail.rs`:
 
 ```rust
-use paddock_channels::{Dispatcher, Message, Severity, Settings, UreqPoster, LettreSender};
-use paddock_download::ProxyMode;
+use paddock_channels::{Dispatcher, EgressPoster, LettreSender, Message, Severity, Settings, channel_policy};
 use paddock_jobs::{CancelToken, time::SystemClock};
+use paddock_net::{Egress, Reach};
 
+let egress = app_egress;                                 // paddock-net Egress built with channel_policy(Reach::Lan)
 settings.validate()?;                                    // on Save: the message says what to fix; at most 8 channels
-let d = Dispatcher::new(settings, secrets, Arc::new(UreqPoster::new(ProxyMode::System)?), Arc::new(LettreSender), Arc::new(SystemClock));
+let d = Dispatcher::new(settings, secrets, Arc::new(EgressPoster::new(egress)), Arc::new(LettreSender), Arc::new(SystemClock));
 let msg = Message::new("diskLow", Severity::Error, "Disk low", "C: has 2 GB left", "runner-1");
 let deliveries = d.dispatch(&msg, &cancel);              // blocks: run it in a job; one Delivery per channel, in order
 let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // "Send test" before Save; d.test(id, ..) after
 ```
 
-- Settings hold no secret: a webhook or ntfy channel with `auth` uses the token `Name("channel:<id>", "token")`, an e-mail
-  channel with a `username` uses `Name("channel:<id>", "password")` (`ChannelConfig::secret_name`); an old Pitcrew
+- Settings hold no secret: a webhook or ntfy channel with `auth` uses the token `Name("channel:<id>", "secret")`, and so does an e-mail
+  channel with a `username` (its password; `ChannelConfig::secret_name`, `secret_name_of(id)`); an old Pitcrew
   entry moves with `paddock_secrets::rename_entry`. `forget_secret` removes it when the channel is deleted.
 - Bounded: title one line of at most 200 characters, body at most 64 KiB (cut on a character boundary with a marker), at most 8
   channels, 10 recipients, 64 events a channel, 8 KiB a header; the answer's body is never read.
+- Settings page engine (`ChannelsControl`, feature `tauri` for the commands `channels_get`, `channels_save`, `channels_set_secret`,
+  `channels_clear_secret`, `channels_test` and the `paddock://channels` event): settings in a `SettingsStore` (`FileSettings` over
+  `paddock-env`), `save` validates and then deletes the secrets of removed channels, `set_secret` is called only by the secret dialog's
+  window, `test` returns an id at once and reports a `ChannelsEvent::Test` (one test per channel, four at once). UI:
+  `@decryp7/paddock-ui/shell/channels`.
+- Network: `EgressPoster` over `paddock-net` (https only, plain http to this computer with `Reach::Loopback`, offline mode,
+  connection reuse, no redirects, the answer's body never read).
 - Retries: transient failures only (no connection, timeout, HTTP 408/425/429/5xx, a 4xx mail reply), at most 3 attempts by default
   (`RetryPolicy`, 5 at most), waits from `paddock_jobs::time::Backoff` (2 s doubling to 30 s), a server's `Retry-After` honoured up
   to that cap, every wait cancellable and on the injected `Clock` (tests use `FakeClock`). A bad configuration, a missing secret,
@@ -867,6 +879,10 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 - `launch`/`child`: `ChildSpec` → `paddock_proc::Supervised` (no console window, own process group, tree ended on drop,
   optional `MemoryCap`, clean environment), the `Bootstrap` JSON line on stdin (stdin stays open as the lifeline), and the
   child's `serve`/`read_bootstrap`/`connect`/`lifeline`. `Bootstrap::extra` carries what an app adds (Debrief's sandbox).
+- Every limit runs on an injected clock (`PeerOptions::clock`, `Host::with_clock`, `ServerConfig::clock`); each client of a
+  `LinkServer` is authenticated on its own thread within `handshake_timeout`, so a silent client delays nobody; the server
+  caps `max_connections` and `max_handshakes` (`busy`), and `Subscriptions` push a topic's events to the connections that
+  asked for it.
 - `link`: `Discovery` (endpoint, token, pid, build, protocol; written owner-only through `paddock_env::write_atomic`, read
   bounded; `Found::Stale` for a dead pid, `Found::Untrusted` for a file others could write), `LinkServer` (accept thread,
   `peers()` for pushes, removes its file on stop), `LinkClient` (state `Connecting`/`Connected`/`Retrying`/`GaveUp`/`Stopped`,
@@ -875,6 +891,37 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 - Tests start real processes through the `paddock-ipc-test-child` binary and leave none behind; nothing sleeps or measures
   time (gates, channels, a `FakeClock` for the back-off). `fuzz/` holds the frame-codec fuzz target
   (`cargo +nightly fuzz run frame`).
+
+## `paddock-net` (plan X16)
+
+Every outbound request goes through one `Egress`:
+
+```rust
+use paddock_net::{Egress, Policy, Reach, Request, SystemLookup, UreqWire};
+use paddock_download::ProxyMode;
+
+let policy = Policy::default().reach(Reach::Public).allow_hosts(&["api.example.org", "*.cdn.example.org"]).min_gap(Duration::from_secs(1));
+let wire = Arc::new(UreqWire::new(&policy, ProxyMode::System)?);          // one connection pool per proxy and reach
+let egress = Arc::new(Egress::new(policy, wire, Arc::new(SystemLookup), Arc::new(SystemClock)));
+let resp = egress.send(&Request::get(url).if_none_match(&etag)?, &cancel)?; // resp.not_modified(), resp.etag(), resp.body (capped)
+egress.set_offline(true);                                                  // every later request: NetError::Offline, no lookup, no socket
+let transport = egress.download_transport();                               // the same policy under paddock_download::Downloader
+```
+
+- Before **every hop** (a redirect is a new request): no login in the URL; https (plain http only for `localhost`, `127.x`,
+  `::1` when the reach is `Loopback`); the host on the allow-list; **every** address of the name within the reach (one bad
+  address refuses the name, as a DNS-rebinding answer would be); `169.254.169.254` and all link-local, unspecified and
+  multicast addresses are never reachable. The wire applies the reach again to the addresses the socket connects to.
+- A redirect never goes farther than where the request started (a public start cannot reach the LAN or this computer), never
+  goes from https to http, drops `Authorization`, `Cookie` and `Proxy-Authorization` when the host changes, and a 301/302/303
+  after a POST becomes a GET. The wire never follows one.
+- Caps: answer body (8 MiB, `max_body`), request body (1 MiB), redirects (5, at most 10), headers (32, 8 KiB each).
+  `stream` returns the unread body for downloads (no whole-request limit; `body_timeout` between chunks).
+- Politeness: `min_gap` between two requests to one host on the injected clock, cancellable. `Retry-After` is read with
+  `Response::retry_after`; retrying is the caller's (`paddock-channels`, the downloader).
+- Tests use `FakeWire` (scripted, records, counts sockets) and `StaticLookup`; the real wire is tested against a loopback server.
+- Name checks resolve through the system resolver before each hop; behind a proxy that resolves names itself (internal-only
+  names), pass a `Lookup` that answers from the proxy's policy instead.
 
 ## `paddock-env` (plan X7)
 
@@ -943,6 +990,32 @@ let snapshot = store.current();                                             // A
 - `user_regex`: `compile`, `compile_with`, `compile_set`; `RegexLimits::DEFAULT` (Debrief: 8 MiB) and `STRICT` (Spotter: 1 MiB);
   typed `RegexError` (`TooLong`, `TooComplex`, `Invalid`) whose messages say what to fix.
 - `Snapshot::health()` gives the one line (`Ok`, `Notes`, `Degraded`) for the `packs` health or notification entry.
+- `tauri` feature: `paddock_packs::tauri::{Setup, install}` over `view::kind(id, label, store)` (the pack type erased); `Builder::packs(|app|
+  Ok(Setup::new().kind(...).health("packs")))` in `paddock-shell`. Commands `packs_status` (every window) and `packs_reload` (main windows and the
+  Settings dialog), the `paddock://packs` event to every window on a real change, and the health entry: down with the first refused pack and `Retry`
+  as its repair (a reload, served by the shell, never by a pack: rule 19), ok when none is. The UI is `@decryp7/paddock-ui/shell/packs` (Settings >
+  Knowledge packs).
+
+## `paddock-watch` (plan X23)
+
+```rust
+use paddock_watch::{Debouncer, NotifySource, Settle, SettleConfig, scan_folder, spawn};
+
+let debouncer = Arc::new(Debouncer::new(Arc::new(SystemClock), Duration::from_millis(300), Duration::from_millis(1500)));
+let _watch = spawn(debouncer, &NotifySource, &folder, /* recursive */ true, move || rescan())?;   // feature `notify`; FakeSource in tests
+
+// Debrief's watched folders: a file is ready when its size and time stopped changing.
+let mut settle = Settle::new(SettleConfig::default());
+let ready = settle.observe(&scan_folder(&folder, &|rel| is_log(rel)).files, clock.now_ms());   // ready.new / .changed / .skipped
+settle.imported(&stamp);  settle.failed(&path, "locked", now);                                  // back-off, then given up
+```
+
+- `Debouncer`: quiet time, never later than the longest wait after the first event; `poll()` is `Idle`, `Waiting(d)` or `Now`.
+  Tests move a `FakeClock`; the thread's 50 ms wake-up only bounds how late a due action runs.
+- `Settle` ignores temporary names and empty files, forgets vanished files, retries a locked file with back-off (4 attempts), reports
+  a too-large file once, and bounds its pending list; `Batcher` groups ready files into one job. `scan_folder` skips symbolic links
+  and stops at 50 000 entries or 16 levels (`Scan::truncated`).
+- Not here yet: Dyno's keep-for times (`dyno-core/src/watch.rs`) are app policy over `Settle`'s stamps and stay in Dyno.
 
 ## `paddock-log` (plan X1)
 
@@ -1170,6 +1243,36 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
   by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.
 
+## `paddock-live` (plan X29)
+
+Replaces Pitwall's `live.rs`, Dyno's `link.rs` pump, Pitcrew's `events.rs` forwarder, Spotter's push handling and the ordering gaps
+of Debrief's channels. The UI half is `@decryp7/paddock-ui/live` (see `ui/README.md`).
+
+```rust
+impl LiveState for Overview {                       // the app's state
+    type Delta = OverviewChange;
+    fn apply(&mut self, d: &OverviewChange) { /* the one fold */ }
+    fn merge(prev: &mut OverviewChange, next: &OverviewChange) -> bool { /* latest wins, or false */ }
+}
+let hub = Hub::new(Overview::default());
+let forwarder = paddock_live::tauri::register(app.handle(), "overview", &hub)?;   // paddock://live/overview + live_snapshot
+std::thread::spawn(move || paddock_live::run(&hub, &mut source, &clock, default_policy(), &cancel));
+// a Source: connect, `feed.seed(state)` (link becomes connected, a snapshot goes out), then `feed.publish(delta)` until it ends
+```
+
+- Sequence: every `publish` is the next number; a frame is `from..=seq` because merged deltas stand for several numbers. A window
+  applies a delta only when `from` is next; a gap, a reload or a new window asks `live_snapshot`. Frames are camelCase JSON with a
+  `kind` tag (`snapshot`, `delta`, `link`).
+- Bounded: each `Subscription` queues at most `with_queue_cap` frames (4 to 4096, default 256). Deltas merge into the queued one when
+  `LiveState::merge` says so (a memory sample replaces the last); a consumer that still falls behind has its queue replaced by one
+  snapshot (`resyncs()` counts it): memory never grows, nothing is lost silently. `reset` (a reseed) also replaces what was queued.
+- `run` waits its delays on the injected `Clock` (a `FakeClock` in specs); the link announces `reconnecting { attempt, retryInMs,
+  reason }` before each wait, `down` when the policy gives up and `stopped` on cancel. A connection that lasted `reset_after` starts
+  the delays over. Reasons are short sentences, never content.
+- A panic in an app's `apply` poisons nothing: locks recover (`PoisonError::into_inner`).
+- Channel names are `[a-z][a-z0-9-]{0,31}`; the command is `Query [WINDOW]` and async (rule 10); dialog windows reach it only through a
+  contract (`handler_with_grants`). Not covered: per-call streams to one caller (Debrief's `tauri::ipc::Channel` for search results
+  and the live tail) stay in the app; a feed is for shared state.
 ## `paddock-metrics` (plan X30)
 
 Replaces `metrics.rs` in Pitcrew (generic `TieredStore`), Pitwall (four tiers) and the tier maths of Dyno's agent store, and the four
@@ -1236,3 +1339,13 @@ io), `String`/`&str` (`failed`) and the guard's `Refusal` (`denied`, `limit`). `
 `unavailable`, `timeout`). The TypeScript (`ui/projects/paddock-ui/ipc/generated/ipc.ts`, with the runtime `ERROR_CODES`) is generated
 by `PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated` and checked on every run. Domain errors stay in their libraries
 and convert once at the command edge.
+
+## `paddock-build` and `paddock_proc::self_test` (plan X34)
+
+`paddock-build` is a build-dependency; the build.rs of an app is one line (`paddock_build::Build::new().sidecars(["x-service"]).run()`, feature
+`tauri-build`). It embeds the one Windows application manifest (Common Controls v6) into every binary of the crate, test binaries
+included, and tells tauri-build to add none of its own; it creates an empty `binaries/<name>-<target>[.exe]` for each sidecar that is not
+built yet (a real file is never overwritten); and it reruns on `TAURI_UPDATER_PUBKEY`. The apps' `windows-app-manifest.xml` copies go.
+App extras (Debrief's commit id) stay in the app's build.rs before the call. `paddock_proc::self_test::handle(name, version, &checks)` is
+the first call in a sidecar's `main`: with `--self-test` it runs the checks, prints one line each and exits 0 or 1 (rule 23; C34 checks
+that every sidecar has it, and `paddock-sidecar self-test` starts them from the built bundle).

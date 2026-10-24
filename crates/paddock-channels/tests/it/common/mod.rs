@@ -185,12 +185,16 @@ pub fn http_server(reply: Option<&'static str>) -> (u16, std::thread::JoinHandle
 pub struct SmtpScript {
     pub auth: &'static [u8],
     pub rcpt: &'static [u8],
+    pub greeting: &'static [u8],
+    pub ehlo: &'static [u8],
 }
 
 impl SmtpScript {
     pub const OK: SmtpScript = SmtpScript {
         auth: b"235 ok\r\n",
         rcpt: b"250 ok\r\n",
+        greeting: b"220 fake ESMTP\r\n",
+        ehlo: b"250-fake\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n",
     };
 }
 
@@ -204,7 +208,7 @@ pub fn smtp_server(script: SmtpScript) -> (u16, std::thread::JoinHandle<Vec<Stri
         let mut r = BufReader::new(s);
         let mut seen = Vec::new();
         let mut in_data = false;
-        let _ = w.write_all(b"220 fake ESMTP\r\n");
+        let _ = w.write_all(script.greeting);
         loop {
             let mut line = String::new();
             if r.read_line(&mut line).unwrap_or(0) == 0 {
@@ -221,7 +225,7 @@ pub fn smtp_server(script: SmtpScript) -> (u16, std::thread::JoinHandle<Vec<Stri
             }
             let up = line.to_uppercase();
             let reply: &[u8] = if up.starts_with("EHLO") {
-                b"250-fake\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n"
+                script.ehlo
             } else if up.starts_with("AUTH") {
                 script.auth
             } else if up.starts_with("RCPT") {

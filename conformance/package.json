@@ -6,7 +6,8 @@
   "license": "MIT OR Apache-2.0",
   "bin": {
     "paddock-conformance": "bin/paddock-conformance.mjs",
-    "paddock-notices": "bin/paddock-notices.mjs"
+    "paddock-notices": "bin/paddock-notices.mjs",
+    "paddock-sidecar": "bin/paddock-sidecar.mjs"
   },
   "exports": {
     ".": "./src/index.mjs",
@@ -14,7 +15,8 @@
     "./release/publish": "./release/publish.mjs",
     "./release/latest-json": "./release/latest-json.mjs",
     "./release/strip-keys": "./release/strip-keys.mjs",
-    "./notices": "./src/notices/generate.mjs"
+    "./notices": "./src/notices/generate.mjs",
+    "./sidecar": "./src/sidecar/sidecar.mjs"
   },
   "files": [
     "bin",

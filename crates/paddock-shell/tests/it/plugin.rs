@@ -683,3 +683,71 @@ fn the_start_at_login_switch_also_switches_the_apps_own_login_item() {
     }
     assert_eq!(*asked.lock().unwrap(), [true]);
 }
+
+#[test]
+fn the_knowledge_packs_bring_their_commands_event_and_health_entry() {
+    use paddock_packs::{
+        BuiltinPack, Limits, Origin, PackError, PackKind, PackLoader, PackSource, PackStore,
+    };
+    struct Lines;
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        #[serde(default)]
+        line: Vec<String>,
+    }
+    impl PackKind for Lines {
+        type Raw = Raw;
+        type Pack = Vec<String>;
+        const FORMAT: u32 = 1;
+        fn convert(raw: Raw, _: Origin) -> Result<Vec<String>, PackError> {
+            Ok(raw.line)
+        }
+    }
+    struct Empty;
+    impl PackSource for Empty {
+        fn list(&self) -> std::io::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        fn read(&self, _: &str, _: u64) -> std::io::Result<Vec<u8>> {
+            Err(std::io::ErrorKind::NotFound.into())
+        }
+    }
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .health(vec![paddock_health::ServiceSpec::new(
+            "packs",
+            "the knowledge packs",
+        )])
+        .packs(|_| {
+            let loader = PackLoader::<Lines>::new(
+                vec![
+                    BuiltinPack {
+                        name: "builtin.toml",
+                        text: "format = 1\nline = ['a']\n",
+                    },
+                    BuiltinPack {
+                        name: "bad.toml",
+                        text: "format = 7\n",
+                    },
+                ],
+                Box::new(Empty),
+                Limits::default(),
+            );
+            let store = Arc::new(PackStore::new(loader));
+            store.reload();
+            Ok(paddock_packs::tauri::Setup::new()
+                .kind(paddock_packs::view::kind("lines", "Line packs", store))
+                .health("packs"))
+        }));
+    let main = window(&app, "main");
+    let status = invoke(&main, "packs_status", json!({})).unwrap();
+    assert_eq!(status["kinds"][0]["id"], "lines", "{status}");
+    assert_eq!(status["kinds"][0]["problems"][0]["file"], "bad.toml");
+    let health = invoke(&main, "health_snapshot", json!({})).unwrap();
+    assert!(
+        health.to_string().contains("\"repair\":\"retry\""),
+        "{health}"
+    );
+    assert!(invoke(&main, "packs_reload", json!({})).is_ok());
+}

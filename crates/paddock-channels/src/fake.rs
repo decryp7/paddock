@@ -51,14 +51,6 @@ impl FakePoster {
         }))
     }
 
-    /// The next request panics (a channel bug the dispatcher must contain). The dispatcher sends to its channels in
-    /// parallel, so with more than one HTTP channel "the next request" can be any of them: use [`FakePoster::panic_on`]
-    /// to make one channel's requests panic.
-    pub fn then_panic(self) -> FakePoster {
-        lock(&self.script).push_back(Step::Panic);
-        self
-    }
-
     /// Every request whose URL contains `url_part` panics, whatever the order the channels post in.
     pub fn panic_on(self, url_part: &str) -> FakePoster {
         lock(&self.panic_on).push(url_part.to_owned());
@@ -83,8 +75,7 @@ impl HttpPoster for FakePoster {
         let step = lock(&self.script).pop_front();
         match step {
             Some(Step::Answer(a)) => a,
-            Some(Step::Panic) => panic!("fake poster panic"),
-            None => Ok(PostResponse {
+            _ => Ok(PostResponse {
                 status: 200,
                 retry_after: None,
             }),
