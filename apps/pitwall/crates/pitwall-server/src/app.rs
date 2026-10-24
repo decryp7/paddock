@@ -564,7 +564,19 @@ impl AppState {
     }
 
     /// Run the whole pipeline for a chat-like request and start generating.
-    pub async fn start_chat(self: &Arc<Self>, who: &Principal, meta: Meta, mut req: ChatRequest) -> Result<Run, ApiError> {
+    pub async fn start_chat(self: &Arc<Self>, who: &Principal, meta: Meta, req: ChatRequest) -> Result<Run, ApiError> {
+        self.start_chat_queued(who, meta, req, None).await
+    }
+
+    /// [`Self::start_chat`] that also tells `on_queued` the job id when the request has to wait in the queue, so the
+    /// route can answer at once with `X-Pitwall-Job-Id` (cancel by id while queued).
+    pub async fn start_chat_queued(
+        self: &Arc<Self>,
+        who: &Principal,
+        meta: Meta,
+        mut req: ChatRequest,
+        on_queued: Option<tokio::sync::oneshot::Sender<u64>>,
+    ) -> Result<Run, ApiError> {
         let cfg = self.cfg();
         let now = now_ms();
         req.check().map_err(ApiError::from)?;
@@ -655,7 +667,7 @@ impl AppState {
         let queued = Instant::now();
         let permit = self
             .serving
-            .acquire(app.clone(), resolved.id.clone(), priority, meta.kind, app_cap)
+            .acquire(app.clone(), resolved.id.clone(), priority, meta.kind, app_cap, on_queued)
             .await?;
         let (busy, cold) = self.serving.ensure_for(&resolved).await?;
         if req.has_images() && !busy.model().vision {

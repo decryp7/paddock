@@ -387,6 +387,7 @@ level every 30 seconds so it never starves. An app cannot go above its permissio
 | `X-Pitwall-Chosen-By` | `explicit` (named), `capabilities` (`auto:`) or `default`. |
 | `X-Pitwall-Alias` | Present when the `model` field named a preset: the preset's name (`X-Pitwall-Model` is the model behind it). |
 | `X-Pitwall-Cold-Start-Ms` | Present when the model had to be loaded first. |
+| `X-Pitwall-Job-Id` | The queue job behind the answer. A streamed request that has to wait answers at once with it; `DELETE /x/v1/jobs/{id}` cancels it (the stream ends with a `cancelled` error frame). An app may cancel only its own jobs. A running job stops when the connection closes. |
 
 With no `model`, Pitwall uses the default model from Settings, else a loaded one, else the first chat model installed.
 

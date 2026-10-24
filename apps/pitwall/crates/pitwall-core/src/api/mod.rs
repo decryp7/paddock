@@ -60,6 +60,8 @@ pub enum ErrorKind {
     CapabilityUnsupported,
     /// The engine build pinned for the model is not installed or failed its self-test (503, typed; ADR 0018).
     EnginePin,
+    /// The job was cancelled by `DELETE /x/v1/jobs/{id}` before it ran (499, typed).
+    Cancelled,
 }
 
 /// An error, ready to be written in any API's shape.
@@ -100,6 +102,7 @@ impl ApiError {
             ErrorKind::NotAvailable => 501,
             ErrorKind::Timeout => 504,
             ErrorKind::Engine => 500,
+            ErrorKind::Cancelled => 499,
         }
     }
 
@@ -121,6 +124,7 @@ impl ApiError {
             ErrorKind::EngineBuildTooOld => "engine_build_too_old",
             ErrorKind::CapabilityUnsupported => "capability_unsupported",
             ErrorKind::EnginePin => "engine_pin_unavailable",
+            ErrorKind::Cancelled => "cancelled",
         }
     }
 

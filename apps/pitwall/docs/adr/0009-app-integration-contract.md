@@ -59,7 +59,10 @@ on a clean shutdown it rewrites the file with `"serving": false` instead of dele
 Files without the field (older Pitwall) are read as `serving: true` and judged by `pid` as before.
 
 **Cancel by id.** Chat, completions and messages answers carry `X-Pitwall-Job-Id`, the id of the queued job.
-`DELETE /x/v1/jobs/{id}` cancels it while queued (and while running) without closing the connection; an app may cancel
+`DELETE /x/v1/jobs/{id}` cancels it while queued without closing the connection: a streamed request that has to wait
+answers at once (200, `X-Pitwall-Job-Id`; the model/engine headers are then absent) and its body ends with a typed
+`cancelled` error frame (HTTP 499 code `cancelled` elsewhere). A running job still stops by the connection closing
+(`wasRunning: true` is reported); non-streamed answers carry the id only with the finished answer; an app may cancel
 only its own jobs (others answer 404), the admin may cancel any.
 
 **Context per slot.** `GET /x/v1/models` entries and the `POST /x/v1/select` answer report `contextPerSlot` (the context

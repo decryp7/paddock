@@ -574,7 +574,7 @@ impl Serving {
         }
     }
 
-    /// Wait for a turn in the queue.
+    /// Wait for a turn in the queue. `on_queued` is told the job id if the job has to wait.
     pub async fn acquire(
         &self,
         app: AppId,
@@ -582,7 +582,9 @@ impl Serving {
         priority: Priority,
         kind: JobKind,
         app_cap: Option<usize>,
+        on_queued: Option<tokio::sync::oneshot::Sender<u64>>,
     ) -> Result<Permit, ApiError> {
+        let mut on_queued = on_queued;
         let slots = self.slots_for(&model);
         let id = {
             let mut sched = lock(&self.inner.sched);
@@ -619,7 +621,11 @@ impl Serving {
                     return Ok(permit);
                 }
                 if s.job(id).is_none() {
-                    return Err(api(ErrorKind::Overloaded, "the request was cancelled while it waited"));
+                    return Err(api(ErrorKind::Cancelled, "the request was cancelled while it waited"));
+                }
+                // Still waiting: tell the caller the job's id once, so it can answer at once and be cancelled by id.
+                if let Some(tx) = on_queued.take() {
+                    let _ = tx.send(id);
                 }
             }
             tokio::select! { () = &mut notified => {}, () = tokio::time::sleep(Duration::from_millis(500)) => {} }
