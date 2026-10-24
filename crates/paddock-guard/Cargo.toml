@@ -1,0 +1,19 @@
+[package]
+name = "paddock-guard"
+version = "0.1.0"
+description = "Crash containment for code the app does not control (plugins, workers): panics become typed errors attributed to their owner, a quarantine policy (3 failures in 10 minutes by default, on the shared clock, kept in a versioned state file) stops calling repeat offenders, and a guarded call runs a function under a time budget, catching panics and abandoning hangs."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+paddock-env = { workspace = true }
+paddock-jobs = { workspace = true }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json = "1"
