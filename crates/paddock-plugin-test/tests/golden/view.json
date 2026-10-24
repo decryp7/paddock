@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "title": "Fixture",
+  "root": {
+    "id": "root",
+    "kind": {
+      "stack": {
+        "dir": "column",
+        "children": [
+          {
+            "id": "",
+            "kind": {
+              "text": {
+                "text": "Hello from the fixture",
+                "tone": "neutral",
+                "style": "body"
+              }
+            }
+          },
+          {
+            "id": "",
+            "kind": {
+              "empty": {
+                "icon": "info",
+                "title": "Nothing here",
+                "hint": "Refresh to look again",
+                "action": {
+                  "id": "refresh",
+                  "label": "Refresh",
+                  "confirm": null,
+                  "args": {},
+                  "writes": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "etag": 1
+}
