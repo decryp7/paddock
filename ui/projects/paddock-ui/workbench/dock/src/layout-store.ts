@@ -62,6 +62,7 @@ function sanitizeSlot(raw: unknown): DockSlot {
     direction,
     ...(finite(v['index']) ? { index: v['index'] as number } : {}),
     ...(finite(v['size']) ? { size: v['size'] as number } : {}),
+    ...(['left', 'right', 'bottom'].includes(v['edge'] as string) ? { edge: v['edge'] as 'left' | 'right' | 'bottom' } : {}),
   };
 }
 

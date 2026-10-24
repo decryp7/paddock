@@ -1,5 +1,5 @@
 import { DRAG_THRESHOLD, hitDockTarget, moveTab, popoutDragReduce, PopoutDrag, outsideViewport, pressTab, screenToClient, SETTLE_MS, targetPreview } from './dock-target';
-import { at } from '../../testing/must';
+import { at } from './must.spec-helper';
 
 const root = { x: 0, y: 0, width: 800, height: 600 };
 const groups = [

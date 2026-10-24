@@ -1,7 +1,7 @@
 import { Rect } from './dock-geometry';
-import { cueMode, DragOutCue, InWindowCue } from './drag-out-cue';
+import { cueMode, DragOutCue, type DragOutPreview, InWindowCue } from './drag-out-cue';
 import { TabDropOutcome } from './float-cue';
-import { DragOutPreview } from './panel-windows';
+
 
 class FakePreview implements DragOutPreview {
   native = true;

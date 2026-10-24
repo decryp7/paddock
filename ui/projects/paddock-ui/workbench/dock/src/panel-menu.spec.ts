@@ -15,6 +15,12 @@ const find = (items: ReturnType<typeof panelMenu>, action: string) => items.find
 const actions = (f: PanelFacts) => panelMenu(f).map((i) => i.action);
 
 describe('panelMenu', () => {
+  it('leaves the pop-out action out without a pop-out service, and disables Close for a view that cannot be closed', () => {
+    expect(actions(facts({ popOutAvailable: false }))).not.toContain('popout');
+    expect(find(panelMenu(facts({ closable: false })), 'close')?.disabled).toBe(true);
+    expect(find(panelMenu(facts({ closable: true })), 'close')?.disabled).toBeUndefined();
+  });
+
   it('offers window positions, auto hide and close for a tool window', () => {
     expect(actions(facts())).toEqual(['float', 'popout', 'dock', 'dockAsDocument', 'autoHide', 'pinTab', 'close']);
   });
