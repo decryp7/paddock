@@ -6,11 +6,11 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildManifest } from '../release/latest-json.mjs';
 import { exportLines, stripKey, strippedEnv } from '../release/strip-keys.mjs';
-import { buildManifest as pitwallBuild } from './fixtures/pitwall-latest-json.mjs';
+import { buildManifest as pitwallBuild } from '../fixtures/pitwall-latest-json.mjs';
 import { makeApp } from './helpers.mjs';
 
 const SHARED = fileURLToPath(new URL('../release/latest-json.mjs', import.meta.url));
-const PITWALL = fileURLToPath(new URL('./fixtures/pitwall-latest-json.mjs', import.meta.url));
+const PITWALL = fileURLToPath(new URL('../fixtures/pitwall-latest-json.mjs', import.meta.url));
 const STRIP = fileURLToPath(new URL('../release/strip-keys.mjs', import.meta.url));
 
 function artifacts() {
