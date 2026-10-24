@@ -453,22 +453,42 @@ Pop-out panel windows: a panel of a window's dock moved into an OS window of its
 
 ## `paddock-workbench` (plan X50 W2a, W7)
 
-The Rust side of the workbench (ADR 0013 §3). Today: the dock's layout store. The workbench Tauri plugin (pop-out panels
-of `paddock-panels` and the assistant of `paddock-assistant` folded behind one guard) joins it in W7.
+The Rust side of the workbench (ADR 0013 §3): the dock's layout store and the workbench Tauri plugin, built exactly like
+`paddock-shell` (one guard over a composed table, generated permission sets per window class, generated TypeScript names).
 
 ```rust
-app.manage(paddock_workbench::tauri::Layouts::open(dirs.config()));     // <config>/workbench-layout.json
-// in a table: paddock_workbench::COMMANDS (layout_get [MAIN | POPOUT], layout_set [MAIN]); handler: tauri::invoke_handler()
+let workbench = paddock_workbench::Builder::new()                 // every part optional (a missing one answers "not set up")
+    .layouts(dirs.config())                                       // <config>/workbench-layout.json
+    .panels(Panels::builder().route("index.html#/popout").bounds_file(data.join("popout-places.json")).build())
+    .window_hooks(WindowHooks::new())                             // optional: the app's steps in building a pop-out
+    .assistant(Arc::new(assistant))                               // paddock_assistant::Assistant
+    .build();
+tauri::Builder::default().plugin(shell.build()).plugin(workbench) // the shell first: the dialogs' grants are its state
 ```
 
+- Plugin `paddock-workbench` (`links`): commands are `plugin:paddock-workbench|<command>`. `COMMANDS` folds `LAYOUT`
+  (`layout_get [MAIN | POPOUT]`, `layout_set [MAIN]`), `paddock_panels::COMMANDS` (11 commands) and
+  `paddock_assistant::tauri::COMMANDS` (7) behind one `Guard` (`paddock_dialogs::tauri::grant_of` for the dialog contracts)
+  over `Routes` to each crate's unguarded handler. The plugin also hooks every window's events into the panel layer
+  (a pop-out closing docks back, a host closing closes its pop-outs). The app serves the drag ghost's page
+  (`paddock_panels::ghost`) and calls `Panels::set_exiting(true)` when it quits.
+- Permissions: `build.rs` makes `allow-<command>`; `permissions/window-classes.toml` (generated from the table, checked by
+  a test; `PADDOCK_WRITE_TS=1 cargo test -p paddock-workbench --all-features --lib generated` rewrites it) holds the sets
+  `default` (= `main`), `popout` and `dialog`. An app's capabilities grant `paddock-workbench:default` to `main`/`w-*`,
+  `paddock-workbench:popout` to `p-*` and `paddock-workbench:dialog` to `d-*`. The drag ghost window (`drag-ghost`) matches
+  none of them.
+- Generated TypeScript (`ui/projects/paddock-ui/workbench/generated/`): `WORKBENCH_COMMANDS` / `WorkbenchCommand`
+  (`workbench-commands.ts`) and `WORKBENCH_PLUGIN` (`workbench.ts`), exported from `workbench/public-api.ts`.
 - `layout::LayoutStore`: a `paddock-env` `VersionedFile` (format 1). Keys `[a-z0-9._:-]{1,64}`, values JSON objects of at
   most 1 MiB, at most 128 keys and 8 MiB in all; a damaged file gives an empty store and one `Problem` (logged), a newer
   file is left alone and saves are refused (the change stays in memory for the run). The UI owns the content (the dock's
   versioned envelope, parsed at its edge).
 - Commands answer the one envelope of `paddock_commands::CommandError` (boxed): `invalid` with `field` for a bad key or a
   value that is not an object, `limit` for too large or full, `io` for a refused write; file I/O runs on the blocking pool.
-- Tests: the store in temporary folders (damaged, newer, out-of-bound files), the commands behind the guard on Tauri's
-  mock runtime (a pop-out reads but cannot write, a dialog cannot read).
+- Tests: the store in temporary folders (damaged, newer, out-of-bound files); on Tauri's mock runtime through the plugin:
+  every command reaches its handler from a window of a class it is open to and is refused (by Tauri's ACL) from the
+  others, a dialog reaches only its contract, the drag ghost's label reaches nothing, parts left out answer "not set up";
+  the generated files are current.
 
 ## `paddock-window` (plan S12)
 

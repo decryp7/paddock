@@ -3763,13 +3763,20 @@ name = "paddock-workbench"
 version = "0.1.0"
 dependencies = [
  "log",
+ "paddock-assistant",
  "paddock-commands",
+ "paddock-dialogs",
  "paddock-env",
+ "paddock-health",
+ "paddock-panels",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
+ "tauri-plugin",
+ "tauri-utils",
  "tempfile",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
