@@ -7,12 +7,36 @@
 //! reads it to know whether the agent answers. `stop` leaves a stop file the running agent sees within one beat; a
 //! supervised agent also exits when its executable changed (the update) and the OS starts the new one.
 
-use paddock_env::AppDirs;
+use paddock_env::{AppDirs, AppId};
 use paddock_service::backend::{Side, in_app_bundle};
 use paddock_service::{Manager, ProcessType, ServiceSpec, Verb, render};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// The app's id (its folders are the app's: the agent shares the data folder).
+pub const APP_ID: &str = "shell-demo";
+/// The app's name.
+pub const APP_NAME: &str = "Paddock Shell Demo";
+/// The agent's version (equal to the app's; the app's tests check it).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The argument the bundle check starts the agent with (rule 23).
+pub const SELF_TEST: &str = "--self-test";
+
+/// The app's folders, as the agent uses them.
+pub fn dirs() -> Result<AppDirs, Box<dyn std::error::Error + Send + Sync>> {
+    Ok(AppDirs::for_app(&AppId::new(APP_ID, APP_NAME)?)?)
+}
+
+/// What `--self-test` prints: the agent loads, its spec renders and its version, without reading or writing anything.
+pub fn self_test() -> String {
+    let plist = bundled_plist();
+    let ok = plist.contains(LABEL) && !nsis_hooks().is_empty();
+    format!(
+        "{PROGRAM} {VERSION} self-test: {}",
+        if ok { "ok" } else { "spec does not render" }
+    )
+}
 
 /// The launchd label (and the bundled plist's file name without `.plist`).
 pub const LABEL: &str = "net.decryptology.paddock-shell-demo.agent";
@@ -145,7 +169,7 @@ pub fn manager(
     let backend = paddock_service::native::host_backend(&spec(), program, side, data)?;
     let beat_dir = data.to_path_buf();
     Ok(Manager::new(
-        "Paddock Shell Demo",
+        APP_NAME,
         backend,
         data,
         LABEL,
@@ -154,7 +178,7 @@ pub fn manager(
     ))
 }
 
-/// The bundled launch agent the app ships (`src-tauri/macos/<label>.plist`, checked by the app's tests).
+/// The bundled launch agent the app ships (`src-tauri/macos/agent.plist`, checked by the app's tests).
 pub fn bundled_plist() -> String {
     render::launchd_plist(&spec(), render::LaunchdProgram::Bundled)
 }
@@ -280,9 +304,15 @@ mod tests {
     }
 
     #[test]
+    fn the_self_test_answers_without_touching_anything() {
+        assert!(self_test().ends_with(": ok"), "{}", self_test());
+        assert!(self_test().contains(VERSION));
+    }
+
+    #[test]
     fn the_spec_renders_the_bundled_agent() {
-        assert!(bundled_plist().contains("<string>Contents/MacOS/shell-demo-agent</string>"));
-        assert!(nsis_hooks().contains("shell-demo-agent.exe"));
+        assert!(bundled_plist().contains(&format!("<string>Contents/MacOS/{PROGRAM}</string>")));
+        assert!(nsis_hooks().contains(&format!("{PROGRAM}.exe")));
         assert_eq!(spec().label(), LABEL);
     }
 }

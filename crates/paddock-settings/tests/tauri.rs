@@ -400,3 +400,23 @@ fn every_command_is_async_and_in_the_table() {
         paddock_commands::Kind::Mutation
     );
 }
+
+#[test]
+fn a_change_with_missing_or_mistyped_arguments_is_refused_before_it_runs() {
+    let app = app_with(handler());
+    let main = window(&app, "main");
+    let settings = manage(app.handle(), Settings::in_memory());
+    settings.register(Arc::new(general())).unwrap();
+    for (cmd, body) in [
+        ("settings_set", json!({ "values": {} })),
+        ("settings_set", json!({ "section": 3, "values": {} })),
+        ("settings_reset", json!({})),
+        ("settings_reset", json!({ "section": ["sd.general"] })),
+    ] {
+        assert!(invoke(&main, cmd, body).is_err(), "{cmd}");
+    }
+    assert_eq!(
+        settings.values("sd.general").unwrap().get("repeat"),
+        Some(&json!(1))
+    );
+}

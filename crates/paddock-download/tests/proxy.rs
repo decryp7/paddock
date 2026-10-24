@@ -5,8 +5,8 @@
 mod support;
 
 use paddock_download::{
-    Config, DownloadError, Downloader, HttpConfig, HttpTransport, Integrity, ProxyMode, ProxyRules,
-    ProxyServer, Request, Sha256Digest,
+    Config, DownloadError, Downloader, Fetch, HttpConfig, HttpTransport, Integrity, ProxyMode,
+    ProxyRules, ProxyServer, Request, Sha256Digest,
 };
 use std::time::Duration;
 use support::{ConnectProxy, Server, blob, job, partial, sha256_hex};
@@ -237,4 +237,17 @@ fn proxy_rules_per_scheme_and_the_no_proxy_forms_that_are_rare_or_malformed() {
     assert!(shown.contains("password hidden") && !shown.contains("secret"));
     // The process environment is read by `from_env` (the result depends on the machine; only that it answers).
     let _ = ProxyRules::from_env();
+}
+
+#[test]
+fn an_https_proxy_that_refuses_connections_is_a_network_error_naming_the_target_host() {
+    // Nothing listens on the discard port of the loopback: the proxy is the part that fails, and it is not retried forever.
+    let proxy = ProxyServer::parse("https://127.0.0.1:9").unwrap();
+    let e = downloader(ProxyRules::all(proxy))
+        .get_bytes("http://files.example.test/a.bin", &Fetch::new())
+        .unwrap_err();
+    assert!(
+        matches!(&e, DownloadError::Network { host, .. } if host == "files.example.test"),
+        "{e:?}"
+    );
 }
