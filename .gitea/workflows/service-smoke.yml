@@ -1,0 +1,70 @@
+# The service-after-update smoke (conformance C21, catalogue R03) in a throw-away macOS VM on the Mac runner (rule 7: the
+# smoke registers a real launch agent, so it never runs on the runner's own session). Builds the shell demo twice on the
+# host, build N (the version in Cargo.toml) and build N+1 (its patch number plus one), and hands both .app bundles to
+# tools/macos-vm-smoke.sh, which clones a fresh Tart VM from a pinned base image, runs scripts/shell-demo/smoke-service-update.sh
+# in it and always deletes the VM again. Needs Tart on the runner (cirruslabs/cli) and 60 GB free; one VM at a time.
+# The Linux guest (systemd --user) is the same tool with --guest linux; it needs linux-arm64 builds of the agent and
+# is run by hand until a Linux build job exists.
+
+name: service-smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+concurrency:
+  group: service-smoke
+  cancel-in-progress: false
+
+jobs:
+  macos-vm:
+    name: update smoke in a macOS VM
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Persistent build folder
+        run: |
+          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target-shell-demo" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: ./.gitea/actions/build-env
+
+      - name: Tart is installed
+        run: tart --version
+
+      - name: Build N and N+1 (the second differs by its patch version, so by its ad-hoc code hash)
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/smoke-builds"; rm -rf "$out"; mkdir -p "$out/n" "$out/n1"
+          # The app and its agent carry the same version (the agent's tests check it), so N+1 bumps both: the smoke
+          # waits for the agent's heartbeat to report the app's new version, and a changed agent has a new cdhash.
+          tomls="apps/shell-demo/src-tauri/Cargo.toml apps/shell-demo/src-tauri/agent/Cargo.toml"
+          v_old=$(node scripts/shell-demo-release.mjs version)
+          v_new=$(node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); console.log(`${a}.${b}.${c+1}`)' "$v_old")
+          echo "PADDOCK_SMOKE_OLD_VERSION=$v_old" >> "$GITHUB_ENV"
+          echo "PADDOCK_SMOKE_NEW_VERSION=$v_new" >> "$GITHUB_ENV"
+          bundle() { bash scripts/shell-demo/bundle.sh app,dmg >/dev/null; cp -R "$CARGO_TARGET_DIR"/release/bundle/macos/*.app "$1/"; }
+          bundle "$out/n"
+          for toml in $tomls; do sed -i '' "s/^version = \"$v_old\"/version = \"$v_new\"/" "$toml"; done
+          bundle "$out/n1"
+          [ "$("$out"/n1/*.app/Contents/MacOS/shell-demo-agent --self-test | awk '{print $2}')" = "$v_new" ] \
+            || { echo "::error::build N+1's agent does not report $v_new"; exit 1; }
+          git checkout -- $tomls apps/shell-demo/src-tauri/Cargo.lock 2>/dev/null || true
+
+      - name: Run the smoke in a fresh VM (always deleted)
+        run: |
+          out="$RUNNER_TEMP/smoke-builds"
+          app="$(basename "$(ls -d "$out"/n/*.app)")"
+          PADDOCK_VM_LOG_DIR="$RUNNER_TEMP/smoke-logs" \
+            bash tools/macos-vm-smoke.sh --old "$out/n/$app" --new "$out/n1/$app"
+
+      - name: No VM is left behind
+        if: always()
+        run: |
+          left=$(tart list --quiet | grep '^paddock-smoke-' || true)
+          [ -z "$left" ] || { echo "::error::leftover VMs: $left"; exit 1; }

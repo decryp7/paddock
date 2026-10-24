@@ -24,9 +24,12 @@ report() {
   check "cargo-nextest" "cargo nextest --version"
   check "cargo-deny" "cargo deny --version"
   check "cargo-llvm-cov" "cargo llvm-cov --version"
+  check "cargo-hakari" "cargo hakari --version"
+  check "cargo-machete" "cargo machete --version"
   check "docker" "docker version --format '{{.Server.Version}}'"
   if [ "$(uname)" = "Darwin" ]; then check "Xcode Command Line Tools" "xcode-select -p"; fi
   echo "Environment:"
+  if [ -n "${SCCACHE_DIR:-}" ]; then echo "  ok       SCCACHE_DIR=$SCCACHE_DIR"; else echo "  not set  SCCACHE_DIR (the cache then lands on the system disk)"; fi
   if [ "${RUSTC_WRAPPER:-}" = "sccache" ]; then echo "  ok       RUSTC_WRAPPER=sccache"; else echo "  not set  RUSTC_WRAPPER=sccache"; fi
   if [ -n "${CARGO_BUILD_JOBS:-}" ]; then echo "  ok       CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS"; else echo "  not set  CARGO_BUILD_JOBS"; fi
 }
@@ -41,7 +44,7 @@ if $install && [ "${#missing[@]}" -gt 0 ]; then
   for m in "${missing[@]}"; do
     case "$m" in
       sccache | cargo-nextest) brew install "$m" ;;
-      cargo-deny | cargo-llvm-cov) cargo install --locked "$m" ;;
+      cargo-deny | cargo-llvm-cov | cargo-hakari | cargo-machete) cargo install --locked "$m" ;;
       "windows-msvc target") rustup target add x86_64-pc-windows-msvc ;;
       *) echo "  install by hand: $m (see docs/dev-setup.md)" ;;
     esac
@@ -54,6 +57,7 @@ if [ "${RUSTC_WRAPPER:-}" != "sccache" ] || [ -z "${CARGO_BUILD_JOBS:-}" ]; then
 
 Add to your shell profile (~/.zshenv on macOS), between builds:
   export RUSTC_WRAPPER=sccache
+  export SCCACHE_DIR=<a folder on the big volume>   # Mac mini: /Volumes/d8sst7/dev-targets/sccache
   export SCCACHE_CACHE_SIZE=60G
   export CARGO_BUILD_JOBS=2
 EOF
