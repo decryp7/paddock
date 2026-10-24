@@ -113,12 +113,12 @@ describe('JobsStore', () => {
     const { backend, clock } = jobsBed({ stillWorkingAfterMs: 3_000 });
     const store = TestBed.inject(JobsStore);
     await settle();
-    expect(clock.timers.size).toBe(0);
+    expect(clock.ticking).toBe(0);
     backend.emit(snap(1, 1, 'queued'));
     backend.emit(snap(2, 1, 'running', { phase: phase('Reading', 1) }));
     await settle();
-    expect(clock.timers.size).toBe(1);
-    expect([...clock.timers][0]?.ms).toBe(1_000);
+    expect(clock.ticking).toBe(1);
+    expect(clock.periods()[0]).toBe(1_000);
     clock.advance(2_999);
     expect(store.stalledIds().size).toBe(0);
     clock.advance(1);
@@ -130,7 +130,7 @@ describe('JobsStore', () => {
     backend.emit(snap(2, 3, 'done'));
     await settle();
     expect(store.stalledIds().size).toBe(0);
-    expect(clock.timers.size).toBe(0);
+    expect(clock.ticking).toBe(0);
   });
 
   it('ticks at least every 250 ms when "Still working" comes early', async () => {
@@ -139,7 +139,7 @@ describe('JobsStore', () => {
     await settle();
     backend.emit(snap(1, 1));
     await settle();
-    expect([...clock.timers][0]?.ms).toBe(250);
+    expect(clock.periods()[0]).toBe(250);
   });
 
   it('cancels through the backend; a failed request is a notice', async () => {

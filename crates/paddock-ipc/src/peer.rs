@@ -15,6 +15,8 @@
 use crate::error::{IpcError, RemoteError, codes, panic_message};
 use crate::frame::{self, Frame, FrameError, FrameHead, FrameKind, FrameLimit};
 use crate::handshake::Connection;
+use paddock_jobs::CancelToken;
+use paddock_jobs::time::{Clock, SystemClock};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
@@ -83,6 +85,8 @@ pub struct PeerOptions {
     pub cancel_grace: Duration,
     /// Pushes waiting for the push callback; newer ones are dropped and counted when it falls behind.
     pub push_queue: usize,
+    /// The clock call timeouts and the cancel grace run on (a `FakeClock` in tests).
+    pub clock: Arc<dyn Clock>,
     on_push: Option<PushFn>,
 }
 
@@ -106,6 +110,7 @@ impl PeerOptions {
             max_concurrent_calls: 64,
             cancel_grace: CANCEL_GRACE,
             push_queue: 64,
+            clock: Arc::new(SystemClock),
             on_push: None,
         }
     }
@@ -128,9 +133,18 @@ enum Event {
 /// A call this side made and is waiting for.
 struct Pending {
     tx: mpsc::Sender<Event>,
+    /// Cancelled when an event is posted, so the caller's wait on the clock ends at once.
+    arrived: CancelToken,
     streams: bool,
     granted: u64,
     received: u64,
+}
+
+impl Pending {
+    fn post(&self, event: Event) {
+        let _ = self.tx.send(event);
+        self.arrived.cancel();
+    }
 }
 
 /// A call of the other side this side is handling.
@@ -151,6 +165,7 @@ enum Out {
 }
 
 struct Inner {
+    id: u64,
     opts: PeerOptions,
     limit: FrameLimit,
     peer_pid: Option<u32>,
@@ -163,6 +178,10 @@ struct Inner {
     closed: Mutex<Option<IpcError>>,
     closed_cv: Condvar,
 }
+
+static NEXT_PEER: AtomicU64 = AtomicU64::new(1);
+/// Why a call ended when its connection went without saying why (not expected: every close posts its reason).
+const GONE: &str = "the connection is gone";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     // Every guarded value here stays consistent if a holder panicked.
@@ -208,6 +227,7 @@ impl Peer {
         let on_push = opts.on_push.clone();
         let peer = Peer {
             inner: Arc::new(Inner {
+                id: NEXT_PEER.fetch_add(1, Ordering::Relaxed),
                 opts,
                 limit: conn.limit,
                 peer_pid,
@@ -238,6 +258,11 @@ impl Peer {
             r.read_loop(&mut reader, &handler, pushes.as_ref())
         })?;
         Ok(peer)
+    }
+
+    /// This connection's number, unique in the process (subscriptions and logs key on it).
+    pub fn id(&self) -> u64 {
+        self.inner.id
     }
 
     /// The label of the other side.
@@ -313,7 +338,7 @@ impl Peer {
         }
         self.inner.closed_cv.notify_all();
         for (_, p) in lock(&self.inner.pending).drain() {
-            let _ = p.tx.send(Event::Closed(why.clone()));
+            p.post(Event::Closed(why.clone()));
         }
         for (_, s) in lock(&self.inner.served).drain() {
             lock(&s.state).cancelled = true;
@@ -321,24 +346,21 @@ impl Peer {
         }
     }
 
-    fn gone(&self) -> IpcError {
-        self.closed().unwrap_or_else(|| {
-            IpcError::Closed(format!("the connection to {} is gone", self.label()))
-        })
+    /// Why the connection closed (every close records its reason).
+    fn closed_reason(&self) -> IpcError {
+        self.closed()
+            .unwrap_or_else(|| IpcError::Closed(GONE.into()))
     }
 
     fn send(&self, f: &Frame) -> Result<(), IpcError> {
-        if let Some(why) = self.closed() {
-            return Err(why);
+        if self.is_closed() {
+            return Err(self.closed_reason());
         }
-        let bytes = frame::encode(f, self.inner.limit).map_err(|e| match e {
-            FrameError::TooLarge { len, max } => IpcError::TooLarge { len, max },
-            other => IpcError::Protocol(other.to_string()),
-        })?;
+        let bytes = frame::encode(f, self.inner.limit).map_err(IpcError::from)?;
         self.inner
             .out
             .send(Out::Frame(bytes))
-            .map_err(|_| self.gone())
+            .map_err(|_| self.closed_reason())
     }
 
     fn begin(&self, body: Vec<u8>, credit: u32) -> Result<(u64, mpsc::Receiver<Event>), IpcError> {
@@ -348,6 +370,7 @@ impl Peer {
             id,
             Pending {
                 tx,
+                arrived: CancelToken::new(),
                 streams: credit > 0,
                 granted: u64::from(credit),
                 received: 0,
@@ -364,38 +387,58 @@ impl Peer {
         let _ = self.send(&Frame::Cancel { id });
     }
 
+    /// The next event of call `id`, waiting at most `timeout` on the peer's clock (`None`: as long as the connection
+    /// lives); `Ok(None)` when the time passed first. Event-driven: posting an event ends the wait at once.
+    fn wait_event(
+        &self,
+        id: u64,
+        rx: &mpsc::Receiver<Event>,
+        timeout: Option<Duration>,
+    ) -> Result<Option<Event>, IpcError> {
+        if let Ok(e) = rx.try_recv() {
+            return Ok(Some(e));
+        }
+        let Some(t) = timeout else {
+            return rx.recv().map(Some).map_err(|_| self.closed_reason());
+        };
+        let arrived = CancelToken::new();
+        if let Some(p) = lock(&self.inner.pending).get_mut(&id) {
+            p.arrived = arrived.clone();
+        }
+        // An event posted before the new token was in place is already in the channel.
+        if let Ok(e) = rx.try_recv() {
+            return Ok(Some(e));
+        }
+        let _ = self.inner.opts.clock.wait(t, &arrived);
+        // Nothing posted: the time passed (a sender gone without an event cannot happen; it reads as a timeout).
+        Ok(rx.try_recv().ok())
+    }
+
     /// Calls the other side and waits for its answer (at most `timeout`; `None` waits as long as the connection lives).
     /// After the timeout a cancel is sent; a callee that does not end the call within [`PeerOptions::cancel_grace`], or
     /// that ends it with a cancellation, makes this [`IpcError::Timeout`]. A request over the frame limit fails at once
     /// with [`IpcError::TooLarge`] and nothing is sent.
     pub fn call(&self, body: Vec<u8>, timeout: Option<Duration>) -> Result<Vec<u8>, IpcError> {
         let (id, rx) = self.begin(body, 0)?;
-        let first = match timeout {
-            Some(t) => rx.recv_timeout(t),
-            None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
-        };
-        let event = match first {
-            Ok(e) => e,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
+        let event = match self.wait_event(id, &rx, timeout)? {
+            Some(e) => e,
+            None => {
                 self.cancel(id);
-                let late = rx.recv_timeout(self.inner.opts.cancel_grace);
+                let late = self.wait_event(id, &rx, Some(self.inner.opts.cancel_grace));
                 lock(&self.inner.pending).remove(&id);
                 return match late {
-                    Ok(Event::Reply(b)) => Ok(b),
-                    Ok(Event::Closed(e)) => Err(e),
+                    Ok(Some(Event::Reply(b))) => Ok(b),
+                    Ok(Some(Event::Closed(e))) | Err(e) => Err(e),
                     _ => Err(IpcError::Timeout),
                 };
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(self.gone()),
         };
         match event {
             Event::Reply(b) => Ok(b),
             Event::Fail(e) => Err(IpcError::Remote(e)),
             Event::Closed(e) => Err(e),
             // `deliver` refuses items for calls that do not stream before they get here.
-            Event::Item(_) => Err(IpcError::Protocol(
-                "an item arrived for a call that does not stream".into(),
-            )),
+            Event::Item(_) => Err(IpcError::Protocol(GONE.into())),
         }
     }
 
@@ -457,7 +500,7 @@ impl Peer {
                     "{} sent an item for a call that does not stream",
                     self.label()
                 ));
-                let _ = p.tx.send(Event::Closed(e.clone()));
+                p.post(Event::Closed(e.clone()));
                 return Err(e);
             }
             p.received += 1;
@@ -470,7 +513,7 @@ impl Peer {
                 )));
             }
         }
-        let _ = p.tx.send(event);
+        p.post(event);
         if last {
             pending.remove(&id);
         }
@@ -485,16 +528,20 @@ impl Peer {
         let _ = self.send(&Frame::Credit { id, n });
     }
 
+    /// Answers a call this side cannot run now with `busy`.
+    fn refuse_call(&self, id: u64, message: &str) {
+        let _ = self.send(&Frame::Fail {
+            id,
+            error: RemoteError::new(codes::BUSY, message),
+        });
+    }
+
     fn serve_call(&self, handler: &Arc<dyn Handler>, id: u64, credit: u32, body: Vec<u8>) {
         let served = {
             let mut s = lock(&self.inner.served);
             if s.len() >= self.inner.opts.max_concurrent_calls {
                 drop(s);
-                let _ = self.send(&Frame::Fail {
-                    id,
-                    error: RemoteError::new(codes::BUSY, "too many calls are running; try again"),
-                });
-                return;
+                return self.refuse_call(id, "too many calls are running; try again");
             }
             let served = Arc::new(Served {
                 state: Mutex::new(ServedState {
@@ -539,10 +586,7 @@ impl Peer {
         });
         if let Err(e) = started {
             lock(&self.inner.served).remove(&id);
-            let _ = self.send(&Frame::Fail {
-                id,
-                error: RemoteError::new(codes::BUSY, e.to_string()),
-            });
+            self.refuse_call(id, &e.to_string());
         }
     }
 
@@ -570,7 +614,7 @@ impl Peer {
                 id: Some(id),
             }) => {
                 let streams = lock(&self.inner.pending).remove(&id).map(|p| {
-                    let _ = p.tx.send(Event::Closed(too_large));
+                    p.post(Event::Closed(too_large));
                     p.streams
                 });
                 if streams == Some(true) {
@@ -714,13 +758,8 @@ impl CallStream {
         if self.done {
             return Err(IpcError::Protocol("the stream is already complete".into()));
         }
-        let got = match timeout {
-            Some(t) => match self.rx.recv_timeout(t) {
-                Ok(e) => e,
-                Err(mpsc::RecvTimeoutError::Timeout) => return Ok(StreamEvent::Idle),
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(self.peer.gone()),
-            },
-            None => self.rx.recv().map_err(|_| self.peer.gone())?,
+        let Some(got) = self.peer.wait_event(self.id, &self.rx, timeout)? else {
+            return Ok(StreamEvent::Idle);
         };
         match got {
             Event::Item(b) => {
@@ -834,10 +873,7 @@ impl CallCtx {
         }
         self.peer
             .send(&Frame::Item { id: self.id, body })
-            .map_err(|e| match e {
-                IpcError::TooLarge { .. } => RemoteError::new(codes::TOO_LARGE, e.to_string()),
-                other => RemoteError::new(codes::INTERNAL, other.to_string()),
-            })
+            .map_err(|e| e.to_remote())
     }
 
     /// [`CallCtx::send_item`] with a typed item.

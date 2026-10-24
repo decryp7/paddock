@@ -15,9 +15,11 @@ import {
 import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
 import { SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { OS_NOTIFICATIONS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/notify';
+import { SETUP_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/setup';
 import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS } from '../../../../shell-demo/src/app/demo.contributions';
 import { demoContext } from '../../../../shell-demo/src/app/demo-context';
 import { WARM_PAPER } from '../../../../shell-demo/src/app/demo-appearance';
+import { ACTIVITY_CONTRIBUTIONS, provideShellUndo, UNDO_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/undo';
 import { assertContributionsValid } from './contributions-lint';
 import { provideShellTesting, shellPorts } from './shell-testing';
 
@@ -27,10 +29,11 @@ describe('shell-demo contributions', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       providers: provideShellTesting({
-        contributions: [DEMO_CONTRIBUTIONS],
+        contributions: [DEMO_CONTRIBUTIONS, UNDO_CONTRIBUTIONS, ACTIVITY_CONTRIBUTIONS],
         context: () => Promise.resolve(demoContext),
         // The menus' kind and the demo's submenus, so the lint checks the menu bar as a whole (plan S13).
         providers: [
+          provideShellUndo(),
           provideMenus({ appName: 'Shell demo' }),
           provideSubmenus(...DEMO_SUBMENUS),
           // The demo context reads the appearance (plan S15); no storage or channel in a spec.
@@ -94,7 +97,7 @@ describe('shell-demo manifest', () => {
   it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
     TestBed.configureTestingModule({
       providers: provideShellTesting({
-        contributions: [DEMO_CONTRIBUTIONS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS, OS_NOTIFICATIONS_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS],
+        contributions: [DEMO_CONTRIBUTIONS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS, SETUP_CONTRIBUTIONS, OS_NOTIFICATIONS_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS, UNDO_CONTRIBUTIONS, ACTIVITY_CONTRIBUTIONS],
         context: () => Promise.resolve(demoContext),
         providers: [provideMenus({ appName: 'Shell demo' }), provideSubmenus(...DEMO_SUBMENUS)],
       }),

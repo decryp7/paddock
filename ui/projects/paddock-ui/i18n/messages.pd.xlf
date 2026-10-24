@@ -50,11 +50,395 @@
       <trans-unit id="pd.about.version" datatype="html">
         <source>Version <x id="version"/></source>
       </trans-unit>
+      <trans-unit id="pd.activity.badAnswer" datatype="html">
+        <source>The app did not answer with the entry.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.cannot" datatype="html">
+        <source>That action cannot be undone any more.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.what" datatype="html">
+        <source>What happened</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.col.when" datatype="html">
+        <source>When</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.emptyDescription" datatype="html">
+        <source>Actions the app takes for you will be listed here.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.emptyHeading" datatype="html">
+        <source>Nothing yet</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.expired" datatype="html">
+        <source>No longer possible</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.gone" datatype="html">
+        <source>That entry is no longer in the log.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.noAnswer" datatype="html">
+        <source>The activity log did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.page" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.readFailed" datatype="html">
+        <source>The activity log could not be read</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.subtitle" datatype="html">
+        <source>What the app did for you, and what you can take back.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.title" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undoFailed" datatype="html">
+        <source>The action could not be undone.</source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undoNamed" datatype="html">
+        <source>Undo: <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.activity.undone" datatype="html">
+        <source>Undone</source>
+      </trans-unit>
       <trans-unit id="pd.category.app" datatype="html">
         <source>Application</source>
       </trans-unit>
       <trans-unit id="pd.category.help" datatype="html">
         <source>Help</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.add" datatype="html">
+        <source>Add channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.add-title" datatype="html">
+        <source>New channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.change-password" datatype="html">
+        <source>Change password…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.change-token" datatype="html">
+        <source>Change token…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.clear-failed" datatype="html">
+        <source>The secret could not be removed.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-events" datatype="html">
+        <source>Events</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-name" datatype="html">
+        <source>Name</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-state" datatype="html">
+        <source>State</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.col-type" datatype="html">
+        <source>Type</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.delivered" datatype="html">
+        <source>Delivered</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.delivered-after" datatype="html">
+        <source>Delivered after <x id="attempts"/> attempts</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.edit-aria" datatype="html">
+        <source>Edit <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.edit-title" datatype="html">
+        <source>Edit channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.empty-text" datatype="html">
+        <source>Add a channel to hear about disk space, failed jobs and other events away from the app.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.empty-title" datatype="html">
+        <source>No notification channels yet</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.enabled" datatype="html">
+        <source>On</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.events-hint" datatype="html">
+        <source>Names of the events this channel hears of, separated by commas or new lines, for example diskLow.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.events-more" datatype="html">
+        <source><x id="first"/> and <x id="more"/> more</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-auth" datatype="html">
+        <source>This channel needs a token</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-enabled" datatype="html">
+        <source>Send notifications on this channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-events" datatype="html">
+        <source>Events</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-from" datatype="html">
+        <source>Sender</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-host" datatype="html">
+        <source>Mail server</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-name" datatype="html">
+        <source>Name</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-port" datatype="html">
+        <source>Port</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-security" datatype="html">
+        <source>Connection security</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-server" datatype="html">
+        <source>ntfy server</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-severity" datatype="html">
+        <source>Minimum severity</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-to" datatype="html">
+        <source>Recipients</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-topic" datatype="html">
+        <source>Topic</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-type" datatype="html">
+        <source>Type</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-url" datatype="html">
+        <source>Web address</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.f-username" datatype="html">
+        <source>User name</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.from" datatype="html">
+        <source>Enter the sender as name@domain.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.host" datatype="html">
+        <source>Enter the mail server.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.name" datatype="html">
+        <source>Give the channel a name.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.port" datatype="html">
+        <source>Enter a port between 1 and 65535.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.server" datatype="html">
+        <source>Enter the ntfy server, starting with https://.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.to" datatype="html">
+        <source>Enter at least one recipient as name@domain.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.topic" datatype="html">
+        <source>Enter the topic to publish to.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.hint.url" datatype="html">
+        <source>Enter the web address to post to, starting with https://.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.lede" datatype="html">
+        <source>Where the app tells you about things that need attention, even when its window is closed: a web address it posts to, an ntfy topic, or an email.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.limit" datatype="html">
+        <source>You have the most channels you can keep (<x id="max"/>). Remove one to add another.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.load-failed" datatype="html">
+        <source>The notification channels could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.load-failed-title" datatype="html">
+        <source>The notification channels could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.loading" datatype="html">
+        <source>Reading the notification channels…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.no-events" datatype="html">
+        <source>No events chosen</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.no-password" datatype="html">
+        <source>No password</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.no-token" datatype="html">
+        <source>No token</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.password" datatype="html">
+        <source>Password</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.paused" datatype="html">
+        <source>Off</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.progress-sending" datatype="html">
+        <source>Attempt <x id="attempt"/> of <x id="of"/> · sending…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.progress-waiting" datatype="html">
+        <source>Attempt <x id="attempt"/> of <x id="of"/> · waiting <x id="secs"/> s before the next try</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-aria" datatype="html">
+        <source>Remove <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-invalid" datatype="html">
+        <source>This window was opened without a channel to remove. Close it and choose Remove on a channel in the list.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-question" datatype="html">
+        <source>Remove &quot;<x id="name"/>&quot;?</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-secret" datatype="html">
+        <source>Remove secret</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-secret-goes" datatype="html">
+        <source>Its stored secret is deleted too.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-yes" datatype="html">
+        <source>Remove</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove.title" datatype="html">
+        <source>Remove channel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.save" datatype="html">
+        <source>Save</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.save-failed" datatype="html">
+        <source>The channels could not be saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.save-failed-title" datatype="html">
+        <source>The channel was not saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret-missing" datatype="html">
+        <source>No secret yet</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret-stored" datatype="html">
+        <source>Secret stored</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.failed" datatype="html">
+        <source>The engine could not store the secret.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.hide" datatype="html">
+        <source>Hide what you typed</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.hide-short" datatype="html">
+        <source>Hide</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.invalid" datatype="html">
+        <source>This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel's editor.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.lede-password" datatype="html">
+        <source>The password for <x id="channel"/> is kept by the app's engine, not in the settings file. It is never shown again.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.lede-token" datatype="html">
+        <source>The token for <x id="channel"/> is kept by the app's engine, not in the settings file. It is never shown again.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.password" datatype="html">
+        <source>Password</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.save" datatype="html">
+        <source>Save</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.show" datatype="html">
+        <source>Show what you typed</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.show-short" datatype="html">
+        <source>Show</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.title" datatype="html">
+        <source>Channel secret</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.title-password" datatype="html">
+        <source>Password for <x id="channel"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.title-token" datatype="html">
+        <source>Token for <x id="channel"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.token" datatype="html">
+        <source>Token</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.security.implicit" datatype="html">
+        <source>TLS (implicit)</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.security.none" datatype="html">
+        <source>None (not encrypted)</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.security.starttls" datatype="html">
+        <source>STARTTLS</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.send-test" datatype="html">
+        <source>Send test</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.set-password" datatype="html">
+        <source>Set password…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.set-token" datatype="html">
+        <source>Set token…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.severity.error" datatype="html">
+        <source>Errors only</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.severity.info" datatype="html">
+        <source>Info and above</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.severity.warning" datatype="html">
+        <source>Warnings and errors</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.still-working" datatype="html">
+        <source>Still working… a test can take a minute; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.test-aria" datatype="html">
+        <source>Send a test to <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.channels.test-failed" datatype="html">
+        <source>The test did not get through.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.test-refused" datatype="html">
+        <source>The test could not be started.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.title" datatype="html">
+        <source>Notification channels</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.to-hint" datatype="html">
+        <source>Separate addresses with commas or new lines (at most <x id="max"/>).</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.token" datatype="html">
+        <source>Token</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.type.email" datatype="html">
+        <source>Email</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.type.ntfy" datatype="html">
+        <source>ntfy</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.type.webhook" datatype="html">
+        <source>Webhook</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.username-hint" datatype="html">
+        <source>Leave empty if the server needs no login. With a user name, the password is kept by the engine.</source>
+      </trans-unit>
+      <trans-unit id="pd.chart.error" datatype="html">
+        <source>The chart could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.chart.loading" datatype="html">
+        <source>Loading chart</source>
+      </trans-unit>
+      <trans-unit id="pd.chart.other" datatype="html">
+        <source>Other</source>
+      </trans-unit>
+      <trans-unit id="pd.chart.retry" datatype="html">
+        <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.copyMenu.copy" datatype="html">
         <source>Copy</source>
@@ -199,6 +583,24 @@
       </trans-unit>
       <trans-unit id="pd.dialogs.unknown" datatype="html">
         <source>This dialog is not known to this version of the app: <x id="dialog"/></source>
+      </trans-unit>
+      <trans-unit id="pd.files.clear" datatype="html">
+        <source>Clear the list</source>
+      </trans-unit>
+      <trans-unit id="pd.files.no-recent" datatype="html">
+        <source>The recent files could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.files.recent-empty" datatype="html">
+        <source>Nothing opened yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.files.recent-label" datatype="html">
+        <source>Recent files</source>
+      </trans-unit>
+      <trans-unit id="pd.files.remove" datatype="html">
+        <source>Remove from the list</source>
+      </trans-unit>
+      <trans-unit id="pd.files.reveal" datatype="html">
+        <source>Show in the file manager</source>
       </trans-unit>
       <trans-unit id="pd.format.bytes.one" datatype="html">
         <source><x id="count"/> byte</source>
@@ -488,6 +890,216 @@
       <trans-unit id="pd.language.title" datatype="html">
         <source>Language</source>
       </trans-unit>
+      <trans-unit id="pd.mcp.actions-title" datatype="html">
+        <source>Actions that change things</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.actions-warn" datatype="html">
+        <source>These tools change something on this computer. They stay off until you allow each one, and a client with a key can then use it without asking you again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.active" datatype="html">
+        <source>Active</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.add" datatype="html">
+        <source>Add a client…</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.allow" datatype="html">
+        <source>Allow <x id="tool"/></source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-clear" datatype="html">
+        <source>Clear</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-empty" datatype="html">
+        <source>No client has called a tool yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-failed" datatype="html">
+        <source>The activity log could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-title" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clear-failed" datatype="html">
+        <source>The activity log could not be cleared.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clients-lede" datatype="html">
+        <source>Each client has its own key. Revoke a key to cut that client off.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clients-title" datatype="html">
+        <source>Clients</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-args" datatype="html">
+        <source>Arguments (redacted)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-client" datatype="html">
+        <source>Client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-client-name" datatype="html">
+        <source>Client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-created" datatype="html">
+        <source>Added</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-duration" datatype="html">
+        <source>Took (ms)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-outcome" datatype="html">
+        <source>Result</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-state" datatype="html">
+        <source>State</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-time" datatype="html">
+        <source>Time</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-tool" datatype="html">
+        <source>Tool</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.client" datatype="html">
+        <source>Client name</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.copied" datatype="html">
+        <source>Copied to the clipboard.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.copy" datatype="html">
+        <source>Copy</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.create" datatype="html">
+        <source>Create key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.failed" datatype="html">
+        <source>The engine could not issue a key.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.how" datatype="html">
+        <source>Give it to the client as the first line it sends when it connects: {&quot;key&quot;: &quot;...&quot;}. Anyone with the key can read what the enabled tools expose.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.key-label" datatype="html">
+        <source>Key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.lede" datatype="html">
+        <source>Name the program that will connect, for example &quot;Pitwall&quot;. It gets its own key, which you can revoke at any time.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.not-copied" datatype="html">
+        <source>The clipboard is not available. Select the key and copy it with the keyboard.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.once" datatype="html">
+        <source>This is the only time the key is shown. Copy it now; the app keeps only a fingerprint and cannot show it again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.title" datatype="html">
+        <source>Add a client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.keys-limit" datatype="html">
+        <source><x id="max"/> keys are in use, the most there can be. Revoke one you no longer need before adding another.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.lede" datatype="html">
+        <source>Lets a program on this computer, such as a local AI assistant, ask this app questions over the Model Context Protocol. It is off until you turn it on, it only works on this computer, and every call is logged below.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.load-failed" datatype="html">
+        <source>The AI access settings could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.load-failed-heading" datatype="html">
+        <source>The AI access settings could not be read</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.loading" datatype="html">
+        <source>Loading the AI access settings</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.master-hint" datatype="html">
+        <source>Clients connect with a key you give them. Tools are read-only: they look at data and never change it.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.no-clients" datatype="html">
+        <source>No clients yet</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.no-clients-text" datatype="html">
+        <source>Add a client to get a key for it. Nothing can connect without one.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.off" datatype="html">
+        <source>AI access is off</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.on" datatype="html">
+        <source>AI access is on</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-cancelled" datatype="html">
+        <source>Cancelled by the client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-ok" datatype="html">
+        <source>Answered</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-panicked" datatype="html">
+        <source>Crashed</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-refused" datatype="html">
+        <source>Refused</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-timed-out" datatype="html">
+        <source>Timed out</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-tool-error" datatype="html">
+        <source>Failed</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.resources" datatype="html">
+        <source>Resources</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.resources-hint" datatype="html">
+        <source>Documents the client can read by address, such as a summary.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke" datatype="html">
+        <source>Revoke</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-aria" datatype="html">
+        <source>Revoke the key of <x id="client"/></source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-effect" datatype="html">
+        <source>It stops working at once, and the client has to be given a new key to connect again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-failed" datatype="html">
+        <source>The key could not be revoked.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-invalid" datatype="html">
+        <source>This window was opened without a key to revoke. Close it and choose Revoke on a client in the list.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-question" datatype="html">
+        <source>Revoke the key of &quot;<x id="client"/>&quot;?</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-yes" datatype="html">
+        <source>Revoke</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke.title" datatype="html">
+        <source>Revoke key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoked" datatype="html">
+        <source>Revoked</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.save-failed" datatype="html">
+        <source>The change could not be saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.title" datatype="html">
+        <source>AI access (MCP)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.tools-lede" datatype="html">
+        <source>What a connected client may ask. Switch off what you do not want to share.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.tools-title" datatype="html">
+        <source>Tools</source>
+      </trans-unit>
       <trans-unit id="pd.menu.bar" datatype="html">
         <source>Application menu</source>
       </trans-unit>
@@ -593,6 +1205,69 @@
       <trans-unit id="pd.notifications.unread-mark" datatype="html">
         <source>, unread</source>
       </trans-unit>
+      <trans-unit id="pd.packs.builtin" datatype="html">
+        <source>Built in</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.ignored" datatype="html">
+        <source>Keys that were ignored</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.in-use" datatype="html">
+        <source>Packs in use</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.lede" datatype="html">
+        <source>Lists the app knows are small files you can add to or change. A change is picked up by itself; a file the app cannot use is left out and named here.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.loading" datatype="html">
+        <source>Listing the packs…</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.no-status" datatype="html">
+        <source>The packs could not be listed.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.no-status-title" datatype="html">
+        <source>The packs could not be listed.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.none" datatype="html">
+        <source>This app has no packs.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.refused" datatype="html">
+        <source>Packs left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload" datatype="html">
+        <source>Reload</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload-failed" datatype="html">
+        <source>The packs could not be reloaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reload-failed-title" datatype="html">
+        <source>The packs could not be reloaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.reloading" datatype="html">
+        <source>Reading the packs…</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.left-out" datatype="html">
+        <source><x id="count"/> packs left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.notes" datatype="html">
+        <source>Loaded, some keys ignored</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.ok" datatype="html">
+        <source>All loaded</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.state.one-left-out" datatype="html">
+        <source>One pack left out</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.still-working" datatype="html">
+        <source>Still working. Nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.title" datatype="html">
+        <source>Knowledge packs</source>
+      </trans-unit>
+      <trans-unit id="pd.packs.user" datatype="html">
+        <source>Yours</source>
+      </trans-unit>
       <trans-unit id="pd.pages.link-with-badge" datatype="html">
         <source><x id="page"/>, <x id="badge"/></source>
       </trans-unit>
@@ -695,6 +1370,132 @@
       <trans-unit id="pd.pitwall.use-builtin" datatype="html">
         <source>Use the built-in engine</source>
       </trans-unit>
+      <trans-unit id="pd.schedule.addTime" datatype="html">
+        <source>Add a time</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.cron" datatype="html">
+        <source>Cron expression</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.cronHint" datatype="html">
+        <source>Five fields: minute hour day-of-month month day-of-week, for example 0 9 * * 1-5. A leading seconds field is allowed.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.fri" datatype="html">
+        <source>Fri</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.mon" datatype="html">
+        <source>Mon</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.sat" datatype="html">
+        <source>Sat</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.sun" datatype="html">
+        <source>Sun</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.thu" datatype="html">
+        <source>Thu</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.tue" datatype="html">
+        <source>Tue</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.wed" datatype="html">
+        <source>Wed</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.daysLabel" datatype="html">
+        <source>Days of the week</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.every" datatype="html">
+        <source>Every</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.cron" datatype="html">
+        <source>Cron</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.every" datatype="html">
+        <source>Every…</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.times" datatype="html">
+        <source>At times</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.modeLabel" datatype="html">
+        <source>Schedule type</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.nextRuns" datatype="html">
+        <source>Next runs</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.add" datatype="html">
+        <source>Add a window</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.daysN" datatype="html">
+        <source>Days of window <x id="n"/> (none selected means every day)</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.empty" datatype="html">
+        <source>No windows: nothing is paused.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.from" datatype="html">
+        <source>From</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.overnight" datatype="html">
+        <source>Ends the next day.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.remove" datatype="html">
+        <source>Remove this window</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.removeN" datatype="html">
+        <source>Remove window <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.to" datatype="html">
+        <source>Until</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.zone" datatype="html">
+        <source>Time zone</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.zonePlaceholder" datatype="html">
+        <source>This computer's time zone (or an IANA name such as Europe/Berlin)</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.daily" datatype="html">
+        <source>Daily</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.hours" datatype="html">
+        <source><x id="hours"/> h</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.minutes" datatype="html">
+        <source><x id="minutes"/> min</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.presetsLabel" datatype="html">
+        <source>Common intervals</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.previewLabel" datatype="html">
+        <source>Schedule preview</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.removeTime" datatype="html">
+        <source>Remove this time</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.removeTimeN" datatype="html">
+        <source>Remove time of day <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.timeN" datatype="html">
+        <source>Time of day <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.days" datatype="html">
+        <source>Days</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.hours" datatype="html">
+        <source>Hours</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.minutes" datatype="html">
+        <source>Minutes</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unitLabel" datatype="html">
+        <source>Interval unit</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zone" datatype="html">
+        <source>Time zone</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zoneIn" datatype="html">
+        <source>Times are in <x id="zone"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zonePlaceholder" datatype="html">
+        <source>This computer's time zone (or an IANA name such as Europe/Berlin)</source>
+      </trans-unit>
       <trans-unit id="pd.service.actions" datatype="html">
         <source>Service actions</source>
       </trans-unit>
@@ -785,6 +1586,9 @@
       <trans-unit id="pd.settings.appearance" datatype="html">
         <source>Appearance</source>
       </trans-unit>
+      <trans-unit id="pd.settings.channels" datatype="html">
+        <source>Notification channels</source>
+      </trans-unit>
       <trans-unit id="pd.settings.check.max-items" datatype="html">
         <source>At most <x id="count"/> items.</source>
       </trans-unit>
@@ -863,6 +1667,9 @@
       <trans-unit id="pd.settings.logging" datatype="html">
         <source>Logging</source>
       </trans-unit>
+      <trans-unit id="pd.settings.mcp" datatype="html">
+        <source>AI access (MCP)</source>
+      </trans-unit>
       <trans-unit id="pd.settings.no-match" datatype="html">
         <source>No settings match “<x id="query"/>”.</source>
       </trans-unit>
@@ -871,6 +1678,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.open" datatype="html">
         <source>Settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.packs" datatype="html">
+        <source>Knowledge packs</source>
       </trans-unit>
       <trans-unit id="pd.settings.page-failed" datatype="html">
         <source>This page could not be opened.</source>
@@ -920,8 +1730,14 @@
       <trans-unit id="pd.settings.service" datatype="html">
         <source>Background service</source>
       </trans-unit>
+      <trans-unit id="pd.settings.setup" datatype="html">
+        <source>Set-up</source>
+      </trans-unit>
       <trans-unit id="pd.settings.show-advanced" datatype="html">
         <source>Show advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.storage" datatype="html">
+        <source>Storage</source>
       </trans-unit>
       <trans-unit id="pd.settings.store.load-failed" datatype="html">
         <source>The settings could not be loaded.</source>
@@ -952,6 +1768,72 @@
       </trans-unit>
       <trans-unit id="pd.settings.unsaved.keep" datatype="html">
         <source>Keep editing</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.empty" datatype="html">
+        <source>There is nothing to set up on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.failed" datatype="html">
+        <source>That did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.lede" datatype="html">
+        <source>A few things the app can set up for you. Each is optional, you can skip any of them, and you can come back to this list later in Settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.loading" datatype="html">
+        <source>Looking at what is set up…</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.no-state" datatype="html">
+        <source>The set-up steps could not be asked.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.no-state-title" datatype="html">
+        <source>The set-up steps could not be asked.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.open" datatype="html">
+        <source>Set-up…</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.refused" datatype="html">
+        <source>The request was not accepted.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.repair" datatype="html">
+        <source>Repair</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.settled" datatype="html">
+        <source>Everything is set up or skipped. You can change any of it later in Settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.skip" datatype="html">
+        <source>Skip for now</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.problem" datatype="html">
+        <source>Needs repair</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.skipped" datatype="html">
+        <source>Skipped</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.todo" datatype="html">
+        <source>To do</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.working" datatype="html">
+        <source>Working</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.steps" datatype="html">
+        <source>Set-up steps</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.still-working" datatype="html">
+        <source>Still working. This can take a minute; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.title" datatype="html">
+        <source>Set-up</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.unskip" datatype="html">
+        <source>Take it up again</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.working" datatype="html">
+        <source>Working…</source>
       </trans-unit>
       <trans-unit id="pd.shell.context-failed" datatype="html">
         <source>The app context failed to load: <x id="cause"/></source>
@@ -1034,6 +1916,138 @@
       <trans-unit id="pd.startup.session-restored" datatype="html">
         <source>Your last session was restored.</source>
       </trans-unit>
+      <trans-unit id="pd.storage.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.cancelling" datatype="html">
+        <source>Cancelling…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear" datatype="html">
+        <source>Clear…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-cache" datatype="html">
+        <source>Clear cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-cache-size" datatype="html">
+        <source>Clear cache (<x id="size"/>)…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-label" datatype="html">
+        <source>Clear <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clearing" datatype="html">
+        <source>Clearing…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-folder" datatype="html">
+        <source>Folder</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-name" datatype="html">
+        <source>Kept</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-cache" datatype="html">
+        <source>The app rebuilds it when it needs it.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-data" datatype="html">
+        <source>This is your own data. It cannot be rebuilt, and clearing it cannot be undone.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-invalid" datatype="html">
+        <source>This window was opened without anything to clear. Close it and choose Clear on the Storage page.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-question" datatype="html">
+        <source>Clear <x id="what"/>? Up to <x id="size"/> is removed.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-title" datatype="html">
+        <source>Clear <x id="what"/>?</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-yes" datatype="html">
+        <source>Clear</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm.title" datatype="html">
+        <source>Clear storage</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.exact" datatype="html">
+        <source><x id="files"/> files, <x id="clearable"/> can be cleared</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.failed" datatype="html">
+        <source>That did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.freed" datatype="html">
+        <source>Cleared. <x id="size"/> freed.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.kind-cache" datatype="html">
+        <source>Cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.kind-data" datatype="html">
+        <source>Your data</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.lede" datatype="html">
+        <source>What this app keeps on your computer. Nothing is removed unless you ask, and only inside the app's own folders.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.loading" datatype="html">
+        <source>Asking what the app keeps…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.measure" datatype="html">
+        <source>Measure again</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.measuring" datatype="html">
+        <source>Measuring what the app keeps…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.no-usage" datatype="html">
+        <source>What the app keeps could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.no-usage-title" datatype="html">
+        <source>What the app keeps could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.show" datatype="html">
+        <source>Show</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.show-label" datatype="html">
+        <source>Show <x id="name"/> in the file manager</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.skipped-many" datatype="html">
+        <source><x id="count"/> items left in place</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.skipped-one" datatype="html">
+        <source>1 item left in place</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.still-working" datatype="html">
+        <source>Still working. This can take a while for big folders; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.stopped" datatype="html">
+        <source>Stopped. <x id="size"/> freed so far; the rest was left as it was.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.table-label" datatype="html">
+        <source>What the app keeps</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.the-cache" datatype="html">
+        <source>the cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.title" datatype="html">
+        <source>Storage</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.total" datatype="html">
+        <source>The app keeps <x id="size"/> on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.working" datatype="html">
+        <source>Working…</source>
+      </trans-unit>
       <trans-unit id="pd.table.actions" datatype="html">
         <source>Actions</source>
       </trans-unit>
@@ -1049,8 +2063,14 @@
       <trans-unit id="pd.table.empty" datatype="html">
         <source>Nothing to show yet.</source>
       </trans-unit>
+      <trans-unit id="pd.table.error" datatype="html">
+        <source>The rows could not be loaded.</source>
+      </trans-unit>
       <trans-unit id="pd.table.filter" datatype="html">
         <source>Filter</source>
+      </trans-unit>
+      <trans-unit id="pd.table.loading" datatype="html">
+        <source>Loading rows</source>
       </trans-unit>
       <trans-unit id="pd.table.more" datatype="html">
         <source>More actions</source>
@@ -1060,6 +2080,9 @@
       </trans-unit>
       <trans-unit id="pd.table.none" datatype="html">
         <source>None</source>
+      </trans-unit>
+      <trans-unit id="pd.table.retry" datatype="html">
+        <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.table.sortBy" datatype="html">
         <source>Sort by <x id="PH"/></source>
@@ -1159,6 +2182,51 @@
       </trans-unit>
       <trans-unit id="pd.ui.sparkline" datatype="html">
         <source>Trend</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.actionFailed" datatype="html">
+        <source><x id="label"/> failed: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.category" datatype="html">
+        <source>Edit</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.redo" datatype="html">
+        <source>Redo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.cmd.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.nothingToRedo" datatype="html">
+        <source>Nothing to redo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.nothingToUndo" datatype="html">
+        <source>Nothing to undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.notification.failed" datatype="html">
+        <source>Could not undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.redoFailed" datatype="html">
+        <source>Could not redo <x id="label"/>: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.redone" datatype="html">
+        <source>Redone: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.close" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.done" datatype="html">
+        <source>Done: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.toast.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.undo.undoFailed" datatype="html">
+        <source>Could not undo <x id="label"/>: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.undone" datatype="html">
+        <source>Undone: <x id="label"/></source>
+      </trans-unit>
+      <trans-unit id="pd.undo.unknown" datatype="html">
+        <source>something went wrong</source>
       </trans-unit>
       <trans-unit id="pd.updates.asking" datatype="html">
         <source>Asking the updater…</source>
@@ -1267,6 +2335,537 @@
       </trans-unit>
       <trans-unit id="pd.updates.up-to-date" datatype="html">
         <source>You have the latest version.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.empty" datatype="html">
+        <source>Nothing here</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.label-badge" datatype="html">
+        <source><x id="label"/>, <x id="badge"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.more" datatype="html">
+        <source>More</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.tooltip-keys" datatype="html">
+        <source><x id="label"/> (<x id="keys"/>)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.tooltip-reason" datatype="html">
+        <source><x id="label"/> — <x id="reason"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.activity" datatype="html">
+        <source>Assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.allow-actions" datatype="html">
+        <source>Allow actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.allow-hint" datatype="html">
+        <source>Lets the assistant propose changes. Each one still asks for your approval.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.allow" datatype="html">
+        <source>Allow</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.decline" datatype="html">
+        <source>Decline</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attached" datatype="html">
+        <source>Attached context</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.chip.add" datatype="html">
+        <source>Send this context</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.chip.remove" datatype="html">
+        <source>Do not send this context</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.cite.open" datatype="html">
+        <source>Open <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.cmd.focus" datatype="html">
+        <source>Ask the assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context" datatype="html">
+        <source>Context for this question</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.conversations" datatype="html">
+        <source>Conversations</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.delete" datatype="html">
+        <source>Delete conversation</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.empty" datatype="html">
+        <source>Ask a question. The assistant can look things up with the tools of this app.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.approve" datatype="html">
+        <source>The decision could not be sent.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.delete" datatype="html">
+        <source>The conversation could not be deleted.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.list" datatype="html">
+        <source>The conversations could not be listed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.load" datatype="html">
+        <source>The assistant could not be reached.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.open" datatype="html">
+        <source>The conversation could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.send" datatype="html">
+        <source>The question could not be sent.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.stop" datatype="html">
+        <source>The assistant could not be stopped.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.feature" datatype="html">
+        <source>The assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.new" datatype="html">
+        <source>New conversation</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.no-conversations" datatype="html">
+        <source>No conversations yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.placeholder" datatype="html">
+        <source>Ask the assistant (Enter sends, Shift+Enter adds a line)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.question" datatype="html">
+        <source>Your question</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.send" datatype="html">
+        <source>Send</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.stop" datatype="html">
+        <source>Stop</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.stopped" datatype="html">
+        <source>Stopped.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.thinking" datatype="html">
+        <source>Thinking…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.title" datatype="html">
+        <source>Assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
+        <source>Waiting for your decision</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.failed" datatype="html">
+        <source>Did not finish</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.running" datatype="html">
+        <source>Working…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
+        <source>(unreadable call)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.view" datatype="html">
+        <source>Assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.wants-to" datatype="html">
+        <source>The assistant wants to:</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.category.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.cmd.jobs" datatype="html">
+        <source>Show jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.cmd.toggle-sidebar" datatype="html">
+        <source>Toggle side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.autoHide.toBottom" datatype="html">
+        <source>Auto-hide to the bottom</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.autoHide.toLeft" datatype="html">
+        <source>Auto-hide to the left</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.autoHide.toRight" datatype="html">
+        <source>Auto-hide to the right</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.category" datatype="html">
+        <source>Window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.auto-hide" datatype="html">
+        <source>Auto hide or pin tool window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.auto-hide-all" datatype="html">
+        <source>Auto hide all tool windows</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.close-all-documents" datatype="html">
+        <source>Close all documents</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.float" datatype="html">
+        <source>Float panel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.full-screen" datatype="html">
+        <source>Full screen</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-apply" datatype="html">
+        <source>Apply saved layout</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-delete" datatype="html">
+        <source>Delete saved layout</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-reset" datatype="html">
+        <source>Reset perspective</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-save" datatype="html">
+        <source>Save current as perspective</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.panel-menu" datatype="html">
+        <source>Panel menu</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.pin-all" datatype="html">
+        <source>Pin all tool windows</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.pop-out" datatype="html">
+        <source>Pop out to window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.switcher" datatype="html">
+        <source>Switch panel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.floatCue.cancel" datatype="html">
+        <source>Release to cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.floatCue.window" datatype="html">
+        <source>Release to open in a new window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.autoHide" datatype="html">
+        <source>Auto-hide <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.autoHideTitle" datatype="html">
+        <source>Auto-hide <x id="title"/>. Right-click to choose the left, right or bottom edge.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.autoHideTitleKeys" datatype="html">
+        <source>Auto-hide <x id="title"/> (<x id="keys"/>). Right-click to choose the left, right or bottom edge.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.maximize" datatype="html">
+        <source>Maximize panel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.panelMenu" datatype="html">
+        <source>Panel menu</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.restore" datatype="html">
+        <source>Restore panel size</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.groupActions.toolbar" datatype="html">
+        <source>Panel actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.barBottom" datatype="html">
+        <source>Auto-hidden tool windows (bottom)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.barLeft" datatype="html">
+        <source>Auto-hidden tool windows (left)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.barRight" datatype="html">
+        <source>Auto-hidden tool windows (right)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.hideLabel" datatype="html">
+        <source>Hide <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.pinLabel" datatype="html">
+        <source>Pin <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.host.pinTitle" datatype="html">
+        <source>Pin (dock it again)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.default-name" datatype="html">
+        <source>Layout</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.fit" datatype="html">
+        <source>Layout adjusted to fit this window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.fit.undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.overflow.many" datatype="html">
+        <source><x id="count"/> more tabs</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.overflow.one" datatype="html">
+        <source>1 more tab</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.copied" datatype="html">
+        <source>Copied</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.copyDetails" datatype="html">
+        <source>Copy details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.copyFailed" datatype="html">
+        <source>Copy failed</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.failed" datatype="html">
+        <source>This panel failed: <x id="message"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.loading" datatype="html">
+        <source>Loading <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.missingView" datatype="html">
+        <source>The view &quot;<x id="id"/>&quot; is not available. Close this tab or reset the layout.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panel.stopped" datatype="html">
+        <source>The <x id="label"/> panel stopped, the rest of the app is unaffected.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.autoHide" datatype="html">
+        <source>Auto hide</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.closeAllDocuments" datatype="html">
+        <source>Close all documents</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.closeOthers" datatype="html">
+        <source>Close all but this</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.closeRight" datatype="html">
+        <source>Close all to the right</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.dock" datatype="html">
+        <source>Dock</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.dockAsDocument" datatype="html">
+        <source>Dock as tabbed document</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.float" datatype="html">
+        <source>Float</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.moveToNextGroup" datatype="html">
+        <source>Move to next tab group</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.newHorizontalGroup" datatype="html">
+        <source>New horizontal tab group</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.newVerticalGroup" datatype="html">
+        <source>New vertical tab group</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.pinTab" datatype="html">
+        <source>Pin tab</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.popOut" datatype="html">
+        <source>Pop out to window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelMenu.unpinTab" datatype="html">
+        <source>Unpin tab</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelTab.close" datatype="html">
+        <source>Close (Delete)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.panelTab.menu" datatype="html">
+        <source>Panel menu (Shift+F10)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-1" datatype="html">
+        <source>Switch to perspective 1</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-2" datatype="html">
+        <source>Switch to perspective 2</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-3" datatype="html">
+        <source>Switch to perspective 3</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-4" datatype="html">
+        <source>Switch to perspective 4</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-5" datatype="html">
+        <source>Switch to perspective 5</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-6" datatype="html">
+        <source>Switch to perspective 6</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-7" datatype="html">
+        <source>Switch to perspective 7</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-8" datatype="html">
+        <source>Switch to perspective 8</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.perspective-9" datatype="html">
+        <source>Switch to perspective 9</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.popout.failed" datatype="html">
+        <source>The panel could not be moved to its own window.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.popout.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.switcher.documents" datatype="html">
+        <source>Active documents</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.switcher.tools" datatype="html">
+        <source>Active tool windows</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.windowLayouts.applyFailed" datatype="html">
+        <source>Layout &quot;<x id="name"/>&quot; could not be applied; the default layout is shown</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.action-failed" datatype="html">
+        <source>That action failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.empty" datatype="html">
+        <source>Nothing here yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.failed" datatype="html">
+        <source>This list could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.more" datatype="html">
+        <source>Show more</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.more-of" datatype="html">
+        <source>Show more (<x id="count"/> left)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.no-actions" datatype="html">
+        <source>No actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.no-children" datatype="html">
+        <source>This item has no children to show.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.none" datatype="html">
+        <source>Nothing to explore.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.open-failed" datatype="html">
+        <source><x id="item"/> could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.refresh" datatype="html">
+        <source>Refresh <x id="section"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.activity" datatype="html">
+        <source>Activity bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.resize" datatype="html">
+        <source>Resize the side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.sidebar" datatype="html">
+        <source>Side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.skip" datatype="html">
+        <source>Skip to the work area</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.status" datatype="html">
+        <source>Status bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.accept-failed" datatype="html">
+        <source>That result could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.category.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.cmd.commands" datatype="html">
+        <source>Show all commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.cmd.quick-open" datatype="html">
+        <source>Go to…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.dialog" datatype="html">
+        <source>Command palette</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.did-you-mean" datatype="html">
+        <source>Nothing matches “<x id="query"/>”. Did you mean:</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.empty" datatype="html">
+        <source>Nothing matches</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.failed" datatype="html">
+        <source>The search failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.input" datatype="html">
+        <source>Type a command, or a prefix to search</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.names-building" datatype="html">
+        <source>Still indexing names…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.open-view" datatype="html">
+        <source>Open <x id="view"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.placeholder" datatype="html">
+        <source>Type a command or search…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.prefix.commands" datatype="html">
+        <source>Commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.results" datatype="html">
+        <source>Results</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.searching" datatype="html">
+        <source>Searching…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.unavailable" datatype="html">
+        <source>Not available now</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.close" datatype="html">
+        <source>Close (dock back)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.close-title" datatype="html">
+        <source>Close (the panel docks back)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.connecting" datatype="html">
+        <source>Connecting to the main window…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.dock-back" datatype="html">
+        <source>Dock back into the main window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.dock-back-failed" datatype="html">
+        <source>Could not dock the panel back: <x id="reason"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.dock-back-short" datatype="html">
+        <source>Dock back</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.failed" datatype="html">
+        <source>Could not pop out <x id="title"/>: <x id="reason"/>. It stays docked.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.keep-on-top" datatype="html">
+        <source>Keep on top of the main window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.keep-on-top-on" datatype="html">
+        <source>Keep on top of the main window (on): click to stop</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.limit" datatype="html">
+        <source>At most <x id="max"/> panels can be popped out of one window; dock one back first.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.maximise" datatype="html">
+        <source>Maximise</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.minimise" datatype="html">
+        <source>Minimise</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.missing" datatype="html">
+        <source>This panel is not available in this version. Dock it back or close the window.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.on-top-failed" datatype="html">
+        <source>Could not keep the window on top: <x id="reason"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.restore" datatype="html">
+        <source>Restore</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.window" datatype="html">
+        <source>Window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.view.jobs" datatype="html">
+        <source>Jobs</source>
       </trans-unit>
       <trans-unit id="pd.whats-new.failed" datatype="html">
         <source>The release notes could not be loaded.</source>

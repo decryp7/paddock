@@ -8,6 +8,7 @@ use paddock_jobs::CancelToken;
 use paddock_jobs::time::{Clock, FakeClock};
 use paddock_secrets::{Secret, Secrets};
 use std::sync::Arc;
+use std::time::Duration;
 
 fn header<'a>(r: &'a PostRequest, name: &str) -> Option<&'a str> {
     r.headers
@@ -657,4 +658,39 @@ fn every_error_reads_as_advice() {
         .retry_after()
         .is_some()
     );
+}
+
+/// A clock that panics when read, to break a delivery outside the channel code the dispatcher guards.
+struct PanicClock;
+
+impl paddock_jobs::time::Clock for PanicClock {
+    fn monotonic(&self) -> Duration {
+        panic!("clock broke")
+    }
+    fn wall(&self) -> std::time::SystemTime {
+        std::time::SystemTime::UNIX_EPOCH
+    }
+    fn wait(&self, _d: Duration, _c: &CancelToken) -> Result<(), paddock_jobs::Cancelled> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_delivery_that_breaks_outside_the_channel_is_still_contained() {
+    let d = Dispatcher::new(
+        Settings {
+            channels: vec![webhook("w", false), email("m", None)],
+        },
+        store(),
+        Arc::new(FakePoster::new().then_status(503)),
+        Arc::new(FakeMail::new()),
+        Arc::new(PanicClock),
+    );
+    let out = d.dispatch(&message("diskLow", Severity::Info), &CancelToken::new());
+    assert_eq!(
+        out[0].result,
+        Err(SendError::Panicked),
+        "the retry wait read the broken clock"
+    );
+    assert!(ok(&out[1]), "the other channel still delivered");
 }

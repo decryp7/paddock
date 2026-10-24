@@ -83,6 +83,9 @@
       <trans-unit id="sd.page.dialogs" datatype="html">
         <source>Dialogs</source>
       </trans-unit>
+      <trans-unit id="sd.page.files" datatype="html">
+        <source>Files</source>
+      </trans-unit>
       <trans-unit id="sd.page.home" datatype="html">
         <source>Overview</source>
       </trans-unit>
@@ -97,6 +100,9 @@
       </trans-unit>
       <trans-unit id="sd.page.runners" datatype="html">
         <source>Runners</source>
+      </trans-unit>
+      <trans-unit id="sd.page.schedule" datatype="html">
+        <source>Schedules</source>
       </trans-unit>
       <trans-unit id="sd.pseudo-locale" datatype="html">
         <source>Pseudo-locale</source>
@@ -114,7 +120,7 @@
         <source>General</source>
       </trans-unit>
       <trans-unit id="sd.settings.storage" datatype="html">
-        <source>Storage</source>
+        <source>Demo data</source>
       </trans-unit>
       <trans-unit id="sd.status.runners" datatype="html">
         <source>Runners online</source>

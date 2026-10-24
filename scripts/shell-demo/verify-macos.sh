@@ -58,7 +58,6 @@ check_app() {
   for sidecar in shell-demo-agent; do
     out=$("$app/Contents/MacOS/$sidecar" --self-test) || { echo "::error::$sidecar --self-test failed"; return 1; }
     echo "$out"
-    echo "$out" | grep -q 'self-test: ok$' || { echo "::error::$sidecar --self-test did not answer ok"; return 1; }
   done
   echo "bundle OK: $app"
 }

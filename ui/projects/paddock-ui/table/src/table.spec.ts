@@ -1,7 +1,7 @@
 import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, type PdRowActionEvent } from './table';
+import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './table';
 import type { PdColumn, PdRowAction, PdSort } from './model';
 
 interface Plugin {
@@ -30,7 +30,7 @@ const ACTIONS: PdRowAction[] = [
 ];
 
 @Component({
-  imports: [PdTable, PdCell],
+  imports: [PdTable, PdCell, PdTableEmpty],
   template: `
     <pd-table
       [rows]="rows()"
@@ -41,6 +41,9 @@ const ACTIONS: PdRowAction[] = [
       [groupBy]="groupBy()"
       [virtual]="virtual()"
       [maxHeight]="maxHeight()"
+      [state]="state()"
+      [rowHeight]="rowHeight()"
+      (retry)="retried = retried + 1"
       [(sort)]="sort"
       [(query)]="query"
       [(hiddenColumns)]="hidden"
@@ -49,6 +52,7 @@ const ACTIONS: PdRowAction[] = [
       (action)="chosen.push($event)"
     >
       <ng-template pdCell="size" let-row><b class="custom">{{ row.size }} KiB</b></ng-template>
+      <div pdTableEmpty class="next-step"><button type="button">Install a plugin</button></div>
     </pd-table>
   `,
 })
@@ -60,6 +64,9 @@ class Host {
   readonly groupBy = signal<string | null>(null);
   readonly virtual = signal<boolean | 'auto'>('auto');
   readonly maxHeight = signal(480);
+  readonly state = signal<'ready' | 'loading' | 'error'>('ready');
+  readonly rowHeight = signal<number | null>(null);
+  retried = 0;
   readonly sort = signal<PdSort | null>(null);
   readonly query = signal('');
   readonly hidden = signal<readonly string[] | null>(null);
@@ -103,7 +110,7 @@ describe('pd-table', () => {
     expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe('3 rows');
     expect(el(f).querySelector('.custom')?.textContent).toBe('30 KiB');
     // Paths are shortened in the middle with the full value as the tooltip.
-    expect(el(f).querySelector('pd-path-text [title]')?.getAttribute('title')).toBe('/opt/plugins/zeta/plugin.so');
+    expect(el(f).querySelector('pd-middle-text')?.getAttribute('title')).toBe('/opt/plugins/zeta/plugin.so');
   });
 
   it('sorts by a header: ascending, descending, none, with aria-sort', async () => {
@@ -138,7 +145,7 @@ describe('pd-table', () => {
     input.value = '';
     input.dispatchEvent(new Event('input'));
     await settle(f);
-    expect(el(f).querySelector('.pd-empty')?.textContent).toContain('Nothing to show');
+    expect(el(f).querySelector('.pd-empty')?.textContent).toContain('Install a plugin');
   });
 
   it('lets the user choose columns; required ones are not offered', async () => {
@@ -232,7 +239,7 @@ describe('pd-table', () => {
     await settle(f);
     let items = [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=menuitem]')];
     expect(items.map((i) => i.textContent?.trim())).toEqual(['Open folder', 'Copy path', 'Pin', 'Remove']);
-    expect(items[3]?.classList.contains('pd-danger')).toBe(true);
+    expect(items[3]?.classList.contains('pd-popmenu__item--danger')).toBe(true);
     items[3]!.click();
     await settle(f);
     expect(f.componentInstance.chosen.map((c) => c.id)).toEqual(['remove']);
@@ -289,7 +296,7 @@ describe('pd-table', () => {
     const table = f.debugElement.children[0]!.componentInstance as PdTable<Plugin>;
     table.moveTo(400);
     await settle(f);
-    expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ top: 400 * 40 }));
+    expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ top: 400 * 32 }));
   });
 
   it('can be forced to draw everything or to virtualise a short table', async () => {
@@ -300,5 +307,108 @@ describe('pd-table', () => {
     f.componentInstance.virtual.set(false);
     await settle(f);
     expect(el(f).querySelector('cdk-virtual-scroll-viewport')).toBeNull();
+  });
+
+  it('uses the family row heights: the density by default, 24, 32 or 36, a 28 px header, and nothing else', async () => {
+    const f = await setup();
+    const host = el(f).querySelector<HTMLElement>('pd-table')!;
+    expect(host.style.getPropertyValue('--pd-table-row')).toBe('32px');
+    expect(host.style.getPropertyValue('--pd-table-head')).toBe('28px');
+    f.componentInstance.rowHeight.set(36);
+    await settle(f);
+    expect(host.style.getPropertyValue('--pd-table-row')).toBe('36px');
+    f.componentInstance.rowHeight.set(48);
+    await settle(f);
+    expect(host.style.getPropertyValue('--pd-table-row')).toBe('32px');
+    document.documentElement.style.setProperty('--pd-row-height', '24px');
+    document.documentElement.setAttribute('data-density', 'compact');
+    f.componentInstance.rowHeight.set(null);
+    await new Promise((r) => setTimeout(r, 0));
+    await settle(f);
+    expect(host.style.getPropertyValue('--pd-table-row')).toBe('24px');
+    document.documentElement.style.removeProperty('--pd-row-height');
+    document.documentElement.removeAttribute('data-density');
+  });
+
+  it('shows a quiet sort chevron on every sortable header, before the label in end-aligned columns, and solid on the sorted one', async () => {
+    const f = await setup();
+    const sorts = [...el(f).querySelectorAll<HTMLElement>('.pd-sort')];
+    expect(sorts).toHaveLength(3);
+    expect(sorts.every((b) => b.querySelector('.pd-sort-icon'))).toBe(true);
+    sorts[0]!.click();
+    await settle(f);
+    expect(el(f).querySelector('.pd-sorted .pd-sort-icon')?.querySelector('svg path')?.getAttribute('d')).toBe('M6 15l6-6 6 6');
+    // An unsorted header shows the two-way glyph, which a descending sort never uses.
+    expect(el(f).querySelectorAll('.pd-sort:not(.pd-sorted) .pd-sort-icon svg path')[0]?.getAttribute('d')).toBe('M8 9l4-4 4 4M8 15l4 4 4-4');
+    sorts[0]!.click();
+    await settle(f);
+    expect(el(f).querySelector('.pd-sorted .pd-sort-icon')?.querySelector('svg path')?.getAttribute('d')).toBe('M6 9l6 6 6-6');
+  });
+
+  it('reserves the icon slot for every menu item when one has an icon and puts a rule before the destructive item', async () => {
+    const f = await setup();
+    f.componentInstance.rows.set(DATA);
+    rowEls(f)[0]!.querySelector<HTMLButtonElement>('.pd-more')!.click();
+    await settle(f);
+    const menu = document.querySelector('.cdk-overlay-container .pd-popmenu')!;
+    const items = [...menu.querySelectorAll('[role=menuitem]')];
+    expect(items.every((i) => i.querySelector('.pd-popmenu__icon'))).toBe(true);
+    expect(menu.querySelectorAll('[role=separator]')).toHaveLength(1);
+    expect(menu.querySelector('[role=separator]')?.nextElementSibling?.textContent).toContain('Remove');
+  });
+
+  it('shows skeleton rows while loading and the error with Retry', async () => {
+    const f = await setup();
+    f.componentInstance.state.set('loading');
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-loading]')).not.toBeNull();
+    // The filter stays in the toolbar (the bar keeps its shape) but is disabled until there is something to filter.
+    expect(el(f).querySelector<HTMLInputElement>('input[type=search]')?.disabled).toBe(true);
+    // Nothing is counted while loading, and the action track stays (the columns do not move when the rows arrive).
+    expect(el(f).querySelector('[data-testid=table-count]')).toBeNull();
+    const cols = el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols');
+    expect(cols).toMatch(/84px$/);
+    expect(el(f).querySelector('[role=grid]')?.getAttribute('aria-busy')).toBe('true');
+    expect(el(f).querySelectorAll('.pd-skel').length).toBeGreaterThan(0);
+    f.componentInstance.state.set('error');
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-error]')?.textContent).toContain('could not be loaded');
+    el(f).querySelector<HTMLButtonElement>('[data-testid=table-error] .pd-retry')!.click();
+    expect(f.componentInstance.retried).toBe(1);
+    f.componentInstance.state.set('ready');
+    await settle(f);
+    expect(rowEls(f)).toHaveLength(3);
+    expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols')).toBe(cols);
+    expect(el(f).querySelector<HTMLInputElement>('input[type=search]')?.disabled).toBe(false);
+    expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe('3 rows');
+  });
+
+  it('counts with the locale’s thousands separators and says nothing when there are no rows', async () => {
+    const f = await setup();
+    f.componentInstance.rows.set(Array.from({ length: 1250 }, (_, i): Plugin => ({ id: `r${i}`, name: `R${i}`, size: i, kind: 'k', path: `/p/${i}` })));
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe(`${new Intl.NumberFormat().format(1250)} rows`);
+    f.componentInstance.rows.set([]);
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-count]')).toBeNull();
+  });
+
+  it('shows the next step the app projects when there are no rows at all, and the filter message when a filter hides them', async () => {
+    const f = await setup();
+    f.componentInstance.rows.set([]);
+    await settle(f);
+    expect(el(f).querySelector('.pd-empty .next-step button')?.textContent).toBe('Install a plugin');
+    f.componentInstance.rows.set(DATA);
+    f.componentInstance.query.set('zzz');
+    await settle(f);
+    expect(el(f).querySelector('.pd-empty')?.textContent).toContain('No rows match');
+  });
+
+  it('has no action column and no action header when no row has actions', async () => {
+    const f = await setup();
+    f.componentInstance.rows.set([DATA[2]!]);
+    await settle(f);
+    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Path']);
+    expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols')).not.toContain('px 28px');
   });
 });

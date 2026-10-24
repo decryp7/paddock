@@ -1,6 +1,7 @@
 use crate::{PackKind, PackStore};
 use paddock_jobs::time::Clock;
-use std::sync::{Arc, Mutex};
+use paddock_watch::{Debouncer, Due};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// What [`Reloader::poll`] did.
@@ -14,22 +15,13 @@ pub enum Polled {
     Reloaded(bool),
 }
 
-#[derive(Clone, Copy)]
-struct Pending {
-    first: Duration,
-    last: Duration,
-}
-
 /// Hot reload without a restart: change events are debounced on a [`Clock`], then the store reloads once. A reload
 /// waits until the folder has been quiet for `debounce`, but never longer than `max_wait` after the first event, so a
 /// storm of events is one reload and a folder that never settles is still read. Pure: it does no waiting of its own;
 /// [`crate::watch::spawn`] drives it from a thread and tests drive it by moving a fake clock.
 pub struct Reloader<K: PackKind> {
     store: Arc<PackStore<K>>,
-    clock: Arc<dyn Clock>,
-    debounce: Duration,
-    max_wait: Duration,
-    pending: Mutex<Option<Pending>>,
+    debouncer: Arc<Debouncer>,
 }
 
 impl<K: PackKind> Reloader<K> {
@@ -52,10 +44,7 @@ impl<K: PackKind> Reloader<K> {
     ) -> Self {
         Self {
             store,
-            clock,
-            debounce,
-            max_wait: max_wait.max(debounce),
-            pending: Mutex::new(None),
+            debouncer: Arc::new(Debouncer::new(clock, debounce, max_wait)),
         }
     }
 
@@ -64,50 +53,33 @@ impl<K: PackKind> Reloader<K> {
         &self.store
     }
 
-    /// A change happened in the folder (any number of times).
-    pub fn note_change(&self) {
-        let now = self.clock.monotonic();
-        let mut p = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        *p = Some(match *p {
-            Some(old) => Pending {
-                first: old.first,
-                last: now,
-            },
-            None => Pending {
-                first: now,
-                last: now,
-            },
-        });
+    /// The debouncer a watcher feeds ([`crate::watch::spawn`] does).
+    pub fn debouncer(&self) -> &Arc<Debouncer> {
+        &self.debouncer
     }
 
-    /// Reloads if the quiet time (or the maximum wait) has passed, otherwise says how long to wait.
-    pub fn poll(&self) -> Polled {
-        let now = self.clock.monotonic();
-        {
-            let mut p = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(pending) = *p else {
-                return Polled::Idle;
-            };
-            let due = (pending.last + self.debounce).min(pending.first + self.max_wait);
-            if now < due {
-                return Polled::Waiting(due - now);
-            }
-            *p = None;
-        }
-        Polled::Reloaded(self.store.reload())
+    /// A change happened in the folder (any number of times).
+    pub fn note_change(&self) {
+        self.debouncer.note_change();
     }
 
     /// Whether a change is waiting for its quiet time.
     pub fn has_pending(&self) -> bool {
-        self.pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_some()
+        self.debouncer.has_pending()
+    }
+
+    /// Reloads if the quiet time (or the maximum wait) has passed, otherwise says how long to wait.
+    pub fn poll(&self) -> Polled {
+        match self.debouncer.poll() {
+            Due::Idle => Polled::Idle,
+            Due::Waiting(d) => Polled::Waiting(d),
+            Due::Now => Polled::Reloaded(self.store.reload()),
+        }
     }
 
     /// Reloads now, dropping any waiting change (start-up, a "Reload" button).
     pub fn reload_now(&self) -> bool {
-        *self.pending.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.debouncer.clear();
         self.store.reload()
     }
 }

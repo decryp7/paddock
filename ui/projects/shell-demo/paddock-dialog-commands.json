@@ -1,5 +1,5 @@
 {
-  "//": "hostOnly: a dialog window provides no UI checkpoint, so the start-up contract never saves one there (ui_checkpoint is MAIN-only). exceptions: the Settings window loads its pages by the page's own loader at run time, which the call-graph walk cannot follow, so the Background service page's commands (SERVICE_SETTINGS_COMMANDS) are declared by hand; service_status is reached through the page's providers.",
+  "//": "hostOnly: a dialog window provides no UI checkpoint, so the start-up contract never saves one there (ui_checkpoint is MAIN-only). exceptions: the Settings window loads its pages by the page's own loader at run time, which the call-graph walk cannot follow, so the Background service page's commands (SERVICE_SETTINGS_COMMANDS) are declared by hand; service_status is reached through the page's providers. The Notification channels page's commands (CHANNELS_SETTINGS_COMMANDS) are declared the same way, and the secret dialog's window sets the secret through its lazily loaded component. The AI access page's commands (MCP_SETTINGS_COMMANDS) are declared the same way, and the key dialog's window issues the key through its lazily loaded component.",
   "tsconfig": "tsconfig.app.json",
   "registry": [
     "src/app/demo.contributions.ts"
@@ -7,7 +7,11 @@
   "table": [
     "src/app/generated/app-commands.ts",
     "../paddock-ui/shell/generated/shell-commands.ts",
-    "../paddock-ui/shell/service/generated/service-commands.ts"
+    "../paddock-ui/shell/service/generated/service-commands.ts",
+    "../paddock-ui/shell/channels/generated/channels-commands.ts",
+    "../paddock-ui/shell/storage/generated/storage-commands.ts",
+    "../paddock-ui/shell/mcp/generated/mcp-commands.ts",
+    "../paddock-ui/shell/packs/generated/packs-commands.ts"
   ],
   "base": [
     "window_pong",
@@ -31,7 +35,34 @@
       "declared": [
         "service_repair",
         "service_install",
-        "open_login_items"
+        "open_login_items",
+        "packs_status",
+        "packs_reload",
+        "channels_get",
+        "channels_save",
+        "channels_clear_secret",
+        "channels_test",
+        "storage_last",
+        "storage_scan",
+        "storage_clear",
+        "storage_cancel",
+        "storage_reveal",
+        "mcp_get",
+        "mcp_save",
+        "mcp_revoke_key",
+        "mcp_audit",
+        "mcp_audit_clear",
+        "dialog_open"
+      ]
+    },
+    "pd.channels.secret": {
+      "declared": [
+        "channels_set_secret"
+      ]
+    },
+    "pd.mcp.key": {
+      "declared": [
+        "mcp_issue_key"
       ]
     }
   }

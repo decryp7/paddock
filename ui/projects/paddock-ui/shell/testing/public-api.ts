@@ -28,7 +28,7 @@ export {
   render,
   RecordingShellPorts,
   ManualIdle,
-  ManualClock,
+  FakeClock,
   type ShellTestingOptions,
   type OpenedDialog,
   type Rendered,
