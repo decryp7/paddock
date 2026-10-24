@@ -86,7 +86,7 @@ export class TauriAssistantBackend extends AssistantBackend {
 
 /** What the fake engine of [`MemoryAssistantBackend`] answers to a question. */
 export interface MemoryAssistantOptions {
-  /** The answer to a question (default: "You asked: <text>"); `/tool <name>` and `/write` questions run the demo tools. */
+  /** The answer to a question (default: a short markdown answer, see `DEMO_ANSWER`); the slash inputs of the class doc run the demo tools. */
   readonly reply?: (text: string) => string;
   /** The info (default: a read-only tool `find` and a writing tool `erase`). */
   readonly info?: AssistantInfo;
@@ -96,13 +96,30 @@ export interface MemoryAssistantOptions {
   readonly sendError?: string;
 }
 
+/** The default answer of [`MemoryAssistantBackend`]: a paragraph, a list, inline code and a code block (markdown). */
+export const DEMO_ANSWER =
+  'A request first passes through the router, which picks a handler by method and path.\n\n' +
+  'Three stages matter:\n\n' +
+  '- Routing matches the path and the method\n' +
+  '- Middleware adds the session and the logging\n' +
+  '- `handle_request` builds the response\n\n' +
+  '```rust\nfn handle_request(req: Request) -> Response {\n    router.dispatch(req)\n}\n```\n\n' +
+  'Ask about any stage for more detail.';
+
 /**
  * The assistant held in memory, playing the engine (browser build, demos, tests): deterministic, no timers. A question
- * streams its answer word by word, one microtask apart; `/tool` runs a read-only tool call (`find`) before the answer and
- * `/write` asks for the user's approval of a writing tool (`erase`) and waits for it. `/fail` streams a few words and then ends the
- * turn with an error event of kind `failed`; `/slow` streams its first words and then waits until `stop()` (a running turn with Stop
- * visible, no test hook needed). `hold()` pauses the stream before the
- * first word until `release()` (so a test can press Stop on a running turn).
+ * streams its answer (`DEMO_ANSWER` unless `reply` is set) word by word, one microtask apart. The first word of the
+ * question selects a scripted behaviour:
+ *
+ * - `/tool [what]`: a read-only tool call (`find`) that finishes with a citation (`item 7`), then the answer.
+ * - `/tool-slow`: a `find` call that stays running until `stop()`; the turn then ends as cancelled, with no answer.
+ * - `/tool-fail`: a `find` call that fails with a reason ("The index is locked by another process."), then the answer.
+ * - `/write`: asks for the user's approval of a writing tool (`erase`) and waits for it (needs "Allow actions").
+ * - `/fail`: streams a few words and then ends the turn with an error event of kind `failed`.
+ * - `/slow`: streams its first words and then waits until `stop()` (a running turn with Stop visible).
+ * - anything else: just the answer.
+ *
+ * `hold()` pauses the stream before the first word until `release()` (so a test can press Stop on a running turn).
  */
 export class MemoryAssistantBackend extends AssistantBackend {
   private readonly listeners = new Set<(e: Envelope) => void>();
@@ -216,17 +233,27 @@ export class MemoryAssistantBackend extends AssistantBackend {
     this.emit(id, { type: 'started', title: c.title });
     if (this.gate) await this.gate;
     let said = '';
-    if (text.startsWith('/tool')) {
-      this.emit(id, { type: 'toolStarted', callId: 'call_1', name: 'find', summary: text.slice(5).trim() || 'everything', write: false });
-      this.emit(id, {
-        type: 'toolFinished',
-        callId: 'call_1',
-        name: 'find',
-        ok: true,
-        summary: '2 things found',
-        data: { citations: [{ text: 'item 7', target: 'record:7', title: 'Item 7' }] },
-      });
-    } else if (text.startsWith('/write') && allowWrite) {
+    const command = text.split(/\s/, 1)[0] ?? '';
+    if (command === '/tool' || command === '/tool-fail' || command === '/tool-slow') {
+      const what = text.slice(command.length).trim() || 'everything';
+      this.emit(id, { type: 'toolStarted', callId: 'call_1', name: 'find', summary: what, write: false });
+      if (command === '/tool-slow') {
+        // The card stays "running" until the user presses Stop.
+        await new Promise<void>((resolve) => (run.halt = resolve));
+        run.halt = null;
+      } else if (command === '/tool-fail') {
+        this.emit(id, { type: 'toolFinished', callId: 'call_1', name: 'find', ok: false, summary: 'The index is locked by another process.' });
+      } else {
+        this.emit(id, {
+          type: 'toolFinished',
+          callId: 'call_1',
+          name: 'find',
+          ok: true,
+          summary: '2 things found',
+          data: { citations: [{ text: 'item 7', target: 'record:7', title: 'Item 7' }] },
+        });
+      }
+    } else if (command === '/write' && allowWrite) {
       run.call = 'call_2';
       this.emit(id, { type: 'toolStarted', callId: 'call_2', name: 'erase', summary: 'Erase everything', write: true });
       this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
@@ -236,20 +263,20 @@ export class MemoryAssistantBackend extends AssistantBackend {
       if (approved) this.erased++;
       this.emit(id, { type: 'toolFinished', callId: 'call_2', name: 'erase', ok: approved, summary: approved ? 'Erased' : 'Declined by the user' });
     }
-    const answer = this.options.reply ? this.options.reply(text) : text.startsWith('/tool') ? 'Found item 7 for you.' : `You asked: ${text}`;
-    const words = answer.split(/(?<= )/);
+    const answer = this.options.reply ? this.options.reply(text) : command === '/tool' ? 'Found item 7 for you.' : DEMO_ANSWER;
+    const words = answer.split(/(?<=\s)/);
     for (const word of words) {
       if (run.stopped) break;
       said += word;
       this.emit(id, { type: 'delta', text: word });
       await Promise.resolve();
     }
-    if (text.startsWith('/fail') && !run.stopped) {
+    if (command === '/fail' && !run.stopped) {
       this.running.delete(id);
       this.emit(id, { type: 'error', kind: 'failed', message: 'The model stopped answering.' });
       return;
     }
-    if (text.startsWith('/slow') && !run.stopped) {
+    if (command === '/slow' && !run.stopped) {
       // Waits here, mid-answer, until the user presses Stop.
       await new Promise<void>((resolve) => (run.halt = resolve));
       run.halt = null;

@@ -18,6 +18,21 @@ export interface ToolCard {
   readonly data: unknown;
   /** The arguments of the call, known once a write asks for approval (shown in the prompt's details). */
   readonly input?: unknown;
+  /** The user declined this call: a choice, not a failure (the card is neutral). */
+  readonly declined?: boolean;
+}
+
+/** Marks a waiting call as declined by the user (or takes the mark back when the decision could not be sent). */
+export function setDeclined(t: TurnView, callId: string, declined: boolean): TurnView {
+  return setCard(t, callId, (c) => ({ ...c, declined }));
+}
+
+/** The conversation's heading: the title without a leading slash command, in sentence case. */
+export function conversationTitle(raw: string): string {
+  const trimmed = raw.trim();
+  const rest = trimmed.replace(/^\/[^\s]*\s*/, '');
+  const base = rest || trimmed.replace(/^\//, '');
+  return base.charAt(0).toLocaleUpperCase() + base.slice(1);
 }
 
 /** A piece of an answer in order: text, or a tool call between two texts. */
