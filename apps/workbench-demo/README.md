@@ -52,13 +52,23 @@ notes. Before tagging: bump `src-tauri/Cargo.toml` and add the CHANGELOG section
 
 ## Start a new app from the workbench demo
 
-An IDE-style app (Pacenotes, Sighter) starts from this demo plus the shell demo's generator for the shell parts. Until a
-generator knows this layout, copy by hand; each step is small:
+An IDE-style app (Pacenotes, Sighter) starts from this demo with the generator:
 
-1. Copy `apps/workbench-demo` and `ui/projects/workbench-demo` into the new app (`app/src-tauri`, `app/src`), rename the
-   crate, product name, app id (`APP_ID`, `APP_NAME`), bundle identifier and the folder names, and take the crates and
-   `@decryp7/paddock-ui` from the registries (`node scripts/new-app.mjs` does that for the shell demo; its rewrites are the
-   model).
+```sh
+node scripts/new-app.mjs sightr "Sightr" --template workbench-demo --accent sighter [--dest <dir>] [--identifier <id>]
+```
+
+It copies `ui/projects/workbench-demo` to `app/` and `apps/workbench-demo/src-tauri` to `app/src-tauri/` in a new
+repository (the family layout), renames the crate, product name, app id (`APP_ID`, `APP_NAME`, the `<ID>_HOME` override),
+bundle identifier, window titles and the sample texts, sets the window accent (`--accent`, one of the app accents; default
+graphite), takes the crates and `@decryp7/paddock-ui` from the registries, and writes the repo root files (AGENTS.md, CI
+baseline, CHANGELOG). The icons are the demo's: they are the placeholders until step 4. Every rewrite must match or the
+script stops, so a change to the demo that the generator does not know fails `npm run test:scripts` here, not in a new app.
+
+Then, in the new app:
+
+1. `cd app && npm install && npx ng build`, then `cd src-tauri && cargo test` (it writes `Cargo.lock`; commit both lock
+   files).
 2. Keep `main.ts`'s three window kinds, `app/desktop.ts` (the one seam to Tauri) and the three capability files. Replace the
    sample views, perspectives, Explorer provider and commands in `demo.contributions.ts` with the app's (they are
    contributions: `defineView`, `definePerspective`, ...; nothing else changes), and the sample tool and system prompt in
