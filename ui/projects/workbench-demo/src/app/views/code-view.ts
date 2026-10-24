@@ -1,4 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, untracked } from '@angular/core';
+import { ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { PANEL_VISIBLE } from '@decryp7/paddock-ui/workbench/dock';
+import type { WorkbenchDemoContext } from '../context';
 import { PdPathText } from '@decryp7/paddock-ui';
 import { VIEW_PANEL } from '@decryp7/paddock-ui/workbench';
 import { DemoRepo } from '../repo';
@@ -13,7 +16,7 @@ import { DemoRepo } from '../repo';
     @if (file(); as f) {
       <ol class="code" [attr.aria-label]="path()" data-testid="code-lines">
         @for (line of lines(); track $index) {
-          <li><code>{{ line }}</code></li>
+          <li><code>{{ line || '\u00a0' }}</code></li>
         }
       </ol>
     } @else {
@@ -35,4 +38,16 @@ export class CodeView {
   protected readonly path = computed(() => this.panel?.key ?? 'README.md');
   protected readonly file = computed(() => this.repo.file(this.path()));
   protected readonly lines = computed(() => (this.file()?.text ?? '').replace(/\n$/, '').split('\n'));
+
+  constructor() {
+    const visible = inject(PANEL_VISIBLE, { optional: true });
+    const host = inject(ShellContextHost);
+    // The Code panel in front is the file the user works on (the Explorer and the Outline follow it, also after a reload
+    // restored the layout; review 2 P2-F): telling the app context is a side effect on state outside this view.
+    effect(() => {
+      const key = this.panel?.key;
+      if (!key || !(visible?.() ?? true)) return;
+      untracked(() => void host.load().then((ctx) => (ctx as unknown as WorkbenchDemoContext).select(key)));
+    });
+  }
 }
