@@ -147,7 +147,7 @@ const INDENT = 12;
   styles: `
     :host { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; font-size: var(--pd-text-body); color: var(--pd-text); container: pd-explorer / inline-size; }
     .pd-ex-head { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); position: sticky; top: 0; background: var(--pd-surface-1); z-index: 1; }
-    .pd-ex-title { flex: 1; display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; height: 24px; padding: 0 var(--pd-space-1); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; text-align: start; }
+    .pd-ex-title { flex: 1; display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; height: 24px; padding: 0 var(--pd-space-1); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); cursor: pointer; text-align: start; }
     .pd-ex-title span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-ex-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
     .pd-ex-icon-btn:hover, .pd-ex-title:hover { background: var(--pd-hover); color: var(--pd-text); }
@@ -214,6 +214,19 @@ export class PdExplorer {
         const before = seen.get(section.id);
         seen.set(section.id, value);
         if (had && !Object.is(before, value)) untracked(() => void this.store.refresh(section.id));
+      }
+    });
+    // Following the active item (review P3-14): expanding and selecting is a side effect (provider loads) of the path.
+    const revealed = new Map<string, string>();
+    effect(() => {
+      const ctx = host.context();
+      for (const section of this.store.sections()) {
+        if (!section.reveal) continue;
+        const ids = evaluate(section.reveal, ctx, null);
+        const sig = Array.isArray(ids) && ids.length ? ids.join('\u0000') : '';
+        if (!sig || revealed.get(section.id) === sig) continue;
+        revealed.set(section.id, sig);
+        untracked(() => void this.store.reveal(section.id, ids as readonly string[]));
       }
     });
   }
