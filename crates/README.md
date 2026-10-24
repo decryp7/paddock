@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -100,6 +100,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
@@ -1130,6 +1131,31 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   four commands of `status::COMMANDS` (`pitwall_state`, `pitwall_connect`, `pitwall_cancel_pairing`, `pitwall_use_builtin`) over
   its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
   by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.
+
+## `paddock-metrics` (plan X30)
+
+Replaces `metrics.rs` in Pitcrew (generic `TieredStore`), Pitwall (four tiers) and the tier maths of Dyno's agent store, and the four
+free-space helpers (Debrief `disk.rs`, Pitcrew `probe.rs`, Pitwall `system.rs`, Dyno `sensors.rs`).
+
+```rust
+let retention = Retention::standard(30);                    // 5 s/1 h, 1 min/1 d, 10 min/1 w, 1 h/30 d; Retention::new(..) checks your own
+let file = StoreFile::<MachineSample>::new(dirs.state("metrics.json"), retention.clone());
+let (mut store, problem) = file.load();                     // damaged or newer file: empty store + a Problem to report once
+let mut sampler = Sampler::new(SystemProbe::new(), clock).watch_disk(&runners_dir).watch_process(std::process::id());
+store.push(sampler.sample());                               // every tier; a sample from the past is TooLate, never reordered
+let chart = store.query(clock.wall_ms() as u64, Duration::from_secs(86_400));   // the finest tier covering the range
+file.save(&store)?;
+```
+
+- A `Series` says how samples fold into a bucket (`begin`/`absorb`/`point`); the bucket may be any serializable value, so Pitwall's
+  histograms fit. Memory is `Retention::capacity()` points at most (`MAX_TIERS` 8, `MAX_KEEP`, `MAX_POINTS`); a file written with another
+  tier layout is dropped, a changed `keep` trims.
+- `MachineSample` aggregates CPU and memory as means (with the CPU peak), free disk as the minimum. Own memory is `paddock-proc`'s
+  `tree_memory`: PSS on Linux, threads skipped (rule 26).
+- `volume_free` picks the mount with the longest matching mount point (verbatim Windows paths match plain ones); `Sampler::disk_space` caches
+  the list of volumes (`mounts_every`, default 60 s, on the clock). `folder_size` stops at `max_entries`, `max_depth`, `max_time` (on the
+  clock) or a cancel and never follows links; `folder_size_with` takes any listing for tests.
+- Dyno keeps its SQLite history and uses `bucket_start`, `Retention::tier_for` and `Mean` for the tier maths.
 
 ## `paddock-testkit` (plan X40)
 
