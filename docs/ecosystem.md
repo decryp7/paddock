@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=20c35da2" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=0adea082" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -16,9 +16,9 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=3f9ae030) and [dark](images/paddock-ecosystem-dark.png?v=df7479ea), integrations
-[light](images/paddock-integrations-light.png?v=72242dc8) and [dark](images/paddock-integrations-dark.png?v=cfb0783c), hand-offs
-[light](images/paddock-handoffs-light.png?v=36352e2f) and [dark](images/paddock-handoffs-dark.png?v=90af075e). PNGs are
+hero [light](images/paddock-ecosystem-light.png?v=7fe5625b) and [dark](images/paddock-ecosystem-dark.png?v=4c682bd0), integrations
+[light](images/paddock-integrations-light.png?v=59baa1a0) and [dark](images/paddock-integrations-dark.png?v=3ae9a8ae), hand-offs
+[light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
 `CHROME` to override).
 
@@ -128,11 +128,11 @@ Status: **in design** (after Pitwall). Repo: <https://dev.decryptology.net/decry
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=26ea5c70" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter and Dyno reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app; Pitwall runs llama.cpp as a child process, keeps keys in the OS credential store, and its tool router is an MCP client of the read-only MCP servers of Pacenotes, Debrief and Sighter, which other MCP clients can use too" width="100%">
+  <img src="images/paddock-integrations.svg?v=fcd26b68" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter and Dyno reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app; Pitwall runs llama.cpp as a child process, keeps keys in the OS credential store, and its tool router is an MCP client of the read-only MCP servers of Pacenotes, Debrief and Sighter, which other MCP clients can use too" width="100%">
 </picture>
 
 <picture>
-  <img src="images/paddock-handoffs.svg?v=6f8c5d40" alt="Hand-offs between apps: Sighter run bundles, Pitcrew job logs, Dyno issues and Pacenotes log checks go to Debrief; Debrief sends Pacenotes stack traces and drives Sighter over MCP to reproduce a bug from a video; Pacenotes sends Sighter test plans and gets results back; Dyno sends Spotter its watch list and Pitcrew machine health; Spotter tells Pacenotes about newer versions and, later, triggers Sighter smoke tests; Pitcrew supervises the Gitea runners" width="100%">
+  <img src="images/paddock-handoffs.svg?v=63c55171" alt="Hand-offs between apps: Sighter run bundles, Pitcrew job logs, Dyno issues and Pacenotes log checks go to Debrief; Debrief sends Pacenotes stack traces and drives Sighter over MCP to reproduce a bug from a video; Pacenotes sends Sighter test plans and gets results back; Dyno sends Spotter its installed software and Pitcrew machine health; Spotter tells Pacenotes about newer versions and, later, triggers Sighter smoke tests" width="100%">
 </picture>
 
 The apps never depend on each other to do their own job. They meet in a few well-defined places:
@@ -141,12 +141,13 @@ The apps never depend on each other to do their own job. They meet in a few well
 |---|---|---|
 | **Pitwall local API** | every app to Pitwall | HTTP on loopback; OpenAI-, Anthropic- and Ollama-compatible, plus `/x/v1`. One key per app (held in the OS credential store), job priorities, prompt and response caching, usage and limits per app. |
 | **MCP** | Pitwall to Pacenotes, and any MCP client | Pacenotes is a read-only MCP server; Pitwall is the MCP client and tool router, offering tools to local models. |
-| **MCP servers** (decided 2026-10-23, [ADR 0007](adr/0007-mcp-servers-across-the-family.md)) | Pacenotes, Sighter, Debrief, then Spotter, Pitcrew, Dyno | Each serves read-only tools locally (Sighter acts, with allow-list, confirmation, budgets and a stop key); off by default, every call logged, results bounded; Pitwall hosts and serves none. Debrief first, after 1.0.2. |
+| **MCP servers** (decided 2026-10-23, [ADR 0007](adr/0007-mcp-servers-across-the-family.md)) | Pacenotes, Sighter, Debrief, then Spotter, Pitcrew, Dyno | Each serves read-only tools locally (Sighter acts, with allow-list, confirmation, budgets and a stop key); off by default, every call logged, results bounded; Pitwall hosts and serves none. Debrief first. |
 | **Deep links** | Pitcrew and Dyno to Debrief; Dyno to Spotter and Pitcrew | "Job logs" and "Issues" open in Debrief; Dyno's installed software becomes Spotter's watch list; Dyno's machine health shows next to the runners in Pitcrew. The target app opens at the right place. |
 | **Debrief bridge** | Debrief and Pacenotes, both ways | Stack trace to code, and log-line checks against the code. |
 | **Run bundles** | Sighter to Debrief | A file with video, steps and results; Debrief opens it next to the app's logs. |
 | **Test plans and results** | Pacenotes and Sighter | Pacenotes owns requirements and traceability and drafts test plans (`.sighterplan`); Sighter owns UI test execution and results, which flow back to Pacenotes. |
 | **`paddock-testplan`** (planned) | Pacenotes and Sighter | The shared test-plan format behind `.sighterplan`. |
+| **Newer version** | Spotter to Pacenotes | Spotter tells Pacenotes when a newer version of a dependency is available. |
 | **Smoke tests** (later) | Spotter to Sighter | A new release found by Spotter triggers a Sighter smoke test. |
 | **CI** | Pitcrew to every repo | Pitcrew keeps the runners that build and test all of these apps alive, updated and clean. |
 | **Plugin platform** (planned) | Debrief, Pacenotes, later Dyno's tier-3 plugins | Debrief's plugin host, IPC and API (the ADR 0017 model) extracted into shared crates: out-of-process, Rust-only plugins. |

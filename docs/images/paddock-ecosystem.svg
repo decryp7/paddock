@@ -5,7 +5,7 @@
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E;--line2:#CDD3DD;--wbf:#E8EEF8;--wbs:#B3C2DB}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0;--line2:#3A414D;--wbf:#1F2939;--wbs:#4A5D80}}
 text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;fill:var(--ink)}
-.eyebrow{font-size:15px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
+.eyebrow{font-size:16px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
 .h1{font-size:44px;font-weight:600;letter-spacing:-.02em}
 .sub{font-size:19px;fill:var(--muted)}
 .chip-design{fill:none;stroke:var(--link);stroke-dasharray:3 3}
@@ -48,7 +48,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <text class="h1" x="800" y="136" text-anchor="middle">Seven local-first tools for people who keep systems running</text>
 <text class="sub" x="800" y="176" text-anchor="middle">One private AI hub, one shared foundation. Each app is good alone and better together.</text>
 
-<path class="stub" d="M245 514 L245 646"/><polygon class="ahp" points="245,646 239,635 251,635"/><polygon class="ahp" points="245,514 239,525 251,525"/><g><rect class="pill" x="169" y="579" width="152" height="30" rx="15"/><text class="lbl" x="245" y="600" text-anchor="middle">Q&amp;A, embeddings</text></g>
+<path class="stub" d="M245 514 L245 531 M245 549 L245 646"/><polygon class="ahp" points="245,646 239,635 251,635"/><polygon class="ahp" points="245,514 239,525 251,525"/><g><rect class="pill" x="169" y="579" width="152" height="30" rx="15"/><text class="lbl" x="245" y="600" text-anchor="middle">Q&amp;A, embeddings</text></g>
 <path class="stub" d="M720 514 L720 646"/><polygon class="ahp" points="720,646 714,635 726,635"/><g><rect class="pill" x="635.5" y="565" width="169" height="30" rx="15"/><text class="lbl" x="720" y="586" text-anchor="middle">AI engine, paired</text></g>
 <path class="stub" d="M1265 514 L1265 646"/><polygon class="ahp" points="1265,646 1259,635 1271,635"/><polygon class="ahp" points="1265,514 1259,525 1271,525"/><g><rect class="pill" x="1189" y="565" width="152" height="30" rx="15"/><text class="lbl" x="1265" y="586" text-anchor="middle">Vision, planner</text></g>
 <path class="stub" d="M720 946 L720 814"/><polygon class="ahp" points="720,814 714,825 726,825"/><g><rect class="pill" x="669" y="865" width="102" height="30" rx="15"/><text class="lbl" x="720" y="886" text-anchor="middle">Diagnosis</text></g>
@@ -227,13 +227,13 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <path class="hand" d="M972 459 L1183 459"/><polygon class="ah" points="1183,459 1172,453 1172,465"/><g><rect class="pill" x="993" y="444" width="169" height="30" rx="15"/><text class="lbl" x="1077.5" y="465" text-anchor="middle">Video repro (MCP)</text></g>
 <path class="hand" d="M628 1035 L417 1035"/><polygon class="ah" points="417,1035 428,1029 428,1041"/><g><rect class="pill" x="450.5" y="1020" width="144" height="30" rx="15"/><text class="lbl" x="522.5" y="1041" text-anchor="middle">Machine health</text></g>
 <path class="hand" d="M972 1035 L1183 1035"/><polygon class="ah" points="1183,1035 1172,1029 1172,1041"/><g><rect class="pill" x="989" y="1020" width="177" height="30" rx="15"/><text class="lbl" x="1077.5" y="1041" text-anchor="middle">Installed software</text></g>
-<path class="hand" d="M335 338 L335 319 Q335 300 354 300 L1246 300 Q1265 300 1265 319 L1265 338"/><polygon class="ah" points="1265,338 1259,327 1271,327"/><g><rect class="pill" x="703" y="285" width="194" height="30" rx="15"/><text class="lbl" x="800" y="306" text-anchor="middle">Test plans, MCP host</text></g>
+<path class="hand" d="M335 338 L335 319 Q335 300 354 300 L1246 300 Q1265 300 1265 319 L1265 338"/><polygon class="ah" points="1265,338 1259,327 1271,327"/><g><rect class="pill" x="720" y="285" width="160" height="30" rx="15"/><text class="lbl" x="800" y="306" text-anchor="middle">Test plans (MCP)</text></g>
 <path class="hand" d="M1385 338 L1385 262 Q1385 240 1363 240 L297 240 Q275 240 275 262 L275 338"/><polygon class="ah" points="275,338 269,327 281,327"/><g><rect class="pill" x="757.5" y="225" width="85" height="30" rx="15"/><text class="lbl" x="800" y="246" text-anchor="middle">Results</text></g>
-<path class="hand" d="M100 948 L100 562 Q100 540 122 540 L646 540 Q660 540 660 526 L660 512"/><polygon class="ah" points="660,512 654,523 666,523"/><g><rect class="pill" x="53.5" y="890" width="93" height="30" rx="15"/><text class="lbl" x="100" y="911" text-anchor="middle">Job logs</text></g>
-<path class="hand" d="M660 948 L660 882 Q660 860 638 860 L120 860 Q100 860 100 840 L100 820"/><g><rect class="pill" x="342" y="845" width="76" height="30" rx="15"/><text class="lbl" x="380" y="866" text-anchor="middle">Issues</text></g>
-<path class="hand later" d="M1470 948 L1470 512"/><polygon class="ah" points="1470,512 1464,523 1476,523"/><g><rect class="pill" x="1411" y="865" width="118" height="30" rx="15"/><text class="lbl" x="1470" y="886" text-anchor="middle">Smoke tests</text></g>
-<g><rect class="hub" x="140" y="650" width="1290" height="160" rx="24"/><rect class="chip-ok" x="1325" y="666" width="83" height="28" rx="14"/><text class="chipt-ok" x="1366.5" y="685.5" text-anchor="middle">v1.0.3</text>
-<svg x="168" y="690" width="80" height="80" viewBox="60 60 904 904" overflow="visible">
+<path class="hand" d="M122 948 L122 562 Q122 540 144 540 L646 540 Q660 540 660 526 L660 512"/><polygon class="ah" points="660,512 654,523 666,523"/><g><rect class="pill" x="75.5" y="890" width="93" height="30" rx="15"/><text class="lbl" x="122" y="911" text-anchor="middle">Job logs</text></g>
+<path class="hand" d="M660 948 L660 882 Q660 860 638 860 L122 860"/><g><rect class="pill" x="342" y="845" width="76" height="30" rx="15"/><text class="lbl" x="380" y="866" text-anchor="middle">Issues</text></g><circle class="ah" cx="122" cy="860" r="4.5"/>
+<path class="hand later" d="M1462 948 L1462 512"/><polygon class="ah" points="1462,512 1456,523 1468,523"/><g><rect class="pill" x="1403" y="865" width="118" height="30" rx="15"/><text class="lbl" x="1462" y="886" text-anchor="middle">Smoke tests</text></g>
+<g><rect class="hub" x="162" y="650" width="1260" height="160" rx="24"/><rect class="chip-ok" x="1317" y="666" width="83" height="28" rx="14"/><text class="chipt-ok" x="1358.5" y="685.5" text-anchor="middle">v1.0.3</text>
+<svg x="190" y="690" width="80" height="80" viewBox="60 60 904 904" overflow="visible">
   
   <defs>
     <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
@@ -261,10 +261,10 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
   </g>
   <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
 </svg>
-<rect x="270" y="694" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
-<text class="name hubname" x="270" y="730">Pitwall</text>
-<text class="promise" x="270" y="756">The local AI hub, on llama.cpp.</text>
-<text class="promise" x="270" y="779">Optional for every app.</text>
+<rect x="292" y="694" width="20" height="3" rx="1.5" fill="#6D3FD6"/>
+<text class="name hubname" x="292" y="730">Pitwall</text>
+<text class="promise" x="292" y="756">The local AI hub, on llama.cpp.</text>
+<text class="promise" x="292" y="779">Optional for every app.</text>
 <text class="vt" x="600" y="712">One local API</text><text class="vs" x="600" y="740">OpenAI, Anthropic and Ollama</text><text class="vs" x="600" y="763">compatible, plus /x/v1.</text><text class="vt" x="930" y="712">Tools over MCP</text><text class="vs" x="930" y="740">MCP client and tool</text><text class="vs" x="930" y="763">router.</text><text class="vt" x="1150" y="712">Yours alone</text><text class="vs" x="1150" y="740">Keys, priorities, caching.</text><text class="vs" x="1150" y="763">No cloud, no telemetry.</text></g>
 
 <g>
