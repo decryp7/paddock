@@ -1978,6 +1978,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ntapi"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
+dependencies = [
+ "winapi",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2144,6 +2153,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-io-kit"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33fafba39597d6dc1fb709123dfa8289d39406734be322956a69f0931c73bb15"
+dependencies = [
+ "libc",
+ "objc2-core-foundation",
+]
+
+[[package]]
 name = "objc2-io-surface"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2298,6 +2317,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-jobs",
  "serde",
  "serde_json",
  "tauri",
@@ -2320,6 +2340,7 @@ dependencies = [
  "chrono",
  "log",
  "paddock-env",
+ "paddock-jobs",
  "serde",
  "serde_json",
  "tracing",
@@ -2406,8 +2427,11 @@ version = "0.1.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-env",
+ "paddock-log",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-plugin-dialog",
 ]
@@ -3495,6 +3519,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.39.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2071df9448915b71c4fe6d25deaf1c22f12bd234f01540b77312bb8e41361e6"
+dependencies = [
+ "libc",
+ "memchr",
+ "ntapi",
+ "objc2-core-foundation",
+ "objc2-io-kit",
+ "windows",
 ]
 
 [[package]]
