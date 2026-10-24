@@ -5,6 +5,15 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- i18n kit (plan X48). `paddock-i18n build [--config paddock-i18n.json] [--check] [--no-extract]` runs an app's whole translation
+  build from one declaration: the `localize-extract` run over its built output, every catalog (sources, manifests, extraction),
+  the pseudo-locale and each translated `messages.<tag>.xlf` into its runtime JSON together with the shell's translations
+  (Debrief's `build-locales` and this repo's `scripts/build-i18n.mjs` are replaced by it; `--check` writes nothing and fails on
+  drift, `--no-extract` reads the committed catalogs so no build is needed). `LanguageChoice` now also names a shipped
+  translation by its tag, `isLocaleTag` validates one, and `@decryp7/paddock-ui/shell/i18n/page` is the Settings > Language page
+  (`PdLanguagePage`, `defineLanguageSettingsPage`): System default, English, each translation by its own name, the pseudo-locale
+  where the app ships it, a restart offer. `paddock-conformance` C30 runs `build --check --no-extract` over the app's
+  `paddock-i18n.json`.
 - `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
   It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
   actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
