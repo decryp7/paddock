@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -49,7 +49,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7), `paddock-download` (S8), `paddock-settings` (S10), `paddock-menu` (S13) and `paddock-window` (S12) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7), `paddock-download` (S8), `paddock-settings` (S10), `paddock-menu` (S13), `paddock-window` (S12) and `paddock-updater` (S11) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -423,3 +423,27 @@ let models: ModelsSettings = settings.decode("pw.models")?;                     
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.
+
+## `paddock-updater` (plan S11)
+
+Updates, About and What's New. With the `tauri` feature (and `install` for the installer over `tauri-plugin-updater`):
+
+```rust
+.setup(|app| {
+    let key = option_env!("TAURI_UPDATER_PUBKEY"); // CI secret; else `plugins.updater.pubkey`
+    let updates = paddock_updater::tauri::UpdatesBuilder::new("Pitwall")
+        .public_key(key)                                   // no valid key: "Updates are not available in this build"
+        .releases_page("https://dev.decryptology.net/decryp7/pitwall/releases")
+        .changelog(include_str!("../../CHANGELOG.md"))     // What's New: the running version's notes only
+        .legal("notices", "Third-party notices", include_str!("../resources/THIRD_PARTY_NOTICES.md"))
+        .service_hooks(Arc::new(PitwallService))           // rule 24: before_install, on_version_change
+        .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(app.handle().clone(), key.unwrap_or_default())));
+    paddock_updater::tauri::install(app.handle(), updates)?;
+    Ok(())
+})
+.run(|app, e| if let tauri::RunEvent::Exit = e { paddock_updater::tauri::on_exit(app); })
+```
+
+The release address is `plugins.updater.endpoints[0]` (the `stable` channel) unless the builder names channels. Checks
+and downloads are jobs on the app's `paddock-jobs` registry and use the app's `paddock-download` downloader; the UI is
+`@decryp7/paddock-ui/shell/about`.

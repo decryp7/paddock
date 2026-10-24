@@ -5,7 +5,9 @@ import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/
 import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
-import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS } from './app/demo.contributions';
+import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
+import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS } from './app/demo.contributions';
+import { demoAboutBackend, demoUpdatesBackend } from './app/demo-about';
 import type { DemoContext } from './app/demo-context';
 import { DemoIcon } from './app/demo-icon';
 import { tauriIpc } from './app/demo-ipc';
@@ -19,7 +21,6 @@ import { ShellDemo } from './app/shell-demo';
 
 // Every shell entry point resolves from this app (the reference consumer, ADR 0012 §7): type-only imports, so the build
 // fails when an entry point stops resolving. Each work package replaces its line with the real use of its exports.
-import type * as shellAbout from '@decryp7/paddock-ui/shell/about';
 // shell/store is used through shell/jobs and shell/notify (their stores take its withRequestStatus).
 import type * as shellStore from '@decryp7/paddock-ui/shell/store';
 
@@ -41,6 +42,10 @@ export function bootMainWindow(): Promise<unknown> {
         },
       },
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
+      // About, Updates and What's New (plan S11): the Help menu's items; the main window announces a found update and
+      // opens What's New once after an update.
+      provideContributions(SHELL_ABOUT_CONTRIBUTIONS),
+      provideShellAbout({ about: demoAboutBackend, updates: demoUpdatesBackend, main: true, ready: windowReady }),
       // Settings (plan S10): Settings… (Mod+,) and the shell's Appearance page, Open Settings for notices and repairs, and
       // the Appearance settings as the source of the window's look, read once the window is ready (start-up sends only
       // the contract's calls).

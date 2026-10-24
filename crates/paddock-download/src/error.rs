@@ -87,6 +87,9 @@ pub enum DownloadError {
     Protocol { host: String, detail: String },
     /// The disk is full.
     DiskFull,
+    /// The destination's disk has not enough free space for the file (checked before writing): `needed` bytes are still to
+    /// be written plus the reserve, `free` are available.
+    NotEnoughSpace { needed: u64, free: u64 },
     /// Reading or writing the local file failed.
     Io(io::Error),
 }
@@ -101,6 +104,7 @@ impl DownloadError {
                 | DownloadError::Throttled { .. }
                 | DownloadError::Stalled { .. }
                 | DownloadError::DiskFull
+                | DownloadError::NotEnoughSpace { .. }
                 | DownloadError::Io(_)
         )
     }
@@ -176,6 +180,12 @@ impl fmt::Display for DownloadError {
             DownloadError::DiskFull => {
                 f.write_str("the disk is full; free some space and run it again to resume")
             }
+            DownloadError::NotEnoughSpace { needed, free } => write!(
+                f,
+                "the download needs {} of free disk space, {} is free; free some space and run it again",
+                human_bytes(*needed),
+                human_bytes(*free)
+            ),
             DownloadError::Io(e) => write!(f, "the file could not be written ({e})"),
         }
     }
@@ -187,6 +197,22 @@ impl std::error::Error for DownloadError {
             DownloadError::Io(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+/// A size for people, in decimal units as the operating systems show disk space: `1.5 GB`, `700 MB`, `12 bytes`.
+pub fn human_bytes(n: u64) -> String {
+    const UNITS: [(u64, &str); 3] = [(1_000_000_000, "GB"), (1_000_000, "MB"), (1_000, "KB")];
+    match UNITS.iter().find(|(size, _)| n >= *size) {
+        Some((size, unit)) => {
+            let tenths = (n as u128 * 10 + *size as u128 / 2) / *size as u128;
+            if tenths >= 1000 || tenths.is_multiple_of(10) {
+                format!("{} {unit}", (tenths + 5) / 10)
+            } else {
+                format!("{}.{} {unit}", tenths / 10, tenths % 10)
+            }
+        }
+        None => format!("{n} bytes"),
     }
 }
 
