@@ -108,7 +108,7 @@ describe('pd-notification-host', () => {
     await Promise.resolve();
     await f.whenStable();
     expect(ok).toHaveBeenCalled();
-    expect(one(el, '[data-cause=b] .err').textContent).toContain('nope');
+    expect(one(el, '[data-cause=b] .pd-err').textContent).toContain('nope');
   });
 
   it('dismisses on the close button', async () => {

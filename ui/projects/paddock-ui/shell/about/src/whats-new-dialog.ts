@@ -16,7 +16,7 @@ import { ABOUT_STYLES } from './styles';
           <h2 data-testid="whats-new-heading">{{ heading(n.version) }}</h2>
           @if (n.release; as r) {
             @if (r.date) {
-              <p class="muted">{{ released(r.date) }}</p>
+              <p class="pd-muted">{{ released(r.date) }}</p>
             }
             @for (g of r.groups; track g.title) {
               <section [attr.aria-label]="g.title">
@@ -34,10 +34,10 @@ import { ABOUT_STYLES } from './styles';
         }
       }
       @case ('error') {
-        <p role="alert">{{ t.failed }} <button type="button" class="btn" (click)="notes.reload()">{{ t.retry }}</button></p>
+        <p role="alert">{{ t.failed }} <button type="button" class="pd-btn" (click)="notes.reload()">{{ t.retry }}</button></p>
       }
       @default {
-        <p class="muted" role="status">{{ t.loading }}</p>
+        <p class="pd-muted" role="status">{{ t.loading }}</p>
       }
     }
   `,

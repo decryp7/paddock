@@ -441,7 +441,7 @@ describe('the dialogs', () => {
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('downloaded and its signature verified');
-    el.querySelector<HTMLInputElement>('label.check input[type="checkbox"]')?.click();
+    el.querySelector<HTMLInputElement>('label.pd-check input[type="checkbox"]')?.click();
     await settle();
     expect((await updates.status()).autoCheck).toBe(true);
     const select = el.querySelector<HTMLSelectElement>('select');
@@ -589,7 +589,7 @@ describe('the edges', () => {
     button(el, 'Download').click();
     await settle();
     await f.whenStable();
-    const quit = [...el.querySelectorAll('label.check')].find((l) => text(l as HTMLElement).includes('Install when the app quits'));
+    const quit = [...el.querySelectorAll('label.pd-check')].find((l) => text(l as HTMLElement).includes('Install when the app quits'));
     quit?.querySelector('input')?.click();
     await settle();
     expect((await updates.status()).phase).toMatchObject({ kind: 'ready', installOnQuit: true });

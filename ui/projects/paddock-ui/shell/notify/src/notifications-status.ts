@@ -15,34 +15,34 @@ let nextId = 0;
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdNotificationsPanel],
   host: {
-    '[class.open]': 'open()',
-    '[class.below]': 'placement() === "below"',
+    '[class.pd-open]': 'open()',
+    '[class.pd-below]': 'placement() === "below"',
     '(document:keydown.escape)': 'close(true)',
     '(document:pointerdown)': 'outside($event)',
   },
   template: `
-    <button type="button" class="pill" data-testid="notifications-status" [class.unread]="store.unread() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="label()" (click)="toggle()">
+    <button type="button" class="pd-pill" data-testid="notifications-status" [class.pd-unread]="store.unread() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="label()" (click)="toggle()">
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11L4 11ZM6.5 14h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
       @if (store.unread() > 0) {
-        <span class="count" [class.error]="unreadError()" aria-hidden="true">{{ store.unread() }}</span>
+        <span class="pd-count" [class.pd-error]="unreadError()" aria-hidden="true">{{ store.unread() }}</span>
       }
     </button>
     @if (open()) {
-      <div class="popover" role="region" [attr.aria-label]="t.centre" [id]="panelId">
+      <div class="pd-popover" role="region" [attr.aria-label]="t.centre" [id]="panelId">
         <pd-notifications-panel />
       </div>
     }
   `,
   styles: `
     :host { position: relative; display: inline-flex; min-width: 0; }
-    .pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: 24px; min-width: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
-    .pill.unread { color: var(--pd-text); }
-    .pill:hover, :host(.open) .pill { border-color: var(--pd-border-control); }
-    .pill:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
-    .count { min-width: 16px; padding: 0 4px; border-radius: var(--pd-radius-pill); background: var(--pd-surface-3); box-shadow: inset 0 0 0 1px var(--pd-border-strong); color: var(--pd-text); font-variant-numeric: tabular-nums; font-weight: var(--pd-weight-medium); line-height: 16px; text-align: center; }
-    .count.error { background: var(--pd-danger-tint); box-shadow: none; color: var(--pd-danger); }
-    .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: var(--pd-z-overlay); width: min(400px, calc(100vw - 32px)); max-height: min(520px, 70vh); overflow: auto; box-sizing: border-box; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); }
-    :host(.below) .popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
+    .pd-pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: 24px; min-width: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
+    .pd-pill.pd-unread { color: var(--pd-text); }
+    .pd-pill:hover, :host(.pd-open) .pd-pill { border-color: var(--pd-border-control); }
+    .pd-pill:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
+    .pd-count { min-width: 16px; padding: 0 4px; border-radius: var(--pd-radius-pill); background: var(--pd-surface-3); box-shadow: inset 0 0 0 1px var(--pd-border-strong); color: var(--pd-text); font-variant-numeric: tabular-nums; font-weight: var(--pd-weight-medium); line-height: 16px; text-align: center; }
+    .pd-count.pd-error { background: var(--pd-danger-tint); box-shadow: none; color: var(--pd-danger); }
+    .pd-popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: var(--pd-z-overlay); width: min(400px, calc(100vw - 32px)); max-height: min(520px, 70vh); overflow: auto; box-sizing: border-box; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); }
+    :host(.pd-below) .pd-popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
   `,
 })
 export class PdNotificationsStatus {
@@ -73,7 +73,7 @@ export class PdNotificationsStatus {
     if (!this.open()) return;
     this.open.set(false);
     this.store.setFocus(null);
-    if (refocus) this.host.nativeElement.querySelector<HTMLButtonElement>('.pill')?.focus();
+    if (refocus) this.host.nativeElement.querySelector<HTMLButtonElement>('.pd-pill')?.focus();
   }
 
   protected outside(e: Event): void {

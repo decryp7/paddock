@@ -31,7 +31,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
   host: {
     role: 'dialog',
     class: 'pd-in-page-dialog',
-    '[class.modeless]': "entry().def.modality === 'modeless'",
+    '[class.pd-modeless]': "entry().def.modality === 'modeless'",
     '[attr.aria-modal]': "entry().def.modality === 'modal'",
     '[attr.aria-labelledby]': 'titleId()',
     '[attr.data-dialog]': 'entry().def.id',
@@ -42,33 +42,33 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
     '(keydown)': 'onKey($event)',
   },
   template: `
-    <header class="head">
-      <h2 class="title" [id]="titleId()">{{ entry().title }}</h2>
+    <header class="pd-head">
+      <h2 class="pd-title" [id]="titleId()">{{ entry().title }}</h2>
       @if (!entry().def.requiredChoice) {
-        <button type="button" class="close" data-dialog-close data-testid="dialog-close" [attr.aria-label]="t.close" [title]="t.close" (click)="entry().ref.close()">
+        <button type="button" class="pd-close" data-dialog-close data-testid="dialog-close" [attr.aria-label]="t.close" [title]="t.close" (click)="entry().ref.close()">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
         </button>
       }
     </header>
-    <div class="body" #body>
+    <div class="pd-body" #body>
       @if (error(); as e) {
-        <p class="failed" role="alert" data-testid="dialog-error">{{ e }}</p>
+        <p class="pd-failed" role="alert" data-testid="dialog-error">{{ e }}</p>
       } @else if (loading()) {
-        <p class="loading" data-testid="dialog-loading">{{ t.loading }}</p>
+        <p class="pd-loading" data-testid="dialog-loading">{{ t.loading }}</p>
       }
       <ng-container #content />
     </div>
   `,
   styles: `
     :host { position: fixed; top: 56px; inset-inline-start: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); max-height: calc(100vh - 96px); box-sizing: border-box; display: flex; flex-direction: column; border-radius: var(--pd-radius-lg, 14px); background: var(--pd-surface-2); color: var(--pd-text); border: 1px solid var(--pd-hairline); box-shadow: var(--pd-elevation-3, 0 12px 32px rgb(0 0 0 / 0.3)); }
-    :host(.modeless) { top: 72px; inset-inline-start: auto; inset-inline-end: 24px; transform: none; max-height: calc(100vh - 112px); }
-    .head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-2, 8px); padding: var(--pd-space-2, 8px) var(--pd-space-2, 8px) var(--pd-space-2, 8px) var(--pd-space-4, 16px); border-bottom: 1px solid var(--pd-hairline); }
-    .title { margin: 0; font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); overflow-wrap: anywhere; }
-    .close { display: inline-grid; place-items: center; inline-size: 28px; block-size: 28px; border: 0; border-radius: var(--pd-radius-control, 6px); background: transparent; color: var(--pd-text-muted); }
-    .close:hover { background: var(--pd-surface-3); color: var(--pd-text); }
-    .body { min-height: 0; flex: 1 1 auto; overflow: auto; padding: var(--pd-space-4, 16px); display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); }
-    .loading { margin: auto; color: var(--pd-text-muted); }
-    .failed { margin: 0; color: var(--pd-danger); overflow-wrap: anywhere; }
+    :host(.pd-modeless) { top: 72px; inset-inline-start: auto; inset-inline-end: 24px; transform: none; max-height: calc(100vh - 112px); }
+    .pd-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-2, 8px); padding: var(--pd-space-2, 8px) var(--pd-space-2, 8px) var(--pd-space-2, 8px) var(--pd-space-4, 16px); border-bottom: 1px solid var(--pd-hairline); }
+    .pd-title { margin: 0; font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); overflow-wrap: anywhere; }
+    .pd-close { display: inline-grid; place-items: center; inline-size: 28px; block-size: 28px; border: 0; border-radius: var(--pd-radius-control, 6px); background: transparent; color: var(--pd-text-muted); }
+    .pd-close:hover { background: var(--pd-surface-3); color: var(--pd-text); }
+    .pd-body { min-height: 0; flex: 1 1 auto; overflow: auto; padding: var(--pd-space-4, 16px); display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); }
+    .pd-loading { margin: auto; color: var(--pd-text-muted); }
+    .pd-failed { margin: 0; color: var(--pd-danger); overflow-wrap: anywhere; }
   `,
 })
 export class InPageDialogView {
@@ -163,18 +163,18 @@ export class InPageDialogView {
   host: { '(document:keydown.escape)': 'onEscape($event)' },
   template: `
     @if (scrim()) {
-      <div class="scrim" data-testid="dialog-scrim" aria-hidden="true"></div>
+      <div class="pd-scrim" data-testid="dialog-scrim" aria-hidden="true"></div>
     }
     @for (d of stack(); track d.n; let i = $index) {
       @if (d.def.modality === 'modal') {
-        <div class="backdrop" data-testid="dialog-backdrop" [style.z-index]="210 + 2 * i" (mousedown)="dismiss(d)"></div>
+        <div class="pd-backdrop" data-testid="dialog-backdrop" [style.z-index]="210 + 2 * i" (mousedown)="dismiss(d)"></div>
       }
       <pd-in-page-dialog [entry]="d" [style.z-index]="211 + 2 * i" />
     }
   `,
   styles: `
-    .scrim, .backdrop { position: fixed; inset: 0; background: var(--pd-scrim, rgb(0 0 0 / 0.4)); }
-    .scrim { z-index: 200; }
+    .pd-scrim, .pd-backdrop { position: fixed; inset: 0; background: var(--pd-scrim, rgb(0 0 0 / 0.4)); }
+    .pd-scrim { z-index: 200; }
   `,
 })
 export class DialogHost {

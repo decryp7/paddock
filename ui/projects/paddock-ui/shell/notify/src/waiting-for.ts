@@ -58,35 +58,35 @@ export function offlineLine(subject: string | null, label: string, repair: strin
   selector: 'pd-waiting-for',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="waiting" role="status" [attr.data-testid]="'waiting-for-' + service()" [attr.data-kind]="kind()">
+    <div class="pd-waiting" role="status" [attr.data-testid]="'waiting-for-' + service()" [attr.data-kind]="kind()">
       @if (kind() === 'offline') {
-        <svg class="icon" [attr.data-status]="status()" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path [attr.d]="icon()" /></svg>
+        <svg class="pd-icon" [attr.data-status]="status()" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path [attr.d]="icon()" /></svg>
         <strong>{{ stopped() }}</strong>
-        <span class="line">{{ line() }}</span>
+        <span class="pd-line">{{ line() }}</span>
         @if (repairText(); as text) {
-          <button type="button" class="btn" data-testid="waiting-for-repair" (click)="repair()">{{ text }}</button>
+          <button type="button" class="pd-btn" data-testid="waiting-for-repair" (click)="repair()">{{ text }}</button>
         }
       } @else {
-        <span class="spinner" aria-hidden="true"></span>
+        <span class="pd-spinner" aria-hidden="true"></span>
         <strong>{{ kind() === 'repairing' ? repairing() : waitingFor() }}</strong>
       }
-      <button type="button" class="link" data-testid="waiting-for-details" (click)="health.showDetails()">{{ t.seeWhatHappened }}</button>
+      <button type="button" class="pd-link" data-testid="waiting-for-details" (click)="health.showDetails()">{{ t.seeWhatHappened }}</button>
     </div>
   `,
   styles: `
     :host { display: block; }
-    .waiting { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); text-align: center; color: var(--pd-text-muted); padding: var(--pd-space-4); }
+    .pd-waiting { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); text-align: center; color: var(--pd-text-muted); padding: var(--pd-space-4); }
     strong { color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
-    .line { max-width: 48ch; }
-    .icon { color: var(--pd-danger); }
-    .icon path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
-    .btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
-    .link { border: 0; padding: 0; background: none; font: inherit; cursor: pointer; color: var(--pd-accent); text-decoration: underline; font-size: var(--pd-text-caption); }
-    .link:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
-    .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pd-hairline); border-top-color: var(--pd-accent); animation: pd-waiting-spin 0.9s linear infinite; }
+    .pd-line { max-width: 48ch; }
+    .pd-icon { color: var(--pd-danger); }
+    .pd-icon path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+    .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-link { border: 0; padding: 0; background: none; font: inherit; cursor: pointer; color: var(--pd-accent); text-decoration: underline; font-size: var(--pd-text-caption); }
+    .pd-link:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pd-hairline); border-top-color: var(--pd-accent); animation: pd-waiting-spin 0.9s linear infinite; }
     @keyframes pd-waiting-spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+    @media (prefers-reduced-motion: reduce) { .pd-spinner { animation: none; } }
   `,
 })
 export class PdWaitingFor {
@@ -138,13 +138,13 @@ export class PdWaitingFor {
     @if (waiting()) {
       <pd-waiting-for [service]="service() ?? ''" [subject]="subject()" />
     } @else {
-      <div class="error" role="alert">
-        <strong class="summary">{{ summary() }}</strong>
+      <div class="pd-error" role="alert">
+        <strong class="pd-summary">{{ summary() }}</strong>
         @if (retryable()) {
-          <button class="btn" type="button" (click)="retry.emit()">{{ t.retry }}</button>
+          <button class="pd-btn" type="button" (click)="retry.emit()">{{ t.retry }}</button>
         }
         @if (detail(); as d) {
-          <details class="tech">
+          <details class="pd-tech">
             <summary>{{ t.technicalDetails }}</summary>
             <code>{{ d }}</code>
           </details>
@@ -154,13 +154,13 @@ export class PdWaitingFor {
   `,
   styles: `
     :host { display: block; }
-    .error { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); text-align: center; padding: var(--pd-space-4); }
-    .summary { color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
-    .btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .btn:focus-visible, summary:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
-    .tech { max-width: 100%; color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
-    .tech summary { cursor: pointer; }
-    .tech code { display: block; margin-top: var(--pd-space-1); white-space: pre-wrap; overflow-wrap: anywhere; text-align: start; font-family: var(--pd-font-mono); user-select: text; }
+    .pd-error { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); text-align: center; padding: var(--pd-space-4); }
+    .pd-summary { color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
+    .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-btn:focus-visible, summary:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-tech { max-width: 100%; color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .pd-tech summary { cursor: pointer; }
+    .pd-tech code { display: block; margin-top: var(--pd-space-1); white-space: pre-wrap; overflow-wrap: anywhere; text-align: start; font-family: var(--pd-font-mono); user-select: text; }
   `,
 })
 export class PdServiceError {

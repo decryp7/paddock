@@ -46,13 +46,13 @@ export function iconLetter(name: string): string {
         <path [attr.d]="d" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
     } @else {
-      <span class="letter">{{ letter() }}</span>
+      <span class="pd-letter">{{ letter() }}</span>
     }
   `,
   styles: `
     :host { display: inline-flex; width: 16px; height: 16px; flex: none; align-items: center; justify-content: center; }
     svg { display: block; }
-    .letter { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); border: 1px solid var(--pd-border-strong); font-size: 10px; line-height: 1; font-weight: var(--pd-weight-semibold); }
+    .pd-letter { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); border: 1px solid var(--pd-border-strong); font-size: 10px; line-height: 1; font-weight: var(--pd-weight-semibold); }
   `,
 })
 export class PdShellIcon {

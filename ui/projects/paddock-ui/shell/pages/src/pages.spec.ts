@@ -284,11 +284,11 @@ describe('pd-shell-frame with provideShellPages', () => {
   it('shows the title bar, the pages, the first page and the status bar; the window title names the page', async () => {
     const { el, router } = await boot();
     expect(el.querySelector('[data-testid="app-name"]')?.textContent).toBe('Test app');
-    expect(el.querySelector('.end')?.textContent).toBe('END');
-    expect(el.querySelector('.slot')?.textContent).toBe('FOOT');
+    expect(el.querySelector('.pd-end')?.textContent).toBe('END');
+    expect(el.querySelector('.pd-slot')?.textContent).toBe('FOOT');
     expect(router.url).toBe('/one');
     expect(el.querySelector('main h1')?.textContent).toBe('Page one');
-    const links = [...el.querySelectorAll<HTMLAnchorElement>('nav a.item')].map((a) => a.dataset['pageLink']);
+    const links = [...el.querySelectorAll<HTMLAnchorElement>('nav a.pd-item')].map((a) => a.dataset['pageLink']);
     // Before the context is loaded every page is offered.
     expect(links).toEqual(['t.one', 't.two', 't.lab', 't.broken', 't.about']);
     expect(el.querySelector('a[aria-current="page"]')?.getAttribute('data-page-link')).toBe('t.one');
@@ -303,7 +303,7 @@ describe('pd-shell-frame with provideShellPages', () => {
     const { el, router, fixture } = await boot();
     await TestBed.inject(ShellContextHost).load();
     await settle();
-    expect([...el.querySelectorAll<HTMLAnchorElement>('nav a.item')].map((a) => a.dataset['pageLink'])).toEqual(['t.one', 't.two', 't.about']);
+    expect([...el.querySelectorAll<HTMLAnchorElement>('nav a.pd-item')].map((a) => a.dataset['pageLink'])).toEqual(['t.one', 't.two', 't.about']);
     count.set(3);
     await settle();
     await fixture.whenStable();
@@ -391,7 +391,7 @@ describe('pd-shell-frame with provideShellPages', () => {
     await settle();
     await fixture.whenStable();
     expect(nav.hidden).toBe(false);
-    expect(nav.classList).toContain('drawer');
+    expect(nav.classList).toContain('pd-drawer');
     expect(toggle.getAttribute('aria-label')).toBe('Hide pages');
     expect(document.activeElement?.getAttribute('data-page-link')).toBe('t.one');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -450,14 +450,14 @@ describe('pd-shell-frame with provideShellPages', () => {
     const handled = new KeyboardEvent('keydown', { key: 'F6', bubbles: true, cancelable: true });
     handled.preventDefault();
     document.dispatchEvent(handled);
-    (el.querySelector('a.skip') as HTMLAnchorElement).click();
+    (el.querySelector('a.pd-skip') as HTMLAnchorElement).click();
     expect(document.activeElement?.id).toBe('pd-main');
   });
 
   it('arrow keys, Home and End move between the page links', async () => {
     const { el } = await boot();
     document.body.append(el);
-    const links = [...el.querySelectorAll<HTMLAnchorElement>('nav a.item')];
+    const links = [...el.querySelectorAll<HTMLAnchorElement>('nav a.pd-item')];
     const key = (from: HTMLElement, k: string) => {
       from.focus();
       const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
@@ -574,8 +574,8 @@ describe('pd-page-host and the title strategy alone', () => {
     const fixture = TestBed.createComponent(PdPagesSidebar);
     fixture.componentRef.setInput('labelled', false);
     await fixture.whenStable();
-    expect(fixture.nativeElement.classList).toContain('rail');
+    expect(fixture.nativeElement.classList).toContain('pd-rail');
     // Without the app's context the conditions throw: those pages are not offered.
-    expect(fixture.nativeElement.querySelectorAll('a.item')).toHaveLength(3);
+    expect(fixture.nativeElement.querySelectorAll('a.pd-item')).toHaveLength(3);
   });
 });

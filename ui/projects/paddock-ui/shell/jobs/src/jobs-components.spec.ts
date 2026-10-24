@@ -48,7 +48,7 @@ describe('pd-jobs-list', () => {
     clock.advance(2_000);
     await fixture.whenStable();
     expect(items[0]?.textContent).toContain('Still working');
-    items[0]?.querySelector<HTMLButtonElement>('button.cancel')?.click();
+    items[0]?.querySelector<HTMLButtonElement>('button.pd-cancel')?.click();
     expect(cancel).toHaveBeenCalledWith(1);
   });
 
@@ -106,7 +106,7 @@ describe('pd-jobs-status', () => {
     await settle();
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
-    const button = el.querySelector<HTMLButtonElement>('button.pill') as HTMLButtonElement;
+    const button = el.querySelector<HTMLButtonElement>('button.pd-pill') as HTMLButtonElement;
     expect(button.textContent?.trim()).toBe('1 running');
     backend.emit(snap(2, 1, 'running'));
     await fixture.whenStable();
@@ -153,7 +153,7 @@ describe('pd-jobs-status', () => {
     const fixture = TestBed.createComponent(PdJobsStatus);
     fixture.componentRef.setInput('placement', 'below');
     await fixture.whenStable();
-    expect(fixture.nativeElement.classList).toContain('below');
+    expect(fixture.nativeElement.classList).toContain('pd-below');
     expect(fixture.nativeElement.querySelector('button')?.textContent?.trim()).toBe('Jobs');
   });
 });

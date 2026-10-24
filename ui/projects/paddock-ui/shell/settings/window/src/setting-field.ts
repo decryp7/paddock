@@ -13,86 +13,86 @@ let nextId = 0;
 @Component({
   selector: 'pd-setting-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'pd-setting', '[class.invalid]': '!!message()', '[class.edited]': 'dirty()', '[attr.data-key]': 'setting().key' },
+  host: { class: 'pd-setting', '[class.pd-invalid]': '!!message()', '[class.pd-edited]': 'dirty()', '[attr.data-key]': 'setting().key' },
   template: `
     @let f = setting();
     @let k = f.kind;
-    <div class="head">
+    <div class="pd-head">
       @if (k.type === 'bool') {
-        <input class="switch" type="checkbox" role="switch" [id]="id" [checked]="value() === true" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (change)="choose($any($event.target).checked)" (blur)="touch.emit()" />
+        <input class="pd-switch" type="checkbox" role="switch" [id]="id" [checked]="value() === true" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (change)="choose($any($event.target).checked)" (blur)="touch.emit()" />
       }
-      <label class="label" [for]="id">{{ f.label }}</label>
+      <label class="pd-label" [for]="id">{{ f.label }}</label>
       @if (f.restartRequired) {
-        <span class="badge" [title]="t.restartTitle">{{ t.restart }}</span>
+        <span class="pd-badge" [title]="t.restartTitle">{{ t.restart }}</span>
       }
       @if (f.advanced) {
-        <span class="badge">{{ t.advanced }}</span>
+        <span class="pd-badge">{{ t.advanced }}</span>
       }
-      <span class="spacer"></span>
+      <span class="pd-spacer"></span>
       @if (!disabled() && !isDefault()) {
-        <button class="reset" type="button" [attr.aria-label]="resetLabel(f.label)" [title]="defaultTitle()" (click)="resetToDefault.emit()">{{ t.reset }}</button>
+        <button class="pd-reset" type="button" [attr.aria-label]="resetLabel(f.label)" [title]="defaultTitle()" (click)="resetToDefault.emit()">{{ t.reset }}</button>
       }
     </div>
     @if (k.type !== 'bool') {
-      <div class="control">
+      <div class="pd-control">
         @switch (k.type) {
           @case ('enum') {
-            <select class="input" [id]="id" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (change)="choose($any($event.target).value)" (blur)="touch.emit()">
+            <select class="pd-input" [id]="id" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (change)="choose($any($event.target).value)" (blur)="touch.emit()">
               @for (o of k.options; track o.value) {
                 <option [value]="o.value" [selected]="o.value === value()">{{ o.label }}</option>
               }
             </select>
           }
           @case ('stringList') {
-            <textarea class="input wide" rows="3" [id]="id" [value]="listText()" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set(list($any($event.target).value))" (blur)="leave()"></textarea>
+            <textarea class="pd-input pd-wide" rows="3" [id]="id" [value]="listText()" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set(list($any($event.target).value))" (blur)="leave()"></textarea>
           }
           @case ('text') {
-            <input class="input wide" type="text" [id]="id" [value]="text()" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set($any($event.target).value)" (keydown.enter)="commit.emit()" (blur)="leave()" />
+            <input class="pd-input pd-wide" type="text" [id]="id" [value]="text()" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set($any($event.target).value)" (keydown.enter)="commit.emit()" (blur)="leave()" />
           }
           @case ('path') {
-            <input class="input wide mono" type="text" [id]="id" [value]="text()" [disabled]="disabled()" [placeholder]="k.dir ? t.folder : t.file" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set($any($event.target).value)" (keydown.enter)="commit.emit()" (blur)="leave()" />
+            <input class="pd-input pd-wide pd-mono" type="text" [id]="id" [value]="text()" [disabled]="disabled()" [placeholder]="k.dir ? t.folder : t.file" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set($any($event.target).value)" (keydown.enter)="commit.emit()" (blur)="leave()" />
           }
           @default {
-            <input class="input num" type="number" inputmode="decimal" [id]="id" [value]="numberText()" [attr.min]="limits().min" [attr.max]="limits().max" [attr.step]="limits().step" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set(number($any($event.target).value))" (keydown.enter)="commit.emit()" (blur)="leave()" />
+            <input class="pd-input pd-num" type="number" inputmode="decimal" [id]="id" [value]="numberText()" [attr.min]="limits().min" [attr.max]="limits().max" [attr.step]="limits().step" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set(number($any($event.target).value))" (keydown.enter)="commit.emit()" (blur)="leave()" />
             @if (unitLabel()) {
-              <span class="unit">{{ unitLabel() }}</span>
+              <span class="pd-unit">{{ unitLabel() }}</span>
             }
           }
         }
         @if (hint()) {
-          <span class="hint" [id]="id + '-hint'">{{ hint() }}</span>
+          <span class="pd-hint" [id]="id + '-hint'">{{ hint() }}</span>
         }
       </div>
     }
     @if (f.description) {
-      <p class="help" [id]="id + '-help'">{{ f.description }}</p>
+      <p class="pd-help" [id]="id + '-help'">{{ f.description }}</p>
     }
     @if (message(); as m) {
-      <p class="error" [id]="id + '-error'" role="alert">{{ m }}</p>
+      <p class="pd-error" [id]="id + '-error'" role="alert">{{ m }}</p>
     }
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3) 0; border-bottom: 1px solid var(--pd-hairline); min-width: 0; }
-    .head { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; flex-wrap: wrap; }
-    .label { font-weight: var(--pd-weight-medium); color: var(--pd-text); min-width: 0; overflow-wrap: anywhere; }
-    .badge { flex: none; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); border: 1px solid var(--pd-hairline); color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
-    .spacer { flex: 1; }
-    .reset { min-height: 24px; padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
-    .reset:hover { border-color: var(--pd-border-control); color: var(--pd-text); }
-    .control { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; min-width: 0; }
-    .input { min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; min-width: 0; max-width: 100%; box-sizing: border-box; }
-    select.input { padding-inline-end: var(--pd-space-1); }
-    .input.num { width: 9rem; }
-    .input.wide { width: min(32rem, 100%); }
-    textarea.input { padding: var(--pd-space-1) var(--pd-space-2); font-family: var(--pd-font-mono, ui-monospace, monospace); }
-    .mono { font-family: var(--pd-font-mono, ui-monospace, monospace); }
-    .switch { width: 18px; height: 18px; margin: 0; accent-color: var(--pd-accent); }
-    .input:focus-visible, .switch:focus-visible, .reset:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
-    .unit { color: var(--pd-text-muted); }
-    .hint { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
-    .help { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); line-height: 1.45; }
-    .error { margin: 0; color: var(--pd-danger-text, var(--pd-text)); font-size: var(--pd-text-caption); }
-    :host(.invalid) .input { border-color: var(--pd-danger-text, var(--pd-border-control)); }
+    .pd-head { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 28px; flex-wrap: wrap; }
+    .pd-label { font-weight: var(--pd-weight-medium); color: var(--pd-text); min-width: 0; overflow-wrap: anywhere; }
+    .pd-badge { flex: none; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); border: 1px solid var(--pd-hairline); color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .pd-spacer { flex: 1; }
+    .pd-reset { min-height: 24px; padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
+    .pd-reset:hover { border-color: var(--pd-border-control); color: var(--pd-text); }
+    .pd-control { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; min-width: 0; }
+    .pd-input { min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; min-width: 0; max-width: 100%; box-sizing: border-box; }
+    select.pd-input { padding-inline-end: var(--pd-space-1); }
+    .pd-input.pd-num { width: 9rem; }
+    .pd-input.pd-wide { width: min(32rem, 100%); }
+    textarea.pd-input { padding: var(--pd-space-1) var(--pd-space-2); font-family: var(--pd-font-mono, ui-monospace, monospace); }
+    .pd-mono { font-family: var(--pd-font-mono, ui-monospace, monospace); }
+    .pd-switch { width: 18px; height: 18px; margin: 0; accent-color: var(--pd-accent); }
+    .pd-input:focus-visible, .pd-switch:focus-visible, .pd-reset:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
+    .pd-unit { color: var(--pd-text-muted); }
+    .pd-hint { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .pd-help { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); line-height: 1.45; }
+    .pd-error { margin: 0; color: var(--pd-danger-text, var(--pd-text)); font-size: var(--pd-text-caption); }
+    :host(.pd-invalid) .pd-input { border-color: var(--pd-danger-text, var(--pd-border-control)); }
   `,
 })
 export class PdSettingField implements FormValueControl<SettingValue> {

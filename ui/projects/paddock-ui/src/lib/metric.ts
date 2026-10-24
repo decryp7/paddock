@@ -25,38 +25,38 @@ export function formatNumber(value: number, decimals: number | undefined, locale
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[class]': '"pd-metric pd-metric--" + size()' },
   template: `
-    <span class="line">
-      <span class="value">{{ text() }}</span>
+    <span class="pd-line">
+      <span class="pd-value">{{ text() }}</span>
       @if (unit()) {
-        <span class="unit">{{ unit() }}</span>
+        <span class="pd-unit">{{ unit() }}</span>
       }
     </span>
     @if (hasDelta()) {
-      <span [class]="'delta delta--' + tone()">
+      <span [class]="'pd-delta pd-delta--' + tone()">
         <span class="pd-visually-hidden">{{ deltaAria() }}</span>
         <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" focusable="false">
           <path [attr.d]="arrowPath()" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
         <span aria-hidden="true">{{ deltaText() }}</span>
         @if (deltaLabel()) {
-          <span class="delta-label" aria-hidden="true">{{ deltaLabel() }}</span>
+          <span class="pd-delta-label" aria-hidden="true">{{ deltaLabel() }}</span>
         }
       </span>
     }
   `,
   styles: `
     :host { display: inline-flex; flex-direction: column; gap: var(--pd-space-1); font-variant-numeric: tabular-nums; }
-    .line { display: inline-flex; align-items: baseline; gap: var(--pd-space-1); }
-    .value { font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
-    .unit { color: var(--pd-text-muted); font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); }
-    :host(.pd-metric--display) .value { font-size: var(--pd-text-display); line-height: var(--pd-lh-display); }
-    :host(.pd-metric--title) .value { font-size: var(--pd-text-title); line-height: var(--pd-lh-title); }
-    :host(.pd-metric--body) .value { font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
-    :host(.pd-metric--body) .unit { font-size: var(--pd-text-label); }
-    .delta { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
-    .delta--good { color: var(--pd-success); }
-    .delta--bad { color: var(--pd-danger); }
-    .delta-label { color: var(--pd-text-muted); }
+    .pd-line { display: inline-flex; align-items: baseline; gap: var(--pd-space-1); }
+    .pd-value { font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
+    .pd-unit { color: var(--pd-text-muted); font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); }
+    :host(.pd-metric--display) .pd-value { font-size: var(--pd-text-display); line-height: var(--pd-lh-display); }
+    :host(.pd-metric--title) .pd-value { font-size: var(--pd-text-title); line-height: var(--pd-lh-title); }
+    :host(.pd-metric--body) .pd-value { font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
+    :host(.pd-metric--body) .pd-unit { font-size: var(--pd-text-label); }
+    .pd-delta { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
+    .pd-delta--good { color: var(--pd-success); }
+    .pd-delta--bad { color: var(--pd-danger); }
+    .pd-delta-label { color: var(--pd-text-muted); }
     .pd-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `,
 })

@@ -6,26 +6,26 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'status' },
   template: `
-    <span class="icon">
+    <span class="pd-icon">
       <ng-content select="[slot=icon]">
         <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
           <path d="M3.5 13.5 6 5.5h12l2.5 8M3.5 13.5v5h17v-5M3.5 13.5h5l1 2h5l1-2h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </ng-content>
     </span>
-    <h3 class="title">{{ heading() }}</h3>
+    <h3 class="pd-title">{{ heading() }}</h3>
     @if (description()) {
-      <p class="description">{{ description() }}</p>
+      <p class="pd-description">{{ description() }}</p>
     }
-    <div class="action"><ng-content select="[slot=action]" /></div>
+    <div class="pd-action"><ng-content select="[slot=action]" /></div>
   `,
   styles: `
     :host { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-8) var(--pd-space-4); text-align: center; }
-    .icon { display: inline-flex; color: var(--pd-text-muted); }
-    .title { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
-    .description { margin: 0; max-width: 48ch; color: var(--pd-text-muted); font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
-    .action { margin-top: var(--pd-space-2); }
-    .action:empty { display: none; }
+    .pd-icon { display: inline-flex; color: var(--pd-text-muted); }
+    .pd-title { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
+    .pd-description { margin: 0; max-width: 48ch; color: var(--pd-text-muted); font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
+    .pd-action { margin-top: var(--pd-space-2); }
+    .pd-action:empty { display: none; }
   `,
 })
 export class SuEmptyState {
@@ -44,33 +44,33 @@ export class SuEmptyState {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'alert' },
   template: `
-    <span class="icon">
+    <span class="pd-icon">
       <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
         <path d="M8 2.75h8L21.25 8v8L16 21.25H8L2.75 16V8L8 2.75ZM9 9l6 6M15 9l-6 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
     </span>
-    <h3 class="title">{{ heading() }}</h3>
+    <h3 class="pd-title">{{ heading() }}</h3>
     @if (cause()) {
-      <p class="cause">{{ cause() }}</p>
+      <p class="pd-cause">{{ cause() }}</p>
     }
-    <div class="actions">
-      <button type="button" class="retry" [disabled]="busy()" (click)="retry.emit()">{{ retryLabel() }}</button>
+    <div class="pd-actions">
+      <button type="button" class="pd-retry" [disabled]="busy()" (click)="retry.emit()">{{ retryLabel() }}</button>
       @if (secondaryLabel()) {
-        <button type="button" class="secondary" (click)="secondary.emit()">{{ secondaryLabel() }}</button>
+        <button type="button" class="pd-secondary" (click)="secondary.emit()">{{ secondaryLabel() }}</button>
       }
     </div>
   `,
   styles: `
     :host { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-8) var(--pd-space-4); text-align: center; }
-    .icon { display: inline-flex; color: var(--pd-danger); }
-    .title { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
-    .cause { margin: 0; max-width: 48ch; color: var(--pd-text-muted); }
-    .actions { display: flex; gap: var(--pd-space-2); margin-top: var(--pd-space-2); }
+    .pd-icon { display: inline-flex; color: var(--pd-danger); }
+    .pd-title { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
+    .pd-cause { margin: 0; max-width: 48ch; color: var(--pd-text-muted); }
+    .pd-actions { display: flex; gap: var(--pd-space-2); margin-top: var(--pd-space-2); }
     button { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); font-weight: var(--pd-weight-medium); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); }
     button:hover:not(:disabled) { background: var(--pd-surface-3); }
     button:disabled { opacity: 0.5; }
-    .retry { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
-    .retry:hover:not(:disabled) { background: var(--pd-accent-fill-hover); }
+    .pd-retry { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
+    .pd-retry:hover:not(:disabled) { background: var(--pd-accent-fill-hover); }
   `,
 })
 export class SuErrorState {

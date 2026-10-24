@@ -120,7 +120,7 @@ test('reduced motion: the menu toggle and the OS setting shorten every duration 
   await expect(html(page)).toHaveAttribute('data-motion', 'reduce');
   await expect.poll(() => token(page, '--pd-duration-large')).toBe('100ms');
   await expect.poll(() => token(page, '--pd-motion-scale')).toBe('0');
-  const transition = await page.locator('pd-jobs-status .pill').evaluate((el) => getComputedStyle(el).transitionDuration);
+  const transition = await page.locator('pd-jobs-status .pd-pill').evaluate((el) => getComputedStyle(el).transitionDuration);
   expect(transition.split(',').every((d) => Number.parseFloat(d) <= 0.0001)).toBe(true);
   await choose(page, 'Reduce motion');
   await expect(html(page)).toHaveAttribute('data-motion', 'full');

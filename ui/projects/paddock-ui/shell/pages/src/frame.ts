@@ -25,15 +25,15 @@ import { PdPagesSidebar } from './sidebar';
   providers: [PagesFrameStore],
   host: {
     '[attr.data-sidebar]': 'store.mode()',
-    '[class.drawer-open]': 'store.drawer()',
-    '[class.native-menu]': 'menuMode === "native"',
+    '[class.pd-drawer-open]': 'store.drawer()',
+    '[class.pd-native-menu]': 'menuMode === "native"',
     '(document:keydown)': 'onKey($event)',
   },
   template: `
-    <a class="skip" href="#pd-main" (click)="skip($event)">{{ t.skip }}</a>
-    <header class="title" data-pd-region="title" tabindex="-1">
+    <a class="pd-skip" href="#pd-main" (click)="skip($event)">{{ t.skip }}</a>
+    <header class="pd-title" data-pd-region="title" tabindex="-1">
       <pd-title-bar [appName]="config.appName">
-        <button type="button" slot="lead" class="toggle" data-testid="sidebar-toggle" [attr.aria-label]="toggleLabel()" [attr.title]="toggleLabel()"
+        <button type="button" slot="lead" class="pd-toggle" data-testid="sidebar-toggle" [attr.aria-label]="toggleLabel()" [attr.title]="toggleLabel()"
           [attr.aria-expanded]="store.labelled()" aria-controls="pd-pages-nav" (click)="toggle()">
           <pd-icon name="pd:sidebar" />
         </button>
@@ -41,20 +41,20 @@ import { PdPagesSidebar } from './sidebar';
         <ng-container ngProjectAs="[slot=end]"><ng-content select="[slot=title-end]" /></ng-container>
       </pd-title-bar>
     </header>
-    <div class="body">
-      <nav id="pd-pages-nav" class="sidebar" [attr.aria-label]="t.pages" data-pd-region="sidebar" tabindex="-1" [class.drawer]="store.drawer()" [hidden]="store.mode() === 'overlay' && !store.drawer()">
+    <div class="pd-body">
+      <nav id="pd-pages-nav" class="pd-sidebar" [attr.aria-label]="t.pages" data-pd-region="sidebar" tabindex="-1" [class.pd-drawer]="store.drawer()" [hidden]="store.mode() === 'overlay' && !store.drawer()">
         <pd-pages-sidebar [labelled]="store.labelled()" (navigated)="store.closeDrawer()">
           <ng-content select="[slot=sidebar]" />
         </pd-pages-sidebar>
       </nav>
       @if (store.drawer()) {
-        <div class="scrim" data-testid="sidebar-scrim" aria-hidden="true" (click)="closeDrawer(false)"></div>
+        <div class="pd-scrim" data-testid="sidebar-scrim" aria-hidden="true" (click)="closeDrawer(false)"></div>
       }
-      <main id="pd-main" class="page" tabindex="-1" data-pd-region="main" [attr.inert]="store.drawer() ? '' : null">
+      <main id="pd-main" class="pd-page" tabindex="-1" data-pd-region="main" [attr.inert]="store.drawer() ? '' : null">
         <router-outlet />
       </main>
     </div>
-    <footer class="status" [attr.aria-label]="t.statusBar" data-pd-region="status" tabindex="-1" [attr.inert]="store.drawer() ? '' : null">
+    <footer class="pd-status" [attr.aria-label]="t.statusBar" data-pd-region="status" tabindex="-1" [attr.inert]="store.drawer() ? '' : null">
       <pd-status-bar />
     </footer>
     <pd-notification-host />
@@ -62,33 +62,33 @@ import { PdPagesSidebar } from './sidebar';
   `,
   styles: `
     :host { --pd-titlebar-height: 40px; container: pd-frame / inline-size; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; background: var(--pd-bg); color: var(--pd-text); }
-    .title { min-width: 0; background: var(--pd-surface-1); border-bottom: 1px solid var(--pd-hairline); outline: none; }
-    .toggle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
-    .toggle:hover { background: var(--pd-hover); color: var(--pd-text); }
-    .toggle:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .body { position: relative; display: grid; grid-template-columns: var(--pd-sidebar-width) minmax(0, 1fr); min-height: 0; min-width: 0; }
-    :host([data-sidebar='rail']) .body { grid-template-columns: var(--pd-sidebar-collapsed) minmax(0, 1fr); }
-    :host([data-sidebar='overlay']) .body { grid-template-columns: minmax(0, 1fr); }
-    .sidebar { min-height: 0; min-width: 0; background: var(--pd-surface-1); border-inline-end: 1px solid var(--pd-hairline); outline: none; }
-    .sidebar[hidden] { display: none; }
+    .pd-title { min-width: 0; background: var(--pd-surface-1); border-bottom: 1px solid var(--pd-hairline); outline: none; }
+    .pd-toggle { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
+    .pd-toggle:hover { background: var(--pd-hover); color: var(--pd-text); }
+    .pd-toggle:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-body { position: relative; display: grid; grid-template-columns: var(--pd-sidebar-width) minmax(0, 1fr); min-height: 0; min-width: 0; }
+    :host([data-sidebar='rail']) .pd-body { grid-template-columns: var(--pd-sidebar-collapsed) minmax(0, 1fr); }
+    :host([data-sidebar='overlay']) .pd-body { grid-template-columns: minmax(0, 1fr); }
+    .pd-sidebar { min-height: 0; min-width: 0; background: var(--pd-surface-1); border-inline-end: 1px solid var(--pd-hairline); outline: none; }
+    .pd-sidebar[hidden] { display: none; }
         /*
      * Over the page the sidebar is modal: it and its scrim cover everything below the title bar (the page and the status
      * bar, which are inert meanwhile); Escape, the scrim or a page closes it. The title bar stays live for its button and
      * keeps its hairline: the drawer starts below it and casts its shadow to the right only.
      */
-    .sidebar.drawer { position: fixed; top: calc(var(--pd-titlebar-height) + 1px); bottom: 0; inset-inline-start: 0; z-index: var(--pd-z-overlay); width: min(var(--pd-sidebar-width), calc(100vw - var(--pd-space-8))); clip-path: inset(0 -32px 0 0); box-shadow: 16px 0 32px -16px var(--pd-scrim); border-inline-end-color: var(--pd-border-strong); animation: pd-drawer-in var(--pd-duration) var(--pd-ease-enter); }
-    .scrim { position: fixed; top: calc(var(--pd-titlebar-height) + 1px); inset-inline: 0; bottom: 0; z-index: calc(var(--pd-z-overlay) - 1); background: var(--pd-scrim); animation: pd-fade-in var(--pd-duration) var(--pd-ease-enter); }
-    :host([data-sidebar='overlay']) .page { grid-column: 1; }
+    .pd-sidebar.pd-drawer { position: fixed; top: calc(var(--pd-titlebar-height) + 1px); bottom: 0; inset-inline-start: 0; z-index: var(--pd-z-overlay); width: min(var(--pd-sidebar-width), calc(100vw - var(--pd-space-8))); clip-path: inset(0 -32px 0 0); box-shadow: 16px 0 32px -16px var(--pd-scrim); border-inline-end-color: var(--pd-border-strong); animation: pd-drawer-in var(--pd-duration) var(--pd-ease-enter); }
+    .pd-scrim { position: fixed; top: calc(var(--pd-titlebar-height) + 1px); inset-inline: 0; bottom: 0; z-index: calc(var(--pd-z-overlay) - 1); background: var(--pd-scrim); animation: pd-fade-in var(--pd-duration) var(--pd-ease-enter); }
+    :host([data-sidebar='overlay']) .pd-page { grid-column: 1; }
     /* Pages lay out by container queries on the page area (container pd-page), not the window. */
-    :host(.native-menu) { --pd-titlebar-inset-start: 78px; }
-    .page { container: pd-page / inline-size; grid-row: 1; grid-column: 2; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; outline: none; scrollbar-gutter: stable; background: var(--pd-bg); }
-    .status { min-width: 0; overflow-x: clip; background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); outline: none; }
-    .title:focus-visible, .sidebar:focus-visible, .page:focus-visible, .status:focus-visible { box-shadow: inset 0 0 0 2px var(--pd-focus-ring); }
-    .skip { position: fixed; inset-inline-start: var(--pd-space-3); top: -48px; z-index: var(--pd-z-toast); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-accent-fill); color: var(--pd-on-accent); font-weight: var(--pd-weight-medium); }
-    .skip:focus { top: var(--pd-space-2); text-decoration: none; }
+    :host(.pd-native-menu) { --pd-titlebar-inset-start: 78px; }
+    .pd-page { container: pd-page / inline-size; grid-row: 1; grid-column: 2; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; outline: none; scrollbar-gutter: stable; background: var(--pd-bg); }
+    .pd-status { min-width: 0; overflow-x: clip; background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); outline: none; }
+    .pd-title:focus-visible, .pd-sidebar:focus-visible, .pd-page:focus-visible, .pd-status:focus-visible { box-shadow: inset 0 0 0 2px var(--pd-focus-ring); }
+    .pd-skip { position: fixed; inset-inline-start: var(--pd-space-3); top: -48px; z-index: var(--pd-z-toast); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-accent-fill); color: var(--pd-on-accent); font-weight: var(--pd-weight-medium); }
+    .pd-skip:focus { top: var(--pd-space-2); text-decoration: none; }
     @keyframes pd-drawer-in { from { transform: translateX(-12px); opacity: 0; } to { transform: none; opacity: 1; } }
     @keyframes pd-fade-in { from { opacity: 0; } to { opacity: 1; } }
-    @media (prefers-reduced-motion: reduce) { .sidebar.drawer, .scrim { animation: none; } }
+    @media (prefers-reduced-motion: reduce) { .pd-sidebar.pd-drawer, .pd-scrim { animation: none; } }
   `,
 })
 export class PdShellFrame {

@@ -40,21 +40,21 @@ export function sparklineGeometry(values: readonly number[], width: number, heig
   template: `
     <svg [attr.viewBox]="'0 0 ' + width() + ' ' + height()" [attr.height]="height()" preserveAspectRatio="none" role="img" [attr.aria-label]="summary()">
       @if (area() && geometry().line) {
-        <path [attr.d]="geometry().area" class="area" />
+        <path [attr.d]="geometry().area" class="pd-area" />
       }
-      <path [attr.d]="geometry().line" class="line" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+      <path [attr.d]="geometry().line" class="pd-line" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
     </svg>
     @if (geometry().end; as e) {
-      <span class="dot" [style.left.%]="(e.x / width()) * 100" [style.top.px]="e.y"></span>
+      <span class="pd-dot" [style.left.%]="(e.x / width()) * 100" [style.top.px]="e.y"></span>
     }
   `,
   styles: `
     :host { position: relative; display: block; width: 100%; color: var(--pd-accent); }
     svg { display: block; width: 100%; overflow: visible; }
-    .line { stroke: currentColor; }
-    .area { fill: currentColor; opacity: 0.14; }
+    .pd-line { stroke: currentColor; }
+    .pd-area { fill: currentColor; opacity: 0.14; }
     /* A 4 px dot as an element: the SVG stretches to the tile width, which would squash a circle. */
-    .dot { position: absolute; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: currentColor; }
+    .pd-dot { position: absolute; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: currentColor; }
   `,
 })
 export class SuSparkline {
