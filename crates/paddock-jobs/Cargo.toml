@@ -20,8 +20,11 @@ tauri = ["dep:tauri", "dep:paddock-commands", "paddock-commands/tauri"]
 tauri = { workspace = true, optional = true }
 paddock-commands = { workspace = true, optional = true }
 paddock-env = { workspace = true }
+croner = { version = "4", default-features = false, features = ["jiff"] }
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 proptest = "1"
@@ -29,7 +32,7 @@ serde_json = "1"
 tempfile = "3"
 # The Tauri adapter is tested on Tauri's mock runtime.
 tauri = { workspace = true, features = ["test"] }
-# The generated TypeScript of the adapter's command table, checked by tests/tauri.rs.
+# The generated TypeScript of the adapter's command table, checked by tests/it/tauri.rs.
 paddock-commands = { workspace = true }
 
 [[bench]]

@@ -2,7 +2,7 @@
 //! CDNs do), downloaded over one stream and over 2, 4 and 8 segmented connections. Prints a table; no external harness, no
 //! network. `PADDOCK_BENCH_MIB` (default 32) sets the file size, `PADDOCK_BENCH_RATE_MIB` (default 8) the per-connection rate.
 
-#[path = "../tests/support/mod.rs"]
+#[path = "../tests/it/support/mod.rs"]
 mod support;
 
 use paddock_download::{

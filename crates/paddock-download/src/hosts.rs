@@ -1,8 +1,9 @@
 //! Per-host connection caps and back-off, shared by every download of the process.
 
+use paddock_jobs::time::{Clock, SystemClock};
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Connections one host gets at once unless [`HostCaps::with_cap`] says otherwise.
 pub const DEFAULT_HOST_CAP: usize = 4;
@@ -13,7 +14,10 @@ pub const MAX_HOST_CAP: usize = 16;
 struct Host {
     in_use: usize,
     peak: usize,
-    not_before: Option<Instant>,
+    /// On the caps' clock's monotonic reading.
+    not_before: Option<Duration>,
+    /// Requests waiting for the back-off now.
+    held: usize,
 }
 
 /// How many connections each host may have open across all downloads, and until when a host asked to be left alone (429/503
@@ -23,6 +27,7 @@ pub struct HostCaps {
     caps: HashMap<String, usize>,
     hosts: Mutex<HashMap<String, Host>>,
     freed: Condvar,
+    clock: Arc<dyn Clock>,
 }
 
 impl HostCaps {
@@ -33,7 +38,25 @@ impl HostCaps {
             caps: HashMap::new(),
             hosts: Mutex::new(HashMap::new()),
             freed: Condvar::new(),
+            clock: Arc::new(SystemClock),
         }
+    }
+
+    /// The clock back-offs are measured on, and every download using these caps measures its waits and stalls on (a
+    /// `FakeClock` in tests).
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    /// The clock of these caps.
+    pub fn clock(&self) -> &Arc<dyn Clock> {
+        &self.clock
+    }
+
+    /// Requests to `host` waiting for its back-off right now.
+    pub fn held(&self, host: &str) -> usize {
+        self.lock().get(host).map_or(0, |h| h.held)
     }
 
     /// A cap for one host key (`host[:port]`, lower case, as [`Request::host`](crate::Request::host) gives it).
@@ -61,8 +84,9 @@ impl HostCaps {
         self.lock().get(host).map_or(0, |h| h.peak)
     }
 
-    /// Asks every download to wait before the next request to `host` until `until` (later deadlines win).
-    pub fn back_off(&self, host: &str, until: Instant) {
+    /// Asks every download to wait `wait` (on the clock) before the next request to `host` (a later end wins).
+    pub fn back_off(&self, host: &str, wait: Duration) {
+        let until = self.clock.monotonic().saturating_add(wait);
         let mut g = self.lock();
         let h = g.entry(host.to_string()).or_default();
         h.not_before = Some(h.not_before.map_or(until, |t| t.max(until)));
@@ -78,18 +102,34 @@ impl HostCaps {
     ) -> Option<Permit> {
         let cap = self.cap(host);
         let mut g = self.lock();
+        let mut holding = false;
+        let release = |g: &mut HashMap<String, Host>, holding: &mut bool| {
+            if std::mem::take(holding)
+                && let Some(h) = g.get_mut(host)
+            {
+                h.held -= 1;
+            }
+        };
         loop {
             if halt() {
+                release(&mut g, &mut holding);
                 return None;
             }
-            let now = Instant::now();
+            let now = self.clock.monotonic();
             let h = g.entry(host.to_string()).or_default();
             let wait = match h.not_before {
                 Some(t) if t > now => {
+                    if !holding {
+                        holding = true;
+                        h.held += 1;
+                    }
                     waiting();
                     (t - now).min(Duration::from_millis(10))
                 }
                 _ if h.in_use < cap => {
+                    if std::mem::take(&mut holding) {
+                        h.held -= 1;
+                    }
                     h.in_use += 1;
                     h.peak = h.peak.max(h.in_use);
                     return Some(Permit {

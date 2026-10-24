@@ -3,7 +3,9 @@ use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 
 /// Who wrote a pack.
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Origin {
     /// Shipped inside the app.
     Builtin,
