@@ -311,3 +311,11 @@ The user wants installable demo apps to check the shared UI, which also serve as
 - **W8 `workbench-demo` release** (after W0–W7): the workbench with sample Explorer, panes with layout constraints,
   palette, Jobs pane and the assistant pane on Pitwall (with a calm "Pitwall not running" state). About 1.5 days.
 - **Starter:** a documented "new app from the demo" path (copy or generator) that Pacenotes and Sighter start from.
+
+## 11. Liveness after start-up (2026-10-24)
+
+ADR 0058's watchdog covers start-up only; a page that hangs after it reported ready is not detected. S7 adds a liveness
+heartbeat: each visible window answers a cheap ping from Rust on a timer that tolerates a paused app process (same
+rule as the start-up watchdog); a window that misses N pings is marked unresponsive (dialogs then allow the OS close,
+`dialog_windows::page_unresponsive`), logged, and offered Reload / Keep Waiting. Tests: a page that stops answering
+after ready; a paused app process does not trigger it.
