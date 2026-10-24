@@ -43,7 +43,10 @@ fn check_exits_0_within_budget_and_5_over_it() {
         .unwrap();
     assert_eq!(out.status.code(), Some(5));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["ok"], false);
+    assert_eq!(
+        (v["ok"].as_bool(), v["withinBudget"].as_bool()),
+        (Some(true), Some(false))
+    );
     let out = bin()
         .args(["check", "--budgets", &b, "--results", &bad, "--markdown"])
         .output()

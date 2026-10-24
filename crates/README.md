@@ -97,7 +97,10 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-bench` | benchmark harness with stored budgets (rule 16): `Recorder` with an injected clock (startup, throughput, first event, query latency, memory), a results file per app, `budgets.toml` with tolerance and regression limit, `check`, and the `paddock-bench` command for the nightly workflow (plan X26) | yes (every app's benchmarks); built |
+
+| `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
@@ -108,7 +111,6 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
-| `paddock-cli` | shared CLI conventions (`--json`, exit codes, timeouts) | yes |
 
 ## `paddock-jobs` Tauri adapter (plan S9)
 
@@ -715,6 +717,25 @@ a wrong command line). `paddock-bench propose --results ... --margin 25` writes 
 benchmark logic use `ManualClock`, so they do not depend on machine speed. The nightly workflow template is
 `.gitea/workflow-templates/bench-nightly.yml`.
 
+## `paddock-cli` (plan X25)
+
+One look and behaviour for every command line (Pitwall, Dyno, Debrief, the agent and service programs). Pure: writers and
+times are passed in.
+
+```rust
+use paddock_cli::{finish, CliError, CommonFlags, Exit, Format, Help, Progress, Report};
+
+let (flags, rest) = CommonFlags::extract(&std::env::args().skip(1).collect::<Vec<_>>()); // --json -q -h -V
+let result: Result<Report, CliError> = run(&rest);              // Err(CliError::not_running("Pitwall", "Start the app."))
+let exit = finish(flags.format, result, &mut stdout, &mut stderr); // text, or ONE JSON object (errors too)
+std::process::exit(exit.code());
+```
+
+Exit codes (a contract): 0 ok, 1 failure, 2 usage, 3 not running, 4 refused, 5 findings, 130 interrupted. Data goes to
+stdout, progress and notes to stderr. `Progress::update(now, line)` throttles to one line per 500 ms, drops repeats and lets a
+new phase through. `Table` renders text, CSV or JSON with bounded cells and a truncation note. `parse_time`, `parse_size`,
+`format_size` read command-line values once. `paddock_service::Verb` registers its words in `Help` and decides `status`'s exit.
+
 ## `paddock-names` (plan X18)
 
 Rule 20 as a pure library: the user types "grafic bilder" and finds `CompanyA.Graphic.Builder.exe`, or "memory pages" and finds
@@ -1109,3 +1130,33 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   four commands of `status::COMMANDS` (`pitwall_state`, `pitwall_connect`, `pitwall_cancel_pairing`, `pitwall_use_builtin`) over
   its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
   by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.
+
+## `paddock-testkit` (plan X40)
+
+A `[dev-dependencies]` crate; nothing in it ships. It replaces `std::env::temp_dir()` (clippy forbids it in tests, `lint/clippy.toml`), the per-app env mutexes and the hand-made fake runners:
+
+```rust
+use paddock_testkit::{assert_golden, env_lock, FakeRunner, Reply, Scratch};
+
+let scratch = Scratch::new();                       // work(), home(), tmp(); deleted on drop
+let mut env = env_lock();                           // one lock for every test that touches the environment
+env.hermetic(&scratch);                             // HOME, APPDATA, XDG_*, TMPDIR now point into the scratch folder
+let cfg = scratch.write("conf/app.toml", "x = 1")?; // relative paths only; `..` and absolute paths are refused
+run_the_code_under_test(&cfg);
+assert_golden(&golden_dir.join("report.txt"), &report);   // PADDOCK_UPDATE_GOLDEN=1 rewrites the file
+scratch.finish()?;                                  // or just drop it: anything left in tmp() fails the test
+```
+
+- `Scratch`: `work()` is for the code under test, `home()` stands in for the user's home, `tmp()` for the shared temp folder. Dropping a
+  scratch whose `tmp()` is not empty panics with the names (not while the test is already failing); `finish()` returns them as an
+  error to assert on. An unreadable `tmp()` counts as a leftover. `PADDOCK_TESTKIT_KEEP=1` keeps the folder of a failed test.
+- `env_lock()`: a process-wide lock (a lock poisoned by a failed test is recovered); `set`/`remove` restore the original values in
+  reverse order when the guard drops. `hermetic(&scratch)` is the in-process half of C14 (the wrapper `paddock-conformance run --`
+  is the other half).
+- Golden files: line endings normalised; the failure names the file, the first differing line and the update variable.
+- `FakeRunner`: `on("launchctl", &["print"]).reply(Reply::ok("..."))`, replies queue (`.then(...)`, the last repeats), the first
+  matching rule answers, an unscripted command is an error reply, `calls()`/`lines()`/`count()` record. An app implements its own
+  runner trait for it in its test module (Dyno's `Runner`).
+- `corpus(seed)` gives a bounded, deterministic set of hostile inputs; `never_panics(&corpus(seed), parse)` returns the inputs that
+  panicked (the proptest-free half of X41).
+- `FakeClock` (and `Clock`) are `paddock_jobs::time`'s, re-exported: assert on a fake clock, never on `Instant::now()` (C30).

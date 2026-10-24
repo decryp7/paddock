@@ -18,6 +18,7 @@
 
 mod budget;
 mod check;
+mod cli;
 mod clock;
 mod error;
 mod kind;
@@ -27,9 +28,10 @@ mod stats;
 
 pub use budget::{Budget, Budgets, DEFAULT_REGRESSION_PCT, DEFAULT_TOLERANCE_PCT, MAX_BUDGETS};
 pub use check::{Outcome, Row, Summary, Verdict, check};
+pub use cli::run;
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use error::{BenchError, Result};
 pub use kind::{Direction, Kind};
 pub use recorder::Recorder;
-pub use results::{Host, MAX_FILE_BYTES, MAX_MEASUREMENTS, Measurement, RESULTS_VERSION, Results};
+pub use results::{Host, MAX_FILE_BYTES, MAX_MEASUREMENTS, Measurement, RESULTS_SCHEMA, RESULTS_VERSION, Results};
 pub use stats::{Samples, summarize};

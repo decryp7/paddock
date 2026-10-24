@@ -3,6 +3,9 @@ use crate::kind::Kind;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+/// The JSON Schema of the results file (for CI steps and tools that read it without this crate).
+pub const RESULTS_SCHEMA: &str = include_str!("../results.schema.json");
+
 /// The results file's format version.
 pub const RESULTS_VERSION: u32 = 1;
 /// Largest results or budgets file read.
@@ -188,6 +191,41 @@ mod tests {
             runs: 3,
         });
         r
+    }
+
+    fn schema_errors(text: &str) -> Vec<String> {
+        let schema: serde_json::Value = serde_json::from_str(RESULTS_SCHEMA).unwrap();
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(text).unwrap();
+        validator.iter_errors(&doc).map(|e| e.to_string()).collect()
+    }
+
+    #[test]
+    fn what_save_writes_matches_the_schema_and_what_it_refuses_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("r.json");
+        sample().save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(schema_errors(&text), Vec::<String>::new());
+        // A run without a commit or core count (nulls) is valid too.
+        let mut bare = sample();
+        bare.commit = None;
+        bare.host.cpus = None;
+        assert!(schema_errors(&serde_json::to_string(&bare).unwrap()).is_empty());
+        for (broken, why) in [
+            (text.replace("\"version\": 1", "\"version\": 2"), "version"),
+            (text.replace("\"throughput\"", "\"speed\""), "kind"),
+            (text.replace("1000.0", "-1.0"), "negative value"),
+            (text.replace("\"import\"", "\" \""), "blank name"),
+            (text.replace("\"app\"", "\"application\""), "missing app"),
+        ] {
+            assert!(
+                !schema_errors(&broken).is_empty(),
+                "{why} must fail the schema"
+            );
+        }
+        // The Rust validation and the schema agree on a negative value.
+        assert!(Results::parse(&text.replace("1000.0", "-1.0"), &path).is_err());
     }
 
     #[test]
