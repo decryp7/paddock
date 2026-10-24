@@ -16,6 +16,11 @@ Conventional Commits; one semver tag for the whole repo.
   Pitcrew's, Pitwall's and Spotter's chart options and the settings window's field. Gallery sections, Playwright specs (gallery and
   shell-demo; the demo's Runners page now uses `pd-table`) and a contact sheet at `ui/docs/review/x21-data/` for the independent
   review (not approved yet).
+- `paddock-archive` (plan X24): safe unpacking of zip, tar, tar.gz and tar.xz. Limits on entries, file size, total size, expansion
+  ratio, depth and path length, checked while writing; `..`, absolute paths, drive letters, device names and case-only duplicates
+  refused; `Links` (refuse, skip, copy, keep-relative), `Layout` (keep, strip, flat), a name filter, file modes; all-or-nothing
+  `extract` through a staging folder that is swapped in; `extract_job` for a `paddock-jobs` job with phases and Cancel; `sweep_stale`;
+  a fuzz target.
 - `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
   macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
   deleted, one at a time, with disk and load checks (rule 7).
