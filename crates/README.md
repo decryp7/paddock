@@ -833,8 +833,10 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   every minute. `paddock_shell::Builder::service(|app| Ok(ServicePart::new(Setup::new(manager).health("agent"))))`
   wires it and the `pd.login` "Start at login" section (only a change by the user acts). The UI is
   `@decryp7/paddock-ui/shell/service` (Settings > Background service).
-- **The shell demo's agent** (`apps/shell-demo/src-tauri/src/agent.rs`, binary `shell-demo-agent`): a heartbeat-only
-  per-user agent, bundled with its generated plist and NSIS hooks, so the page, the health entry and
+- **The shell demo's agent** (crate `apps/shell-demo/src-tauri/agent`, binary `shell-demo-agent`): a heartbeat-only
+  per-user agent, bundled as Tauri's `externalBin` (`agent/sidecar.mjs` builds it per target triple in
+  `beforeBuildCommand`; the bundle check starts it from the built app with `--self-test`, rule 23), with its generated
+  plist and NSIS hooks, so the page, the health entry and
   `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
 - Not here: Task Scheduler entries (no app uses them).
 
