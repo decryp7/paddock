@@ -365,6 +365,8 @@ impl Walk<'_> {
         false
     }
 
+    /// Reports the count read now. Another walker may report a higher count first; the job drops a count below what
+    /// it already showed, so the "found" number only grows.
     fn report(&self) {
         self.halt
             .job

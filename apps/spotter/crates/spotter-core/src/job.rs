@@ -6,6 +6,11 @@
 //! chunks, directories and files. A phase whose total is not known reports `total: None`: the UI shows an
 //! indeterminate bar and the growing count.
 //!
+//! The job is the one owner of its progress: within a phase `done` never goes back, however many threads report.
+//! A report below what was already shown is dropped (an end report is raised to it), and the sink sees reports in
+//! the order the job accepted them, so parallel workers that read a shared count and then report it cannot make the
+//! bar tick backwards (Paddock rule 11).
+//!
 //! This module is deliberately small and self-contained so it can be replaced by the shared `paddock-jobs` crate.
 
 use serde::Serialize;
@@ -113,6 +118,8 @@ type Sink = Arc<dyn Fn(&Progress) + Send + Sync>;
 struct Gate {
     last: Option<Instant>,
     phase: Option<Phase>,
+    /// The highest `done` shown in `phase`.
+    done: u64,
 }
 
 /// The handle an operation reports to and polls: progress sink plus cancel flag. Clones share both.
@@ -188,19 +195,29 @@ impl Job {
         self.emit(phase, unit, done, total, true);
     }
 
+    /// The sink is called with the gate held, so the order it sees is the order the gate accepted (a sink must not
+    /// report to the same job).
     fn emit(&self, phase: Phase, unit: Unit, done: u64, total: Option<u64>, force: bool) {
         let Some(sink) = &self.sink else { return };
-        {
-            let mut gate = self.gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let now = Instant::now();
-            let fresh = gate.phase != Some(phase);
-            let due = gate.last.is_none_or(|t| now.duration_since(t) >= self.interval);
-            if !(force || fresh || due) {
+        let mut gate = self.gate.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        let fresh = gate.phase != Some(phase);
+        let (mut done, mut total) = (done, total);
+        if !fresh && done < gate.done {
+            if !force {
+                // Read before a higher count that already went out: showing it would move the bar back.
                 return;
             }
-            gate.phase = Some(phase);
-            gate.last = Some(now);
+            done = gate.done;
+            total = total.map(|t| t.max(done));
         }
+        let due = gate.last.is_none_or(|t| now.duration_since(t) >= self.interval);
+        if !(force || fresh || due) {
+            return;
+        }
+        gate.phase = Some(phase);
+        gate.last = Some(now);
+        gate.done = done;
         sink(&Progress {
             phase,
             label: phase.label(),
@@ -253,6 +270,67 @@ mod tests {
         assert_eq!(seen.len(), 3);
         assert_eq!(seen[1].label, "Waiting for files to settle");
         assert_eq!(seen[2].done, 5);
+    }
+
+    /// Regression (Windows CI, `the_found_count_is_live_from_the_start_and_only_grows`): parallel folder walkers each
+    /// read the shared count and then report it, so a walker that read 100 can report after one that read 200. The
+    /// job is the one owner of its progress: within a phase a lower count never goes out after a higher one.
+    #[test]
+    fn a_count_read_before_a_higher_one_but_reported_after_it_is_never_shown() {
+        let (job, _, seen) = collecting(Duration::ZERO);
+        // Walker A reads 100, walker B reads 200, B reports first, then A.
+        job.report(Phase::Finding, Unit::Count, 0, None);
+        job.report(Phase::Finding, Unit::Count, 200, None);
+        job.report(Phase::Finding, Unit::Count, 100, None);
+        job.report(Phase::Finding, Unit::Count, 300, None);
+        let done: Vec<u64> = seen.lock().unwrap().iter().map(|p| p.done).collect();
+        assert_eq!(done, [0, 200, 300]);
+    }
+
+    #[test]
+    fn the_end_of_a_phase_always_goes_out_and_never_below_what_was_shown() {
+        let (job, _, seen) = collecting(Duration::from_secs(3600));
+        job.report(Phase::Finding, Unit::Count, 500, None);
+        job.report_done(Phase::Finding, Unit::Count, 400, Some(400));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(
+            (seen[1].done, seen[1].total),
+            (500, Some(500)),
+            "the end is clamped, with its total"
+        );
+    }
+
+    #[test]
+    fn every_phase_starts_its_own_scale() {
+        let (job, _, seen) = collecting(Duration::ZERO);
+        job.report(Phase::Downloading, Unit::Bytes, 9000, None);
+        job.report(Phase::Unpacking, Unit::Bytes, 10, Some(100));
+        job.report(Phase::Downloading, Unit::Bytes, 5, None);
+        let done: Vec<u64> = seen.lock().unwrap().iter().map(|p| p.done).collect();
+        assert_eq!(done, [9000, 10, 5]);
+    }
+
+    /// Many threads counting into one atomic and reporting what they read: the shown counts only grow, because the
+    /// order the sink sees is the order the job accepted them in.
+    #[test]
+    fn concurrent_reporters_never_make_the_count_go_back() {
+        use std::sync::atomic::AtomicU64;
+        let (job, _, seen) = collecting(Duration::ZERO);
+        let count = AtomicU64::new(0);
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    for _ in 0..2000 {
+                        let n = count.fetch_add(1, Ordering::Relaxed) + 1;
+                        job.report(Phase::Finding, Unit::Count, n, None);
+                    }
+                });
+            }
+        });
+        let seen = seen.lock().unwrap();
+        assert!(seen.windows(2).all(|w| w[0].done <= w[1].done), "the count went back");
+        assert_eq!(seen.last().map(|p| p.done), Some(16_000));
     }
 
     #[test]
