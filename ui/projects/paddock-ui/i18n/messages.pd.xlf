@@ -248,6 +248,30 @@
       <trans-unit id="pd.format.unit.s" datatype="html">
         <source>s</source>
       </trans-unit>
+      <trans-unit id="pd.forms.email" datatype="html">
+        <source>Enter a valid email address.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.invalid" datatype="html">
+        <source>This value is not valid.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.max" datatype="html">
+        <source>Enter <x id="max"/> or less.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.maxLength" datatype="html">
+        <source>Use at most <x id="max"/> characters.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.min" datatype="html">
+        <source>Enter <x id="min"/> or more.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.minLength" datatype="html">
+        <source>Use at least <x id="min"/> characters.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.pattern" datatype="html">
+        <source>This is not in the expected format.</source>
+      </trans-unit>
+      <trans-unit id="pd.forms.required" datatype="html">
+        <source>This is required.</source>
+      </trans-unit>
       <trans-unit id="pd.health.chip.compact.many" datatype="html">
         <source><x id="count"/> services</source>
       </trans-unit>
@@ -985,6 +1009,36 @@
       </trans-unit>
       <trans-unit id="pd.startup.session-restored" datatype="html">
         <source>Your last session was restored.</source>
+      </trans-unit>
+      <trans-unit id="pd.table.actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.table.columns" datatype="html">
+        <source>Columns</source>
+      </trans-unit>
+      <trans-unit id="pd.table.count" datatype="html">
+        <source><x id="PH"/> rows</source>
+      </trans-unit>
+      <trans-unit id="pd.table.countOf" datatype="html">
+        <source><x id="PH"/> of <x id="PH_1"/> rows</source>
+      </trans-unit>
+      <trans-unit id="pd.table.empty" datatype="html">
+        <source>Nothing to show yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.table.filter" datatype="html">
+        <source>Filter</source>
+      </trans-unit>
+      <trans-unit id="pd.table.more" datatype="html">
+        <source>More actions</source>
+      </trans-unit>
+      <trans-unit id="pd.table.noMatch" datatype="html">
+        <source>No rows match the filter.</source>
+      </trans-unit>
+      <trans-unit id="pd.table.none" datatype="html">
+        <source>None</source>
+      </trans-unit>
+      <trans-unit id="pd.table.sortBy" datatype="html">
+        <source>Sort by <x id="PH"/></source>
       </trans-unit>
       <trans-unit id="pd.ui.elapsed.hours" datatype="html">
         <source><x id="hours"/> h</source>
