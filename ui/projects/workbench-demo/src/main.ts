@@ -1,3 +1,4 @@
+import { demoAccent } from './app/params';
 import { applyStoredAppearance } from '@decryp7/paddock-ui/shell';
 import { ipcBootErrorSender, startBootErrorForwarding } from '@decryp7/paddock-ui/shell/startup';
 import { parseDialogRoute } from '@decryp7/paddock-ui/shell/dialogs';
@@ -12,7 +13,7 @@ import { desktopIpc } from './app/desktop';
  * shell; a pop-out window (`index.html#/popout?panel=...`) boots only the pop-out shell and its view's providers; any other
  * window boots the workbench. Each is its own lazy chunk.
  */
-applyStoredAppearance(document.documentElement, 'graphite');
+applyStoredAppearance(document.documentElement, demoAccent());
 
 // Errors before the window is ready reach the app's log (ADR 0058): a window that never starts leaves its cause there.
 const ipc = desktopIpc();

@@ -1,3 +1,4 @@
+import { demoAccent } from './app/params';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { inTauri } from '@decryp7/paddock-ui/ipc';
 import { provideAppearance, provideShellContext } from '@decryp7/paddock-ui/shell';
@@ -25,7 +26,7 @@ export function bootPopoutWindow(): Promise<unknown> {
   return bootstrapApplication(PdPopoutShell, {
     providers: [
       provideShellCore(),
-      provideAppearance({ accent: 'graphite' }),
+      provideAppearance({ accent: demoAccent() }),
       provideWorkbenchContributions<WorkbenchDemoContext>(DEMO_CONTRIBUTIONS),
       provideShellContext<WorkbenchDemoContext>(() => import('./app/context').then((m) => m.workbenchDemoContext)),
       provideStartupBackend(() => (ipc ? new TauriStartupBackend(ipc) : new MockStartupBackend())),

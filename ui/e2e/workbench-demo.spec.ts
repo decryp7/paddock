@@ -188,3 +188,59 @@ test.describe('pop-out (plan W3)', () => {
     await expect(tab).toHaveCount(0);
   });
 });
+
+test.describe('review 1 (X50)', () => {
+  test('P1-1: the Explorer menu opens at the pointer, and at the row for Shift+F10', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    const row = wb.explorer.node('wd.files', 'README.md');
+    const box = (await row.boundingBox())!;
+    const at = { x: box.x + 60, y: box.y + box.height / 2 };
+    await page.mouse.click(at.x, at.y, { button: 'right' });
+    await expect(wb.explorer.menu).toBeVisible();
+    const menu = (await wb.explorer.menu.boundingBox())!;
+    expect(Math.abs(menu.x - at.x)).toBeLessThanOrEqual(8);
+    expect(Math.abs(menu.y - at.y)).toBeLessThanOrEqual(8);
+    await expect(row).toHaveClass(/pd-menu-target/);
+    await page.keyboard.press('Escape');
+    await row.click();
+    await page.keyboard.press('Shift+F10');
+    await expect(wb.explorer.menu).toBeVisible();
+    const kb = (await wb.explorer.menu.boundingBox())!;
+    expect(Math.abs(kb.y - (box.y + box.height))).toBeLessThanOrEqual(8);
+    expect(kb.x).toBeGreaterThanOrEqual(box.x);
+  });
+
+  test('P1-2: at 320 px the Problem column takes most of the table, with the file folded under it', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.palette.open();
+    await wb.palette.search('>show problems');
+    await wb.palette.run('Show problems');
+    const table = page.locator('wd-problems-view pd-table');
+    await expect(table.getByRole('columnheader', { name: /Problem/ })).toBeVisible();
+    const [tw, pw] = await Promise.all([
+      table.evaluate((t) => t.getBoundingClientRect().width),
+      table.getByRole('columnheader', { name: /Problem/ }).evaluate((h) => h.getBoundingClientRect().width),
+    ]);
+    expect(pw / tw).toBeGreaterThanOrEqual(0.6);
+    await expect(table.locator('.where').first()).toBeVisible();
+    await expectNoHorizontalScroll(page);
+  });
+
+  test('P1-3: a fitted layout is said in the notifications, never over the dock', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await wb.frame.open();
+    await wb.explorer.expand('wd.files', 'src');
+    await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
+    await wb.activity.item('wd.act.problems').click();
+    await expect(page.locator('[data-testid="pd-dock-tab"][data-panel-id="wd.problems"]')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some((k) => (localStorage.getItem(k) ?? '').includes('wd.problems')))).toBe(true);
+    await page.setViewportSize({ width: 700, height: 560 });
+    await page.reload();
+    await expect(page.locator('pd-dock .pd-dock-notice')).toHaveCount(0);
+    await expect(wb.notifications.toasts.getByText('Layout adjusted to fit this window')).toBeVisible();
+  });
+});

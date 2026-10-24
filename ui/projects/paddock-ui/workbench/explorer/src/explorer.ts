@@ -76,7 +76,7 @@ const INDENT = 12;
                       [attr.title]="row.node.problem ?? null"
                       (click)="click(row)"
                       (dblclick)="store.open(row.section, row.node)"
-                      (contextmenu)="onContextMenu($event, row, trigger)"
+                      (contextmenu)="onContextMenu(row)"
                       (dragstart)="dragStart($event, row)"
                     >
                       <span class="pd-ex-twisty" aria-hidden="true" (click)="toggle(row, $event)">
@@ -337,10 +337,11 @@ export class PdExplorer {
   }
 
   /** A right-click on a row: its menu at the pointer (one code path with the keyboard's `openMenuFor`). */
-  protected onContextMenu(e: MouseEvent, row: Extract<TreeRow, { kind: 'node' }>, trigger: CdkContextMenuTrigger): void {
-    e.preventDefault();
-    e.stopPropagation();
-    this.openMenu(row, { x: e.clientX, y: e.clientY }, trigger);
+  protected onContextMenu(row: Extract<TreeRow, { kind: 'node' }>): void {
+    // The row's actions first; the tree's CDK trigger then opens the menu at the pointer for this same event (it keeps the
+    // right button's own mouseup and auxclick from closing it again, which `open()` without the event cannot).
+    this.target.set(this.menuTarget(row));
+    this.menuOpen.set(true);
   }
 
   /** Opens the actions of a row from the keyboard, at the row (below its label). */
