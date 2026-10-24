@@ -61,6 +61,7 @@ export {
 } from './src/registry';
 export {
   WORKBENCH_PORTS,
+  defaultWorkbenchPorts,
   PANEL_WINDOWS,
   DOCK_PORT,
   EXPLORER_PLAN,

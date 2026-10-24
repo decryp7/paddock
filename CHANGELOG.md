@@ -6,6 +6,20 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### Added
 - `paddock-assistant` and `@decryp7/paddock-ui/workbench/assistant` (plan X50 W6): the assistant over Pitwall: `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for tools that write, a bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, `assistant_*` commands and the `paddock://assistant` event, and the `pd-assistant` chat pane with its store, safe markdown renderer, context chips, conversation list and tool-approval prompt.
+- `paddock-workbench` (plan X50 W2a/W7): the dock's layout store, a bounded `paddock-env` versioned file in the config folder,
+  served by `layout_get` [MAIN | POPOUT] and `layout_set` [MAIN] with the `CommandError` envelope.
+- `@decryp7/paddock-ui/workbench/palette` (plan X50 W5): `<pd-command-palette>` and `PaletteStore`: the palette's own commands
+  and "Open <view>" entries (`>`, recent and common first, word-start, inner and initials matching, "did you mean"), contributed
+  providers by prefix (debounced, `AbortSignal` aborted on the next keystroke or close, late answers dropped, capped at 50,
+  inline error with Retry), `namesPaletteProvider` over an engine's `names_search` (X18), Mod+Shift+P and Mod+P.
+- `@decryp7/paddock-ui/workbench/explorer` and `/workbench/frame` (plan X50 W4): `<pd-explorer>` (one section per Explorer
+  provider: lazy, paged with "Show more", cancellable on collapse, middle-truncated names, context menu on right-click and
+  Shift+F10, drag data, empty state with a command, errors with Retry) and `<pd-workbench>` with `provideShellWorkbench`:
+  title and menu bar, activity bar (badges in the accessible name, fly-outs, overflow into More, pinned bottom items),
+  the Explorer side bar sized by the user and closed and reopened by the layout plan in a narrow window, the stage slot for
+  the dock, status bar, palette, notifications, dialogs, F6 regions, the Jobs view and "Toggle side bar" (Mod+B).
+- `ui/projects/workbench-demo`: the workbench reference app on mock backends (views with layouts and instances, Explorer
+  sections, palette providers including `@` over a names search, perspectives, shared state, assistant context, jobs).
 - `@decryp7/paddock-ui/workbench` core (plan X50 W1, ADR 0013 §2): the workbench's contribution kinds in the shell's one registry
   (`defineView` with a required `ViewLayout`, `defineActivityItem`, `defineExplorerProvider` (lazy, paged, cancellable),
   `definePaletteProvider` (one prefix each, `AbortSignal`, capped), `definePerspective`, `defineSharedState`, `defineAssistantContext`),
