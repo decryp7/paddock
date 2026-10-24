@@ -3465,6 +3465,7 @@ dependencies = [
 name = "paddock-testplan"
 version = "0.1.0"
 dependencies = [
+ "paddock-workspace-hack",
  "proptest",
  "serde",
  "sha2 0.10.9",
