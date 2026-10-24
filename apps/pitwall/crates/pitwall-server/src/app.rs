@@ -326,9 +326,20 @@ impl AppState {
         }
     }
 
-    /// Remove it on shutdown.
+    /// On a clean shutdown the file stays, rewritten with `"serving": false`, so apps can tell "installed, not running"
+    /// from "not installed".
     pub fn remove_discovery(&self) {
-        let _ = std::fs::remove_file(self.dirs.discovery());
+        // Flip the file this process wrote; if it is missing or damaged there is nothing trustworthy to keep.
+        let stopped = std::fs::read_to_string(self.dirs.discovery())
+            .ok()
+            .and_then(|t| pitwall_core::discovery::Discovery::parse(&t).ok())
+            .and_then(|d| serde_json::to_vec_pretty(&d.stopped()).ok());
+        match stopped {
+            Some(b) if paths::write_atomic(&self.dirs.discovery(), &b).is_ok() => {}
+            _ => {
+                let _ = std::fs::remove_file(self.dirs.discovery());
+            }
+        }
     }
 
     /// Start the background tasks: release loop, live feed, metrics sampling.
