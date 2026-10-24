@@ -26,6 +26,8 @@
 //! The core has no Tauri dependency. Tests use temporary folders only.
 
 mod error;
+#[cfg(test)]
+mod generated;
 mod kind;
 mod limits;
 mod loader;
@@ -34,7 +36,10 @@ mod reload;
 mod snapshot;
 mod source;
 mod store;
+#[cfg(feature = "tauri")]
+pub mod tauri;
 pub mod user_regex;
+pub mod view;
 pub mod watch;
 
 pub use error::PackError;
@@ -47,3 +52,16 @@ pub use snapshot::{Health, LoadedPack, Problem, Snapshot};
 pub use source::{DirSource, PackSource, user_packs_dir};
 pub use store::PackStore;
 pub use watch::ChangeSource;
+
+/// The event every change of a pack kind is sent on, to every window (a [`view::PacksView`]).
+pub const EVENT_NAME: &str = "paddock://packs";
+
+paddock_commands::command_table! {
+    /// The commands of the packs adapter (`paddock_packs::tauri::invoke_handler` serves them; the shell plugin folds them
+    /// into its table). Every window may look; main windows and the Settings dialog reload.
+    pub static COMMANDS;
+    /// Every pack kind now.
+    Query [WINDOW] => tauri::packs_status,
+    /// Reads the pack folders again (the Repair of the packs health entry, and a Reload button).
+    Mutation [MAIN | DIALOG] => tauri::packs_reload,
+}
