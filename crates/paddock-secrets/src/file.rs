@@ -233,7 +233,8 @@ mod tests {
         fs::write(&plain, "x").unwrap();
         let blocked = FileSecrets::new(plain.join("deeper"));
         assert!(blocked.set(&n("a"), &s("v")).is_err());
-        // A file where the folder should be: even reading fails, with a message.
+        // A file where the folder should be: even reading fails, with a message (Windows reports the path as missing instead).
+        #[cfg(unix)]
         assert!(blocked.get(&n("a")).is_err());
     }
 }

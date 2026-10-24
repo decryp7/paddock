@@ -65,7 +65,7 @@ interface LoadedPage {
         (input)="store.setQuery($any($event.target).value)"
         (keydown.escape)="clearSearch($event)"
       />
-      <label class="pd-advanced">
+      <label class="pd-advanced pd-check">
         <input type="checkbox" role="switch" [checked]="store.showAdvanced()" (change)="store.setShowAdvanced($any($event.target).checked)" />
         {{ t.showAdvanced }}
       </label>
@@ -162,7 +162,6 @@ interface LoadedPage {
     .pd-top { display: flex; align-items: center; gap: var(--pd-space-3); flex-wrap: wrap; }
     .pd-search { flex: 1 1 12rem; min-width: 0; min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
     .pd-advanced { display: inline-flex; align-items: center; gap: var(--pd-space-1); color: var(--pd-text-muted); white-space: nowrap; }
-    .pd-advanced input { accent-color: var(--pd-accent); }
     .pd-banner { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; padding: var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text); }
     .pd-banner > span { flex: 1 1 12rem; min-width: 0; }
     .pd-banner.pd-warn { border-color: var(--pd-warning, var(--pd-border-control)); }
@@ -174,9 +173,10 @@ interface LoadedPage {
     .pd-group:first-child { margin-top: 0; }
     .pd-subgroup { margin: var(--pd-space-2) 0 var(--pd-space-1); padding: 0 var(--pd-space-2); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); color: var(--pd-text-subtle); }
     .pd-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-    .pd-item { display: flex; align-items: center; gap: var(--pd-space-1); width: 100%; min-height: 30px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; text-align: start; cursor: pointer; }
+    .pd-item { position: relative; display: flex; align-items: center; gap: var(--pd-space-1); width: 100%; min-height: 30px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; text-align: start; cursor: pointer; }
     .pd-item:hover { background: var(--pd-surface-2); }
-    .pd-item[aria-current='page'] { background: var(--pd-surface-2); box-shadow: inset 2px 0 0 var(--pd-accent); font-weight: var(--pd-weight-medium); }
+    .pd-item[aria-current='page'] { background: var(--pd-accent-tint); font-weight: var(--pd-weight-semibold); }
+    .pd-item[aria-current='page']::before { content: ''; position: absolute; inset-block: 6px; inset-inline-start: 0; width: 2px; border-radius: 1px; background: var(--pd-accent); }
     .pd-item:focus-visible, .pd-btn:focus-visible, .pd-link:focus-visible, .pd-search:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-accent); }

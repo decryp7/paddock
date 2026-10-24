@@ -53,13 +53,28 @@ describe('control styles and the Material bridge (plan X37)', () => {
   });
 
   describe.each(['dark', 'light'] as Scheme[])('contrast of the pairs the controls add, %s', (scheme) => {
-    it.each(ACCENTS)('the accent fill (selected toggle track, checked box, primary) is 3:1 on surface-1 and 2.9:1 on surface-2 (see the note), accent %s', (accent) => {
+    it.each(ACCENTS)('the control fill (on toggle track, checked box or radio) is 3:1 on the page, surface-1, surface-2 and surface-3, and its ink is legible, accent %s', (accent) => {
       const v = resolve(rules, scheme, accent);
       const c = (n: string) => parseColor(v[n] as string);
-      expect(contrast(c('--pd-accent-fill'), c('--pd-surface-1'))).toBeGreaterThanOrEqual(3);
-      // On a card (surface-2) Pitwall's dark fill is 2.95:1, a hair under 3:1: the on state also has the handle's position and
-      // glyph as a second cue (WCAG 1.4.1), so this stays a recorded open item for the design review, not a hard 3:1.
-      expect(contrast(c('--pd-accent-fill'), c('--pd-surface-2'))).toBeGreaterThanOrEqual(2.9);
+      for (const s of ['--pd-bg', '--pd-surface-1', '--pd-surface-2', '--pd-surface-3']) {
+        expect(contrast(c('--pd-accent-control'), c(s)), s).toBeGreaterThanOrEqual(3);
+      }
+      expect(contrast(c('--pd-on-accent-control'), c('--pd-accent-control'))).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it.each(ACCENTS)('the focus ring is 3:1 on every surface (SC 2.4.13), accent %s', (accent) => {
+      const v = resolve(rules, scheme, accent);
+      const c = (n: string) => parseColor(v[n] as string);
+      for (const s of ['--pd-bg', '--pd-surface-1', '--pd-surface-2', '--pd-surface-3']) {
+        expect(contrast(c('--pd-focus-ring'), c(s)), s).toBeGreaterThanOrEqual(3);
+      }
+    });
+
+    it.each(ACCENTS)('the selected segment (accent ring on the track) is 3:1 against the track in both components, accent %s', (accent) => {
+      const v = resolve(rules, scheme, accent);
+      const c = (n: string) => parseColor(v[n] as string);
+      // .pd-segmented's track is surface-3, pd-segmented-control's is surface-2.
+      for (const track of ['--pd-surface-3', '--pd-surface-2']) expect(contrast(c('--pd-accent'), c(track)), track).toBeGreaterThanOrEqual(3);
     });
 
     it('the unselected toggle handle and the placeholder text are legible on their track and field', () => {
@@ -68,5 +83,22 @@ describe('control styles and the Material bridge (plan X37)', () => {
       expect(contrast(c('--pd-text-muted'), c('--pd-surface-3'))).toBeGreaterThanOrEqual(3);
       expect(contrast(c('--pd-text-subtle'), c('--pd-surface-1'))).toBeGreaterThanOrEqual(4.5);
     });
+  });
+
+  it('inputs, selects and the switch show the solid focus ring, not only a translucent halo (review P1-5)', () => {
+    expect(controls).toMatch(/\.pd-input:focus-visible,[^{]*\{[^}]*outline: 2px solid var\(--pd-focus-ring\)/);
+    expect(controls).not.toMatch(/box-shadow:\s*0 0 0 2px var\(--pd-accent-ring\)/);
+    expect(controls).toMatch(/\.pd-switch:focus-visible\s*\{[^}]*outline: 2px solid/);
+  });
+
+  it('the selected segment is an accent tint with a ring and a heavier label, not a surface that inverts in dark (review P1-6)', () => {
+    const block = controls.slice(controls.indexOf('.pd-segmented'));
+    expect(block).toMatch(/aria-checked=true\][^{]*\{[^}]*background: var\(--pd-accent-tint\)[^}]*font-weight: var\(--pd-weight-semibold\)[^}]*inset 0 0 0 1px var\(--pd-accent\)/);
+  });
+
+  it('toggles, checkboxes and radios use the control tokens in the Material bridge too', () => {
+    for (const m of material.matchAll(/(--mat-(?:slide-toggle-selected|checkbox-selected|radio-selected)[\w-]*(?:track|icon)-color):\s*([^;]+);/g)) {
+      expect(m[2], m[1]).toBe('var(--pd-accent-control)');
+    }
   });
 });

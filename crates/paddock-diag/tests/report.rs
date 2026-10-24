@@ -624,6 +624,8 @@ fn a_folder_that_cannot_be_written_is_a_typed_error_and_leaves_nothing() {
     }
 }
 
+// Windows reports a path below a file as not found (the settings simply are not there), so the note exists on Unix only.
+#[cfg(unix)]
 #[test]
 fn a_settings_file_that_cannot_be_inspected_is_a_note() {
     let root = tempfile::tempdir().unwrap();
