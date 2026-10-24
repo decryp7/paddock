@@ -600,3 +600,13 @@ storage page move to Paddock now (overriding the workbench.md deferral), and X45
 - Settings window: themed (non-native) selects in Appearance; "Show advanced" shown once; the "N advanced settings
   hidden" line not clipped; nav sub-groups; an API for the window's footer notice.
 - Service labels keep the app's casing (no forced capital on the first word).
+
+## Shell gaps found by Spotter's move (2026-10-24 night, for 0.3.0)
+
+- **paddock-download: system proxy** (env `HTTPS_PROXY`/`NO_PROXY` and the OS proxy settings). Spotter's old client used
+  it; without it users behind a corporate proxy regress. Must land before any app ships on the shared downloader.
+- Typed bridge from an app's own job/phase type to `paddock-jobs` (phases + Cancel), instead of hand-written adapters.
+- Dialog titles set at runtime (a decision dialog shows its real title, not a static one).
+- Already listed and confirmed again: `withComponentInputBinding` in `provideShellPages`; dialog-window providers for
+  app-wide stores.
+- `PADDOCK_SHELL_PERMISSION_FILES` wiring documented in the starter so every app gets the capability ACL test.
