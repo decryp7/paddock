@@ -671,6 +671,132 @@
       <trans-unit id="pd.pitwall.use-builtin" datatype="html">
         <source>Use the built-in engine</source>
       </trans-unit>
+      <trans-unit id="pd.schedule.addTime" datatype="html">
+        <source>Add a time</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.cron" datatype="html">
+        <source>Cron expression</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.cronHint" datatype="html">
+        <source>Five fields: minute hour day-of-month month day-of-week, for example 0 9 * * 1-5. A leading seconds field is allowed.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.fri" datatype="html">
+        <source>Fri</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.mon" datatype="html">
+        <source>Mon</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.sat" datatype="html">
+        <source>Sat</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.sun" datatype="html">
+        <source>Sun</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.thu" datatype="html">
+        <source>Thu</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.tue" datatype="html">
+        <source>Tue</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.day.wed" datatype="html">
+        <source>Wed</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.daysLabel" datatype="html">
+        <source>Days of the week</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.every" datatype="html">
+        <source>Every</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.cron" datatype="html">
+        <source>Cron</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.every" datatype="html">
+        <source>Every…</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.mode.times" datatype="html">
+        <source>At times</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.modeLabel" datatype="html">
+        <source>Schedule type</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.nextRuns" datatype="html">
+        <source>Next runs</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.add" datatype="html">
+        <source>Add a window</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.daysN" datatype="html">
+        <source>Days of window <x id="n"/> (none selected means every day)</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.empty" datatype="html">
+        <source>No windows: nothing is paused.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.from" datatype="html">
+        <source>From</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.overnight" datatype="html">
+        <source>Ends the next day.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.remove" datatype="html">
+        <source>Remove this window</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.removeN" datatype="html">
+        <source>Remove window <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.to" datatype="html">
+        <source>Until</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.zone" datatype="html">
+        <source>Time zone</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.pause.zonePlaceholder" datatype="html">
+        <source>This computer's time zone (or an IANA name such as Europe/Berlin)</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.daily" datatype="html">
+        <source>Daily</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.hours" datatype="html">
+        <source><x id="hours"/> h</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.preset.minutes" datatype="html">
+        <source><x id="minutes"/> min</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.presetsLabel" datatype="html">
+        <source>Common intervals</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.previewLabel" datatype="html">
+        <source>Schedule preview</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.removeTime" datatype="html">
+        <source>Remove this time</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.removeTimeN" datatype="html">
+        <source>Remove time of day <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.timeN" datatype="html">
+        <source>Time of day <x id="n"/></source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.days" datatype="html">
+        <source>Days</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.hours" datatype="html">
+        <source>Hours</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unit.minutes" datatype="html">
+        <source>Minutes</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.unitLabel" datatype="html">
+        <source>Interval unit</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zone" datatype="html">
+        <source>Time zone</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zoneIn" datatype="html">
+        <source>Times are in <x id="zone"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.schedule.zonePlaceholder" datatype="html">
+        <source>This computer's time zone (or an IANA name such as Europe/Berlin)</source>
+      </trans-unit>
       <trans-unit id="pd.service.actions" datatype="html">
         <source>Service actions</source>
       </trans-unit>
