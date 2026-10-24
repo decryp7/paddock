@@ -2,7 +2,7 @@
 
 use super::centre::{NoticeAction, NoticeSeverity};
 use super::*;
-use crate::clock::ManualClock;
+use crate::FakeClock;
 use serde_json::json;
 
 fn alert(n: u32) -> NewNotice {
@@ -20,10 +20,10 @@ fn app_and_project_lists_are_kept_apart_and_saved_where_they_belong() {
     crate::tests::capture_logs();
     let tmp = tempfile::tempdir().unwrap();
     let file = tmp.path().join("notifications.json");
-    let clock = Arc::new(ManualClock::default());
+    let clock = Arc::new(FakeClock::default());
     let c = NotificationCentre::new(Some(file.clone()), clock.clone());
     c.post(Some("main"), alert(1));
-    clock.advance(10);
+    clock.advance_ms(10);
     c.post(Some("main"), alert(1));
     c.post(Some("w-2"), alert(2));
     let update = c.post(
@@ -89,7 +89,7 @@ fn app_and_project_lists_are_kept_apart_and_saved_where_they_belong() {
 
 #[test]
 fn a_once_message_posted_again_is_not_saved_or_logged_again() {
-    let c = NotificationCentre::new(None, Arc::new(ManualClock::default()));
+    let c = NotificationCentre::new(None, Arc::new(FakeClock::default()));
     let offer = || {
         NewNotice::new(
             "update:3",
@@ -108,7 +108,7 @@ fn a_once_message_posted_again_is_not_saved_or_logged_again() {
 
 #[test]
 fn a_resolved_cause_goes_from_every_list() {
-    let c = NotificationCentre::new(None, Arc::new(ManualClock::default()));
+    let c = NotificationCentre::new(None, Arc::new(FakeClock::default()));
     let health = |scope| {
         NewNotice::new(
             "health:store",
@@ -131,7 +131,7 @@ fn a_resolved_cause_goes_from_every_list() {
 fn project_records_round_trip_and_damage_gives_an_empty_list() {
     let c = NotificationCentre::with_caps(
         None,
-        Arc::new(ManualClock::default()),
+        Arc::new(FakeClock::default()),
         Caps { app: 5, project: 5 },
     );
     c.post(Some("main"), alert(1));
@@ -168,7 +168,7 @@ fn project_records_round_trip_and_damage_gives_an_empty_list() {
 
 #[test]
 fn a_clicked_os_notification_opens_its_message_once_and_only_soon_after() {
-    let clock = Arc::new(ManualClock::default());
+    let clock = Arc::new(FakeClock::default());
     let c = NotificationCentre::new(None, clock.clone());
     c.note_shown(NoticeId(4), Some("main"));
     assert_eq!(
@@ -177,7 +177,7 @@ fn a_clicked_os_notification_opens_its_message_once_and_only_soon_after() {
     );
     assert_eq!(c.take_pending(), None, "once");
     c.note_shown(NoticeId(5), None);
-    clock.advance(OPEN_WITHIN_MS + 1);
+    clock.advance_ms(OPEN_WITHIN_MS as u64 + 1);
     assert_eq!(c.take_pending(), None, "too late: an ordinary focus");
 }
 
@@ -187,7 +187,7 @@ fn a_file_that_cannot_be_written_is_logged_and_the_list_keeps_working() {
     std::fs::write(tmp.path().join("blocked"), "a file").unwrap();
     let c = NotificationCentre::new(
         Some(tmp.path().join("blocked/notifications.json")),
-        Arc::new(ManualClock::default()),
+        Arc::new(FakeClock::default()),
     );
     c.post(None, alert(1));
     assert!(c.flush());
@@ -196,7 +196,7 @@ fn a_file_that_cannot_be_written_is_logged_and_the_list_keeps_working() {
 
 #[test]
 fn the_events_are_spelled_like_the_ui() {
-    let c = NotificationCentre::new(None, Arc::new(ManualClock::default()));
+    let c = NotificationCentre::new(None, Arc::new(FakeClock::default()));
     let posted = c.post(Some("main"), alert(1)).notice;
     let event = NoticesEvent {
         snapshot: c.snapshot("main"),
@@ -220,7 +220,7 @@ fn the_events_are_spelled_like_the_ui() {
 
 #[test]
 fn a_poisoned_centre_keeps_working() {
-    let c = NotificationCentre::new(None, Arc::new(ManualClock::default()));
+    let c = NotificationCentre::new(None, Arc::new(FakeClock::default()));
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _a = c.app.lock().unwrap();
         let _p = c.projects.lock().unwrap();
@@ -236,7 +236,7 @@ fn a_poisoned_centre_keeps_working() {
 
 #[test]
 fn every_change_of_any_list_raises_the_revision_and_nothing_else_does() {
-    let clock = Arc::new(ManualClock::default());
+    let clock = Arc::new(FakeClock::default());
     let c = NotificationCentre::new(None, clock.clone());
     let rev = |c: &NotificationCentre| c.snapshot("main").revision;
     assert_eq!(rev(&c), 0);

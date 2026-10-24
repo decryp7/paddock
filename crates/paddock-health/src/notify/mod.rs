@@ -5,6 +5,7 @@
 //! - [`centre`]: the pure list (cause-key merge with counts, caps, read state).
 //! - [`persist`]: the versioned records: a window's project messages travel with its project, the app's live in a
 //!   file in the app's data folder.
+//! - [`os`]: OS notifications over the centre: one policy, rate limits, quiet hours, buttons and clicks (plan X8).
 //! - [`health`]: what a service-health change means for the centre (one message per outage, with Repair).
 //! - Here: [`NotificationCentre`], the app's list and every window's project list, with the app list saved off the
 //!   locks by a debounced writer.
@@ -14,11 +15,12 @@
 
 pub mod centre;
 pub mod health;
+pub mod os;
 pub mod persist;
 pub mod window;
 mod writer;
 
-use crate::clock::Clock;
+use crate::Clock;
 use centre::{APP_CAP, Centre, NewNotice, Notice, NoticeId, NoticeScope, PROJECT_CAP, Posted};
 use persist::NoticesRecord;
 use serde::Serialize;
@@ -36,6 +38,9 @@ pub const NOTIFICATIONS_EVENT: &str = "paddock://notifications";
 pub const OPEN_EVENT: &str = "paddock://notifications-open";
 /// An OS notification clicked (the app focused) within this time opens its message.
 pub const OPEN_WITHIN_MS: i64 = 120_000;
+/// The event telling a window to run an action of a message (a button of an OS notification the shell cannot run itself);
+/// its payload is a [`NoticeActionEvent`].
+pub const ACTION_EVENT: &str = "paddock://notifications-action";
 /// How long changes to the app list wait before they are written (bursts are written once).
 pub const SAVE_DELAY: Duration = Duration::from_millis(250);
 
@@ -61,6 +66,18 @@ pub struct NoticesEvent {
     pub snapshot: NoticesSnapshot,
     /// The message just posted or merged (the UI previews it as a toast); none for a quiet one or another change.
     pub posted: Option<Notice>,
+}
+
+/// An action of a message to run in a window: the button of an OS notification that only the UI or the app can do.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoticeActionEvent {
+    /// The message the button belongs to.
+    pub id: NoticeId,
+    /// The action, as the message offered it.
+    #[cfg_attr(test, ts(type = "NoticeAction"))]
+    pub action: centre::NoticeAction,
 }
 
 /// A window's list after its project messages were restored, and why not all of them loaded.
@@ -180,7 +197,7 @@ impl NotificationCentre {
     /// Posts a message: app-scoped ones to the app list, project-scoped ones to `window`'s (without a window they go to
     /// the app list too).
     pub fn post(&self, window: Option<&str>, mut new: NewNotice) -> Posted {
-        let now = self.clock.now_ms();
+        let now = self.clock.wall_ms();
         let id = self.id();
         if new.link.window.is_none() {
             new.link.window = window.map(str::to_string);
@@ -251,6 +268,20 @@ impl NotificationCentre {
             notices,
             unread,
         }
+    }
+
+    /// The message `id` wherever it is (the app's list, then any window's), and the window it was posted for.
+    pub fn find(&self, id: NoticeId) -> Option<Notice> {
+        let in_app = lock(&self.app)
+            .notices()
+            .iter()
+            .find(|n| n.id == id)
+            .cloned();
+        in_app.or_else(|| {
+            lock(&self.projects)
+                .values()
+                .find_map(|c| c.notices().iter().find(|n| n.id == id).cloned())
+        })
     }
 
     /// Marks one message read. False when the window cannot see it.
@@ -345,7 +376,7 @@ impl NotificationCentre {
         *lock(&self.pending) = Some(PendingOpen {
             id,
             window: window.map(str::to_string),
-            at: self.clock.now_ms(),
+            at: self.clock.wall_ms(),
         });
     }
 
@@ -353,7 +384,7 @@ impl NotificationCentre {
     /// window it was posted for.
     pub fn take_pending(&self) -> Option<(NoticeId, Option<String>)> {
         let p = lock(&self.pending).take()?;
-        (self.clock.now_ms() - p.at <= OPEN_WITHIN_MS).then_some((p.id, p.window))
+        (self.clock.wall_ms() - p.at <= OPEN_WITHIN_MS).then_some((p.id, p.window))
     }
 }
 

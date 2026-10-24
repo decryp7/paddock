@@ -1,6 +1,6 @@
-use crate::clock::{Clock, SystemClock};
 use crate::eta::EtaEstimator;
 use crate::model::{JobId, JobKind, JobSnapshot, JobState, Phase, PhaseProgress};
+use crate::time::{Clock, SystemClock};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -79,7 +79,7 @@ impl Reporter {
             title,
             subject,
             sink,
-            Arc::new(SystemClock::new()),
+            Arc::new(SystemClock),
             DEFAULT_MIN_INTERVAL_MS,
         )
     }

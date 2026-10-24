@@ -512,10 +512,11 @@ fn the_setups_clock_names_the_file_and_install_keeps_the_first_state() {
     assert!(Arc::ptr_eq(&again, &rig.state));
     let _ = (events, w);
     // A fixed clock gives a fixed suggested name and a fixed manifest time.
-    let fixed = Arc::new(paddock_log::ManualClock::new(
+    let fixed = Arc::new(paddock_log::FakeClock::at_wall(
         chrono::Utc
             .with_ymd_and_hms(2026, 10, 24, 10, 30, 0)
-            .unwrap(),
+            .unwrap()
+            .into(),
     ));
     let root = tempfile::tempdir().unwrap();
     let dirs = AppDirs::resolve(

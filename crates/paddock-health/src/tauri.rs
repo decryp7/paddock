@@ -16,6 +16,7 @@ use crate::health::Health;
 use crate::model::{Change, SERVICE_HEALTH_EVENT, Snapshot, is_service_id};
 use crate::notify::centre::{NewNotice, Notice, NoticeId, NoticeScope};
 use crate::notify::health::{HealthNotice, for_change};
+use crate::notify::os::OsNotifier;
 use crate::notify::persist::NoticesRecord;
 use crate::notify::window::{WindowNotice, WindowNoticeScope};
 use crate::notify::{
@@ -31,6 +32,14 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(feature = "os-notify")]
+pub mod native;
+mod os;
+
+pub use os::{
+    ActionHandler, ActionHandlers, Dispatched, dispatch, poll_digest, spawn_digest_ticker,
+};
+
 /// Shows an OS notification for a message (the app decides: its setting, focus, rate limit) and says whether it did.
 /// Called on the main thread.
 pub type OsNotify<R> = dyn Fn(&AppHandle<R>, &Notice) -> bool + Send + Sync;
@@ -42,6 +51,9 @@ pub struct Setup<R: Runtime> {
     clock: Arc<dyn Clock>,
     caps: Caps,
     os: Option<Arc<OsNotify<R>>>,
+    notifier: Option<Arc<OsNotifier>>,
+    handlers: ActionHandlers<R>,
+    digest_every: Option<std::time::Duration>,
 }
 
 impl<R: Runtime> Setup<R> {
@@ -54,6 +66,9 @@ impl<R: Runtime> Setup<R> {
             clock: Arc::new(SystemClock),
             caps: Caps::default(),
             os: None,
+            notifier: None,
+            handlers: ActionHandlers::default(),
+            digest_every: None,
         }
     }
 
@@ -83,6 +98,36 @@ impl<R: Runtime> Setup<R> {
         self.os = Some(Arc::new(notify));
         self
     }
+
+    /// Raises OS notifications through the shared policy ([`OsNotifier`]: level, seen-in-window, quiet hours, rate
+    /// limits, buttons) and routes clicks on them: the toast opens its message, Repair runs in the shell, other buttons
+    /// go to [`Setup::on_notice_action`] or to the window. The general hook is [`Setup::os_notifications`].
+    pub fn os_notifier(mut self, notifier: Arc<OsNotifier>) -> Setup<R> {
+        let n = notifier.clone();
+        self.os = Some(Arc::new(move |app, notice| os::offer(app, &n, notice)));
+        self.notifier = Some(notifier);
+        self
+    }
+
+    /// Looks for the quiet-hours digest every `every` on a thread that ends with the app (quiet hours end by the clock,
+    /// not by an event). Without it the digest also comes when a window gets the focus ([`poll_digest`]).
+    pub fn os_digest_every(mut self, every: std::time::Duration) -> Setup<R> {
+        self.digest_every = Some(every);
+        self
+    }
+
+    /// The app's handler for a kind of action clicked on a toast (`viewJob`, `retry`...); see [`ActionHandler`].
+    pub fn on_notice_action(
+        mut self,
+        kind: impl Into<String>,
+        handler: impl Fn(&AppHandle<R>, &Notice, &crate::notify::centre::NoticeAction) -> bool
+        + Send
+        + Sync
+        + 'static,
+    ) -> Setup<R> {
+        self.handlers.insert(kind, handler);
+        self
+    }
 }
 
 /// The OS notification hook, managed next to the centre.
@@ -97,6 +142,9 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, setup: Setup<R>) -> Result<Arc<Healt
         clock,
         caps,
         os,
+        notifier,
+        handlers,
+        digest_every,
     } = setup;
     let handle = app.clone();
     let health = Health::new(
@@ -106,6 +154,12 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, setup: Setup<R>) -> Result<Arc<Healt
     app.manage(Arc::new(NotificationCentre::with_caps(file, clock, caps)));
     app.manage(OsHook(os));
     app.manage(health.clone());
+    if let Some(notifier) = notifier {
+        os::install(app, &notifier, handlers);
+        if let Some(every) = digest_every {
+            os::spawn_digest_ticker(app, every);
+        }
+    }
     Ok(health)
 }
 
@@ -251,7 +305,10 @@ pub fn on_focus<R: Runtime>(app: &AppHandle<R>, label: &str) {
     let Some(centre) = centre_of(app) else {
         return;
     };
-    if let Some((id, window)) = centre.take_pending() {
+    let pending = centre.take_pending();
+    // The user is looking now: a due digest is listed in the centre, without a toast.
+    poll_digest(app);
+    if let Some((id, window)) = pending {
         let target = window
             .filter(|w| app.get_webview_window(w).is_some())
             .unwrap_or_else(|| label.to_string());
@@ -416,5 +473,7 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync 
     handler!()
 }
 
+#[cfg(test)]
+mod os_tests;
 #[cfg(test)]
 mod tests;
