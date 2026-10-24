@@ -4,7 +4,7 @@ use super::*;
 use crate::{DialogGrant, KIB};
 use ::tauri::ipc::{CallbackFn, InvokeBody};
 use ::tauri::test::{
-    get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
+    INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
 };
 use ::tauri::webview::InvokeRequest;
 use ::tauri::{WebviewUrl, WebviewWindow, WebviewWindowBuilder};
