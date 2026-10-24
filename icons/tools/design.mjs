@@ -3,7 +3,21 @@
 
 export const APPS = ['debrief', 'pitcrew', 'spotter', 'pitwall', 'dyno', 'sighter', 'pacenotes'];
 
-export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter', pacenotes: 'Pacenotes' };
+/**
+ * The umbrella mark: Paddock itself (the family, its shared shell, workbench, design system and lessons), not an app. It is built by the
+ * same pipeline and passes the same CVD check, but stays out of the app rows of the family sheet (preview.html shows it on its own).
+ */
+export const UMBRELLA = ['paddock'];
+
+/** Everything the pipeline builds. */
+export const ALL = [...APPS, ...UMBRELLA];
+
+/** Order of the app hues in Paddock's family stripe (by hue: blue, violet, lavender, magenta, orange, amber, olive). */
+export const STRIPE = ['debrief', 'pitwall', 'sighter', 'dyno', 'pitcrew', 'spotter', 'pacenotes'];
+/** Stripe colour per app: the tile's top colour, lifted where it would sink into the graphite tile. */
+const STRIPE_COLOUR = app => ({ pitwall: '#8A5AE6', pacenotes: '#C2A845' })[app] ?? PALETTE[app].top;
+
+export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter', pacenotes: 'Pacenotes', paddock: 'Paddock' };
 
 /** One hue per app. `base` is the identity colour (CVD-checked, see tools/cvd.mjs); top/bottom are the tile gradient. */
 export const PALETTE = {
@@ -14,10 +28,13 @@ export const PALETTE = {
   sighter: { top: '#BFA2EE', base: '#A686D6', bottom: '#8B6DB5', deep: '#3C2D52', light: '#CCBAEC' },
   pacenotes: { top: '#9A8228', base: '#6D590F', bottom: '#6A5500', deep: '#302501', light: '#C0B491' },
   dyno: { top: '#DE559F', base: '#BE3584', bottom: '#A0226A', deep: '#5E0E3C', light: '#F29CCB' },
+  // Asphalt graphite: no app hue of its own (the family's hues ride in its stripe). A near-black tile keeps every family CVD
+  // minimum unchanged (tools/cvd.mjs); a lighter slate (#333A44 and up) drops tritanopia against Pitwall.
+  paddock: { top: '#4A525E', base: '#2B3038', bottom: '#1E2228', deep: '#07080A', light: '#8A94A3', rim: '#FFFFFF' },
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */
-export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF' };
+export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF', paddock: '#FFFFFF' };
 
 export const CARBON = { top: '#30333B', bottom: '#15171B', rim: '#4A4E58' };
 
@@ -30,6 +47,7 @@ export const STATUSES = {
   dyno: ['normal', 'high'],
   sighter: ['default'],
   pacenotes: ['default'],
+  paddock: ['default'],
 };
 
 export const STATUS_COLOURS = { busy: '#2F8FFF', warning: '#F5A524', error: '#E5484D', new: '#E5484D', serving: '#2FB36B', high: '#F2711C' };
@@ -133,6 +151,38 @@ const PACENOTES = {
   },
 };
 export const PACENOTES_MAIN = 'left';
+
+/**
+ * Paddock: pit garages under one roof that carries the family stripe, on a shared foundation slab. The roof is the umbrella: the
+ * seven app hues side by side over the teams' bays (tone 'family'; plain ink in monochrome renders). The stripe runs in hue order
+ * (STRIPE), not in app-list order, so it reads as one spectrum. `seams` cuts thin gaps between its segments.
+ */
+const seams = (x0, x1, y0, y1) => STRIPE.slice(1).map((_, i) => { const x = f(x0 + ((i + 1) * (x1 - x0)) / STRIPE.length); return `M${x} ${y0}V${y1}`; }).join('');
+/** Shallow gable roof line from eave to eave. */
+const gable = (x, w, y, rise) => `M${f(x)} ${f(y + rise)}L${f(x + w / 2)} ${f(y)}L${f(x + w)} ${f(y + rise)}`;
+/** The garage row on any grid: the gable roof over `n` closed roller doors (slats cut through them), on the slab. */
+function garages({ x, w, roofY, rise, roofW, roofTone = 'family', doorY, doorH, gap, inset, slats, slatW, r, slab, slabH, seamW, n = 3 }) {
+  const bw = (w - 2 * inset - (n - 1) * gap) / n;
+  const doors = Array.from({ length: n }, (_, i) => rr(x + inset + i * (bw + gap), doorY, bw, doorH, r)).join('');
+  const cuts = slats.map(dy => `M${f(x)} ${f(doorY + dy)}H${f(x + w)}`).join('');
+  return [
+    { kind: 'stroke', d: gable(x, w, roofY, rise), w: roofW, tone: roofTone, x0: x - roofW / 2, x1: x + w + roofW / 2,
+      ...(seamW ? { cutStroke: { d: seams(x - roofW / 2, x + w + roofW / 2, roofY - roofW, roofY + rise + roofW), w: seamW, cap: 'butt' } } : {}) },
+    { kind: 'fill', d: doors, tone: 'primary', ...(slats.length ? { cutStroke: { d: cuts, w: slatW, cap: 'butt' } } : {}) },
+    { kind: 'fill', d: rr(x, slab, w, slabH, slabH / 2), tone: 'primary' },
+  ];
+}
+const PADDOCK = {
+  g1024: garages({ x: 244, w: 536, roofY: 300, rise: 124, roofW: 78, doorY: 488, doorH: 176, gap: 30, inset: 30, slats: [59, 118], slatW: 16, r: 16, slab: 698, slabH: 52, seamW: 10 }),
+  g32: garages({ x: 5, w: 22, roofY: 6.5, rise: 5, roofW: 3.5, doorY: 14, doorH: 7.5, gap: 1.5, inset: 1.25, slats: [3.5], slatW: 1, r: 0.75, slab: 23.5, slabH: 2.5, seamW: 0 }),
+  // 24 px: its own 24 grid, two bays on whole pixels (three bays from the 32 grid left 1 px gaps and half-tone rows).
+  g24: garages({ x: 3.5, w: 17, roofY: 4.5, rise: 3.5, roofW: 2.5, doorY: 10, doorH: 6, gap: 2, inset: 1.5, slats: [2.5], slatW: 1, r: 0, slab: 18, slabH: 2, seamW: 0, n: 2 }),
+  // 16 px: two bays on whole pixels (three would put the middle door on half pixels and grey it out).
+  g16: garages({ x: 1.5, w: 13, roofY: 2.75, rise: 3, roofW: 2, doorY: 7, doorH: 4, gap: 2, inset: 1.5, slats: [], slatW: 0, r: 0, slab: 12, slabH: 2, seamW: 0, n: 2 }),
+  // Tray (monochrome): two bays, one slat, a 1 px foundation line so the base never outweighs the roof.
+  tray: garages({ x: 1, w: 14, roofY: 1.75, rise: 3.5, roofW: 2, roofTone: 'primary', doorY: 7, doorH: 5, gap: 2, inset: 1, slats: [2.5], slatW: 1, r: 0, slab: 13, slabH: 1, seamW: 0, n: 2 }),
+};
+
 export { PACENOTES };
 
 /** Master glyphs on the 1024 grid (optical centre 512,512; live area ~ 270..754). */
@@ -178,6 +228,7 @@ export const GLYPH_1024 = {
     { kind: 'fill', d: pointer(436, 392, 0.76), tone: 'primary', round: 10 },
   ],
   pacenotes: () => PACENOTES[PACENOTES_MAIN].g1024,
+  paddock: () => PADDOCK.g1024,
   dyno: () => {
     const cx = 512, cy = 548, r = 248, needle = 318;
     return [
@@ -191,6 +242,7 @@ export const GLYPH_1024 = {
 
 /** Hand-tuned small glyphs. 16 is drawn on a 16 px grid, the rest on a 32 grid (24 and 48 scale it). */
 export const GLYPH_SMALL = {
+  24: { paddock: PADDOCK.g24 },
   16: {
     debrief: [
       { kind: 'stroke', d: 'M3.5 4.5H8', w: 2, tone: 'secondary', cap: 'butt' },
@@ -223,6 +275,7 @@ export const GLYPH_SMALL = {
       { kind: 'fill', d: pointer(5.9, 4.9, 0.0205), tone: 'primary' },
     ],
     pacenotes: PACENOTES[PACENOTES_MAIN].g16,
+    paddock: PADDOCK.g16,
     dyno: [
       { kind: 'stroke', d: arc(8, 9, 5.5, 150, 390), w: 1.75, tone: 'secondary', cap: 'butt' },
       { kind: 'stroke', d: arc(8, 9, 5.5, 150, 318), w: 1.75, tone: 'primary', cap: 'butt' },
@@ -265,6 +318,7 @@ export const GLYPH_SMALL = {
       { kind: 'fill', d: pointer(10.3, 8.6, 0.0425), tone: 'primary' },
     ],
     pacenotes: PACENOTES[PACENOTES_MAIN].g32,
+    paddock: PADDOCK.g32,
     dyno: [
       { kind: 'stroke', d: arc(16, 17.5, 9.5, 150, 390), w: 2.5, tone: 'secondary', cap: 'round' },
       { kind: 'stroke', d: arc(16, 17.5, 9.5, 150, 318), w: 2.5, tone: 'primary', cap: 'round' },
@@ -277,12 +331,21 @@ export const GLYPH_SMALL = {
 // ---------- renderers ----------
 let uidCounter = 0;
 const newUid = p => `${p}${(uidCounter++).toString(36)}`;
+/** Id prefix per icon: the app's initial, except Paddock ('k'), whose 'p' would collide with Pacenotes and Pitcrew when inlined together. */
+const idp = app => (app === 'paddock' ? 'k' : app[0]);
 
 /** Render glyph layers. paint = { primary, secondary, accent } (each a colour or url()). */
 function renderGlyph(layers, paint, uid) {
   const defs = [], body = [];
   layers.forEach((L, i) => {
-    const fill = paint[L.tone] ?? paint.primary;
+    let fill = paint[L.tone] ?? paint.primary;
+    if (L.tone === 'family' && paint.family) {
+      // Hard-stop gradient: one segment per app hue, left to right in STRIPE order.
+      const id = `${uid}fam${i}`, n = STRIPE.length;
+      const stops = STRIPE.map((a, k) => `<stop offset="${(k / n).toFixed(4)}" stop-color="${STRIPE_COLOUR(a)}"/><stop offset="${((k + 1) / n).toFixed(4)}" stop-color="${STRIPE_COLOUR(a)}"/>`).join('');
+      defs.push(`<linearGradient id="${id}" x1="${L.x0}" y1="0" x2="${L.x1}" y2="0" gradientUnits="userSpaceOnUse">${stops}</linearGradient>`);
+      fill = `url(#${id})`;
+    }
     let maskAttr = '';
     if (L.cut || L.cutStroke) {
       const id = `${uid}m${i}`;
@@ -326,14 +389,14 @@ function inkPaint(app, concept, uid) {
     };
   }
   const ink = INK[app];
-  return { defs: '', paint: { primary: ink, secondary: ink, accent: ink, secondaryOpacity: app === 'spotter' ? 0.55 : 0.6 } };
+  return { defs: '', paint: { primary: ink, secondary: ink, accent: ink, family: true, secondaryOpacity: app === 'spotter' ? 0.55 : 0.6 } };
 }
 
 /**
  * 1024 master. platform 'macos': squircle body 824 at (100,100) with drop shadow (Big Sur grid).
  * platform 'windows': near full-bleed rounded square (margin 40, circular corners), no outer shadow.
  */
-export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(app[0]) } = {}) {
+export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)) } = {}) {
   const p = PALETTE[app];
   const mac = platform === 'macos';
   const x = mac ? 100 : 40, s = mac ? 824 : 944;
@@ -372,7 +435,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     <path d="M${x - 40} ${x + s * 1.19}L${x + s * 1.19} ${x - 40}L${x + s * 1.23} ${x - 40}L${x - 40} ${x + s * 1.23}Z" fill="${liveryCol}" opacity="${liveryOp * 1.1}"/>
     <rect x="${x}" y="${x}" width="${s}" height="${s}" fill="url(#${uid}sheen)"/>
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>
-    ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}
+    ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="0.14" stroke-width="${f(4 * scale)}"/>` : ''}
   </g>
   <g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>
 </svg>
@@ -380,14 +443,15 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
 }
 
 /** Hand-tuned small app icon (Windows-style near full-bleed tile; used for the .ico 16/24/32/48 frames). */
-export function smallSvg(app, size, { uid = newUid(app[0]) } = {}) {
+export function smallSvg(app, size, { uid = newUid(idp(app)) } = {}) {
   const p = PALETTE[app];
-  const grid = size === 16 ? 16 : 32;
+  // 16 has its own grid; 24 too where an app draws one (GLYPH_SMALL[24]); otherwise 24, 32 and 48 share the 32 grid.
+  const grid = size === 16 ? 16 : size === 24 && GLYPH_SMALL[24]?.[app] ? 24 : 32;
   const layers = GLYPH_SMALL[grid][app];
   const ink = inkPaint(app, 'enamel', uid);
   const glyph = renderGlyph(layers, ink.paint, uid);
   const inset = grid === 16 ? 0.5 : 1;
-  const R = grid === 16 ? 3.5 : 7;
+  const R = grid === 16 ? 3.5 : grid === 24 ? 5.25 : 7;
   const t = rr(inset, inset, grid - 2 * inset, grid - 2 * inset, R);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${grid} ${grid}">
   <title>${NAMES[app]} ${size}px</title>
@@ -396,7 +460,7 @@ export function smallSvg(app, size, { uid = newUid(app[0]) } = {}) {
     ${glyph.defs}
   </defs>
   <path d="${t}" fill="url(#${uid}bg)"/>
-  <path d="${rr(inset + 0.25, inset + 0.25, grid - 2 * inset - 0.5, grid - 2 * inset - 0.5, R - 0.25)}" fill="none" stroke="${p.deep}" stroke-opacity="${app === 'spotter' ? 0.45 : 0.35}" stroke-width="0.5"/>
+  <path d="${rr(inset + 0.25, inset + 0.25, grid - 2 * inset - 0.5, grid - 2 * inset - 0.5, R - 0.25)}" fill="none" stroke="${p.rim ?? p.deep}" stroke-opacity="${p.rim ? 0.22 : app === 'spotter' ? 0.45 : 0.35}" stroke-width="0.5"/>
   ${glyph.body}
 </svg>
 `;
@@ -447,6 +511,8 @@ function trayGlyph(app, status) {
         { kind: 'fill', d: rr(4.5, 1.5, 8.5, 12, 1.5), tone: 'primary', cutStroke: { d: 'M7 10.5C7 9 9.5 9.4 9.5 7.5', w: 1.2, cap: 'butt' } },
         { kind: 'stroke', d: 'M1.8 4H4.5M1.8 7H4.5M1.8 10H4.5', w: 1.3, tone: 'primary', cap: 'butt' },
       ];
+    case 'paddock':
+      return PADDOCK.tray;
     case 'dyno': {
       const n = status === 'high' ? 372 : 300;
       return [

@@ -269,8 +269,36 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 
 <g>
 <rect class="found" x="75" y="1180" width="1450" height="346" rx="20"/>
-<text class="ft" x="107" y="1226">Paddock</text>
-<text class="fs" x="107" y="1254">The shared foundation under every app.</text>
+<svg x="101" y="1202" width="60" height="60" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="k0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4A525E"/><stop offset="0.55" stop-color="#2B3038"/><stop offset="1" stop-color="#1E2228"/>
+    </linearGradient>
+    <radialGradient id="k0sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="k0edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="k0clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="k0gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#07080A" flood-opacity="0.32"/></filter>
+    <filter id="k0ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <linearGradient id="k0fam0" x1="205" y1="0" x2="819" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0.0000" stop-color="#5590FF"/><stop offset="0.1429" stop-color="#5590FF"/><stop offset="0.1429" stop-color="#8A5AE6"/><stop offset="0.2857" stop-color="#8A5AE6"/><stop offset="0.2857" stop-color="#BFA2EE"/><stop offset="0.4286" stop-color="#BFA2EE"/><stop offset="0.4286" stop-color="#DE559F"/><stop offset="0.5714" stop-color="#DE559F"/><stop offset="0.5714" stop-color="#FF8A4C"/><stop offset="0.7143" stop-color="#FF8A4C"/><stop offset="0.7143" stop-color="#FFD257"/><stop offset="0.8571" stop-color="#FFD257"/><stop offset="0.8571" stop-color="#C2A845"/><stop offset="1.0000" stop-color="#C2A845"/></linearGradient><mask id="k0m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M292.71 222V502M380.43 222V502M468.14 222V502M555.86 222V502M643.57 222V502M731.29 222V502" fill="none" stroke="#000" stroke-width="10" stroke-linecap="butt"/></mask><mask id="k0m1" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M244 547H780M244 606H780" fill="none" stroke="#000" stroke-width="16" stroke-linecap="butt"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#k0bg)" filter="url(#k0ts)"/>
+  <g clip-path="url(#k0clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#k0sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#k0edge)" stroke-width="6"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="4"/>
+  </g>
+  <g filter="url(#k0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M244 424L512 300L780 424" fill="none" stroke="url(#k0fam0)" stroke-width="78" stroke-linecap="round" stroke-linejoin="round" mask="url(#k0m0)"/><path d="M290 488H396.67A16 16 0 0 1 412.67 504V648A16 16 0 0 1 396.67 664H290A16 16 0 0 1 274 648V504A16 16 0 0 1 290 488ZM458.67 488H565.33A16 16 0 0 1 581.33 504V648A16 16 0 0 1 565.33 664H458.67A16 16 0 0 1 442.67 648V504A16 16 0 0 1 458.67 488ZM627.33 488H734A16 16 0 0 1 750 504V648A16 16 0 0 1 734 664H627.33A16 16 0 0 1 611.33 648V504A16 16 0 0 1 627.33 488Z" fill="#FFFFFF" mask="url(#k0m1)"/><path d="M270 698H754A26 26 0 0 1 780 724V724A26 26 0 0 1 754 750H270A26 26 0 0 1 244 724V724A26 26 0 0 1 270 698Z" fill="#FFFFFF"/></g>
+</svg>
+<text class="ft" x="175" y="1226">Paddock</text>
+<text class="fs" x="175" y="1254">The shared foundation under every app.</text>
 <rect class="chip" x="781" y="1210" width="76" height="32" rx="16"/><text class="chiplbl" x="819" y="1231" text-anchor="middle">UI kit</text><rect class="chip" x="867" y="1210" width="128" height="32" rx="16"/><text class="chiplbl" x="931" y="1231" text-anchor="middle">Design system</text><rect class="chip" x="1005" y="1210" width="113" height="32" rx="16"/><text class="chiplbl" x="1061.5" y="1231" text-anchor="middle">Diagram kit</text><rect class="chip" x="1128" y="1210" width="91" height="32" rx="16"/><text class="chiplbl" x="1173.5" y="1231" text-anchor="middle">Icon set</text><rect class="chip" x="1229" y="1210" width="158" height="32" rx="16"/><text class="chiplbl" x="1308" y="1231" text-anchor="middle">Release practices</text><rect class="chip" x="1397" y="1210" width="84" height="32" rx="16"/><text class="chiplbl" x="1439" y="1231" text-anchor="middle">Lessons</text>
 <g><rect class="layer wb" x="95" y="1276" width="1410" height="100" rx="14"/>
 <text class="lt" x="119" y="1312">Workbench</text><svg x="237" y="1289" width="30" height="30" viewBox="60 60 904 904" overflow="visible">

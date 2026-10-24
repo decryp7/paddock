@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=7c468da5" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=1268df39" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -15,7 +15,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=9511e646) and [dark](images/paddock-ecosystem-dark.png?v=41f6fbfe), integrations
+hero [light](images/paddock-ecosystem-light.png?v=e68d3456) and [dark](images/paddock-ecosystem-dark.png?v=a1b06d58), integrations
 [light](images/paddock-integrations-light.png?v=bb3fc28b) and [dark](images/paddock-integrations-dark.png?v=68a820ad). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
 `CHROME` to override).
@@ -174,7 +174,7 @@ Pitwall is the AI hub, never a dependency. Every app's core works without it:
 - **`@decryp7/paddock-ui`** on the Gitea npm registry: tokens, Angular components, ECharts theme ([`ui/`](../ui/README.md)).
 - **Design guide and tokens**: five accents and a colour-vision-safe categorical palette ([design guide](design-guide.md)).
 - **Diagram kit**: draw.io shape library, templates and canonical export ([`diagrams/`](../diagrams/README.md)).
-- **Icon set**: one icon per app, per platform ([`icons/`](../icons/README.md)).
+- **Icon set**: one icon per app, per platform, and the Paddock mark itself: pit garages on a slab striped in the seven app hues ([`icons/`](../icons/README.md)).
 - **Shared Rust crates** (planned): the plugin platform, `paddock-pitwall` and `paddock-testplan` ([`crates/`](../crates/README.md)).
 - **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script. Apple notarization and Windows code signing are deferred until the releases settle (2026-10-23); every app's release notes carry a "First launch" note (macOS Open Anyway, Windows More info > Run anyway).
 - **Lessons**: what Debrief and Pitcrew taught about build, windows, services, native feel and tests ([lessons](lessons.md)).

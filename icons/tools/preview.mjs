@@ -1,7 +1,7 @@
 // Writes preview.html: a self-contained review sheet with inline SVGs (unique ids per instance).
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { APPS, NAMES, PALETTE, INK, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { APPS, UMBRELLA, NAMES, PALETTE, INK, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { check, contrast } from './cvd.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -229,6 +229,15 @@ const html = `<!doctype html>
     <div class="panel dark"><div class="grid5">${APPS.map(a => `<div class="cell">${carbon(a, 180)}<div class="sizes">${carbon(a, 32)}${carbon(a, 16)}</div></div>`).join('')}</div>
       <p class="note">Why it was not chosen: all five tiles share one dark body, so at 16 to 32 px only a thin coloured glyph tells them apart, and on a dark Windows taskbar or in the dark Dock the tiles sink into the background. Enamel puts the identity hue on the whole tile, so it holds up at every size and on every background.</p></div>
   </div>
+</section>
+<section>
+  <h2>The Paddock mark (umbrella)</h2>
+  <p class="sub">Not an app: the family and its shared foundation. Pit garages under one roof striped in the seven app hues, on an asphalt-graphite tile with no hue of its own. Shown beside Debrief for scale, then the hand-tuned frames and the tray template.</p>
+  <div class="split">
+    ${['panel', 'panel dark'].map(c => `<div class="${c}"><div class="sizes">${UMBRELLA.map(a => `<figure>${mac(a, 200)}<figcaption>${NAMES[a]}</figcaption></figure>`).join('')}<figure>${mac('debrief', 200)}<figcaption>Debrief</figcaption></figure></div>
+      <div class="sizes" style="margin-top:18px">${UMBRELLA.map(a => [64, 32, 16].map(s => `<figure>${mac(a, s)}<figcaption>${s}</figcaption></figure>`).join('') + [48, 32, 24, 16].map(s => `<figure>${small(a, s)}<figcaption>${s}</figcaption></figure>`).join('')).join('')}</div></div>`).join('')}
+  </div>
+  <div class="panel" style="margin-top:16px">${UMBRELLA.map(a => `<div class="trayrow"><div class="label">${NAMES[a]}</div><figure class="trayfig"><div class="chips"><span class="chip mac-l">${tray(a, 'default', 'template', 18)}</span><span class="chip mac-d">${tray(a, 'default', 'template', 18)}</span><span class="chip win-l">${tray(a, 'default', 'light')}</span><span class="chip win-d">${tray(a, 'default', 'dark')}</span></div><figcaption>tray</figcaption></figure></div>`).join('')}</div>
 </section>
 </body></html>
 `;

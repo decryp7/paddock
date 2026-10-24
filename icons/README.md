@@ -1,6 +1,7 @@
 # Icons
 
-The family icon set: app icons for Debrief, Pitcrew, Spotter, Pitwall, Dyno, Sighter and Pacenotes. All seven are approved.
+The family icon set: app icons for Debrief, Pitcrew, Spotter, Pitwall, Dyno, Sighter and Pacenotes (all seven approved), and the
+Paddock mark itself (the umbrella, see below).
 Open `preview.html` to review them, or see the renders in `screenshots/`.
 
 | App | Status |
@@ -8,6 +9,7 @@ Open `preview.html` to review them, or see the renders in `screenshots/`.
 | Debrief, Pitcrew, Spotter, Pitwall, Dyno | Approved |
 | Sighter | Approved (2026-10-23) |
 | Pacenotes | Approved (2026-10-23) |
+| Paddock (umbrella mark) | Reviewed (2026-10-24) |
 
 ## Build
 
@@ -15,7 +17,8 @@ Open `preview.html` to review them, or see the renders in `screenshots/`.
 cd icons
 npm ci
 npm run all                  # everything: SVG, PNG, tray, Tauri sets, .ico, preview, screenshots
-ONLY=pacenotes node tools/build.mjs   # one app
+ONLY=pacenotes node tools/build.mjs   # one app (or ONLY=paddock for the umbrella mark)
+node tools/umbrella-sheet.mjs <dir>   # review renders: the umbrella beside the apps, small frames, tray
 ```
 
 Edit only `tools/design.mjs`; every SVG is generated from the geometry there. Output is deterministic except `tauri/icon.icns`,
@@ -66,6 +69,17 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 - **Pitwall:** a radio bubble with the voice kept inside it: a private, local model.
 - **Sighter:** a pointer arrow inside a sighting reticle (four ring arcs with ticks through the gaps): it finds UI elements by sight. Lavender tile `#A686D6` (2026-10-24, with the plum UI accent; it replaced the first cyan tile): the closest tile to the plum accent that keeps all four CVD minimums of the family (17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan); a plum tile `#975EA2` dropped them to 10.2, 6.7, 5.1 against Dyno. Lime was rejected earlier (3.3 to 4.3 dE from Spotter or Pitcrew under protan/deutan). Dark ink (`#2D1D43`, 5.1:1) because white reaches only 3.0:1 on the light tile.
 - **Pacenotes:** a portrait spiral notebook with a second page peeking out behind it, rings through punched holes on the left edge, ruled lines, a small route curve drawn like a pacenote and a compact `</>` mark: notes about the road ahead, here the shape of a codebase. The first version (a squarish card with flat tabs) was rejected as not reading as a notebook. At 32 px the code mark drops out, at 16 px only rings, page and one curve remain. A variant with the spiral along the top is `alternative/pacenotes-top-spiral` (the left spiral was clearer at 16 px); the first-round concept `alternative/pacenotes-brackets-road` is kept too. Bronze-olive tile `#6D590F` (2026-10-24, with the olive UI accent; it replaced the first crimson tile): the closest tile to the olive accent that keeps all four CVD minimums (an olive tile `#657C1F` dropped protanopia to 1.6 against Pitcrew). White ink gives 6.8:1.
+- **Paddock (umbrella mark, not an app):** pit garages under one gable roof, on a shared foundation slab. The roof is the family
+  stripe: the seven app hues side by side, in hue order (blue Debrief, violet Pitwall, lavender Sighter, magenta Dyno, orange
+  Pitcrew, amber Spotter, olive Pacenotes), so the family literally covers the teams' bays. Asphalt-graphite tile `#2B3038` with
+  white ink (13.3:1): it has no hue of its own, so it reads as the place rather than one more app, and it is clearly apart from the
+  light silver Shell Demo tile (ΔE 57). A near-black tile keeps every family CVD minimum unchanged (17.7, 11.6, 13.6, 10.7); its own
+  nearest neighbours are Pacenotes (19.5 normal, 20.1 deutan), Dyno (17.9 protan) and Pitwall (12.2 tritan). A lighter slate
+  (`#333A44` and up) dropped tritanopia against Pitwall to 8.8. Pitwall's and Pacenotes' roof segments are lifted (`#8A5AE6`,
+  `#B49A3C`) so they do not sink into the tile; the tile has a faint light rim for dark docks and taskbars. At 16 px and in the tray
+  the row drops to two bays on whole pixels; monochrome renders draw the roof in plain ink. Extra web set in `paddock/web/`:
+  `favicon.svg`, `favicon.ico` (16/32/48), `apple-touch-icon.png`, `paddock-512.png` and `paddock-avatar-512.png` (the Windows
+  master, which fills a square avatar crop).
 - **Dyno:** a dynamometer gauge with a load arc and the needle near the redline.
 
 ## Layout
@@ -78,6 +92,7 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 <app>/tray/macos/<name>-{16,18}ptTemplate[@2x].png   menu-bar template images
 <app>/tray/windows/<name>-{light,dark}-{16,20,24,32}.png and .ico
 <app>/tauri/                                    drop-in replacement for src-tauri/icons
+paddock/web/                                    favicon (svg, ico), apple-touch-icon, 512 and avatar PNGs (umbrella only)
 alternative/<app>-carbon.svg                    Carbon concept
 preview.html, screenshots/                      review sheet and renders
 tools/                                          generators (design.mjs is the source of truth)
