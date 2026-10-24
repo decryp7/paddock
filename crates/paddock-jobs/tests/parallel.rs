@@ -7,13 +7,28 @@ fn w(n: usize) -> Workers {
     Workers::new(n)
 }
 
+/// Yields until `ready` holds. It is an event wait, not a time limit: a bounded number of turns stops a hung test,
+/// after which the test's own assertions fail.
+fn wait_until(ready: impl Fn() -> bool) {
+    for _ in 0..50_000_000 {
+        if ready() {
+            return;
+        }
+        std::thread::yield_now();
+    }
+}
+
 #[test]
 fn map_keeps_input_order_whatever_the_timing() {
     let items: Vec<u64> = (0..200).collect();
     let counter = AtomicU64::new(0);
+    let finished = AtomicUsize::new(0);
     let out = par_map_ordered(items.clone(), w(8), &CancelToken::new(), &counter, |i| {
-        // Early items are slowest, so completion order is the reverse of input order.
-        std::thread::sleep(Duration::from_micros((200 - i) * 20));
+        // Item 0 finishes after 4 later items, so completion order differs from input order whatever the timing.
+        if i == 0 {
+            wait_until(|| finished.load(Ordering::SeqCst) >= 4);
+        }
+        finished.fetch_add(1, Ordering::SeqCst);
         Ok(i * 2)
     })
     .unwrap();
@@ -108,7 +123,7 @@ fn cancel_stops_promptly_and_reports_the_reason() {
         if started.fetch_add(1, Ordering::SeqCst) == 50 {
             cancel.cancel();
         }
-        std::thread::sleep(Duration::from_micros(200));
+        std::thread::yield_now();
         Ok(i)
     });
     assert!(matches!(r, Err(JobError::Cancelled(CancelReason::User))));
@@ -149,7 +164,8 @@ fn in_flight_items_are_bounded_by_the_window() {
         &CancelToken::new(),
         |i| {
             if i == 0 {
-                std::thread::sleep(Duration::from_millis(60));
+                // Item 0 is held back until the source has run as far ahead as the window allows (it cannot go further).
+                wait_until(|| produced.load(Ordering::SeqCst) >= 6);
             }
             Ok(i)
         },
@@ -172,9 +188,12 @@ fn pipeline_overlaps_discovery_and_processing() {
     // The first result is delivered before the (slow) source has produced everything.
     let produced = AtomicUsize::new(0);
     let at_first = AtomicUsize::new(usize::MAX);
-    let src = (0..20u32).inspect(|_| {
+    let src = (0..20u32).inspect(|n| {
         produced.fetch_add(1, Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(5));
+        if *n == 19 {
+            // The source's last item waits for the first result: only a pipeline that overlaps can deliver it.
+            wait_until(|| at_first.load(Ordering::SeqCst) != usize::MAX);
+        }
     });
     pipeline_ordered(src, w(2), 4, &CancelToken::new(), Ok, |x| {
         if x == 0 {
