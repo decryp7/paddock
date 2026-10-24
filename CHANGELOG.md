@@ -4,6 +4,20 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Changed
+- X21 data parts after the independent review (`ui/docs/review/x21-data/REVIEW.md`): `pd-table` keeps its primary column at 128 px
+  or more (optional columns drop out from the right as the table narrows; the action column is sized to what the rows can show;
+  compact toolbar), rows are 32 px by default (24/32/36 by density) under a 28 px header, a quiet sort chevron shows on hover and
+  focus, first column weight 500, selected rows get the accent tint and a 2 px bar, loading and error states and a projected
+  next step for an empty table, middle ellipsis measured as one piece of text (`pd-middle-text`). Menus use shared `.pd-popmenu`
+  classes (surface-3, 2 px focus ring inset, icon slot, rule before destructive items) and `copy-menu` gets the same ring.
+  `pd-chart` draws a visible title (label and unit), loading and error states with Retry; donut: total in the middle, every slice named
+  with value and share, slice order chosen so neighbours (the wrap-around pair too) keep delta-E 20 under protan, deutan and
+  tritan (tested over the real palettes in `test/tokens/ring.spec.ts`), more than five slices merge into "Other"; only the top
+  stacked-bar segment is rounded; a lone value between gaps gets a marker; one series uses the accent. `pd-field` puts the error
+  under the control in place of the hint and takes `size="short"`. New `columns` glyph. Design guide: palette slot 6 (light) is
+  #494FDB as in the CSS.
+
 ### Added
 - `paddock-net` (plan X16): the outbound HTTP policy. `Egress` (`send`, `stream`, `set_offline`, `download_transport`), `Policy`
   (reach, redirects, caps, timeouts, allow-list, per-host gap), `Reach`/`Class` classification, `Wire`/`Lookup` ports with `UreqWire`
