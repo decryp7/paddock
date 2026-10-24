@@ -375,6 +375,15 @@ mod tests {
     }
 
     #[test]
+    fn the_default_redactor_has_the_default_rules() {
+        let (s, c) = Redactor::default().text("token=abc and 10.0.0.1");
+        assert_eq!(
+            (s.as_str(), c.secrets, c.ip_addresses),
+            ("token=[redacted] and <ip>", 1, 1)
+        );
+    }
+
+    #[test]
     fn machine_variables_that_are_missing_or_tiny_are_skipped() {
         let r = Redactor::for_machine(&MapVars::new().with("USER", "x"));
         assert_eq!(r.text("x marks").0, "x marks");

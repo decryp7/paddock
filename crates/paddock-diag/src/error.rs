@@ -74,3 +74,48 @@ pub(crate) fn io<'a>(
         source,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn every_error_says_what_to_change() {
+        let failure = DiagError::Io {
+            action: "write",
+            path: PathBuf::from("/data/r.zip"),
+            source: std::io::Error::other("disk full"),
+        };
+        let text = failure.to_string();
+        assert!(
+            text.contains("Could not write /data/r.zip: disk full")
+                && text.contains("Choose another folder")
+        );
+        assert_eq!(
+            failure.source().map(ToString::to_string).as_deref(),
+            Some("disk full")
+        );
+        for (error, want) in [
+            (
+                DiagError::BadDestination("Save it as .zip.".into()),
+                "Save it as .zip.",
+            ),
+            (DiagError::BadName("../x".into()), "\"../x\" is not allowed"),
+            (
+                DiagError::Duplicate("a.txt".into()),
+                "already has a file called \"a.txt\"",
+            ),
+            (
+                DiagError::Zip("broken".into()),
+                "could not be packed: broken",
+            ),
+            (DiagError::Cancelled, "nothing was saved"),
+        ] {
+            assert!(error.to_string().contains(want), "{error}");
+            assert!(error.source().is_none());
+        }
+        let wrapped = io("read", Path::new("/x"))(std::io::Error::other("no"));
+        assert!(matches!(wrapped, DiagError::Io { action: "read", .. }));
+    }
+}

@@ -557,3 +557,86 @@ fn suggested_names_carry_the_app_and_the_time() {
         "demo-diagnostics-20261024-103000.zip"
     );
 }
+
+#[test]
+fn a_cut_never_splits_a_character() {
+    let (_root, d) = machine();
+    // 999 bytes: the 1000-byte cut would land inside the 500th "é" (2 bytes each, after one ASCII byte).
+    let limits = Limits {
+        max_files: MAX_FILES,
+        max_file_bytes: 1000,
+        max_total_bytes: MAX_TOTAL_BYTES,
+    };
+    let text = format!("a{}", "é".repeat(2000));
+    let sections: Vec<Arc<dyn Section>> = vec![Arc::new(Fixed(
+        SectionOutput::one(file("wide.txt", &text)),
+        "wide",
+    ))];
+    let c = Collected::collect_with(&app_info(), &d, &sections, &redactor(), now(), limits);
+    let cut = String::from_utf8(c.files()[0].data.clone()).expect("valid UTF-8 after the cut");
+    assert!(cut.ends_with(TRUNCATION_NOTE));
+    // The description is cut the same way.
+    let long = format!("a{}", "é".repeat(MAX_DESCRIPTION));
+    let capped = cap_description(&long);
+    assert!(
+        capped.ends_with('…') && capped.len() <= MAX_DESCRIPTION + 3,
+        "{}",
+        capped.len()
+    );
+}
+
+#[test]
+fn a_destination_under_a_file_is_refused() {
+    let out = tempfile::tempdir().unwrap();
+    let plain = out.path().join("plain.txt");
+    std::fs::write(&plain, "x").unwrap();
+    let e = validate_destination(&plain.join("r.zip")).unwrap_err();
+    assert!(
+        matches!(e, DiagError::BadDestination(_)) && e.to_string().contains("does not exist"),
+        "{e}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_folder_that_cannot_be_written_is_a_typed_error_and_leaves_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_root, d) = machine();
+    let report = Collected::collect(&app_info(), &d, &[], &redactor(), now()).assemble("");
+    let out = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(out.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let result = report.save(&out.path().join("r.zip"), &CancelToken::new(), &());
+    std::fs::set_permissions(out.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    // A process that may write anyway (root in a container) is not a failure of the code under test.
+    if let Err(e) = result {
+        assert!(
+            matches!(
+                e,
+                DiagError::Io {
+                    action: "write",
+                    ..
+                }
+            ),
+            "{e}"
+        );
+        assert!(e.to_string().contains("Choose another folder"));
+        assert_eq!(std::fs::read_dir(out.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn a_settings_file_that_cannot_be_inspected_is_a_note() {
+    let root = tempfile::tempdir().unwrap();
+    let d = dirs(root.path());
+    // The config folder is a file: looking inside it fails with something other than "not found".
+    std::fs::create_dir_all(root.path()).unwrap();
+    std::fs::write(d.config(), b"not a folder").unwrap_or_default();
+    let c = Collected::collect(&app_info(), &d, &builtin::all(), &redactor(), now());
+    assert!(
+        c.notes()
+            .iter()
+            .any(|n| n.contains("settings file cannot be read")),
+        "{:?}",
+        c.notes()
+    );
+}
