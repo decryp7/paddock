@@ -137,6 +137,8 @@ describe('persistence', () => {
     first.rendered.fixture.destroy();
     const second = await mountDock({ views, store });
     expect(second.dock.openPanels()).toEqual(['a.one', 'a.two']);
+    // Regression (review 2 P2-F): a restored layout raises no activation, yet its front panel is the active one.
+    expect(second.dock.activePanel()).toBe('a.two');
   });
 
   it('builds the default layout from corrupt or foreign stored data', async () => {

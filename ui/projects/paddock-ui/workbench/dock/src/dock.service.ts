@@ -291,6 +291,8 @@ export class WorkbenchDock {
     void this.persistence.load().then((saved) => {
       if (token !== this.attachment || this.ctx.api !== api) return;
       this.start(api, saved);
+      // A restored layout raises no activation: the panel in front is the active one from the start (review 2 P2-F).
+      this.activeView.set(api.activePanel?.id ?? null);
     });
     this.unreturned = this.ctx.windows()?.onReturned((panel) => this.returned(panel)) ?? null;
   }
