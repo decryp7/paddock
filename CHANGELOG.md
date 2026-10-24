@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-channels` (plan X17): outbound notification channels (webhook, ntfy, e-mail) from Pitcrew's `notify-channels` and
+  Spotter's `mail.rs`. `Settings` with `validate`, secrets through `paddock-secrets` (`channel:<id>`), bounded `Message`s,
+  `Dispatcher` (parallel channels, retries with `paddock_jobs::time` back-off and `Retry-After`, cancel, panics contained,
+  `test` / `test_with` for the settings page), ports `HttpPoster` (`UreqPoster` over `paddock-download`'s agent, proxy and OS
+  certificates) and `MailSender` (`LettreSender`), `FakePoster` / `FakeMail`. `paddock_download::ureq_agent` is new: the one
+  place the TLS and proxy set-up of a ureq agent lives.
 - `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
   It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
   actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
