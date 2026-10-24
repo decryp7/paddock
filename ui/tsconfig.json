@@ -16,7 +16,8 @@
     "moduleResolution": "bundler",
     "paths": {
       "@decryp7/paddock-ui": ["./projects/paddock-ui/src/public-api.ts"],
-      "@decryp7/paddock-ui/*": ["./projects/paddock-ui/*/public-api.ts"]
+      "@decryp7/paddock-ui/*": ["./projects/paddock-ui/*/public-api.ts"],
+      "@decryp7/paddock-e2e": ["./projects/paddock-e2e/src/index.ts"]
     }
   },
   "angularCompilerOptions": { "strictInjectionParameters": true, "strictInputAccessModifiers": true, "strictTemplates": true },

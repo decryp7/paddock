@@ -58,6 +58,10 @@ jobs:
         run: npx ng build shell-demo
 
       - name: Reference app checks (gallery and shell demo; axe, keyboard, CSP, 320 px)
+        # CI names its ports (@decryp7/paddock-e2e refuses a default there: another job could hold it).
+        env:
+          PW_PORT: 4300
+          SHELL_DEMO_PORT: 4301
         run: |
           npx playwright install --with-deps chromium
           npx playwright test
