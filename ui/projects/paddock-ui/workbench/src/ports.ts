@@ -68,6 +68,8 @@ export interface PopOutPlacement {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  /** The scale factor of the display `x` and `y` are logical px of (what the drag ghost reports); without it Rust works it out. */
+  readonly scale?: number;
 }
 
 /**

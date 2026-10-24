@@ -22,7 +22,7 @@ bounds?: PopOutBounds,
 /**
  * Stay above the host window (an owned window), not above everything.
  */
-keepOnTop: boolean, };
+keepOnTop?: boolean, };
 
 export type PopOutInfo = { label: string, host: string, panel: string, title: string, 
 /**
@@ -60,7 +60,7 @@ snapshot?: string,
 /**
  * The window's colour scheme is dark (the ghost matches it).
  */
-dark: boolean, 
+dark?: boolean, 
 /**
  * The size the popped-out window will get (logical px).
  */

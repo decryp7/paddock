@@ -63,7 +63,8 @@ pub struct PopOutRequest {
     pub bounds: Option<PopOutBounds>,
     /// Stay above the host window (an owned window), not above everything.
     #[serde(default)]
-    pub keep_on_top: bool,
+    #[cfg_attr(test, ts(optional))]
+    pub keep_on_top: Option<bool>,
 }
 
 /// A pop-out as the UI sees it.
@@ -121,7 +122,8 @@ pub struct GhostRequest {
     pub snapshot: Option<String>,
     /// The window's colour scheme is dark (the ghost matches it).
     #[serde(default)]
-    pub dark: bool,
+    #[cfg_attr(test, ts(optional))]
+    pub dark: Option<bool>,
     /// The size the popped-out window will get (logical px).
     pub width: f64,
     pub height: f64,
@@ -211,7 +213,7 @@ mod tests {
     #[test]
     fn requests_refuse_unknown_fields_and_default_the_rest() {
         let r: PopOutRequest = serde_json::from_value(json!({ "panel": "pn.code" })).unwrap();
-        assert!(r.bounds.is_none() && r.title.is_none() && !r.keep_on_top);
+        assert!(r.bounds.is_none() && r.title.is_none() && r.keep_on_top.is_none());
         assert!(
             serde_json::from_value::<PopOutRequest>(json!({ "panel": "pn.code", "evil": 1 }))
                 .is_err()

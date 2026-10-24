@@ -1268,6 +1268,111 @@
       <trans-unit id="pd.updates.up-to-date" datatype="html">
         <source>You have the latest version.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.category.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.accept-failed" datatype="html">
+        <source>That result could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.category.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.cmd.commands" datatype="html">
+        <source>Show all commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.cmd.quick-open" datatype="html">
+        <source>Go to…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.dialog" datatype="html">
+        <source>Command palette</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.did-you-mean" datatype="html">
+        <source>Nothing matches “<x id="query"/>”. Did you mean:</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.empty" datatype="html">
+        <source>Nothing matches</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.failed" datatype="html">
+        <source>The search failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.input" datatype="html">
+        <source>Type a command, or a prefix to search</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.names-building" datatype="html">
+        <source>Still indexing names…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.open-view" datatype="html">
+        <source>Open <x id="view"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.placeholder" datatype="html">
+        <source>Type a command or search…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.prefix.commands" datatype="html">
+        <source>Commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.results" datatype="html">
+        <source>Results</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.searching" datatype="html">
+        <source>Searching…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.unavailable" datatype="html">
+        <source>Not available now</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.close" datatype="html">
+        <source>Close (dock back)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.close-title" datatype="html">
+        <source>Close (the panel docks back)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.connecting" datatype="html">
+        <source>Connecting to the main window…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.dock-back" datatype="html">
+        <source>Dock back into the main window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.dock-back-failed" datatype="html">
+        <source>Could not dock the panel back: <x id="reason"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.dock-back-short" datatype="html">
+        <source>Dock back</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.failed" datatype="html">
+        <source>Could not pop out <x id="title"/>: <x id="reason"/>. It stays docked.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.keep-on-top" datatype="html">
+        <source>Keep on top of the main window</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.keep-on-top-on" datatype="html">
+        <source>Keep on top of the main window (on): click to stop</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.limit" datatype="html">
+        <source>At most <x id="max"/> panels can be popped out of one window; dock one back first.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.maximise" datatype="html">
+        <source>Maximise</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.minimise" datatype="html">
+        <source>Minimise</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.missing" datatype="html">
+        <source>This panel is not available in this version. Dock it back or close the window.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.on-top-failed" datatype="html">
+        <source>Could not keep the window on top: <x id="reason"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.restore" datatype="html">
+        <source>Restore</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.panels.window" datatype="html">
+        <source>Window</source>
+      </trans-unit>
       <trans-unit id="pd.whats-new.failed" datatype="html">
         <source>The release notes could not be loaded.</source>
       </trans-unit>

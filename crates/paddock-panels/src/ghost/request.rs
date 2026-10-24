@@ -82,7 +82,7 @@ impl GhostRequest {
                 title: clean_title(&self.title),
                 icon,
                 snapshot,
-                dark: self.dark,
+                dark: self.dark.unwrap_or(false),
             },
             size: GhostSize {
                 width,
