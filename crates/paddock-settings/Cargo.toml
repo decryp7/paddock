@@ -20,6 +20,7 @@ regex = { version = "1", default-features = false, features = ["std", "unicode"]
 tauri = { workspace = true, optional = true }
 paddock-commands = { workspace = true, optional = true }
 paddock-health = { workspace = true, optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"
