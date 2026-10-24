@@ -5,8 +5,8 @@
   "build": {
     "frontendDist": "../../../ui/dist/shell-demo/browser",
     "devUrl": "http://localhost:4301",
-    "beforeDevCommand": "npm --prefix ../../ui run shell-demo",
-    "beforeBuildCommand": "npm --prefix ../../ui run shell-demo:build"
+    "beforeDevCommand": "node src-tauri/agent/sidecar.mjs --dev && npm --prefix ../../ui run shell-demo",
+    "beforeBuildCommand": "node src-tauri/agent/sidecar.mjs && npm --prefix ../../ui run shell-demo:build"
   },
   "app": {
     "windows": [
@@ -31,6 +31,7 @@
     "active": true,
     "targets": ["dmg", "app", "nsis", "deb", "appimage"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "externalBin": ["binaries/shell-demo-agent"],
     "category": "DeveloperTool",
     "copyright": "MIT OR Apache-2.0",
     "shortDescription": "The Paddock app shell as an app, to check the shared UI",

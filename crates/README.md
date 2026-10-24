@@ -97,6 +97,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
+| `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
@@ -705,6 +706,48 @@ file.save(&loaded.value)?;                                // atomic; refused whe
   Saves write a temporary file, fsync, rename; the previous good file becomes `.bak` (a damaged one never replaces it).
   `write_atomic` is the same replace for non-JSON files.
 
+## `paddock-packs` (plan X15)
+
+Knowledge packs (rule 21), from Spotter's `pack.rs`, Pitwall's `packs.rs`, Dyno's `cleanup/pack.rs` and the two `user_regex.rs` copies:
+
+```rust
+use paddock_packs::{BuiltinPack, DirSource, Limits, Origin, PackError, PackKind, PackLoader, PackStore, Reloader, user_packs_dir};
+
+struct Cleanup;
+impl PackKind for Cleanup {
+    type Raw = RawPack;                    // serde type of one file; no `deny_unknown_fields`, no `format` field
+    type Pack = Vec<Category>;             // what the app uses
+    const FORMAT: u32 = 1;
+    fn convert(raw: RawPack, origin: Origin) -> Result<Vec<Category>, PackError> { /* the app's own rules; origin tells user from built-in */ }
+}
+
+let loader = PackLoader::<Cleanup>::new(
+    vec![BuiltinPack { name: "builtin.toml", text: include_str!("builtin.toml") }],
+    Box::new(DirSource::new(user_packs_dir(&dirs))),
+    Limits::default(),
+);
+let store = Arc::new(PackStore::new(loader));
+store.observe(|snapshot| emit_packs_changed(snapshot));                    // once per real change
+let reloader = Arc::new(Reloader::new(store.clone(), Arc::new(SystemClock)));
+reloader.reload_now();                                                      // first load
+let _watch = paddock_packs::watch::spawn(reloader, &NotifySource, &user_packs_dir(&dirs))?;   // feature `watch`
+let snapshot = store.current();                                             // Arc<Snapshot>: packs, problems, warnings, health()
+```
+
+- One answer to a bad pack (decision D11): refused whole with a named reason (a syntax error names line and column); keys the
+  kind does not know are warnings naming the key (`unknown key "category.0.flavour" is ignored`). One bad pack never touches the
+  others; a pack that turns bad while running keeps its last good version and says so; a file deleted during a reload is gone,
+  not an error.
+- Limits (`Limits`, all bounded before the typed parse): file bytes (read at most max + 1), entries per list, string and key
+  length, nesting depth, values in the file, `*.toml` files in the folder. The folder source ignores dot-files, `~` files,
+  sub-folders and symbolic links. Nothing in a pack is executed or followed.
+- Reload: `Reloader` debounces on a `paddock_jobs::time::Clock` (300 ms quiet, 1.5 s at most), so a storm is one reload and
+  tests move a `FakeClock`. The new snapshot is built whole, then swapped; readers keep theirs. `watch::ChangeSource` is the
+  port (`FakeSource` for tests, `NotifySource` behind the `watch` feature); X23 (`paddock-watch`) replaces the adapter.
+- `user_regex`: `compile`, `compile_with`, `compile_set`; `RegexLimits::DEFAULT` (Debrief: 8 MiB) and `STRICT` (Spotter: 1 MiB);
+  typed `RegexError` (`TooLong`, `TooComplex`, `Invalid`) whose messages say what to fix.
+- `Snapshot::health()` gives the one line (`Ok`, `Notes`, `Degraded`) for the `packs` health or notification entry.
+
 ## `paddock-log` (plan X1)
 
 The log of every app, service and sidecar, from Debrief's `logging.rs` + `clef.rs` + the generic half of `activity/logger.rs`:
@@ -834,8 +877,10 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   every minute. `paddock_shell::Builder::service(|app| Ok(ServicePart::new(Setup::new(manager).health("agent"))))`
   wires it and the `pd.login` "Start at login" section (only a change by the user acts). The UI is
   `@decryp7/paddock-ui/shell/service` (Settings > Background service).
-- **The shell demo's agent** (`apps/shell-demo/src-tauri/src/agent.rs`, binary `shell-demo-agent`): a heartbeat-only
-  per-user agent, bundled with its generated plist and NSIS hooks, so the page, the health entry and
+- **The shell demo's agent** (crate `apps/shell-demo/src-tauri/agent`, binary `shell-demo-agent`): a heartbeat-only
+  per-user agent, bundled as Tauri's `externalBin` (`agent/sidecar.mjs` builds it per target triple in
+  `beforeBuildCommand`; the bundle check starts it from the built app with `--self-test`, rule 23), with its generated
+  plist and NSIS hooks, so the page, the health entry and
   `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
 - Not here: Task Scheduler entries (no app uses them).
 
