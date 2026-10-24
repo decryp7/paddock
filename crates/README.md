@@ -317,6 +317,40 @@ paddock_startup::tauri::install(tauri::Builder::default(), startup) // manage + 
 - Generated TypeScript: `ui/projects/paddock-ui/shell/startup/generated/startup.ts` (wire types) and
   `startup-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-startup --lib generated`).
 
+### Run lifecycle: unclean shutdown, safe mode, session restore (plan X3)
+
+Debrief's `lifecycle.rs`, shared. The app begins the run first thing in `main` (after `paddock-log` is installed with
+`with_app_dirs`, so a panic leaves its `CrashMarker` in the data folder) and hands it to the contract:
+
+```rust
+let mode = paddock_startup::Mode::from_launch(launch.safe_mode, std::env::var("PITWALL_SAFE_MODE").ok().as_deref());
+let life = paddock_startup::Lifecycle::begin(paddock_startup::Start {   // feature `os-probe`
+    data_dir: dirs.data(), process: "pitwall", mode,
+    scope: paddock_startup::InstanceScope::of(single_instance), app_version: env!("CARGO_PKG_VERSION"),
+});
+if !mode.allows(paddock_startup::Feature::Plugins) { /* do not load them */ }
+let startup = Startup::builder().safe_mode(restart_in_safe_mode).lifecycle(life).build()?;
+```
+
+- **Running marker** (`running.json`, a `VersionedFile`): `begin` writes it, `end` removes it on a clean exit (the shell
+  calls `paddock_startup::tauri::end_run` at `RunEvent::Exit`; an app without the plugin calls it itself). Left behind, it is a
+  crash when its process is gone; PID reuse is caught by the start time; a live predecessor is taken over; an unreadable or
+  newer marker is a crash. `paddock-log`'s crash marker also makes the start a crash and says which thread and where.
+- **Instances.** Safe mode and `--new-instance` use `instances/<pid>/` (marker, sessions), so they never rotate the main
+  instance's session or report its crash; dead ones are pruned; a crash in safe mode is told to the next normal start, which
+  then does not offer safe mode again.
+- **Session.** `ui_checkpoint` also goes to `session/current.json` on the autosave thread (newest state per window; the
+  clean exit flushes). At start the previous run's file becomes `recovered.json` and the run starts empty; an empty run
+  never wipes the recovered one. Torn, damaged or newer files start clean with a notice in the offer; at most 8 windows of
+  2 MiB.
+- **The offer.** `recovery_status` (main window only) answers `{ safeMode, unclean: { crash, session, offers } | null }`;
+  `recovery_restore` returns the windows and the asking window's state; `recovery_start_fresh` forgets the session;
+  `recovery_safe_mode` runs the app's restart and settles the notice only when it worked. The UI side is
+  `RecoveryStore` / `PdRecoveryNotice` / `PdSafeModeBadge` in `@decryp7/paddock-ui/shell/startup` (the pages frame places them).
+- Replaces: Debrief `app/src-tauri/src/lifecycle.rs` (marker, instances, `SessionStore`, `Lifecycle`) and
+  `app/src/app/lifecycle/` (`lifecycle-banners.ts`, `lifecycle.service.ts` safe-mode and crash parts, `session.service.ts`
+  checkpoint part). Debrief keeps the project-file format of its sessions: its `UiCheckpoint.capture()` returns the content.
+
 ## `paddock-window` (plan S12)
 
 Top-level windows, single instance and deep links, the bounded quit, native feel and the tray (ADR 0012 §3), ported

@@ -372,6 +372,8 @@ fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
         paddock_window::tauri::on_run_event(app, event);
     }
     if let RunEvent::Exit = event {
+        // First: the last checkpoint and the removal of the running marker are what makes this a clean exit.
+        paddock_startup::tauri::end_run(app);
         paddock_updater::tauri::on_exit(app);
         paddock_health::tauri::flush(app);
     }

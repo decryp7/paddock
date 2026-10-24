@@ -1,5 +1,5 @@
 import { Provider } from '@angular/core';
-import type { BootErrorKind, ReadyReply, Recovery } from '../generated/startup';
+import type { BootErrorKind, ReadyReply, Recovery, RestorePlan, StartReport, UncleanShutdown } from '../generated/startup';
 import { PING_EVENT } from '../generated/startup';
 import type { StartupCommand } from '../generated/startup-commands';
 import type { BootErrorSender } from './boot-errors';
@@ -20,6 +20,14 @@ export abstract class StartupBackend {
   abstract onPing(handler: (seq: number) => void): Promise<() => void>;
   /** Answers liveness ping `seq`. */
   abstract pong(seq: number): Promise<void>;
+  /** How this run started: safe mode, and after an unclean shutdown what the notice offers until the user decides. */
+  abstract recoveryStatus(): Promise<StartReport>;
+  /** The user chose Restore: the previous session, with this window's own UI state. */
+  abstract recoveryRestore(): Promise<RestorePlan>;
+  /** The user chose Start fresh: Rust forgets the previous session. */
+  abstract recoveryStartFresh(): Promise<void>;
+  /** The user chose Safe mode: Rust restarts the app in it (this window goes away; the call resolves when it started). */
+  abstract recoverySafeMode(): Promise<void>;
 }
 
 /**
@@ -57,6 +65,22 @@ export class TauriStartupBackend extends StartupBackend {
   pong(seq: number): Promise<void> {
     return this.ipc.invoke<void>('window_pong', { seq });
   }
+
+  recoveryStatus(): Promise<StartReport> {
+    return this.ipc.invoke<StartReport>('recovery_status');
+  }
+
+  recoveryRestore(): Promise<RestorePlan> {
+    return this.ipc.invoke<RestorePlan>('recovery_restore');
+  }
+
+  recoveryStartFresh(): Promise<void> {
+    return this.ipc.invoke<void>('recovery_start_fresh');
+  }
+
+  recoverySafeMode(): Promise<void> {
+    return this.ipc.invoke<void>('recovery_safe_mode');
+  }
 }
 
 /** The boot error sender over the app's IPC, for `startBootErrorForwarding` in `main.ts` (before Angular). */
@@ -69,6 +93,17 @@ export const MOCK_RECOVER_KEY = 'paddock.mock.recover';
 /** Where the mock keeps the checkpoint across a reload (Rust's memory in the real app). */
 export const MOCK_CHECKPOINT_KEY = 'paddock.mock.uiCheckpoint';
 
+/** Test hook of the mock: set to `1` (a default notice) or to the JSON of an `UncleanShutdown` before a load to play "the last run crashed". */
+export const MOCK_UNCLEAN_KEY = 'paddock.mock.unclean';
+/** Test hook of the mock: `1` plays a run in safe mode. Choosing Safe mode in the notice sets it (the restart). */
+export const MOCK_SAFE_MODE_KEY = 'paddock.mock.safeMode';
+
+const DEFAULT_UNCLEAN: UncleanShutdown = {
+  crash: null,
+  session: { available: true, windows: 1, problem: null },
+  offers: { restore: true, safeMode: true, startFresh: true },
+};
+
 const RECOVERIES: readonly Recovery[] = ['unresponsive', 'hung', 'terminated'];
 
 function storage(): Storage | null {
@@ -76,6 +111,17 @@ function storage(): Storage | null {
     return typeof sessionStorage === 'undefined' ? null : sessionStorage;
   } catch {
     return null;
+  }
+}
+
+function mockUnclean(raw: string | null): UncleanShutdown | null {
+  if (raw === null) return null;
+  if (raw === '1') return DEFAULT_UNCLEAN;
+  try {
+    const parsed = JSON.parse(raw) as UncleanShutdown | null;
+    return parsed && typeof parsed === 'object' && parsed.offers ? parsed : DEFAULT_UNCLEAN;
+  } catch {
+    return DEFAULT_UNCLEAN;
   }
 }
 
@@ -117,6 +163,41 @@ export class MockStartupBackend extends StartupBackend {
 
   async pong(seq: number): Promise<void> {
     this.pongs.push(seq);
+  }
+
+  /** The recovery commands the page sent (`restore`, `safe-mode`, `start-fresh`), for tests and the demo. */
+  readonly recoveryCalls: string[] = [];
+
+  async recoveryStatus(): Promise<StartReport> {
+    const s = storage();
+    const safeMode = s?.getItem(MOCK_SAFE_MODE_KEY) === '1';
+    return { safeMode, unclean: safeMode ? null : mockUnclean(s?.getItem(MOCK_UNCLEAN_KEY) ?? null) };
+  }
+
+  async recoveryRestore(): Promise<RestorePlan> {
+    this.recoveryCalls.push('restore');
+    const s = storage();
+    s?.removeItem(MOCK_UNCLEAN_KEY);
+    let ui: unknown = null;
+    try {
+      ui = JSON.parse(s?.getItem(MOCK_CHECKPOINT_KEY) ?? 'null');
+    } catch {
+      ui = null;
+    }
+    return { windows: ['main'], ui };
+  }
+
+  async recoveryStartFresh(): Promise<void> {
+    this.recoveryCalls.push('start-fresh');
+    storage()?.removeItem(MOCK_UNCLEAN_KEY);
+    storage()?.removeItem(MOCK_CHECKPOINT_KEY);
+  }
+
+  async recoverySafeMode(): Promise<void> {
+    this.recoveryCalls.push('safe-mode');
+    storage()?.removeItem(MOCK_UNCLEAN_KEY);
+    // The restart: the next load of the page is the safe-mode run.
+    storage()?.setItem(MOCK_SAFE_MODE_KEY, '1');
   }
 
   /** Sends ping `seq` to the page, as Rust's ticker does. */

@@ -2870,10 +2870,14 @@ version = "0.1.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-env",
+ "paddock-log",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-plugin-dialog",
+ "tempfile",
  "ts-rs",
 ]
 
