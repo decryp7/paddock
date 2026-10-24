@@ -5,7 +5,10 @@ use crate::guard::DialogGrant;
 use crate::labels::{Label, WindowClass, class_of, resolve};
 use crate::table::{MAX_LIMIT, MIN_LIMIT};
 use crate::testing::{self, FoundCommand, GeneratedError, Synced, WriteMode};
-use crate::{DEFAULT_LIMIT, Kind, MIB, RefusalCode, Spec, Table, TableError, Windows, check, ts};
+use crate::{
+    CommandError, DEFAULT_LIMIT, ErrorCode, Kind, MIB, RefusalCode, Spec, Table, TableError,
+    Windows, check, ts,
+};
 use std::path::{Path, PathBuf};
 
 crate::command_table! {
@@ -625,7 +628,27 @@ fn generated_files() -> Vec<(&'static str, String)> {
         .map(|d| format!("export {d}\n"))
         .collect::<Vec<_>>()
         .join("\n");
-    vec![("commands.ts", format!("{header}{types}"))]
+    // The IPC kit's types (`@decryp7/paddock-ui/ipc`, plan X28): the error envelope and the runtime list of its codes.
+    let ipc_header = format!(
+        "// Generated from the Rust wire types of paddock-commands (ts-rs). Do not edit: {REGENERATE}.\n\n"
+    );
+    let ipc_types = [ErrorCode::decl(), CommandError::decl()]
+        .into_iter()
+        .map(|d| format!("export {d}\n"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let codes = ErrorCode::ALL
+        .iter()
+        .map(|c| format!("'{}'", c.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ipc = format!(
+        "{ipc_header}{ipc_types}\n/** Every error code, for validating what arrives over the wire. */\nexport const ERROR_CODES: readonly ErrorCode[] = [{codes}];\n"
+    );
+    vec![
+        ("commands.ts", format!("{header}{types}")),
+        ("../../ipc/generated/ipc.ts", ipc),
+    ]
 }
 
 #[test]
@@ -893,4 +916,93 @@ fn a_composed_table_lists_every_part_in_order_with_its_specs() {
 #[should_panic(expected = "composed length")]
 fn a_composed_table_of_the_wrong_length_is_refused() {
     let _ = crate::table::concat::<2>(&[&PART_A, &PART_B]);
+}
+
+// ---- the error envelope (plan X28) ----
+
+#[test]
+fn an_error_serialises_to_the_wire_shape_and_skips_what_it_does_not_have() {
+    let plain = serde_json::to_value(CommandError::invalid(
+        "The port must be between 1 and 65535.",
+    ))
+    .unwrap();
+    assert_eq!(
+        plain,
+        serde_json::json!({"code": "invalid", "message": "The port must be between 1 and 65535.", "retryable": false})
+    );
+    let full = CommandError::unavailable("Pitwall is not running.")
+        .hint("Start it from the tray.")
+        .field("engine")
+        .cause("health:pitwall")
+        .kind("noEngine")
+        .retry(false);
+    assert_eq!(
+        serde_json::to_value(&full).unwrap(),
+        serde_json::json!({
+            "code": "unavailable", "message": "Pitwall is not running.", "retryable": false,
+            "hint": "Start it from the tray.", "field": "engine", "cause": "health:pitwall", "kind": "noEngine"
+        })
+    );
+    assert_eq!(full.to_string(), "Pitwall is not running.");
+}
+
+#[test]
+fn every_code_has_a_constructor_a_wire_name_and_a_retry_default() {
+    let all: Vec<CommandError> = vec![
+        CommandError::failed("m"),
+        CommandError::invalid("m"),
+        CommandError::not_found("m"),
+        CommandError::not_granted("m"),
+        CommandError::busy("m"),
+        CommandError::cancelled("m"),
+        CommandError::io("m"),
+        CommandError::limit("m"),
+        CommandError::unsupported("m"),
+        CommandError::unavailable("m"),
+        CommandError::denied("m"),
+        CommandError::missing("m"),
+        CommandError::timeout("m"),
+        CommandError::internal("m"),
+    ];
+    let codes: Vec<ErrorCode> = all.iter().map(|e| e.code).collect();
+    assert_eq!(codes, ErrorCode::ALL, "the constructors follow the list");
+    for e in &all {
+        let wire = serde_json::to_value(e.code).unwrap();
+        assert_eq!(wire, e.code.as_str(), "as_str is the serde name");
+        assert_eq!(e.retryable, e.code.retryable_by_default());
+    }
+    let retryable: Vec<&str> = all
+        .iter()
+        .filter(|e| e.retryable)
+        .map(|e| e.code.as_str())
+        .collect();
+    assert_eq!(retryable, ["busy", "io", "unavailable", "timeout"]);
+}
+
+#[test]
+fn foreign_errors_convert_at_the_edge() {
+    use std::io::{Error, ErrorKind};
+    assert_eq!(
+        CommandError::from(Error::from(ErrorKind::NotFound)).code,
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        CommandError::from(Error::from(ErrorKind::PermissionDenied)).code,
+        ErrorCode::Denied
+    );
+    let other = CommandError::from(Error::other("disk on fire"));
+    assert_eq!(
+        (other.code, other.message.as_str(), other.retryable),
+        (ErrorCode::Io, "disk on fire", true)
+    );
+    assert_eq!(CommandError::from("old helper").code, ErrorCode::Failed);
+    assert_eq!(
+        CommandError::from(String::from("old helper")).message,
+        "old helper"
+    );
+    let denied = run("query_page", "main", None, DEFAULT_LIMIT + 1).unwrap_err();
+    let e = CommandError::from(denied);
+    assert_eq!((e.code, e.retryable), (ErrorCode::Limit, false));
+    let refused = run("dialog_close", "main", None, 0).unwrap_err();
+    assert_eq!(CommandError::from(refused).code, ErrorCode::Denied);
 }
