@@ -19,6 +19,8 @@ tauri = ["dep:tauri", "dep:paddock-commands", "paddock-commands/tauri"]
 [dependencies]
 tauri = { workspace = true, optional = true }
 paddock-commands = { workspace = true, optional = true }
+croner = { version = "4", default-features = false, features = ["jiff"] }
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
