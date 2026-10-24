@@ -1,10 +1,11 @@
-import type { ChannelConfig, ChannelsError, ChannelsErrorCode, ChannelsEvent, ChannelsView, EmailSecurity, MinSeverity, Transport } from '../generated/channels';
+import type { ChannelConfig, ChannelsError, ChannelsErrorCode, ChannelsEvent, ChannelsView, EmailSecurity, MinSeverity, TestPhase, Transport } from '../generated/channels';
 
 // Payloads from the engine are parsed once, at this edge: what is not the expected shape is dropped here, and what passes is
 // rebuilt from known fields only.
 
 const SEVERITIES: ReadonlySet<string> = new Set<MinSeverity>(['info', 'warning', 'error']);
 const SECURITIES: ReadonlySet<string> = new Set<EmailSecurity>(['startTls', 'implicit', 'none']);
+const PHASES: ReadonlySet<string> = new Set<TestPhase>(['sending', 'waiting']);
 const CODES: ReadonlySet<string> = new Set<ChannelsErrorCode>(['invalid', 'storeUnavailable', 'busy', 'failed']);
 
 function isObject(v: unknown): v is Record<string, unknown> {
@@ -72,13 +73,22 @@ export function asChannelsError(e: unknown): ChannelsError | null {
   return { code: e['code'] as ChannelsErrorCode, message: e['message'], retryable: e['retryable'] === true };
 }
 
-/** A `ChannelsEvent` from `paddock://channels`, or null. */
+/** A `ChannelsEvent` (the outcome of a test, or its progress) from `paddock://channels`, or null. */
 export function parseChannelsEvent(v: unknown): ChannelsEvent | null {
-  if (!isObject(v) || v['kind'] !== 'test') return null;
-  const { testId, channelId, ok, attempts } = v;
+  if (!isObject(v)) return null;
+  const { testId, channelId } = v;
+  if (typeof testId !== 'number' || !Number.isInteger(testId) || typeof channelId !== 'string') return null;
+  if (v['kind'] === 'testProgress') {
+    const { attempt, of, phase } = v;
+    const waitSecs = v['waitSecs'] ?? null;
+    if (typeof attempt !== 'number' || !Number.isInteger(attempt) || attempt < 1 || typeof of !== 'number' || !Number.isInteger(of) || of < attempt) return null;
+    if (typeof phase !== 'string' || !PHASES.has(phase) || (waitSecs !== null && (typeof waitSecs !== 'number' || waitSecs < 0))) return null;
+    return { kind: 'testProgress', testId, channelId, attempt, of, phase: phase as TestPhase, waitSecs };
+  }
+  if (v['kind'] !== 'test') return null;
+  const { ok, attempts } = v;
   const message = v['message'] ?? null;
-  if (typeof testId !== 'number' || !Number.isInteger(testId) || typeof channelId !== 'string' || typeof ok !== 'boolean') return null;
-  if (typeof attempts !== 'number' || !Number.isInteger(attempts) || attempts < 0 || (message !== null && typeof message !== 'string')) return null;
+  if (typeof ok !== 'boolean' || typeof attempts !== 'number' || !Number.isInteger(attempts) || attempts < 0 || (message !== null && typeof message !== 'string')) return null;
   return { kind: 'test', testId, channelId, ok, attempts, message };
 }
 
