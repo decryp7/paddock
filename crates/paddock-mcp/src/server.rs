@@ -204,7 +204,7 @@ impl Server {
                 title: t.title.clone(),
                 description: t.description.clone(),
                 access: t.access,
-                exposed: policy.exposes(t),
+                exposed: policy.enabled && policy.exposes(t),
             })
             .collect()
     }
