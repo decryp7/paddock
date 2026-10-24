@@ -1101,6 +1101,9 @@ paddock_proc::end_all();                                       // at shutdown / 
 - Not yet: a Windows job object (`KILL_ON_JOB_CLOSE`). Windows trees end through `taskkill /T /F`, which cannot reach a
   helper whose parent already exited; the stdin lifeline and the sandbox limits of `debrief-ipc` stay with `paddock-ipc` (X13).
 
+- Windows (plan X54): each supervised child runs in a kill-on-close job object held by the `Supervised` value; dropping it, or
+  the app ending in any way, ends the child and every helper it started, orphans included (`Supervised::in_job`).
+
 ## `paddock-service` (plan X4)
 
 Background services and login items, from the four designs in the apps: Pitwall's and Pitcrew's `service_install.rs` /
