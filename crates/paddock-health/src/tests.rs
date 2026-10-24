@@ -30,6 +30,7 @@ fn health_ts() -> String {
         notify::centre::Notice::decl(),
         notify::NoticesSnapshot::decl(),
         notify::NoticesEvent::decl(),
+        notify::NoticeActionEvent::decl(),
         notify::RestoredNotices::decl(),
         persist::NoticesRecord::decl(),
         notify::window::WindowNoticeScope::decl(),
@@ -45,6 +46,8 @@ fn health_ts() -> String {
          export const NOTIFICATIONS_EVENT = '{}';\n\n\
          /** Open this message (its OS notification was clicked); the payload is a `NoticeId`. */\n\
          export const NOTIFICATIONS_OPEN_EVENT = '{}';\n\n\
+         /** Run this action of a message (a button of its OS notification that only a window can run); the payload is a `NoticeActionEvent`. */\n\
+         export const NOTIFICATIONS_ACTION_EVENT = '{}';\n\n\
          /** The notification cause of a service's outage. */\n\
          export const healthCause = (service: string): string => `health:${{service}}`;\n\n\
          /**\n * What a message's button does: a `type` the UI maps to a feature, and its arguments, flat\n \
@@ -53,6 +56,7 @@ fn health_ts() -> String {
         crate::SERVICE_HEALTH_EVENT,
         notify::NOTIFICATIONS_EVENT,
         notify::OPEN_EVENT,
+        notify::ACTION_EVENT,
     );
     for d in decls {
         out.push_str(&format!("export {d}\n\n"));

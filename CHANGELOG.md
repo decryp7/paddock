@@ -5,6 +5,15 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- OS notifications (plan X8): `paddock-health` `notify::os` and `tauri::os`/`tauri::native` (feature `os-notify`), the four
+  adapters (Debrief, Spotter, Pitcrew, Dyno) as one. One policy (`OsSettings`: level off/alerts/all, quiet hours across
+  midnight with an optional critical bypass, cool-down and burst limits), `screen` and `user_sees` pure, `RateLimiter` per
+  cause key on the injected clock, `OsNotifier` over a `Toaster` port (`PluginToaster` over `tauri-plugin-notification`,
+  `FakeToaster` for tests), toasts with up to three labelled buttons, and `route` for clicks: open the message, repair in the
+  shell, the app's handler (`Setup::on_notice_action`), or `paddock://notifications-action` to the window
+  (`NOTIFICATIONS_ACTION_EVENT`, `NotificationsBackend.onAction`, `NotificationsStore.runFromOs`). `Setup::os_notifier`
+  installs it; `paddock-shell` adds the `pd.notifications` settings page (`Builder::os_notifications`) and the `os-notify`
+  feature.
 - `paddock-diag` and `@decryp7/paddock-ui/shell/diagnostics` (plan X2, decision D9): Report a problem, the three designs of Debrief,
   Dyno and Pitcrew as one. A diagnostics zip of the app's log (newest part, read from the end), system facts, settings (secrets
   masked) and crash marker, plus the sections an app adds; one `Redactor` (secrets from Pitcrew and Debrief, personal data from Dyno,

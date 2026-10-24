@@ -34,6 +34,7 @@
 mod builder;
 mod commands;
 pub mod manifest;
+pub mod notifications;
 pub mod permissions;
 mod prefs;
 
