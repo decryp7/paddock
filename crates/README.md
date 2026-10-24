@@ -96,6 +96,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
 | `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
+| `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
+| `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` as TOML (ADR 0005): typed ids and a closed `Step` enum, secrets by reference with redacting writers, canonical writer, traceability `Coverage`, plan `diff`, JUnit export, limits and a fuzz target (plan X52) | two (Pacenotes, Sighter); built |
 | `paddock-archive` | safe zip/tar/tar.gz/tar.xz unpacking: limits on entries, sizes and expansion ratio, traversal and link guards, layout and filter, all-or-nothing extract through a staging folder swapped in, progress and Cancel as a paddock-jobs job, fuzz target (plan X24) | yes (Debrief AI/video runtimes, Pitwall engines, Spotter renderer, Pitcrew runners); built |
 | `paddock-bench` | benchmark harness with stored budgets (rule 16): `Recorder` with an injected clock (startup, throughput, first event, query latency, memory), a results file per app, `budgets.toml` with tolerance and regression limit, `check`, and the `paddock-bench` command for the nightly workflow (plan X26) | yes (every app's benchmarks); built |
@@ -731,6 +733,28 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
 
+## `paddock-mcp` (plan X22)
+
+```rust
+use paddock_mcp::{AuditLog, Policy, Server, ToolDef, ToolOutput, serve_stdio};
+
+let audit = Arc::new(AuditLog::new(500));                                   // the app shows and clears this
+let server = Server::new("debrief", env!("CARGO_PKG_VERSION"), Arc::new(SystemClock::new()), audit.clone(), Arc::new(Redactor::new()));
+server.add_tool(ToolDef::read_only("search_events", "Searches the open logs.", schema, |ctx, args| {
+    Ok(ToolOutput { text: rows, structured: None, next_cursor })               // ctx.cursor, ctx.cancel; capped, timed, audited
+}).paged())?;
+server.set_policy(Policy::read_only());                                      // from the settings page; off by default
+serve_stdio(&server, &mut stdin.lock(), &mut stdout.lock())?;                // `--mcp` mode; or serve_loopback(server, keys, listener, 4)
+```
+
+Rules built in (ADR 0007): local only (stdio, or 127.0.0.1 with a handshake line holding a per-client `KeyStore` key: shown once,
+only a SHA-256 kept, revocable), off by default, every call audited with redacted arguments (`query`/`content` fields are kept as
+a size only), arguments validated against the tool's schema (a wrong call is a tool error the model can fix), results cut at the
+tool's byte limit with a cursor for more, a call that passes its time limit is cancelled and abandoned (at most 8 still running),
+a panicking tool is contained, actions (`ToolDef::action`) are hidden and refused until `Policy::allow_action(name)`. Sighter's own
+rules sit on top and are not relaxed. `client` has the request builders and typed results for a host (Pitwall); the wire types are
+shared. The contract test pins the message shapes against the specification's JSON Schema. Not built: `prompts`, subscriptions,
+sampling, HTTP transport (stdio and loopback only, as ADR 0007 decides).
 ## `paddock-archive` (plan X24)
 
 ```rust
