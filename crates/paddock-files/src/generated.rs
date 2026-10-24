@@ -75,6 +75,7 @@ fn the_table_has_the_file_commands_and_the_pickers_are_for_windows_that_open() {
             "files_recent_grant",
             "files_reveal",
             "files_open",
+            "files_open_at_line",
             "files_open_app_folder",
             "files_open_url"
         ]

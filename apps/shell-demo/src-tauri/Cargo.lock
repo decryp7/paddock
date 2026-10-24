@@ -3052,6 +3052,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-mcp"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-log",
+ "paddock-secrets",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+]
+
+[[package]]
 name = "paddock-menu"
 version = "0.1.0"
 dependencies = [
@@ -3175,6 +3193,7 @@ dependencies = [
  "paddock-files",
  "paddock-health",
  "paddock-jobs",
+ "paddock-mcp",
  "paddock-menu",
  "paddock-packs",
  "paddock-pitwall",

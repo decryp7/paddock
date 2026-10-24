@@ -71,6 +71,7 @@ fn rig(chosen: Vec<PathBuf>) -> Rig {
             files_recent_grant,
             files_reveal,
             files_open,
+            files_open_at_line,
             files_open_app_folder,
             files_open_url,
             read_it
@@ -81,6 +82,7 @@ fn rig(chosen: Vec<PathBuf>) -> Rig {
         .picker(Arc::new(Choosing(chosen, Mutex::default())))
         .launcher(launched.clone())
         .os(Os::Mac)
+        .editor(|| Some(PathBuf::from("/usr/bin/code")))
         .folder(AppFolder::Logs, dir.path());
     let files = install(app.handle(), files);
     Rig {
@@ -229,6 +231,21 @@ fn reveal_open_folders_and_urls_go_through_the_launcher() {
         .unwrap();
     invoke(&main, "files_reveal", json!({ "path": s(&log) })).unwrap();
     invoke(&main, "files_open", json!({ "path": s(&log) })).unwrap();
+    invoke(
+        &main,
+        "files_open_at_line",
+        json!({ "path": s(&log), "line": 7 }),
+    )
+    .unwrap();
+    assert_eq!(
+        invoke(
+            &main,
+            "files_open_at_line",
+            json!({ "path": s(&log), "line": 0 })
+        )
+        .unwrap_err()["code"],
+        "invalid"
+    );
     invoke(&main, "files_open_app_folder", json!({ "folder": "logs" })).unwrap();
     assert_eq!(
         invoke(&main, "files_open_app_folder", json!({ "folder": "cache" })).unwrap_err()["code"],
@@ -249,7 +266,7 @@ fn reveal_open_folders_and_urls_go_through_the_launcher() {
         .unwrap_err()["code"],
         "invalid"
     );
-    assert_eq!(r.launched.started.lock().unwrap().len(), 4);
+    assert_eq!(r.launched.started.lock().unwrap().len(), 5);
     let _ = &r.dir;
 }
 

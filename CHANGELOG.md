@@ -40,6 +40,12 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- Files and storage follow-ups (plan X31/X32). `paddock-storage`: the size tree (`Storage::tree`, `storage_tree`, `StorageEvent::Tree`:
+  depth 3, 12 items per folder with the rest folded, bounded in entries and time, no links, one volume) and, in `shell/storage`, a
+  Folders button on the Storage page that shows it as a `pd-table` grouped by top-level folder. `paddock-files`: `Files::open_at_line` and
+  `files_open_at_line` (a granted file in the editor at a bounded line, the editor found per OS, never run); `RecentEntry::folder`.
+  `@decryp7/paddock-ui/icons`: four glyphs (`file`, `file-text`, `file-code`, `archive`) and `fileIcon()` in `shell/files`, which `pd-recent-files`
+  draws at 16 px; a contact sheet for their independent review (`CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x3x`).
 - `paddock-storage` and `@decryp7/paddock-ui/shell/storage` (plan X32): what an app keeps on disk and clearing it safely. Declared
   `Category`s (cache or the user's data, a confined folder, items with the reason they stay, an optional removal through the app),
   a bounded size walk, a scan that is the preview, `clear` that needs it, confirms data per category, re-checks every item before

@@ -67,4 +67,24 @@ test.describe('storage (plan X32)', () => {
     await expect(page.getByRole('button', { name: 'Show Cache in the file manager' })).toBeVisible();
     expect(await axeViolations(page)).toEqual([]);
   });
+
+  test('the Folders button shows what is in a category as a table grouped by folder, which folds away', async ({ app, page, pageErrors }) => {
+    await openStorage(app, page);
+    await page.getByTestId('storage-tree-cache').click();
+    await expect(page.getByTestId('storage-working')).toBeVisible();
+    const tree = page.getByTestId('storage-tree');
+    await expect(tree).toContainText('What is in Cache');
+    await expect(tree.getByRole('grid', { name: 'What is in Cache' })).toBeVisible();
+    // The biggest folder first, with its contents below its heading; the smallest items are one line.
+    await expect(tree).toContainText('thumbnails');
+    await expect(tree).toContainText('7 smaller items');
+    await expect(tree.getByRole('button', { name: 'thumbnails' }).first()).toHaveAttribute('aria-expanded', 'true');
+    expect(await axeViolations(page)).toEqual([]);
+    await tree.getByRole('button', { name: 'thumbnails' }).first().click();
+    await expect(tree.getByRole('button', { name: 'thumbnails' }).first()).toHaveAttribute('aria-expanded', 'false');
+    // Asking again hides it.
+    await page.getByTestId('storage-tree-cache').click();
+    await expect(tree).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+  });
 });

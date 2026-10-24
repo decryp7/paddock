@@ -289,6 +289,21 @@ pub async fn files_open<R: Runtime>(
     joined(::tauri::async_runtime::spawn_blocking(move || files.open(&key, &path)).await)?
 }
 
+/// Opens a granted file in the editor at `line`; the file is only an argument of the editor.
+#[::tauri::command]
+pub async fn files_open_at_line<R: Runtime>(
+    window: Window<R>,
+    state: Managed<'_>,
+    path: String,
+    line: u32,
+) -> Result<(), CommandError> {
+    let files = state.inner().clone();
+    let key = key(window.label()).to_string();
+    joined(
+        ::tauri::async_runtime::spawn_blocking(move || files.open_at_line(&key, &path, line)).await,
+    )?
+}
+
 /// Shows one of the app's own folders in the file manager.
 #[::tauri::command]
 pub async fn files_open_app_folder(
@@ -316,6 +331,7 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync 
         files_recent_grant,
         files_reveal,
         files_open,
+        files_open_at_line,
         files_open_app_folder,
         files_open_url
     ]

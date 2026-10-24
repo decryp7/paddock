@@ -989,7 +989,10 @@ let models = Category::new("models", "Models", Kind::Data).folder(models_dir)
 - **Re-check before every delete** (`guard::recheck`, from Dyno): the item still exists, is not a link, has the kind the preview
   saw, resolves through its real parent inside the category's folder, was listed by the preview and has not changed since. What
   fails stays, with the reason, in the result.
-- **Jobs.** `storage_scan` and `storage_clear` start a job (phase-labelled progress from the first moment, Cancel in every phase,
+- **Size tree** (`tree`, from Dyno's disk-space map): `storage_tree(id)` walks one category's folder into a bounded tree (three levels,
+  twelve items per folder with the smaller ones folded into one line, entries and time limited, no links, one volume); `capped` says
+  the sizes are lower bounds. Only folders inside the app's folders are walked.
+- **Jobs.** `storage_scan`, `storage_clear` and `storage_tree` start a job (phase-labelled progress from the first moment, Cancel in every phase,
   one job at a time) and return at once; the outcome is a `paddock://storage` event. `Run` is the port, `Recorder` its fake.
 - **UI.** `@decryp7/paddock-ui/shell/storage` (+ `/page`, `/dialog`): `StorageBackend` (Tauri, memory with the same rules),
   `StorageStore`, the Storage page and the `pd.storage.confirm` decision window.
@@ -1031,8 +1034,9 @@ async fn open_log(grants: paddock_files::tauri::WindowGrants, app: tauri::AppHan
   (`Os`), started by a `Launcher` (a detached child with a reaper and a timeout). Files that would run (`runs_on_open`: scripts,
   programs, installers) are refused; web addresses must be http, https or mailto.
 - **Commands** (`COMMANDS`, folded into the shell plugin): `files_pick`, `files_recent_list|remove|clear|grant`, `files_reveal`,
-  `files_open`, `files_open_app_folder` (data, config, cache, logs by name: the webview never supplies the path) and
-  `files_open_url`. The wire types and names are generated into `ui/projects/paddock-ui/shell/files/generated/`
+  `files_open`, `files_open_at_line` (a granted file in VS Code at a line, 1 to ten million; the file is an argument of the editor, never run;
+  the editor is found per OS and a missing one says what to install), `files_open_app_folder` (data, config, cache, logs by name: the
+  webview never supplies the path) and `files_open_url`. Recent entries remember whether they were a folder, for the UI's glyph. The wire types and names are generated into `ui/projects/paddock-ui/shell/files/generated/`
   (`PADDOCK_WRITE_TS=1 cargo test -p paddock-files --all-features --lib generated`).
 ## `paddock-net` (plan X16)
 

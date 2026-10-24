@@ -162,4 +162,42 @@ describe('the Storage page', () => {
     expect(text(p.q('storage-skipped')!)).toContain('2 items left in place');
     expect(text(p.q('storage-skipped')!)).toContain('in use');
   });
+
+  it('shows the size tree of a folder as a grouped table, and hides it again', async () => {
+    const p = await open();
+    await p.click('storage-tree-cache');
+    expect(text(p.q('storage-working')!)).toContain('Measuring what the app keeps');
+    await p.h.next();
+    await p.flush();
+    expect(text(p.q('storage-working')!)).toContain('Measuring Cache');
+    await p.h.all();
+    await p.flush();
+    const tree = p.q('storage-tree')!;
+    expect(text(tree.querySelector('h3')!)).toBe('What is in Cache');
+    expect(tree.querySelector('pd-table')).not.toBeNull();
+    expect(text(tree)).toContain('thumbnails');
+    expect(text(tree)).toContain('7 smaller items');
+    expect(p.q('storage-tree-cache')!.getAttribute('aria-expanded')).toBe('true');
+    await p.click('storage-tree-cache');
+    expect(p.q('storage-tree')).toBeNull();
+    await p.click('storage-tree-cache');
+    expect(p.q('storage-tree')).not.toBeNull();
+  });
+
+  it('says when the walk stopped early', async () => {
+    const h = held({ measured: true });
+    const own = h.memory;
+    const dialogs = new FakeDialogs();
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellStorage({ backend: () => own }), { provide: DialogService, useValue: dialogs }] });
+    const fixture = TestBed.createComponent(PdStoragePage);
+    await settle();
+    await fixture.whenStable();
+    const el = fixture.nativeElement as HTMLElement;
+    (el.querySelector('[data-testid="storage-tree-models"]') as HTMLButtonElement).click();
+    await settle();
+    own.send({ state: 'tree', tree: { id: 'models', capped: true, root: { name: 'Models', bytes: 5, folded: 0, children: [] } } });
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('[data-testid="storage-tree-capped"]')?.textContent).toContain('stopped early');
+  });
 });
