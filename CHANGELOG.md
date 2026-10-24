@@ -15,6 +15,36 @@ Conventional Commits; one semver tag for the whole repo.
   and Escape with a fade); `COMMANDS` and generated `shell/generated/window.ts` and `window-commands.ts`.
 - Window class `TRAY` in `paddock-commands` (plan S12): tray popovers are labelled `tray` and `tray-<item>`, are not
   part of `WINDOW`, and call only commands that name the class; `paddock-startup`'s default watch leaves them out.
+- Downloads (plan S8, ADR 0008 §5 and 0012; ported from Debrief's model downloader): crate `paddock-download` 0.1.0.
+  `Downloader::download(ctx, req)` runs inside a `paddock-jobs` job with the phases `connect`, `resume` (only when
+  resuming), `download` and `verify`, each on its own scale and never backwards, and Cancel noticed within 250 ms in
+  every phase. Hosts that serve byte ranges are downloaded over several connections (default 4) with positioned writes,
+  splitting of slow ranges and one in-order SHA-256 (`paddock_jobs::HashingWriter`) fed while writing; ranges ahead of
+  it wait in a bounded buffer, so the file is never read back (rule 15). Hosts without ranges are streamed, and a
+  dropped connection restarts and skips what was written. Per-host connection caps across downloads (`HostCaps`, default
+  4), 429/503 with `Retry-After` (seconds or date) lowering the connections and holding the host, exponential back-off,
+  stall detection, resume from the hashed prefix (`<name>.part.json`, matched by size, pinned checksum and strong ETag or
+  Last-Modified, `If-Range` on every range), pinned checksum and size, size limits before and while writing, and an
+  atomic rename after a sync. Typed `DownloadError` with `keeps_partial()`. The network is the `Transport` port;
+  `HttpTransport` (feature `http`, default: ureq, rustls, the OS certificate store) and a `tauri` adapter (`manage`,
+  `downloader`). Tests against an in-process HTTP server (no-range host, 429, truncated segments, digest mismatch, a
+  file that changes, resume, host caps, cancel in every phase) and a scripted transport; a benchmark against one stream.
+- Pages frame (plan S14, ADR 0012): `@decryp7/paddock-ui/shell/pages` composes a manager app's whole main window from its
+  contributions with `provideShellPages({ appName, notify, jobs, startup, nativeMenu, dialogs, routes, paths, sidebar,
+  icon })` and `<pd-shell-frame />`: routes for the contributed pages (hash URLs by default; each page lazy with its own
+  providers through `loadPart`, `when` guarded, the first page for the empty path and anything unknown, "Page – App"
+  window titles), the sidebar (`pd-pages-sidebar`: top and bottom pages, neutral badges, arrow keys) expanded, an icon rail
+  or over the page with a scrim as `planLayout` leaves room (`sidebarFit`; the user's collapse kept under
+  `paddock.pages.sidebar`), `ShellPages` (`showPage` port, a page that stops being offered gives way), the menu bar and
+  keys (F6/Shift+F6 regions reserved), notifications, jobs, dialogs and the start-up contract with the native menu built
+  after ready. The root shell entry gains the frame parts shared with the workbench: `pd-title-bar`, `pd-status-bar`
+  (contributed status items by side and priority, the lowest hidden when narrow with "Show all status items",
+  `planStatusBar`), `pd-part-outlet` (lazy part with skeleton or error and Try again), `pd-icon` with the `SHELL_ICON`
+  port and the shell's `pd:` icons, and F6 region helpers. `planLayout` (ADR 0011) moves from Debrief to the root entry
+  with its spec. `@angular/router` (^22) is an optional peer dependency. `shell-demo` is now a full pages app (Overview,
+  Dialogs, Keyboard, Activity with page providers and a badge, a conditional Lab, About; a status item of its own; its
+  own icon component) with Chromium e2e for navigation, lazy pages, conditions, status bar parts, every width from 320 px,
+  F6 regions and axe in both themes, and screenshots in `ui/docs/screenshots/shell-demo/`.
 - Menus and keys (plan S13, ADR 0012; ported from Debrief ADR 0008 and `menu.rs`): crate `paddock-menu` 0.1.0 validates the
   UI's menu model (`parse`: limits on menus, entries, depth, ids, labels; key bindings to native accelerators), builds the
   macOS menu bar with the standard items (`native_spec`: app menu with Services and Hide and `pd.app.quit` last, Edit

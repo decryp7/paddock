@@ -145,7 +145,7 @@ jobs:
 
       - name: paddock-download
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-download --all-targets --all-features -- -D warnings && cargo test -p paddock-download --all-features
+        run: cargo clippy -p paddock-download --all-targets --all-features -- -D warnings && cargo test -p paddock-download --all-features && cargo test -p paddock-download --no-default-features
 
       - name: paddock-health
         if: ${{ !cancelled() }}
