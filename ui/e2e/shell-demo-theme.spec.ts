@@ -136,7 +136,7 @@ test('reduced motion: the menu toggle and the OS setting shorten every duration 
 test('the macOS-less menu bar names the app once: in the title bar, its menu entries under File', async ({ page }) => {
   await open(page);
   await expect(page.getByRole('menubar').getByRole('menuitem')).toHaveText(['File', 'View', 'Help']);
-  await expect(page.getByText('Paddock demo', { exact: true })).toHaveCount(1);
+  await expect(page.getByText('Paddock Shell Demo', { exact: true })).toHaveCount(1);
   await page.getByRole('menubar').getByRole('menuitem', { name: 'File', exact: true }).click();
   await expect(page.getByRole('menu', { name: 'File' }).getByRole('menuitem', { name: 'Settings…' })).toBeVisible();
   await page.keyboard.press('Escape');

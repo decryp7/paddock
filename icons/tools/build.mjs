@@ -5,7 +5,7 @@ import { Resvg } from '@resvg/resvg-js';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { APPS, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { ALL, APPS, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { writeIco } from './ico.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -19,7 +19,7 @@ const dir = (...p) => {
 const png = (svg, px) => new Resvg(svg, { fitTo: { mode: 'width', value: px }, shapeRendering: 2, textRendering: 0 }).render().asPng();
 const save = (path, data) => writeFileSync(path, data);
 
-const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : APPS;
+const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : ALL;
 for (const app of ONLY) {
   const out = dir(app);
   rmSync(out, { recursive: true, force: true });
@@ -87,9 +87,9 @@ for (const app of ONLY) {
   console.log(`built ${app}`);
 }
 
-// 5. Alternative concept (Carbon), kept for comparison
+// 5. Alternative concept (Carbon), kept for comparison (family apps only)
 const alt = dir('alternative');
-for (const app of ONLY) {
+for (const app of ONLY.filter((a) => APPS.includes(a))) {
   const svg = masterSvg(app, { concept: 'carbon' });
   save(join(alt, `${app}-carbon.svg`), svg);
   save(join(alt, `${app}-carbon-512.png`), png(svg, 512));

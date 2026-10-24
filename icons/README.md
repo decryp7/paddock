@@ -8,6 +8,18 @@ Open `preview.html` to review them, or see the renders in `screenshots/`.
 | Debrief, Pitcrew, Spotter, Pitwall, Dyno | Approved |
 | Sighter | Approved (2026-10-23) |
 | Pacenotes | Approved (2026-10-23) |
+| Paddock Shell Demo (a demo app, not a family member) | New (2026-10-24), awaiting independent review |
+
+## Demo apps
+
+`DEMOS` in `tools/design.mjs` are built by the same pipeline (`ONLY=shell-demo node tools/build.mjs`) but stay out of
+the family sheet (`preview.html`) and the Carbon concept. Paddock Shell Demo (`apps/shell-demo`) is a neutral silver
+tile (`#D5D8DE`, dark ink `#1E2530`, 10.8:1) with the shell itself as its glyph: a window with its title bar, the pages
+sidebar and the page. Silver is light like Spotter's tile, so it takes the dark ink and the light-tile material. A search
+over low-chroma tiles (`tools/cvd.mjs`) kept the family's minimums unchanged (normal 17.7, protan 11.6, deutan 13.6,
+tritan 10.7) only for near-black and light silver; mid greys fell to 1.6 to 5.4 against Dyno or Pitwall. Its
+`tauri/` folder is copied to `apps/shell-demo/src-tauri/icons` (`node scripts/shell-demo-release.mjs icons` checks
+they are equal).
 
 ## Build
 

@@ -1,0 +1,177 @@
+# Releases Paddock Shell Demo (apps/shell-demo, plan docs/plans/workbench.md §10, S18) from a `shell-demo-v<version>` tag,
+# and only from one (rule 9): the gates run again on the tagged commit, then the installers are built on all three
+# platforms (macOS DMG sealed ad-hoc and verified, Windows NSIS, Linux deb and AppImage) and the Gitea release is created
+# with them and the version's notes. The app's tags are its own: the packages and crates release from `v*` (publish.yml),
+# and ci.yml's `v*` tag filter never matches `shell-demo-v*`.
+#
+# Before tagging (rule 25): `cargo deny check advisories` in apps/shell-demo/src-tauri, one CI run with bundles
+# (workflow_dispatch below builds them without releasing), the icon check, and the First launch notes (added here).
+# The demo has no updater key yet: its builds say "Updates are not available in this build" and no latest.json is
+# published. Secrets: RELEASE_TOKEN (a Gitea token with write:repository) for the release.
+
+name: shell-demo-release
+
+on:
+  push:
+    tags: ["shell-demo-v*"]
+  # Builds and verifies the installers without releasing (the "one CI build with bundles" before a tag).
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gates:
+    name: gates (version, icons, ui, app)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: The tag names the app's version
+        if: startsWith(github.ref, 'refs/tags/shell-demo-v')
+        run: node scripts/shell-demo-release.mjs check-tag "${{ github.ref_name }}"
+
+      - name: The app icons are the icon pipeline's
+        run: node scripts/shell-demo-release.mjs icons
+
+      - name: The release notes (the version's CHANGELOG section)
+        run: node scripts/shell-demo-release.mjs notes /tmp/notes.md && cat /tmp/notes.md
+
+      - name: UI (specs, translations, dialog contracts, the shell demo's build and browser checks)
+        working-directory: ui
+        env:
+          PW_PORT: 4300
+          SHELL_DEMO_PORT: 4301
+        run: |
+          npm ci
+          npm test
+          npm run test:scripts
+          npm run build
+          npm run i18n:check
+          npm run check:dialogs
+          npx ng build shell-demo
+          npx playwright install --with-deps chromium
+          npx playwright test --project=shell-demo
+
+      - name: App (fmt, clippy, tests on the mock runtime, advisories)
+        working-directory: apps/shell-demo/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+          cargo deny check
+
+  bundle:
+    name: bundle (${{ matrix.os }})
+    needs: [gates]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bundles: deb,appimage
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: app,dmg
+    runs-on: ${{ matrix.os }}
+    # Linux runs in the garage image (Tauri's libraries pre-installed); Windows and macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-shell-demo>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - name: Persistent build folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target-shell-demo" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: 24
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: runner.os == 'Windows'
+
+      - name: Toolchain present
+        run: rustc --version && cargo --version && node --version
+
+      - name: Build the installers
+        env:
+          CI: "true"
+          SHELL_DEMO_COMMIT: ${{ github.sha }}
+        run: |
+          export SHELL_DEMO_BUILT="$(date -u +%Y-%m-%d)"
+          bash scripts/shell-demo/bundle.sh "${{ matrix.bundles }}"
+
+      # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and on the app inside
+      # the DMG; the app is never started here.
+      - name: Verify the .app and the DMG (macOS)
+        if: runner.os == 'macOS'
+        run: bash scripts/shell-demo/verify-macos.sh
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        with:
+          name: paddock-shell-demo-${{ runner.os }}
+          path: apps/shell-demo/dist/*
+          if-no-files-found: error
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/shell-demo-v')
+    needs: [bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
+        with:
+          path: artifacts
+
+      - name: Every platform's installers are present
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          ls -la release
+          for pattern in '*.dmg' '*-setup.exe' '*.deb' '*.AppImage'; do
+            ls release/$pattern >/dev/null 2>&1 || { echo "::error::no $pattern was built: nothing is released"; exit 1; }
+          done
+
+      - name: Publish the release
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          node --test scripts/shell-demo-release.test.mjs
+          node scripts/shell-demo-release.mjs notes release-notes.md
+          node scripts/shell-demo-release.mjs publish "${{ github.ref_name }}" release release-notes.md

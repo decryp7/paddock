@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "shell-dialog",
+  "description": "Dialog windows (d-<host>-<n>): the shell's dialog set; the guard narrows each dialog to its contract (dialog-contracts.json).",
+  "windows": ["d-*"],
+  "permissions": ["core:event:default", "paddock-shell:dialog"]
+}

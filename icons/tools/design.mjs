@@ -3,7 +3,16 @@
 
 export const APPS = ['debrief', 'pitcrew', 'spotter', 'pitwall', 'dyno', 'sighter', 'pacenotes'];
 
-export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter', pacenotes: 'Pacenotes' };
+/**
+ * Demo apps of the shared UI (plan workbench §10): not family members, so they stay out of the family sheet (preview.html)
+ * and the Carbon concept, but they are built by the same pipeline and their tile passes the same CVD check.
+ */
+export const DEMOS = ['shell-demo'];
+
+/** Everything the pipeline builds. */
+export const ALL = [...APPS, ...DEMOS];
+
+export const NAMES = { debrief: 'Debrief', pitcrew: 'Pitcrew', spotter: 'Spotter', pitwall: 'Pitwall', dyno: 'Dyno', sighter: 'Sighter', pacenotes: 'Pacenotes', 'shell-demo': 'Paddock Shell Demo' };
 
 /** One hue per app. `base` is the identity colour (CVD-checked, see tools/cvd.mjs); top/bottom are the tile gradient. */
 export const PALETTE = {
@@ -14,10 +23,13 @@ export const PALETTE = {
   sighter: { top: '#4FD8F0', base: '#00B8D9', bottom: '#0094B8', deep: '#00485A', light: '#A5ECF8' },
   pacenotes: { top: '#B3283C', base: '#831826', bottom: '#66131E', deep: '#340A0F', light: '#E0A0A8' },
   dyno: { top: '#DE559F', base: '#BE3584', bottom: '#A0226A', deep: '#5E0E3C', light: '#F29CCB' },
+  // Neutral silver: no family hue, light like Spotter's tile so it takes dark ink. The CVD search over low-chroma
+  // tiles kept the family minimums unchanged only for near-black and light silver (tools/cvd.mjs; icons/README.md).
+  'shell-demo': { top: '#ECEEF2', base: '#D5D8DE', bottom: '#BBC1CB', deep: '#4A5361', light: '#F6F7F9' },
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */
-export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#00303B', pacenotes: '#FFFFFF' };
+export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#00303B', pacenotes: '#FFFFFF', 'shell-demo': '#1E2530' };
 
 export const CARBON = { top: '#30333B', bottom: '#15171B', rim: '#4A4E58' };
 
@@ -30,7 +42,11 @@ export const STATUSES = {
   dyno: ['normal', 'high'],
   sighter: ['default'],
   pacenotes: ['default'],
+  'shell-demo': ['default'],
 };
+
+/** Light tiles (dark ink): a stronger livery and secondary ink, a softer glyph shadow. */
+const LIGHT_TILE = new Set(['spotter', 'shell-demo']);
 
 export const STATUS_COLOURS = { busy: '#2F8FFF', warning: '#F5A524', error: '#E5484D', new: '#E5484D', serving: '#2FB36B', high: '#F2711C' };
 
@@ -178,6 +194,16 @@ export const GLYPH_1024 = {
     { kind: 'fill', d: pointer(436, 392, 0.76), tone: 'primary', round: 10 },
   ],
   pacenotes: () => PACENOTES[PACENOTES_MAIN].g1024,
+  // The shell itself: a window with its title bar, the pages sidebar (one page chosen) and the page's content.
+  'shell-demo': () => [
+    { kind: 'stroke', d: rr(272, 296, 480, 432, 72), w: 56, tone: 'primary' },
+    { kind: 'stroke', d: 'M272 404H752', w: 48, tone: 'primary', cap: 'butt' },
+    { kind: 'stroke', d: 'M436 404V728', w: 40, tone: 'secondary', cap: 'butt' },
+    { kind: 'stroke', d: 'M334 486H374', w: 44, tone: 'primary' },
+    { kind: 'stroke', d: 'M334 566H374M334 646H374', w: 44, tone: 'secondary' },
+    { kind: 'stroke', d: 'M506 492H686', w: 44, tone: 'primary' },
+    { kind: 'stroke', d: 'M506 572H660M506 652H620', w: 44, tone: 'secondary' },
+  ],
   dyno: () => {
     const cx = 512, cy = 548, r = 248, needle = 318;
     return [
@@ -223,6 +249,12 @@ export const GLYPH_SMALL = {
       { kind: 'fill', d: pointer(5.9, 4.9, 0.0205), tone: 'primary' },
     ],
     pacenotes: PACENOTES[PACENOTES_MAIN].g16,
+    'shell-demo': [
+      { kind: 'stroke', d: rr(2.5, 3, 11, 10, 2), w: 1.5, tone: 'primary' },
+      { kind: 'stroke', d: 'M2.5 6H13.5', w: 1.5, tone: 'primary', cap: 'butt' },
+      { kind: 'fill', d: rr(4, 7.5, 2, 4, 0.5), tone: 'secondary' },
+      { kind: 'stroke', d: 'M8 8.75H11.5', w: 1.5, tone: 'primary', cap: 'butt' },
+    ],
     dyno: [
       { kind: 'stroke', d: arc(8, 9, 5.5, 150, 390), w: 1.75, tone: 'secondary', cap: 'butt' },
       { kind: 'stroke', d: arc(8, 9, 5.5, 150, 318), w: 1.75, tone: 'primary', cap: 'butt' },
@@ -265,6 +297,15 @@ export const GLYPH_SMALL = {
       { kind: 'fill', d: pointer(10.3, 8.6, 0.0425), tone: 'primary' },
     ],
     pacenotes: PACENOTES[PACENOTES_MAIN].g32,
+    'shell-demo': [
+      { kind: 'stroke', d: rr(5.5, 6.5, 21, 19, 3.5), w: 2.5, tone: 'primary' },
+      { kind: 'stroke', d: 'M5.5 11.5H26.5', w: 2.5, tone: 'primary', cap: 'butt' },
+      { kind: 'stroke', d: 'M12.5 11.5V25.5', w: 2, tone: 'secondary', cap: 'butt' },
+      { kind: 'stroke', d: 'M8.75 15.5H9.75', w: 2.25, tone: 'primary' },
+      { kind: 'stroke', d: 'M8.75 19.5H9.75', w: 2.25, tone: 'secondary' },
+      { kind: 'stroke', d: 'M16 15.5H23', w: 2.25, tone: 'primary' },
+      { kind: 'stroke', d: 'M16 19.5H21', w: 2.25, tone: 'secondary' },
+    ],
     dyno: [
       { kind: 'stroke', d: arc(16, 17.5, 9.5, 150, 390), w: 2.5, tone: 'secondary', cap: 'round' },
       { kind: 'stroke', d: arc(16, 17.5, 9.5, 150, 318), w: 2.5, tone: 'primary', cap: 'round' },
@@ -326,7 +367,7 @@ function inkPaint(app, concept, uid) {
     };
   }
   const ink = INK[app];
-  return { defs: '', paint: { primary: ink, secondary: ink, accent: ink, secondaryOpacity: app === 'spotter' ? 0.55 : 0.6 } };
+  return { defs: '', paint: { primary: ink, secondary: ink, accent: ink, secondaryOpacity: LIGHT_TILE.has(app) ? 0.55 : 0.6 } };
 }
 
 /**
@@ -345,9 +386,9 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
   const glyph = renderGlyph(g, ink.paint, uid);
   const top = carbon ? CARBON.top : p.top, bottom = carbon ? CARBON.bottom : p.bottom, mid = carbon ? '#22252B' : p.base;
   const liveryCol = carbon ? p.base : '#FFFFFF';
-  const liveryOp = carbon ? 0.22 : app === 'spotter' ? 0.16 : 0.08;
+  const liveryOp = carbon ? 0.22 : LIGHT_TILE.has(app) ? 0.16 : 0.08;
   const glyphShadow = carbon ? '#000000' : p.deep;
-  const shadowOp = carbon ? 0.5 : app === 'spotter' ? 0.18 : 0.32;
+  const shadowOp = carbon ? 0.5 : LIGHT_TILE.has(app) ? 0.18 : 0.32;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>${NAMES[app]}${carbon ? ' (Carbon concept)' : ''}</title>
   <defs>
@@ -396,7 +437,7 @@ export function smallSvg(app, size, { uid = newUid(app[0]) } = {}) {
     ${glyph.defs}
   </defs>
   <path d="${t}" fill="url(#${uid}bg)"/>
-  <path d="${rr(inset + 0.25, inset + 0.25, grid - 2 * inset - 0.5, grid - 2 * inset - 0.5, R - 0.25)}" fill="none" stroke="${p.deep}" stroke-opacity="${app === 'spotter' ? 0.45 : 0.35}" stroke-width="0.5"/>
+  <path d="${rr(inset + 0.25, inset + 0.25, grid - 2 * inset - 0.5, grid - 2 * inset - 0.5, R - 0.25)}" fill="none" stroke="${p.deep}" stroke-opacity="${LIGHT_TILE.has(app) ? 0.45 : 0.35}" stroke-width="0.5"/>
   ${glyph.body}
 </svg>
 `;
@@ -446,6 +487,14 @@ function trayGlyph(app, status) {
         { kind: 'fill', d: rr(5.5, 2, 8.5, 12, 1.5), tone: 'secondary', cut: [rr(4.5, 1.5, 8.5, 12, 1.5)] },
         { kind: 'fill', d: rr(4.5, 1.5, 8.5, 12, 1.5), tone: 'primary', cutStroke: { d: 'M7 10.5C7 9 9.5 9.4 9.5 7.5', w: 1.2, cap: 'butt' } },
         { kind: 'stroke', d: 'M1.8 4H4.5M1.8 7H4.5M1.8 10H4.5', w: 1.3, tone: 'primary', cap: 'butt' },
+      ];
+    case 'shell-demo':
+      return [
+        { kind: 'stroke', d: rr(1.75, 2.25, 12.5, 11.5, 2.25), w: 1.5, tone: 'primary' },
+        { kind: 'stroke', d: 'M1.75 5.75H14.25', w: 1.5, tone: 'primary', cap: 'butt' },
+        { kind: 'fill', d: rr(3.5, 7.5, 2.25, 4.5, 0.5), tone: 'secondary' },
+        { kind: 'stroke', d: 'M7.75 8.75H12', w: 1.5, tone: 'primary', cap: 'butt' },
+        { kind: 'stroke', d: 'M7.75 11.25H10.5', w: 1.5, tone: 'secondary', cap: 'butt' },
       ];
     case 'dyno': {
       const n = status === 'high' ? 372 : 300;

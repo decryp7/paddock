@@ -305,6 +305,14 @@
     "sd.theme.light": "⟦Ţĥééɱéé: ļîîĝĥţ⟧",
     "sd.theme.system": "⟦Ţĥééɱéé: šýšţééɱ⟧",
     "sd.theme.warm-paper": "⟦Ŵááŕɱ þááþééŕ⟧",
+    "sd.tray.failed": "⟦Ţĥááţ ðîîð ñööţ ŵöŕķ: {$reason}⟧",
+    "sd.tray.job": "⟦Šţááŕţ šááɱþļéé ĵöƀ⟧",
+    "sd.tray.quit": "⟦Ǫûûîîţ⟧",
+    "sd.tray.show": "⟦Šĥööŵ ŵîîñðööŵ⟧",
+    "sd.tray.unavailable": "⟦Ţĥéé ááþþ ðîîð ñöţ ááñšŵééŕ: {$reason}⟧",
+    "sd.tray.version": "⟦Ṽééŕšîîööñ {$version}⟧",
+    "sd.tray.windows.one": "⟦1 ŵîîñðööŵ ööþéñ⟧",
+    "sd.tray.windows.other": "⟦{$count} ŵîîñðööŵš ööþéñ⟧",
     "sd.warm-paper": "⟦Ŵááŕɱ þááþééŕ⟧"
   }
 }

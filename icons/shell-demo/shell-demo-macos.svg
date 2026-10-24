@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Paddock Shell Demo</title>
+  <defs>
+    <linearGradient id="s0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ECEEF2"/><stop offset="0.55" stop-color="#D5D8DE"/><stop offset="1" stop-color="#BBC1CB"/>
+    </linearGradient>
+    <radialGradient id="s0sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s0edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="s0clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="s0gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#4A5361" flood-opacity="0.18"/></filter>
+    <filter id="s0ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#s0bg)" filter="url(#s0ts)"/>
+  <g clip-path="url(#s0clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.16"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.17600000000000002"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#s0sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#s0edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#s0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M344 296H680A72 72 0 0 1 752 368V656A72 72 0 0 1 680 728H344A72 72 0 0 1 272 656V368A72 72 0 0 1 344 296Z" fill="none" stroke="#1E2530" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/><path d="M272 404H752" fill="none" stroke="#1E2530" stroke-width="48" stroke-linecap="butt" stroke-linejoin="round"/><g opacity="0.55"><path d="M436 404V728" fill="none" stroke="#1E2530" stroke-width="40" stroke-linecap="butt" stroke-linejoin="round"/></g><path d="M334 486H374" fill="none" stroke="#1E2530" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/><g opacity="0.55"><path d="M334 566H374M334 646H374" fill="none" stroke="#1E2530" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M506 492H686" fill="none" stroke="#1E2530" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/><g opacity="0.55"><path d="M506 572H660M506 652H620" fill="none" stroke="#1E2530" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/></g></g>
+</svg>

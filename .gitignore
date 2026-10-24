@@ -12,3 +12,9 @@
 
 # Icon set build deps
 /icons/node_modules/
+
+# The shell demo app (apps/shell-demo): its Tauri CLI, Tauri's generated schemas, a local build folder and bundles.
+/apps/shell-demo/node_modules/
+/apps/shell-demo/src-tauri/gen/
+/apps/shell-demo/src-tauri/target/
+/apps/shell-demo/dist/

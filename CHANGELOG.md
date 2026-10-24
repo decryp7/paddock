@@ -4,6 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Added
+- Paddock Shell Demo (`apps/shell-demo`, plan S18): the shell demo as an installable Tauri app on the `paddock-shell`
+  plugin, with a sample engine (a service whose Repair works and one whose Repair fails, jobs with phases and Cancel,
+  settings sections, the tray popover), its own neutral icon from the icon pipeline (`icons/shell-demo`), ad-hoc macOS
+  signing with the strict verify, and its own release workflow on `shell-demo-v*` tags. In the app the demo's UI uses
+  every Tauri backend of the shell (health, notifications, jobs, dialogs as windows); in the browser its stand-ins.
+- `node scripts/new-app.mjs <id> "<Name>"`: a new app from the demo, renamed, in the family layout, on the registries.
+
+### Changed
+- The shell demo's product name is "Paddock Shell Demo"; its Rust side is the app (`apps/shell-demo/src-tauri` writes
+  `app-commands.ts`); `paddock-shell`'s `tests/demo.rs` keeps only the plugin's checks over the demo's files.
+
 ## 0.2.0 - not yet tagged (the first shell release)
 
 The app shell of ADR 0012 (plan S0-S17): `@decryp7/paddock-ui` 0.2.0 with the `shell/*` entry points,

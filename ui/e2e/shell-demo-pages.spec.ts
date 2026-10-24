@@ -25,14 +25,14 @@ test.describe('pages frame (plan S14)', () => {
     await app.frame.open();
     await expect(page).toHaveURL(/#\/home$/);
     await expect(app.frame.heading).toHaveText('Overview');
-    await expect(page).toHaveTitle('Overview – Paddock demo');
+    await expect(page).toHaveTitle('Overview – Paddock Shell Demo');
     await expect(app.sidebar.link('Overview')).toHaveAttribute('aria-current', 'page');
     await expect(app.sidebar.links).toHaveText([/^Overview$/, /^Runners/, /^Dialogs$/, /^Keyboard$/, /^About$/]);
 
     await app.sidebar.link('Keyboard').click();
     await expect(app.frame.heading).toHaveText('Keyboard');
     await expect(page).toHaveURL(/#\/keys$/);
-    await expect(page).toHaveTitle('Keyboard – Paddock demo');
+    await expect(page).toHaveTitle('Keyboard – Paddock Shell Demo');
     await expect(app.sidebar.link('Keyboard')).toHaveAttribute('aria-current', 'page');
     // Focus moves to the page, so a screen reader starts there.
     await expect(app.frame.main).toBeFocused();
@@ -282,7 +282,7 @@ test.describe('pages frame (plan S14)', () => {
     await page.setViewportSize({ width: 320, height: 640 });
     await app.frame.open();
     await expect(app.frame.appName).toBeVisible();
-    await expect(app.frame.appName).toHaveAttribute('title', 'Paddock demo');
+    await expect(app.frame.appName).toHaveAttribute('title', 'Paddock Shell Demo');
     const glyph = () => app.frame.toggle.locator('pd-icon').evaluate((el) => el.innerHTML);
     const narrow = await glyph();
     await page.setViewportSize({ width: 1280, height: 800 });

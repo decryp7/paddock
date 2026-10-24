@@ -6,7 +6,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <article class="text">
-      <h2>Paddock shell demo</h2>
+      <h2>Paddock Shell Demo</h2>
       <p>The reference app of the Paddock app shell. Every shell part shows up here first, against a mock backend.</p>
       <p>This window is a viewer: it stays open beside the work, and Escape or Close dismisses it.</p>
     </article>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 32 32">
+  <title>Paddock Shell Demo 48px</title>
+  <defs>
+    <linearGradient id="s5bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ECEEF2"/><stop offset="1" stop-color="#BBC1CB"/></linearGradient>
+    
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#s5bg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#4A5361" stroke-opacity="0.45" stroke-width="0.5"/>
+  <path d="M9 6.5H23A3.5 3.5 0 0 1 26.5 10V22A3.5 3.5 0 0 1 23 25.5H9A3.5 3.5 0 0 1 5.5 22V10A3.5 3.5 0 0 1 9 6.5Z" fill="none" stroke="#1E2530" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 11.5H26.5" fill="none" stroke="#1E2530" stroke-width="2.5" stroke-linecap="butt" stroke-linejoin="round"/><g opacity="0.55"><path d="M12.5 11.5V25.5" fill="none" stroke="#1E2530" stroke-width="2" stroke-linecap="butt" stroke-linejoin="round"/></g><path d="M8.75 15.5H9.75" fill="none" stroke="#1E2530" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><g opacity="0.55"><path d="M8.75 19.5H9.75" fill="none" stroke="#1E2530" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M16 15.5H23" fill="none" stroke="#1E2530" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><g opacity="0.55"><path d="M16 19.5H21" fill="none" stroke="#1E2530" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></g>
+</svg>

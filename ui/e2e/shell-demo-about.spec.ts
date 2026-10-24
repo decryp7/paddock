@@ -91,6 +91,8 @@ const fakeEngine = (page: Page): Promise<TauriFake> =>
       updates_status: status({ kind: 'idle' }),
       updates_check: status({ kind: 'checking', job: 7 }),
       updates_download: status({ kind: 'downloading', info: INFO, job: 8 }),
+      // The window's start data comes from the plugin (`dialog_take_input`), as in the desktop app.
+      dialog_take_input: { dialogId: 'pd.updates', title: 'Updates', kind: 'tool', modality: 'modeless', requiredChoice: false, input: {} },
     },
   });
 

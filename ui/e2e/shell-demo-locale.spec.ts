@@ -11,7 +11,7 @@ const PSEUDO = /⟦[^⟧]*⟧/;
 const ALLOWED = /^(Ctrl|Shift|Alt|Cmd|Win|Esc|Enter|Tab|F\d+|[A-Z])$/;
 const LANGUAGE_KEY = 'paddock.language';
 /** The app's name (the title of its app menu and title bar) is the app's own text, never translated. */
-const APP_NAME = 'Paddock demo';
+const APP_NAME = 'Paddock Shell Demo';
 
 async function openPseudo(page: Page, path = '/'): Promise<void> {
   await page.addInitScript((key) => {

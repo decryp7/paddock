@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "shell-popout",
+  "description": "Pop-out windows (p-<host>-<n>).",
+  "windows": ["p-*"],
+  "permissions": ["core:event:default", "paddock-shell:popout"]
+}

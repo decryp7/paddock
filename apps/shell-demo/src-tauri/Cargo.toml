@@ -1,0 +1,58 @@
+# Paddock Shell Demo: the shell demo (ui/projects/shell-demo) as an installable desktop app on the `paddock-shell` plugin
+# (plan docs/plans/workbench.md §10, S18). It is its own workspace, as an app's `src-tauri` is, and the starter of new apps
+# (`node scripts/new-app.mjs`, which turns the path dependencies below into registry ones).
+[workspace]
+
+[package]
+name = "paddock-shell-demo"
+# The app's version, its single source: tauri.conf.json has none (Tauri reads this one), the release tag is
+# `shell-demo-v<version>` and CHANGELOG.md has its notes (What's New).
+version = "0.1.0"
+description = "Paddock Shell Demo: the Paddock app shell as an installable app, to check the shared UI and to start new apps from"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://dev.decryptology.net/decryp7/paddock"
+publish = false
+default-run = "paddock-shell-demo"
+
+[lib]
+name = "paddock_shell_demo"
+
+[[bin]]
+name = "paddock-shell-demo"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+# The shell crates from this repository (path dependencies). An app outside the repository names them from the
+# `decryp7` registry instead (crates/README.md, "Consuming the crates"); scripts/new-app.mjs rewrites these lines.
+[dependencies]
+paddock-shell = { path = "../../../crates/paddock-shell", features = ["tray"] }
+paddock-commands = { path = "../../../crates/paddock-commands", features = ["tauri"] }
+paddock-dialogs = { path = "../../../crates/paddock-dialogs", features = ["tauri"] }
+paddock-health = { path = "../../../crates/paddock-health", features = ["tauri"] }
+paddock-jobs = { path = "../../../crates/paddock-jobs", features = ["tauri"] }
+paddock-settings = { path = "../../../crates/paddock-settings", features = ["tauri"] }
+paddock-startup = { path = "../../../crates/paddock-startup", features = ["tauri"] }
+paddock-updater = { path = "../../../crates/paddock-updater", features = ["tauri"] }
+paddock-window = { path = "../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
+# The tray icon's images are PNG (template images on macOS).
+tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = { version = "0.4", features = ["kv"] }
+
+[dev-dependencies]
+tauri = { version = "2.12", features = ["test"] }
+# Dialogs on Tauri's mock runtime (not parented to a native window).
+paddock-shell = { path = "../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }
+# The capabilities are resolved through Tauri's own ACL in the tests.
+tauri-utils = "2.10"
+tempfile = "3"
+toml = "0.9"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

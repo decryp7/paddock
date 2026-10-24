@@ -6,11 +6,15 @@ import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
+import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
+import { TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
+import { TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
 import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS } from './app/demo.contributions';
 import { demoAboutBackend, demoUpdatesBackend } from './app/demo-about';
 import type { DemoContext } from './app/demo-context';
 import { DemoIcon } from './app/demo-icon';
-import { tauriIpc } from './app/demo-ipc';
+import { tauriBridge, tauriIpc } from './app/demo-ipc';
+import { APP_NAME } from './app/demo-name';
 import { DemoHealthEngine } from './app/demo-health';
 import { DemoJobsEngine } from './app/demo-jobs';
 import { DemoNote } from './app/demo-note';
@@ -27,6 +31,7 @@ import type * as shellStore from '@decryp7/paddock-ui/shell/store';
 /** The demo's main window: the pages frame (plan S14) from the demo's contributions. */
 export function bootMainWindow(): Promise<unknown> {
   const ipc = tauriIpc();
+  const bridge = tauriBridge();
   return bootstrapApplication(ShellDemo, {
     providers: [
       // Theme and language (plan S15): the appearance store, over the Appearance settings (provideShellSettings below);
@@ -58,20 +63,23 @@ export function bootMainWindow(): Promise<unknown> {
       provideSubmenus<DemoContext>(...DEMO_SUBMENUS),
       // The app's part of the context is a lazy chunk, loaded when the window is idle (plan §9).
       provideShellContext<DemoContext>(() => import('./app/demo-context').then((m) => m.demoContext)),
-      // The whole window from the contributions: pages, status bar, menus and keys, notifications over the demo's
-      // in-memory paddock-health, jobs over its simulated engine ("Still working" after 1.5 s without events), the
-      // start-up contract keeping the note across a recovery reload, and dialogs in the page (the desktop build passes
-      // `dialogs: { io: () => tauriDialogIo(bridge) }`).
+      // The whole window from the contributions: pages, status bar, menus and keys, notifications and service health,
+      // jobs ("Still working" after 1.5 s without events), the start-up contract keeping the note across a recovery
+      // reload, and dialogs. In the desktop app every part is the shell plugin's (dialogs are real windows); in the
+      // browser, the demo's in-memory stand-ins (dialogs in the page).
       provideShellPages({
-        appName: 'Paddock demo',
+        appName: APP_NAME,
         icon: DemoIcon,
-        notify: { health: () => inject(DemoHealthEngine).health, notifications: () => inject(DemoHealthEngine).centre },
-        jobs: { backend: () => inject(DemoJobsEngine).backend, stillWorkingAfterMs: 1_500 },
+        notify: ipc
+          ? { health: () => new TauriServiceHealthBackend(ipc), notifications: () => new TauriNotificationsBackend(ipc) }
+          : { health: () => inject(DemoHealthEngine).health, notifications: () => inject(DemoHealthEngine).centre },
+        jobs: { backend: () => (ipc ? new TauriJobsBackend(ipc) : inject(DemoJobsEngine).backend), stillWorkingAfterMs: 1_500 },
         startup: {
           backend: () => (ipc ? new TauriStartupBackend(ipc) : new MockStartupBackend()),
           checkpoint: () => inject(DemoNote).checkpoint,
         },
         ...(ipc ? { nativeMenu: tauriNativeMenuPort(ipc) } : {}),
+        ...(bridge ? { dialogs: { io: () => tauriDialogIo(bridge) } } : {}),
       }),
     ],
   }).catch((e: unknown) => {

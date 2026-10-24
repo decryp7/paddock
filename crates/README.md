@@ -508,8 +508,8 @@ The shell as one Tauri plugin (ADR 0012 §3, decision D2): `paddock_shell::Build
   (`checkShellVersion`).
 - Tests on Tauri's mock runtime: every command reaches its handler from a window of a class it is open to, each permission
   set opens exactly the table's classes, a dialog reaches only its contract, window notices reach every window, the update
-  preferences flow through the settings, and `tests/demo.rs` is the shell demo's Rust side (its table writes the demo's
-  `app-commands.ts`; its contracts and manifest are checked).
+  preferences flow through the settings, and `tests/demo.rs` checks the shell demo's contracts and manifest. The demo's
+  real Rust side is the app `apps/shell-demo/src-tauri` (plan S18): its table writes the demo's `app-commands.ts`.
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.

@@ -1,9 +1,8 @@
-//! The shell demo's Rust side, as an app keeps it (`ui/projects/shell-demo` has no `src-tauri` yet; this test stands in
-//! for it): its own command table, the shell plugin with its services and sections, and the checks every app runs over
-//! its generated files: the dialog contracts and `paddock-manifest.json` against the plugin and the app's table.
-//! It also writes the demo's command names (`src/app/generated/app-commands.ts`), as `paddock-commands` writes an app's.
+//! The plugin's checks over a real consumer's generated files: the shell demo's dialog contracts and
+//! `paddock-manifest.json` against the plugin and a table with the demo's dialog commands. The demo app itself
+//! (`apps/shell-demo/src-tauri`, its own workspace) runs the same checks with its real table and writes the UI's command
+//! names; this test keeps the plugin's side of them in this workspace's runs and coverage.
 
-use paddock_commands::testing::{WriteMode, sync_generated};
 use paddock_health::ServiceSpec;
 use paddock_settings::{FieldKind, SectionOwner, SettingField, SettingsSection};
 use paddock_shell::{AppIdentity, Builder};
@@ -64,21 +63,6 @@ fn demo_shell() -> Builder<MockRuntime> {
         .section(section("sd.general", "General"))
         .section(section("sd.storage", "Storage"))
         .in_memory()
-}
-
-const REGENERATE: &str = "PADDOCK_WRITE_TS=1 cargo test -p paddock-shell --test demo";
-
-#[test]
-fn the_demos_command_names_are_generated_from_its_table() {
-    let text = paddock_commands::ts::names_module(
-        &DEMO_COMMANDS,
-        "APP_COMMANDS",
-        "AppCommand",
-        REGENERATE,
-    )
-    .unwrap();
-    let path = demo_dir().join("src/app/generated/app-commands.ts");
-    sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]

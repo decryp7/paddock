@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Paddock Shell Demo</title>
+  <defs>
+    <linearGradient id="s1bg" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ECEEF2"/><stop offset="0.55" stop-color="#D5D8DE"/><stop offset="1" stop-color="#BBC1CB"/>
+    </linearGradient>
+    <radialGradient id="s1sheen" cx="304.32000000000005" cy="40" r="802.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s1edge" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="s1clip"><path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z"/></clipPath>
+    <filter id="s1gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="11.46" stdDeviation="13.75" flood-color="#4A5361" flood-opacity="0.18"/></filter>
+    
+    
+  </defs>
+  <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="url(#s1bg)"/>
+  <g clip-path="url(#s1clip)">
+    <path d="M0 965.12L965.12 0L1097.2800000000002 0L0 1097.2800000000002Z" fill="#FFFFFF" opacity="0.16"/>
+    <path d="M0 1163.36L1163.36 0L1201.12 0L0 1201.12Z" fill="#FFFFFF" opacity="0.17600000000000002"/>
+    <rect x="40" y="40" width="944" height="944" fill="url(#s1sheen)"/>
+    <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="none" stroke="url(#s1edge)" stroke-width="6.87"/>
+    
+  </g>
+  <g filter="url(#s1gs)" transform="translate(512 512) scale(1.15) translate(-512 -512)"><path d="M344 296H680A72 72 0 0 1 752 368V656A72 72 0 0 1 680 728H344A72 72 0 0 1 272 656V368A72 72 0 0 1 344 296Z" fill="none" stroke="#1E2530" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/><path d="M272 404H752" fill="none" stroke="#1E2530" stroke-width="48" stroke-linecap="butt" stroke-linejoin="round"/><g opacity="0.55"><path d="M436 404V728" fill="none" stroke="#1E2530" stroke-width="40" stroke-linecap="butt" stroke-linejoin="round"/></g><path d="M334 486H374" fill="none" stroke="#1E2530" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/><g opacity="0.55"><path d="M334 566H374M334 646H374" fill="none" stroke="#1E2530" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M506 492H686" fill="none" stroke="#1E2530" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/><g opacity="0.55"><path d="M506 572H660M506 652H620" fill="none" stroke="#1E2530" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/></g></g>
+</svg>

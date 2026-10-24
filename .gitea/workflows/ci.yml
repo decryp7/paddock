@@ -188,3 +188,35 @@ jobs:
       - name: paddock-window
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-window --all-targets --all-features -- -D warnings && cargo test -p paddock-window --all-features
+
+  # Paddock Shell Demo (apps/shell-demo, plan S18): the shell plugin in a real app, in its own workspace, with the UI it
+  # embeds. Inside this repo it is the first consumer: a change to a shell crate or to the UI that breaks an app fails
+  # here before a tag. Its installers are built by shell-demo-release.yml (a `shell-demo-v*` tag or a manual run).
+  shell-demo-app:
+    name: shell demo app (fmt, clippy, tests, deny)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
+      - name: The UI the app embeds
+        working-directory: ui
+        run: |
+          npm ci
+          npx ng build shell-demo
+
+      - name: App (fmt, clippy, tests on the mock runtime, deny)
+        working-directory: apps/shell-demo/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+          cargo deny check

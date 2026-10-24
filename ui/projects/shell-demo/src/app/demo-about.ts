@@ -1,5 +1,6 @@
 import { MemoryAboutBackend, MemoryUpdatesBackend, TauriAboutBackend, TauriUpdatesBackend, type AboutBackend, type FakeServer, type UpdatesBackend } from '@decryp7/paddock-ui/shell/about';
 import shellPackage from '../../../paddock-ui/package.json';
+import { APP_NAME } from './demo-name';
 import { tauriIpc } from './demo-ipc';
 
 /** The demo's version: the shell's own (its single source, rule 6; the e2e reads the same file). */
@@ -25,7 +26,7 @@ export function demoAboutBackend(): AboutBackend {
   if (ipc) return new TauriAboutBackend(ipc);
   about ??= new MemoryAboutBackend(
     {
-      appName: 'Paddock demo',
+      appName: APP_NAME,
       version: DEMO_VERSION,
       os: 'browser',
       arch: 'web',

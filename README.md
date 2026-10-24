@@ -66,6 +66,7 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 | Icon set | [`icons/`](icons/README.md) | the family app icons per platform and the tooling that builds them | copy the app's folder |
 | Release practices | [`docs/lessons.md`](docs/lessons.md), [`CHANGELOG.md`](CHANGELOG.md) | tag workflow, signed updates, `latest.json`, the release script | follow the lessons |
 | Rust crates | [`crates/`](crates/README.md) | shared Rust code. Planned: `paddock-mcp` (MCP servers across the family, ADR 0007), the plugin platform (host, IPC and API, extracted from Debrief's ADR 0017 model), `paddock-pitwall` (the Pitwall client) and `paddock-testplan` (the `.sighterplan` format) | git dependency on a tag |
+| Paddock Shell Demo | [`apps/shell-demo/`](apps/shell-demo/README.md) | the shell demo as an installable app on the `paddock-shell` plugin, to check the shared UI on every OS; the starter of new apps (`node scripts/new-app.mjs <id> "<Name>"`) | installers from a `shell-demo-v*` tag |
 | Rules | [`docs/rules.md`](docs/rules.md) | the binding rules for every app and agent | follow them; each app's AGENTS.md carries them |
 | Lessons | [`docs/lessons.md`](docs/lessons.md) | what building Debrief and Pitcrew taught | read before starting an app |
 
@@ -126,6 +127,10 @@ by CI. Steps: update the version in `ui/projects/paddock-ui/package.json` and `u
 move together), bump each changed crate's `version`, update `CHANGELOG.md`, commit, tag, push the tag.
 `node scripts/publish.mjs` (or `cd ui && npm run release`) is the local dry run: it lists every crate, npm package and
 entry point with what the tag would publish, and uploads nothing.
+
+Paddock Shell Demo has its own tags, `shell-demo-v<version>` (its version is `apps/shell-demo/src-tauri/Cargo.toml`'s):
+`.gitea/workflows/shell-demo-release.yml` builds its installers and creates its release. A `v*` tag never builds it, and
+its tag never publishes the packages.
 
 ## Licence
 
