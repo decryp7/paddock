@@ -421,3 +421,9 @@ in the branch). "Owned" is in the Paddock repo.
 - `JobsStore.follow` in windows without jobs providers.
 - In-memory about/settings backends need shell-only fixtures.
 - The dialog-command checker must run in apps (ship it with its inputs in the npm package).
+
+## Release scope change (user, 2026-10-24 night)
+
+All apps wait for one shell release before they move, so **0.3.0 contains all 20 work packages (X1–X20)**, plus
+`paddock-pitwall`, the gaps found by the Pitcrew and Pitwall moves, and the Shell Demo fixes already on main. There is
+no 0.2.1 and no separate 0.4.0. Groups G1–G5 keep their order; G4/G5 start as soon as their dependencies land.
