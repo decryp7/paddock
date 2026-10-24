@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, untracked } from '@angular/core';
+import { SU_STATUS_ICON, type SuStatus } from '@decryp7/paddock-ui';
 import { repairButtonLabel } from './notice-actions';
 import { OPEN_SETTINGS } from './notify-config';
 import { ServiceHealthStore } from './service-health.store';
@@ -15,6 +16,39 @@ export function waitingKind(state: string | null): WaitingKind {
 }
 
 /**
+ * The one severity of a service's state wherever it is shown (rule 8: icon, word and colour as one unit): the status
+ * chip, a panel's offline state, a tray's pill and banner. Not working is `danger`; under way is `neutral`.
+ */
+export function serviceStatus(state: string | null): SuStatus {
+  if (state === 'down' || state === 'degraded' || state === 'quarantined') return 'danger';
+  return state === 'ok' ? 'success' : 'neutral';
+}
+
+/** "the demo engine" restarts, is reset, is installed: what brings it back, by its repair. */
+function untilPhrase(service: string, repair: string | null): string {
+  switch (repair) {
+    case 'restart':
+      return $localize`:@@pd.health.until.restart:until ${service}:service: restarts`;
+    case 'reset':
+      return $localize`:@@pd.health.until.reset:until ${service}:service: is reset`;
+    case 'install':
+      return $localize`:@@pd.health.until.install:until ${service}:service: is installed`;
+    default:
+      return $localize`:@@pd.health.until.works:until ${service}:service: works again`;
+  }
+}
+
+/**
+ * The offline state's line: what is missing and what brings it back ("Engine data is unavailable until the demo engine
+ * restarts."). Without the panel's `subject`, the service itself ("Demo engine is unavailable until it restarts.").
+ */
+export function offlineLine(subject: string | null, label: string, repair: string | null): string {
+  const what = subject ?? shortName(label);
+  const until = untilPhrase(subject ? label : $localize`:@@pd.health.it:it`, repair);
+  return $localize`:@@pd.health.offline:${what}:subject: is unavailable ${until}:until:.`;
+}
+
+/**
  * What a panel shows instead of its own error while a service it needs is not working. While something is under way
  * (the first snapshot, a start, a repair) it waits with a spinner. When the service stopped it draws the offline state:
  * the warning icon and word, one muted line, and the same repair the status chip offers (rule 19), plus a link to the
@@ -26,9 +60,9 @@ export function waitingKind(state: string | null): WaitingKind {
   template: `
     <div class="waiting" role="status" [attr.data-testid]="'waiting-for-' + service()" [attr.data-kind]="kind()">
       @if (kind() === 'offline') {
-        <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 2.2 14.5 13.5h-13Z" /><path class="mark" d="M8 6.5v3.2M8 11.6v.01" /></svg>
+        <svg class="icon" [attr.data-status]="status()" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path [attr.d]="icon()" /></svg>
         <strong>{{ stopped() }}</strong>
-        <span class="line">{{ t.unavailable }}</span>
+        <span class="line">{{ line() }}</span>
         @if (repairText(); as text) {
           <button type="button" class="btn" data-testid="waiting-for-repair" (click)="repair()">{{ text }}</button>
         }
@@ -44,7 +78,7 @@ export function waitingKind(state: string | null): WaitingKind {
     .waiting { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); text-align: center; color: var(--pd-text-muted); padding: var(--pd-space-4); }
     strong { color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
     .line { max-width: 48ch; }
-    .icon { color: var(--pd-warning); }
+    .icon { color: var(--pd-danger); }
     .icon path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
     .btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
     .btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
@@ -59,17 +93,21 @@ export class PdWaitingFor {
   /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
   protected readonly t = {
     seeWhatHappened: $localize`:@@pd.health.see-what-happened:See what happened`,
-    unavailable: $localize`:@@pd.health.unavailable:This is unavailable until it works again.`,
   };
   protected readonly health = inject(ServiceHealthStore);
   private readonly openSettings = inject(OPEN_SETTINGS, { optional: true });
   /** The service id. */
   readonly service = input.required<string>();
+  /** What the panel shows when the service works ("Engine data"), for the offline line; the service's name without it. */
+  readonly subject = input<string | null>(null);
   private readonly state = computed(() => this.health.health(this.service()));
   protected readonly kind = computed(() => waitingKind(this.state()?.state ?? null));
   protected readonly label = computed(() => this.state()?.label ?? this.service());
   protected readonly waitingFor = computed(() => $localize`:@@pd.health.waiting-for:Waiting for ${this.label()}:service:`);
   protected readonly repairing = computed(() => $localize`:@@pd.health.repairing-for:Repairing ${this.label()}:service:…`);
+  protected readonly status = computed(() => serviceStatus(this.state()?.state ?? null));
+  protected readonly icon = computed(() => SU_STATUS_ICON[this.status()]);
+  protected readonly line = computed(() => offlineLine(this.subject(), this.label(), this.state()?.repair ?? null));
   protected readonly stopped = computed(() => `${shortName(this.label())} ${stateWord(this.state()?.state ?? 'down')}`);
   /** The chip's repair, by the same words; none when nothing repairs it here (the details say what to do). */
   protected readonly repairText = computed(() => {
@@ -98,7 +136,7 @@ export class PdWaitingFor {
   imports: [PdWaitingFor],
   template: `
     @if (waiting()) {
-      <pd-waiting-for [service]="service() ?? ''" />
+      <pd-waiting-for [service]="service() ?? ''" [subject]="subject()" />
     } @else {
       <div class="error" role="alert">
         <strong class="summary">{{ summary() }}</strong>
@@ -137,6 +175,8 @@ export class PdServiceError {
   /** The backend's message (technical); folded away. */
   readonly detail = input<string | null>(null);
   readonly retryable = input(true);
+  /** What the panel shows when it works ("Engine data"), for the offline line while its service is stopped. */
+  readonly subject = input<string | null>(null);
   /** The service the panel's data comes from; null when it needs none (never waits). */
   readonly service = input<string | null>(null);
   readonly retry = output<void>();

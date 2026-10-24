@@ -82,6 +82,8 @@ test('a service failure comes from the engine, and Repair asks the shell plugin'
   const panel = page.getByTestId('waiting-for-sd.engine');
   await expect(panel).toHaveAttribute('data-kind', 'offline');
   await expect(panel.getByTestId('waiting-for-repair')).toHaveText('Restart demo engine');
+  await expect(panel).toContainText('Engine data is unavailable until the demo engine restarts.');
+  await expect(panel.locator('svg.icon')).toHaveAttribute('data-status', 'danger');
 
   await chip.click();
   await app.notifications.services.getByRole('button', { name: 'Restart' }).click();
@@ -200,6 +202,8 @@ test.describe('tray popover', () => {
     await page.goto('/#/tray');
     await expect(page.getByTestId('tray-status')).toHaveText('Demo engine stopped');
     const banner = page.getByTestId('tray-attention');
+    // One severity for a stopped service: the pill and the banner are danger, as the chip and the panel are.
+    await expect(banner).toHaveAttribute('data-status', 'danger');
     await expect(banner).toContainText('The demo engine stopped unexpectedly.');
     await expect(page.getByTestId('tray-job')).toContainText('Importing logs');
     await expect(page.getByTestId('tray-job')).toContainText('Reading 25%');

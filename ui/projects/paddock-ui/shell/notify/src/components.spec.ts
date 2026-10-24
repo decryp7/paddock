@@ -11,7 +11,7 @@ import { PdServiceStatus } from './service-status';
 import { chipCompactText, chipText, shortName, stateWord } from './service-status-text';
 import { ServiceHealthStore } from './service-health.store';
 import { all, cause, notifyBed, one, settle } from './spec-helpers';
-import { PdServiceError, PdWaitingFor, waitingKind } from './waiting-for';
+import { offlineLine, PdServiceError, PdWaitingFor, serviceStatus, waitingKind } from './waiting-for';
 import { ServiceHealthBackend, type Unlisten } from './backends';
 import type { ServiceHealthSnapshot } from './wire.types';
 
@@ -186,6 +186,28 @@ class Panels {
   readonly retries = signal(0);
 }
 
+describe('a stopped service, in words and severity', () => {
+  it('says what is missing and what brings it back, from the subject and the repair', () => {
+    expect(offlineLine('Engine data', 'the demo engine', 'restart')).toBe('Engine data is unavailable until the demo engine restarts.');
+    expect(offlineLine('Search', 'the search index', 'reset')).toBe('Search is unavailable until the search index is reset.');
+    expect(offlineLine('Charts', 'the model', 'install')).toBe('Charts is unavailable until the model is installed.');
+    expect(offlineLine('Events', 'the log store', null)).toBe('Events is unavailable until the log store works again.');
+    expect(offlineLine(null, 'the demo engine', 'restart')).toBe('Demo engine is unavailable until it restarts.');
+  });
+
+  it('has one severity everywhere: not working is danger, under way neutral', () => {
+    expect(['down', 'degraded', 'quarantined', 'repairing', 'starting', 'ok', null].map(serviceStatus)).toEqual([
+      'danger',
+      'danger',
+      'danger',
+      'neutral',
+      'neutral',
+      'success',
+      'neutral',
+    ]);
+  });
+});
+
 describe('waitingKind', () => {
   it('spins only while something is under way; a stopped service is an offline state', () => {
     expect([null, 'starting', 'ok', 'repairing', 'down', 'degraded', 'quarantined'].map(waitingKind)).toEqual([
@@ -222,7 +244,8 @@ describe('pd-service-error and pd-waiting-for', () => {
     const panel = one(el, '[data-testid=waiting-for-store]');
     expect(panel.dataset['kind']).toBe('offline');
     expect(panel.textContent).toContain('Log store stopped');
-    expect(panel.textContent).toContain('This is unavailable until it works again.');
+    expect(panel.textContent).toContain('Log store is unavailable until it restarts.');
+    expect(panel.querySelector('svg.icon')?.getAttribute('data-status')).toBe('danger');
     expect(panel.querySelector('.spinner')).toBeNull();
     expect(el.textContent).not.toContain('Could not load events.');
     const store = TestBed.inject(ServiceHealthStore);

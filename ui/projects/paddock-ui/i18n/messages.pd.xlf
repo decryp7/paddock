@@ -89,6 +89,9 @@
       <trans-unit id="pd.health.chip.unknown" datatype="html">
         <source>Services: unknown</source>
       </trans-unit>
+      <trans-unit id="pd.health.it" datatype="html">
+        <source>it</source>
+      </trans-unit>
       <trans-unit id="pd.health.no-answer" datatype="html">
         <source>The service-health service did not answer.</source>
       </trans-unit>
@@ -100,6 +103,9 @@
       </trans-unit>
       <trans-unit id="pd.health.nothing-to-repair" datatype="html">
         <source>There is nothing to repair for <x id="service"/> now.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.offline" datatype="html">
+        <source><x id="subject"/> is unavailable <x id="until"/>.</source>
       </trans-unit>
       <trans-unit id="pd.health.popover" datatype="html">
         <source>Services</source>
@@ -170,11 +176,20 @@
       <trans-unit id="pd.health.try-again" datatype="html">
         <source>Try again</source>
       </trans-unit>
-      <trans-unit id="pd.health.unavailable" datatype="html">
-        <source>This is unavailable until it works again.</source>
-      </trans-unit>
       <trans-unit id="pd.health.unknown" datatype="html">
         <source>The state of the services is not known yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.until.install" datatype="html">
+        <source>until <x id="service"/> is installed</source>
+      </trans-unit>
+      <trans-unit id="pd.health.until.reset" datatype="html">
+        <source>until <x id="service"/> is reset</source>
+      </trans-unit>
+      <trans-unit id="pd.health.until.restart" datatype="html">
+        <source>until <x id="service"/> restarts</source>
+      </trans-unit>
+      <trans-unit id="pd.health.until.works" datatype="html">
+        <source>until <x id="service"/> works again</source>
       </trans-unit>
       <trans-unit id="pd.health.waiting-for" datatype="html">
         <source>Waiting for <x id="service"/></source>

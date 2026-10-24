@@ -11,7 +11,7 @@ import { DemoEngineData } from './demo-health';
     <section class="panel" aria-labelledby="sd-engine-data">
       <h2 id="sd-engine-data">Engine data</h2>
       @if (data.failed()) {
-        <pd-service-error summary="Could not load the engine data." service="sd.engine" (retry)="data.load()" />
+        <pd-service-error summary="Could not load the engine data." subject="Engine data" service="sd.engine" (retry)="data.load()" />
       } @else {
         <p data-testid="engine-data">Engine data loaded ({{ data.loads() }} {{ data.loads() === 1 ? 'load' : 'loads' }})</p>
       }

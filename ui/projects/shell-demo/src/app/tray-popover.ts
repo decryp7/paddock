@@ -1,5 +1,6 @@
 import { afterRenderEffect, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, InjectionToken, signal } from '@angular/core';
 import { jobView, SuStatusPill, SuTrayPopover, type SuJobSnapshot, type SuTrayPlatform } from '@decryp7/paddock-ui';
+import { serviceStatus } from '@decryp7/paddock-ui/shell/notify';
 import { APP_NAME } from './demo-name';
 
 /** What the tray popover may call: only commands open to the `tray` class (`paddock-shell:tray` and the demo's own). */
@@ -77,11 +78,11 @@ function platform(doc: Document): SuTrayPlatform {
           <path d="M4.5 7.5H5.5V11.5H4.5Z" fill="#1E2530" opacity="0.55" />
         </svg>
         <strong class="name">{{ name }}</strong>
-        <pd-status-pill data-testid="tray-status" [status]="problem() ? 'danger' : 'success'" [label]="status()" />
+        <pd-status-pill data-testid="tray-status" [status]="severity()" [label]="status()" />
       </div>
       <div class="body">
         @if (problem(); as p) {
-          <div class="attention" data-testid="tray-attention">
+          <div class="attention" data-testid="tray-attention" [attr.data-status]="severity()">
             <p class="cause">{{ p.cause?.message ?? status() }}</p>
             @if (repairLabel(p); as repairText) {
               <button type="button" class="btn btn--primary" (click)="repair(p)">{{ repairText }}</button>
@@ -156,6 +157,8 @@ export class TrayPopover {
   private readonly state = signal<TrayState>({ problems: [], job: null });
   readonly failure = signal<string | null>(null);
   readonly problem = computed(() => this.state().problems[0] ?? null);
+  /** The one severity of the app's state (the shell's mapping: the chip, panels and this pill agree). */
+  readonly severity = computed(() => serviceStatus(this.problem()?.state ?? 'ok'));
   /** The pill: Running, or what is stopped (the chip's words). */
   readonly status = computed(() => {
     const p = this.problem();

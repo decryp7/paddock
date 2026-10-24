@@ -20,7 +20,9 @@ Conventional Commits; one semver tag for the whole repo.
 - The tray popover layout has one 16 px inset for its header, content and footer.
 - `pd-waiting-for` (and `pd-service-error` while it waits) draws a stopped service as an offline state: the warning icon,
   "<Service> stopped", one muted line and the status chip's repair; it spins only while a start or repair is under way
-  (`waitingKind`).
+  (`waitingKind`). The line says what is missing and what brings it back ("Engine data is unavailable until the demo
+  engine restarts.": `subject` input, `offlineLine`), and a stopped service has one severity everywhere, danger
+  (`serviceStatus`: chip, panel icon, a tray's pill and banner).
 - The chosen segment of `pd-segmented-control` is raised (surface-3), also in dark.
 - The narrow jobs status item says "1 job" / "3 jobs" instead of a bare count.
 - Sentence case for the shell's About items: "Check for updates…", "What’s new" (and "What’s new in <version>").
