@@ -13,6 +13,7 @@
 
 use crate::distance::{allowed_typos, edit_distance_capped};
 use crate::group::{Candidate, vocabulary_from};
+use crate::index::{Index, MIN_INSIDE};
 use crate::normalise::{NormName, Style, normalise_as, squash, vendor_prefixes};
 use crate::segment::Vocabulary;
 use serde::{Deserialize, Serialize};
@@ -39,8 +40,6 @@ pub const MAX_OPTIONS: usize = 3;
 pub const TIE_GAP: f64 = 0.04;
 const FILLER: &[&str] = &["the", "a", "an", "my", "our", "that", "this", "please"];
 const WEIGHT_SHARE: f64 = 0.02;
-/// Shortest word that may be found inside another word (shorter ones must equal or start a word).
-const MIN_INSIDE: usize = 3;
 
 /// One thing that can be found.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -211,21 +210,21 @@ pub struct Search {
     pub clarify: Option<Clarification>,
 }
 
-struct Prepared {
-    id: String,
-    display: String,
-    kind: Option<String>,
-    weight: u64,
+pub(crate) struct Prepared {
+    pub(crate) id: String,
+    pub(crate) display: String,
+    pub(crate) kind: Option<String>,
+    pub(crate) weight: u64,
     /// Each spelling squashed (letters and digits), and its file stem squashed.
-    spellings: Vec<String>,
+    pub(crate) spellings: Vec<String>,
     /// The distinct token lists of the names.
-    names: Vec<Vec<String>>,
+    pub(crate) names: Vec<Vec<String>>,
     /// Each name's tokens joined.
-    joined: Vec<String>,
+    pub(crate) joined: Vec<String>,
     /// Tokens of the other fields.
-    field_tokens: Vec<String>,
-    aliases: Vec<String>,
-    user_aliases: Vec<String>,
+    pub(crate) field_tokens: Vec<String>,
+    pub(crate) aliases: Vec<String>,
+    pub(crate) user_aliases: Vec<String>,
 }
 
 /// A searchable set of entries.
@@ -233,6 +232,7 @@ pub struct Catalogue {
     vocab: Vocabulary,
     style: Style,
     entries: Vec<Prepared>,
+    index: Index,
     max_weight: u64,
 }
 
@@ -300,16 +300,29 @@ impl Catalogue {
             HashSet::new()
         };
         let max_weight = entries.iter().map(|e| e.weight).max().unwrap_or(0);
-        let prepared = entries
+        let prepared: Vec<Prepared> = entries
             .into_iter()
             .map(|e| prepare(e, style, &vocab, &vendors))
             .collect();
+        let index = Index::build(&prepared);
         Ok(Catalogue {
             vocab,
             style,
             entries: prepared,
+            index,
             max_weight,
         })
+    }
+
+    /// A catalogue with nothing in it.
+    pub fn empty() -> Catalogue {
+        Catalogue {
+            vocab: Vocabulary::builtin(),
+            style: Style::Text,
+            entries: Vec::new(),
+            index: Index::default(),
+            max_weight: 0,
+        }
     }
 
     /// How many entries.
@@ -329,14 +342,59 @@ impl Catalogue {
 
     /// The entries the words refer to, best first, at most `limit` (1 to [`MAX_MATCHES`]). An empty query matches nothing.
     pub fn search(&self, text: &str, limit: usize) -> Search {
+        self.run(text, limit, true)
+    }
+
+    /// [`search`](Self::search) without the index: every entry is ranked. Same results, much slower on a large catalogue; for
+    /// tests and benchmarks that compare the two.
+    #[doc(hidden)]
+    pub fn search_scan(&self, text: &str, limit: usize) -> Search {
+        self.run(text, limit, false)
+    }
+
+    fn run(&self, text: &str, limit: usize, indexed: bool) -> Search {
         let q = Query::parse(text, self.style, &self.vocab);
         if q.squashed.is_empty() {
             return Search::default();
         }
+        let all = |_: &Query| (0..self.entries.len() as u32).collect::<Vec<u32>>();
+        let strict_ids = if indexed {
+            self.index.candidates(&q)
+        } else {
+            all(&q)
+        };
+        let mut found = self.rank(&strict_ids, |p| self.strict(p, &q));
+        // Typos only when nothing matches better.
+        if found.is_empty() && self.may_be_typo(&q) {
+            let ids = if indexed {
+                self.index.fuzzy_candidates(&q)
+            } else {
+                all(&q)
+            };
+            found = self.rank(&ids, |p| self.typo(p, &q));
+        }
+        found.sort_by(|a, b| {
+            b.0.score
+                .total_cmp(&a.0.score)
+                .then(b.1.cmp(&a.1))
+                .then_with(|| a.0.id.cmp(&b.0.id))
+        });
+        found.truncate(limit.clamp(1, MAX_MATCHES));
+        let matches: Vec<Match> = found.into_iter().map(|m| m.0).collect();
+        let clarify = self.clarification(&matches, text);
+        Search { matches, clarify }
+    }
+
+    /// The entries among `ids` that `how` matches, scored.
+    fn rank(
+        &self,
+        ids: &[u32],
+        how: impl Fn(&Prepared) -> Option<(How, String, f64)>,
+    ) -> Vec<(Match, u64)> {
         let top = (self.max_weight as f64 + 1.0).ln().max(f64::MIN_POSITIVE);
-        let mut found: Vec<(Match, u64)> = Vec::new();
-        for p in &self.entries {
-            let Some((how, why, tier)) = self.how(p, &q) else {
+        let mut found = Vec::new();
+        for p in ids.iter().map(|i| &self.entries[*i as usize]) {
+            let Some((how, why, tier)) = how(p) else {
                 continue;
             };
             let share = WEIGHT_SHARE * ((p.weight as f64 + 1.0).ln() / top);
@@ -352,25 +410,12 @@ impl Catalogue {
                 p.weight,
             ));
         }
-        found.sort_by(|a, b| {
-            b.0.score
-                .total_cmp(&a.0.score)
-                .then(b.1.cmp(&a.1))
-                .then_with(|| a.0.id.cmp(&b.0.id))
-        });
-        // Typos only when nothing matches better.
-        if found.iter().any(|m| m.0.how != How::Typo) {
-            found.retain(|m| m.0.how != How::Typo);
-        }
-        found.truncate(limit.clamp(1, MAX_MATCHES));
-        let matches: Vec<Match> = found.into_iter().map(|m| m.0).collect();
-        let clarify = self.clarification(&matches, text);
-        Search { matches, clarify }
+        found
     }
 
     /// How `p` matches, the phrase saying so and a tier (0 for the name, up to 4 for the fields) that orders matches of
     /// one way.
-    fn how(&self, p: &Prepared, q: &Query) -> Option<(How, String, f64)> {
+    fn strict(&self, p: &Prepared, q: &Query) -> Option<(How, String, f64)> {
         if p.user_aliases.iter().any(|a| squash(a) == q.squashed) {
             return Some((How::UserAlias, "you named it this".into(), 0.0));
         }
@@ -413,14 +458,16 @@ impl Catalogue {
         if let Some(tier) = words_tier(p, q) {
             return Some((How::Words, "every word is in this name".into(), tier));
         }
-        self.typo(p, q)
+        None
+    }
+
+    /// Whether the query can be a typo at all: it has four letters and a word nobody knows ("great builder" is two real words,
+    /// so it is another thing).
+    fn may_be_typo(&self, q: &Query) -> bool {
+        q.squashed.chars().count() >= 4 && !q.tokens.iter().all(|t| self.vocab.knows(t))
     }
 
     fn typo(&self, p: &Prepared, q: &Query) -> Option<(How, String, f64)> {
-        // A typo has a word nobody knows; "grape builder" is two real words, so it is another thing.
-        if q.squashed.chars().count() < 4 || q.tokens.iter().all(|t| self.vocab.knows(t)) {
-            return None;
-        }
         let word_by_word = p
             .names
             .iter()
@@ -488,10 +535,10 @@ impl Catalogue {
 }
 
 /// The parsed query: the squashed letters, the tidy words and the words joined.
-struct Query {
-    squashed: String,
-    tokens: Vec<String>,
-    joined: String,
+pub(crate) struct Query {
+    pub(crate) squashed: String,
+    pub(crate) tokens: Vec<String>,
+    pub(crate) joined: String,
 }
 
 impl Query {
@@ -644,9 +691,6 @@ fn word_tier<'a>(
 /// Every query word is a word of the entry or a typo of one (a word under four letters must be exact), at least one a typo.
 /// Returns the letters off in all.
 fn fuzzy_words(p: &Prepared, q: &Query) -> Option<usize> {
-    if q.tokens.is_empty() {
-        return None;
-    }
     let all: Vec<&str> = p
         .names
         .iter()
