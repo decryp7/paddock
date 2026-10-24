@@ -28,6 +28,8 @@ export interface WorkbenchPorts {
   readonly activePerspective: Signal<string | null>;
   /** Shows the side bar with an Explorer section expanded and focused. */
   showExplorer(id: string): void;
+  /** Closes the side bar. */
+  hideExplorer(): void;
   /** The Explorer section shown in the side bar, or null when the side bar is closed. */
   readonly explorerShown: Signal<string | null>;
   /** Opens the command palette, optionally with a prefix typed (`>`, `@`). */
@@ -54,6 +56,7 @@ export const WORKBENCH_PORTS = new InjectionToken<WorkbenchPorts>('PADDOCK_WORKB
     },
     activePerspective: NULL,
     showExplorer: (id) => warn(`show Explorer section ${id}`),
+    hideExplorer: () => warn('hide the side bar'),
     explorerShown: NULL,
     openPalette: () => warn('open the palette'),
   }),
@@ -85,3 +88,25 @@ export interface PanelWindowsPort {
 
 /** Provided by `workbench/panels`; optional (null: no pop-outs in this window, as in a pop-out window itself). */
 export const PANEL_WINDOWS = new InjectionToken<PanelWindowsPort | null>('PADDOCK_PANEL_WINDOWS', { providedIn: 'root', factory: () => null });
+
+/** The dock's part of `WORKBENCH_PORTS` (plan W2a): `workbench/dock` provides it; the frame composes the rest. */
+export type DockPort = Pick<WorkbenchPorts, 'showView' | 'closeView' | 'openPanels' | 'activePanel' | 'applyPerspective' | 'activePerspective'>;
+
+/** Provided by `provideWorkbenchDock`; null in a window without a dock. */
+export const DOCK_PORT = new InjectionToken<DockPort | null>('PADDOCK_DOCK_PORT', { providedIn: 'root', factory: () => null });
+
+/** Whether the Explorer keeps its column (`keep`), should close for want of room (`hide`), or fits again (`show`). */
+export type ExplorerVerdict = 'keep' | 'hide' | 'show';
+
+/**
+ * The layout plan's say on the Explorer column (ADR 0011; Debrief's `NarrowWindow`): the dock plans the Explorer as a
+ * left column beside what is docked and answers here; without a dock the frame plans it against a minimal document.
+ */
+export interface ExplorerPlan {
+  verdict(open: boolean, width: number): ExplorerVerdict;
+  /** Called after each re-plan of the window (a resize, a view opened); returns the unsubscribe function. */
+  onWindowPlan(listener: () => void): () => void;
+}
+
+/** Provided by the dock; null falls back to the frame's own plan. */
+export const EXPLORER_PLAN = new InjectionToken<ExplorerPlan | null>('PADDOCK_EXPLORER_PLAN', { providedIn: 'root', factory: () => null });

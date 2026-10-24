@@ -124,6 +124,9 @@ export const EXPLORER_PROVIDERS = defineContributionKind<ExplorerProviderDef>({
     ),
 });
 
+/** The prefix of the palette's own commands list (plus "Open <view>"); never a provider's. */
+export const COMMANDS_PREFIX = '>';
+
 /** A palette prefix: empty (plain text) or one symbol that is not a letter, digit or space. */
 export const PALETTE_PREFIX = /^(?:[^\p{L}\p{N}\s])?$/u;
 
@@ -135,7 +138,8 @@ export const PALETTE_PROVIDERS = defineContributionKind<PaletteProviderDef>({
     issues(
       idProblem(p.id),
       messageProblem('title', p.title),
-      (typeof p.prefix !== 'string' || !PALETTE_PREFIX.test(p.prefix)) && `prefix ${JSON.stringify(p.prefix)} must be empty or one symbol (@, #, >)`,
+      (typeof p.prefix !== 'string' || !PALETTE_PREFIX.test(p.prefix)) && `prefix ${JSON.stringify(p.prefix)} must be empty or one symbol (@, #, :)`,
+      p.prefix === COMMANDS_PREFIX && `prefix ${COMMANDS_PREFIX} is the palette's commands (choose another symbol)`,
       p.placeholder !== undefined && messageProblem('placeholder', p.placeholder),
       numberProblem('order', p.order, 0, 100_000),
       fnProblem(p.search, 'search'),

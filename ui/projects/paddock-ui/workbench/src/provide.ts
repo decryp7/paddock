@@ -1,5 +1,5 @@
-import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
-import { contributionProviders, provideContributionKinds, provideContributions, type ContributionBatch } from '@decryp7/paddock-ui/shell';
+import { EnvironmentProviders, inject, Injector, makeEnvironmentProviders, type Provider } from '@angular/core';
+import { contributionProviders, provideContributionKinds, provideContributions, SHELL_CONTRIBUTIONS, SHELL_KINDS, type ContributionBatch } from '@decryp7/paddock-ui/shell';
 import type {
   ActivityItemDef,
   AssistantContextDef,
@@ -52,4 +52,25 @@ export function provideWorkbenchContributions<T extends object = object>(batch: 
     provideContributions(shell as ContributionBatch<T>),
     ...workbench.flatMap(([kind, items]) => contributionProviders(kind, items)),
   ]);
+}
+
+/**
+ * Contributions whose live functions need the window's services (the workbench's own commands open the palette or switch a
+ * perspective through `WORKBENCH_PORTS`): `build` receives the window's injector and must only use it when a function
+ * runs, never while building (the registry is being created then; resolving a port that needs it would be a cycle).
+ */
+export function provideLiveContributions(build: (injector: Injector) => WorkbenchBatch): EnvironmentProviders {
+  // One batch per injector, built on the first kind's provider and shared by the others.
+  const built = new WeakMap<Injector, Record<string, readonly unknown[] | undefined>>();
+  const batchOf = (injector: Injector): Record<string, readonly unknown[] | undefined> => {
+    let batch = built.get(injector);
+    if (!batch) built.set(injector, (batch = build(injector) as Record<string, readonly unknown[] | undefined>));
+    return batch;
+  };
+  const providers: Provider[] = [...SHELL_KINDS, ...WORKBENCH_KINDS].map(({ name: kind }) => ({
+    provide: SHELL_CONTRIBUTIONS,
+    multi: true,
+    useFactory: () => Object.freeze({ kind, items: Object.freeze([...(batchOf(inject(Injector))[kind] ?? [])]) }),
+  }));
+  return makeEnvironmentProviders([provideWorkbenchKinds(), provideContributions({}), ...providers]);
 }
