@@ -17,12 +17,12 @@ import { ShellPages } from './pages';
   template: `
     <ng-template #link let-p>
       <a class="item" [routerLink]="'/' + pages.path(p.id)" routerLinkActive="active" ariaCurrentWhenActive="page" [attr.data-page-link]="p.id"
-        [attr.aria-label]="labelled() ? null : label(p.title.text, p.id)" [attr.title]="labelled() ? null : label(p.title.text, p.id)"
+        [attr.aria-label]="labelled() && !pages.badgeLabels()[p.id] ? null : label(p.title.text, p.id)" [attr.title]="labelled() ? null : label(p.title.text, p.id)"
         (keydown)="onKey($event)" (click)="navigated.emit()">
         <pd-icon class="icon" [name]="p.icon" />
         <span class="label">{{ p.title.text }}</span>
         @if (pages.badges()[p.id]; as badge) {
-          <span class="badge" data-testid="page-badge">{{ badge }}</span>
+          <span class="badge" data-testid="page-badge" [attr.title]="pages.badgeLabels()[p.id] ?? null">{{ badge }}</span>
         }
       </a>
     </ng-template>
@@ -68,9 +68,9 @@ export class PdPagesSidebar {
   /** A page link was chosen (the frame closes a sidebar that is open over the page). */
   readonly navigated = output<void>();
 
-  /** A rail link's name: the page and its badge ("Runners, 1"). */
+  /** A link's name with its badge: "Runners, 1 runner offline" (what it counts, else the count). */
   protected label(title: string, id: string): string {
-    const badge = this.pages.badges()[id];
+    const badge = this.pages.badgeLabels()[id] ?? this.pages.badges()[id];
     return badge ? `${title}, ${badge}` : title;
   }
 

@@ -42,7 +42,7 @@ export function notificationsStatusText(unread: number): string {
     .pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: 24px; min-width: 24px; padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
     .pill.unread { color: var(--pd-text); }
     .pill:hover, :host(.open) .pill { border-color: var(--pd-border-control); }
-    .pill:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pill:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     .count { min-width: 16px; padding: 0 4px; border-radius: var(--pd-radius-pill); background: var(--pd-surface-3); box-shadow: inset 0 0 0 1px var(--pd-border-strong); color: var(--pd-text); font-variant-numeric: tabular-nums; font-weight: var(--pd-weight-medium); line-height: 16px; text-align: center; }
     .count.error { background: var(--pd-danger-tint); box-shadow: none; color: var(--pd-danger); }
     .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: var(--pd-z-overlay); width: min(400px, calc(100vw - 32px)); max-height: min(520px, 70vh); overflow: auto; box-sizing: border-box; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); }

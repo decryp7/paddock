@@ -5,6 +5,17 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Changed
+- Pages frame after its re-review (`ui/docs/screenshots/shell-demo/REVIEW-2.md`): a running job no longer blinks out
+  of a narrowing status bar for a frame (an item not yet measured in its compact form counts as no width; every item is
+  re-measured when the bar changes form; regression tests in the unit specs and in Chromium). The service chip's
+  compact form keeps a subject ("Index stopped"); its Repair button is named for the action and the service
+  (`repairButtonLabel`: "Restart demo engine", "Reset search index"). The jobs status item names the lead job ("1
+  running: Update runner") with the phase or "still working" in its tooltip (`jobsStatusDetail`); its spinner is a quarter
+  arc on a faint ring. `definePage({ badgeLabel })` says what a badge counts (tooltip and accessible name). The drawer
+  starts below the title bar's hairline and casts its shadow to the right only; status-bar focus rings are inset; the
+  job's warning icon sits on the first line. `shell-demo`: consistent runner data (build-mac-2 "Updating"), the harness
+  pages (Dialogs, Keyboard) only in developer mode (`sd.developer` off for the reference screenshots), new focus shots
+  of a selected and an unselected page link.
 - Pages frame after its design review (`ui/docs/screenshots/shell-demo/REVIEW.md`): the status bar shrinks its items to
   their compact form first (`STATUS_COMPACT`: the service chip says only the state, jobs only the count) and hides only
   unpinned items behind a counted "More status (n)" button (24 px, text-muted); `defineStatusItem({ pinned })` keeps

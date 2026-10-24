@@ -171,11 +171,28 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       icon: 'sd:runner',
       order: 150,
       badge: (ctx) => ctx.attention(),
+      badgeLabel: (ctx) => `${ctx.attention()} runner${ctx.attention() === 1 ? '' : 's'} offline`,
       providers: () => import('./pages/runners.providers').then((m) => m.RUNNERS_PROVIDERS),
       load: () => import('./pages/runners-page').then((m) => m.RunnersPage),
     }),
-    definePage({ id: 'sd.dialogs', title: msg('sd.page.dialogs', 'Dialogs'), icon: 'pd:window', order: 200, load: () => import('./pages/dialogs-page').then((m) => m.DialogsPage) }),
-    definePage({ id: 'sd.keys', title: msg('sd.page.keys', 'Keyboard'), icon: 'pd:keyboard', order: 300, load: () => import('./pages/keys-page').then((m) => m.KeysPage) }),
+    // Harness pages of the shell's parts: offered in developer mode only (on unless `sd.developer` is "off", as in the
+    // reference screenshots, which show a manager app's navigation).
+    definePage<DemoContext>({
+      id: 'sd.dialogs',
+      title: msg('sd.page.dialogs', 'Dialogs'),
+      icon: 'pd:window',
+      order: 200,
+      when: (ctx) => ctx.developer(),
+      load: () => import('./pages/dialogs-page').then((m) => m.DialogsPage),
+    }),
+    definePage<DemoContext>({
+      id: 'sd.keys',
+      title: msg('sd.page.keys', 'Keyboard'),
+      icon: 'pd:keyboard',
+      order: 300,
+      when: (ctx) => ctx.developer(),
+      load: () => import('./pages/keys-page').then((m) => m.KeysPage),
+    }),
     definePage<DemoContext>({
       id: 'sd.lab',
       title: msg('sd.page.lab', 'Lab'),

@@ -93,7 +93,9 @@ test.describe('jobs (plan S9)', () => {
     const status = page.getByRole('contentinfo', { name: 'Status bar' }).getByRole('button').first();
     await expect(status).toHaveText('Jobs');
     await page.getByRole('button', { name: 'Start sample job' }).click();
-    await expect(status).toHaveText(/^1 running: (Finding files|Reading)$/);
+    // The item names the lead job; its phase is in the tooltip.
+    await expect(status).toHaveText('1 running: Importing logs');
+    await expect(status).toHaveAttribute('title', /^Importing logs: (Finding files|Reading)$/);
 
     await status.click();
     await expect(status).toHaveAttribute('aria-expanded', 'true');
@@ -136,12 +138,13 @@ test.describe('jobs (plan S9)', () => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Start quiet job' }).click();
     const status = page.getByRole('contentinfo', { name: 'Status bar' }).getByRole('button').first();
-    await expect(status).toHaveText('1 running: Waiting for the device');
+    await expect(status).toHaveText('1 running: Update runner');
+    await expect(status).toHaveAttribute('title', 'Update runner: Waiting for the device');
     await page.clock.runFor(1_600);
-    await expect(status).toHaveText('1 running: Still working');
+    await expect(status).toHaveAttribute('title', 'Update runner: still working, this step is taking longer than usual');
     // Ten minutes without an event: still running, still "Still working", never failed.
     await page.clock.fastForward('10:00');
-    await expect(status).toHaveText('1 running: Still working');
+    await expect(status).toHaveAttribute('data-stalled', 'true');
     await status.click();
     const job = page.getByRole('region', { name: 'Jobs' }).getByRole('listitem');
     await expect(job).toContainText('Still working. This step is taking longer than usual.');
@@ -304,7 +307,7 @@ test.describe('notifications and service health (plan S4)', () => {
     await page.getByTestId('waiting-for-details').click();
     const details = page.getByRole('region', { name: 'Services' });
     await expect(details).toContainText('The demo engine stopped unexpectedly.');
-    await expect(details).toContainText('Choose Restart.');
+    await expect(details).toContainText('Restarting it brings the engine data back.');
     await details.getByText('Technical details').click();
     await expect(details).toContainText('demo-engine exited (signal: 6)');
     await details.getByRole('button', { name: 'Restart' }).click();
@@ -324,11 +327,12 @@ test.describe('notifications and service health (plan S4)', () => {
     await expect(chip(page)).toHaveText('Search index: stopped');
     await chip(page).click();
     const details = page.getByRole('region', { name: 'Services' });
-    await expect(details).toContainText('The search index is damaged.');
-    await details.getByRole('button', { name: 'Try again' }).click();
+    await expect(details).toContainText('The search index stopped: a segment is damaged.');
+    // The repair is named for what it does (rule 19).
+    await details.getByRole('button', { name: 'Reset search index' }).click();
     await expect(details).toContainText('The search index could not be rebuilt.');
     await expect(details).toContainText('Free some disk space, then try again.');
-    await expect(details.getByRole('button', { name: 'Try again' })).toBeEnabled();
+    await expect(details.getByRole('button', { name: 'Reset search index' })).toBeEnabled();
     await expect(chip(page)).toHaveText('Search index: stopped');
     // Two services down: one chip with a count.
     await page.keyboard.press('Escape');

@@ -84,6 +84,18 @@ export class ShellPages {
     }
     return out as Readonly<Record<string, string>>;
   });
+  /** What each badge counts, where the page says ("1 runner offline"): its tooltip and accessible name. */
+  readonly badgeLabels = computed(() => {
+    const ctx = this.host.context();
+    const badges = this.badges();
+    const out: Record<string, string> = {};
+    for (const p of this.visible()) {
+      if (!badges[p.id]) continue;
+      const label = evaluate(p.badgeLabel, ctx, null);
+      if (typeof label === 'string' && label.trim()) out[p.id] = label.trim();
+    }
+    return out as Readonly<Record<string, string>>;
+  });
   /** The page shown now (null before the first navigation, or on a route that is not a page). */
   readonly current = this.shownPage.asReadonly();
 

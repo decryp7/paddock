@@ -4,14 +4,14 @@ import { Injectable } from '@angular/core';
 export interface Runner {
   readonly name: string;
   readonly host: string;
-  readonly state: 'online' | 'busy' | 'offline';
+  readonly state: 'online' | 'updating' | 'offline';
   readonly jobsToday: number;
   readonly lastJob: string;
 }
 
 const RUNNERS: readonly Runner[] = [
-  { name: 'build-mac-1', host: 'mac-mini-01.lan', state: 'busy', jobsToday: 14, lastJob: '2 min ago' },
-  { name: 'build-mac-2', host: 'mac-mini-02.lan', state: 'online', jobsToday: 9, lastJob: '18 min ago' },
+  { name: 'build-mac-1', host: 'mac-mini-01.lan', state: 'online', jobsToday: 14, lastJob: '2 min ago' },
+  { name: 'build-mac-2', host: 'mac-mini-02.lan', state: 'updating', jobsToday: 9, lastJob: '18 min ago' },
   { name: 'build-linux-1', host: 'nuc-03.lan', state: 'online', jobsToday: 22, lastJob: '5 min ago' },
   { name: 'build-win-1', host: 'win-vm-01.lan', state: 'offline', jobsToday: 0, lastJob: 'Yesterday, 18:40' },
 ];

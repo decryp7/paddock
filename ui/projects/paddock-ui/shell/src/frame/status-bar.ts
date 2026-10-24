@@ -1,5 +1,8 @@
 import {
   afterNextRender,
+  effect,
+  Injector,
+  untracked,
   InjectionToken,
   type Signal,
   ChangeDetectionStrategy,
@@ -94,7 +97,7 @@ export class PdStatusMeasure {
     .more { display: inline-flex; align-items: center; justify-content: center; gap: 2px; flex: none; min-width: 24px; height: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); font-variant-numeric: tabular-nums; cursor: pointer; }
     .more:hover, .more[aria-expanded='true'] { border-color: var(--pd-border-control); color: var(--pd-text); }
     .more-count { min-width: 8px; }
-    .more:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .more:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
   `,
 })
 export class PdStatusBar {
@@ -132,7 +135,9 @@ export class PdStatusBar {
     const full = this.fullWidths();
     const small = this.compactWidths();
     const compact = this.compact();
-    const slots = this.items().map((i) => ({ id: i.id, priority: i.priority, pinned: i.pinned === true, width: (compact ? small[i.id] : undefined) ?? full[i.id] ?? 0 }));
+    // In the compact form an item not measured yet counts as no width: it stays until measured, rather than being hidden
+    // for its full width during the frame the bar turns compact (an attention item must never blink out).
+    const slots = this.items().map((i) => ({ id: i.id, priority: i.priority, pinned: i.pinned === true, width: (compact ? small[i.id] : full[i.id]) ?? 0 }));
     return new Set(planStatusBar(slots, this.available(), GAP, MORE).hidden);
   });
 
@@ -140,6 +145,13 @@ export class PdStatusBar {
 
   constructor() {
     afterNextRender(() => this.observer?.observe(this.el));
+    // Turning compact (or back) re-measures every item once it has rendered in its new form: an item without a compact
+    // form does not resize, so the observer would not report it. Measuring is a side effect on the DOM.
+    const injector = inject(Injector);
+    effect(() => {
+      this.compact();
+      untracked(() => afterNextRender(() => this.remeasure(), { injector }));
+    });
     inject(DestroyRef).onDestroy(() => this.observer?.disconnect());
   }
 
@@ -152,6 +164,12 @@ export class PdStatusBar {
   unobserve(el: Element): void {
     this.ids.delete(el);
     this.observer?.unobserve(el);
+  }
+
+  /** Measures every observed item now, into the widths of the current form. */
+  private remeasure(): void {
+    if (!this.observer) return;
+    this.measured([...this.ids.keys()].map((target) => ({ target }) as ResizeObserverEntry));
   }
 
   private measured(entries: readonly ResizeObserverEntry[]): void {

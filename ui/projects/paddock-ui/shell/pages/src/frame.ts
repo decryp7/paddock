@@ -73,10 +73,11 @@ import { PdPagesSidebar } from './sidebar';
     .sidebar[hidden] { display: none; }
         /*
      * Over the page the sidebar is modal: it and its scrim cover everything below the title bar (the page and the status
-     * bar, which are inert meanwhile); Escape, the scrim or a page closes it. The title bar stays live for its button.
+     * bar, which are inert meanwhile); Escape, the scrim or a page closes it. The title bar stays live for its button and
+     * keeps its hairline: the drawer starts below it and casts its shadow to the right only.
      */
-    .sidebar.drawer { position: fixed; top: var(--pd-titlebar-height); bottom: 0; inset-inline-start: 0; z-index: var(--pd-z-overlay); width: min(var(--pd-sidebar-width), calc(100vw - var(--pd-space-8))); box-shadow: var(--pd-shadow-3); border-inline-end-color: var(--pd-border-strong); animation: pd-drawer-in var(--pd-duration) var(--pd-ease-enter); }
-    .scrim { position: fixed; top: var(--pd-titlebar-height); inset-inline: 0; bottom: 0; z-index: calc(var(--pd-z-overlay) - 1); background: var(--pd-scrim); animation: pd-fade-in var(--pd-duration) var(--pd-ease-enter); }
+    .sidebar.drawer { position: fixed; top: calc(var(--pd-titlebar-height) + 1px); bottom: 0; inset-inline-start: 0; z-index: var(--pd-z-overlay); width: min(var(--pd-sidebar-width), calc(100vw - var(--pd-space-8))); clip-path: inset(0 -32px 0 0); box-shadow: 16px 0 32px -16px var(--pd-scrim); border-inline-end-color: var(--pd-border-strong); animation: pd-drawer-in var(--pd-duration) var(--pd-ease-enter); }
+    .scrim { position: fixed; top: calc(var(--pd-titlebar-height) + 1px); inset-inline: 0; bottom: 0; z-index: calc(var(--pd-z-overlay) - 1); background: var(--pd-scrim); animation: pd-fade-in var(--pd-duration) var(--pd-ease-enter); }
     :host([data-sidebar='overlay']) .page { grid-column: 1; }
     /* Pages lay out by container queries on the page area (container pd-page), not the window. */
     :host(.native-menu) { --pd-titlebar-inset-start: 78px; }

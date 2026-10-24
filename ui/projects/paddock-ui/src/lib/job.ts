@@ -75,8 +75,9 @@ import { jobView, type SuJobSnapshot } from './job-view';
     .bar { position: relative; height: 6px; overflow: hidden; background: var(--pd-surface-2); box-shadow: inset 0 0 0 1px var(--pd-hairline); border-radius: var(--pd-radius-pill); }
     .fill { display: block; height: 100%; background: var(--pd-accent); border-radius: inherit; transition: width var(--pd-duration) var(--pd-ease-move); }
     .bar.indeterminate .fill { position: absolute; width: 35%; animation: pd-job-slide 1.4s var(--pd-ease-move) infinite; }
-    .detail { display: flex; align-items: center; gap: var(--pd-space-1); margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
-    .warn { flex: none; }
+    .detail { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); line-height: var(--pd-lh-body); }
+    /* On the first line when the text wraps: centred in that line's box. */
+    .warn { flex: none; margin-top: calc((1lh - 14px) / 2); }
     :host(.pd-job--danger) .detail { color: var(--pd-danger); }
     .actions { display: flex; align-items: center; gap: var(--pd-space-2); }
     .cancel { min-height: var(--pd-button-height); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font-weight: var(--pd-weight-medium); }

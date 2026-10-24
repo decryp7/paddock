@@ -59,7 +59,7 @@ export {
 } from './src/notify-config';
 export { ServiceHealthStore, type ServiceHealthStoreType } from './src/service-health.store';
 export { NotificationsStore, localCause, LOCAL_CAUSE, LOCAL_SOURCE, type NotificationsStoreType, type ReadFilter } from './src/notifications.store';
-export { NoticeActions, repairLabel } from './src/notice-actions';
+export { NoticeActions, repairLabel, repairButtonLabel } from './src/notice-actions';
 export {
   NOTIFICATION_SOURCES,
   visibleNotifications,

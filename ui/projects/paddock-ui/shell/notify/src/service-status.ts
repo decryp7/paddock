@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, linkedSignal, signal } from '@angular/core';
 import { STATUS_COMPACT } from '@decryp7/paddock-ui/shell';
-import { repairLabel } from './notice-actions';
+import { repairButtonLabel } from './notice-actions';
 import { OPEN_SETTINGS, RAISE_CAP } from './notify-config';
 import { ServiceHealthStore } from './service-health.store';
 import type { RaiseCap, ServiceHealth, ServiceState } from './wire.types';
@@ -34,12 +34,14 @@ export function chipText(problems: readonly Pick<ServiceHealth, 'label' | 'state
   return `${problems.length} services need attention`;
 }
 
-/** The chip's compact form (a narrow status bar): the state alone, or the count; the full text is its name and tooltip. */
+/** The chip's compact form (a narrow status bar): a short subject and the state, or the count; the full text is its name and tooltip. */
 export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' | 'state'>[]): string {
   const p = problems[0];
   if (problems.length === 1 && p) {
-    const word = stateWord(p.state);
-    return word.charAt(0).toUpperCase() + word.slice(1);
+    // The subject's last word keeps it said what stopped: "Index stopped", "Engine limited".
+    const subject = shortName(p.label).split(/\s+/).at(-1) ?? '';
+    const head = subject.charAt(0).toUpperCase() + subject.slice(1);
+    return `${head} ${stateWord(p.state)}`;
   }
   return problems.length ? `${problems.length} services` : 'Unknown';
 }
@@ -86,7 +88,7 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
                   <span class="hint" role="status">Repairing…</span>
                 } @else if (s.repair; as action) {
                   @if (canRepair(s)) {
-                    <button type="button" class="btn primary" [attr.data-testid]="'service-health-repair-' + s.service" (click)="repair(s)">{{ label(action) }}</button>
+                    <button type="button" class="btn primary" [attr.data-testid]="'service-health-repair-' + s.service" (click)="repair(s)">{{ label(action, s.label) }}</button>
                   }
                 }
                 @if (s.cause?.raiseCap; as cap) {
@@ -159,7 +161,7 @@ export class PdServiceStatus {
   /** The status bar is narrow: the chip shows its compact form. */
   protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);
   protected readonly compactText = computed(() => chipCompactText(this.problems()));
-  protected readonly label = repairLabel;
+  protected readonly label = repairButtonLabel;
   protected readonly shortName = shortName;
 
   protected close(refocus: boolean): void {
