@@ -35,11 +35,12 @@ ARG MACHETE_SHA256_ARM64=6f96c3e6026a5bdd241b6ae600c6fb86c9197c6e189a894f91371ba
 ARG DUCKDB_VERSION=1.5.6
 ARG DUCKDB_SHA256_AMD64=b845005f5132a7d8180057c35e14a7626632258782f871a90861b19c1c03841b
 ARG DUCKDB_SHA256_ARM64=b72ed9f05003f5e9d2015f7ceada6416b377d9dd33169cdde3c9e33897856eee
-# Chrome for Testing: the version Playwright PLAYWRIGHT_VERSION bundles (playwright-core/browsers.json, "chromium"), so the
-# pinned binary and Playwright's own agree. Google publishes no Linux arm64 build; the image is amd64 only for Chrome.
+# Chrome for Testing: the build the apps download (crates/paddock-chromium/src/chromium.toml, linux-x86_64; scripts/ci-image.test.mjs
+# checks they agree), so tests drive what users get. Playwright keeps its own bundled Chromium beside it. Google publishes no
+# Linux arm64 build; the image is amd64 only for Chrome.
 ARG PLAYWRIGHT_VERSION=1.64.1
-ARG CHROME_VERSION=156.0.8078.4
-ARG CHROME_SHA256_AMD64=43fd31766c7533a02dda2ded5ad50c2f861cd5400be7509c0abad71129f79d79
+ARG CHROME_VERSION=156.0.8078.47
+ARG CHROME_SHA256_AMD64=e6c94490f0b6b337225aeb2d2a5034858516b7017356980ba94f5176d8774a50
 
 COPY fetch-verified.sh /usr/local/bin/fetch-verified
 RUN set -eu; \
@@ -85,7 +86,7 @@ FROM ${GARAGE_IMAGE}
 ARG TARGETARCH
 ARG NODE_MAJOR=24
 ARG PLAYWRIGHT_VERSION=1.64.1
-ARG CHROME_VERSION=156.0.8078.4
+ARG CHROME_VERSION=156.0.8078.47
 ARG DUCKDB_VERSION=1.5.6
 ARG SCCACHE_VERSION=0.18.0
 

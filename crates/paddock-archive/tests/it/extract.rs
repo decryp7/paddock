@@ -652,17 +652,20 @@ fn copy_allows_dotdot_inside_the_tree_but_keep_does_not() {
     .unwrap();
     assert_eq!(read(&d.path().join("c/lib/l")), "X");
     assert_eq!(r.files, ["bin/x", "lib/l"]);
-    assert!(matches!(
-        run(
-            &a,
-            &d.path().join("k"),
-            &Options {
-                links: Links::Keep,
-                ..Options::default()
-            }
-        ),
-        Err(ArchiveError::Unsafe { .. })
-    ));
+    let kept = run(
+        &a,
+        &d.path().join("k"),
+        &Options {
+            links: Links::Keep,
+            ..Options::default()
+        },
+    );
+    if cfg!(unix) {
+        assert!(matches!(kept, Err(ArchiveError::Unsafe { .. })));
+    } else {
+        // Where links cannot be kept on disk (Windows), `Keep` is `Copy`: the same rules, so the same result.
+        assert_eq!(read(&d.path().join("k/lib/l")), "X");
+    }
 }
 
 #[test]
@@ -941,7 +944,7 @@ fn sweep_removes_only_old_leftovers_of_that_destination() {
     let ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
     for n in old.iter().chain(&["rt.paddock-expand-1-3"]) {
         let p = d.path().join(format!(".{n}"));
-        std::fs::File::open(&p).unwrap().set_modified(ago).unwrap();
+        set_modified(&p, ago);
     }
     assert_eq!(
         paddock_archive::sweep_stale(&dest, std::time::Duration::from_secs(3600)),
@@ -959,4 +962,23 @@ fn sweep_removes_only_old_leftovers_of_that_destination() {
         paddock_archive::sweep_stale(&d.path().join("missing/dir"), std::time::Duration::ZERO),
         0
     );
+}
+
+/// Sets the modification time of a file or folder. A folder is opened for writing attributes with backup semantics on
+/// Windows, where a plain `File::open` of a folder is refused.
+fn set_modified(path: &std::path::Path, time: std::time::SystemTime) {
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        std::fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+            .unwrap()
+    };
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path).unwrap();
+    file.set_modified(time).unwrap();
 }

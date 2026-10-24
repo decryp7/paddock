@@ -14,3 +14,6 @@ crates/*/tests/fixtures/** -text
 *.gz binary
 *.xz binary
 *.zip binary
+
+# The same for fixtures that sit beside tests/ (paddock-testplan): a CRLF checkout would break the text comparisons.
+crates/*/fixtures/** -text

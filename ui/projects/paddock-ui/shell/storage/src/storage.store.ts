@@ -2,12 +2,12 @@ import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { toCommandError, type CommandError } from '@decryp7/paddock-ui/ipc';
 import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
-import type { StorageClearResult, StorageEvent, StorageUsage } from '../generated/storage';
+import type { StorageClearResult, StorageEvent, StorageTree, StorageUsage } from '../generated/storage';
 import { StorageBackend, type StorageProgress, type Unlisten } from './backend';
 import { clearRequest } from './wire';
 
 /** What is running: a scan, or a clear. */
-export type StorageJob = 'scan' | 'clear';
+export type StorageJob = 'scan' | 'clear' | 'tree';
 
 interface StorageState {
   /** What the engine last measured; null until the first answer. */
@@ -20,6 +20,8 @@ interface StorageState {
   result: StorageClearResult | null;
   /** Why the last request did not work (a refusal or a failed job), until the next request or dismissal. */
   failure: CommandError | null;
+  /** The size trees the engine sent, by category; cleared whenever the figures are measured again. */
+  trees: Readonly<Record<string, StorageTree>>;
   /** Cancel was pressed and the engine has not ended the job yet. */
   cancelling: boolean;
 }
@@ -32,7 +34,7 @@ interface StorageState {
  * refuses data without one), and never without a scan in front of it.
  */
 export const StorageStore = signalStore(
-  withState<StorageState>({ usage: null, working: null, progress: null, result: null, failure: null, cancelling: false }),
+  withState<StorageState>({ usage: null, working: null, progress: null, result: null, failure: null, trees: {}, cancelling: false }),
   withRequestStatus(),
   withComputed(({ usage }) => ({
     /** The rows of the table. */
@@ -75,6 +77,10 @@ export const StorageStore = signalStore(
       clear(choices: readonly { id: string; confirmed: boolean }[]): Promise<boolean> {
         return start('clear', () => backend.clear(clearRequest(choices)));
       },
+      /** Walks one category's folder into a size tree (the outcome arrives as an event). */
+      tree(id: string): Promise<boolean> {
+        return start('tree', () => backend.tree(id));
+      },
       /** Cancels the job in progress. What a clear already did stays done and is reported. */
       async cancel(): Promise<void> {
         if (!store.working()) return;
@@ -106,12 +112,15 @@ export const StorageStore = signalStore(
       _event(event: StorageEvent): void {
         switch (event.state) {
           case 'usage':
-            patchState(store, { usage: event.usage, working: null, progress: null, cancelling: false }, setLoaded());
+            patchState(store, { usage: event.usage, working: null, progress: null, cancelling: false, trees: {} }, setLoaded());
             break;
           case 'cleared':
-            patchState(store, { result: event.result, working: null, progress: null, cancelling: false, usage: null });
+            patchState(store, { result: event.result, working: null, progress: null, cancelling: false, usage: null, trees: {} });
             // The figures are old now: measure again, so the table is right and the next clear has its preview.
             void start('scan', () => backend.scan());
+            break;
+          case 'tree':
+            patchState(store, { trees: { ...store.trees(), [event.tree.id]: event.tree }, working: null, progress: null, cancelling: false });
             break;
           case 'cancelled':
             patchState(store, { working: null, progress: null, cancelling: false });

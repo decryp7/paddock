@@ -1067,7 +1067,7 @@ let manifest = Manifest::parse(&std::fs::read_to_string("manifest.toml")?)?;    
 let key = SecretKey::generate_to(&dir.join("publisher.key"))?;                        // 0600, never replaces an existing key
 archive::build(Build { manifest, programs: vec![(target, &exe)], sign: Some(&key) }, &out)?;   // deterministic .paddockplugin
 let pkg = Package::open(&out)?;                                                       // bounded read, checksums, signature
-pkg.manifest.check_compatible(PLATFORM_PROTOCOL, &app_namespaces, "Debrief")?;        // says who must update
+HostInfo::new("Debrief").check_protocol(id, pkg.manifest.protocol)?;                  // paddock-plugin-api: says who must update
 let trust = policy.decide(&pkg.signature)?;                                           // Builtin | Signed | Unsigned (developer mode)
 let sha = pkg.extract(&out, manifest::host_target(), &installed)?;                    // exec bit, re-verified while copying
 archive::verify_installed(&installed, &sha)?;                                         // before every start: changed binary = Tampered
@@ -1080,11 +1080,12 @@ archive::verify_installed(&installed, &sha)?;                                   
   `McpExpose`, `Memory { mib }`, `Cpu { percent }`; default deny, each kind once, lists of 1 to 64 names. `manifest.toml` is
   bounded (64 KiB, 256 contributions, 64 actions each, 16 targets) and **unknown keys are refused** (as in Debrief); the model
   types are plain serde (no `untagged`/`flatten`/internal tags), so the same `Manifest` crosses the postcard IPC, where the host
-  runs `Manifest::check` on it. `check_compatible` applies the one rule (same major, known minor) to the platform protocol and to
-  every namespace, with texts that say who must update.
+  runs `Manifest::check` on it. Compatibility is not here: `paddock_plugin_api::compat::HostInfo` judges a manifest's protocol and
+  namespaces with the one rule of `paddock_ipc::ProtocolVersion` (`accepts`, `skew`, `introduced_in`) and words who must update.
 - `names`: `PluginId`, `GrantRef`, `ProgramRef`, `HostPattern` (`*.example.com`), `Namespace`: newtypes that validate in
-  `new` and in `Deserialize`, so a name from the wire is as valid as one from a file. `version::ProtocolVersion` is a plain serde
-  copy of `paddock_ipc`'s rule on purpose (a package must be verifiable without the IPC crate); conversion is two field moves.
+  `new` and in `Deserialize`, so a name from the wire is as valid as one from a file. `ProtocolVersion` is re-exported from `paddock_ipc` (the one
+  implementation; the package depends on `paddock-ipc`, which is a dependency only, nothing is launched) and `GrantRef` from
+  `paddock-view` (the one type a path field and a folder permission share).
 - `archive`: zip with `manifest.toml`, `bin/<target>/<binary>[.exe]`, `SHA256SUMS` and an optional detached Ed25519 `signature`
   over the digest of the manifest bytes plus the sums bytes. `Package::read`/`open` (with `Limits`: 256 MiB package, 128 MiB program,
   512 MiB total, 64 entries; sizes counted while reading) refuse traversal, absolute and drive names, links, encrypted, duplicate and
@@ -1121,7 +1122,10 @@ let models = Category::new("models", "Models", Kind::Data).folder(models_dir)
 - **Re-check before every delete** (`guard::recheck`, from Dyno): the item still exists, is not a link, has the kind the preview
   saw, resolves through its real parent inside the category's folder, was listed by the preview and has not changed since. What
   fails stays, with the reason, in the result.
-- **Jobs.** `storage_scan` and `storage_clear` start a job (phase-labelled progress from the first moment, Cancel in every phase,
+- **Size tree** (`tree`, from Dyno's disk-space map): `storage_tree(id)` walks one category's folder into a bounded tree (three levels,
+  twelve items per folder with the smaller ones folded into one line, entries and time limited, no links, one volume); `capped` says
+  the sizes are lower bounds. Only folders inside the app's folders are walked.
+- **Jobs.** `storage_scan`, `storage_clear` and `storage_tree` start a job (phase-labelled progress from the first moment, Cancel in every phase,
   one job at a time) and return at once; the outcome is a `paddock://storage` event. `Run` is the port, `Recorder` its fake.
 - **UI.** `@decryp7/paddock-ui/shell/storage` (+ `/page`, `/dialog`): `StorageBackend` (Tauri, memory with the same rules),
   `StorageStore`, the Storage page and the `pd.storage.confirm` decision window.
@@ -1163,8 +1167,9 @@ async fn open_log(grants: paddock_files::tauri::WindowGrants, app: tauri::AppHan
   (`Os`), started by a `Launcher` (a detached child with a reaper and a timeout). Files that would run (`runs_on_open`: scripts,
   programs, installers) are refused; web addresses must be http, https or mailto.
 - **Commands** (`COMMANDS`, folded into the shell plugin): `files_pick`, `files_recent_list|remove|clear|grant`, `files_reveal`,
-  `files_open`, `files_open_app_folder` (data, config, cache, logs by name: the webview never supplies the path) and
-  `files_open_url`. The wire types and names are generated into `ui/projects/paddock-ui/shell/files/generated/`
+  `files_open`, `files_open_at_line` (a granted file in VS Code at a line, 1 to ten million; the file is an argument of the editor, never run;
+  the editor is found per OS and a missing one says what to install), `files_open_app_folder` (data, config, cache, logs by name: the
+  webview never supplies the path) and `files_open_url`. Recent entries remember whether they were a folder, for the UI's glyph. The wire types and names are generated into `ui/projects/paddock-ui/shell/files/generated/`
   (`PADDOCK_WRITE_TS=1 cargo test -p paddock-files --all-features --lib generated`).
 ## `paddock-net` (plan X16)
 
@@ -1405,8 +1410,10 @@ browser.close();                                                    // Browser.c
   OffScreen, Headless}`, `QUIET_FLAGS` (no GPU, no component downloads, no throttling; `opts.quiet`), `disk_cache_bytes` for a
   kept profile, `extra_args`. `Sandbox::decide(env, root)`: dropped only as root with `PADDOCK_BROWSER_NO_SANDBOX=1` (CI
   containers), then also `--disable-dev-shm-usage`; `launch_with(exe, opts, sandbox)` lets tests run that branch on any OS.
-- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends). `max_lifetime` runs on
-  `opts.clock` (a `FakeClock` in tests), `memory_cap` through `MemoryCap` (an injectable sampler); `ended_by()` says which.
+- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends). Every wait runs on
+  `opts.clock` (a `FakeClock` in tests): the lifetime limit, the start-up wait (`start_limit`), `start_page`'s wait and the
+  pages' `wait_ready` polls; only `close_gracefully`'s grace for a real process uses the OS clock. `memory_cap` goes through
+  `MemoryCap` (an injectable sampler); `ended_by()` says which limit ended the browser.
   A failed start says why (the end of the browser's error output, or the memory cap). `check_display` explains a headful
   launch on Linux without `DISPLAY`/`WAYLAND_DISPLAY`. Profiles: `Throwaway(base)` (removed at the end; `sweep_profiles`
   removes those of dead processes) or `Persistent(path)` with an accent theme (`write_theme`).
@@ -1422,7 +1429,11 @@ browser.close();                                                    // Browser.c
 - `fake` (feature `test-support`, Unix): a fake DevTools browser that re-runs the test binary; it plays the user (close the
   window, quit, drop the connection, stall loads) and answers page scripts from a file (`page_shows`). Apps refuse to start
   when `PADDOCK_FAKE_BROWSER` is set. `tests/real_browser.rs` drives a real Chrome for Testing headless when
-  `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind.
+  `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind; with `PADDOCK_REQUIRE_TEST_BROWSER` set a missing browser
+  fails it (Paddock's Linux CI job, whose `paddock-ci` image carries the build `chromium.toml` pins).
+- Pins: `node conformance/ci/pin-runtime.mjs crates/paddock-chromium/src/chromium.toml --chrome-for-testing Stable` rewrites
+  version, URLs, sizes and checksums (any `paddock-runtime` catalogue: `--version <v>` or as it is); the CI image's
+  `CHROME_VERSION` must follow (`scripts/ci-image.test.mjs` checks it).
 
 - Windows (plan X54): each supervised child runs in a kill-on-close job object held by the `Supervised` value; dropping it, or
   the app ending in any way, ends the child and every helper it started, orphans included (`Supervised::in_job`).

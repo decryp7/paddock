@@ -429,7 +429,8 @@
         "storage_clear",
         "storage_last",
         "storage_reveal",
-        "storage_scan"
+        "storage_scan",
+        "storage_tree"
       ]
     },
     "pd.setup": {
