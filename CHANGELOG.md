@@ -10,7 +10,8 @@ Conventional Commits; one semver tag for the whole repo.
   `PADDOCK_UPDATE_GOLDEN`, `FakeRunner` for OS-command seams, `corpus`/`never_panics`, and `FakeClock` re-exported from
   `paddock_jobs::time`.
 - Conformance check C30 (warning level, rule 40): a `#[test]` fn that compares a duration measured with `elapsed()`,
-  `Instant::now() - x` or `duration_since` against a limit. A hang guard of at least 10 s may carry `// conformance: hang-guard`.
+  `Instant::now() - x` or `duration_since` against a limit; a `thread::sleep` in a test that uses threads; and `Date.now()`/`performance.now()`
+  differences under `expect` in TypeScript specs. A hang guard of at least 10 s may carry `// conformance: hang-guard`.
   First findings in Paddock: `paddock-diag` window.rs, `paddock-proc` login.rs and supervised.rs, `paddock-updater` tests,
   `paddock-window` exit.rs and tauri/tests.rs.
 - `paddock-packs` (plan X15, decision D11): knowledge packs for all apps. `PackKind` (serde type, format number, the app's own
