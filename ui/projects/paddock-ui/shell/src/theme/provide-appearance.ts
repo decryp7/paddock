@@ -1,16 +1,24 @@
-import { EnvironmentProviders, inject, makeEnvironmentProviders, provideEnvironmentInitializer } from '@angular/core';
+import { EnvironmentProviders, inject, InjectionToken, makeEnvironmentProviders, provideEnvironmentInitializer } from '@angular/core';
 import { applyPaddockAppearance, type SuAccent } from '@decryp7/paddock-ui';
 import { contributionProviders, provideContributionKinds } from '../provide';
 import { AppearanceBackend, BrowserAppearanceBackend } from './appearance-backend';
 import { APPEARANCE_CONFIG, AppearanceStore } from './appearance.store';
 import { THEMES, type ThemeDef } from './theme';
 
+/**
+ * Where the window's appearance lives when a layer owns it (the Settings layer: `provideShellSettings` provides it, so
+ * the engine's Appearance settings are the one source and every window follows their changes). Without it the window
+ * keeps the choice in its storage and a BroadcastChannel (`BrowserAppearanceBackend`).
+ */
+export const APPEARANCE_SOURCE = new InjectionToken<() => AppearanceBackend>('PADDOCK_APPEARANCE_SOURCE');
+
 export interface AppearanceOptions {
   /** The app's accent (one per app; not a user choice). */
   readonly accent: SuAccent;
   /**
-   * Builds the window's backend (in an injection context). Default: `BrowserAppearanceBackend` (localStorage and a
-   * BroadcastChannel). The desktop build passes `() => new IpcAppearanceBackend(ipc)`.
+   * Builds the window's backend (in an injection context). Default: the `APPEARANCE_SOURCE` when one is provided (the
+   * Settings layer), else `BrowserAppearanceBackend` (localStorage and a BroadcastChannel). An app without Settings passes
+   * `() => new IpcAppearanceBackend(ipc)` in the desktop build.
    */
   readonly backend?: () => AppearanceBackend;
   /** The element the look is applied to (default `document.documentElement`). */
@@ -26,7 +34,7 @@ export function provideAppearance(options: AppearanceOptions): EnvironmentProvid
   const root = options.root ?? (() => document.documentElement);
   return makeEnvironmentProviders([
     provideContributionKinds(THEMES),
-    { provide: AppearanceBackend, useFactory: options.backend ?? (() => new BrowserAppearanceBackend()) },
+    { provide: AppearanceBackend, useFactory: options.backend ?? (() => inject(APPEARANCE_SOURCE, { optional: true })?.() ?? new BrowserAppearanceBackend()) },
     { provide: APPEARANCE_CONFIG, useValue: Object.freeze({ accent: options.accent, root }) },
     AppearanceStore,
     provideEnvironmentInitializer(() => void inject(AppearanceStore)),

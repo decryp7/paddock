@@ -1,7 +1,6 @@
 import { makeEnvironmentProviders, type EnvironmentProviders } from '@angular/core';
 import type { SuAccent } from '@decryp7/paddock-ui';
-import { BrowserAppearanceBackend, defineTheme, IpcAppearanceBackend, msg, provideAppearance, provideThemes, type AppearanceBackend } from '@decryp7/paddock-ui/shell';
-import { appearanceIpc } from './demo-ipc';
+import { defineTheme, msg, provideAppearance, provideThemes } from '@decryp7/paddock-ui/shell';
 
 /** The demo's accent (it is Pitwall's reference app first, plan §4.1). */
 export const DEMO_ACCENT: SuAccent = 'pitwall';
@@ -20,16 +19,10 @@ export const WARM_PAPER = defineTheme({
   },
 });
 
-/** The window's own copy of the look and its channel: `paddock://appearance` in the desktop build, a BroadcastChannel in the browser. */
-export function demoAppearanceLocal(): AppearanceBackend {
-  const ipc = appearanceIpc();
-  return ipc ? new IpcAppearanceBackend(ipc) : new BrowserAppearanceBackend();
-}
-
 /**
- * The appearance of a demo window. A dialog window follows the others through the channel; the main window passes a
- * backend that also keeps theme and density in the Appearance settings (plan S10).
+ * The appearance of a demo window: its store, whose backend comes from the Settings layer (`APPEARANCE_SOURCE`: the
+ * engine's Appearance settings, followed by every window), and the demo's theme pack.
  */
-export function provideDemoAppearance(backend: () => AppearanceBackend = demoAppearanceLocal): EnvironmentProviders {
-  return makeEnvironmentProviders([provideAppearance({ accent: DEMO_ACCENT, backend }), provideThemes(WARM_PAPER)]);
+export function provideDemoAppearance(): EnvironmentProviders {
+  return makeEnvironmentProviders([provideAppearance({ accent: DEMO_ACCENT }), provideThemes(WARM_PAPER)]);
 }

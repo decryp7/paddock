@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
@@ -26,6 +26,7 @@ test.beforeEach(async ({ context }) => {
     if (sessionStorage.getItem('paddock.e2e.seeded')) return;
     sessionStorage.setItem('paddock.e2e.seeded', '1');
     localStorage.removeItem('paddock.appearance');
+    localStorage.removeItem('sd.settings');
   });
 });
 
@@ -129,10 +130,59 @@ test('reduced motion: the menu toggle and the OS setting shorten every duration 
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect.poll(() => token(page, '--pd-duration-large')).not.toBe('100ms');
-  await page.evaluate(() => localStorage.removeItem('paddock.appearance'));
+  await page.evaluate(() => (localStorage.removeItem('paddock.appearance'), localStorage.removeItem('sd.settings')));
   await page.reload();
   await expect(html(page)).not.toHaveAttribute('data-motion');
   await expect.poll(() => token(page, '--pd-duration-large')).toBe('100ms');
+});
+
+test('one writer of the look (rule 40): only the appearance store puts the appearance on <html>', () => {
+  const ui = join(__dirname, '..');
+  const files = (dir: string): string[] =>
+    readdirSync(dir).flatMap((n) => {
+      const p = join(dir, n);
+      return statSync(p).isDirectory() ? (n === 'node_modules' ? [] : files(p)) : n.endsWith('.ts') && !n.endsWith('.spec.ts') ? [p] : [];
+    });
+  // The store applies the look (`applyAppearanceTo`); `applyStoredAppearance` paints the stored copy before Angular starts.
+  const allowed = ['shell/src/theme/appearance.store.ts', 'shell/src/theme/provide-appearance.ts'];
+  const writer = /applyPaddockAppearance\(|setAttribute\(\s*['"]data-(theme|density|contrast|motion|accent|pack)['"]/;
+  const found = [...files(join(ui, 'projects', 'paddock-ui', 'shell')), ...files(join(ui, 'projects', 'shell-demo', 'src'))]
+    .filter((f) => writer.test(readFileSync(f, 'utf8')))
+    .map((f) => f.slice(join(ui, 'projects', 'paddock-ui').length + 1));
+  expect(found.sort()).toEqual(allowed);
+});
+
+test('the macOS-less menu bar names the app once: in the title bar, its menu entries under File', async ({ page }) => {
+  await open(page);
+  await expect(page.getByRole('menubar').getByRole('menuitem')).toHaveText(['File', 'View', 'Help']);
+  await expect(page.getByText('Paddock demo', { exact: true })).toHaveCount(1);
+  await page.getByRole('menubar').getByRole('menuitem', { name: 'File', exact: true }).click();
+  await expect(page.getByRole('menu', { name: 'File' }).getByRole('menuitem', { name: 'Settings…' })).toBeVisible();
+  await page.keyboard.press('Escape');
+});
+
+test('a View-menu change and a Settings change in another window never revert each other', async ({ context, page }) => {
+  await open(page);
+  const other = await context.newPage();
+  await open(other);
+  // Window A: View > Appearance > High contrast. Window B: Settings > Appearance > Theme: Light.
+  await choose(page, 'High contrast');
+  await other.getByRole('button', { name: 'Settings…', exact: true }).click();
+  const win = other.getByRole('dialog', { name: 'Settings' });
+  await win.locator('pd-setting-field[data-key="theme"]').getByRole('combobox').selectOption('light');
+  for (const p of [page, other]) {
+    await expect(html(p)).toHaveAttribute('data-theme', 'light');
+    await expect(html(p)).toHaveAttribute('data-contrast', 'more');
+  }
+  // The Settings window shows the menu's change too, and A's next change keeps B's theme.
+  await expect(win.locator('pd-setting-field[data-key="contrast"]').getByRole('combobox')).toHaveValue('more');
+  await choose(page, 'Reduce motion');
+  for (const p of [page, other]) {
+    await expect(html(p)).toHaveAttribute('data-motion', 'reduce');
+    await expect(html(p)).toHaveAttribute('data-theme', 'light');
+    await expect(html(p)).toHaveAttribute('data-contrast', 'more');
+  }
+  await other.close();
 });
 
 test.describe('screenshots (independent review)', () => {
@@ -173,8 +223,8 @@ test.describe('screenshots (independent review)', () => {
     await open(page);
     await look(page, 'dark', 'standard');
     await page.locator('button.cmd[data-command="sd.job.start"]').click();
-    // The View menu (after the app menu and File).
-    await page.getByRole('menubar').getByRole('menuitem').nth(2).click();
+    // The View menu (after File).
+    await page.getByRole('menubar').getByRole('menuitem').nth(1).click();
     await page.getByRole('menu').first().locator('[aria-haspopup]').first().click();
     mkdirSync(root, { recursive: true });
     await page.screenshot({ path: join(root, 'theme-pseudo-locale-dark.png'), fullPage: false });

@@ -3,7 +3,8 @@
  * (`settings_overview`, `settings_set`, `settings_reset`, changes on `paddock://settings`): the `SettingsBackend` port
  * (Tauri and in-memory), the Settings window (`PdSettingsWindow`, a modeless `tool` dialog: pages by group, search,
  * restart bar, unsaved edits asked about before closing), the generic section form and field control (Signal Forms),
- * the shell's Appearance page and its follower, and the contributions that open it.
+ * the shell's Appearance page, the Appearance settings as the source of every window's look, and the contributions that
+ * open it.
  *
  * The app declares the window as its own dialog, so its contract is in its registry:
  *
@@ -54,8 +55,14 @@ export { SettingsDrafts, type SectionForm, type SectionValues } from './src/sett
 export { PdSettingField } from './src/setting-field';
 export { PdSettingsSection, PdSettingsSectionPage, SETTINGS_PAGE } from './src/settings-section';
 export { PdSettingsWindow, SETTINGS_WINDOW_PAGES, SETTINGS_RESTART } from './src/settings-window';
-export { appearanceOf, appearanceFollower, followAppearance } from './src/appearance';
-export { SettingsAppearanceBackend, settingsAppearanceBackend, type SettingsAppearanceOptions } from './src/settings-appearance';
+export { appearanceFromSettings, appearanceToSettings } from './src/appearance';
+export {
+  SettingsAppearanceBackend,
+  settingsAppearanceBackend,
+  provideSettingsAppearance,
+  type SettingsAppearanceOptions,
+  type AppearanceRead,
+} from './src/settings-appearance';
 export { settingsWindowProviders, type SettingsWindowOptions } from './src/provide-settings';
 export { provideShellSettings, type ShellSettingsOptions } from './src/provide-shell-settings';
 export { SETTINGS_CONTRIBUTIONS, SETTINGS_DIALOG_ID, SETTINGS_DIALOG_COMMANDS, SHELL_SETTINGS_PAGES } from './src/settings.contributions';

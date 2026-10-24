@@ -1,9 +1,9 @@
-import { signal } from '@angular/core';
+import { createEnvironmentInjector, EnvironmentInjector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { AppearanceStore, BrowserAppearanceBackend, DEFAULT_APPEARANCE, provideAppearance, type Appearance, type AppearanceStorage } from '@decryp7/paddock-ui/shell';
+import { AppearanceStore, BrowserAppearanceBackend, DEFAULT_APPEARANCE, provideAppearance, type AppearanceStorage } from '@decryp7/paddock-ui/shell';
 import { APPEARANCE_SECTION } from '../generated/settings';
 import { MemorySettingsBackend, SettingsBackend } from './settings-backend';
-import { SettingsAppearanceBackend, settingsAppearanceBackend } from './settings-appearance';
+import { provideSettingsAppearance, SettingsAppearanceBackend, settingsAppearanceBackend } from './settings-appearance';
 
 class MemoryStorage implements AppearanceStorage {
   readonly map = new Map<string, string>();
@@ -16,59 +16,115 @@ class MemoryStorage implements AppearanceStorage {
 }
 
 const flush = async (): Promise<void> => {
-  for (let i = 0; i < 6; i++) await Promise.resolve();
+  for (let i = 0; i < 8; i++) await Promise.resolve();
 };
+const copy = () => new BrowserAppearanceBackend({ storage: new MemoryStorage(), channel: null });
 
-describe('SettingsAppearanceBackend (plan S15 over S10)', () => {
-  it('theme and density follow the engine; the rest stays in the window', async () => {
+describe('SettingsAppearanceBackend (the engine is the one source of the look)', () => {
+  it('saves the whole look to the engine and keeps a copy for the next start', async () => {
     const settings = new MemorySettingsBackend();
-    const local = new BrowserAppearanceBackend({ storage: new MemoryStorage(), channel: null });
+    const local = copy();
     const backend = new SettingsAppearanceBackend(settings, local);
-    const heard: Appearance[] = [];
-    const stop = backend.listen((a) => heard.push(a));
+    backend.save({ theme: 'light', contrast: 'more', motion: 'reduce', density: 'compact', pack: 'sd.theme.warm-paper' });
     await flush();
-    const engine = settings.values(APPEARANCE_SECTION) ?? {};
-    expect(backend.load().theme).toBe(engine['theme']);
-
-    // A change made here goes to the engine (theme, density) and stays local (contrast).
-    backend.save({ ...backend.load(), theme: 'light', contrast: 'more' });
-    await flush();
-    expect(settings.values(APPEARANCE_SECTION)).toMatchObject({ theme: 'light' });
-    expect(local.load()).toMatchObject({ theme: 'light', contrast: 'more' });
-
-    // A change made elsewhere (the Settings window, another window) arrives from the engine.
-    await settings.set(APPEARANCE_SECTION, { density: 'compact' });
-    await flush();
-    expect(heard.at(-1)).toMatchObject({ theme: 'light', contrast: 'more', density: 'compact' });
-    const count = heard.length;
-    stop();
-    await settings.set(APPEARANCE_SECTION, { density: 'comfortable' });
-    await flush();
-    expect(heard).toHaveLength(count);
+    expect(settings.values(APPEARANCE_SECTION)).toEqual({ theme: 'light', contrast: 'more', motion: 'reduce', density: 'compact', pack: 'sd.theme.warm-paper' });
+    expect(backend.load()).toMatchObject({ theme: 'light', contrast: 'more' });
   });
 
-  it('a contrast-only change does not write the engine; failures are reported, never thrown', async () => {
+  it('follows every change of the section (from any window) and nothing else; stops when asked', async () => {
     const settings = new MemorySettingsBackend();
-    const writes: unknown[] = [];
-    const spy = Object.assign(Object.create(settings) as SettingsBackend, {
-      set: (s: string, c: unknown) => (writes.push([s, c]), Promise.reject(new Error('engine gone'))),
+    const backend = new SettingsAppearanceBackend(settings, copy());
+    const heard: unknown[] = [];
+    const stop = backend.listen((a) => heard.push(a));
+    await flush();
+    expect(heard).toEqual([DEFAULT_APPEARANCE]);
+    await settings.set(APPEARANCE_SECTION, { motion: 'reduce' });
+    await settings.set('sd.general', { repeat: 2 });
+    expect(heard.at(-1)).toMatchObject({ motion: 'reduce' });
+    expect(heard).toHaveLength(2);
+    stop();
+    await settings.set(APPEARANCE_SECTION, { motion: 'full' });
+    expect(heard).toHaveLength(2);
+    expect(backend.load().motion).toBe('reduce');
+  });
+
+  it('`events`: follows the changes without asking the engine (a dialog window without settings commands)', async () => {
+    const settings = new MemorySettingsBackend();
+    const overview = vi.spyOn(settings, 'overview');
+    const backend = new SettingsAppearanceBackend(settings, copy(), undefined, 'events');
+    const heard: unknown[] = [];
+    backend.listen((a) => heard.push(a));
+    await flush();
+    expect(overview).not.toHaveBeenCalled();
+    expect(heard).toEqual([]);
+    await settings.set(APPEARANCE_SECTION, { theme: 'dark' });
+    expect(heard).toEqual([{ ...DEFAULT_APPEARANCE, theme: 'dark' }]);
+  });
+
+  it('failures are reported, never thrown; stopping before the engine answered still unlistens', async () => {
+    const settings = new MemorySettingsBackend();
+    const failing = Object.assign(Object.create(settings) as SettingsBackend, {
+      set: () => Promise.reject(new Error('engine gone')),
       listen: () => Promise.reject(new Error('no events')),
     });
     const warnings: string[] = [];
-    const backend = new SettingsAppearanceBackend(spy, new BrowserAppearanceBackend({ storage: new MemoryStorage(), channel: null }), (s) => s(), (m) => warnings.push(m));
+    const backend = new SettingsAppearanceBackend(failing, copy(), undefined, 'overview', (m) => warnings.push(m));
     backend.save({ ...DEFAULT_APPEARANCE, contrast: 'more' });
-    expect(writes).toEqual([]);
-    backend.save({ ...DEFAULT_APPEARANCE, contrast: 'more', theme: 'dark' });
     backend.listen(() => undefined);
     await flush();
-    expect(writes).toHaveLength(1);
     expect(warnings).toEqual([
       '[paddock-settings] the appearance could not be saved: engine gone',
       '[paddock-settings] the appearance settings could not be read: no events',
     ]);
+    let unlistened = 0;
+    const slow = Object.assign(Object.create(settings) as SettingsBackend, { listen: () => Promise.resolve(() => void unlistened++) });
+    new SettingsAppearanceBackend(slow, copy()).listen(() => undefined)();
+    await flush();
+    expect(unlistened).toBe(1);
+    const withDefaults = new SettingsAppearanceBackend(settings);
+    expect(withDefaults.load()).toEqual(DEFAULT_APPEARANCE);
   });
+});
 
-  it('asks the engine nothing before the gate opens (start-up sends only the contract’s calls)', async () => {
+describe('two windows on one engine (rule 40: one writer, one source)', () => {
+  /** A window: its own injector with the appearance store over the shared engine, and its own <html>. */
+  function windowOn(settings: SettingsBackend) {
+    const root = document.createElement('html');
+    const injector = createEnvironmentInjector(
+      [{ provide: SettingsBackend, useValue: settings }, provideSettingsAppearance({ copy }), provideAppearance({ accent: 'pitwall', root: () => root })],
+      TestBed.inject(EnvironmentInjector),
+    );
+    return { root, store: injector.get(AppearanceStore), destroy: () => injector.destroy() };
+  }
+
+  it('a Settings change and a View-menu change in another window never revert each other', async () => {
+    const settings = new MemorySettingsBackend();
+    const a = windowOn(settings);
+    const b = windowOn(settings);
+    await flush();
+    // Window A: View > Appearance > High contrast. The Settings window (B's side): theme Light, through the form.
+    a.store.setContrast('more');
+    await settings.set(APPEARANCE_SECTION, { theme: 'light' });
+    await flush();
+    TestBed.tick();
+    for (const w of [a, b]) {
+      expect(w.store.appearance()).toMatchObject({ theme: 'light', contrast: 'more' });
+      expect(w.root.getAttribute('data-theme')).toBe('light');
+      expect(w.root.getAttribute('data-contrast')).toBe('more');
+    }
+    // B changes motion from its menu; A's earlier contrast and the Settings theme stay.
+    b.store.setMotion('reduce');
+    await flush();
+    TestBed.tick();
+    expect(settings.values(APPEARANCE_SECTION)).toMatchObject({ theme: 'light', contrast: 'more', motion: 'reduce' });
+    expect(a.store.appearance()).toMatchObject({ theme: 'light', contrast: 'more', motion: 'reduce' });
+    a.destroy();
+    b.destroy();
+  });
+});
+
+describe('settingsAppearanceBackend', () => {
+  it('asks the engine nothing before the gate opens', async () => {
     const settings = new MemorySettingsBackend();
     let asked = 0;
     const counting = Object.assign(Object.create(settings) as SettingsBackend, {
@@ -79,11 +135,7 @@ describe('SettingsAppearanceBackend (plan S15 over S10)', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: SettingsBackend, useValue: counting },
-        provideAppearance({
-          accent: 'pitwall',
-          root: () => document.createElement('html'),
-          backend: settingsAppearanceBackend({ local: () => new BrowserAppearanceBackend({ storage: new MemoryStorage(), channel: null }), gate: () => ready }),
-        }),
+        provideAppearance({ accent: 'pitwall', root: () => document.createElement('html'), backend: settingsAppearanceBackend({ copy, gate: () => ready }) }),
       ],
     });
     const store = TestBed.inject(AppearanceStore);
@@ -95,16 +147,13 @@ describe('SettingsAppearanceBackend (plan S15 over S10)', () => {
     await flush();
     expect(asked).toBe(2);
     await settings.set(APPEARANCE_SECTION, { theme: 'light' });
-    await flush();
     expect(store.theme()).toBe('light');
   });
 
-  it('without a gate it starts at once and keeps its copy in localStorage by default', async () => {
+  it('takes a given settings backend, and keeps its copy in localStorage by default', async () => {
     const settings = new MemorySettingsBackend();
     await settings.set(APPEARANCE_SECTION, { theme: 'dark' });
-    TestBed.configureTestingModule({
-      providers: [{ provide: SettingsBackend, useValue: settings }, provideAppearance({ accent: 'pitwall', root: () => document.createElement('html'), backend: settingsAppearanceBackend() })],
-    });
+    TestBed.configureTestingModule({ providers: [provideAppearance({ accent: 'pitwall', root: () => document.createElement('html'), backend: settingsAppearanceBackend({ settings: () => settings }) })] });
     const store = TestBed.inject(AppearanceStore);
     await flush();
     expect(store.theme()).toBe('dark');

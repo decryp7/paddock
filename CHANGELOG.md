@@ -5,6 +5,18 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Changed
+- Appearance has one writer and one source (rule 40, rule 34): `paddock_settings::shell::appearance` holds the whole
+  look (theme, contrast, motion, density and the theme pack; `PACK_ID`); `provideShellSettings` provides it as the
+  window's `APPEARANCE_SOURCE`, so `provideAppearance` follows the engine's Appearance settings in every window and
+  writes every change there (`SettingsAppearanceBackend`: `overview` in a main window and the Settings window,
+  `events` in a dialog window whose contract has no settings command, `provideSettingsAppearance`). The old
+  `appearanceFollower` / `followAppearance` / `appearanceOf` are gone (`appearanceFromSettings`, `appearanceToSettings`
+  replace the value mapping); the Settings window never writes the look itself. An e2e check allows only the appearance
+  store (and the pre-paint copy) to put the look on `<html>`, and a View-menu change and a Settings change in another
+  window never revert each other. The shell demo's in-memory settings engine is shared by the origin's windows and kept
+  in localStorage, as the Rust engine is.
+- The in-app menu bar (Windows, Linux, the browser) has no app menu: the title bar already names the app, so its entries
+  (Settings…, About, Quit) are at the end of File (`foldAppMenu`); the macOS menu bar keeps the app menu.
 - Pages frame, review round 3: status items sit at equal distances (4 px gap, 4 px item padding; the service chip
   keeps 5 px of margin for its visible edge) and the chip looks pressed while its details are open. `shell-demo`: the
   status item says the table's exceptions ("1 offline · 1 updating", the full count in its name and tooltip), and the

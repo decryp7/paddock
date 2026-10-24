@@ -377,6 +377,10 @@ provideAppearance({ accent: 'pitwall', backend: () => new IpcAppearanceBackend({
 provideThemes(CONSOLE_THEME),                                                                          // optional packs
 ```
 
+- With Settings (`/shell/settings`), `provideShellSettings` makes the engine's Appearance settings the source of the look
+  (`APPEARANCE_SOURCE`): every window's store follows their changes and writes there; dialog windows add
+  `provideSettingsAppearance({ settings, read: 'events' })` to their base providers. The store is the only writer of the
+  look on `<html>` (checked by `e2e/shell-demo-theme.spec.ts`).
 - `AppearanceStore`: `theme()`, `contrast()`, `motion()`, `density()`, `pack()`, `resolved()` (`scheme`, `highContrast`,
   `reducedMotion` against the OS) and `setTheme`/`setContrast`/`setMotion`/`setDensity`/`setPack`. A change is saved and
   announced (`paddock://appearance` in the desktop build, a `BroadcastChannel` in the browser); the other windows apply it

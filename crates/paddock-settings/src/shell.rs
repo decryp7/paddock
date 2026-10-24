@@ -5,8 +5,10 @@ use crate::schema::{EnumOption, FieldKind, SectionOwner, SettingField, SettingsS
 /// The id of the shell's Appearance section (and of its settings page in the UI).
 pub const APPEARANCE: &str = "pd.appearance";
 
-/// Appearance: theme (`system`, `light`, `dark`) and density (`comfortable`, `standard`, `compact`) of every window.
-/// The UI applies them in each window when they change (`@decryp7/paddock-ui/shell/settings`).
+/// Appearance of every window: theme (`system`, `light`, `dark`), contrast (`system`, `standard`, `more`), motion
+/// (`system`, `reduce`, `full`), density (`comfortable`, `standard`, `compact`) and the theme pack (an app's
+/// `defineTheme` id, empty for none). The engine is the one source of truth (rule 34); each window's appearance store
+/// follows its changes (`@decryp7/paddock-ui/shell/settings`, `settingsAppearanceBackend`).
 pub fn appearance() -> SettingsSection {
     let options = |list: &[(&str, &str)]| FieldKind::Enum {
         options: list.iter().map(|(v, l)| EnumOption::new(*v, *l)).collect(),
@@ -28,6 +30,32 @@ pub fn appearance() -> SettingsSection {
         )
         .field(
             SettingField::new(
+                "contrast",
+                "Contrast",
+                options(&[
+                    ("system", "Same as the system"),
+                    ("standard", "Standard"),
+                    ("more", "High contrast"),
+                ]),
+                "system",
+            )
+            .describe("Stronger borders and no translucency, or follow the operating system."),
+        )
+        .field(
+            SettingField::new(
+                "motion",
+                "Motion",
+                options(&[
+                    ("system", "Same as the system"),
+                    ("reduce", "Reduced"),
+                    ("full", "Full"),
+                ]),
+                "system",
+            )
+            .describe("Reduced: fades only, no movement. Or follow the operating system."),
+        )
+        .field(
+            SettingField::new(
                 "density",
                 "Density",
                 options(&[
@@ -39,7 +67,15 @@ pub fn appearance() -> SettingsSection {
             )
             .describe("How much space controls and rows take."),
         )
+        .field(
+            SettingField::new("pack", "Theme pack", FieldKind::Text { max_len: 128, pattern: Some(PACK_ID.into()) }, "")
+                .describe("An app's colour pack over the theme; empty for none. Never applied in high contrast.")
+                .as_advanced(),
+        )
 }
+
+/// A theme pack id as the UI writes it (`db.theme.console`), or empty for none.
+pub const PACK_ID: &str = r"(?:[a-z][a-z0-9]*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+)?";
 
 #[cfg(test)]
 mod tests {
@@ -56,8 +92,28 @@ mod tests {
             }
             other => panic!("{other:?}"),
         };
-        // `SU_THEMES` and `SU_DENSITIES` of @decryp7/paddock-ui.
+        // `SU_THEMES`, `SU_CONTRASTS`, `SU_MOTIONS` and `SU_DENSITIES` of @decryp7/paddock-ui.
         assert_eq!(values("theme"), ["system", "light", "dark"]);
+        assert_eq!(values("contrast"), ["system", "standard", "more"]);
+        assert_eq!(values("motion"), ["system", "reduce", "full"]);
         assert_eq!(values("density"), ["comfortable", "standard", "compact"]);
+        assert_eq!(
+            s.fields.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(),
+            ["theme", "contrast", "motion", "density", "pack"]
+        );
+    }
+
+    #[test]
+    fn the_theme_pack_takes_an_id_or_nothing() {
+        let s = appearance();
+        let ok = |v: &str| {
+            crate::values::validate_field(s.find("pack").unwrap(), &serde_json::json!(v)).is_ok()
+        };
+        assert!(ok(""));
+        assert!(ok("db.theme.console"));
+        assert!(ok("sd.theme.warm-paper"));
+        assert!(!ok("Console"));
+        assert!(!ok("db.theme.console; x"));
+        assert!(!ok(&"a.b".repeat(60)));
     }
 }
