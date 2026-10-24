@@ -427,6 +427,11 @@ mod tests {
     }
 
     #[test]
+    fn a_one_letter_needle_matches_nothing() {
+        assert_eq!(replace_word("a b", "a", "<x>"), ("a b".to_string(), 0));
+    }
+
+    #[test]
     fn ipv6_addresses_are_redacted_but_times_and_mac_addresses_are_not() {
         let (t, n) = replace_ipv6(
             "peer 2a00:1450:4001:82b::200e and [::1]:443, fe80::1ff:fe23:4567:890a. at 12:30:45 mac aa:bb:cc:dd:ee:ff",

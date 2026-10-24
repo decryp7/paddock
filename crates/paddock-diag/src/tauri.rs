@@ -220,8 +220,11 @@ impl Diagnostics {
     /// Blocking: call it on the blocking pool.
     pub fn preview(&self, token: Option<&str>, description: &str) -> PreviewReply {
         let mut cache = lock(&self.cache);
-        let reuse = matches!((&*cache, token), (Some(c), Some(t)) if c.token == t);
-        if !reuse {
+        let known = matches!((&*cache, token), (Some(c), Some(t)) if c.token == t);
+        if !known {
+            *cache = None;
+        }
+        let cached = cache.get_or_insert_with(|| {
             if let Some(log) = &self.log {
                 log.flush_repeats();
             }
@@ -233,27 +236,11 @@ impl Diagnostics {
                 self.clock.now(),
             );
             let token = format!("r{}", self.next.fetch_add(1, Ordering::Relaxed));
-            *cache = Some(Cached { token, collected });
-        }
-        let cached = cache.as_ref();
-        match cached {
-            Some(c) => PreviewReply {
-                token: c.token.clone(),
-                preview: c.collected.assemble(description).preview(),
-            },
-            // Unreachable: the cache was filled above. An empty reply keeps the function total without a panic.
-            None => PreviewReply {
-                token: String::new(),
-                preview: Collected::collect(
-                    &self.app,
-                    &self.dirs,
-                    &[],
-                    &self.redactor,
-                    self.clock.now(),
-                )
-                .assemble(description)
-                .preview(),
-            },
+            Cached { token, collected }
+        });
+        PreviewReply {
+            token: cached.token.clone(),
+            preview: cached.collected.assemble(description).preview(),
         }
     }
 }
@@ -363,29 +350,17 @@ fn start_save<R: Runtime>(
     }
     let suggested = suggested_name(&state.app, state.clock.now());
     let (app, state, label) = (app.clone(), state.clone(), label.to_string());
-    let spawned = std::thread::Builder::new()
-        .name("paddock-diag-save".into())
-        .spawn({
-            let (app, state) = (app.clone(), state.clone());
-            move || {
-                let outcome = run_save(&state, &jobs, picker.as_ref(), &label, &suggested, &report);
-                {
-                    let mut active = lock(&state.active);
-                    active.saving = false;
-                    active.job = None;
-                }
-                // A failed emit means the app is closing; nothing is left to tell.
-                let _ = app.emit(EVENT, &outcome);
-            }
-        });
-    if spawned.is_err() {
-        lock(&state.active).saving = false;
-        return Err(refuse(
-            DiagErrorCode::Failed,
-            "The report could not be saved: no thread could be started.",
-            true,
-        ));
-    }
+    // The save blocks on the native dialog, so it runs on the blocking pool, never on the IPC or main thread.
+    ::tauri::async_runtime::spawn_blocking(move || {
+        let outcome = run_save(&state, &jobs, picker.as_ref(), &label, &suggested, &report);
+        {
+            let mut active = lock(&state.active);
+            active.saving = false;
+            active.job = None;
+        }
+        // A failed emit means the app is closing; nothing is left to tell.
+        let _ = app.emit(EVENT, &outcome);
+    });
     Ok(())
 }
 
@@ -420,10 +395,9 @@ fn run_save(
         report
             .save(&dest, ctx.cancel_token(), ctx)
             .map_err(|e| match e {
-                crate::DiagError::Cancelled => ctx
-                    .check()
-                    .err()
-                    .unwrap_or_else(|| JobError::Failed(e.to_string())),
+                crate::DiagError::Cancelled => {
+                    JobError::Cancelled(paddock_jobs::CancelReason::User)
+                }
                 other => JobError::Failed(other.to_string()),
             })
     });

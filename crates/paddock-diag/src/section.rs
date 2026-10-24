@@ -277,4 +277,16 @@ pub mod builtin {
             Arc::new(Logs::new()),
         ]
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_default_log_window_is_the_standard_one() {
+            assert_eq!(Logs::default().window, Logs::new().window);
+            assert_eq!(Logs::new().window, LOG_WINDOW);
+            assert_eq!(Logs::with_window(5).window, 5);
+        }
+    }
 }

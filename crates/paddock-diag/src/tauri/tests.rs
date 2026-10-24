@@ -487,3 +487,179 @@ fn the_log_handle_is_kept_for_the_logging_section_and_flushed_before_collecting(
         assert!(!state.preview(None, "").token.is_empty());
     });
 }
+
+#[test]
+fn the_setups_clock_names_the_file_and_install_keeps_the_first_state() {
+    use chrono::TimeZone;
+    let rig = rig(|_, _| Pick::Dismiss);
+    let events = outcomes(&rig.app);
+    let w = window(&rig.app, "d-main-1");
+    // A second install keeps the first state (the shell may be built twice in a test).
+    let id = AppId::new("demo", "Demo").unwrap();
+    let dirs = AppDirs::resolve(
+        &id,
+        Os::MacOs,
+        &MapVars::new().with("DEMO_HOME", rig._root.path()),
+        None,
+        true,
+    )
+    .unwrap();
+    let again = install(
+        rig.app.handle(),
+        Setup::new(AppInfo::new("other", "Other", "9", ""), dirs),
+        None,
+    );
+    assert!(Arc::ptr_eq(&again, &rig.state));
+    let _ = (events, w);
+    // A fixed clock gives a fixed suggested name and a fixed manifest time.
+    let fixed = Arc::new(paddock_log::ManualClock::new(
+        chrono::Utc
+            .with_ymd_and_hms(2026, 10, 24, 10, 30, 0)
+            .unwrap(),
+    ));
+    let root = tempfile::tempdir().unwrap();
+    let dirs = AppDirs::resolve(
+        &id,
+        Os::MacOs,
+        &MapVars::new().with("DEMO_HOME", root.path()),
+        None,
+        true,
+    )
+    .unwrap();
+    let app = mock_builder()
+        .invoke_handler(invoke_handler())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    paddock_jobs::tauri::manage(app.handle());
+    let picker = Arc::new(FakePicker(Pick::Dismiss, Mutex::new(Vec::new())));
+    install(
+        app.handle(),
+        Setup::new(AppInfo::new("demo", "Demo", "1", ""), dirs)
+            .clock(fixed)
+            .picker(picker.clone()),
+        None,
+    );
+    let events = outcomes(&app);
+    let w = window(&app, "d-main-1");
+    let token = preview(&w, None, "")["token"].as_str().unwrap().to_string();
+    invoke(
+        &w,
+        "diagnostics_save",
+        json!({ "token": token, "description": "" }),
+    )
+    .unwrap();
+    assert_eq!(next(&events)["state"], "dismissed");
+    assert_eq!(lock(&picker.1)[0].1, "demo-diagnostics-20261024-103000.zip");
+}
+
+#[test]
+fn a_save_without_the_jobs_state_is_refused_and_a_panicking_picker_fails_the_save_not_the_app() {
+    // No jobs state: a save is a job, so it says the app did not set reports up.
+    let app = mock_builder()
+        .invoke_handler(invoke_handler())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let id = AppId::new("demo", "Demo").unwrap();
+    let dirs = AppDirs::resolve(
+        &id,
+        Os::MacOs,
+        &MapVars::new().with("DEMO_HOME", root.path()),
+        None,
+        true,
+    )
+    .unwrap();
+    let picker = Arc::new(FakePicker(Pick::Dismiss, Mutex::new(Vec::new())));
+    install(
+        app.handle(),
+        Setup::new(AppInfo::new("demo", "Demo", "1", ""), dirs).picker(picker),
+        None,
+    );
+    let w = window(&app, "d-main-1");
+    let token = preview(&w, None, "")["token"].as_str().unwrap().to_string();
+    let e = invoke(
+        &w,
+        "diagnostics_save",
+        json!({ "token": token, "description": "" }),
+    )
+    .unwrap_err();
+    assert_eq!(e["code"], "notSetUp");
+    assert_eq!(
+        invoke(&w, "diagnostics_cancel", json!({})).unwrap(),
+        json!(false)
+    );
+    assert!(
+        !lock(
+            &install(
+                app.handle(),
+                Setup::new(
+                    AppInfo::new("a", "A", "1", ""),
+                    AppDirs::resolve(
+                        &id,
+                        Os::MacOs,
+                        &MapVars::new().with("DEMO_HOME", root.path()),
+                        None,
+                        true
+                    )
+                    .unwrap()
+                ),
+                None
+            )
+            .active
+        )
+        .saving
+    );
+
+    // A picker that panics: the job contains it, the save ends as failed with words, and the next save can start.
+    struct Panics;
+    impl SavePicker for Panics {
+        fn pick(&self, _: &str, _: &str) -> Option<PathBuf> {
+            panic!("the dialog plugin crashed")
+        }
+    }
+    let rig = rig(|_, _| Pick::Dismiss);
+    let panicking = mock_builder()
+        .invoke_handler(invoke_handler())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    paddock_jobs::tauri::manage(panicking.handle());
+    let dirs = AppDirs::resolve(
+        &id,
+        Os::MacOs,
+        &MapVars::new().with("DEMO_HOME", rig._root.path()),
+        None,
+        true,
+    )
+    .unwrap();
+    install(
+        panicking.handle(),
+        Setup::new(AppInfo::new("demo", "Demo", "1", ""), dirs).picker(Arc::new(Panics)),
+        None,
+    );
+    let events = outcomes(&panicking);
+    let w = window(&panicking, "d-main-1");
+    let token = preview(&w, None, "")["token"].as_str().unwrap().to_string();
+    invoke(
+        &w,
+        "diagnostics_save",
+        json!({ "token": token, "description": "" }),
+    )
+    .unwrap();
+    let out = next(&events);
+    assert_eq!(out["state"], "failed");
+    assert!(
+        out["message"].as_str().unwrap().contains("internal error"),
+        "{out}"
+    );
+    invoke(
+        &w,
+        "diagnostics_save",
+        json!({ "token": token, "description": "" }),
+    )
+    .unwrap();
+    assert_eq!(
+        next(&events)["state"],
+        "failed",
+        "the failed save did not leave the state stuck"
+    );
+}
