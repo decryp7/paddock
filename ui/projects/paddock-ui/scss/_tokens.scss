@@ -288,6 +288,9 @@ $accents: (
   'graphite': (dark: #a6a8ad, light: #4f5764, fill: #4f5764, fill-dark: #a6a8ad, on-fill-dark: #16181c),
 );
 
+// Ink on a control fill in the dark scheme (the page colour).
+$on-control-dark: #0e0f12;
+
 // An accent's fill in the dark scheme, and the text on it there: `fill-dark` / `on-fill-dark` when it has them.
 @function dark-fill($a) {
   @if map.has-key($a, 'fill-dark') {
@@ -302,10 +305,14 @@ $accents: (
   @return #ffffff;
 }
 
-@mixin accent-vars($text, $fill, $on: #ffffff) {
+// `control` is the fill of a switched-on toggle, a checked box or radio: >= 3:1 on every surface (WCAG 1.4.11). Light: the
+// accent fill with white ink. Dark: the accent colour itself with dark ink (the fills are 2.9:1 on a card there).
+@mixin accent-vars($text, $fill, $on: #ffffff, $control: $fill, $on-control: #ffffff) {
   --pd-accent: #{$text};
   --pd-on-accent: #{$on};
   --pd-accent-fill: #{$fill};
+  --pd-accent-control: #{$control};
+  --pd-on-accent-control: #{$on-control};
   --pd-accent-fill-hover: color-mix(in srgb, #{$fill} 88%, #000);
   --pd-accent-tint: color-mix(in srgb, #{$text} 14%, transparent);
   --pd-accent-ring: color-mix(in srgb, #{$text} 35%, transparent);
@@ -313,7 +320,7 @@ $accents: (
 
 // Default accent: Debrief.
 :root {
-  @include accent-vars(map.get(map.get($accents, 'debrief'), dark), map.get(map.get($accents, 'debrief'), fill));
+  @include accent-vars(map.get(map.get($accents, 'debrief'), dark), map.get(map.get($accents, 'debrief'), fill), #ffffff, map.get(map.get($accents, 'debrief'), dark), $on-control-dark);
 }
 
 @media (prefers-color-scheme: light) {
@@ -327,12 +334,12 @@ $accents: (
 }
 
 :root[data-theme='dark'] {
-  @include accent-vars(map.get(map.get($accents, 'debrief'), dark), map.get(map.get($accents, 'debrief'), fill));
+  @include accent-vars(map.get(map.get($accents, 'debrief'), dark), map.get(map.get($accents, 'debrief'), fill), #ffffff, map.get(map.get($accents, 'debrief'), dark), $on-control-dark);
 }
 
 @each $name, $a in $accents {
   :root[data-accent='#{$name}'] {
-    @include accent-vars(map.get($a, dark), dark-fill($a), dark-on-fill($a));
+    @include accent-vars(map.get($a, dark), dark-fill($a), dark-on-fill($a), map.get($a, dark), $on-control-dark);
   }
 
   @media (prefers-color-scheme: light) {
@@ -346,7 +353,7 @@ $accents: (
   }
 
   :root[data-theme='dark'][data-accent='#{$name}'] {
-    @include accent-vars(map.get($a, dark), dark-fill($a), dark-on-fill($a));
+    @include accent-vars(map.get($a, dark), dark-fill($a), dark-on-fill($a), map.get($a, dark), $on-control-dark);
   }
 }
 

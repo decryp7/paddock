@@ -133,6 +133,7 @@
 .pd-input,
 .pd-select,
 .pd-textarea {
+  box-sizing: border-box;
   min-width: 0;
   min-height: var(--pd-control-height);
   padding: 0 var(--pd-space-3);
@@ -142,19 +143,22 @@
   color: var(--pd-text);
   font: inherit;
   transition:
-    border-color var(--pd-duration-micro) var(--pd-ease-move),
-    box-shadow var(--pd-duration-micro) var(--pd-ease-move);
+    border-color var(--pd-duration-micro) var(--pd-ease-move);
 
   &::placeholder {
     color: var(--pd-text-subtle);
   }
 
-  // Focus: the accent border and a 2 px ring at 35 % alpha (design guide §6), on top of the global keyboard ring.
-  &:focus,
+  // Focus: the accent border and the family focus ring, a solid 2 px outline at 3:1 or better (design guide §4 and §6). A
+  // translucent halo alone measured 1.7:1 and is not an indicator.
   &:focus-visible {
-    outline: none;
     border-color: var(--pd-accent);
-    box-shadow: 0 0 0 2px var(--pd-accent-ring);
+    outline: 2px solid var(--pd-focus-ring);
+    outline-offset: 2px;
+  }
+
+  &:focus:not(:focus-visible) {
+    border-color: var(--pd-accent);
   }
 
   &:disabled {
@@ -167,11 +171,12 @@
   }
 
   &[aria-invalid='true']:focus-visible {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--pd-danger) 35%, transparent);
+    outline-color: var(--pd-danger);
   }
 }
 
 .pd-textarea {
+  box-sizing: border-box;
   min-height: calc(var(--pd-control-height) * 2);
   padding-block: var(--pd-space-2);
   line-height: var(--pd-lh-body);
@@ -189,17 +194,20 @@
 .pd-select {
   appearance: none;
   padding-inline-end: var(--pd-space-8);
-  background-image: linear-gradient(45deg, transparent 50%, var(--pd-text-muted) 50%), linear-gradient(135deg, var(--pd-text-muted) 50%, transparent 50%);
+  // The caret is the chevron-down glyph, drawn as two 1.5 px diagonal bands (no image, so the CSP and the theme both hold).
+  background-image:
+    linear-gradient(to bottom left, transparent calc(50% - 0.75px), var(--pd-text-muted) calc(50% - 0.75px) calc(50% + 0.75px), transparent calc(50% + 0.75px)),
+    linear-gradient(to bottom right, transparent calc(50% - 0.75px), var(--pd-text-muted) calc(50% - 0.75px) calc(50% + 0.75px), transparent calc(50% + 0.75px));
   background-position:
-    calc(100% - 15px) 50%,
-    calc(100% - 11px) 50%;
+    calc(100% - 18px) 50%,
+    calc(100% - 14px) 50%;
   background-size: 4px 4px;
   background-repeat: no-repeat;
 
   &:dir(rtl) {
     background-position:
-      15px 50%,
-      11px 50%;
+      14px 50%,
+      18px 50%;
   }
 }
 
@@ -227,8 +235,16 @@
 }
 
 .pd-field__error {
+  display: flex;
+  align-items: center;
+  gap: var(--pd-space-1);
   font-size: var(--pd-text-label);
   color: var(--pd-danger);
+
+  pd-glyph,
+  .mat-icon {
+    flex: none;
+  }
 }
 
 .pd-field-grid {
@@ -254,7 +270,8 @@
   }
 }
 
-// ---- Check and radio: the native control in the accent, 16 px with a 24 px hit area from the label.
+// ---- Check and radio: a themed 16 px box (the browser's grey default ignores the tokens), a 24 px hit area from the label.
+// A label-less check in a field row sits on the control line of the fields beside it.
 .pd-check {
   display: inline-flex;
   align-items: center;
@@ -262,11 +279,127 @@
   min-height: var(--pd-hit-min);
   cursor: default;
 
-  input {
+  input:not(.pd-switch) {
+    appearance: none;
+    position: relative;
+    flex: none;
+    box-sizing: border-box;
     width: 16px;
     height: 16px;
     margin: 0;
-    accent-color: var(--pd-accent-fill);
+    border: 1px solid var(--pd-border-control);
+    border-radius: var(--pd-radius-tag);
+    background: var(--pd-surface-1);
+
+    &[type='radio'] {
+      border-radius: var(--pd-radius-pill);
+    }
+
+    &:checked,
+    &:indeterminate {
+      border-color: var(--pd-accent-control);
+      background: var(--pd-accent-control);
+    }
+
+    // The tick (or the dash, or the radio dot) is drawn with borders: no image, no colour of its own.
+    &:checked::after {
+      content: '';
+      position: absolute;
+      inset-inline-start: 4px;
+      top: 1px;
+      width: 4px;
+      height: 8px;
+      border: solid var(--pd-on-accent-control);
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+
+    &[type='radio']:checked::after {
+      inset: 3px;
+      width: auto;
+      height: auto;
+      border: 0;
+      border-radius: var(--pd-radius-pill);
+      background: var(--pd-on-accent-control);
+      transform: none;
+    }
+
+    &:indeterminate::after {
+      content: '';
+      position: absolute;
+      inset: 6px 3px auto;
+      height: 2px;
+      border-radius: 1px;
+      background: var(--pd-on-accent-control);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--pd-focus-ring);
+      outline-offset: 2px;
+    }
+
+    &:disabled {
+      opacity: 0.5;
+    }
+  }
+}
+
+.pd-field > .pd-check {
+  align-self: end;
+  min-height: var(--pd-control-height);
+}
+
+// ---- Switch: a native checkbox (role="switch") drawn as a 32 x 18 track. Off: the control border on the surface; on: the
+// accent control fill (3:1 on every surface) with the on-control handle, which also moves, so colour is never the only cue.
+.pd-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  border: 1px solid var(--pd-border-control);
+  border-radius: var(--pd-radius-pill);
+  background: var(--pd-surface-3);
+  transition:
+    background var(--pd-duration-micro) var(--pd-ease-move),
+    border-color var(--pd-duration-micro) var(--pd-ease-move);
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    inset-inline-start: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: var(--pd-radius-pill);
+    background: var(--pd-text-muted);
+    transition: transform var(--pd-duration-micro) var(--pd-ease-move);
+  }
+
+  &:checked {
+    border-color: var(--pd-accent-control);
+    background: var(--pd-accent-control);
+  }
+
+  &:checked::after {
+    background: var(--pd-on-accent-control);
+    transform: translateX(14px);
+  }
+
+  &:dir(rtl):checked::after {
+    transform: translateX(-14px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--pd-focus-ring);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 
@@ -304,6 +437,14 @@
     width: 12px;
     height: 12px;
   }
+
+  > button {
+    color: var(--pd-text-muted);
+
+    &:hover {
+      color: var(--pd-text);
+    }
+  }
 }
 
 // ---- Segmented control (a few mutually exclusive options): buttons with aria-pressed or aria-checked.
@@ -333,11 +474,14 @@
       color: var(--pd-text);
     }
 
+    // Selected: an accent tint, a 1 px accent ring (3:1 on the track in both schemes) and a 600 label. A raised surface
+    // reads as raised in light and as sunken in dark, so selection is never carried by the surface alone.
     &[aria-pressed='true'],
     &[aria-checked='true'] {
-      background: var(--pd-surface-1);
+      background: var(--pd-accent-tint);
       color: var(--pd-text);
-      box-shadow: var(--pd-shadow-1);
+      font-weight: var(--pd-weight-semibold);
+      box-shadow: inset 0 0 0 1px var(--pd-accent);
     }
   }
 }
@@ -390,4 +534,10 @@
   font-size: var(--pd-text-caption);
   color: var(--pd-text-muted);
   text-align: center;
+  line-height: 16px;
+  vertical-align: baseline;
+
+  + .pd-kbd {
+    margin-inline-start: 2px;
+  }
 }
