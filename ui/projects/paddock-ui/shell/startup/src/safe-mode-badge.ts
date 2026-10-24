@@ -13,7 +13,7 @@ import { RecoveryStore } from './recovery.store';
   template: `
     @if (store.safeMode()) {
       <span class="pd-safe-mode" role="status" data-testid="safe-mode-badge" [attr.title]="t.title">
-        <pd-glyph class="pd-safe-mode__icon" name="shield" [size]="12" />
+        <pd-glyph class="pd-safe-mode__icon" name="shield" [size]="14" />
         {{ t.label }}
       </span>
     }
