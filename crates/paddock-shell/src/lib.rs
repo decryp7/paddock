@@ -65,6 +65,7 @@ paddock_commands::command_table! {
         paddock_diag::COMMANDS,
         paddock_files::COMMANDS,
         paddock_service::COMMANDS,
+        paddock_packs::COMMANDS,
         paddock_jobs::tauri::COMMANDS,
         paddock_settings::tauri::COMMANDS,
         paddock_updater::COMMANDS,

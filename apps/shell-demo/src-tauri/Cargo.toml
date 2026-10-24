@@ -25,7 +25,7 @@ name = "paddock-shell-demo"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = { version = "2.7", features = [] }
+paddock-build = { path = "../../../crates/paddock-build", features = ["tauri-build"] }
 
 # The shell crates from this repository (path dependencies). An app outside the repository names them from the
 # `decryp7` registry instead (crates/README.md, "Consuming the crates"); scripts/new-app.mjs rewrites these lines.
@@ -40,6 +40,7 @@ paddock-log = { path = "../../../crates/paddock-log" }
 paddock-health = { path = "../../../crates/paddock-health", features = ["tauri", "os-notify"] }
 tauri-plugin-notification = "2.7"
 paddock-jobs = { path = "../../../crates/paddock-jobs", features = ["tauri"] }
+paddock-packs = { path = "../../../crates/paddock-packs", features = ["tauri", "watch"] }
 paddock-service = { path = "../../../crates/paddock-service", features = ["tauri"] }
 # The sample agent's spec, heartbeat and manager (its binary is bundled as `externalBin`).
 shell-demo-agent = { path = "agent" }

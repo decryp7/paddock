@@ -22,6 +22,7 @@ scripts/setup-dev.sh --install  # macOS: installs the missing tools, then report
 | `sccache` | one Rust build cache shared by every checkout and worktree | `brew install sccache` | `cargo install sccache --locked` | same |
 | `cargo-nextest` | faster, isolated Rust test runs; flaky-test report | `brew install cargo-nextest` | `cargo install cargo-nextest --locked` | same |
 | `cargo-deny`, `cargo-llvm-cov` | licence and advisory gate, coverage | `cargo install --locked cargo-deny cargo-llvm-cov` | same | same |
+| `cargo-hakari`, `cargo-machete` | one feature set per dependency, unused dependencies | `cargo install --locked cargo-hakari cargo-machete` (or the prebuilt release binaries) | same | same |
 | Docker (or OrbStack) | run the Linux CI image locally before pushing | Docker Desktop or OrbStack | docker | Docker Desktop |
 | Playwright browsers | e2e: Chromium in branches, Chromium + WebKit on the combined branch and in CI | `npx playwright install chromium webkit` in `app/` | `npx playwright install --with-deps chromium webkit` | `npx playwright install chromium` |
 | Chrome for Testing (pinned) | tests that drive a real browser; never the installed Google Chrome (rule 7) | each app's `install-test-browser` script sets `CHROMIUM_TEST_PATH` | same | same |
@@ -32,11 +33,33 @@ Put these in the shell profile (`~/.zshenv` on macOS):
 
 ```sh
 export RUSTC_WRAPPER=sccache        # shared compile cache; `sccache --show-stats` shows the hit rate
+export SCCACHE_DIR=/Volumes/d8sst7/dev-targets/sccache   # on the big volume (Mac mini), not the system disk
 export SCCACHE_CACHE_SIZE=60G       # the default 10G is too small for several apps
 export CARGO_BUILD_JOBS=2           # per job; several run at once (Mac mini: about five heavy jobs at most)
 ```
 
 Change `RUSTC_WRAPPER` only between builds: it is part of Cargo's fingerprint, so changing it rebuilds the target folder.
+
+**sccache.** One server per user serves every checkout and worktree; the cache lives on the big volume
+(`SCCACHE_DIR`, Mac mini: `/Volumes/d8sst7/dev-targets/sccache`, next to the per-worktree target folders). It caches
+the dependencies (registry crates, build scripts' C code), which is most of a cold build of a new worktree. It cannot
+cache the workspace's own crates in a debug build (incremental) or any link, so an edit-and-test cycle gains nothing
+from it. When `sccache --show-stats` stays at 0 requests while builds run, the server is broken: `sccache --stop-server`
+(the next build starts it again with the current environment) and check that `RUSTC_WRAPPER` and `SCCACHE_DIR` are set
+in the shell that builds. A server started from a shell without `SCCACHE_DIR` writes to `~/Library/Caches/Mozilla.sccache`
+on the system disk.
+
+**Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:
+
+```toml
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+```
+
+The gain is largest on aarch64 Linux, which still links with GNU ld; x86_64 Linux already links with rust-lld (the default
+since Rust 1.90), where mold saves a little more per link. macOS keeps the default linker (Apple's ld is already fast).
 
 ## Shared build cache
 
@@ -55,6 +78,37 @@ another database number. sccache's keys include the compiler and target, so one 
   never fails it.
 - Hit rates: the `sccache-stats` step at the end of each job prints `sccache --show-stats`; look at "Cache hits rate". A
   cold first run is all misses; later runs of the same crates should mostly hit.
+
+## Builds
+
+- **One feature set per dependency (cargo-hakari).** With resolver 2, `cargo build -p <crate>` resolves features for that
+  crate alone, so a dependency can be compiled again with another feature set than `cargo test --workspace` used (in Debrief, one
+  `cargo build -p` inside a test recompiled 18 crates). A workspace-hack crate (`crates/paddock-workspace-hack`, settings in
+  `crates/.config/hakari.toml`) depends on every such dependency with the union of its features, and every member depends
+  on it, so all builds share one compiled copy. Tauri is left out on purpose (the libraries take it without a webview
+  runtime). After adding or changing a dependency: `cargo hakari generate && cargo hakari manage-deps`; CI runs
+  `cargo hakari generate --diff`, `cargo hakari manage-deps --dry-run` and `cargo hakari verify`. The crate is never
+  published: `scripts/publish.mjs` publishes with `cargo hakari publish`, which drops the dependency for the upload.
+- **Unused dependencies (cargo-machete).** CI runs `cargo machete` on every crate. A false report (a dependency used only
+  by a macro, or for its features) goes into `ignored` of `[workspace.metadata.cargo-machete]` in `crates/Cargo.toml`, or
+  of the crate's own `[package.metadata.cargo-machete]`, with a comment saying why.
+- **Build profiles.** `[profile.dev]` (tests inherit it) keeps line tables only (`debug = "line-tables-only"`: backtraces
+  still name file and line) and dependencies get no debug info, which shrinks the objects and speeds up linking. For a
+  debugger session with variables: `CARGO_PROFILE_DEV_DEBUG=full cargo build`. `split-debuginfo` stays at the platform
+  default (macOS already keeps debug info out of the binaries; Windows supports only `packed`).
+
+## Tests
+
+- **Rust:** `cargo nextest run` (each app's `.config/nextest.toml`: one test per core but one, slow-test warnings after
+  30 s, and a `ci` profile without retries, because a flaky test is fixed rather than retried, with a JUnit report).
+  nextest does not run doc tests: `cargo test --doc` runs them.
+- **One integration-test binary per crate:** `tests/it/main.rs` declares one module per test file (`mod pool;` for
+  `tests/it/pool.rs`), shared helpers in `tests/it/common/` or `tests/it/support/`. Linking one binary per file cost more
+  than running the tests (Debrief went from 239 test binaries to 99). A new test file is a new `mod` line, never a new
+  `tests/<name>.rs`; run one file's tests with `cargo nextest run -p <crate> -E 'test(/^pool::/)'` or
+  `cargo test -p <crate> --test it pool::`. A test that changes something process-wide (environment variables, the panic
+  hook, the global allocator, a measured resident size) either serialises that change with a lock or runs in a child
+  process of its own (re-running its own test binary with `--exact`), because `cargo test` runs all modules in one process.
 
 ## Parallel work (people and agents)
 

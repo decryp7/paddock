@@ -6,6 +6,15 @@ use paddock_window::tauri::NativeTray;
 use paddock_window::tray::{TrayEntry, TrayView, disabled, item, submenu};
 
 fn main() {
+    // cargo-nextest first asks every test binary for its tests (`--list --format terse`, then the same with `--ignored`)
+    // and then runs each by name; answer the listing like libtest so this harness-less test runs under nextest too.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--list") {
+        if !args.iter().any(|a| a == "--ignored") {
+            println!("native_menu: test");
+        }
+        return;
+    }
     let app = tauri::test::mock_app();
     let view = TrayView::new(
         "App",
