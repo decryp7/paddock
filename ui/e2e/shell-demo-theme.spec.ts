@@ -150,13 +150,14 @@ test('a View-menu change and a Settings change in another window never revert ea
   await choose(page, 'High contrast');
   await other.getByRole('button', { name: 'Settings…', exact: true }).click();
   const win = other.getByRole('dialog', { name: 'Settings' });
-  await win.locator('pd-setting-field[data-key="theme"]').getByRole('combobox').selectOption('light');
+  await win.locator('pd-setting-field[data-key="theme"]').getByRole('combobox').click();
+  await other.getByRole('option', { name: 'Light', exact: true }).click();
   for (const p of [page, other]) {
     await expect(html(p)).toHaveAttribute('data-theme', 'light');
     await expect(html(p)).toHaveAttribute('data-contrast', 'more');
   }
   // The Settings window shows the menu's change too, and A's next change keeps B's theme.
-  await expect(win.locator('pd-setting-field[data-key="contrast"]').getByRole('combobox')).toHaveValue('more');
+  await expect(win.locator('pd-setting-field[data-key="contrast"]').getByRole('combobox')).toHaveText('High contrast');
   await choose(page, 'Reduce motion');
   for (const p of [page, other]) {
     await expect(html(p)).toHaveAttribute('data-motion', 'reduce');

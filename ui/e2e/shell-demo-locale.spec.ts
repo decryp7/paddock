@@ -135,7 +135,7 @@ test.describe('pseudo-locale (plan S15)', () => {
     await page.locator('pd-jobs-status .pd-pill').click();
     const job = page.locator('pd-jobs-status pd-job').first();
     await expect(job.getByRole('button')).toHaveText(PSEUDO);
-    expect(await unmarkedEnglish(page.locator('pd-jobs-status'), '.title, .headline, .subject, [role=status], [role=progressbar]')).toEqual([]);
+    expect(await unmarkedEnglish(page.locator('pd-jobs-status'), '.pd-title, .pd-headline, .pd-subject, [role=status], [role=progressbar]')).toEqual([]);
     await job.getByRole('button').click();
     await page.keyboard.press('Escape');
 
@@ -143,11 +143,11 @@ test.describe('pseudo-locale (plan S15)', () => {
     await page.locator('button.cmd[data-command="sd.notify.three"]').click();
     const toast = page.getByRole('region', { name: PSEUDO }).filter({ has: page.getByTestId('notification-dismiss') });
     await expect(toast.getByTestId('notification-dismiss')).toHaveAttribute('aria-label', PSEUDO);
-    expect(await unmarkedEnglish(toast, '.title, .body')).toEqual([]);
+    expect(await unmarkedEnglish(toast, '.pd-title, .pd-body')).toEqual([]);
     await page.getByTestId('notifications-status').click();
     const centre = page.locator('pd-notifications-panel');
     await expect(centre.getByTestId('notices-mark-all')).toHaveText(PSEUDO);
-    expect(await unmarkedEnglish(centre, '.title, .body, .time')).toEqual([]);
+    expect(await unmarkedEnglish(centre, '.pd-title, .pd-body, .pd-time')).toEqual([]);
   });
 
   test('no unmarked English in the service chip and its details (the engine’s cause text is data)', async ({ page }) => {
@@ -158,7 +158,7 @@ test.describe('pseudo-locale (plan S15)', () => {
     const details = page.getByTestId('service-health-details');
     await expect(details).toBeVisible();
     await expect(details.locator('button').first()).toHaveText(PSEUDO);
-    expect(await unmarkedEnglish(page.locator('pd-service-status'), '.svc > strong, .hint, code')).toEqual([]);
+    expect(await unmarkedEnglish(page.locator('pd-service-status'), '.pd-svc > strong, .pd-hint, code')).toEqual([]);
   });
 
   test('a dialog in the page and a dialog window: the shell’s chrome and the contributed title are pseudo text', async ({ app, page }) => {
@@ -187,7 +187,7 @@ test.describe('pseudo-locale (plan S15)', () => {
     await expect(win.getByRole('navigation')).toHaveAttribute('aria-label', PSEUDO);
     // Engine-written texts (section titles and descriptions, field labels, hints, option labels) carry English until the
     // engine's messages get codes (ADR 0012 §6); the shell's own words around them must be translated.
-    expect(await unmarkedEnglish(win, '.nav .item, .title, .desc, .label, .hint, .help, option, select, .status, [data-testid=settings-problem]')).toEqual([]);
+    expect(await unmarkedEnglish(win, '.pd-nav .pd-item, .pd-title, .pd-desc, .pd-label, .pd-hint, .pd-help, option, pd-select, .pd-status, [data-testid=settings-problem]')).toEqual([]);
   });
 });
 

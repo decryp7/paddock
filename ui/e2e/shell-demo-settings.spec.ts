@@ -13,7 +13,7 @@ test.describe('settings (plan S10)', () => {
     await expect(win).toHaveAttribute('aria-modal', 'false');
     await expect(app.settings.nav.getByRole('button')).toHaveText(['Appearance', 'General', 'Storage']);
     // The Appearance section is the shell's; its change applies to the main window at once.
-    await app.settings.field('theme', win).getByRole('combobox').selectOption('dark');
+    await app.settings.choose('theme', 'Dark', win);
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await expect(app.settings.saved('Theme saved.', win)).toBeVisible();
     await app.settings.field('theme', win).getByRole('button', { name: 'Reset to default: Theme' }).click();
@@ -32,7 +32,7 @@ test.describe('settings (plan S10)', () => {
     await app.settings.open({ page: 'sd.general' });
     await expect(app.settings.nav.locator('[aria-current="page"]')).toHaveText('General');
     await expect(app.settings.field('notify').getByRole('switch', { name: 'Show a notification' })).toBeChecked();
-    await expect(app.settings.field('style').getByRole('combobox', { name: 'Style' })).toHaveValue('casual');
+    await expect(app.settings.select('style')).toHaveText('Casual');
     await expect(app.settings.field('greeting').getByRole('textbox', { name: 'Greeting' })).toHaveValue('Hello');
     await expect(app.settings.field('repeat').getByRole('spinbutton', { name: 'Repeat' })).toHaveValue('1');
     await expect(app.settings.field('volume')).toContainText('Needs restart');
@@ -119,7 +119,7 @@ test.describe('settings (plan S10)', () => {
     await notice.getByRole('button', { name: 'Open Settings…' }).click();
     const win = app.settings.window;
     await expect(win.getByTestId('settings-problem')).toContainText('Defaults are in use; the damaged file was kept as settings.json.corrupt');
-    await expect(app.settings.field('theme', win).getByRole('combobox')).toHaveValue('system');
+    await expect(app.settings.select('theme', win)).toHaveText('Same as the system');
     // The centre's popover stays open beside the window; closing it leaves the window.
     if (await centre.isVisible()) await app.statusBar.bell.click();
     await win.getByText('Close', { exact: true }).click();

@@ -15,6 +15,9 @@ const SECTIONS = [
   'skeleton',
   'job',
   'segmented-control',
+  'icons',
+  'controls',
+  'path-text',
   'tray-popover',
   'chart-theme',
 ] as const;
