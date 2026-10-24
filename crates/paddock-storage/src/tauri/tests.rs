@@ -342,6 +342,37 @@ fn a_bug_in_the_apps_categories_fails_the_job_not_the_app() {
 }
 
 #[test]
+fn a_size_tree_is_a_job_refused_up_front_for_a_folder_it_may_not_walk() {
+    let r = rig(true, true, |root, mut c| {
+        c.push(Category::new("gone", "Gone", Kind::Cache).folder(root.join("gone")));
+        c
+    });
+    let main = window(&r.app, "main");
+    invoke(&main, "storage_tree", json!({ "id": "cache" })).unwrap();
+    let StorageEvent::Tree { tree } = event(&r) else {
+        panic!("a tree")
+    };
+    assert_eq!(
+        (tree.root.bytes, tree.capped, tree.root.children.len()),
+        (150, false, 2)
+    );
+    assert_eq!(
+        invoke(&main, "storage_tree", json!({ "id": "nope" })).unwrap_err()["code"],
+        "notFound"
+    );
+    assert_eq!(
+        invoke(&main, "storage_tree", json!({ "id": "gone" })).unwrap_err()["code"],
+        "unavailable"
+    );
+    let jobs = r
+        .app
+        .state::<paddock_jobs::tauri::Jobs>()
+        .registry()
+        .snapshots();
+    assert!(jobs.iter().any(|j| j.kind.0 == TREE_KIND));
+}
+
+#[test]
 fn a_category_folder_is_shown_by_id_only() {
     let r = rig(true, true, |_, c| c);
     let main = window(&r.app, "main");

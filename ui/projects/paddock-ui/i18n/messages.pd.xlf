@@ -1916,14 +1916,14 @@
       <trans-unit id="pd.startup.session-restored" datatype="html">
         <source>Your last session was restored.</source>
       </trans-unit>
+      <trans-unit id="pd.storage.at-least" datatype="html">
+        <source>At least (the walk stopped early):</source>
+      </trans-unit>
       <trans-unit id="pd.storage.cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
       <trans-unit id="pd.storage.cancelling" datatype="html">
         <source>Cancelling…</source>
-      </trans-unit>
-      <trans-unit id="pd.storage.clear" datatype="html">
-        <source>Clear…</source>
       </trans-unit>
       <trans-unit id="pd.storage.clear-cache" datatype="html">
         <source>Clear cache</source>
@@ -1943,8 +1943,20 @@
       <trans-unit id="pd.storage.col-folder" datatype="html">
         <source>Folder</source>
       </trans-unit>
+      <trans-unit id="pd.storage.col-group" datatype="html">
+        <source>Folder</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-item" datatype="html">
+        <source>Item</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-kind" datatype="html">
+        <source>Kind</source>
+      </trans-unit>
       <trans-unit id="pd.storage.col-name" datatype="html">
         <source>Kept</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-share" datatype="html">
+        <source>Share</source>
       </trans-unit>
       <trans-unit id="pd.storage.col-size" datatype="html">
         <source>Size</source>
@@ -1985,8 +1997,26 @@
       <trans-unit id="pd.storage.failed" datatype="html">
         <source>That did not work.</source>
       </trans-unit>
+      <trans-unit id="pd.storage.folders" datatype="html">
+        <source>Folders</source>
+      </trans-unit>
       <trans-unit id="pd.storage.freed" datatype="html">
         <source>Cleared. <x id="size"/> freed.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.group-cache" datatype="html">
+        <source>Cache: rebuilt by the app</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.group-data" datatype="html">
+        <source>Your data: cannot be rebuilt</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.inside" datatype="html">
+        <source>What is inside</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.items" datatype="html">
+        <source><x id="total"/> items</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.items-of" datatype="html">
+        <source><x id="shown"/> of <x id="total"/> items</source>
       </trans-unit>
       <trans-unit id="pd.storage.kind-cache" datatype="html">
         <source>Cache</source>
@@ -2012,14 +2042,17 @@
       <trans-unit id="pd.storage.no-usage-title" datatype="html">
         <source>What the app keeps could not be read.</source>
       </trans-unit>
+      <trans-unit id="pd.storage.other-many" datatype="html">
+        <source><x id="count"/> smaller items</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.other-one" datatype="html">
+        <source>1 smaller item</source>
+      </trans-unit>
       <trans-unit id="pd.storage.retry" datatype="html">
         <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.storage.show" datatype="html">
-        <source>Show</source>
-      </trans-unit>
-      <trans-unit id="pd.storage.show-label" datatype="html">
-        <source>Show <x id="name"/> in the file manager</source>
+        <source>Show in the file manager</source>
       </trans-unit>
       <trans-unit id="pd.storage.skipped-many" datatype="html">
         <source><x id="count"/> items left in place</source>
@@ -2044,6 +2077,24 @@
       </trans-unit>
       <trans-unit id="pd.storage.total" datatype="html">
         <source>The app keeps <x id="size"/> on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.total-least" datatype="html">
+        <source>The app keeps at least <x id="size"/> on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-capped" datatype="html">
+        <source>The walk stopped early (too many items or too long), so these sizes are at least that much.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-files" datatype="html">
+        <source>Files here</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-smaller" datatype="html">
+        <source>Smaller items</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-title" datatype="html">
+        <source>What is in <x id="name"/></source>
       </trans-unit>
       <trans-unit id="pd.storage.working" datatype="html">
         <source>Working…</source>

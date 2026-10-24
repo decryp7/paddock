@@ -11,6 +11,9 @@ exclude = ["fuzz"]
 
 [dependencies]
 paddock-env = { workspace = true }
+# The one `ProtocolVersion` rule (paddock-ipc owns it) and the one `GrantRef` (paddock-view owns it).
+paddock-ipc = { workspace = true }
+paddock-view = { workspace = true }
 # Ed25519 signatures (MIT, no dependencies): the publisher's signature over the package digest.
 ed25519-compact = { version = "2.2", default-features = false, features = ["std"] }
 getrandom = "0.3"

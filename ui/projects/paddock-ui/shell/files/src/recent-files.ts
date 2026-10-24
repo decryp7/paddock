@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { PdPathText } from '@decryp7/paddock-ui';
+import { fileIcon } from './file-icon';
+import { baseName, parentPath } from './path-parts';
 import { FilesStore } from './files.store';
 
 /**
@@ -21,14 +23,17 @@ import { FilesStore } from './files.store';
         @for (entry of entries(); track entry.path) {
           <li class="pd-row" data-testid="recent-entry">
             <button type="button" class="pd-entry" (click)="reopen(entry.path)">
-              @if (entry.name) {
-                <span class="pd-name">{{ entry.name }}</span>
-              }
-              <pd-path-text [value]="entry.path" [plain]="false" />
+              <pd-glyph class="pd-kind" [name]="icon(entry.path, entry.folder)" [size]="16" data-testid="recent-icon" />
+              <span class="pd-text">
+                <span class="pd-name" [attr.title]="entry.path">{{ entry.name || base(entry.path) }}</span>
+                @if (parent(entry.path); as dir) {
+                  <pd-path-text class="pd-dir" [value]="dir" [full]="entry.path" />
+                }
+              </span>
             </button>
             <span class="pd-actions">
               <button type="button" class="pd-icon" [attr.aria-label]="revealLabel" [attr.title]="revealLabel" (click)="reveal(entry.path)">
-                <pd-glyph name="folder" [size]="16" />
+                <pd-glyph name="reveal" [size]="16" />
               </button>
               <button type="button" class="pd-icon" [attr.aria-label]="removeLabel" [attr.title]="removeLabel" (click)="store.remove(list(), entry.path)">
                 <pd-glyph name="close" [size]="16" />
@@ -53,16 +58,18 @@ import { FilesStore } from './files.store';
     .pd-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
     .pd-row { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; border-radius: var(--pd-radius-control); }
     .pd-row:hover { background: var(--pd-hover); }
-    .pd-entry { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; flex: 1 1 auto; min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); border: 0; background: transparent; color: var(--pd-text); font: inherit; text-align: left; cursor: pointer; border-radius: var(--pd-radius-control); }
+    .pd-entry { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: var(--pd-space-2); align-items: center; flex: 1 1 auto; min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); border: 0; background: transparent; color: var(--pd-text); font: inherit; text-align: left; cursor: pointer; border-radius: var(--pd-radius-control); }
     .pd-entry:focus-visible, .pd-icon:focus-visible, .pd-clear:focus-visible { outline: 2px solid var(--pd-focus-ring); }
-    .pd-entry pd-path-text { width: 100%; color: var(--pd-text-muted); }
-    .pd-name { font-weight: 600; }
+    .pd-kind { color: var(--pd-text-muted); }
+    .pd-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .pd-entry pd-path-text { width: 100%; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .pd-name { font-weight: var(--pd-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-actions { display: inline-flex; flex: none; opacity: 0; }
     .pd-row:hover .pd-actions, .pd-row:focus-within .pd-actions { opacity: 1; }
     @media (hover: none) { .pd-actions { opacity: 1; } }
     .pd-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
     .pd-icon:hover { color: var(--pd-text); background: var(--pd-hover); }
-    .pd-clear { align-self: flex-start; border: 0; background: transparent; color: var(--pd-text-muted); font: inherit; text-decoration: underline; cursor: pointer; padding: var(--pd-space-1) var(--pd-space-2); }
+    .pd-clear { align-self: flex-start; margin-inline-start: calc(var(--pd-space-2) + 16px + var(--pd-space-2)); border: 0; background: transparent; color: var(--pd-text-muted); font: inherit; text-decoration: underline; cursor: pointer; padding: var(--pd-space-1) var(--pd-space-2); }
     .pd-empty { margin: 0; color: var(--pd-text-muted); }
     .pd-failure { margin: 0; color: var(--pd-danger); }
     .pd-hint { display: block; color: var(--pd-text-muted); }
@@ -83,6 +90,18 @@ export class PdRecentFiles {
   protected readonly revealLabel = $localize`:@@pd.files.reveal:Show in the file manager`;
   protected readonly removeLabel = $localize`:@@pd.files.remove:Remove from the list`;
   protected readonly clearLabel = $localize`:@@pd.files.clear:Clear the list`;
+
+  protected base(path: string): string {
+    return baseName(path);
+  }
+
+  protected parent(path: string): string {
+    return parentPath(path);
+  }
+
+  protected icon(path: string, folder: boolean | undefined): string {
+    return fileIcon(path, folder === true);
+  }
 
   protected async reopen(path: string): Promise<void> {
     const granted = await this.store.reopen(this.list(), path);

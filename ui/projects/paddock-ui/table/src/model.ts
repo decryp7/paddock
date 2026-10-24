@@ -98,14 +98,20 @@ export function shownColumns<T>(columns: readonly PdColumn<T>[], hiddenByUser: r
 
 /** One line of the flattened table: a group heading or a row. */
 export type PdTableItem<T> =
-  | { readonly kind: 'group'; readonly key: string; readonly label: string; readonly count: number; readonly collapsed: boolean }
+  | { readonly kind: 'group'; readonly key: string; readonly label: string; readonly count: number; readonly collapsed: boolean; readonly cells?: Readonly<Record<string, string>> }
   | { readonly kind: 'row'; readonly row: T };
 
 /**
  * Rows grouped by the text of one column (rule 6: group rows live in the same table). Groups come in order of first
- * appearance in the (already sorted) rows; a collapsed group contributes its heading only.
+ * appearance in the (already sorted) rows; a collapsed group contributes its heading only. `summary` gives the group row's own
+ * cell text by column key (the aggregate of its rows: a folder's size), drawn in the columns beneath the heading.
  */
-export function groupItems<T>(rows: readonly T[], column: PdColumn<T> | undefined, collapsed: ReadonlySet<string>): readonly PdTableItem<T>[] {
+export function groupItems<T>(
+  rows: readonly T[],
+  column: PdColumn<T> | undefined,
+  collapsed: ReadonlySet<string>,
+  summary?: ((rows: readonly T[]) => Readonly<Record<string, string>>) | null,
+): readonly PdTableItem<T>[] {
   if (!column) return rows.map((row) => ({ kind: 'row', row }));
   const groups = new Map<string, T[]>();
   for (const row of rows) {
@@ -117,7 +123,7 @@ export function groupItems<T>(rows: readonly T[], column: PdColumn<T> | undefine
   const out: PdTableItem<T>[] = [];
   for (const [key, list] of groups) {
     const isCollapsed = collapsed.has(key);
-    out.push({ kind: 'group', key, label: key, count: list.length, collapsed: isCollapsed });
+    out.push({ kind: 'group', key, label: key, count: list.length, collapsed: isCollapsed, ...(summary ? { cells: summary(list) } : {}) });
     if (!isCollapsed) for (const row of list) out.push({ kind: 'row', row });
   }
   return out;

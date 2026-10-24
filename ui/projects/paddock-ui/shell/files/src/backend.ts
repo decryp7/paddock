@@ -36,6 +36,8 @@ export abstract class FilesBackend {
   abstract reveal(path: string): Promise<void>;
   /** Opens a granted path with the OS's program for it. */
   abstract open(path: string): Promise<void>;
+  /** Opens a granted file in the editor at a line (1 to ten million); the file is an argument of the editor, never run. */
+  abstract openAtLine(path: string, line: number): Promise<void>;
   /** Shows one of the app's own folders in the file manager. */
   abstract openAppFolder(folder: AppFolder): Promise<void>;
   /** Opens a web address in the browser. */
@@ -83,6 +85,10 @@ export class TauriFilesBackend extends FilesBackend {
 
   async open(path: string): Promise<void> {
     await this.ipc.invoke<unknown>('files_open', { path });
+  }
+
+  async openAtLine(path: string, line: number): Promise<void> {
+    await this.ipc.invoke<unknown>('files_open_at_line', { path, line });
   }
 
   async openAppFolder(folder: AppFolder): Promise<void> {
@@ -138,6 +144,8 @@ export class MemoryFilesBackend extends FilesBackend {
   readonly revealed: string[] = [];
   /** The paths opened with their program. */
   readonly launched: string[] = [];
+  /** The files opened in the editor, as `path:line`. */
+  readonly edited: string[] = [];
   /** The app folders shown. */
   readonly folders: AppFolder[] = [];
   /** The web addresses opened. */
@@ -261,6 +269,17 @@ export class MemoryFilesBackend extends FilesBackend {
       this.call('files_open', { path });
       this.require(path);
       this.launched.push(path);
+    });
+  }
+
+  openAtLine(path: string, line: number): Promise<void> {
+    return this.run(() => {
+      this.call('files_open_at_line', { path, line });
+      if (!Number.isInteger(line) || line < 1 || line > 10_000_000) {
+        throw { code: 'invalid', message: 'the line must be between 1 and 10000000', retryable: false, field: 'line' } satisfies CommandError;
+      }
+      this.require(path);
+      this.edited.push(`${path}:${line}`);
     });
   }
 

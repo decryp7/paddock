@@ -839,7 +839,9 @@ fn a_body_that_breaks_is_a_timeout_or_a_connect_error_and_the_system_resolver_wo
     }
     let found = SystemLookup.lookup("localhost", 80).unwrap();
     assert!(found.iter().any(std::net::IpAddr::is_loopback));
-    assert!(SystemLookup.lookup("no-such-host.invalid", 80).is_err());
+    // A name that is not a host name at all: never resolved, even by a network whose DNS answers every unknown name (a
+    // hijacking resolver answers `*.invalid` too).
+    assert!(SystemLookup.lookup("not a host name", 80).is_err());
     let post = Request::post("https://api.example.org/", vec![1]);
     assert!(format!("{post:?}").starts_with("Request(POST "));
 }
