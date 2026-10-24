@@ -5,6 +5,11 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-mcp` (plan X22, ADR 0007): the local-only MCP server. `Server` with `ToolDef`/`ResourceDef` registration, `Policy` (off by
+  default, read-only tools, actions only by name), schema validation, result caps, cursors, time limits with cancel, panic
+  containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers
+  only, bounded lines, connection cap), `client` request builders and the shared MCP types for Pitwall; a contract test of the
+  2025-06-18 message shapes.
 - `paddock-bench` (plan X26, rule 16): the benchmark harness with stored budgets. `Recorder` (median of several runs on an
   injected `Clock`; `ManualClock` for tests), `Kind` (startup, throughput, first event, query latency, memory: unit and
   direction), `Results` (versioned results file per app, atomic, bounded), `Budgets` (`budgets.toml`: limit, tolerance, regression
