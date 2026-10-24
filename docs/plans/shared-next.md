@@ -478,3 +478,15 @@ Gaps left:
 - **Dyno:** `dyno-cli` `render.rs` tables, the common flags in `args.rs`, and the exit handling in `lib.rs`.
 - **Agent and service programs** (`debrief-agent`, `pitcrew-service` `cli.rs`, `dyno-agent` `cli.rs`): `Verb::add_to_help`,
   `Verb::status_exit` (3 when not running), `Verb::reject_extra`.
+
+## X24 built: adoption (2026-10-25)
+
+`paddock-archive` 0.1.0 (crates/README.md "paddock-archive"). What each app deletes when it adopts it:
+
+- **Debrief:** `debrief-ai/src/runtimes/unpack.rs` (`Layout::Flat { max_depth: 2 }`, `Links::Copy`, `Modes::AllExecutable`, filter =
+  `is_expected`) and `debrief-video/src/runtime/unpack.rs` (tar.xz, four folders deep: `Flat { max_depth: 4 }`); the `zip`, `tar`,
+  `flate2` and `lzma-rs` dependencies of those crates. **Behaviour change:** an unsafe name anywhere in the archive now refuses the whole
+  archive (it used to be skipped when unwanted).
+- **Pitwall:** the zip/tar code in `pitwall-server/src/engines.rs` and `runtimes::flat_name`.
+- **Spotter:** `spotter-render/src/install.rs` (zip with kept symlinks: `Links::Keep`, which also refuses targets with `..`).
+- **Pitcrew:** the runner archive unpacking.
