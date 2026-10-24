@@ -100,6 +100,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-plugin-api` | what an out-of-process plugin links (ADR 0001, plan X51): platform protocol 2.0 (`PlatformRequest`, `HostCall`), `Plugin` and `Contributions` (tools with checked schemas, settings, views, MCP tools), the `Extension` mechanism for an app's own contract, version rules with refusal texts that say who must update, host files, output files, `serve` | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-host` | what an app links to run plugins (ADR 0001, plan X51): installed `.paddockplugin` packages (verified before every start), grants (default deny) and the pure `sandbox_for` mapping, a `Supervisor` per plugin (restart with back-off, quarantine through `paddock-guard`), guarded `Remote<C>` proxies, grant-checked host files, outputs and elevated operations, status for the UI | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-test` | testing plugins (ADR 0001, plan X51): `FakeHost` (a plugin in this process over a real IPC pair), the conformance checks every plugin runs, golden helpers, and `paddock-plugin-fixture`, the sample plugin the host's tests start as a process | yes (every plugin, the host's tests); built |
+| `cargo-paddock-plugin` | the plugin author's tool (ADR 0001, plan X51): `cargo paddock-plugin new / build / pack / keygen / sign / verify / run / test` on `paddock-cli` conventions; a project that depends on `paddock-plugin-api` alone, a deterministic optionally Ed25519-signed `.paddockplugin`, verification against trusted keys, and the built program started against `FakeHost` for the conformance checks (from Debrief `cargo-debrief-plugin`) | yes (every plugin author, plugin CI); built |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
@@ -856,6 +857,39 @@ stdout, progress and notes to stderr. `Progress::update(now, line)` throttles to
 new phase through. `Table` renders text, CSV or JSON with bounded cells and a truncation note. `parse_time`, `parse_size`,
 `format_size` read command-line values once. `paddock_service::Verb` registers its words in `Help` and decides `status`'s exit.
 
+## `cargo-paddock-plugin` (plan X51, ADR 0001)
+
+`cargo install cargo-paddock-plugin --registry decryp7`, then `cargo paddock-plugin <command>`. Output follows `paddock-cli`:
+`--json` writes exactly one object (errors too), `-q` silences notes, exit codes 0 ok, 1 failed, 2 wrong command line, 4 refused
+(a package that is unsigned, signed by a stranger or changed), 5 findings.
+
+```text
+cargo paddock-plugin new my-plugin [--dir D] [--id com.you.my-plugin] [--publisher "You"] [--api-path <checkout>/crates]
+cd my-plugin
+cargo paddock-plugin test                       # build, start the program against FakeHost, run the conformance checks
+cargo paddock-plugin run                        # start it and print what it describes
+cargo paddock-plugin keygen --out ~/.paddock/me.key        # owner-only file, never overwritten; prints the public key
+cargo paddock-plugin build [--target <triple>]...
+cargo paddock-plugin pack [--target T]... [--program T=<file>]... [--key me.key] [--out F]   # dist/<id>-<version>.paddockplugin
+cargo paddock-plugin sign dist/x.paddockplugin --key me.key [--out F]
+cargo paddock-plugin verify dist/x.paddockplugin [--trust <public key text or file>]...        # exit 4 when not trusted/intact
+```
+
+- `new` writes `Cargo.toml` (dependencies: `paddock-plugin-api` and `serde_json`; dev: `paddock-plugin-test`), `manifest.toml`, a
+  library with the plugin (one tool), a `main` that is one `serve` call, a conformance test, `.cargo/config.toml` (the registry) and
+  `.gitignore`. Nothing existing is overwritten. `--api-path` depends on a checkout's crates by path (no network).
+- `build` runs `cargo build --release --bin <manifest binary>` into `<project>/target` whatever `CARGO_TARGET_DIR` says; a target
+  that is not this computer's needs `rustup target add`.
+- `pack` reads `manifest.toml` (targets, program name), takes each program from `target/` or `--program`, and writes the archive
+  through `paddock-plugin-package` (fixed times, sorted entries, `SHA256SUMS`, optional signature): the same inputs give the same bytes.
+- `verify` opens the package (layout, limits, checksums, signature) and, with `--trust`, decides trust like the app does
+  (`TrustPolicy`); without it only the integrity is checked and the output says so.
+- `test` compares what the plugin describes with its manifest (id, version, protocol, tools, views, MCP tools) and runs
+  `paddock_plugin_test::conformance`; each finding is `[check] problem`. `--program <file>` starts a program built elsewhere and
+  `--no-build` uses the existing build.
+- Pure core (`args`, `template`, plans in `pack`/`build`), the one process start in `cargo.rs` (through `paddock-proc`),
+  `FakeHost::launch` in `paddock-plugin-test` starts a program like the app's launcher does.
+
 ## `paddock-names` (plan X18)
 
 Rule 20 as a pure library: the user types "grafic bilder" and finds `CompanyA.Graphic.Builder.exe`, or "memory pages" and finds
@@ -1033,7 +1067,7 @@ let manifest = Manifest::parse(&std::fs::read_to_string("manifest.toml")?)?;    
 let key = SecretKey::generate_to(&dir.join("publisher.key"))?;                        // 0600, never replaces an existing key
 archive::build(Build { manifest, programs: vec![(target, &exe)], sign: Some(&key) }, &out)?;   // deterministic .paddockplugin
 let pkg = Package::open(&out)?;                                                       // bounded read, checksums, signature
-pkg.manifest.check_compatible(PLATFORM_PROTOCOL, &app_namespaces, "Debrief")?;        // says who must update
+HostInfo::new("Debrief").check_protocol(id, pkg.manifest.protocol)?;                  // paddock-plugin-api: says who must update
 let trust = policy.decide(&pkg.signature)?;                                           // Builtin | Signed | Unsigned (developer mode)
 let sha = pkg.extract(&out, manifest::host_target(), &installed)?;                    // exec bit, re-verified while copying
 archive::verify_installed(&installed, &sha)?;                                         // before every start: changed binary = Tampered
@@ -1046,11 +1080,12 @@ archive::verify_installed(&installed, &sha)?;                                   
   `McpExpose`, `Memory { mib }`, `Cpu { percent }`; default deny, each kind once, lists of 1 to 64 names. `manifest.toml` is
   bounded (64 KiB, 256 contributions, 64 actions each, 16 targets) and **unknown keys are refused** (as in Debrief); the model
   types are plain serde (no `untagged`/`flatten`/internal tags), so the same `Manifest` crosses the postcard IPC, where the host
-  runs `Manifest::check` on it. `check_compatible` applies the one rule (same major, known minor) to the platform protocol and to
-  every namespace, with texts that say who must update.
+  runs `Manifest::check` on it. Compatibility is not here: `paddock_plugin_api::compat::HostInfo` judges a manifest's protocol and
+  namespaces with the one rule of `paddock_ipc::ProtocolVersion` (`accepts`, `skew`, `introduced_in`) and words who must update.
 - `names`: `PluginId`, `GrantRef`, `ProgramRef`, `HostPattern` (`*.example.com`), `Namespace`: newtypes that validate in
-  `new` and in `Deserialize`, so a name from the wire is as valid as one from a file. `version::ProtocolVersion` is a plain serde
-  copy of `paddock_ipc`'s rule on purpose (a package must be verifiable without the IPC crate); conversion is two field moves.
+  `new` and in `Deserialize`, so a name from the wire is as valid as one from a file. `ProtocolVersion` is re-exported from `paddock_ipc` (the one
+  implementation; the package depends on `paddock-ipc`, which is a dependency only, nothing is launched) and `GrantRef` from
+  `paddock-view` (the one type a path field and a folder permission share).
 - `archive`: zip with `manifest.toml`, `bin/<target>/<binary>[.exe]`, `SHA256SUMS` and an optional detached Ed25519 `signature`
   over the digest of the manifest bytes plus the sums bytes. `Package::read`/`open` (with `Limits`: 256 MiB package, 128 MiB program,
   512 MiB total, 64 entries; sizes counted while reading) refuse traversal, absolute and drive names, links, encrypted, duplicate and
@@ -1375,8 +1410,10 @@ browser.close();                                                    // Browser.c
   OffScreen, Headless}`, `QUIET_FLAGS` (no GPU, no component downloads, no throttling; `opts.quiet`), `disk_cache_bytes` for a
   kept profile, `extra_args`. `Sandbox::decide(env, root)`: dropped only as root with `PADDOCK_BROWSER_NO_SANDBOX=1` (CI
   containers), then also `--disable-dev-shm-usage`; `launch_with(exe, opts, sandbox)` lets tests run that branch on any OS.
-- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends). `max_lifetime` runs on
-  `opts.clock` (a `FakeClock` in tests), `memory_cap` through `MemoryCap` (an injectable sampler); `ended_by()` says which.
+- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends). Every wait runs on
+  `opts.clock` (a `FakeClock` in tests): the lifetime limit, the start-up wait (`start_limit`), `start_page`'s wait and the
+  pages' `wait_ready` polls; only `close_gracefully`'s grace for a real process uses the OS clock. `memory_cap` goes through
+  `MemoryCap` (an injectable sampler); `ended_by()` says which limit ended the browser.
   A failed start says why (the end of the browser's error output, or the memory cap). `check_display` explains a headful
   launch on Linux without `DISPLAY`/`WAYLAND_DISPLAY`. Profiles: `Throwaway(base)` (removed at the end; `sweep_profiles`
   removes those of dead processes) or `Persistent(path)` with an accent theme (`write_theme`).
@@ -1392,7 +1429,11 @@ browser.close();                                                    // Browser.c
 - `fake` (feature `test-support`, Unix): a fake DevTools browser that re-runs the test binary; it plays the user (close the
   window, quit, drop the connection, stall loads) and answers page scripts from a file (`page_shows`). Apps refuse to start
   when `PADDOCK_FAKE_BROWSER` is set. `tests/real_browser.rs` drives a real Chrome for Testing headless when
-  `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind.
+  `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind; with `PADDOCK_REQUIRE_TEST_BROWSER` set a missing browser
+  fails it (Paddock's Linux CI job, whose `paddock-ci` image carries the build `chromium.toml` pins).
+- Pins: `node conformance/ci/pin-runtime.mjs crates/paddock-chromium/src/chromium.toml --chrome-for-testing Stable` rewrites
+  version, URLs, sizes and checksums (any `paddock-runtime` catalogue: `--version <v>` or as it is); the CI image's
+  `CHROME_VERSION` must follow (`scripts/ci-image.test.mjs` checks it).
 
 - Windows (plan X54): each supervised child runs in a kill-on-close job object held by the `Supervised` value; dropping it, or
   the app ending in any way, ends the child and every helper it started, orphans included (`Supervised::in_job`).
@@ -1801,4 +1842,4 @@ let answer = plugin.invoke("collector", "start", json!({ "folder": path }))?;   
   `FakeClock`; nothing sleeps.
 - **Not here:** Debrief's profile/document importers, dumps, the old `PluginRequest` enum (it becomes the `debrief.*`
   contract bodies, ADR 0003 phase 2), the elevated *process* (the app starts it and runs `Invoke` with the `elevated` role),
-  the OS sandbox, and the `cargo paddock-plugin` tool.
+  the OS sandbox. The author's tool is `cargo-paddock-plugin` (below).
