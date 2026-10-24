@@ -282,6 +282,18 @@ pub struct Autosaver {
 impl Autosaver {
     /// Starts the writer thread for `store`.
     pub fn start(store: Arc<SessionStore>) -> Autosaver {
+        Autosaver::start_with(store, |work| {
+            std::thread::Builder::new()
+                .name("paddock-session-autosave".into())
+                .spawn(work)
+        })
+    }
+
+    /// [`Autosaver::start`] with the way the writer thread is started given (a test refuses it).
+    fn start_with(
+        store: Arc<SessionStore>,
+        spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<JoinHandle<()>>,
+    ) -> Autosaver {
         let shared = Arc::new(Shared {
             store,
             queue: Mutex::new(Queue::default()),
@@ -289,9 +301,7 @@ impl Autosaver {
             idle: Condvar::new(),
         });
         let worker = Arc::clone(&shared);
-        let spawned = std::thread::Builder::new()
-            .name("paddock-session-autosave".into())
-            .spawn(move || run(&worker));
+        let spawned = spawn(Box::new(move || run(&worker)));
         let thread = match spawned {
             Ok(t) => Some(t),
             Err(e) => {
