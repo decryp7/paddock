@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -90,6 +90,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
+| `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -537,3 +538,34 @@ Updates, About and What's New. With the `tauri` feature (and `install` for the i
 The release address is `plugins.updater.endpoints[0]` (the `stable` channel) unless the builder names channels. Checks
 and downloads are jobs on the app's `paddock-jobs` registry and use the app's `paddock-download` downloader; the UI is
 `@decryp7/paddock-ui/shell/about`.
+
+## `paddock-secrets` (plan X5)
+
+One credential store for the apps (decision D6: service = the app's display name, account = `<scope>:<key>`, e.g.
+`Spotter` / `channel:w1:2:token`):
+
+```rust
+use paddock_secrets::{KeyringSecrets, MemorySecrets, Name, Secret, Secrets};
+
+let secrets = KeyringSecrets::os("Spotter");             // feature `keyring`; tests use MemorySecrets::new("Spotter")
+let name = Name::new("w1", "token")?;                    // parsed once: 1-128 printable ASCII, no ':' in the key
+secrets.set(&name, &Secret::new(token)?)?;               // Secret: 1-8192 chars on one line
+let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
+```
+
+- `Secret`: `Debug` is `Secret(***)`, `Display` is `***`, zeroized on drop, `expose()` is the one way to read it. Errors name
+  what to fix and never contain a value.
+- `Secrets` (port): `get -> Result<Option<Secret>>`, `set`, `delete` (missing is not an error). `Vault` is the raw
+  `(service, account)` layer under it (`OsVault`, `MemoryVault`); `VaultSecrets::new(service, vault)` adds the scheme.
+- Fallback: `WithFileFallback::new(primary, FileSecrets::new(dir))` is the opt-in (Pitwall's admin key). The file is used
+  only when the primary is *unavailable* (no Secret Service, locked keychain) or has no value; files are created 0600
+  (written to a 0600 temp file and renamed) and a file with group/other bits is refused (`InsecureFile`). On Windows no mode
+  exists: `dir` must be a per-user folder (the app's data dir under `%LOCALAPPDATA%`), whose ACL is owner, SYSTEM and
+  Administrators only.
+- Old entries: `rename_entry(vault, (old_service, old_account), (new_service, new_account))` reads old, writes new, deletes
+  old (idempotent, never loses the secret); Pitcrew's `Pitcrew notification channel` / `<key>` becomes `Pitcrew` /
+  `channel:<key>`, its `Pitcrew Gitea API` / `<url>` becomes `Pitcrew` / `<url>:read token`, and so on.
+- Rule 7: the keyring calls (`src/os/native.rs`) panic unless `PADDOCK_SECRETS_REAL=1` when running this crate's tests or
+  when an app's tests set `PADDOCK_SECRETS_FORBID_REAL=1` (put it in the app's test environment), so a test that reaches the
+  real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
+  opt-in round trip by hand.

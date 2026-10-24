@@ -5,6 +5,9 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-secrets` (plan X5, decision D6): the credential store the five apps copied. A `Secrets` port, a `Secret` that never
+  prints and is zeroized, the keyring adapter (`keyring` feature, refused in tests unless `PADDOCK_SECRETS_REAL=1`),
+  `MemorySecrets`, an opt-in owner-only file fallback (0600), one naming scheme and `rename_entry` for old entries.
 - Paddock Shell Demo (`apps/shell-demo`, plan S18): the shell demo as an installable Tauri app on the `paddock-shell`
   plugin, with a sample engine (a service whose Repair works and one whose Repair fails, jobs with phases and Cancel,
   settings sections, the tray popover), its own neutral icon from the icon pipeline (`icons/shell-demo`), ad-hoc macOS
