@@ -648,3 +648,10 @@ tools, browsers, libduckdb into the CI image), 3 (build the UI once for e2e shar
 tags/nightly), 7 (coverage only on main/nightly/tags), 9 (WebKit on main/nightly/tags, third shard) — in X10/X53.
 Option 5 (runner capacity, cache server, tmpfs on the server): **left as is** (user). Not adopted: mold, Cranelift,
 cargo-chef, rust-cache, MinIO sccache; Nx/Turborepo decided in the monorepo ADR.
+
+## Service update smoke in a throwaway macOS VM (user, 2026-10-25)
+
+C21 (install shell demo N, register its agent, install N+1, check the agent runs N+1) runs in a fresh macOS VM on the
+Mac mini (Tart or similar), created per run and deleted afterwards; manual or nightly, not per push. Never on the
+user's session or the shared runner (rule 7). The script stays guarded by `PADDOCK_DISPOSABLE_MAC=1`, which only the
+VM sets.
