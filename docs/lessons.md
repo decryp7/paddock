@@ -286,5 +286,10 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   or watch for parent death.
 - A webview's page process can be paused (e.g. App Tamer auto-stop) or killed: the window stays blank or dies.
   Every window reports ready, a watchdog reloads once and then shows a recovery state, and page errors go to the log.
+  Debrief's contract: no initializer awaits IPC; startup calls retry (4 s × 4, first answer wins); each window sends
+  `window_ready` after its first render; Rust reloads a window not ready in 10 s once, then asks natively
+  (Reload / Safe Mode / Keep Waiting — not "Report": a stuck webview cannot run the in-app report); a paused app process
+  (>3 s between watchdog ticks) restarts the timers instead of firing them all; uncaught page errors before ready go
+  to the app log as one bounded line. Only the app process can notice a paused or dead webview.
 - Dialogs on multi-display, mixed-scale Macs open on the wrong display or at the wrong size when position/size are
   absolute or converted with another monitor's scale; place relative to the parent, on the parent's monitor.
