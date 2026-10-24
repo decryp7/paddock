@@ -18,6 +18,7 @@ import type { DemoStatus } from './dialogs/demo-ipc';
 
 // The registration file of the shell demo: static data and loaders only (plan §9). Its lints run in
 // shell/testing/src/reference-apps.spec.ts (contributions) and e2e/shell-demo.spec.ts (lazy imports).
+// Stands in for the settings page until plan S10 renders it.
 const placeholder = () => import('./placeholder').then((m) => m.Placeholder);
 
 /** A decision: modal, fitted to its content. */
@@ -161,8 +162,33 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
     defineMenuItem({ menu: 'sd.greetings', command: 'sd.greet', group: 'demo', order: 100 }),
     defineMenuItem({ menu: 'sd.greetings', command: 'sd.reset', group: 'demo', order: 200 }),
   ],
-  pages: [definePage({ id: 'sd.home', title: msg('sd.page.home', 'Home'), icon: 'pd:home', order: 100, load: placeholder })],
-  statusItems: [defineStatusItem({ id: 'sd.greetings', title: msg('sd.status.greetings', 'Greetings'), side: 'end', priority: 50, load: placeholder })],
+  // The pages of the frame (plan S14): each a lazy chunk; Activity brings providers of its own, Lab has a condition.
+  pages: [
+    definePage({ id: 'sd.home', title: msg('sd.page.home', 'Overview'), icon: 'pd:home', order: 100, load: () => import('./pages/overview-page').then((m) => m.OverviewPage) }),
+    definePage({ id: 'sd.dialogs', title: msg('sd.page.dialogs', 'Dialogs'), icon: 'pd:window', order: 200, load: () => import('./pages/dialogs-page').then((m) => m.DialogsPage) }),
+    definePage({ id: 'sd.keys', title: msg('sd.page.keys', 'Keyboard'), icon: 'pd:keyboard', order: 300, load: () => import('./pages/keys-page').then((m) => m.KeysPage) }),
+    definePage<DemoContext>({
+      id: 'sd.activity',
+      title: msg('sd.page.activity', 'Activity'),
+      icon: 'pd:activity',
+      order: 400,
+      badge: (ctx) => ctx.greetings(),
+      providers: () => import('./pages/activity.providers').then((m) => m.ACTIVITY_PROVIDERS),
+      load: () => import('./pages/activity-page').then((m) => m.ActivityPage),
+    }),
+    definePage<DemoContext>({
+      id: 'sd.lab',
+      title: msg('sd.page.lab', 'Lab'),
+      icon: 'sd:lab',
+      order: 500,
+      when: (ctx) => ctx.greetings() > 0,
+      load: () => import('./pages/lab-page').then((m) => m.LabPage),
+    }),
+    definePage({ id: 'sd.about', title: msg('sd.page.about', 'About'), icon: 'pd:info', order: 100, section: 'bottom', load: () => import('./pages/about-page').then((m) => m.AboutPage) }),
+  ],
+  statusItems: [
+    defineStatusItem({ id: 'sd.greetings', title: msg('sd.status.greetings', 'Greetings'), side: 'start', priority: 50, load: () => import('./greetings-status').then((m) => m.GreetingsStatus) }),
+  ],
   settingsPages: [defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100, load: placeholder })],
   // One dialog of each kind (ADR 0009), plus a modal form and a required choice. Contracts: dialog-contracts.json.
   dialogs: DEMO_DIALOGS,

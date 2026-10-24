@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 
-/** Stands in for the pages, status items, settings pages and dialogs of the demo until their packages render them. */
+/** Stands in for the settings page of the demo until plan S10 renders it. */
 @Component({
   selector: 'sd-placeholder',
   changeDetection: ChangeDetectionStrategy.OnPush,

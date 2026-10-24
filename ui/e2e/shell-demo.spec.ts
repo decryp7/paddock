@@ -18,7 +18,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(e.message));
       await page.goto('/');
-      await expect(page.getByRole('heading', { level: 1, name: 'Paddock shell demo' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
       await expect(page.locator('.pd-splash')).toHaveCount(0);
       const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
       expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
@@ -62,7 +62,7 @@ test.describe('contributions (plan S2)', () => {
   });
 
   test('every contribution kind is registered', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/#/about');
     const rows = page.getByRole('table', { name: 'Registered contributions' }).getByRole('row');
     await expect(rows).toHaveCount(11);
     for (const kind of ['commands', 'keybindings', 'menus', 'pages', 'statusItems', 'settingsPages', 'dialogs', 'healthServices', 'notificationKinds', 'submenus']) {
@@ -202,7 +202,7 @@ test.describe('menus and keys (plan S13)', () => {
     const compact = view.getByRole('menuitemcheckbox', { name: 'Compact layout' });
     await expect(compact).toHaveAttribute('aria-checked', 'false');
     await compact.click();
-    await expect(page.locator('main.page')).toHaveClass(/compact/);
+    await expect(page.locator('sd-page')).toHaveClass(/compact/);
     await expect((await openMenu(page, 'View')).getByRole('menuitemcheckbox', { name: 'Compact layout' })).toHaveAttribute('aria-checked', 'true');
     await page.keyboard.press('Escape');
   });
@@ -230,18 +230,19 @@ test.describe('menus and keys (plan S13)', () => {
     await page.keyboard.press('ControlOrMeta+Shift+H');
     await expect(page.getByTestId('greetings')).toHaveText('Greetings: 2');
     await page.keyboard.press('ControlOrMeta+Alt+K');
-    await expect(page.locator('main.page')).toHaveClass(/compact/);
+    await expect(page.locator('sd-page')).toHaveClass(/compact/);
   });
 
   test('a changed key is kept across a reload, and a taken key is refused with its owner', async ({ page }) => {
     const mac = await isMac(page);
+    await page.getByRole('link', { name: 'Keyboard' }).click();
     const row = (command: string) => page.locator(`tr[data-command="${command}"]`);
     await row('sd.greet').getByRole('button', { name: 'Change key' }).click();
     await expect(row('sd.greet').getByTestId('shortcut-key')).toHaveText('Press a key…');
     // A key pressed while recording runs nothing.
     await page.keyboard.press('ControlOrMeta+Alt+G');
     await expect(page.getByTestId('shortcut-message')).toHaveText(`Say hello is now ${mac ? '⌥⌘G' : 'Ctrl+Alt+G'}.`);
-    await expect(page.getByTestId('greetings')).toHaveText('Greetings: 0');
+    await expect(page.getByTestId('greetings-status')).toHaveText('Greetings: 0');
     // The menu shows the new key.
     await expect((await openMenu(page, 'Help')).getByRole('menuitem', { name: 'Say hello' })).toContainText(mac ? '⌥⌘G' : 'Ctrl+Alt+G');
     await page.keyboard.press('Escape');
@@ -251,13 +252,13 @@ test.describe('menus and keys (plan S13)', () => {
     await expect(page.getByTestId('shortcut-message')).toContainText('is already used by Say hello; Reset greetings keeps its key.');
 
     await page.reload();
-    await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+    await expect(row('sd.greet')).toBeVisible();
     await page.keyboard.press('ControlOrMeta+Shift+H');
     await page.keyboard.press('ControlOrMeta+Alt+G');
-    await expect(page.getByTestId('greetings')).toHaveText('Greetings: 1');
+    await expect(page.getByTestId('greetings-status')).toHaveText('Greetings: 1');
     await row('sd.greet').getByRole('button', { name: 'Reset key' }).click();
     await page.keyboard.press('ControlOrMeta+Shift+H');
-    await expect(page.getByTestId('greetings')).toHaveText('Greetings: 2');
+    await expect(page.getByTestId('greetings-status')).toHaveText('Greetings: 2');
   });
 
   test('the greetings count has a context menu from the same model', async ({ page }) => {
@@ -471,8 +472,9 @@ test.describe('dialogs (plan S6)', () => {
   });
 
   test('in the page: a modal blocks behind a backdrop, a modeless one leaves the page usable and opens once', async ({ page }) => {
-    await page.goto('/');
-    const open = (id: string) => page.locator(`[data-dialog-open="${id}"]`).click();
+    await page.goto('/#/dialogs');
+    // A modeless dialog may sit over the buttons (it opens in the middle of the window): the button is clicked as itself.
+    const open = (id: string) => page.locator(`[data-dialog-open="${id}"]`).dispatchEvent('click');
     await open('sd.confirm-reset');
     const modal = page.getByRole('dialog', { name: 'Reset greetings?' });
     await expect(modal).toHaveAttribute('aria-modal', 'true');
@@ -487,7 +489,9 @@ test.describe('dialogs (plan S6)', () => {
     await expect(page.getByTestId('dialog-backdrop')).toHaveCount(0);
     await open('sd.about');
     await expect(page.getByRole('dialog', { name: 'About the shell demo' })).toHaveCount(1);
-    await page.getByRole('button', { name: 'Say hello' }).click();
+    // The window stays usable: the page's controls and the keys work beside it.
+    await page.locator('[data-dialog-open="sd.rename"]').focus();
+    await page.keyboard.press('ControlOrMeta+Shift+H');
     await expect(page.getByText('Hello from the shell demo (1)')).toBeVisible();
     await viewer.getByRole('button', { name: 'Close' }).click();
     await expect(page.getByTestId('dialog-answer')).toHaveText('About the shell demo: dismissed');
@@ -507,7 +511,7 @@ test.describe('dialogs (plan S6)', () => {
     await open('sd.inspector');
     await expect(page.getByRole('dialog', { name: 'Engine inspector' }).getByTestId('engine-status')).toContainText('running');
     // A modeless dialog answers Escape from inside it only: from the page it stays open.
-    await page.getByRole('heading', { level: 1 }).click();
+    await page.locator('[data-dialog-open="sd.rename"]').focus();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Engine inspector' })).toBeVisible();
     await page.getByRole('dialog', { name: 'Engine inspector' }).getByRole('button', { name: 'Refresh' }).press('Escape');
