@@ -30,10 +30,10 @@ fn error_reply(reply: &Value, code: i64) {
 #[test]
 fn initialize_result_has_the_specified_shape() {
     let r = rig();
-    let mut s = Session::new("");
+    let s = Session::new("");
     let reply = rpc(
         &r.server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"Pitwall","version":"1"}}}),
     );
     ok_result(
@@ -64,7 +64,7 @@ fn an_unknown_protocol_version_is_answered_with_one_we_speak() {
     for (asked, want) in [("2024-11-05", "2024-11-05"), ("1999-01-01", "2025-06-18")] {
         let reply = rpc(
             &r.server,
-            &mut Session::new(""),
+            &Session::new(""),
             json!({"jsonrpc":"2.0","id":"a","method":"initialize","params":{"protocolVersion":asked}}),
         );
         assert_eq!(reply["result"]["protocolVersion"], want);
@@ -75,10 +75,10 @@ fn an_unknown_protocol_version_is_answered_with_one_we_speak() {
 #[test]
 fn tools_list_has_the_specified_shape_and_hides_actions() {
     let r = rig();
-    let mut s = ready(&r.server);
+    let s = ready(&r.server);
     let reply = rpc(
         &r.server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
     );
     ok_result(
@@ -109,7 +109,7 @@ fn tools_list_has_the_specified_shape_and_hides_actions() {
         .set_policy(Policy::read_only().allow_action("delete"));
     let reply = rpc(
         &r.server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}),
     );
     let del = reply["result"]["tools"]
@@ -148,7 +148,7 @@ fn tools_list_pages_with_cursors() {
             page_size: 3,
             ..Default::default()
         });
-    let mut s = ready(&server);
+    let s = ready(&server);
     let (mut seen, mut cursor) = (vec![], None::<String>);
     for id in 10.. {
         let params = cursor
@@ -156,7 +156,7 @@ fn tools_list_pages_with_cursors() {
             .map_or_else(|| json!({}), |c| json!({"cursor": c}));
         let reply = rpc(
             &server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":id,"method":"tools/list","params":params}),
         );
         seen.extend(
@@ -174,13 +174,13 @@ fn tools_list_pages_with_cursors() {
     assert_eq!(seen.len(), 7, "{seen:?}");
     let bad = rpc(
         &server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":99,"method":"tools/list","params":{"cursor":"nonsense"}}),
     );
     error_reply(&bad, -32602);
     let bad = rpc(
         &server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":99,"method":"tools/list","params":{"cursor":5}}),
     );
     error_reply(&bad, -32602);
@@ -195,8 +195,8 @@ fn call_result_schema() -> Value {
 #[test]
 fn tools_call_results_have_the_specified_shape() {
     let r = rig();
-    let mut s = ready(&r.server);
-    let ok = call(&r.server, &mut s, 1, "echo", json!({"text":"hello"}));
+    let s = ready(&r.server);
+    let ok = call(&r.server, &s, 1, "echo", json!({"text":"hello"}));
     ok_result(&ok, call_result_schema());
     assert_eq!(
         ok["result"]["content"],
@@ -205,7 +205,7 @@ fn tools_call_results_have_the_specified_shape() {
     assert_eq!(ok["result"]["structuredContent"], json!({"echo":"hello"}));
     assert_eq!(ok["result"]["isError"], false);
     // A wrong argument is a tool error the model can read and fix, not a protocol error.
-    let bad = call(&r.server, &mut s, 2, "echo", json!({"text": 5}));
+    let bad = call(&r.server, &s, 2, "echo", json!({"text": 5}));
     ok_result(&bad, call_result_schema());
     assert_eq!(bad["result"]["isError"], true);
     assert!(
@@ -214,7 +214,7 @@ fn tools_call_results_have_the_specified_shape() {
             .unwrap()
             .contains("arguments.text must be string")
     );
-    let missing = call(&r.server, &mut s, 3, "echo", json!({}));
+    let missing = call(&r.server, &s, 3, "echo", json!({}));
     assert!(
         missing["result"]["content"][0]["text"]
             .as_str()
@@ -226,13 +226,13 @@ fn tools_call_results_have_the_specified_shape() {
 #[test]
 fn protocol_errors_use_the_standard_codes() {
     let r = rig();
-    let mut s = ready(&r.server);
-    error_reply(&call(&r.server, &mut s, 1, "nope", json!({})), -32602);
-    error_reply(&call(&r.server, &mut s, 2, "delete", json!({})), -32602); // an action that is not allowed does not exist
+    let s = ready(&r.server);
+    error_reply(&call(&r.server, &s, 1, "nope", json!({})), -32602);
+    error_reply(&call(&r.server, &s, 2, "delete", json!({})), -32602); // an action that is not allowed does not exist
     error_reply(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{}}),
         ),
         -32602,
@@ -240,7 +240,7 @@ fn protocol_errors_use_the_standard_codes() {
     error_reply(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"echo","arguments":[1]}}),
         ),
         -32602,
@@ -248,7 +248,7 @@ fn protocol_errors_use_the_standard_codes() {
     error_reply(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":5,"method":"prompts/list"}),
         ),
         -32601,
@@ -256,7 +256,7 @@ fn protocol_errors_use_the_standard_codes() {
     error_reply(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":6,"method":"resources/read","params":{}}),
         ),
         -32602,
@@ -272,7 +272,7 @@ fn protocol_errors_use_the_standard_codes() {
             -32600,
         ),
     ] {
-        let reply: Value = serde_json::from_str(&r.server.handle(&mut s, line).unwrap()).unwrap();
+        let reply: Value = serde_json::from_str(&r.server.handle(&s, line).unwrap()).unwrap();
         error_reply(&reply, code);
         assert_eq!(reply["id"], Value::Null, "{line}");
     }
@@ -281,11 +281,11 @@ fn protocol_errors_use_the_standard_codes() {
 #[test]
 fn requests_need_initialize_first_but_ping_does_not() {
     let r = rig();
-    let mut s = Session::new("c");
+    let s = Session::new("c");
     error_reply(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
         ),
         -32600,
@@ -293,7 +293,7 @@ fn requests_need_initialize_first_but_ping_does_not() {
     ok_result(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":2,"method":"ping"}),
         ),
         json!({"type":"object"}),
@@ -303,13 +303,13 @@ fn requests_need_initialize_first_but_ping_does_not() {
 #[test]
 fn notifications_and_stray_responses_get_no_answer() {
     let r = rig();
-    let mut s = ready(&r.server);
+    let s = ready(&r.server);
     for line in [
         r#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}"#,
         r#"{"jsonrpc":"2.0","method":"unknown/notification"}"#,
         r#"{"jsonrpc":"2.0","id":5,"result":{}}"#,
     ] {
-        assert!(r.server.handle(&mut s, line).is_none(), "{line}");
+        assert!(r.server.handle(&s, line).is_none(), "{line}");
     }
 }
 
@@ -328,10 +328,10 @@ fn resources_have_the_specified_shapes() {
             Err("not ready".into())
         }))
         .unwrap();
-    let mut s = ready(&r.server);
+    let s = ready(&r.server);
     let list = rpc(
         &r.server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":1,"method":"resources/list"}),
     );
     ok_result(
@@ -342,7 +342,7 @@ fn resources_have_the_specified_shapes() {
     assert_eq!(list["result"]["resources"].as_array().unwrap().len(), 2);
     let read = rpc(
         &r.server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"demo://summary"}}),
     );
     ok_result(
@@ -357,7 +357,7 @@ fn resources_have_the_specified_shapes() {
     error_reply(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"demo://missing"}}),
         ),
         -32002,
@@ -365,7 +365,7 @@ fn resources_have_the_specified_shapes() {
     error_reply(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"demo://broken"}}),
         ),
         -32603,
@@ -373,7 +373,7 @@ fn resources_have_the_specified_shapes() {
     ok_result(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":5,"method":"resources/templates/list"}),
         ),
         json!({"type":"object","required":["resourceTemplates"]}),
@@ -385,21 +385,21 @@ fn resources_have_the_specified_shapes() {
     });
     let list = rpc(
         &r.server,
-        &mut s,
+        &s,
         json!({"jsonrpc":"2.0","id":6,"method":"resources/list"}),
     );
     assert_eq!(list["result"]["resources"], json!([]));
     error_reply(
         &rpc(
             &r.server,
-            &mut s,
+            &s,
             json!({"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"demo://summary"}}),
         ),
         -32002,
     );
     let init = rpc(
         &r.server,
-        &mut Session::new(""),
+        &Session::new(""),
         json!({"jsonrpc":"2.0","id":8,"method":"initialize","params":{}}),
     );
     assert_eq!(

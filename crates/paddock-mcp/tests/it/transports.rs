@@ -35,26 +35,44 @@ fn stdio_answers_one_line_per_request_and_survives_bad_input() {
     let mut out = Vec::new();
     serve_stdio(&r.server, &mut Cursor::new(input.into_bytes()), &mut out).unwrap();
     let replies = lines_out(out);
-    let codes: Vec<Option<i64>> = replies
+    // Tool calls are answered as they finish; the others at once. Look replies up by id.
+    let by_id = |id: i64| {
+        replies
+            .iter()
+            .find(|v| v["id"] == id)
+            .unwrap_or_else(|| panic!("no reply for {id}: {replies:?}"))
+            .clone()
+    };
+    let errors: Vec<i64> = replies
         .iter()
-        .map(|v| v["error"]["code"].as_i64())
+        .filter_map(|v| v["error"]["code"].as_i64())
         .collect();
     assert_eq!(
-        codes,
-        [None, Some(-32700), Some(-32600), None, None, None],
+        replies.len(),
+        6,
         "the notification and the blank line get no answer"
     );
-    let call = client::parse_call(replies[3]["result"].clone()).unwrap();
-    assert_eq!(call.text(), "hi");
     assert_eq!(
-        client::parse_tools(replies[4]["result"].clone())
+        errors,
+        [-32700, -32600],
+        "the bad JSON and the long line, in the order read"
+    );
+    assert_eq!(
+        client::parse_call(by_id(2)["result"].clone())
+            .unwrap()
+            .text(),
+        "hi"
+    );
+    assert_eq!(
+        client::parse_tools(by_id(3)["result"].clone())
             .unwrap()
             .tools
             .len(),
         2
     );
+    assert!(by_id(4)["result"].is_object());
     assert_eq!(
-        client::parse_initialize(replies[0]["result"].clone())
+        client::parse_initialize(by_id(1)["result"].clone())
             .unwrap()
             .server_info
             .name,
@@ -82,6 +100,35 @@ fn a_failing_output_ends_the_stdio_loop_with_an_error() {
     let err = serve_stdio(
         &r.server,
         &mut Cursor::new(client::ping(1).into_bytes()),
+        &mut Closed,
+    )
+    .unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
+}
+
+#[test]
+fn a_reply_that_cannot_be_written_is_reported_when_the_input_ends() {
+    struct Closed;
+    impl Write for Closed {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let r = rig();
+    let input = [
+        client::initialize(1, "t", "1"),
+        client::call_tool(2, "echo", json!({"text": "x"})),
+    ];
+    // The initialize reply fails to write first (inline), so use a session that is already initialized.
+    let session = paddock_mcp::Session::new("t");
+    r.server.handle(&session, &input[0]);
+    let err = paddock_mcp::serve_lines(
+        &r.server,
+        &session,
+        &mut Cursor::new(input[1].clone().into_bytes()),
         &mut Closed,
     )
     .unwrap_err();
@@ -219,4 +266,135 @@ fn a_listener_that_is_not_loopback_is_refused_before_serving() {
     let r = rig();
     let l = listener();
     assert!(serve_loopback(r.server.clone(), Arc::new(KeyStore::new()), l, 1).is_ok());
+}
+
+/// A server whose `slow` tool blocks until the test releases it and reports whether it was cancelled.
+fn gated(
+    max_concurrent: usize,
+) -> (
+    Arc<paddock_mcp::Server>,
+    Arc<paddock_mcp::AuditLog>,
+    std::sync::mpsc::Sender<()>,
+    std::sync::mpsc::Receiver<bool>,
+) {
+    use paddock_mcp::{Policy, ToolDef, ToolOutput};
+    use std::sync::{Mutex, mpsc};
+    let audit = Arc::new(paddock_mcp::AuditLog::new(20));
+    let server = paddock_mcp::Server::new(
+        "demo",
+        "1",
+        Arc::new(paddock_jobs::FakeClock::new()),
+        audit.clone(),
+        Arc::new(paddock_log::Redactor::new()),
+    )
+    .with_limits(Limits {
+        max_concurrent_calls: max_concurrent,
+        ..Limits::default()
+    });
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let (seen_tx, seen_rx) = mpsc::channel::<bool>();
+    let (release_rx, seen_tx) = (Mutex::new(release_rx), Mutex::new(seen_tx));
+    server
+        .add_tool(ToolDef::read_only(
+            "slow",
+            "Waits for the test.",
+            json!({"type":"object"}),
+            move |ctx, _| {
+                let _ = release_rx.lock().unwrap().recv();
+                let _ = seen_tx.lock().unwrap().send(ctx.cancel.is_cancelled());
+                Ok(ToolOutput::text("slow done"))
+            },
+        ))
+        .unwrap();
+    server
+        .add_tool(ToolDef::read_only(
+            "quick",
+            "Answers at once.",
+            json!({"type":"object"}),
+            |_, _| Ok(ToolOutput::text("quick done")),
+        ))
+        .unwrap();
+    server.set_policy(Policy::read_only());
+    (Arc::new(server), audit, release_tx, seen_rx)
+}
+
+fn open_client(serving: &paddock_mcp::Serving, key: &str) -> Conn {
+    let mut c = Conn::open(serving.addr());
+    c.send(&json!({"key": key}).to_string());
+    assert_eq!(c.next().unwrap()["ok"], true);
+    c.send(&client::initialize(1, "t", "1"));
+    assert!(c.next().unwrap()["result"].is_object());
+    c.send(&client::initialized());
+    c
+}
+
+#[test]
+fn calls_on_one_connection_run_concurrently_and_answer_in_any_order() {
+    let (server, _, release, _) = gated(4);
+    let keys = Arc::new(KeyStore::new());
+    let (_, key) = keys.issue("a", 1).unwrap();
+    let serving = serve_loopback(server, keys, listener(), 2).unwrap();
+    let mut c = open_client(&serving, &key);
+    c.send(&client::call_tool(10, "slow", json!({})));
+    c.send(&client::call_tool(11, "quick", json!({})));
+    let first = c.next().unwrap();
+    assert_eq!(
+        first["id"], 11,
+        "the quick call is answered while the slow one is still running"
+    );
+    release.send(()).unwrap();
+    let second = c.next().unwrap();
+    assert_eq!(second["id"], 10);
+    assert_eq!(
+        client::parse_call(second["result"].clone()).unwrap().text(),
+        "slow done"
+    );
+    serving.stop();
+}
+
+#[test]
+fn the_bound_on_concurrent_calls_makes_the_reader_wait() {
+    let (server, _, release, _) = gated(1);
+    let keys = Arc::new(KeyStore::new());
+    let (_, key) = keys.issue("a", 1).unwrap();
+    let serving = serve_loopback(server, keys, listener(), 2).unwrap();
+    let mut c = open_client(&serving, &key);
+    c.send(&client::call_tool(10, "slow", json!({})));
+    c.send(&client::call_tool(11, "quick", json!({})));
+    // With one slot the quick call is not read until the slow one ends, so the answers come in request order.
+    release.send(()).unwrap();
+    assert_eq!(c.next().unwrap()["id"], 10);
+    assert_eq!(c.next().unwrap()["id"], 11);
+    serving.stop();
+}
+
+#[test]
+fn a_cancelled_call_is_stopped_gets_no_answer_and_is_audited() {
+    let (server, audit, release, seen) = gated(4);
+    let keys = Arc::new(KeyStore::new());
+    let (_, key) = keys.issue("a", 1).unwrap();
+    let serving = serve_loopback(server, keys, listener(), 2).unwrap();
+    let mut c = open_client(&serving, &key);
+    c.send(&client::call_tool(10, "slow", json!({})));
+    c.send(&json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":10,"reason":"user"}}).to_string());
+    c.send(&client::ping(11));
+    // The ping is answered; the cancelled call never is.
+    assert_eq!(c.next().unwrap()["id"], 11);
+    release.send(()).unwrap();
+    assert!(seen.recv().unwrap(), "the tool saw its token cancelled");
+    // A cancel for an unknown or malformed id is ignored.
+    c.send(
+        &json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":999}})
+            .to_string(),
+    );
+    c.send(&json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{}}).to_string());
+    c.send(&client::ping(12));
+    assert_eq!(
+        c.next().unwrap()["id"],
+        12,
+        "no stray answer for 10 came before this one"
+    );
+    serving.stop();
+    let outcomes: Vec<paddock_mcp::Outcome> = audit.entries().iter().map(|e| e.outcome).collect();
+    assert_eq!(outcomes, [paddock_mcp::Outcome::Cancelled]);
 }

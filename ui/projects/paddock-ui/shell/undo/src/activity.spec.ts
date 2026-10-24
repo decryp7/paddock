@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { ACTIVITY_PAGE_SIZE, ActivityBackend, MemoryActivityBackend, TauriActivityBackend, type ActivityIpc, type Unlisten } from './activity-backend';
+import { ACTIVITY_COMMANDS } from '../generated/activity-commands';
+import { ACTIVITY_PAGE_SIZE, ActivityBackend, DEFAULT_ACTIVITY_COMMANDS, MemoryActivityBackend, TauriActivityBackend, type ActivityIpc, type Unlisten } from './activity-backend';
 import { PdActivityPage } from './activity-page';
 import { ACTIVITY_EVENT, parseActivityEntries, parseActivityEntry, type ActivityEntry } from './activity-wire';
 import { ACTIVITY_CONTRIBUTIONS } from './activity.contributions';
@@ -88,6 +89,14 @@ describe('Tauri activity backend', () => {
     await backend.list(1);
     await expect(backend.undo(1)).rejects.toThrow('did not answer with the entry');
     expect(t.calls.map((c) => c[0])).toEqual(['my_list', 'my_undo']);
+  });
+});
+
+describe('the default command names', () => {
+  it('are commands of the Rust adapter', () => {
+    expect(Object.keys(ACTIVITY_COMMANDS).sort()).toEqual(['activity_list', 'activity_mark', 'activity_undo']);
+    expect(Object.keys(ACTIVITY_COMMANDS)).toContain(DEFAULT_ACTIVITY_COMMANDS.list);
+    expect(Object.keys(ACTIVITY_COMMANDS)).toContain(DEFAULT_ACTIVITY_COMMANDS.undo);
   });
 });
 
