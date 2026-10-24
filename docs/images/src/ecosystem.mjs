@@ -235,8 +235,9 @@ ${hub}
 
 <g>
 <rect class="found" x="${PX}" y="${PY}" width="${PW}" height="${PH}" rx="20"/>
-<text class="ft" x="${PX + 32}" y="${PY + 46}">Paddock</text>
-<text class="fs" x="${PX + 32}" y="${PY + 74}">The shared foundation under every app.</text>
+${icon('paddock', PX + 26, PY + 22, 60)}
+<text class="ft" x="${PX + 100}" y="${PY + 46}">Paddock</text>
+<text class="fs" x="${PX + 100}" y="${PY + 74}">The shared foundation under every app.</text>
 ${kits}
 ${layers}
 ${buildsOn}

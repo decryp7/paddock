@@ -5,7 +5,7 @@ import { Resvg } from '@resvg/resvg-js';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { ALL, APPS, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { ALL, APPS, UMBRELLA, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { writeIco } from './ico.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -84,12 +84,23 @@ for (const app of ONLY) {
     scaled(win, 256),
   ];
   save(join(tauri, 'icon.ico'), writeIco(ico));
+
+  // 5. Web set for the umbrella mark (it has no app bundle of its own): favicon, avatar and social images.
+  if (UMBRELLA.includes(app)) {
+    const web = dir(app, 'web');
+    save(join(web, 'favicon.svg'), smallSvg(app, 32));
+    save(join(web, 'favicon.ico'), writeIco([16, 32, 48].map(s => ({ size: s, png: smallPng[s] }))));
+    save(join(web, 'apple-touch-icon.png'), png(win, 180));
+    save(join(web, `${app}-512.png`), png(mac, 512));
+    // Avatar (Gitea/GitHub repo and org avatars, social cards): the near-full-bleed Windows master, which fills a square crop.
+    save(join(web, `${app}-avatar-512.png`), png(win, 512));
+  }
   console.log(`built ${app}`);
 }
 
-// 5. Alternative concept (Carbon), kept for comparison (family apps only)
+// 6. Alternative concept (Carbon), kept for comparison (family apps only)
 const alt = dir('alternative');
-for (const app of ONLY.filter((a) => APPS.includes(a))) {
+for (const app of ONLY.filter(a => APPS.includes(a))) {
   const svg = masterSvg(app, { concept: 'carbon' });
   save(join(alt, `${app}-carbon.svg`), svg);
   save(join(alt, `${app}-carbon-512.png`), png(svg, 512));

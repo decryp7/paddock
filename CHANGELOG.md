@@ -18,11 +18,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### Changed
 - The tray popover layout has one 16 px inset for its header, content and footer.
+- `pd-waiting-for` (and `pd-service-error` while it waits) draws a stopped service as an offline state: the warning icon,
+  "<Service> stopped", one muted line and the status chip's repair; it spins only while a start or repair is under way
+  (`waitingKind`).
+- The chosen segment of `pd-segmented-control` is raised (surface-3), also in dark.
+- The narrow jobs status item says "1 job" / "3 jobs" instead of a bare count.
 - Sentence case for the shell's About items: "Check for updates…", "What’s new" (and "What’s new in <version>").
 - The shell demo's product name is "Paddock Shell Demo"; its Rust side is the app (`apps/shell-demo/src-tauri` writes
   `app-commands.ts`); `paddock-shell`'s `tests/demo.rs` keeps only the plugin's checks over the demo's files.
 
-## 0.2.0 - not yet tagged (the first shell release)
+## 0.2.0 - 2026-10-24 (the first shell release)
 
 The app shell of ADR 0012 (plan S0-S17): `@decryp7/paddock-ui` 0.2.0 with the `shell/*` entry points,
 `@decryp7/paddock-e2e` 0.2.0, and the shell crates on the Gitea cargo registry `decryp7` for the first time:

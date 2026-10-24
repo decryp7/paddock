@@ -147,6 +147,8 @@ the family's smallest OKLab distance (`icons/tools/cvd.mjs`: 17.7 normal, 11.6 p
 chosen (2026-10-24): Sighter on a lavender tile #A686D6 with a dark glyph (#2D1D43, 5.1:1; white reaches only 3.0:1),
 Pacenotes on a bronze-olive tile #6D590F with a white glyph (6.8:1). A plum tile (#975EA2) would have dropped the
 family to 10.2 normal and 5.1 deuteranopia against Dyno, an olive tile (#657C1F) to 1.6 protanopia against Pitcrew.
+The Paddock mark itself (the umbrella, not an app) uses an asphalt-graphite tile #2B3038 with white ink and carries the seven
+app hues as a stripe in its roof; it keeps every family minimum and never stands in for an app (icons/README.md).
 
 Accent rules: primary button, selected nav item (tinted bg 14% + 2 px left or full tint, accent icon), focus ring (2 px
 accent, 2 px offset), links, the single highlighted chart series, progress of the app's own primary metric. Not
