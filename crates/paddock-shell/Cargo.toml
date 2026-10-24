@@ -33,7 +33,10 @@ paddock-files = { workspace = true, features = ["tauri"] }
 paddock-download = { workspace = true, features = ["tauri"] }
 paddock-health = { workspace = true, features = ["tauri"] }
 paddock-jobs = { workspace = true, features = ["tauri"] }
+paddock-env = { workspace = true }
 paddock-menu = { workspace = true, features = ["tauri"] }
+paddock-pitwall = { workspace = true }
+paddock-siblings = { workspace = true }
 paddock-packs = { workspace = true, features = ["tauri"] }
 paddock-channels = { workspace = true, features = ["tauri"] }
 paddock-service = { workspace = true, features = ["tauri"] }
@@ -44,6 +47,7 @@ paddock-updater = { workspace = true, features = ["tauri"] }
 paddock-window = { workspace = true, features = ["tauri"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+log = { version = "0.4", features = ["kv"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [build-dependencies]
@@ -56,7 +60,10 @@ tauri = { workspace = true, features = ["test"] }
 paddock-dialogs = { workspace = true, features = ["tauri", "mock-runtime"] }
 # The diagnostics test installs a scoped log and folders in a temporary directory.
 paddock-log = { workspace = true }
-paddock-env = { workspace = true }
+# The Pitwall step is tested against the fake Pitwall on an ephemeral loopback port.
+paddock-pitwall = { workspace = true, features = ["testing"] }
+paddock-siblings = { workspace = true, features = ["testing"] }
+paddock-secrets = { workspace = true }
 # The permission sets are resolved through Tauri's own ACL in the tests.
 tauri-utils = "2.10"
 toml = "0.9"

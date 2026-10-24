@@ -407,3 +407,13 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   included. A workspace-hack crate also cannot be published; `cargo hakari publish` drops the dependency for the upload,
   which edits a manifest, so the lock file is checked separately instead of `--locked`.
 - Measure under a quiet machine and in back-to-back pairs: at a 1-minute load of 30-50 the same build varied by 60%.
+
+## Linux VM guests (Paddock C21, 2026-10-25)
+- Linux guests: `tart exec` (like `ssh` without a PAM login) has no logind session, so there is no `systemd --user`
+  manager and no session bus; `loginctl enable-linger <user>` starts one, as a desktop login would. A desktop smoke
+  needs no full desktop: Xvfb, stalonetray (XEmbed tray; libayatana-appindicator falls back to it when no
+  StatusNotifierWatcher is on the bus), dunst (`dunstctl history` shows what reached the notification server) and
+  xdotool for the tray menu. Start the app with `--hidden`: a focused window counts as "seen" and suppresses the toast.
+- Build Linux test binaries in the guest's own release (ubuntu:24.04 arm64 container for the Ubuntu 24.04 guest), so
+  glibc and WebKitGTK match; `cargo build --features tauri/custom-protocol` embeds the UI, without it a release binary
+  loads `devUrl`.

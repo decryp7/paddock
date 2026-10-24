@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-assistant-load"
+description = "Enables the assistant_load command without any pre-configured scope."
+commands.allow = ["assistant_load"]
+
+[[permission]]
+identifier = "deny-assistant-load"
+description = "Denies the assistant_load command without any pre-configured scope."
+commands.deny = ["assistant_load"]

@@ -108,7 +108,7 @@ export function presetLabel(secs: number): string {
           <p class="pd-warning"><pd-glyph name="info" [size]="14" />{{ w }}</p>
         }
         <ol class="pd-runs" [attr.aria-label]="nextRunsLabel">
-          @for (r of pv.nextRuns; track r) {
+          @for (r of pv.nextRuns; track $index) {
             <li>{{ run(r, pv.zone) }}</li>
           }
         </ol>

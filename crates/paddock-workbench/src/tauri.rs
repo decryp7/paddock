@@ -88,7 +88,7 @@ pub async fn layout_set<R: Runtime>(
     blocking(move || store.set(&key, value)).await
 }
 
-/// The unguarded handler of [`COMMANDS`](crate::COMMANDS) (the plugin wraps it in the guard).
+/// The unguarded handler of [`LAYOUT`](crate::LAYOUT) (the plugin wraps it in the guard).
 pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
     ::tauri::generate_handler![layout_get, layout_set]
 }

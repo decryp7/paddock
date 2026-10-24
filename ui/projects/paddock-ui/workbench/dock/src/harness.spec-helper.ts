@@ -52,6 +52,8 @@ export interface HarnessOptions {
   /** The `when` flag; absent: the context is loaded with ready = false. */
   ready?: ReturnType<typeof signal<boolean>>;
   extra?: readonly (Provider | EnvironmentProviders)[];
+  /** Load dockview before mounting (default); false leaves it to the dock, to test attaching before it is there. */
+  preload?: boolean;
 }
 
 @Component({ selector: 'pd-harness', changeDetection: ChangeDetectionStrategy.OnPush, imports: [PdDock], template: '<div class="harness-box"><pd-dock /></div>' })
@@ -59,7 +61,7 @@ export class Harness {}
 
 /** Mounts `<pd-dock />` in a zoneless window with the given views, perspectives and ports; resolves once the dock has its layout. */
 export async function mountDock(options: HarnessOptions): Promise<{ rendered: Rendered<Harness>; dock: WorkbenchDock; store: DockLayoutStore; ready: ReturnType<typeof signal<boolean>> }> {
-  await loadDockview();
+  if (options.preload !== false) await loadDockview();
   const store = options.store ?? new InMemoryDockLayoutStore();
   const ready = options.ready ?? signal(true);
   TestBed.resetTestingModule();

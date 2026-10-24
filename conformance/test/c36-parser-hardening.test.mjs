@@ -47,3 +47,34 @@ test('C36 handles a crate at the repository root', async () => {
   assert.equal(f.length, 1);
   assert.equal(f[0].file, 'src/lib.rs');
 });
+
+test('C36: a crate nested in another crate owns its files (the app does not inherit its parser)', async () => {
+  const nested = {
+    'app/Cargo.toml': '[package]\nname = "the-app"\n',
+    'app/src/lib.rs': 'pub fn run() {}\n',
+    'app/agent/Cargo.toml': '[package]\nname = "the-agent"\n',
+    'app/agent/src/lib.rs': PARSER,
+    'app/agent/tests/it.rs': 'never_panics(&corpus(S), |b| the_agent::parse_line(b))',
+  };
+  assert.deepEqual(await findingsOf('C36', makeApp(nested)), []);
+  const without = { ...nested };
+  delete without['app/agent/tests/it.rs'];
+  const f = await findingsOf('C36', makeApp(without));
+  assert.deepEqual(f.map((x) => x.message.split(' ')[0]), ['the-agent']);
+});
+
+test('C36 accepts the one-line helper assert_never_panics', async () => {
+  const helper = crate('log-parse', PARSER, { 'crates/log-parse/tests/it/never_panics.rs': 'assert_never_panics(&[b"x"], |b| log_parse::parse_line(&String::from_utf8_lossy(b)));' });
+  assert.deepEqual(await findingsOf('C36', makeApp(helper)), []);
+});
+
+test('--strict makes the warnings of the named checks fail the run', async () => {
+  const { main } = await import('../src/cli.mjs');
+  const root = makeApp(crate('log-parse', PARSER));
+  const io = { log: () => undefined, err: () => undefined };
+  const run = (...extra) => main(['--app', 'demo', '--root', root, '--only', 'C36', ...extra], io);
+  assert.equal(await run(), 0, 'a warning alone passes');
+  assert.equal(await run('--strict', 'C36'), 1);
+  assert.equal(await run('--strict', 'c30, c36'), 1);
+  assert.equal(await run('--strict', 'C30'), 0);
+});

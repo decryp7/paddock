@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { CommandService, provideContributions, provideShellContext, provideAppearance, BrowserAppearanceBackend } from '@decryp7/paddock-ui/shell';
 import { DEMO_CONTRIBUTIONS } from '../../../../shell-demo/src/app/demo.contributions';
+import { provideShellUndo } from '@decryp7/paddock-ui/shell/undo';
 import { demoContext } from '../../../../shell-demo/src/app/demo-context';
 import { DemoJobsEngine } from '../../../../shell-demo/src/app/demo-jobs';
 import { JobsStore } from './jobs.store';
@@ -19,6 +20,8 @@ describe('shell-demo jobs', () => {
       extra: [
         { provide: DemoJobsEngine, useValue: engine },
         provideContributions(DEMO_CONTRIBUTIONS),
+        // The demo context carries the window's undo store (plan X44).
+        provideShellUndo(),
         provideShellContext(() => Promise.resolve(demoContext), { prefetch: 'first-use' }),
         // The demo context reads the appearance (plan S15); no storage or channel in a spec.
         provideAppearance({ accent: 'pitwall', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) }),
