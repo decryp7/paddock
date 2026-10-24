@@ -15,4 +15,6 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 libc = "0.2"
 
 [dev-dependencies]
+# The never-panics test of the parsers (conformance check C36).
+paddock-testkit = { workspace = true }
 tempfile = "3"
