@@ -289,3 +289,13 @@ migration about three more.
 | D4 | When Debrief moves: shell and workbench together at Pacenotes' start (Debrief frozen meanwhile), or the shell right after the Pitwall release and the workbench later | **Together at Pacenotes' start**: Debrief is touched once and one app at a time (rule 1) holds during the Pitwall release |
 | D5 | Assistant pane scope: the workbench owns the chat UI and tool loop over Pitwall only, Debrief keeps its built-in llama.cpp engine as its own adapter; or the built-in engine moves to Paddock too | **Pitwall only in Paddock**: Pacenotes and Sighter use Pitwall by design; the built-in engine is Debrief's fallback (Debrief ADR 0059) |
 | D6 | i18n in manager apps: adopt `$localize` with the shell (English only shipped), or keep plain strings there | **Adopt with the shell**: the shell's strings are already ids; app strings move when each page is next touched |
+
+## 9. Input from Debrief 1.1's start-up work (2026-10-24)
+
+Measured on Debrief 1.1: about 780 kB of the main window's first-paint JavaScript is the ~50 `provide*()` calls in
+`app.config.ts`, each statically importing its stores, commands and start-up work, and pop-out windows boot the whole app
+config. So the contribution model (S2, W1) must make features lazy by construction: a contribution is a manifest of
+command, view and menu stubs plus a loader; its stores and services load on first use or when idle; a lint stops a
+contribution's registration file from importing store or command classes; and each view declares the providers it needs,
+so pop-outs and dialog windows compose only those. Acceptance for S2/W1 and Debrief's M1: the main window's first-paint
+JavaScript drops well below today's 1233 kB, measured by Debrief's `scripts/window-weight.mjs`.
