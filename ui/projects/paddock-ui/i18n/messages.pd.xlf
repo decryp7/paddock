@@ -242,9 +242,6 @@
       <trans-unit id="pd.channels.hint.url" datatype="html">
         <source>Enter the web address to post to, starting with https://.</source>
       </trans-unit>
-      <trans-unit id="pd.channels.keep" datatype="html">
-        <source>Keep</source>
-      </trans-unit>
       <trans-unit id="pd.channels.lede" datatype="html">
         <source>Where the app tells you about things that need attention, even when its window is closed: a web address it posts to, an ntfy topic, or an email.</source>
       </trans-unit>
@@ -275,14 +272,38 @@
       <trans-unit id="pd.channels.paused" datatype="html">
         <source>Off</source>
       </trans-unit>
-      <trans-unit id="pd.channels.remove" datatype="html">
-        <source>Remove</source>
+      <trans-unit id="pd.channels.progress-sending" datatype="html">
+        <source>Attempt <x id="attempt"/> of <x id="of"/> · sending…</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.progress-waiting" datatype="html">
+        <source>Attempt <x id="attempt"/> of <x id="of"/> · waiting <x id="secs"/> s before the next try</source>
       </trans-unit>
       <trans-unit id="pd.channels.remove-aria" datatype="html">
         <source>Remove <x id="name"/></source>
       </trans-unit>
+      <trans-unit id="pd.channels.remove-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-invalid" datatype="html">
+        <source>This window was opened without a channel to remove. Close it and choose Remove on a channel in the list.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-question" datatype="html">
+        <source>Remove &quot;<x id="name"/>&quot;?</source>
+      </trans-unit>
       <trans-unit id="pd.channels.remove-secret" datatype="html">
         <source>Remove secret</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-secret-goes" datatype="html">
+        <source>Its stored secret is deleted too.</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove-yes" datatype="html">
+        <source>Remove</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.remove.title" datatype="html">
+        <source>Remove channel</source>
       </trans-unit>
       <trans-unit id="pd.channels.save" datatype="html">
         <source>Save</source>
@@ -302,6 +323,9 @@
       <trans-unit id="pd.channels.secret.cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
+      <trans-unit id="pd.channels.secret.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
       <trans-unit id="pd.channels.secret.failed" datatype="html">
         <source>The engine could not store the secret.</source>
       </trans-unit>
@@ -310,6 +334,9 @@
       </trans-unit>
       <trans-unit id="pd.channels.secret.hide-short" datatype="html">
         <source>Hide</source>
+      </trans-unit>
+      <trans-unit id="pd.channels.secret.invalid" datatype="html">
+        <source>This window was opened without a channel to set a secret for. Close it and choose Set token or Set password in the channel's editor.</source>
       </trans-unit>
       <trans-unit id="pd.channels.secret.lede-password" datatype="html">
         <source>The password for <x id="channel"/> is kept by the app's engine, not in the settings file. It is never shown again.</source>
@@ -544,6 +571,24 @@
       </trans-unit>
       <trans-unit id="pd.dialogs.unknown" datatype="html">
         <source>This dialog is not known to this version of the app: <x id="dialog"/></source>
+      </trans-unit>
+      <trans-unit id="pd.files.clear" datatype="html">
+        <source>Clear the list</source>
+      </trans-unit>
+      <trans-unit id="pd.files.no-recent" datatype="html">
+        <source>The recent files could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.files.recent-empty" datatype="html">
+        <source>Nothing opened yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.files.recent-label" datatype="html">
+        <source>Recent files</source>
+      </trans-unit>
+      <trans-unit id="pd.files.remove" datatype="html">
+        <source>Remove from the list</source>
+      </trans-unit>
+      <trans-unit id="pd.files.reveal" datatype="html">
+        <source>Show in the file manager</source>
       </trans-unit>
       <trans-unit id="pd.format.bytes.one" datatype="html">
         <source><x id="count"/> byte</source>

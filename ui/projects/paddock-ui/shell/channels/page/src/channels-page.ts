@@ -5,6 +5,7 @@ import { PdPathText, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill } from
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import {
+  CHANNELS_REMOVE_DIALOG_ID,
   CHANNELS_SECRET_DIALOG_ID,
   ChannelsStore,
   EMPTY_DRAFT,
@@ -18,6 +19,7 @@ import {
   type ChannelDraft,
   type DraftField,
   type MinSeverity,
+  type TestProgress,
   type TestState,
   type TransportType,
 } from '@decryp7/paddock-ui/shell/channels';
@@ -92,18 +94,11 @@ import { CHANNELS_STYLES } from './styles';
                   </span>
                 </td>
                 <td>
-                  @if (confirming() === c.id) {
-                    <span class="pd-ch__confirm" role="group" [attr.aria-label]="removeAria(c.name)">
-                      <button type="button" class="pd-ch__btn" data-testid="channel-remove-confirm" (click)="remove(c.id)">{{ t.remove }}</button>
-                      <button type="button" class="pd-ch__btn" data-testid="channel-remove-keep" (click)="confirming.set(null)">{{ t.keep }}</button>
-                    </span>
-                  } @else {
-                    <span class="pd-ch__actions" [class.pd-ch__actions--open]="editingId() === c.id">
-                      <button type="button" class="pd-ch__icon" data-testid="channel-edit" [attr.aria-label]="editAria(c.name)" [title]="editAria(c.name)" (click)="edit(c)"><pd-glyph name="edit" [size]="16" /></button>
-                      <button type="button" class="pd-ch__icon" data-testid="channel-test" [attr.aria-label]="testAria(c.name)" [title]="testAria(c.name)" [disabled]="store.tests()[c.id]?.state === 'running'" (click)="store.test(c)"><pd-glyph name="play" [size]="16" /></button>
-                      <button type="button" class="pd-ch__icon" data-testid="channel-remove" [attr.aria-label]="removeAria(c.name)" [title]="removeAria(c.name)" (click)="confirming.set(c.id)"><pd-glyph name="trash" [size]="16" /></button>
-                    </span>
-                  }
+                  <span class="pd-ch__actions" [class.pd-ch__actions--open]="editingId() === c.id">
+                    <button type="button" class="pd-ch__icon" data-testid="channel-edit" [attr.aria-label]="editAria(c.name)" [title]="editAria(c.name)" (click)="edit(c)"><pd-glyph name="edit" [size]="16" /></button>
+                    <button type="button" class="pd-ch__icon" data-testid="channel-test" [attr.aria-label]="testAria(c.name)" [title]="testAria(c.name)" [disabled]="store.tests()[c.id]?.state === 'running'" (click)="store.test(c)"><pd-glyph name="play" [size]="16" /></button>
+                    <button type="button" class="pd-ch__icon" data-testid="channel-remove" [attr.aria-label]="removeAria(c.name)" [title]="removeAria(c.name)" (click)="remove(c)"><pd-glyph name="trash" [size]="16" /></button>
+                  </span>
                 </td>
               </tr>
             }
@@ -259,7 +254,12 @@ import { CHANNELS_STYLES } from './styles';
         @case ('running') {
           <span class="pd-ch__test" role="status" [attr.data-testid]="'channel-test-result-' + id">
             <span class="pd-ch__spin" aria-hidden="true"></span>
-            <span>{{ t.stillWorking }}</span>
+            <span>
+              {{ t.stillWorking }}
+              @if (test.progress; as p) {
+                <span class="pd-ch__progress" [attr.data-testid]="'channel-test-progress-' + id">{{ progressText(p) }}</span>
+              }
+            </span>
           </span>
         }
         @case ('delivered') {
@@ -285,7 +285,6 @@ export class PdChannelsPage {
   private readonly open = signal(false);
   protected readonly model = signal<ChannelDraft>(EMPTY_DRAFT);
   protected readonly f = form(this.model);
-  protected readonly confirming = signal<string | null>(null);
   /** Secrets stored during this editing session for channels the engine does not list yet (only that they exist, never the value). */
   private readonly sessionSecrets = signal<readonly string[]>([]);
   /** The ids being edited is the one the draft has, if saved. */
@@ -324,8 +323,6 @@ export class PdChannelsPage {
     colActions: $localize`:@@pd.channels.col-actions:Actions`,
     enabled: $localize`:@@pd.channels.enabled:On`,
     paused: $localize`:@@pd.channels.paused:Off`,
-    remove: $localize`:@@pd.channels.remove:Remove`,
-    keep: $localize`:@@pd.channels.keep:Keep`,
     addTitle: $localize`:@@pd.channels.add-title:New channel`,
     editTitle: $localize`:@@pd.channels.edit-title:Edit channel`,
     fName: $localize`:@@pd.channels.f-name:Name`,
@@ -409,6 +406,13 @@ export class PdChannelsPage {
     return secretKind(c) === 'password' ? $localize`:@@pd.channels.no-password:No password` : $localize`:@@pd.channels.no-token:No token`;
   }
 
+  /** Where a running test is, phase-labelled: "Attempt 2 of 3 · waiting 4 s before the next try". */
+  protected progressText(p: TestProgress): string {
+    return p.phase === 'waiting'
+      ? $localize`:@@pd.channels.progress-waiting:Attempt ${p.attempt}:attempt: of ${p.of}:of: · waiting ${p.waitSecs ?? 0}:secs: s before the next try`
+      : $localize`:@@pd.channels.progress-sending:Attempt ${p.attempt}:attempt: of ${p.of}:of: · sending…`;
+  }
+
   protected deliveredText(attempts: number): string {
     return attempts > 1 ? $localize`:@@pd.channels.delivered-after:Delivered after ${attempts}:attempts: attempts` : $localize`:@@pd.channels.delivered:Delivered`;
   }
@@ -433,7 +437,6 @@ export class PdChannelsPage {
   }
 
   private begin(d: ChannelDraft): void {
-    this.confirming.set(null);
     this.store.dismissSaveError();
     this.f().reset(d);
     this.open.set(true);
@@ -468,8 +471,11 @@ export class PdChannelsPage {
     this.open.set(false);
   }
 
-  protected async remove(id: string): Promise<void> {
-    this.confirming.set(null);
+  /** Asks in the remove dialog's window; Remove (true) deletes the channel and its secret, anything else keeps it. */
+  protected async remove(c: ChannelConfig): Promise<void> {
+    const id = c.id;
+    const confirmed = await this.dialogs.open<boolean>(CHANNELS_REMOVE_DIALOG_ID, { inputs: { channelId: id, name: c.name } }).closed;
+    if (confirmed !== true) return;
     if (this.editingId() === id) this.open.set(false);
     await this.store.remove(id);
   }

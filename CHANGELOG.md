@@ -5,6 +5,13 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-files` and `@decryp7/paddock-ui/shell/files` (plan X31): the user's files. `PathGrants` (open only paths the user chose,
+  by dialog, drop or command line; per window, bounded, expiring, canonical), the validators (`parse`, `canonical`, `output_file`,
+  `child`, `confined`), validated pickers behind `Picker` (`NativePicker` over `tauri-plugin-dialog`), `Recents` (named lists in a
+  versioned file, recorded only after a granted open, granted again on use), reveal, open and web addresses with command lines per
+  OS (never a file that runs on open; http, https and mailto only), `Files` and the `files_*` commands in the shell plugin
+  (`Builder::files`, drops granted by the window hook, `WindowGrants` for the app's own commands). UI: `FilesBackend`
+  (Tauri, memory), `FilesStore`, `pd-recent-files`; the shell demo has a Files page.
 - Undo and an activity journal (plan X44). `paddock_jobs::journal`: a bounded (at most 5,000 entries, cut texts), persisted (paddock-env
   versioned file, user-only permissions, a damaged file kept, a newer one never overwritten) log of what the app did on the user's
   behalf, each entry `NotUndoable`, `Available`, `Undone` or `Expired`; `record`, `mark`, `expire_before`, `entries`, listeners for
