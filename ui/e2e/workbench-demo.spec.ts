@@ -142,7 +142,7 @@ test.describe('dock (plan W2a, W2b)', () => {
       await wb.explorer.expand('wd.files', 'src');
       await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
       await wb.activity.item('wd.act.problems').click();
-      await wb.activity.item('wd.act.outline').click();
+      await wb.activity.item('pd.wb.assistant.activity').click();
       await expect(tab(page, 'wd.problems')).toBeVisible();
       const short = await page.locator('[data-min-width]').evaluateAll((groups) =>
         groups

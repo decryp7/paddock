@@ -190,6 +190,28 @@ export const ExplorerStore = signalStore(
       retry(section: string, parent: string): Promise<void> {
         return load(section, parent);
       },
+      /**
+       * Expands the tree along `ids` (top level first, loading each level as needed) and selects the last one. Stops where
+       * a node is not (yet) in its parent's loaded pages. Resolves the selected key, or null.
+       */
+      async reveal(section: string, ids: readonly string[]): Promise<string | null> {
+        let parent = '';
+        for (const [i, id] of ids.entries()) {
+          const key = treeKey(section, parent);
+          if (!store.lists()[key] || store.lists()[key]?.status !== 'loaded') await load(section, parent);
+          const node = store.lists()[key]?.nodes.find((n) => n.id === id);
+          if (!node) return null;
+          if (i === ids.length - 1) {
+            patchState(store, { selected: treeKey(section, id) });
+            return treeKey(section, id);
+          }
+          if (!node.expandable) return null;
+          const nodeKey = treeKey(section, id);
+          if (!store.expanded().includes(nodeKey)) patchState(store, { expanded: [...store.expanded(), nodeKey] });
+          parent = id;
+        }
+        return null;
+      },
       select(key: string | null): void {
         patchState(store, { selected: key });
       },
