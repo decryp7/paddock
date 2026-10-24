@@ -189,6 +189,12 @@ impl Files {
         self.start(&open::open_default(self.os, &path))
     }
 
+    /// Shows a folder the app itself chose (never one named by the webview) in the file manager.
+    pub fn show_folder(&self, folder: &Path) -> Result<()> {
+        let path = canonical(folder)?;
+        self.start(&open::open_default(self.os, &path))
+    }
+
     /// Opens a web address in the user's browser (http, https and mailto only).
     pub fn open_url(&self, raw: &str) -> Result<()> {
         let url = open::check_url(raw)?;
@@ -425,6 +431,19 @@ mod tests {
         let gone = files(&rec).folder(AppFolder::Data, &t.path().join("gone"));
         assert_eq!(
             gone.open_app_folder(AppFolder::Data).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+    }
+
+    #[test]
+    fn a_folder_the_app_chose_is_shown_when_it_exists() {
+        let t = tempfile::tempdir().unwrap();
+        let rec = Arc::new(Recording::default());
+        let f = files(&rec);
+        f.show_folder(t.path()).unwrap();
+        assert_eq!(rec.started.lock().unwrap().len(), 1);
+        assert_eq!(
+            f.show_folder(&t.path().join("gone")).unwrap_err().code,
             ErrorCode::NotFound
         );
     }
