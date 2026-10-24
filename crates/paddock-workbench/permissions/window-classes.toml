@@ -52,5 +52,7 @@ permissions = [
 identifier = "dialog"
 description = "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract."
 permissions = [
+  "allow-layout-get",
+  "allow-layout-set",
   "allow-ui-sync-publish",
 ]
