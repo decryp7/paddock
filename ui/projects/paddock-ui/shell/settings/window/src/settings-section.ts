@@ -25,7 +25,7 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
           <h2 class="title" [id]="headingId()">{{ s.title }}</h2>
           <span class="spacer"></span>
           @if (s.fields.length && !keys()) {
-            <button type="button" class="btn" (click)="resetSection()">Reset section</button>
+            <button type="button" class="btn" (click)="resetSection()">{{ t.resetSection }}</button>
           }
         </div>
         @if (s.description) {
@@ -44,15 +44,15 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
       }
       @if (hiddenAdvanced(); as n) {
         <p class="muted">
-          {{ n === 1 ? '1 advanced setting is hidden.' : n + ' advanced settings are hidden.' }}
-          <button type="button" class="link" (click)="store.setShowAdvanced(true)">Show advanced</button>
+          {{ hiddenText(n) }}
+          <button type="button" class="link" (click)="store.setShowAdvanced(true)">{{ t.showAdvanced }}</button>
         </p>
       }
       @if (!s.fields.length) {
-        <p class="muted">This section has no settings.</p>
+        <p class="muted">{{ t.empty }}</p>
       }
     } @else if (store.isLoaded()) {
-      <p class="muted" role="status">These settings are not available in this app.</p>
+      <p class="muted" role="status">{{ t.unavailable }}</p>
     }
   `,
   styles: `
@@ -70,6 +70,16 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
   `,
 })
 export class PdSettingsSection {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    resetSection: $localize`:@@pd.settings.section.reset:Reset section`,
+    showAdvanced: $localize`:@@pd.settings.show-advanced:Show advanced`,
+    empty: $localize`:@@pd.settings.section.empty:This section has no settings.`,
+    unavailable: $localize`:@@pd.settings.section.unavailable:These settings are not available in this app.`,
+  };
+  protected hiddenText(n: number): string {
+    return n === 1 ? $localize`:@@pd.settings.section.hidden.one:1 advanced setting is hidden.` : $localize`:@@pd.settings.section.hidden.other:${n}:count: advanced settings are hidden.`;
+  }
   protected readonly store = inject(SettingsStore);
   private readonly drafts = inject(SettingsDrafts);
   /** The engine section's id. */

@@ -12,21 +12,21 @@ export function shortName(label: string): string {
 export function stateWord(state: ServiceState): string {
   switch (state) {
     case 'quarantined':
-      return 'switched off';
+      return $localize`:@@pd.health.state.quarantined:switched off`;
     case 'repairing':
-      return 'repairing';
+      return $localize`:@@pd.health.state.repairing:repairing`;
     case 'degraded':
-      return 'limited';
+      return $localize`:@@pd.health.state.degraded:limited`;
     default:
-      return 'stopped';
+      return $localize`:@@pd.health.state.stopped:stopped`;
   }
 }
 
 /** What the chip says: one service by name and state, or how many need attention. */
 export function chipText(problems: readonly Pick<ServiceHealth, 'label' | 'state'>[]): string {
   const p = problems[0];
-  if (problems.length === 1 && p) return `${shortName(p.label)}: ${stateWord(p.state)}`;
-  return `${problems.length} services need attention`;
+  if (problems.length === 1 && p) return $localize`:@@pd.health.chip.one:${shortName(p.label)}:service:: ${stateWord(p.state)}:state:`;
+  return $localize`:@@pd.health.chip.many:${problems.length}:count: services need attention`;
 }
 
 /** The chip's compact form (a narrow status bar): a short subject and the state, or the count; the full text is its name and tooltip. */
@@ -36,7 +36,7 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
     // The subject's last word keeps it said what stopped: "Index stopped", "Engine limited".
     const subject = shortName(p.label).split(/\s+/).at(-1) ?? '';
     const head = subject.charAt(0).toUpperCase() + subject.slice(1);
-    return `${head} ${stateWord(p.state)}`;
+    return $localize`:@@pd.health.chip.compact.one:${head}:service: ${stateWord(p.state)}:state:`;
   }
-  return problems.length ? `${problems.length} services` : 'Unknown';
+  return problems.length ? $localize`:@@pd.health.chip.compact.many:${problems.length}:count: services` : $localize`:@@pd.health.chip.compact.unknown:Unknown`;
 }

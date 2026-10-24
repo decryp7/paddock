@@ -40,6 +40,7 @@
           "builder": "@angular/build:application",
           "options": {
             "browser": "projects/gallery/src/main.ts",
+            "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/gallery/tsconfig.app.json",
             "styles": ["projects/paddock-ui/css/paddock.css", "projects/gallery/src/styles.css"]
           },
@@ -73,6 +74,7 @@
           "builder": "@angular/build:application",
           "options": {
             "browser": "projects/shell-demo/src/main.ts",
+            "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/shell-demo/tsconfig.app.json",
             "styles": ["projects/paddock-ui/css/paddock.css", "projects/shell-demo/src/styles.css"]
           },

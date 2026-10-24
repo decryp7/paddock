@@ -13,7 +13,7 @@ import { JobsStore } from './jobs.store';
   imports: [SuJob, SuEmptyState, SuErrorState, SuSkeleton],
   template: `
     @if (store.requestError(); as cause) {
-      <pd-error-state heading="The jobs could not be read" [cause]="cause" [busy]="store.isLoading()" (retry)="store.load()" />
+      <pd-error-state [heading]="t.readFailed" [cause]="cause" [busy]="store.isLoading()" (retry)="store.load()" />
     }
     @if (store.list().length) {
       <ul class="jobs" [attr.aria-label]="label()">
@@ -28,7 +28,7 @@ import { JobsStore } from './jobs.store';
         <pd-skeleton shape="block" />
       </div>
     } @else if (!store.requestError()) {
-      <pd-empty-state heading="No jobs" description="Long operations show their progress here." />
+      <pd-empty-state [heading]="t.emptyHeading" [description]="t.emptyDescription" />
     }
   `,
   styles: `
@@ -39,9 +39,15 @@ import { JobsStore } from './jobs.store';
   `,
 })
 export class PdJobsList {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    readFailed: $localize`:@@pd.jobs.read-failed:The jobs could not be read`,
+    emptyHeading: $localize`:@@pd.jobs.empty.heading:No jobs`,
+    emptyDescription: $localize`:@@pd.jobs.empty.description:Long operations show their progress here.`,
+  };
   protected readonly store = inject(JobsStore);
   /** The list's accessible name. */
-  readonly label = input('Jobs');
+  readonly label = input($localize`:@@pd.jobs.list:Jobs`);
 
   /** A running job's time now: its last snapshot's plus the time since it arrived (so a quiet step still counts up). */
   protected elapsed(job: SuJobSnapshot): number {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { contrast, deltaE, parseColor, simulate, type Cvd, type Rgba } from './color';
-import { ACCENTS, readRules, resolve, type Scheme, type Vars } from './css';
+import { ACCENTS, readRules, resolve, type Contrast, type Scheme, type Vars } from './css';
 
 const rules = readRules();
 const SCHEMES: Scheme[] = ['dark', 'light'];
+const CONTRASTS: Contrast[] = ['standard', 'more'];
+const MODES = SCHEMES.flatMap((s) => CONTRASTS.map((c) => [s, c] as const));
 const SURFACES = ['--pd-bg', '--pd-surface-1', '--pd-surface-2', '--pd-surface-3'] as const;
 const STATUS = ['success', 'warning', 'danger', 'info'] as const;
 const CVDS: Cvd[] = ['deuteranopia', 'protanopia', 'tritanopia'];
@@ -26,8 +28,8 @@ const on = (v: Vars, name: string, surface: string): Rgba => {
 };
 const ratio = (v: Vars, fg: string, bg: string): number => contrast(col(v, fg), on(v, bg, '--pd-surface-1'));
 
-describe.each(SCHEMES)('contrast, %s', (scheme) => {
-  const v = resolve(rules, scheme, 'debrief');
+describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
+  const v = resolve(rules, scheme, 'debrief', mode);
 
   it.each(SURFACES)('text on %s is AAA (7:1)', (s) => {
     expect(contrast(col(v, '--pd-text'), col(v, s))).toBeGreaterThanOrEqual(7);
@@ -86,8 +88,8 @@ describe.each(SCHEMES)('contrast, %s', (scheme) => {
   });
 });
 
-describe.each(SCHEMES.flatMap((s) => ACCENTS.map((a) => [s, a] as const)))('accent, %s %s', (scheme, accent) => {
-  const v = resolve(rules, scheme, accent);
+describe.each(MODES.flatMap(([s, c]) => ACCENTS.map((a) => [s, c, a] as const)))('accent, %s, %s contrast, %s', (scheme, mode, accent) => {
+  const v = resolve(rules, scheme, accent, mode);
 
   it('accent text (links, selected icon) is AA on every surface', () => {
     for (const s of SURFACES) expect(contrast(col(v, '--pd-accent'), col(v, s))).toBeGreaterThanOrEqual(4.5);
@@ -165,6 +167,79 @@ describe.each(SCHEMES)('chart palette under colour-vision deficiency, %s', (sche
     const g = simulate({ r: 128, g: 128, b: 128, a: 1 }, 'deuteranopia');
     expect(Math.abs(g.r - 128)).toBeLessThan(3);
     expect(SURFACE_1.a).toBe(1);
+  });
+});
+
+describe('seven accents (one per app, ADR 0012 §5)', () => {
+  it('every app of the family has an accent, Pacenotes and Sighter included', () => {
+    expect([...ACCENTS].sort()).toEqual(['debrief', 'dyno', 'pacenotes', 'pitcrew', 'pitwall', 'sighter', 'spotter']);
+  });
+
+  it.each(ACCENTS)('%s has its own rule for each scheme', (accent) => {
+    for (const scheme of SCHEMES) expect(rules.get(`:root[data-theme=${scheme}][data-accent=${accent}]`)?.['--pd-accent']).toBeTruthy();
+  });
+
+  it('accent fills are told apart from each other (normal vision dE >= 15)', () => {
+    const fills = ACCENTS.map((a) => [a, col(resolve(rules, 'dark', a), '--pd-accent-fill')] as const);
+    for (let i = 0; i < fills.length; i++)
+      for (let j = i + 1; j < fills.length; j++) {
+        const [a, x] = fills[i] as (typeof fills)[number];
+        const [b, y] = fills[j] as (typeof fills)[number];
+        expect(deltaE(x, y), `${a} vs ${b}`).toBeGreaterThanOrEqual(15);
+      }
+  });
+});
+
+describe.each(SCHEMES)('high contrast, %s', (scheme) => {
+  const v = resolve(rules, scheme, 'debrief', 'more');
+  const standard = resolve(rules, scheme, 'debrief');
+
+  it('hairlines become boundaries of 3:1 against surface-1 (they are translucent and faint otherwise)', () => {
+    expect(ratio(standard, '--pd-hairline', '--pd-surface-1')).toBeLessThan(3);
+    expect(ratio(v, '--pd-hairline', '--pd-surface-1')).toBeGreaterThanOrEqual(3);
+  });
+
+  it('removes translucency: opaque hairlines, popovers on surface-1, no soft shadows', () => {
+    expect(col(v, '--pd-hairline').a).toBe(1);
+    expect(v['--pd-surface-3']).toBe(v['--pd-surface-1']);
+    expect(v['--pd-shadow-1']).toBe('none');
+    expect(v['--pd-shadow-2']).toContain('var(--pd-border-control)');
+  });
+
+  it('subtle text is as strong as muted text (>= 6.5:1 on surface-1)', () => {
+    expect(contrast(col(v, '--pd-text-subtle'), col(v, '--pd-surface-1'))).toBeGreaterThanOrEqual(6.5);
+  });
+
+  it('the scrim is darker than in standard contrast', () => {
+    expect(col(v, '--pd-scrim').a).toBeGreaterThan(col(standard, '--pd-scrim').a);
+  });
+
+  it('applies by the OS preference too, unless the app turned it off', () => {
+    const os = rules.get('@media (prefers-contrast: more) | :root:not([data-contrast=off])');
+    expect(os?.['--pd-hairline']).toBe(rules.get(':root[data-contrast=more]')?.['--pd-hairline']);
+  });
+});
+
+describe('reduced motion', () => {
+  const reduced = rules.get(':root[data-motion=reduce]');
+  const ms = (v: string | undefined, all: Vars): number => {
+    const ref = /^var\((--[\w-]+)\)$/.exec(v ?? '');
+    return Number.parseFloat((ref ? all[ref[1] as string] : v) ?? 'NaN');
+  };
+
+  it('every duration is at most 100 ms (fades only) and translation is off', () => {
+    const all = { ...rules.get(':root'), ...reduced };
+    for (const name of ['--pd-duration-micro', '--pd-duration', '--pd-duration-large']) expect(ms(all[name], all), name).toBeLessThanOrEqual(100);
+    expect(all['--pd-motion-scale']).toBe('0');
+  });
+
+  it('full motion by default', () => {
+    expect(rules.get(':root')?.['--pd-motion-scale']).toBe('1');
+    expect(Number.parseFloat(rules.get(':root')?.['--pd-duration-large'] ?? '')).toBeGreaterThan(100);
+  });
+
+  it('follows the OS setting unless the app chose full motion', () => {
+    expect(rules.get('@media (prefers-reduced-motion: reduce) | :root:not([data-motion=full])')).toEqual(reduced);
   });
 });
 

@@ -5,7 +5,6 @@ import { notificationsStatusText } from './notice-text';
 
 let nextId = 0;
 
-
 /**
  * The notifications status item: a bell with the unread count that opens the centre in an in-app popover (Escape or a
  * click outside closes it). It opens by itself when a message is to be shown (an OS notification was clicked, or a toast's
@@ -29,7 +28,7 @@ let nextId = 0;
       }
     </button>
     @if (open()) {
-      <div class="popover" role="region" aria-label="Notifications centre" [id]="panelId">
+      <div class="popover" role="region" [attr.aria-label]="t.centre" [id]="panelId">
         <pd-notifications-panel />
       </div>
     }
@@ -47,6 +46,10 @@ let nextId = 0;
   `,
 })
 export class PdNotificationsStatus {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    centre: $localize`:@@pd.notifications.centre:Notifications centre`,
+  };
   protected readonly store = inject(NotificationsStore);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** Where the centre opens: above (a status bar at the bottom, the default) or below. */

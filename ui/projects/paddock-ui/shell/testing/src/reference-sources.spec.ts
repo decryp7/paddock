@@ -4,7 +4,8 @@ import { checkRegistrationSource, isRegistrationFile, lazyExportProblems } from 
 
 // The static checks over the shell's and the reference app's sources, read from disk (vitest runs in ui/): lazy
 // registration files (plan §9), lazy chunks that stay lazy (plan S16), no UI timeout (rule 12, plan §12) and the
-// splash (ADR 0058). They ran in the e2e before plan S16; the e2e now uses only @decryp7/paddock-e2e.
+// splash (ADR 0058), one writer of the look (rule 40, plan S15) and the pseudo-locale's coverage of the shell catalog.
+// They ran in the e2e before plan S16; the e2e now uses only @decryp7/paddock-e2e.
 
 /** Node's `fs`, loaded at run time (the spec programme has no Node types). */
 interface NodeFs {
@@ -68,5 +69,23 @@ describe('shell and shell-demo sources', () => {
   it('the demo page passes the splash check (ADR 0058)', async () => {
     const fs = await nodeFs();
     expect(splashProblems(fs.readFileSync(`${DEMO}/index.html`, 'utf8'), 'sd-root')).toEqual([]);
+  });
+
+  it('has one writer of the look: only the appearance store puts the appearance on <html> (rule 40)', async () => {
+    const fs = await nodeFs();
+    // The store applies the look (`applyAppearanceTo`); `applyStoredAppearance` paints the stored copy before Angular starts.
+    const allowed = ['shell/src/theme/appearance.store.ts', 'shell/src/theme/provide-appearance.ts'];
+    const writer = /applyPaddockAppearance\(|setAttribute\(\s*['"]data-(theme|density|contrast|motion|accent|pack)['"]/;
+    const found = [...sources(fs, SHELL), ...sources(fs, DEMO)].filter((f) => writer.test(fs.readFileSync(f, 'utf8'))).map((f) => f.replace('projects/paddock-ui/', ''));
+    expect(found.sort()).toEqual(allowed);
+  });
+
+  it('every message of the shell catalog is in the demo’s pseudo-locale file (paddock-i18n merge)', async () => {
+    const fs = await nodeFs();
+    const catalog = fs.readFileSync('projects/paddock-ui/i18n/messages.pd.xlf', 'utf8');
+    const ids = [...catalog.matchAll(/<trans-unit id="([^"]+)"/g)].map((m) => m[1] as string);
+    const loaded = JSON.parse(fs.readFileSync(`${DEMO}/locale/messages.en-XA.json`, 'utf8')) as { translations: Record<string, string> };
+    expect(ids.length).toBeGreaterThan(50);
+    expect(ids.filter((id) => !(id in loaded.translations))).toEqual([]);
   });
 });

@@ -58,8 +58,8 @@ interface LoadedPage {
         #search
         class="search"
         type="search"
-        placeholder="Search settings"
-        aria-label="Search settings"
+        [placeholder]="t.search"
+        [attr.aria-label]="t.search"
         data-testid="settings-search"
         [value]="store.query()"
         (input)="store.setQuery($any($event.target).value)"
@@ -67,7 +67,7 @@ interface LoadedPage {
       />
       <label class="advanced">
         <input type="checkbox" role="switch" [checked]="store.showAdvanced()" (change)="store.setShowAdvanced($any($event.target).checked)" />
-        Show advanced
+        {{ t.showAdvanced }}
       </label>
     </div>
 
@@ -78,26 +78,26 @@ interface LoadedPage {
       <div class="banner restart" role="status" data-testid="settings-restart">
         <span>{{ restartText() }}</span>
         @if (restart) {
-          <button type="button" class="btn primary" (click)="restart()">Restart now</button>
+          <button type="button" class="btn primary" (click)="restart()">{{ t.restartNow }}</button>
         }
       </div>
     }
     @if (asking()) {
       <div class="banner warn" role="alertdialog" aria-labelledby="pd-settings-unsaved" data-testid="settings-unsaved">
-        <span id="pd-settings-unsaved">Some changes are not saved: {{ unsavedTitles() }}.</span>
-        <button type="button" class="btn" (click)="discardAndClose()">Discard changes</button>
-        <button type="button" class="btn primary" (click)="keepEditing()">Keep editing</button>
+        <span id="pd-settings-unsaved">{{ unsavedText() }}</span>
+        <button type="button" class="btn" (click)="discardAndClose()">{{ t.discard }}</button>
+        <button type="button" class="btn primary" (click)="keepEditing()">{{ t.keepEditing }}</button>
       </div>
     }
     @if (store.actionError(); as e) {
       <div class="banner err" role="alert">
         <span>{{ e }}</span>
-        <button type="button" class="btn" (click)="store.dismissNotice()">Dismiss</button>
+        <button type="button" class="btn" (click)="store.dismissNotice()">{{ t.dismiss }}</button>
       </div>
     }
 
     <div class="main">
-      <nav class="nav" aria-label="Settings pages" (keydown)="navKey($event)">
+      <nav class="nav" [attr.aria-label]="t.pages" (keydown)="navKey($event)">
         @for (g of nav(); track g.id) {
           <h2 class="group" [id]="'pd-settings-group-' + g.id">{{ g.title }}</h2>
           <ul class="items" [attr.aria-labelledby]="'pd-settings-group-' + g.id">
@@ -106,7 +106,7 @@ interface LoadedPage {
                 <button type="button" class="item" [attr.aria-current]="current()?.id === item.id && !searching() ? 'page' : null" [attr.data-page]="item.id" (click)="select(item.id)">
                   <span class="name">{{ item.title }}</span>
                   @if (unsaved().includes(item.id)) {
-                    <span class="dot" role="img" aria-label="unsaved changes" title="Unsaved changes"></span>
+                    <span class="dot" role="img" [attr.aria-label]="t.unsaved" [title]="t.unsaved"></span>
                   }
                 </button>
               </li>
@@ -115,14 +115,14 @@ interface LoadedPage {
         }
       </nav>
 
-      <section class="content" [attr.aria-label]="searching() ? 'Search results' : (current()?.title ?? 'Settings')" data-testid="settings-content">
+      <section class="content" [attr.aria-label]="searching() ? t.results : (current()?.title ?? t.settings)" data-testid="settings-content">
         @if (store.requestError(); as e) {
           <div class="banner err" role="alert">
-            <span>The settings could not be loaded: {{ e }}</span>
-            <button type="button" class="btn" (click)="store.load()">Retry</button>
+            <span>{{ loadFailed(e) }}</span>
+            <button type="button" class="btn" (click)="store.load()">{{ t.retry }}</button>
           </div>
         } @else if (!store.isLoaded() && !store.overview()) {
-          <p class="muted" role="status">Loading settings…</p>
+          <p class="muted" role="status">{{ t.loadingSettings }}</p>
         } @else if (searching()) {
           @for (hit of hits(); track hit.id) {
             @if (hit.keys) {
@@ -131,17 +131,17 @@ interface LoadedPage {
               <p class="page-hit"><button type="button" class="link" (click)="select(hit.id)">{{ hit.title }}</button></p>
             }
           } @empty {
-            <p class="muted" role="status">No settings match “{{ store.query() }}”.</p>
+            <p class="muted" role="status">{{ noMatch(store.query()) }}</p>
           }
         } @else if (loaded.error()) {
           <div class="banner err" role="alert">
-            <span>This page could not be opened.</span>
-            <button type="button" class="btn" (click)="loaded.reload()">Retry</button>
+            <span>{{ t.pageFailed }}</span>
+            <button type="button" class="btn" (click)="loaded.reload()">{{ t.retry }}</button>
           </div>
         } @else if (loaded.value(); as p) {
           <ng-container *ngComponentOutlet="p.component; injector: p.injector; environmentInjector: p.environment" />
         } @else {
-          <p class="muted" role="status">Loading…</p>
+          <p class="muted" role="status">{{ t.loading }}</p>
         }
       </section>
     </div>
@@ -149,7 +149,7 @@ interface LoadedPage {
     <div class="foot">
       <span class="status" role="status" aria-live="polite">{{ store.notice() ?? '' }}</span>
       <span class="spacer"></span>
-      <button type="button" class="btn" data-dialog-close (click)="close()">Close</button>
+      <button type="button" class="btn" data-dialog-close (click)="close()">{{ t.close }}</button>
     </div>
   `,
   styles: `
@@ -190,6 +190,24 @@ interface LoadedPage {
   `,
 })
 export class PdSettingsWindow implements DialogContent {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    search: $localize`:@@pd.settings.search:Search settings`,
+    showAdvanced: $localize`:@@pd.settings.show-advanced:Show advanced`,
+    restartNow: $localize`:@@pd.settings.restart-now:Restart now`,
+    discard: $localize`:@@pd.settings.unsaved.discard:Discard changes`,
+    keepEditing: $localize`:@@pd.settings.unsaved.keep:Keep editing`,
+    dismiss: $localize`:@@pd.settings.dismiss:Dismiss`,
+    pages: $localize`:@@pd.settings.pages:Settings pages`,
+    unsaved: $localize`:@@pd.settings.unsaved:Unsaved changes`,
+    results: $localize`:@@pd.settings.results:Search results`,
+    settings: $localize`:@@pd.settings.title:Settings`,
+    retry: $localize`:@@pd.settings.retry:Retry`,
+    loadingSettings: $localize`:@@pd.settings.loading:Loading settings…`,
+    pageFailed: $localize`:@@pd.settings.page-failed:This page could not be opened.`,
+    loading: $localize`:@@pd.settings.loading-page:Loading…`,
+    close: $localize`:@@pd.settings.close:Close`,
+  };
   protected readonly store = inject(SettingsStore);
   private readonly drafts = inject(SettingsDrafts);
   private readonly pages = inject(SETTINGS_WINDOW_PAGES);
@@ -218,10 +236,19 @@ export class PdSettingsWindow implements DialogContent {
   protected readonly searching = computed(() => this.store.query().trim().length > 0);
   protected readonly unsaved = computed(() => this.drafts.dirtySections());
   protected readonly unsavedTitles = computed(() => this.unsaved().map((id) => this.items().find((i) => i.id === id)?.title ?? id).join(', '));
+  protected readonly unsavedText = computed(() => $localize`:@@pd.settings.unsaved.ask:Some changes are not saved: ${this.unsavedTitles()}:pages:.`);
+  protected loadFailed(cause: string): string {
+    return $localize`:@@pd.settings.load-failed:The settings could not be loaded: ${cause}:cause:`;
+  }
+  protected noMatch(query: string): string {
+    return $localize`:@@pd.settings.no-match:No settings match “${query}:query:”.`;
+  }
   protected readonly restartText = computed(() => {
     const n = this.store.restartChanges().length;
-    if (n === 0) return 'Some changes take effect after the app restarts.';
-    return n === 1 ? `1 change takes effect after the app restarts (${this.store.restartChanges()[0]}).` : `${n} changes take effect after the app restarts.`;
+    if (n === 0) return $localize`:@@pd.settings.restart.some:Some changes take effect after the app restarts.`;
+    return n === 1
+      ? $localize`:@@pd.settings.restart.one:1 change takes effect after the app restarts (${this.store.restartChanges()[0]}:setting:).`
+      : $localize`:@@pd.settings.restart.other:${n}:count: changes take effect after the app restarts.`;
   });
 
   /** Every field that matches the search (advanced ones too), by section, then pages whose title matches. */

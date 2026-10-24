@@ -13,11 +13,11 @@ export function repairButtonLabel(action: RepairAction, service: string): string
   const subject = service.replace(/^the /i, '');
   switch (action) {
     case 'restart':
-      return `Restart ${subject}`;
+      return $localize`:@@pd.health.repair.restart-named:Restart ${subject}:service:`;
     case 'reset':
-      return `Reset ${subject}`;
+      return $localize`:@@pd.health.repair.reset-named:Reset ${subject}:service:`;
     case 'install':
-      return `Install ${subject}`;
+      return $localize`:@@pd.health.repair.install-named:Install ${subject}:service:`;
     default:
       return repairLabel(action);
   }
@@ -26,18 +26,18 @@ export function repairButtonLabel(action: RepairAction, service: string): string
 export function repairLabel(action: RepairAction): string {
   switch (action) {
     case 'restart':
-      return 'Restart';
+      return $localize`:@@pd.health.repair.restart:Restart`;
     case 'liftQuarantine':
-      return 'Allow again';
+      return $localize`:@@pd.health.repair.lift-quarantine:Allow again`;
     case 'install':
-      return 'Install';
+      return $localize`:@@pd.health.repair.install:Install`;
     case 'openSettings':
-      return 'Open Settings…';
+      return $localize`:@@pd.health.repair.open-settings:Open Settings…`;
     case 'useFallback':
-      return 'Use the fallback';
+      return $localize`:@@pd.health.repair.use-fallback:Use the fallback`;
     case 'reset':
     case 'retry':
-      return 'Try again';
+      return $localize`:@@pd.health.repair.retry:Try again`;
   }
 }
 
@@ -58,12 +58,12 @@ export class NoticeActions {
       type: 'repairService',
       label: (a) => {
         const repair = this.health.health(arg(a, 'service') ?? '')?.repair;
-        return repair ? repairLabel(repair) : 'Repair';
+        return repair ? repairLabel(repair) : $localize`:@@pd.health.repair:Repair`;
       },
       run: (a) => this.health.repair(arg(a, 'service') ?? ''),
     },
     ...(this.openSettings
-      ? [{ type: 'openSettings', label: () => 'Open Settings…', run: (a: NoticeAction) => this.openSettings?.(arg(a, 'section') ?? '') }]
+      ? [{ type: 'openSettings', label: () => $localize`:@@pd.health.repair.open-settings:Open Settings…`, run: (a: NoticeAction) => this.openSettings?.(arg(a, 'section') ?? '') }]
       : []),
   ];
 
@@ -83,12 +83,12 @@ export class NoticeActions {
   /** Runs `a`; resolves with why it failed, or null. */
   async run(a: NoticeAction, n: Notice): Promise<string | null> {
     const h = this.handler(a);
-    if (!h) return `This window cannot do “${a.type}”.`;
+    if (!h) return $localize`:@@pd.notifications.action-unknown:This window cannot do “${a.type}:action:”.`;
     try {
       await h.run(a, n);
       return null;
     } catch (e) {
-      return errorMessage(e, 'The action failed.');
+      return errorMessage(e, $localize`:@@pd.notifications.action-failed:The action failed.`);
     }
   }
 }

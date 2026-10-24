@@ -72,7 +72,7 @@ export class WindowRecovery {
         }
       }
     } catch (e) {
-      this.ports.notify({ level: 'warning', message: `The window's view could not be restored: ${e instanceof Error ? e.message : String(e)}` });
+      this.ports.notify({ level: 'warning', message: $localize`:@@pd.startup.restore-failed:The window's view could not be restored: ${e instanceof Error ? e.message : String(e)}:cause:` });
     } finally {
       this.startCheckpoints();
     }

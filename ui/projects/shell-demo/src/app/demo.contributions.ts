@@ -99,6 +99,13 @@ export const DEMO_SETTINGS_PAGES = [
 
 export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG] as const;
 
+/** The titles of the theme choices (literal msg() calls: the catalog scanner reads them). */
+const THEME_TITLES = {
+  system: msg('sd.theme.system', 'Theme: system'),
+  dark: msg('sd.theme.dark', 'Theme: dark'),
+  light: msg('sd.theme.light', 'Theme: light'),
+} as const;
+
 export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
   commands: [
     defineCommand<DemoContext>({
@@ -159,6 +166,43 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       category: msg('sd.category.notify', 'Notifications'),
       run: (ctx) => ctx.breakIndex(),
     }),
+    ...(['system', 'dark', 'light'] as const).map((theme) =>
+      defineCommand<DemoContext>({
+        id: `sd.theme.${theme}`,
+        title: THEME_TITLES[theme],
+        category: msg('sd.category.appearance', 'Appearance'),
+        checked: (ctx) => ctx.theme() === theme,
+        run: (ctx) => ctx.setTheme(theme),
+      }),
+    ),
+    defineCommand<DemoContext>({
+      id: 'sd.warm-paper',
+      title: msg('sd.warm-paper', 'Warm paper'),
+      category: msg('sd.category.appearance', 'Appearance'),
+      checked: (ctx) => ctx.pack() === 'sd.theme.warm-paper',
+      run: (ctx) => ctx.setPack(ctx.pack() ? null : 'sd.theme.warm-paper'),
+    }),
+    defineCommand<DemoContext>({
+      id: 'sd.contrast',
+      title: msg('sd.contrast', 'High contrast'),
+      category: msg('sd.category.appearance', 'Appearance'),
+      checked: (ctx) => ctx.highContrast(),
+      run: (ctx) => ctx.toggleHighContrast(),
+    }),
+    defineCommand<DemoContext>({
+      id: 'sd.motion',
+      title: msg('sd.motion', 'Reduce motion'),
+      category: msg('sd.category.appearance', 'Appearance'),
+      checked: (ctx) => ctx.reducedMotion(),
+      run: (ctx) => ctx.toggleReducedMotion(),
+    }),
+    defineCommand<DemoContext>({
+      id: 'sd.pseudo-locale',
+      title: msg('sd.pseudo-locale', 'Pseudo-locale'),
+      category: msg('sd.category.appearance', 'Appearance'),
+      checked: (ctx) => ctx.pseudoLocale(),
+      run: (ctx) => ctx.togglePseudoLocale(),
+    }),
     defineCommand<DemoContext>({
       id: 'sd.fail',
       title: msg('sd.fail', 'Fail on purpose'),
@@ -175,6 +219,14 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
     defineMenuItem({ menu: 'view', command: 'sd.compact', group: 'notices', order: 100 }),
     defineMenuItem({ menu: 'file', command: 'sd.job.start', group: 'jobs', order: 100 }),
     defineMenuItem({ menu: 'file', command: 'sd.job.quiet', group: 'jobs', order: 200 }),
+    // View > Appearance (plan S15): the theme, contrast, motion and the pseudo-locale.
+    defineMenuItem({ menu: 'sd.appearance', command: 'sd.theme.system', group: 'theme', order: 100 }),
+    defineMenuItem({ menu: 'sd.appearance', command: 'sd.theme.dark', group: 'theme', order: 110 }),
+    defineMenuItem({ menu: 'sd.appearance', command: 'sd.theme.light', group: 'theme', order: 120 }),
+    defineMenuItem({ menu: 'sd.appearance', command: 'sd.warm-paper', group: 'theme', order: 130 }),
+    defineMenuItem({ menu: 'sd.appearance', command: 'sd.contrast', group: 'access', order: 200 }),
+    defineMenuItem({ menu: 'sd.appearance', command: 'sd.motion', group: 'access', order: 210 }),
+    defineMenuItem({ menu: 'sd.appearance', command: 'sd.pseudo-locale', group: 'language', order: 300 }),
     // In the submenu Help > More demos.
     defineMenuItem({ menu: 'sd.more', command: 'sd.fail', group: 'demo', order: 100 }),
     // The context menu of the greetings count (pd-context-menu menu="sd.greetings"); it may repeat menu-bar commands.
@@ -190,7 +242,10 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       icon: 'sd:runner',
       order: 150,
       badge: (ctx) => ctx.attention(),
-      badgeLabel: (ctx) => `${ctx.attention()} runner${ctx.attention() === 1 ? '' : 's'} offline`,
+      badgeLabel: (ctx) =>
+        ctx.attention() === 1
+          ? $localize`:@@sd.runners.offline.one:1 runner offline`
+          : $localize`:@@sd.runners.offline.other:${ctx.attention()}:count: runners offline`,
       providers: () => import('./pages/runners.providers').then((m) => m.RUNNERS_PROVIDERS),
       load: () => import('./pages/runners-page').then((m) => m.RunnersPage),
     }),
@@ -238,4 +293,5 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
 /** The demo's submenus (plan S13), registered with `provideSubmenus`. */
 export const DEMO_SUBMENUS: readonly SubmenuDef<DemoContext>[] = [
   defineSubmenu<DemoContext>({ id: 'sd.more', menu: 'help', title: msg('sd.menu.more', 'More demos'), group: 'more', order: 900 }),
+  defineSubmenu<DemoContext>({ id: 'sd.appearance', menu: 'view', title: msg('sd.menu.appearance', 'Appearance'), group: 'appearance', order: 50 }),
 ];

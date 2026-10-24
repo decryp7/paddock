@@ -21,7 +21,7 @@ export async function settle(): Promise<void> {
 
 /** TestBed with a Settings window's providers over a memory engine (the fixtures Rust wrote). */
 export function settingsBed(
-  options: { backend?: SettingsBackend; pages?: readonly SettingsPageDef[]; extra?: unknown[]; appearance?: boolean; restart?: () => void } = {},
+  options: { backend?: SettingsBackend; pages?: readonly SettingsPageDef[]; extra?: unknown[]; restart?: () => void } = {},
 ): { backend: SettingsBackend } {
   const backend = options.backend ?? new MemorySettingsBackend();
   TestBed.configureTestingModule({
@@ -30,7 +30,6 @@ export function settingsBed(
       ...settingsWindowProviders({
         backend: () => backend,
         pages: options.pages ?? SPEC_PAGES,
-        appearance: options.appearance ?? false,
         ...(options.restart ? { restart: () => options.restart as () => void } : {}),
       }),
       ...((options.extra ?? []) as never[]),

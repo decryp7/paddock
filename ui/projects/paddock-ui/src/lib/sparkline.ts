@@ -60,7 +60,7 @@ export function sparklineGeometry(values: readonly number[], width: number, heig
 export class SuSparkline {
   readonly values = input.required<readonly number[]>();
   /** Accessible name, e.g. "CPU, last hour". The summary (latest and peak) is appended. */
-  readonly label = input<string>('Trend');
+  readonly label = input<string>($localize`:@@pd.ui.sparkline:Trend`);
   readonly height = input<number>(32);
   readonly area = input<boolean>(false);
   /** Fixed scale shared by sparklines in one row; omitted: fitted to the data. */

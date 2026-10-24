@@ -40,16 +40,24 @@ export function readRules(): Map<string, Vars> {
   return rules;
 }
 
-export const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter'] as const;
-export type Accent = (typeof ACCENTS)[number];
+// The accents the apps select (one per app): the same list `applyPaddockAppearance` accepts.
+export { SU_ACCENTS as ACCENTS } from '../../projects/paddock-ui/src/lib/appearance';
+import type { SuAccent } from '../../projects/paddock-ui/src/lib/appearance';
+export type Accent = SuAccent;
 export type Scheme = 'dark' | 'light';
+/** `more`: the high-contrast mode (`data-contrast="more"` or the OS's Increase Contrast). */
+export type Contrast = 'standard' | 'more';
 
-/** The resolved custom properties of one scheme + accent, as the browser would compute them (var() chains resolved). */
-export function resolve(rules: Map<string, Vars>, scheme: Scheme, accent: Accent): Vars {
+/**
+ * The resolved custom properties of one scheme + accent (+ contrast mode), as the browser would compute them (var()
+ * chains resolved). Rules apply in source order, which is also their specificity order here.
+ */
+export function resolve(rules: Map<string, Vars>, scheme: Scheme, accent: Accent, contrast: Contrast = 'standard'): Vars {
   const base = { ...rules.get(':root') };
   const forScheme = rules.get(`:root[data-theme=${scheme}]`) ?? {};
+  const forContrast = contrast === 'more' ? (rules.get(':root[data-contrast=more]') ?? {}) : {};
   const forAccent = rules.get(`:root[data-theme=${scheme}][data-accent=${accent}]`) ?? {};
-  const merged: Vars = { ...base, ...forScheme, ...forAccent };
+  const merged: Vars = { ...base, ...forScheme, ...forContrast, ...forAccent };
   const deref = (v: string, depth = 0): string => {
     const m = /^var\((--[\w-]+)\)$/.exec(v);
     return m && depth < 8 ? deref(merged[m[1] as string] ?? v, depth + 1) : v;

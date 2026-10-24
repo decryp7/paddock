@@ -5,6 +5,18 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Changed
+- Appearance has one writer and one source (rule 40, rule 34): `paddock_settings::shell::appearance` holds the whole
+  look (theme, contrast, motion, density and the theme pack; `PACK_ID`); `provideShellSettings` provides it as the
+  window's `APPEARANCE_SOURCE`, so `provideAppearance` follows the engine's Appearance settings in every window and
+  writes every change there (`SettingsAppearanceBackend`: `overview` in a main window and the Settings window,
+  `events` in a dialog window whose contract has no settings command, `provideSettingsAppearance`). The old
+  `appearanceFollower` / `followAppearance` / `appearanceOf` are gone (`appearanceFromSettings`, `appearanceToSettings`
+  replace the value mapping); the Settings window never writes the look itself. An e2e check allows only the appearance
+  store (and the pre-paint copy) to put the look on `<html>`, and a View-menu change and a Settings change in another
+  window never revert each other. The shell demo's in-memory settings engine is shared by the origin's windows and kept
+  in localStorage, as the Rust engine is.
+- The in-app menu bar (Windows, Linux, the browser) has no app menu: the title bar already names the app, so its entries
+  (Settings…, About, Quit) are at the end of File (`foldAppMenu`); the macOS menu bar keeps the app menu.
 - The "no UI timeout" lint (`uiTimeoutProblems`) flags only timers that give up on work: `Promise.race` against a
   timer, `AbortSignal.timeout`, `...timeout` helpers, and a `setTimeout`/`setInterval` whose callback rejects, aborts,
   cancels, fails or throws; debounce, retry and tick timers are allowed (plan §12). The dialog shell's close check and
@@ -15,7 +27,6 @@ Conventional Commits; one semver tag for the whole repo.
 - `buildManifest` states a dialog's `minSize` as the contract file does (`dialogMinSize`: the kind's floor, a side left
   out filled from `DIALOG_MIN`); `DIALOG_MIN` and `VIEWER_MIN` now live in the shell core.
 - The Playwright config takes its ports through `e2ePort` (CI sets `PW_PORT` and `SHELL_DEMO_PORT`).
-
 - Pages frame, review round 3: status items sit at equal distances (4 px gap, 4 px item padding; the service chip
   keeps 5 px of margin for its visible edge) and the chip looks pressed while its details are open. `shell-demo`: the
   status item says the table's exceptions ("1 offline · 1 updating", the full count in its name and tooltip), and the
@@ -46,6 +57,30 @@ Conventional Commits; one semver tag for the whole repo.
   popover, keyboard focus and macOS frames.
 
 ### Added
+- Theme and i18n in the app shell (plan S15, ADR 0012 §5-6, decision D6). Tokens: accents for Pacenotes (route green,
+  `#7fc85a` / `#3b7114`, fill `#3d7515`) and Sighter (orchid, `#cc8cf2` / `#a224cc`, fill `#a224cc`), a complete high
+  contrast mode (opaque hairlines and scrim, outlined popovers, subtle text as muted; `data-contrast="more|off"`) and
+  reduced motion (`data-motion="reduce|full"`, durations at most 100 ms, `--pd-motion-scale`); `applyPaddockAppearance`
+  takes `contrast` and `motion`. Token tests for seven accents in both schemes and both contrast modes, high contrast
+  and reduced motion (289 tests); the colour maths moved to the shell and is shared with `themeProblems`.
+  `@decryp7/paddock-ui/shell`: theme packs as the `themes` contribution kind (`defineTheme`, `provideThemes`,
+  `themeProblems`), the window's appearance (`provideAppearance`, `AppearanceStore` with the choice resolved against
+  the OS, `applyStoredAppearance` before the first paint) synced across windows by `BrowserAppearanceBackend`
+  (BroadcastChannel) or `IpcAppearanceBackend` (`paddock://appearance`), and `msg()` texts read through the loaded
+  translations (`localizedText`). `@decryp7/paddock-ui/shell/i18n`: `initI18n` (runtime-loaded translation chunks, a
+  broken file falls back to English), `LanguageStore`, locale, plural and number helpers. Every user-visible string of
+  the root components, the frame parts and of `shell/jobs`, `shell/notify`, `shell/dialogs`, `shell/startup`, `shell/menu`, `shell/pages` and the Settings window's own words is a
+  `$localize` message with a `@@pd.` id (201 in `i18n/messages.pd.xlf`, shipped with its pseudo-locale); the service
+  chip names a service by its contributed `defineHealthService` label. Bin `paddock-i18n` (`catalog`: `$localize`
+  extraction plus `msg()` and `$localize` with `@@id`s scanned from the sources, or a manifest, into a sorted XLIFF
+  catalog; `merge`: the shell's and the app's translations into the app's loader file, the pseudo-locale generated;
+  `--check` for CI) and `npm run i18n` /
+  `i18n:check` (CI). `shell-demo`: View > Appearance (theme, a sample pack, high contrast, reduced motion,
+  pseudo-locale), Chromium e2e for switching across windows and a pseudo-locale run that finds no unmarked English in
+  any shell part, and review screenshots in `ui/docs/screenshots/shell-demo/`. With Settings (plan S10) the look has
+  one owner: `SettingsAppearanceBackend` / `settingsAppearanceBackend({ local, gate })` in `/shell/settings` keeps theme
+  and density in the engine's Appearance section (contrast, motion and the pack in the window), and the demo passes
+  `appearance: false` to `provideShellSettings`.
 - Test kit (plan S16, ADR 0012 §7). `@decryp7/paddock-e2e` (no longer a scaffold): `test` and `expect` with the
   fixtures `app` (page objects for the frame, sidebar, status bar, notifications, jobs, menus, dialogs and Settings) and
   `pageErrors`, and a worker check that refuses the installed Chrome or Edge (`assertChromeForTesting` for the config,
@@ -56,18 +91,17 @@ Conventional Commits; one semver tag for the whole repo.
   `shell/testing`: `provideShellTesting` (zoneless, shell core, `RecordingShellPorts`, `ManualIdle`, contributions,
   context, `windowReady` set), `ManualClock`, `settle` and `render` on `whenStable` (rule 38), `lazyExportProblems`;
   the static source checks (lazy registration files, lazy exports of every entry point, no UI timeout, the splash) run
-  in `reference-sources.spec.ts` instead of the e2e.
+  in `reference-sources.spec.ts` instead of the e2e, with S15's one-writer-of-the-look and catalog coverage checks.
 - `shell/settings/window`: the Settings window, its section form and field control and `settingsWindowProviders`, split
   from `shell/settings` so a main window loads none of it (and no `@angular/forms`); a settings page without `load` is
   its Rust section in the window's generic form. The status items' components are exported as types only (their words
-  from pure files), so they stay chunks of their own. `shell-demo`'s main window loads 523.9 kB of JavaScript before
-  first paint instead of 635.8 kB.
+  from pure files), so they stay chunks of their own. `shell-demo` loads 545.6 kB of JavaScript before first paint
+  in its main window instead of 661.9 kB, and 437.5 kB instead of 549.8 kB in a dialog window.
 - `windowReady` (`shell/startup`): set once the window's ready reply was handled; `NATIVE_MENU_GATE` defaults to it
   (with the app context), so `shell/pages` no longer wraps `AFTER_READY` and `PAGES_WINDOW_READY` is gone.
 - `DialogService.open(def, { inputs })` types the inputs from the content component's `input()` signals
   (`DialogInputsOf`); `defineDialog` keeps the component type of its `load`.
 - `paddock-health`: `NoticesSnapshot.revision` (also on every `NoticesEvent`), raised by every change of any list.
-
 - Settings (plan S10, rule 21, ADR 0012; ported from Debrief's settings schema, `config_store.rs` and `settings.rs`):
   crate `paddock-settings` 0.1.0 with the section schema (nine field kinds, schema check at registration), validation
   in Rust (`validate`, `sanitize`, `ValidValues::decode`), the versioned `settings.json` (missing, damaged, newer or
@@ -174,6 +208,8 @@ Conventional Commits; one semver tag for the whole repo.
   booted from `#/dialog`, and a Chromium e2e over the contract file.
 
 ### Changed
+- `@angular/localize` (^22) is a peer dependency of `@decryp7/paddock-ui`: apps add `@angular/localize/init` to their
+  polyfills (the root components' texts are `$localize` messages now). The gallery and the shell demo do.
 - `paddock-dialogs`: dialog ids may contain `.`, so the shell's namespaced contribution ids (`sd.about`) are valid
   contract keys; a test parses the shell demo's generated contract file.
 - Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,

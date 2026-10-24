@@ -16,6 +16,8 @@ const fakeTauri = (page: Page, recovered: Recovered, ui: unknown, hold: boolean)
 /** Rust's ticker: ping `seq` to every `paddock://ping` listener. */
 const ping = (ipc: TauriFake, seq: number) => ipc.emit('paddock://ping', { seq });
 const pongs = async (ipc: TauriFake) => (await ipc.callsOf('window_pong')).map((c) => ({ seq: (c.args as { seq: number }).seq, at: c.at }));
+/** The event names the window listens for (`plugin:event|listen`); the appearance listener (plan S15) is not a ping one. */
+const listens = async (ipc: TauriFake) => (await ipc.callsOf('plugin:event|listen')).map((c) => (c.args as { event?: string }).event ?? '');
 
 const heading = (page: Page) => page.getByRole('heading', { level: 1, name: 'Overview' });
 const note = (page: Page) => page.getByRole('textbox', { name: 'Note' });
@@ -45,10 +47,10 @@ test.describe('start-up contract (plan S7)', () => {
     await expect(note(page)).toBeVisible();
     // Ready is reported after the first paint, without waiting for any other reply; no ping listener before the reply.
     await expect.poll(() => ipc.names()).toContain('window_ready');
-    expect(await ipc.names()).not.toContain('plugin:event|listen');
+    expect(await listens(ipc)).not.toContain('paddock://ping');
     // The process resumes: the replies arrive; the window stays usable and listens for pings.
     await ipc.release();
-    await expect.poll(() => ipc.names()).toContain('plugin:event|listen');
+    await expect.poll(() => listens(ipc)).toContain('paddock://ping');
     await page.getByRole('button', { name: 'Say hello' }).click();
     await expect(app.notifications.toasts.getByText('Hello from the shell demo (1)')).toBeVisible();
     expect(await ipc.callsOf('window_ready')).toHaveLength(1);
@@ -72,7 +74,7 @@ test.describe('start-up contract (plan S7)', () => {
   test('the note is checkpointed to Rust after a quiet second, once the ready reply was handled', async ({ page }) => {
     const ipc = await fakeTauri(page, null, null, false);
     await page.goto('/');
-    await expect.poll(() => ipc.names()).toContain('plugin:event|listen');
+    await expect.poll(() => listens(ipc)).toContain('paddock://ping');
     await note(page).fill('order 42');
     await expect
       .poll(async () => (await ipc.callsOf('ui_checkpoint')).map((c) => c.args))
@@ -82,7 +84,7 @@ test.describe('start-up contract (plan S7)', () => {
   test('a page answers each ping once ready, and a page that stops answering answers nothing until it runs again', async ({ page }) => {
     const ipc = await fakeTauri(page, null, null, false);
     await page.goto('/');
-    await expect.poll(() => ipc.names()).toContain('plugin:event|listen');
+    await expect.poll(() => listens(ipc)).toContain('paddock://ping');
     await ping(ipc, 1);
     await ping(ipc, 2);
     await expect.poll(async () => (await pongs(ipc)).map((p) => p.seq)).toEqual([1, 2]);

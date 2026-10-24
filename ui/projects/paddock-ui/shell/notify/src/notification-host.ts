@@ -25,7 +25,7 @@ interface Timer {
   selector: 'pd-notification-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="stack" role="region" aria-label="Notifications" aria-live="polite">
+    <div class="stack" role="region" [attr.aria-label]="t.toasts" aria-live="polite">
       @for (n of items(); track n.cause) {
         <div
           class="toast"
@@ -51,7 +51,7 @@ interface Timer {
                 <button type="button" class="btn" [class.primary]="a.kind === 'primary'" [class.ghost]="a.kind === 'ghost'" [attr.data-testid]="'notification-action-' + (a.id ?? $index)" (click)="run(n, a)">{{ a.label }}</button>
               }
               @if (n.details) {
-                <button type="button" class="btn ghost" [attr.aria-expanded]="isOpen(n)" data-testid="notification-details-toggle" (click)="toggle(n)">Details</button>
+                <button type="button" class="btn ghost" [attr.aria-expanded]="isOpen(n)" data-testid="notification-details-toggle" (click)="toggle(n)">{{ t.details }}</button>
               }
             </div>
           }
@@ -61,7 +61,7 @@ interface Timer {
           @if (failed()[n.cause]; as why) {
             <div class="body err" role="alert">{{ why }}</div>
           }
-          <button type="button" class="x" aria-label="Dismiss notification" data-testid="notification-dismiss" (click)="n.dismiss()">
+          <button type="button" class="x" [attr.aria-label]="t.dismissToast" data-testid="notification-dismiss" (click)="n.dismiss()">
             <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
           </button>
         </div>
@@ -95,6 +95,12 @@ interface Timer {
   `,
 })
 export class PdNotificationHost {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    toasts: $localize`:@@pd.notifications.toasts:Notifications`,
+    dismissToast: $localize`:@@pd.notifications.dismiss-toast:Dismiss notification`,
+    details: $localize`:@@pd.notifications.details:Details`,
+  };
   private readonly sources = inject(NOTIFICATION_SOURCES, { optional: true }) ?? [];
   private readonly clock = inject(NOTIFY_CLOCK);
   protected readonly items = computed(() => visibleNotifications(this.sources.flatMap((s) => s.items())));
@@ -187,7 +193,7 @@ export class PdNotificationHost {
     try {
       await a.run();
     } catch (e) {
-      this.failed.update((f) => ({ ...f, [n.cause]: errorMessage(e, 'The action failed.') }));
+      this.failed.update((f) => ({ ...f, [n.cause]: errorMessage(e, $localize`:@@pd.notifications.action-failed:The action failed.`) }));
     }
   }
 }

@@ -61,11 +61,11 @@ export function rangeHint(kind: FieldKind): string {
     case 'size':
       return `${formatBytes(kind.minBytes)} – ${formatBytes(kind.maxBytes)}`;
     case 'text':
-      return `up to ${kind.maxLen} characters`;
+      return $localize`:@@pd.settings.hint.text:up to ${kind.maxLen}:count: characters`;
     case 'stringList':
-      return `up to ${kind.maxItems} items, one per line`;
+      return $localize`:@@pd.settings.hint.list:up to ${kind.maxItems}:count: items, one per line`;
     case 'path':
-      return kind.dir ? 'folder' : 'file';
+      return kind.dir ? $localize`:@@pd.settings.hint.folder:folder` : $localize`:@@pd.settings.hint.file:file`;
     default:
       return '';
   }
@@ -98,19 +98,19 @@ export function precheck(field: SettingField, value: unknown): string | null {
   switch (k.type) {
     case 'int':
     case 'float':
-      if (num === null) return 'Enter a number.';
-      if (k.type === 'int' && !Number.isInteger(num)) return 'Enter a whole number.';
+      if (num === null) return $localize`:@@pd.settings.check.number:Enter a number.`;
+      if (k.type === 'int' && !Number.isInteger(num)) return $localize`:@@pd.settings.check.whole:Enter a whole number.`;
       return num < k.min || num > k.max ? `Between ${rangeHint(k)}.` : null;
     case 'duration':
     case 'size': {
       const [min, max] = k.type === 'duration' ? [k.minMs, k.maxMs] : [k.minBytes, k.maxBytes];
-      if (num === null) return 'Enter a number.';
+      if (num === null) return $localize`:@@pd.settings.check.number:Enter a number.`;
       return num < min || num > max ? `Between ${rangeHint(k)}.` : null;
     }
     case 'text':
-      return typeof value === 'string' && [...value].length > k.maxLen ? `At most ${k.maxLen} characters.` : null;
+      return typeof value === 'string' && [...value].length > k.maxLen ? $localize`:@@pd.settings.check.max-len:At most ${k.maxLen}:count: characters.` : null;
     case 'stringList':
-      return Array.isArray(value) && value.length > k.maxItems ? `At most ${k.maxItems} items.` : null;
+      return Array.isArray(value) && value.length > k.maxItems ? $localize`:@@pd.settings.check.max-items:At most ${k.maxItems}:count: items.` : null;
     default:
       return null;
   }
@@ -198,10 +198,17 @@ export interface SettingsNavGroup {
   readonly items: readonly SettingsNavItem[];
 }
 
+/** The group headings, read when shown (so they are in the window's language). */
 export const SETTINGS_GROUP_TITLES: Readonly<Record<SettingsGroup, string>> = {
-  application: 'Application',
-  features: 'Features',
-  advanced: 'Advanced',
+  get application(): string {
+    return $localize`:@@pd.settings.group.application:Application`;
+  },
+  get features(): string {
+    return $localize`:@@pd.settings.group.features:Features`;
+  },
+  get advanced(): string {
+    return $localize`:@@pd.settings.group.advanced:Advanced`;
+  },
 };
 
 /**

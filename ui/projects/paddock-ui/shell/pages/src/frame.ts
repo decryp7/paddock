@@ -30,7 +30,7 @@ import { PdPagesSidebar } from './sidebar';
     '(document:keydown)': 'onKey($event)',
   },
   template: `
-    <a class="skip" href="#pd-main" (click)="skip($event)">Skip to page</a>
+    <a class="skip" href="#pd-main" (click)="skip($event)">{{ t.skip }}</a>
     <header class="title" data-pd-region="title" tabindex="-1">
       <pd-title-bar [appName]="config.appName">
         <button type="button" slot="lead" class="toggle" data-testid="sidebar-toggle" [attr.aria-label]="toggleLabel()" [attr.title]="toggleLabel()"
@@ -42,7 +42,7 @@ import { PdPagesSidebar } from './sidebar';
       </pd-title-bar>
     </header>
     <div class="body">
-      <nav id="pd-pages-nav" class="sidebar" aria-label="Pages" data-pd-region="sidebar" tabindex="-1" [class.drawer]="store.drawer()" [hidden]="store.mode() === 'overlay' && !store.drawer()">
+      <nav id="pd-pages-nav" class="sidebar" [attr.aria-label]="t.pages" data-pd-region="sidebar" tabindex="-1" [class.drawer]="store.drawer()" [hidden]="store.mode() === 'overlay' && !store.drawer()">
         <pd-pages-sidebar [labelled]="store.labelled()" (navigated)="store.closeDrawer()">
           <ng-content select="[slot=sidebar]" />
         </pd-pages-sidebar>
@@ -54,7 +54,7 @@ import { PdPagesSidebar } from './sidebar';
         <router-outlet />
       </main>
     </div>
-    <footer class="status" aria-label="Status bar" data-pd-region="status" tabindex="-1" [attr.inert]="store.drawer() ? '' : null">
+    <footer class="status" [attr.aria-label]="t.statusBar" data-pd-region="status" tabindex="-1" [attr.inert]="store.drawer() ? '' : null">
       <pd-status-bar />
     </footer>
     <pd-notification-host />
@@ -92,6 +92,12 @@ import { PdPagesSidebar } from './sidebar';
   `,
 })
 export class PdShellFrame {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    skip: $localize`:@@pd.pages.skip:Skip to page`,
+    pages: $localize`:@@pd.pages.nav:Pages`,
+    statusBar: $localize`:@@pd.pages.status-bar:Status bar`,
+  };
   protected readonly store = inject(PagesFrameStore);
   protected readonly config = inject(PAGES_CONFIG);
   /** The macOS app has its menus in the native menu bar: the title bar keeps clear of the window buttons (78 px). */
@@ -102,9 +108,9 @@ export class PdShellFrame {
 
   protected readonly toggleLabel = computed(() => {
     const mode = this.store.mode();
-    if (mode === 'expanded') return 'Collapse sidebar';
-    if (this.store.fit() === 'expanded') return 'Expand sidebar';
-    return this.store.drawer() ? 'Hide pages' : 'Show pages';
+    if (mode === 'expanded') return $localize`:@@pd.pages.sidebar.collapse:Collapse sidebar`;
+    if (this.store.fit() === 'expanded') return $localize`:@@pd.pages.sidebar.expand:Expand sidebar`;
+    return this.store.drawer() ? $localize`:@@pd.pages.sidebar.hide:Hide pages` : $localize`:@@pd.pages.sidebar.show:Show pages`;
   });
 
   constructor() {

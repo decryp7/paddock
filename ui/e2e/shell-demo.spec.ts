@@ -50,8 +50,8 @@ test.describe('contributions (plan S2)', () => {
   test('every contribution kind is registered', async ({ page }) => {
     await page.goto('/#/about');
     const rows = page.getByRole('table', { name: 'Registered contributions' }).getByRole('row');
-    await expect(rows).toHaveCount(11);
-    for (const kind of ['commands', 'keybindings', 'menus', 'pages', 'statusItems', 'settingsPages', 'dialogs', 'healthServices', 'notificationKinds', 'submenus']) {
+    await expect(rows).toHaveCount(12);
+    for (const kind of ['commands', 'keybindings', 'menus', 'pages', 'statusItems', 'settingsPages', 'dialogs', 'healthServices', 'notificationKinds', 'themes', 'submenus']) {
       await expect(rows.filter({ has: page.getByRole('cell', { name: kind, exact: true }) })).toHaveText(new RegExp(`^${kind}[1-9]\\d*$`));
     }
   });
@@ -140,8 +140,9 @@ test.describe('menus and keys (plan S13)', () => {
 
   test('the menu bar shows the contributed menus with keys, states and a submenu, and runs items', async ({ app, page }) => {
     const mac = await app.menus.isMac();
-    // The app menu (named after the app) holds Settings… (plan S10); on macOS it is the native app menu.
-    await expect(app.menus.bar.getByRole('menuitem')).toHaveText(['Paddock demo', 'File', 'View', 'Help']);
+    // In the window the app menu's entries (Settings…, plan S10) are at the end of File: the title bar names the app; on
+    // macOS they are in the native app menu.
+    await expect(app.menus.bar.getByRole('menuitem')).toHaveText(['File', 'View', 'Help']);
     const help = await app.menus.open('Help');
     const greet = help.getByRole('menuitem', { name: 'Say hello' });
     await expect(greet).toContainText(mac ? '⇧⌘H' : 'Ctrl+Shift+H');

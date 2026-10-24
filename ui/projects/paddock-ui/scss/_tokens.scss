@@ -5,9 +5,10 @@
 //
 // Selecting things on <html>:
 //   data-theme="dark|light"          (absent: follow prefers-color-scheme, dark when unknown)
-//   data-accent="debrief|pitcrew|pitwall|dyno|spotter"   (absent: debrief)
+//   data-accent="debrief|pitcrew|pitwall|dyno|spotter|pacenotes|sighter"   (absent: debrief)
 //   data-density="comfortable|standard|compact"          (absent: standard)
-//   data-contrast="more"             (absent: follow prefers-contrast)
+//   data-contrast="more|off"         (absent: follow prefers-contrast)
+//   data-motion="reduce|full"        (absent: follow prefers-reduced-motion)
 
 // ---------- Scheme-independent ----------
 :root {
@@ -63,6 +64,8 @@
   --pd-ease-enter: cubic-bezier(0.2, 0, 0, 1);
   --pd-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --pd-ease-move: cubic-bezier(0.3, 0, 0.2, 1);
+  // Multiplies every translation and scale offset of an animation (0 under reduced motion: fades only).
+  --pd-motion-scale: 1;
 
   // Layers.
   --pd-z-sticky: 10;
@@ -211,10 +214,24 @@
   --pd-skeleton-shine: #f6f7f9;
 }
 
+// High contrast (design guide §4 "Contrast targets"; macOS Increase Contrast, Windows contrast themes): hairlines become
+// strong borders, translucency goes (opaque scrim, outlined instead of shadowed popovers), subtle text is muted text.
 @mixin high-contrast {
   --pd-hairline: var(--pd-border-strong);
   --pd-border-strong: var(--pd-border-control);
   --pd-surface-3: var(--pd-surface-1);
+  --pd-text-subtle: var(--pd-text-muted);
+  --pd-scrim: rgb(0 0 0 / 0.78);
+  --pd-shadow-1: none;
+  --pd-shadow-2: 0 0 0 1px var(--pd-border-control);
+  --pd-shadow-3: 0 0 0 1px var(--pd-border-control);
+}
+
+// Reduced motion (design guide §9): no translation or scaling, fades of at most 100 ms, state changes instant.
+@mixin reduced-motion {
+  --pd-duration: var(--pd-duration-micro);
+  --pd-duration-large: var(--pd-duration-micro);
+  --pd-motion-scale: 0;
 }
 
 :root {
@@ -245,6 +262,16 @@
   @include high-contrast;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) {
+    @include reduced-motion;
+  }
+}
+
+:root[data-motion='reduce'] {
+  @include reduced-motion;
+}
+
 // ---------- Accents ----------
 // accent = text, links, focus ring, selection icon (>= 4.5:1 on the surfaces); fill = button background with white text.
 $accents: (
@@ -253,6 +280,8 @@ $accents: (
   'pitwall': (dark: #a58bfa, light: #6d3fd6, fill: #7546e0),
   'dyno': (dark: #f063a8, light: #b01e6e, fill: #c2287c),
   'spotter': (dark: #2cc4b0, light: #0b7a6e, fill: #0e8577),
+  'pacenotes': (dark: #7fc85a, light: #3b7114, fill: #3d7515),
+  'sighter': (dark: #cc8cf2, light: #a224cc, fill: #a224cc),
 );
 
 @mixin accent-vars($text, $fill) {

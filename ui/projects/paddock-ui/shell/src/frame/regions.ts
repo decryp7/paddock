@@ -7,8 +7,18 @@ export const REGION_ATTR = 'data-pd-region';
 
 /** The keys the frame handles itself; `provideShellPages` reserves them so a user binding cannot take them. */
 export const REGION_KEYS = [
-  { key: 'F6', description: 'Focus next region' },
-  { key: 'Shift+F6', description: 'Focus previous region' },
+  {
+    key: 'F6',
+    get description(): string {
+      return $localize`:@@pd.shell.region.next:Focus next region`;
+    },
+  },
+  {
+    key: 'Shift+F6',
+    get description(): string {
+      return $localize`:@@pd.shell.region.previous:Focus previous region`;
+    },
+  },
 ] as const;
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';

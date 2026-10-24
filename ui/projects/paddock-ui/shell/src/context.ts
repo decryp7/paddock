@@ -151,7 +151,7 @@ export class ShellContextHost {
   prefetchWhenIdle(): void {
     if (this.loaded()) return;
     this.idle(() => {
-      this.load().catch((e: unknown) => this.ports.notify({ level: 'error', message: `The app context failed to load: ${describe(e)}` }));
+      this.load().catch((e: unknown) => this.ports.notify({ level: 'error', message: $localize`:@@pd.shell.context-failed:The app context failed to load: ${describe(e)}:cause:` }));
     });
   }
 }

@@ -72,7 +72,7 @@ export const SettingsStore = signalStore(
       replace(id, r.values, r.restartRequired ? true : undefined);
       patchState(store, (st) => ({
         refusals: without(st.refusals, id),
-        notice: `${what} saved.`,
+        notice: $localize`:@@pd.settings.store.saved:${what}:what: saved.`,
         actionError: null,
         restartChanges: [...new Set([...st.restartChanges, ...restart])],
       }));
@@ -86,7 +86,7 @@ export const SettingsStore = signalStore(
           const overview = await backend.overview();
           patchState(store, { overview }, setLoaded());
         } catch (e) {
-          patchState(store, setError(errorMessage(e, 'The settings could not be loaded.')));
+          patchState(store, setError(errorMessage(e, $localize`:@@pd.settings.store.load-failed:The settings could not be loaded.`)));
         }
       },
       section: (id: string): SectionView | undefined => sectionOf(id),
@@ -114,7 +114,7 @@ export const SettingsStore = signalStore(
           const r = await backend.set(id, changes);
           return take(id, changes, r, what);
         } catch (e) {
-          patchState(store, { actionError: errorMessage(e, 'The settings could not be changed.'), notice: null });
+          patchState(store, { actionError: errorMessage(e, $localize`:@@pd.settings.store.set-failed:The settings could not be changed.`), notice: null });
           return false;
         }
       },
@@ -127,10 +127,10 @@ export const SettingsStore = signalStore(
           const r = await backend.reset(id, key);
           const sent: SettingsChanges = Object.fromEntries((key === undefined ? section.fields.map((f) => f.key) : [key]).map((k) => [k, null]));
           const ok = take(id, sent, r, label);
-          if (ok && key === undefined) patchState(store, { notice: `${section.title} reset to defaults.` });
+          if (ok && key === undefined) patchState(store, { notice: $localize`:@@pd.settings.store.reset-done:${section.title}:section: reset to defaults.` });
           return ok;
         } catch (e) {
-          patchState(store, { actionError: errorMessage(e, 'The settings could not be reset.'), notice: null });
+          patchState(store, { actionError: errorMessage(e, $localize`:@@pd.settings.store.reset-failed:The settings could not be reset.`), notice: null });
           return false;
         }
       },

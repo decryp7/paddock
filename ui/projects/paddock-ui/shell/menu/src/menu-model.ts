@@ -104,6 +104,20 @@ export function buildMenus(order: readonly { readonly id: string; readonly label
   return order.map((m) => ({ id: m.id, label: m.label, items: buildMenu(m.id, src) })).filter((m) => m.items.length > 0);
 }
 
+/**
+ * The in-app menu bar's menus (Windows, Linux, the browser): no app menu (the title bar already names the app, so a menu
+ * titled with the app's name said it twice); its entries (Settings, About, Quit) go to the end of File, after a
+ * separator, as Windows and Linux apps place them. The macOS menu bar keeps the app menu.
+ */
+export function foldAppMenu(menus: readonly TopMenu[], fileLabel: string): TopMenu[] {
+  const app = menus.find((m) => m.id === 'app');
+  if (!app) return [...menus];
+  const rest = menus.filter((m) => m !== app);
+  const file = rest.find((m) => m.id === 'file');
+  if (!file) return [{ id: 'file', label: fileLabel, items: app.items }, ...rest];
+  return rest.map((m) => (m === file ? { ...m, items: [...m.items, { kind: 'separator' } as const, ...app.items] } : m));
+}
+
 /** The items at `path` (a top menu id, then submenu ids) in `menus`; empty once it is gone. */
 export function itemsAt(menus: readonly TopMenu[], path: readonly string[]): readonly MenuNode[] {
   let items: readonly MenuNode[] = menus.find((m) => m.id === path[0])?.items ?? [];

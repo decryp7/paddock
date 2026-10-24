@@ -8,10 +8,6 @@ import type { RaiseCap, ServiceHealth } from './wire.types';
 
 let nextId = 0;
 
-
-
-
-
 /**
  * The one place a service outage is stated (ADR 0010, Debrief ADR 0055): a status-bar chip that appears when a service is
  * not working (a count when several) and opens the plain message, the next step, the technical details and the Repair
@@ -35,23 +31,23 @@ let nextId = 0;
         <span class="text">{{ compact() ? compactText() : text() }}</span>
       </button>
       @if (open()) {
-        <div class="popover" role="region" aria-label="Services" [id]="panelId" data-testid="service-health-details">
+        <div class="popover" role="region" [attr.aria-label]="t.popover" [id]="panelId" data-testid="service-health-details">
           @if (unknown(); as why) {
             <section class="svc">
-              <strong>The state of the services is not known yet.</strong>
+              <strong>{{ t.unknown }}</strong>
               <span class="hint">{{ why }}</span>
-              <button type="button" class="btn primary" data-testid="service-health-reload" (click)="store.load()">Try again</button>
+              <button type="button" class="btn primary" data-testid="service-health-reload" (click)="store.load()">{{ t.tryAgain }}</button>
             </section>
           }
           @for (s of problems(); track s.service) {
             <section class="svc" [attr.data-testid]="'service-health-' + s.service" [attr.aria-label]="shortName(s.label)">
-              <strong>{{ s.cause?.message ?? shortName(s.label) + ' is not working.' }}</strong>
+              <strong>{{ s.cause?.message ?? notWorking(s.label) }}</strong>
               @if (s.cause?.hint; as hint) {
                 <span class="hint">{{ hint }}</span>
               }
               <div class="actions">
                 @if (s.state === 'repairing') {
-                  <span class="hint" role="status">Repairing…</span>
+                  <span class="hint" role="status">{{ t.repairing }}</span>
                 } @else if (s.repair; as action) {
                   @if (canRepair(s)) {
                     <button type="button" class="btn primary" [attr.data-testid]="'service-health-repair-' + s.service" (click)="repair(s)">{{ label(action, s.label) }}</button>
@@ -59,7 +55,7 @@ let nextId = 0;
                 }
                 @if (s.cause?.raiseCap; as cap) {
                   @if (canRaise) {
-                    <button type="button" class="btn" [attr.data-testid]="'service-health-raise-cap-' + s.service" (click)="raise(cap)">Raise the cap…</button>
+                    <button type="button" class="btn" [attr.data-testid]="'service-health-raise-cap-' + s.service" (click)="raise(cap)">{{ t.raiseCap }}</button>
                   }
                 }
               </div>
@@ -67,7 +63,7 @@ let nextId = 0;
                 <span class="err" role="alert">{{ why }}</span>
               }
               @if (s.cause?.detail; as detail) {
-                <details><summary>Technical details</summary><code>{{ detail }}</code></details>
+                <details><summary>{{ t.technicalDetails }}</summary><code>{{ detail }}</code></details>
               }
             </section>
           }
@@ -106,6 +102,15 @@ let nextId = 0;
   `,
 })
 export class PdServiceStatus {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    popover: $localize`:@@pd.health.popover:Services`,
+    unknown: $localize`:@@pd.health.unknown:The state of the services is not known yet.`,
+    tryAgain: $localize`:@@pd.health.try-again:Try again`,
+    repairing: $localize`:@@pd.health.repairing:Repairing…`,
+    raiseCap: $localize`:@@pd.health.raise-cap:Raise the cap…`,
+    technicalDetails: $localize`:@@pd.health.technical-details:Technical details`,
+  };
   protected readonly store = inject(ServiceHealthStore);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly raiseCap = inject(RAISE_CAP, { optional: true });
@@ -128,7 +133,10 @@ export class PdServiceStatus {
     },
   });
   protected readonly allRepairing = computed(() => this.problems().length > 0 && this.problems().every((p) => p.state === 'repairing'));
-  protected readonly text = computed(() => (this.problems().length ? chipText(this.problems()) : 'Services: unknown'));
+  protected readonly text = computed(() => (this.problems().length ? chipText(this.problems()) : $localize`:@@pd.health.chip.unknown:Services: unknown`));
+  protected notWorking(label: string): string {
+    return $localize`:@@pd.health.not-working:${shortName(label)}:service: is not working.`;
+  }
   /** The status bar is narrow: the chip shows its compact form. */
   protected readonly compact = inject(STATUS_COMPACT, { optional: true }) ?? signal(false);
   protected readonly compactText = computed(() => chipCompactText(this.problems()));

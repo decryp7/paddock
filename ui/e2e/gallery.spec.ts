@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const THEMES = ['dark', 'light'] as const;
-const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter'] as const;
+const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter'] as const;
 const SECTIONS = [
   'card',
   'status-pill',

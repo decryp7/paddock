@@ -38,6 +38,56 @@ export const SETTINGS_OVERVIEW_FIXTURE: SettingsOverview = {
         },
         {
           "advanced": false,
+          "default": "system",
+          "description": "Stronger borders and no translucency, or follow the operating system.",
+          "key": "contrast",
+          "kind": {
+            "options": [
+              {
+                "label": "Same as the system",
+                "value": "system"
+              },
+              {
+                "label": "Standard",
+                "value": "standard"
+              },
+              {
+                "label": "High contrast",
+                "value": "more"
+              }
+            ],
+            "type": "enum"
+          },
+          "label": "Contrast",
+          "restartRequired": false
+        },
+        {
+          "advanced": false,
+          "default": "system",
+          "description": "Reduced: fades only, no movement. Or follow the operating system.",
+          "key": "motion",
+          "kind": {
+            "options": [
+              {
+                "label": "Same as the system",
+                "value": "system"
+              },
+              {
+                "label": "Reduced",
+                "value": "reduce"
+              },
+              {
+                "label": "Full",
+                "value": "full"
+              }
+            ],
+            "type": "enum"
+          },
+          "label": "Motion",
+          "restartRequired": false
+        },
+        {
+          "advanced": false,
           "default": "standard",
           "description": "How much space controls and rows take.",
           "key": "density",
@@ -60,13 +110,29 @@ export const SETTINGS_OVERVIEW_FIXTURE: SettingsOverview = {
           },
           "label": "Density",
           "restartRequired": false
+        },
+        {
+          "advanced": true,
+          "default": "",
+          "description": "An app's colour pack over the theme; empty for none. Never applied in high contrast.",
+          "key": "pack",
+          "kind": {
+            "maxLen": 128,
+            "pattern": "(?:[a-z][a-z0-9]*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)+)?",
+            "type": "text"
+          },
+          "label": "Theme pack",
+          "restartRequired": false
         }
       ],
       "id": "pd.appearance",
       "owner": "shell",
       "title": "Appearance",
       "values": {
+        "contrast": "system",
         "density": "standard",
+        "motion": "system",
+        "pack": "",
         "theme": "system"
       }
     },

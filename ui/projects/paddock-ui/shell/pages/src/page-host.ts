@@ -17,12 +17,18 @@ import { PAGE_DATA, ShellPages } from './pages';
     @if (page) {
       <pd-part-outlet [part]="page" [label]="page.title.text" variant="page" />
     } @else {
-      <pd-error-state heading="This page does not exist." cause="Choose a page in the sidebar." retryLabel="Go to the first page" (retry)="home()" />
+      <pd-error-state [heading]="t.missing" [cause]="t.choose" [retryLabel]="t.home" (retry)="home()" />
     }
   `,
   styles: `:host { display: block; min-width: 0; }`,
 })
 export class PdPageHost {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    missing: $localize`:@@pd.pages.missing:This page does not exist.`,
+    choose: $localize`:@@pd.pages.missing.cause:Choose a page in the sidebar.`,
+    home: $localize`:@@pd.pages.missing.home:Go to the first page`,
+  };
   private readonly route = inject(ActivatedRoute);
   protected readonly page: PageDef | undefined = inject(ContributionRegistry).find<PageDef>('pages', String(this.route.snapshot.data[PAGE_DATA] ?? ''));
 

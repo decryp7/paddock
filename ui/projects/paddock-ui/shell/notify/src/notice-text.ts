@@ -16,5 +16,5 @@ export function noticeTime(at: number, now: number): string {
 
 /** What the status item says: the unread count when there is one. */
 export function notificationsStatusText(unread: number): string {
-  return unread > 0 ? `${unread} unread` : 'Notifications';
+  return unread > 0 ? $localize`:@@pd.notifications.status.unread:${unread}:count: unread` : $localize`:@@pd.notifications.status.none:Notifications`;
 }

@@ -1,3 +1,4 @@
+import type { StartupIpc } from '@decryp7/paddock-ui/shell/startup';
 
 /** The part of Tauri's page globals the demo uses (what `@tauri-apps/api` wraps). */
 interface TauriInternals {
@@ -27,3 +28,4 @@ export function tauriIpc(): DemoIpc | null {
     },
   };
 }
+

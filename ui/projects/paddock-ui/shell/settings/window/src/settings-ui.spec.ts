@@ -1,10 +1,31 @@
 import { Injector, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { CommandService, ContributionRegistry, defineSettingsPage, msg, provideContributions, provideShellCore, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import {
+  APPEARANCE_SOURCE,
+  AppearanceStore,
+  CommandService,
+  ContributionRegistry,
+  defineSettingsPage,
+  msg,
+  provideAppearance,
+  provideContributions,
+  provideShellCore,
+  SHELL_PORTS,
+} from '@decryp7/paddock-ui/shell';
 import { DIALOG_REF, DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { assertContributionsValid } from '@decryp7/paddock-ui/shell/testing';
-import { SETTINGS_OVERVIEW_FIXTURE, SETTINGS_PROBLEM_FIXTURE, appearanceFollower, appearanceOf, followAppearance, MemorySettingsBackend, SETTINGS_CONTRIBUTIONS, SETTINGS_DIALOG_ID, SHELL_SETTINGS_PAGES, provideShellSettings } from '@decryp7/paddock-ui/shell/settings';
+import {
+  appearanceFromSettings,
+  appearanceToSettings,
+  MemorySettingsBackend,
+  provideShellSettings,
+  SETTINGS_CONTRIBUTIONS,
+  SETTINGS_DIALOG_ID,
+  SETTINGS_OVERVIEW_FIXTURE,
+  SETTINGS_PROBLEM_FIXTURE,
+  SHELL_SETTINGS_PAGES,
+} from '@decryp7/paddock-ui/shell/settings';
 import { PdSettingsSectionPage } from './settings-section';
 import { PdSettingsWindow } from './settings-window';
 import { settingsBed, settle, SPEC_PAGES } from './spec-helpers';
@@ -264,57 +285,24 @@ describe('pd-settings-window', () => {
   });
 });
 
-describe('appearance', () => {
-  it('maps known values only', () => {
-    expect(appearanceOf({ theme: 'dark', density: 'compact' })).toEqual({ theme: 'dark', density: 'compact' });
-    expect(appearanceOf({ theme: 'blue', density: 3 })).toEqual({});
-  });
-
-  it('follows the Appearance settings in this window, from any window', async () => {
-    const root = document.createElement('div');
-    const backend = new MemorySettingsBackend();
-    await backend.set('pd.appearance', { density: 'compact' });
-    settingsBed({ backend });
-    TestBed.runInInjectionContext(() => followAppearance(root));
-    await settle();
-    expect(root.getAttribute('data-density')).toBe('compact');
-    await backend.set('pd.appearance', { theme: 'dark' });
-    expect(root.getAttribute('data-theme')).toBe('dark');
-    await backend.set('sd.general', { repeat: 2 });
-    expect(root.getAttribute('data-theme')).toBe('dark');
-    TestBed.resetTestingModule();
-    await backend.set('pd.appearance', { theme: 'light' });
-    expect(root.getAttribute('data-theme')).toBe('dark');
-  });
-
-  it('starts following when asked, once', async () => {
-    const root = document.createElement('div');
-    const backend = new MemorySettingsBackend();
-    const listen = vi.spyOn(backend, 'listen');
-    settingsBed({ backend });
-    const start = TestBed.runInInjectionContext(() => appearanceFollower(root));
-    await settle();
-    expect(listen).not.toHaveBeenCalled();
-    start();
-    start();
-    await settle();
-    expect(listen).toHaveBeenCalledTimes(1);
-    await backend.set('pd.appearance', { theme: 'light' });
-    expect(root.getAttribute('data-theme')).toBe('light');
-    TestBed.resetTestingModule();
-    start();
-    expect(listen).toHaveBeenCalledTimes(1);
-  });
-
-  it('logs when the appearance cannot be read', async () => {
-    const backend = new MemorySettingsBackend();
-    vi.spyOn(backend, 'overview').mockRejectedValue('offline');
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    settingsBed({ backend });
-    TestBed.runInInjectionContext(() => followAppearance(document.createElement('div')));
-    await settle();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('the appearance settings could not be read: offline'));
-    warn.mockRestore();
+describe('appearance values', () => {
+  it('maps known values only; an empty pack is no pack', () => {
+    expect(appearanceFromSettings({ theme: 'dark', contrast: 'more', motion: 'reduce', density: 'compact', pack: 'sd.theme.warm-paper' })).toEqual({
+      theme: 'dark',
+      contrast: 'more',
+      motion: 'reduce',
+      density: 'compact',
+      pack: 'sd.theme.warm-paper',
+    });
+    expect(appearanceFromSettings({ pack: '' })).toEqual({ pack: null });
+    expect(appearanceFromSettings({ theme: 'blue', density: 3, contrast: 'max', motion: true, pack: 'Not An Id' })).toEqual({});
+    expect(appearanceToSettings({ theme: 'light', contrast: 'standard', motion: 'full', density: 'standard', pack: null })).toEqual({
+      theme: 'light',
+      contrast: 'standard',
+      motion: 'full',
+      density: 'standard',
+      pack: '',
+    });
   });
 });
 
@@ -355,30 +343,47 @@ describe('SETTINGS_CONTRIBUTIONS and provideShellSettings', () => {
     ]);
   });
 
-  it('applies the appearance in a main window once its gate opens', async () => {
+  it('is the source of the window’s appearance, asked nothing before its gate opens', async () => {
     const backend = new MemorySettingsBackend();
     const listen = vi.spyOn(backend, 'listen');
     const ready = signal(false);
-    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellSettings({ backend: () => backend, appearance: { gate: () => ready } })] });
-    TestBed.inject(Injector);
+    const root = document.createElement('html');
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideShellSettings({ backend: () => backend, appearance: { gate: () => ready } }),
+        provideAppearance({ accent: 'pitwall', root: () => root }),
+      ],
+    });
+    const store = TestBed.inject(AppearanceStore);
+    TestBed.tick();
     await settle();
     expect(listen).not.toHaveBeenCalled();
     ready.set(true);
+    TestBed.tick();
     await settle();
     expect(listen).toHaveBeenCalledTimes(1);
     ready.set(false);
     ready.set(true);
+    TestBed.tick();
     await settle();
     expect(listen).toHaveBeenCalledTimes(1);
+    await backend.set('pd.appearance', { density: 'comfortable', contrast: 'more' });
+    TestBed.tick();
+    expect(store.density()).toBe('comfortable');
+    expect(root.getAttribute('data-contrast')).toBe('more');
   });
 
-  it('applies the appearance in a main window unless asked not to', async () => {
+  it('without a gate the engine is asked at once; `appearance: false` leaves the look to the app', async () => {
     const backend = new MemorySettingsBackend();
-    await backend.set('pd.appearance', { density: 'comfortable' });
-    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellSettings({ backend: () => backend })] });
-    TestBed.inject(Injector);
+    await backend.set('pd.appearance', { theme: 'dark' });
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellSettings({ backend: () => backend }), provideAppearance({ accent: 'pitwall', root: () => document.createElement('html') })] });
+    const store = TestBed.inject(AppearanceStore);
     await settle();
-    expect(document.documentElement.getAttribute('data-density')).toBe('comfortable');
-    document.documentElement.removeAttribute('data-density');
+    expect(store.theme()).toBe('dark');
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellSettings({ backend: () => backend, appearance: false })] });
+    expect(TestBed.inject(APPEARANCE_SOURCE, null)).toBeNull();
+    localStorage.clear();
   });
 });

@@ -23,14 +23,14 @@ let nextId = 0;
       }
       <label class="label" [for]="id">{{ f.label }}</label>
       @if (f.restartRequired) {
-        <span class="badge" title="Takes effect after a restart">Needs restart</span>
+        <span class="badge" [title]="t.restartTitle">{{ t.restart }}</span>
       }
       @if (f.advanced) {
-        <span class="badge">Advanced</span>
+        <span class="badge">{{ t.advanced }}</span>
       }
       <span class="spacer"></span>
       @if (!disabled() && !isDefault()) {
-        <button class="reset" type="button" [attr.aria-label]="'Reset to default: ' + f.label" [title]="'Default: ' + defaultText()" (click)="resetToDefault.emit()">Reset to default</button>
+        <button class="reset" type="button" [attr.aria-label]="resetLabel(f.label)" [title]="defaultTitle()" (click)="resetToDefault.emit()">{{ t.reset }}</button>
       }
     </div>
     @if (k.type !== 'bool') {
@@ -50,7 +50,7 @@ let nextId = 0;
             <input class="input wide" type="text" [id]="id" [value]="text()" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set($any($event.target).value)" (keydown.enter)="commit.emit()" (blur)="leave()" />
           }
           @case ('path') {
-            <input class="input wide mono" type="text" [id]="id" [value]="text()" [disabled]="disabled()" [placeholder]="k.dir ? 'Folder (empty: the default)' : 'File (empty: the default)'" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set($any($event.target).value)" (keydown.enter)="commit.emit()" (blur)="leave()" />
+            <input class="input wide mono" type="text" [id]="id" [value]="text()" [disabled]="disabled()" [placeholder]="k.dir ? t.folder : t.file" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set($any($event.target).value)" (keydown.enter)="commit.emit()" (blur)="leave()" />
           }
           @default {
             <input class="input num" type="number" inputmode="decimal" [id]="id" [value]="numberText()" [attr.min]="limits().min" [attr.max]="limits().max" [attr.step]="limits().step" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set(number($any($event.target).value))" (keydown.enter)="commit.emit()" (blur)="leave()" />
@@ -96,6 +96,21 @@ let nextId = 0;
   `,
 })
 export class PdSettingField implements FormValueControl<SettingValue> {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    restartTitle: $localize`:@@pd.settings.field.restart-title:Takes effect after a restart`,
+    restart: $localize`:@@pd.settings.field.restart:Needs restart`,
+    advanced: $localize`:@@pd.settings.field.advanced:Advanced`,
+    reset: $localize`:@@pd.settings.field.reset:Reset to default`,
+    folder: $localize`:@@pd.settings.field.folder:Folder (empty: the default)`,
+    file: $localize`:@@pd.settings.field.file:File (empty: the default)`,
+  };
+  protected resetLabel(label: string): string {
+    return $localize`:@@pd.settings.field.reset-named:Reset to default: ${label}:setting:`;
+  }
+  protected defaultTitle(): string {
+    return $localize`:@@pd.settings.field.default:Default: ${this.defaultText()}:value:`;
+  }
   /** The field's schema (from the engine). */
   readonly setting = input.required<SettingField>();
   /** The value, kept in sync with the form by `[formField]`. */
