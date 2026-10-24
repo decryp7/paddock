@@ -2,7 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import { CommandService, ContributionRegistry, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { PdJobsStatus } from '@decryp7/paddock-ui/shell/jobs';
-import { DemoNotices } from './demo-notices';
+import { PdNotificationsStatus, PdServiceStatus } from '@decryp7/paddock-ui/shell/notify';
+import { EnginePanel } from './engine-panel';
 
 /** One part of the shell and the work package of docs/plans/workbench.md that brings it to this app. */
 interface ShellPart {
@@ -32,7 +33,7 @@ const PARTS: readonly ShellPart[] = [
 @Component({
   selector: 'sd-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState, PdJobsStatus],
+  imports: [SuEmptyState, PdJobsStatus, PdServiceStatus, PdNotificationsStatus, EnginePanel],
   template: `
     <main class="page">
       <h1>Paddock shell demo</h1>
@@ -50,11 +51,6 @@ const PARTS: readonly ShellPart[] = [
             </button>
           }
         </div>
-        <ul class="notices" aria-live="polite" aria-label="Notices">
-          @for (notice of notices(); track notice.n) {
-            <li [class.error]="notice.level === 'error'">{{ notice.message }}</li>
-          }
-        </ul>
         <table class="kinds">
           <caption>Registered contributions</caption>
           <thead>
@@ -67,6 +63,7 @@ const PARTS: readonly ShellPart[] = [
           </tbody>
         </table>
       </section>
+      <sd-engine-panel />
       <table class="parts">
         <caption>Shell parts</caption>
         <thead>
@@ -79,14 +76,16 @@ const PARTS: readonly ShellPart[] = [
         </tbody>
       </table>
     </main>
-    <!-- The status bar the pages frame (plan S14) will own; the jobs status item opens the Jobs list (plan S9). -->
+    <!-- The status bar the pages frame (plan S14) will own: the service chip (S4), the jobs (S9) and the notifications (S4). -->
     <footer class="status-bar" aria-label="Status bar">
+      <pd-service-status />
       <pd-jobs-status />
+      <pd-notifications-status />
     </footer>
   `,
   styles: `
     :host { display: flex; flex-direction: column; min-height: 100vh; }
-    .status-bar { position: sticky; bottom: 0; display: flex; justify-content: flex-end; min-width: 0; margin-top: auto; padding: var(--pd-space-1) var(--pd-space-4); background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); }
+    .status-bar { position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; min-width: 0; margin-top: auto; padding: var(--pd-space-1) var(--pd-space-4); background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); }
     .page { width: 100%; max-width: var(--pd-content-max); margin: 0 auto; padding: var(--pd-space-6) var(--pd-space-4); display: flex; flex-direction: column; gap: var(--pd-space-4); }
     h1 { margin: 0; font-size: var(--pd-text-title); }
     .parts { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); }
@@ -100,9 +99,6 @@ const PARTS: readonly ShellPart[] = [
     .commands { display: flex; flex-wrap: wrap; gap: var(--pd-space-2); }
     .cmd { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); }
     .cmd:disabled { color: var(--pd-text-subtle); }
-    .notices { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--pd-space-1); min-height: 1lh; }
-    .notices li { overflow-wrap: anywhere; }
-    .notices li.error { color: var(--pd-danger); }
     .kinds { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); }
     .kinds caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }
     .kinds th, .kinds td { text-align: start; padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); }
@@ -114,7 +110,6 @@ export class ShellDemo {
   protected readonly commands = inject(CommandService);
   private readonly registry = inject(ContributionRegistry);
   private readonly host = inject(ShellContextHost);
-  protected readonly notices = inject(DemoNotices).notices;
   protected readonly available = this.commands.available;
   protected readonly contextLoaded = computed(() => this.host.context() !== null);
   protected readonly kinds = this.registry.kinds.map((k) => ({ name: k.name, count: this.registry.items(k.name).length }));

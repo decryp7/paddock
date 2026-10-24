@@ -96,7 +96,9 @@ so a manager app never bundles the workbench:
 |---|---|---|
 | `@decryp7/paddock-ui/shell` | contributions, `ShellContext`, frame parts, widgets | S2, S14 |
 | `/shell/jobs` | jobs over the `paddock-jobs` adapter: `JobsBackend` (Tauri, memory), `JobsStore`, `pd-jobs-list`, `pd-jobs-status`, `JobFollow`, `provideShellJobs`, `JOBS_CONTRIBUTIONS` | S9 |
-| `/shell/startup`, `/shell/notify`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/menu`, `/shell/pages`, `/shell/i18n`, `/shell/store`, `/shell/testing` | one shell part each | S4-S16 |
+| `/shell/notify` | notifications and service health over the `paddock-health` adapter: backends (Tauri, memory), `ServiceHealthStore`, `NotificationsStore`, `pd-notification-host`, `pd-service-status`, `pd-notifications-status`, `pd-waiting-for`, `provideShellNotify` | S4 |
+| `/shell/store` | shared SignalStore features: `withRequestStatus` (rule 30) | S4 |
+| `/shell/startup`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/menu`, `/shell/pages`, `/shell/i18n`, `/shell/testing` | one shell part each | S5-S16 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -136,6 +138,42 @@ providers: [
 - Nothing times out a job (rule 12): `uiTimeoutProblems(path, source)` is the grep check the shell demo's e2e runs over every
   shell and reference-app source (delayed `setTimeout`, `AbortSignal.timeout`, `Promise.race`, `...timeout...(` helpers).
 - `@ngrx/signals` (^22) is an optional peer dependency, needed by the shell entry points that hold stores.
+
+### Notifications and service health (`@decryp7/paddock-ui/shell/notify`, plan S4)
+
+Per window (rule 34), with the app's IPC passed in:
+
+```ts
+import { NOTIFY_CONTRIBUTIONS, provideShellNotify, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
+
+const ipc = { invoke, listen: (event, cb) => listen(event, (e) => cb(e.payload)) };
+providers: [
+  provideContributions(NOTIFY_CONTRIBUTIONS), // status items `pd.health` (the chip) and `pd.notifications` (the centre), lazy
+  provideShellNotify({
+    health: () => new TauriServiceHealthBackend(ipc),
+    notifications: () => new TauriNotificationsBackend(ipc),
+    // mountHost: false when the frame places <pd-notification-host> itself; ports: false when the window provides its own
+    // SHELL_PORTS (use `notify: notifyPort()` there).
+  }),
+  { provide: OPEN_SETTINGS, useValue: (section) => ... }, // optional: the `openSettings` repair and notice action
+  provideNoticeAction({ type: 'installUpdate', label: () => 'Install', run: (a) => ... }), // the app's notice buttons
+]
+```
+
+- One display rule (`visibleNotifications`): one toast per cause (a repeat updates it in place with `(×N)`), at most
+  three, and never a `health:<service>` cause: the chip states outages. Errors and critical failures stay until
+  dismissed or resolved; the rest go after 8 s, held while the pointer or focus is on them. The host owns the time
+  (`NOTIFY_CLOCK`, a port); sources (`provideNotificationSource`) only post, update and resolve.
+- `SHELL_PORTS.notify` (every `ShellNotice`, e.g. a failed command or a finished job) becomes a toast and a message in
+  the centre for the session, merged by kind and text.
+- `ServiceHealthStore`: the newest snapshot (by `revision`); `isServing(service)` is false until the first snapshot.
+  `pd-service-status` appears when a service is not working, opens the cause, the next step, technical details and the
+  Repair button (served by the shell, never by the service), and offers Try again when the state could not be read.
+- Panels show `<pd-service-error summary="…" service="engine" (retry)="load()">`: while the service is down it is
+  `<pd-waiting-for>` ("Waiting for the engine", "See what happened" opens the chip), and it emits `retry` once when the
+  service is back.
+- The wire types mirror `shell/generated/health.ts` (ng-packagr cannot import across entry points); a type-level spec
+  fails `npm test` when they drift.
 
 ## Tokens
 

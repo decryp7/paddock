@@ -1,10 +1,13 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 // The pure lint (no Angular imports), straight from the source: Playwright runs in Node.
 import { checkRegistrationSource } from '../projects/paddock-ui/shell/testing/src/registration-lint';
 import { uiTimeoutProblems } from '../projects/paddock-ui/shell/jobs/src/ui-timeouts';
+
+/** The notification host's toasts (plan S4). */
+const toasts = (page: Page) => page.getByRole('region', { name: 'Notifications', exact: true });
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 for (const colorScheme of ['dark', 'light'] as const) {
@@ -40,7 +43,7 @@ test.describe('contributions (plan S2)', () => {
     const reset = page.getByRole('button', { name: 'Reset greetings' });
     await expect(reset).toBeDisabled();
     await page.getByRole('button', { name: 'Say hello' }).click();
-    await expect(page.getByRole('list', { name: 'Notices' }).getByText('Hello from the shell demo (1)')).toBeVisible();
+    await expect(toasts(page).getByText('Hello from the shell demo (1)')).toBeVisible();
     await expect(reset).toBeEnabled();
     await reset.click();
     await expect(page.getByText('Greetings reset')).toBeVisible();
@@ -104,7 +107,7 @@ test.describe('jobs (plan S9)', () => {
     await expect(job).toContainText('Cancelled');
     await expect(job).toContainText('Stopped at your request.');
     await expect(status).toHaveText('Jobs');
-    await expect(page.getByRole('list', { name: 'Notices' }).getByRole('listitem')).toHaveCount(0);
+    await expect(toasts(page).getByTestId('notification')).toHaveCount(0);
 
     await page.keyboard.press('Escape');
     await expect(page.getByRole('region', { name: 'Jobs' })).toHaveCount(0);
@@ -125,7 +128,7 @@ test.describe('jobs (plan S9)', () => {
     await expect(job.getByRole('button', { name: 'Cancel' })).toBeDisabled();
     await page.clock.runFor(1_000);
     await expect(job).toContainText('Done');
-    await expect(page.getByRole('list', { name: 'Notices' })).toContainText('Importing logs: done');
+    await expect(toasts(page)).toContainText('Importing logs: done');
   });
 
   test('a quiet job shows "Still working" and is never timed out', async ({ page }) => {
@@ -162,4 +165,116 @@ test.describe('jobs (plan S9)', () => {
     expect(files.length).toBeGreaterThan(20);
     expect(files.flatMap((f) => uiTimeoutProblems(f, readFileSync(f, 'utf8')))).toEqual([]);
   });
+});
+
+test.describe('notifications and service health (plan S4)', () => {
+  const statusBar = (page: Page) => page.getByRole('contentinfo', { name: 'Status bar' });
+  const chip = (page: Page) => page.getByTestId('service-health-chip');
+  const centre = (page: Page) => page.getByRole('region', { name: 'Notifications centre' });
+
+  test('three identical failures are one chip, one notification with count 3, and no toast; Repair brings the panel back', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.goto('/');
+    await expect(page.getByTestId('engine-data')).toHaveText('Engine data loaded (1 load)');
+    await expect(chip(page)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Break the demo engine' }).click();
+
+    await expect(chip(page)).toHaveCount(1);
+    await expect(chip(page)).toHaveText('Demo engine: stopped');
+    // The chip states the outage: no toast for a health cause.
+    await expect(toasts(page).getByTestId('notification')).toHaveCount(0);
+    // The panel waits calmly instead of showing an error of its own.
+    await expect(page.getByTestId('waiting-for-sd.engine')).toContainText('Waiting for the demo engine');
+    await expect(page.getByText('Could not load the engine data.')).toHaveCount(0);
+
+    // One message in the centre, count 3.
+    await statusBar(page).getByTestId('notifications-status').click();
+    const outage = centre(page).locator('[data-cause="health:sd.engine"]');
+    await expect(outage).toHaveCount(1);
+    await expect(outage).toContainText('The demo engine stopped unexpectedly. (×3)');
+    await page.keyboard.press('Escape');
+
+    // "See what happened" opens the chip; Repair is served by the shell.
+    await page.getByTestId('waiting-for-details').click();
+    const details = page.getByRole('region', { name: 'Services' });
+    await expect(details).toContainText('The demo engine stopped unexpectedly.');
+    await expect(details).toContainText('Choose Restart.');
+    await details.getByText('Technical details').click();
+    await expect(details).toContainText('demo-engine exited (signal: 6)');
+    await details.getByRole('button', { name: 'Restart' }).click();
+
+    await expect(chip(page)).toHaveCount(0);
+    // The panel loaded again by itself, once (load 2 was the one that met the failure).
+    await expect(page.getByTestId('engine-data')).toHaveText('Engine data loaded (3 loads)');
+    // The outage's message resolved with it.
+    await statusBar(page).getByTestId('notifications-status').click();
+    await expect(centre(page).locator('[data-cause="health:sd.engine"]')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('a repair that fails keeps the chip with the new cause and a working button', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Break the search index' }).click();
+    await expect(chip(page)).toHaveText('Search index: stopped');
+    await chip(page).click();
+    const details = page.getByRole('region', { name: 'Services' });
+    await expect(details).toContainText('The search index is damaged.');
+    await details.getByRole('button', { name: 'Try again' }).click();
+    await expect(details).toContainText('The search index could not be rebuilt.');
+    await expect(details).toContainText('Free some disk space, then try again.');
+    await expect(details.getByRole('button', { name: 'Try again' })).toBeEnabled();
+    await expect(chip(page)).toHaveText('Search index: stopped');
+    // Two services down: one chip with a count.
+    await page.keyboard.press('Escape');
+    await expect(chip(page)).toBeFocused();
+    await page.getByRole('button', { name: 'Break the demo engine' }).click();
+    await expect(chip(page)).toHaveText('2 services need attention');
+    await expect(toasts(page).getByTestId('notification')).toHaveCount(0);
+  });
+
+  test('the same notice three times is one toast with a count, which times out and stays in the centre', async ({ page }) => {
+    await page.clock.install();
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Notify three times' }).click();
+    const toast = toasts(page).getByTestId('notification');
+    await expect(toast).toHaveCount(1);
+    await expect(toast).toContainText('The disk is almost full');
+    await expect(toast.getByTestId('notification-count')).toHaveText(/×3/);
+    await page.clock.runFor(8_500);
+    await expect(toast).toHaveCount(0);
+    await statusBar(page).getByTestId('notifications-status').click();
+    await expect(centre(page).getByRole('heading', { name: 'Greeting' })).toBeVisible();
+    await expect(centre(page)).toContainText('The disk is almost full (×3)');
+  });
+
+  test('a toast’s "Show in Notifications" opens the centre at its message', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Fail on purpose' }).click();
+    const toast = toasts(page).getByTestId('notification');
+    await expect(toast).toHaveAttribute('role', 'alert');
+    await toast.getByRole('button', { name: 'Show in Notifications' }).click();
+    await expect(toast).toHaveCount(0);
+    await expect(centre(page)).toContainText('Fail on purpose failed: this command always fails');
+  });
+
+  for (const colorScheme of ['dark', 'light'] as const) {
+    test(`toasts, the chip details and the centre have no axe violations (${colorScheme})`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme });
+      await page.goto('/');
+      await page.getByRole('button', { name: 'Break the search index' }).click();
+      await page.getByRole('button', { name: 'Notify three times' }).click();
+      await page.getByRole('button', { name: 'Fail on purpose' }).click();
+      await chip(page).click();
+      await expect(page.getByRole('region', { name: 'Services' })).toBeVisible();
+      const axe = () => new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
+      let results = await axe();
+      expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+      await page.keyboard.press('Escape');
+      await statusBar(page).getByTestId('notifications-status').click();
+      await expect(centre(page)).toBeVisible();
+      results = await axe();
+      expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    });
+  }
 });

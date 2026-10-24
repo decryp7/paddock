@@ -5,6 +5,21 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Notifications and service health in the app shell (plan S4, ADR 0010 and 0012; the port of Debrief ADR 0055):
+  `@decryp7/paddock-ui/shell/store` publishes the shared `withRequestStatus` SignalStore feature (rule 30: one
+  `idle | loading | loaded | { error }` union, `setLoading`/`setLoaded`/`setError`, `errorMessage`); `shell/jobs` uses it
+  instead of its local copy. `@decryp7/paddock-ui/shell/notify`: the `ServiceHealthBackend` and `NotificationsBackend`
+  ports (Tauri over the app's IPC, `MemoryServiceHealth` and `MemoryNotificationCentre`), edge parsers of every payload,
+  `ServiceHealthStore` (newest revision wins, nothing healthy until the first snapshot), `NotificationsStore` (the
+  engine's centre plus the UI's own notices from `SHELL_PORTS.notify`, merged by cause with counts), the one
+  `pd-notification-host` (one toast per cause with its count, details folded, host-owned time held on hover and focus,
+  never a `health:` cause), the centre panel and its status item, the service chip `pd-service-status` with Repair
+  served by the shell (rule 19) and Try again when the state is unknown, `pd-waiting-for` and `pd-service-error`,
+  notice action handlers, `provideShellNotify`, `notifyPort` and `NOTIFY_CONTRIBUTIONS`. The mirrored wire types are
+  checked against the generated `shell/generated/health*.ts` by a type-level drift spec. `shell-demo` replaces its notice
+  list with the host and adds a demo engine whose Repair works and a search index whose Repair fails, with Chromium e2e
+  (three identical failures are one chip and one notification with count 3 and no toast, the waiting panel loads again
+  by itself after Repair, dedupe of notices, "Show in Notifications", axe in both themes).
 - Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,
   `problems` against the command table, kind size policy), `Grant` for the `paddock-commands` guard, pure placement on
   the parent's monitor (mixed DPI, negative coordinates, remembered offset, never the primary display as default),

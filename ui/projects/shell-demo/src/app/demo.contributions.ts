@@ -51,6 +51,26 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       run: (ctx) => void ctx.startQuietJob(),
     }),
     defineCommand<DemoContext>({
+      id: 'sd.notify.three',
+      title: msg('sd.notify.three', 'Notify three times'),
+      category: msg('sd.category.notify', 'Notifications'),
+      run: (ctx) => {
+        for (let i = 0; i < 3; i++) ctx.notify({ level: 'warning', kind: 'sd.greeting', message: 'The disk is almost full' });
+      },
+    }),
+    defineCommand<DemoContext>({
+      id: 'sd.engine.break',
+      title: msg('sd.engine.break', 'Break the demo engine'),
+      category: msg('sd.category.notify', 'Notifications'),
+      run: (ctx) => ctx.breakEngine(),
+    }),
+    defineCommand<DemoContext>({
+      id: 'sd.index.break',
+      title: msg('sd.index.break', 'Break the search index'),
+      category: msg('sd.category.notify', 'Notifications'),
+      run: (ctx) => ctx.breakIndex(),
+    }),
+    defineCommand<DemoContext>({
       id: 'sd.fail',
       title: msg('sd.fail', 'Fail on purpose'),
       category: msg('sd.category.demo', 'Demo'),
@@ -77,6 +97,9 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       load: placeholder,
     }),
   ],
-  healthServices: [defineHealthService({ id: 'sd.engine', label: msg('sd.health.engine', 'the demo engine'), icon: 'pd:engine' })],
+  healthServices: [
+    defineHealthService({ id: 'sd.engine', label: msg('sd.health.engine', 'the demo engine'), icon: 'pd:engine' }),
+    defineHealthService({ id: 'sd.index', label: msg('sd.health.index', 'the search index'), icon: 'pd:search' }),
+  ],
   notificationKinds: [defineNotificationKind({ id: 'sd.greeting', title: msg('sd.notification.greeting', 'Greeting'), actions: ['again'] })],
 };
