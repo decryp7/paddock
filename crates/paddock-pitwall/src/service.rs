@@ -134,7 +134,7 @@ pub struct LinkConfig {
     pub preset: Option<String>,
     /// Limits and intervals.
     pub tuning: Tuning,
-    /// Wall-clock time (pairing expiry).
+    /// Time (pairing expiry: monotonic for the decision, wall for what the UI shows).
     pub clock: Arc<dyn Clock>,
     /// How retries and the pairing poll wait.
     pub sleeper: Arc<dyn Sleeper>,
@@ -272,8 +272,13 @@ impl Link {
         self.inner().served
     }
 
-    fn now_ms(&self) -> u64 {
-        u64::try_from(self.cfg.clock.now_ms()).unwrap_or(0)
+    /// The calendar time in Unix milliseconds, for what the UI shows.
+    fn wall_ms(&self) -> u64 {
+        self.cfg
+            .clock
+            .wall()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
     }
 
     /// Looks at Pitwall now: discovery, health, the key and a model for the app. Blocking (a few quick loopback calls);
@@ -529,7 +534,10 @@ impl Link {
         // A stored key Pitwall no longer accepts is replaced by the new one.
         let start = self.client(port, None).begin_pairing()?;
         let cancel = CancelToken::new();
-        let expires_at_ms = self.now_ms() + start.expires_in_secs.min(MAX_PAIRING_SECS) * 1000;
+        let life_ms = start.expires_in_secs.min(MAX_PAIRING_SECS) * 1000;
+        // The UI shows the calendar time; the decision to give up uses the monotonic clock (it never jumps).
+        let expires_at_ms = self.wall_ms().saturating_add(life_ms);
+        let give_up_at = self.cfg.clock.now_ms().saturating_add(life_ms);
         {
             let mut i = self.inner();
             i.view.problem = None;
@@ -555,8 +563,7 @@ impl Link {
                     if cancel.is_cancelled() {
                         return;
                     }
-                    let Some(outcome) = link.poll_once(port, &start.pairing_id, expires_at_ms)
-                    else {
+                    let Some(outcome) = link.poll_once(port, &start.pairing_id, give_up_at) else {
                         continue;
                     };
                     link.finish_pairing(&start.pairing_id, outcome, use_for_app);
@@ -568,13 +575,8 @@ impl Link {
     }
 
     /// One poll of a waiting pairing: `None` keeps waiting, `Some` ends it.
-    fn poll_once(
-        &self,
-        port: u16,
-        id: &str,
-        expires_at_ms: u64,
-    ) -> Option<Result<(), PitwallError>> {
-        if self.now_ms() > expires_at_ms {
+    fn poll_once(&self, port: u16, id: &str, give_up_at: u64) -> Option<Result<(), PitwallError>> {
+        if self.cfg.clock.now_ms() > give_up_at {
             return Some(Err(PitwallError::PairingExpired));
         }
         match self.client(port, None).poll_pairing(id) {
