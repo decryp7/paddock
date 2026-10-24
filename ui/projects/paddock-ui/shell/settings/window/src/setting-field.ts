@@ -67,7 +67,7 @@ let nextId = 0;
       <p class="pd-help" [id]="id + '-help'">{{ f.description }}</p>
     }
     @if (message(); as m) {
-      <p class="pd-error" [id]="id + '-error'" role="alert"><pd-glyph name="alert" [size]="12" /><span>{{ m }}</span></p>
+      <p class="pd-error" [id]="id + '-error'" role="alert"><pd-glyph name="alert" [size]="14" /><span>{{ m }}</span></p>
     }
   `,
   styles: `
@@ -85,7 +85,6 @@ let nextId = 0;
     .pd-input.pd-wide { width: min(32rem, 100%); }
     textarea.pd-input { padding: var(--pd-space-1) var(--pd-space-2); font-family: var(--pd-font-mono, ui-monospace, monospace); }
     .pd-mono { font-family: var(--pd-font-mono, ui-monospace, monospace); }
-    .pd-input:focus-visible, .pd-reset:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-unit { color: var(--pd-text-muted); }
     .pd-hint { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
     .pd-help { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); line-height: 1.45; }

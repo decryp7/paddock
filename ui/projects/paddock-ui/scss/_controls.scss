@@ -25,8 +25,9 @@
     border-color var(--pd-duration-micro) var(--pd-ease-move),
     color var(--pd-duration-micro) var(--pd-ease-move);
 
+  // Hover darkens (light) or lightens (dark) the rest fill on every surface; surface-3 is white in light and vanished on a card.
   &:hover:not(:disabled, [aria-disabled='true']) {
-    background: var(--pd-surface-3);
+    background: color-mix(in srgb, var(--pd-surface-2), var(--pd-text) 7%);
     text-decoration: none;
   }
 
@@ -161,6 +162,11 @@
     border-color: var(--pd-accent);
   }
 
+  // Hover: the border goes to muted text (4.5:1 or better), like the themed select's trigger and Material's controls.
+  &:hover:not(:disabled, :focus, :focus-visible, [aria-invalid='true']) {
+    border-color: var(--pd-text-muted);
+  }
+
   &:disabled {
     opacity: 0.6;
     cursor: not-allowed;
@@ -271,7 +277,8 @@
 }
 
 // ---- Check and radio: a themed 16 px box (the browser's grey default ignores the tokens), a 24 px hit area from the label.
-// A label-less check in a field row sits on the control line of the fields beside it.
+// A lone check beside fields: put it in `.pd-field.pd-field--check` after an `aria-hidden` `.pd-field__label` holding a
+// non-breaking space, so it sits on the control line like the fields beside it.
 .pd-check {
   display: inline-flex;
   align-items: center;
@@ -344,9 +351,9 @@
   }
 }
 
-.pd-field > .pd-check {
-  align-self: end;
+.pd-field--check > .pd-check {
   min-height: var(--pd-control-height);
+  align-items: center;
 }
 
 // ---- Switch: a native checkbox (role="switch") drawn as a 32 x 18 track. Off: the control border on the surface; on: the
@@ -434,8 +441,8 @@
 
   pd-glyph,
   .mat-icon {
-    width: 12px;
-    height: 12px;
+    width: 14px;
+    height: 14px;
   }
 
   > button {
