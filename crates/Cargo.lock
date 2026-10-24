@@ -3048,6 +3048,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-assistant"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-health",
+ "paddock-pitwall",
+ "paddock-secrets",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "ts-rs",
+]
+
+[[package]]
 name = "paddock-bench"
 version = "0.1.0"
 dependencies = [
