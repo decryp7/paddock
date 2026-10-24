@@ -8,7 +8,7 @@ const notice = { id: 1, title: 't' } as Notice;
 
 describe('NoticeActions', () => {
   it('labels every repair', () => {
-    expect((['restart', 'reset', 'liftQuarantine', 'install', 'retry', 'openSettings', 'useFallback'] as const).map(repairLabel)).toEqual([
+    expect((['restart', 'reset', 'liftQuarantine', 'install', 'retry', 'openSettings', 'useFallback', 'openLoginItems'] as const).map(repairLabel)).toEqual([
       'Restart',
       'Try again',
       'Allow again',
@@ -16,6 +16,7 @@ describe('NoticeActions', () => {
       'Try again',
       'Open Settings…',
       'Use the fallback',
+      'Open Login Items…',
     ]);
   });
 

@@ -8,4 +8,6 @@ runs:
       run: |
         if command -v sccache >/dev/null 2>&1; then
           sccache --show-stats || echo "::notice::sccache statistics are unavailable (the cache server was not reachable)."
+          # Only CI's own server (setup-rust sets its port); a server on the default port is never stopped.
+          if [ -n "$SCCACHE_SERVER_PORT" ]; then sccache --stop-server >/dev/null 2>&1 || true; fi
         fi

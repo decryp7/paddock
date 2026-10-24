@@ -4,7 +4,10 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-",
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "files": {
+        "Library/LaunchAgents/net.decryptology.paddock-shell-demo.agent.plist": "macos/agent.plist"
+      }
     }
   }
 }
