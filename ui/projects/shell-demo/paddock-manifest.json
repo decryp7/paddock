@@ -254,6 +254,7 @@
     "sd.home",
     "sd.keys",
     "sd.lab",
+    "sd.pitwall",
     "sd.runners"
   ],
   "statusItems": [
@@ -454,6 +455,7 @@
     "sd.page.home": "Overview",
     "sd.page.keys": "Keyboard",
     "sd.page.lab": "Lab",
+    "sd.page.pitwall": "Local AI",
     "sd.page.runners": "Runners",
     "sd.pseudo-locale": "Pseudo-locale",
     "sd.reset": "Reset greetings",
