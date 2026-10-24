@@ -347,3 +347,5 @@ retry and checkpoint debounce then go back to `setTimeout`. A lint must express 
   the demo's AFTER_READY wrapper goes away.
 - `paddock-menu`'s two Tauri menu tests skip on macOS and have never run; run them on Linux locally in Docker (the CI
   image) before shell/integrate is merged to main, so coverage is confirmed locally first (rule 3).
+- `paddock-download` has no free-disk pre-check (Debrief has one): add it (bounded, platform call, clear "needs N GB,
+  M GB free" error before connecting) before Pitwall's model downloads move onto it.
