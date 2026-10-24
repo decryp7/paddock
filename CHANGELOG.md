@@ -5,6 +5,15 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock_jobs::schedule` and the shared schedule editors (plan X33). `Schedule` (every N seconds, days at times of day, cron with five or
+  six fields) in the computer's or a chosen IANA zone with daylight saving (a time inside the spring gap runs once, shifted; a repeated
+  time runs once), `next_check` (jitter, back-off after failures, a per-source minimum interval), `preview` (the words, the next runs and
+  warnings for the editor), `due` with a `CatchUp` policy (`Skip`, `Once`, `All { max }`) for runs missed while the machine slept, and
+  `PauseWindows` (pause windows and quiet hours: spans of local time on chosen days that may cross midnight; `holds`, `resume_at`,
+  `next_open`). Time is always passed in (`UnixMs::from_clock`), so every case is a `FakeClock` test. Spotter's `schedule.rs` and
+  `calendar.rs` are the base; Debrief's agent timers and Pitcrew's `pause.rs` become adopters. UI: `@decryp7/paddock-ui/schedule` with
+  `pd-schedule-editor` (Every / At times / Cron over the engine's preview, warnings and problems) and `pd-pause-editor`, and a
+  Schedules page in the shell demo. New dependencies of `paddock-jobs`: `jiff` (bundled tz database) and `croner`.
 - `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
   dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
   volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.
