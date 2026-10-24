@@ -1,6 +1,6 @@
 # Plan: the Paddock app shell and the workbench
 
-- Status: Plan for ADR 0012 (app shell) and ADR 0013 (workbench), both Proposed (2026-10-24)
+- Status: Plan for ADR 0012 (app shell) and ADR 0013 (workbench), both Accepted (2026-10-24): the full shell is built first, then Pitwall adopts it; D1–D6 as recommended
 - Source of the inventory: Debrief branch `integrate/redesign` at `5c1ebcda` (Debrief 1.1 candidate), read-only; Pitwall,
   Pitcrew, Spotter and Dyno `main` on 2026-10-24
 - Order (decided): Debrief 1.1 → **Pitwall release builds the shell and adopts it first** → **Pacenotes starts by
