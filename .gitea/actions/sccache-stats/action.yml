@@ -1,5 +1,5 @@
 name: sccache-stats
-description: Prints sccache --show-stats (hit rate) in the job log; use it as the last step with `if: always()`. Does nothing when sccache is absent.
+description: "Prints sccache --show-stats (hit rate) in the job log; use it as the last step with `if: always()`. Does nothing when sccache is absent."
 runs:
   using: composite
   steps:
