@@ -13,10 +13,13 @@
 //!
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
 //!
-//! Unix children lead their own process group (killed with `killpg`); Windows trees end through `taskkill /T /F`. Both are
-//! backed by a walk of the process table for helpers that left the group.
+//! Unix children lead their own process group (killed with `killpg`); Windows trees end through `taskkill /T /F`, and every
+//! supervised Windows child runs in a kill-on-close job object, so its helpers end with it even when they left its tree or the
+//! app crashed. Both are backed by a walk of the process table for helpers that left the group.
 
 mod command;
+#[cfg(windows)]
+mod job;
 mod login;
 mod run;
 pub mod self_test;

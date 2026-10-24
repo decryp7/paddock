@@ -1,5 +1,6 @@
 //! The one launcher (ADR 0001, Debrief ADR 0017 §5): creates a private endpoint and token, starts the child through
-//! `paddock-proc` (no console window, its own process group, the whole tree ended on drop, an optional memory cap),
+//! `paddock-proc` (no console window, its own process group, a kill-on-close job object on Windows, the whole tree ended on
+//! drop, an optional memory cap),
 //! hands it the [`Bootstrap`] as one JSON line on stdin, keeps stdin open as its lifeline, and accepts its authenticated
 //! connection (token, protocol, and the pid of the process it started). The child side is [`crate::child`].
 
@@ -131,6 +132,12 @@ impl Child {
         self.pid
     }
 
+    /// Whether it runs in a kill-on-close job object (Windows: it and every helper it starts end when this app's handle
+    /// closes, also on a crash; elsewhere its process group plays that part).
+    pub fn in_job(&self) -> bool {
+        lock(&self.process).in_job()
+    }
+
     /// Whether the process has exited.
     pub fn exited(&self) -> bool {
         !lock(&self.process).is_running()
@@ -220,18 +227,13 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     };
     let mut line = serde_json::to_string(&bootstrap).map_err(|e| IpcError::Spawn(e.to_string()))?;
     line.push('\n');
-    let written = match stdin.as_mut() {
-        Some(s) => s.write_all(line.as_bytes()).and_then(|()| s.flush()),
-        None => Err(io::Error::other("the child has no stdin")),
-    };
-    // On failure `process` is dropped, which ends its tree.
-    written.map_err(|e| {
-        IpcError::Spawn(format!(
-            "{} did not take its bootstrap ({e})",
-            spec.peer.label
-        ))
-    })?;
     let label = spec.peer.label.clone();
+    let no_stdin = || Err(io::Error::from(io::ErrorKind::BrokenPipe));
+    let written = stdin.as_mut().map_or_else(no_stdin, |s| {
+        s.write_all(line.as_bytes()).and_then(|()| s.flush())
+    });
+    // On failure `process` is dropped, which ends its tree.
+    written.map_err(|e| IpcError::Spawn(format!("{label} did not take its bootstrap ({e})")))?;
     let conn = host.accept_while(Some(pid), spec.start_timeout, &mut || {
         if process.is_running() {
             Ok(())
