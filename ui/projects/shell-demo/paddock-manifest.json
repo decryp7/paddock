@@ -263,10 +263,12 @@
   ],
   "settingsPages": [
     "pd.appearance",
+    "pd.channels",
     "pd.language",
     "pd.logging",
     "pd.login",
     "pd.notifications",
+    "pd.packs",
     "sd.general",
     "sd.storage"
   ],
@@ -292,6 +294,16 @@
         "about_legal"
       ]
     },
+    "pd.channels.secret": {
+      "kind": "form",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": [
+        "channels_set_secret"
+      ]
+    },
     "pd.report-problem": {
       "kind": "decision",
       "modality": "modal",
@@ -313,7 +325,14 @@
       "minSize": null,
       "commands": [
         "app_relaunch",
+        "channels_clear_secret",
+        "channels_get",
+        "channels_save",
+        "channels_test",
+        "dialog_open",
         "open_login_items",
+        "packs_reload",
+        "packs_status",
         "service_install",
         "service_repair",
         "service_status",
@@ -417,13 +436,16 @@
     "pd.about.title": "About",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
+    "pd.channels.secret.title": "Channel secret",
     "pd.diag.open": "Report a problem…",
     "pd.diag.title": "Report a problem",
     "pd.settings.appearance": "Appearance",
+    "pd.settings.channels": "Notification channels",
     "pd.settings.language": "Language",
     "pd.settings.logging": "Logging",
     "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",
+    "pd.settings.packs": "Knowledge packs",
     "pd.settings.service": "Background service",
     "pd.settings.title": "Settings",
     "pd.updates.notification.available": "Update available",

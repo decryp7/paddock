@@ -64,11 +64,12 @@ pub fn parse_pack<K: PackKind>(
 
 /// " (line 3, column 5)" for a syntax error, empty when the parser has no span.
 fn at(e: &toml::de::Error, text: &str) -> String {
-    let Some(span) = e.span() else {
-        return String::new();
-    };
-    let before = text.get(..span.start).unwrap_or_default();
-    let line = before.matches('\n').count() + 1;
-    let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
-    format!(" (line {line}, column {col})")
+    e.span()
+        .map(|span| {
+            let before = text.get(..span.start).unwrap_or_default();
+            let line = before.matches('\n').count() + 1;
+            let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+            format!(" (line {line}, column {col})")
+        })
+        .unwrap_or_default()
 }

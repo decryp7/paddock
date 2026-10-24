@@ -18,6 +18,7 @@ serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 tracing-log = { version = "0.2", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"

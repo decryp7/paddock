@@ -8,4 +8,4 @@ pub mod server;
 
 pub use client::{ClientConfig, Launcher, LinkClient, LinkState, Plan, Replace, plan};
 pub use discovery::{Discovery, Found, MAX_DISCOVERY};
-pub use server::{LinkServer, ServerConfig};
+pub use server::{LinkServer, ServerConfig, Subscriptions};
