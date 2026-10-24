@@ -74,3 +74,14 @@ export function provideDialogUiSync(io: PanelsIo): EnvironmentProviders {
     }),
   ]);
 }
+
+/**
+ * Makes the page the pop-out shell's: the app's `index.html` carries the main window's root element (`<app-root>`), which a
+ * pop-out window does not bootstrap; this puts `<pd-popout-shell>` in its place. Call it before `bootstrapApplication(PdPopoutShell, …)`
+ * (the twin of the dialogs' `mountDialogWindowHost`).
+ */
+export function mountPopoutWindowHost(doc: Document = document): HTMLElement {
+  const el = doc.createElement('pd-popout-shell');
+  doc.body.replaceChildren(el);
+  return el;
+}

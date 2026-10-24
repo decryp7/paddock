@@ -890,6 +890,216 @@
       <trans-unit id="pd.language.title" datatype="html">
         <source>Language</source>
       </trans-unit>
+      <trans-unit id="pd.mcp.actions-title" datatype="html">
+        <source>Actions that change things</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.actions-warn" datatype="html">
+        <source>These tools change something on this computer. They stay off until you allow each one, and a client with a key can then use it without asking you again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.active" datatype="html">
+        <source>Active</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.add" datatype="html">
+        <source>Add a client…</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.allow" datatype="html">
+        <source>Allow <x id="tool"/></source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-clear" datatype="html">
+        <source>Clear</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-empty" datatype="html">
+        <source>No client has called a tool yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-failed" datatype="html">
+        <source>The activity log could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-title" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clear-failed" datatype="html">
+        <source>The activity log could not be cleared.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clients-lede" datatype="html">
+        <source>Each client has its own key. Revoke a key to cut that client off.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clients-title" datatype="html">
+        <source>Clients</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-args" datatype="html">
+        <source>Arguments (redacted)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-client" datatype="html">
+        <source>Client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-client-name" datatype="html">
+        <source>Client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-created" datatype="html">
+        <source>Added</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-duration" datatype="html">
+        <source>Took (ms)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-outcome" datatype="html">
+        <source>Result</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-state" datatype="html">
+        <source>State</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-time" datatype="html">
+        <source>Time</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-tool" datatype="html">
+        <source>Tool</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.client" datatype="html">
+        <source>Client name</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.copied" datatype="html">
+        <source>Copied to the clipboard.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.copy" datatype="html">
+        <source>Copy</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.create" datatype="html">
+        <source>Create key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.failed" datatype="html">
+        <source>The engine could not issue a key.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.how" datatype="html">
+        <source>Give it to the client as the first line it sends when it connects: {&quot;key&quot;: &quot;...&quot;}. Anyone with the key can read what the enabled tools expose.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.key-label" datatype="html">
+        <source>Key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.lede" datatype="html">
+        <source>Name the program that will connect, for example &quot;Pitwall&quot;. It gets its own key, which you can revoke at any time.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.not-copied" datatype="html">
+        <source>The clipboard is not available. Select the key and copy it with the keyboard.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.once" datatype="html">
+        <source>This is the only time the key is shown. Copy it now; the app keeps only a fingerprint and cannot show it again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.title" datatype="html">
+        <source>Add a client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.keys-limit" datatype="html">
+        <source><x id="max"/> keys are in use, the most there can be. Revoke one you no longer need before adding another.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.lede" datatype="html">
+        <source>Lets a program on this computer, such as a local AI assistant, ask this app questions over the Model Context Protocol. It is off until you turn it on, it only works on this computer, and every call is logged below.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.load-failed" datatype="html">
+        <source>The AI access settings could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.load-failed-heading" datatype="html">
+        <source>The AI access settings could not be read</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.loading" datatype="html">
+        <source>Loading the AI access settings</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.master-hint" datatype="html">
+        <source>Clients connect with a key you give them. Tools are read-only: they look at data and never change it.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.no-clients" datatype="html">
+        <source>No clients yet</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.no-clients-text" datatype="html">
+        <source>Add a client to get a key for it. Nothing can connect without one.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.off" datatype="html">
+        <source>AI access is off</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.on" datatype="html">
+        <source>AI access is on</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-cancelled" datatype="html">
+        <source>Cancelled by the client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-ok" datatype="html">
+        <source>Answered</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-panicked" datatype="html">
+        <source>Crashed</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-refused" datatype="html">
+        <source>Refused</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-timed-out" datatype="html">
+        <source>Timed out</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-tool-error" datatype="html">
+        <source>Failed</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.resources" datatype="html">
+        <source>Resources</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.resources-hint" datatype="html">
+        <source>Documents the client can read by address, such as a summary.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke" datatype="html">
+        <source>Revoke</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-aria" datatype="html">
+        <source>Revoke the key of <x id="client"/></source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-effect" datatype="html">
+        <source>It stops working at once, and the client has to be given a new key to connect again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-failed" datatype="html">
+        <source>The key could not be revoked.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-invalid" datatype="html">
+        <source>This window was opened without a key to revoke. Close it and choose Revoke on a client in the list.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-question" datatype="html">
+        <source>Revoke the key of &quot;<x id="client"/>&quot;?</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-yes" datatype="html">
+        <source>Revoke</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke.title" datatype="html">
+        <source>Revoke key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoked" datatype="html">
+        <source>Revoked</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.save-failed" datatype="html">
+        <source>The change could not be saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.title" datatype="html">
+        <source>AI access (MCP)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.tools-lede" datatype="html">
+        <source>What a connected client may ask. Switch off what you do not want to share.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.tools-title" datatype="html">
+        <source>Tools</source>
+      </trans-unit>
       <trans-unit id="pd.menu.bar" datatype="html">
         <source>Application menu</source>
       </trans-unit>
@@ -1457,6 +1667,9 @@
       <trans-unit id="pd.settings.logging" datatype="html">
         <source>Logging</source>
       </trans-unit>
+      <trans-unit id="pd.settings.mcp" datatype="html">
+        <source>AI access (MCP)</source>
+      </trans-unit>
       <trans-unit id="pd.settings.no-match" datatype="html">
         <source>No settings match “<x id="query"/>”.</source>
       </trans-unit>
@@ -1517,8 +1730,14 @@
       <trans-unit id="pd.settings.service" datatype="html">
         <source>Background service</source>
       </trans-unit>
+      <trans-unit id="pd.settings.setup" datatype="html">
+        <source>Set-up</source>
+      </trans-unit>
       <trans-unit id="pd.settings.show-advanced" datatype="html">
         <source>Show advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.storage" datatype="html">
+        <source>Storage</source>
       </trans-unit>
       <trans-unit id="pd.settings.store.load-failed" datatype="html">
         <source>The settings could not be loaded.</source>
@@ -1549,6 +1768,72 @@
       </trans-unit>
       <trans-unit id="pd.settings.unsaved.keep" datatype="html">
         <source>Keep editing</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.empty" datatype="html">
+        <source>There is nothing to set up on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.failed" datatype="html">
+        <source>That did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.lede" datatype="html">
+        <source>A few things the app can set up for you. Each is optional, you can skip any of them, and you can come back to this list later in Settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.loading" datatype="html">
+        <source>Looking at what is set up…</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.no-state" datatype="html">
+        <source>The set-up steps could not be asked.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.no-state-title" datatype="html">
+        <source>The set-up steps could not be asked.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.open" datatype="html">
+        <source>Set-up…</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.refused" datatype="html">
+        <source>The request was not accepted.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.repair" datatype="html">
+        <source>Repair</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.settled" datatype="html">
+        <source>Everything is set up or skipped. You can change any of it later in Settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.skip" datatype="html">
+        <source>Skip for now</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.problem" datatype="html">
+        <source>Needs repair</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.skipped" datatype="html">
+        <source>Skipped</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.todo" datatype="html">
+        <source>To do</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.status.working" datatype="html">
+        <source>Working</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.steps" datatype="html">
+        <source>Set-up steps</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.still-working" datatype="html">
+        <source>Still working. This can take a minute; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.title" datatype="html">
+        <source>Set-up</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.unskip" datatype="html">
+        <source>Take it up again</source>
+      </trans-unit>
+      <trans-unit id="pd.setup.working" datatype="html">
+        <source>Working…</source>
       </trans-unit>
       <trans-unit id="pd.shell.context-failed" datatype="html">
         <source>The app context failed to load: <x id="cause"/></source>
@@ -1630,6 +1915,138 @@
       </trans-unit>
       <trans-unit id="pd.startup.session-restored" datatype="html">
         <source>Your last session was restored.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.cancelling" datatype="html">
+        <source>Cancelling…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear" datatype="html">
+        <source>Clear…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-cache" datatype="html">
+        <source>Clear cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-cache-size" datatype="html">
+        <source>Clear cache (<x id="size"/>)…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clear-label" datatype="html">
+        <source>Clear <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.storage.clearing" datatype="html">
+        <source>Clearing…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-folder" datatype="html">
+        <source>Folder</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-name" datatype="html">
+        <source>Kept</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-cache" datatype="html">
+        <source>The app rebuilds it when it needs it.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-data" datatype="html">
+        <source>This is your own data. It cannot be rebuilt, and clearing it cannot be undone.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-invalid" datatype="html">
+        <source>This window was opened without anything to clear. Close it and choose Clear on the Storage page.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-question" datatype="html">
+        <source>Clear <x id="what"/>? Up to <x id="size"/> is removed.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-title" datatype="html">
+        <source>Clear <x id="what"/>?</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm-yes" datatype="html">
+        <source>Clear</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.confirm.title" datatype="html">
+        <source>Clear storage</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.exact" datatype="html">
+        <source><x id="files"/> files, <x id="clearable"/> can be cleared</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.failed" datatype="html">
+        <source>That did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.freed" datatype="html">
+        <source>Cleared. <x id="size"/> freed.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.kind-cache" datatype="html">
+        <source>Cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.kind-data" datatype="html">
+        <source>Your data</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.lede" datatype="html">
+        <source>What this app keeps on your computer. Nothing is removed unless you ask, and only inside the app's own folders.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.loading" datatype="html">
+        <source>Asking what the app keeps…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.measure" datatype="html">
+        <source>Measure again</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.measuring" datatype="html">
+        <source>Measuring what the app keeps…</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.no-usage" datatype="html">
+        <source>What the app keeps could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.no-usage-title" datatype="html">
+        <source>What the app keeps could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.show" datatype="html">
+        <source>Show</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.show-label" datatype="html">
+        <source>Show <x id="name"/> in the file manager</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.skipped-many" datatype="html">
+        <source><x id="count"/> items left in place</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.skipped-one" datatype="html">
+        <source>1 item left in place</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.still-working" datatype="html">
+        <source>Still working. This can take a while for big folders; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.stopped" datatype="html">
+        <source>Stopped. <x id="size"/> freed so far; the rest was left as it was.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.table-label" datatype="html">
+        <source>What the app keeps</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.the-cache" datatype="html">
+        <source>the cache</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.title" datatype="html">
+        <source>Storage</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.total" datatype="html">
+        <source>The app keeps <x id="size"/> on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.working" datatype="html">
+        <source>Working…</source>
       </trans-unit>
       <trans-unit id="pd.table.actions" datatype="html">
         <source>Actions</source>
@@ -1943,11 +2360,29 @@
       <trans-unit id="pd.wb.assistant.allow-hint" datatype="html">
         <source>Lets the assistant propose changes. Each one still asks for your approval.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.answer-failed" datatype="html">
+        <source>The answer failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.answer-ready" datatype="html">
+        <source>Answer ready</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.allow" datatype="html">
         <source>Allow</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.arguments" datatype="html">
+        <source>Arguments</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.decline" datatype="html">
         <source>Decline</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.details" datatype="html">
+        <source>Details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.no-arguments" datatype="html">
+        <source>None</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
+        <source>Tool</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.attached" datatype="html">
         <source>Attached context</source>
@@ -1972,6 +2407,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.delete" datatype="html">
         <source>Delete conversation</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.deleted" datatype="html">
+        <source>Deleted &quot;<x id="title"/>&quot;</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.dismiss" datatype="html">
         <source>Dismiss</source>
@@ -2003,6 +2441,30 @@
       <trans-unit id="pd.wb.assistant.feature" datatype="html">
         <source>The assistant</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.incompatible" datatype="html">
+        <source>Update to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.model" datatype="html">
+        <source>Download a model in Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.not-installed" datatype="html">
+        <source>Install Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.not-running" datatype="html">
+        <source>Start Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.pairing" datatype="html">
+        <source>Connect Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.paused" datatype="html">
+        <source>Resume Pitwall to ask questions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.hint.unavailable" datatype="html">
+        <source>Pitwall is not available right now</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.jump" datatype="html">
+        <source>Jump to latest</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.loading" datatype="html">
         <source>Loading…</source>
       </trans-unit>
@@ -2033,9 +2495,6 @@
       <trans-unit id="pd.wb.assistant.thinking" datatype="html">
         <source>Thinking…</source>
       </trans-unit>
-      <trans-unit id="pd.wb.assistant.title" datatype="html">
-        <source>Assistant</source>
-      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
@@ -2050,6 +2509,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
         <source>(unreadable call)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.undo" datatype="html">
+        <source>Undo</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.view" datatype="html">
         <source>Assistant</source>
@@ -2171,6 +2633,9 @@
       <trans-unit id="pd.wb.dock.layout.fit.undo" datatype="html">
         <source>Undo</source>
       </trans-unit>
+      <trans-unit id="pd.wb.dock.notice.action" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
       <trans-unit id="pd.wb.dock.overflow.many" datatype="html">
         <source><x id="count"/> more tabs</source>
       </trans-unit>
@@ -2245,9 +2710,6 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.panelTab.close" datatype="html">
         <source>Close (Delete)</source>
-      </trans-unit>
-      <trans-unit id="pd.wb.dock.panelTab.menu" datatype="html">
-        <source>Panel menu (Shift+F10)</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.perspective-1" datatype="html">
         <source>Switch to perspective 1</source>
@@ -2366,8 +2828,23 @@
       <trans-unit id="pd.wb.palette.empty" datatype="html">
         <source>Nothing matches</source>
       </trans-unit>
+      <trans-unit id="pd.wb.palette.empty-in" datatype="html">
+        <source>Nothing in <x id="source"/> matches “<x id="query"/>”</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.empty-query" datatype="html">
+        <source>No command matches “<x id="query"/>”</source>
+      </trans-unit>
       <trans-unit id="pd.wb.palette.failed" datatype="html">
         <source>The search failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.common" datatype="html">
+        <source>Frequently used</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.other" datatype="html">
+        <source>Other commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.recent" datatype="html">
+        <source>Recently used</source>
       </trans-unit>
       <trans-unit id="pd.wb.palette.input" datatype="html">
         <source>Type a command, or a prefix to search</source>

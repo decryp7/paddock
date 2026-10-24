@@ -85,6 +85,9 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
 
     <ng-template #face let-item>
       <pd-icon class="pd-act-icon" [name]="item.icon" />
+      @if (items.isOpen(item) && !items.isActive(item)) {
+        <span class="pd-act-open" aria-hidden="true" data-testid="activity-open"></span>
+      }
       @if (items.pulse(item)) {
         <span class="pd-act-pulse" aria-hidden="true"></span>
       }
@@ -95,35 +98,35 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
 
     <!-- Entries are built on every opening: CDK keeps the data a menu was first opened with. -->
     <ng-template #flyout let-item>
-      <div cdkMenu class="pd-act-menu" [attr.aria-label]="item.title.text" [attr.data-activity-menu]="item.id">
+      <div cdkMenu class="pd-popmenu pd-act-menu" [attr.aria-label]="item.title.text" [attr.data-activity-menu]="item.id">
         @for (entry of items.menu(item); track entry.id) {
           @if (entry.checked === undefined) {
-            <button type="button" cdkMenuItem class="pd-act-mi" [cdkMenuitemTypeaheadLabel]="entry.label" [attr.aria-keyshortcuts]="keys(entry)" (cdkMenuItemTriggered)="items.run(entry.run)">
+            <button type="button" cdkMenuItem class="pd-popmenu__item" [cdkMenuitemTypeaheadLabel]="entry.label" [attr.aria-keyshortcuts]="keys(entry)" (cdkMenuItemTriggered)="items.run(entry.run)">
               <ng-container *ngTemplateOutlet="entryFace; context: { $implicit: entry, checked: false }" />
             </button>
           } @else {
-            <button type="button" cdkMenuItemCheckbox class="pd-act-mi" [cdkMenuItemChecked]="entry.checked" [cdkMenuitemTypeaheadLabel]="entry.label" [attr.aria-keyshortcuts]="keys(entry)" (cdkMenuItemTriggered)="items.run(entry.run)">
+            <button type="button" cdkMenuItemCheckbox class="pd-popmenu__item" [cdkMenuItemChecked]="entry.checked" [cdkMenuitemTypeaheadLabel]="entry.label" [attr.aria-keyshortcuts]="keys(entry)" (cdkMenuItemTriggered)="items.run(entry.run)">
               <ng-container *ngTemplateOutlet="entryFace; context: { $implicit: entry, checked: entry.checked }" />
             </button>
           }
         } @empty {
-          <div class="pd-act-mi pd-act-none">{{ t.empty }}</div>
+          <div class="pd-popmenu__item" aria-disabled="true">{{ t.empty }}</div>
         }
       </div>
     </ng-template>
 
     <ng-template #more>
-      <div cdkMenu class="pd-act-menu" [attr.aria-label]="t.more" data-activity-menu="pd.more">
+      <div cdkMenu class="pd-popmenu pd-act-menu" [attr.aria-label]="t.more" data-activity-menu="pd.more">
         @for (item of overflow(); track item.id) {
           @if (items.hasMenu(item)) {
-            <button type="button" cdkMenuItem class="pd-act-mi" [cdkMenuitemTypeaheadLabel]="item.title.text" [cdkMenuTriggerFor]="flyout" [cdkMenuTriggerData]="{ $implicit: item }">
+            <button type="button" cdkMenuItem class="pd-popmenu__item" [cdkMenuitemTypeaheadLabel]="item.title.text" [cdkMenuTriggerFor]="flyout" [cdkMenuTriggerData]="{ $implicit: item }">
               <ng-container *ngTemplateOutlet="entryFace; context: { $implicit: asEntry(item), checked: false, submenu: true }" />
             </button>
           } @else {
             <button
               type="button"
               cdkMenuItemCheckbox
-              class="pd-act-mi"
+              class="pd-popmenu__item"
               [cdkMenuItemChecked]="items.isActive(item)"
               [cdkMenuItemDisabled]="!!items.disabledReason(item)"
               [cdkMenuitemTypeaheadLabel]="item.title.text"
@@ -138,19 +141,21 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
     </ng-template>
 
     <ng-template #entryFace let-entry let-checked="checked" let-submenu="submenu">
-      <span class="pd-act-check" aria-hidden="true">
+      <span class="pd-popmenu__icon pd-act-check" aria-hidden="true">
         @if (checked) {
           <pd-icon name="pd:check" />
         }
       </span>
-      @if (entry.icon) {
-        <pd-icon [name]="entry.icon" />
-      }
-      <span class="pd-act-label">{{ entry.label }}</span>
+      <span class="pd-popmenu__icon" aria-hidden="true">
+        @if (entry.icon) {
+          <pd-icon [name]="entry.icon" />
+        }
+      </span>
+      <span class="pd-popmenu__label">{{ entry.label }}</span>
       @if (submenu) {
-        <pd-icon class="pd-act-hint" name="pd:chevron-right" />
+        <pd-icon class="pd-popmenu__hint" name="pd:chevron-right" />
       } @else if (items.keyHint(entry); as h) {
-        <span class="pd-act-hint" aria-hidden="true">{{ h }}</span>
+        <span class="pd-popmenu__hint" aria-hidden="true">{{ h }}</span>
       }
     </ng-template>
   `,
@@ -160,22 +165,19 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
     .pd-act-icon { transform: scale(1.125); }
     .pd-act:hover { color: var(--pd-text); background: var(--pd-hover); }
     .pd-act:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; color: var(--pd-text); }
-    .pd-act.pd-on { background: var(--pd-accent-tint); color: var(--pd-text); box-shadow: inset 2px 0 0 var(--pd-accent); }
+    .pd-act.pd-on { background: var(--pd-accent-tint); color: var(--pd-text); }
+    /* The selected item's indicator: a 2x20 px bar on the bar's inner edge, outside the rounded tile (review P2-5). */
+    .pd-act.pd-on::before { content: ''; position: absolute; inset-inline-start: -6px; top: 8px; width: 2px; height: 20px; border-radius: 1px; background: var(--pd-accent-fill); }
+    .pd-act-open { position: absolute; bottom: 3px; left: 50%; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--pd-text-muted); }
     .pd-act[aria-disabled='true'] { opacity: 0.45; cursor: default; }
     .pd-act-spacer { flex: 1; min-height: 0; }
     .pd-act-pulse { position: absolute; top: 6px; inset-inline-end: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--pd-accent); animation: pd-act-pulse 1.6s ease-in-out infinite; }
     @keyframes pd-act-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
     @media (prefers-reduced-motion: reduce) { .pd-act-pulse { animation: none; } }
-    .pd-act-badge { position: absolute; bottom: 2px; inset-inline-end: 1px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--pd-accent-fill); color: var(--pd-on-accent); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); line-height: 14px; text-align: center; }
-    .pd-act-menu { min-width: 220px; max-width: min(360px, calc(100vw - 16px)); max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; padding: var(--pd-space-1); border-radius: var(--pd-radius-popover); background: var(--pd-surface-2); border: 1px solid var(--pd-border-strong); box-shadow: var(--pd-shadow-2); color: var(--pd-text); font-size: var(--pd-text-body); }
+    .pd-act-badge { position: absolute; top: 1px; inset-inline-end: 0; box-shadow: 0 0 0 1.5px var(--pd-surface-1); min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--pd-accent-fill); color: var(--pd-on-accent); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); line-height: 14px; text-align: center; }
+    .pd-act-menu { min-width: 220px; max-width: min(360px, calc(100vw - 16px)); max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; }
     .pd-act-menu:focus { outline: none; }
-    .pd-act-mi { display: flex; align-items: center; gap: var(--pd-space-2); flex: none; min-height: 28px; padding: 0 10px 0 6px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); cursor: pointer; text-align: start; font: inherit; white-space: nowrap; }
-    .pd-act-mi:hover, .pd-act-mi:focus, .pd-act-mi[aria-expanded='true'] { background: var(--pd-hover); outline: none; }
-    .pd-act-mi:focus-visible { box-shadow: inset 0 0 0 1px var(--pd-focus-ring); }
-    .pd-act-mi[aria-disabled='true'], .pd-act-none { opacity: 0.6; cursor: default; }
-    .pd-act-check { width: 14px; flex: none; display: inline-flex; color: var(--pd-accent); }
-    .pd-act-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .pd-act-hint { flex: none; margin-inline-start: var(--pd-space-6); color: var(--pd-text-muted); font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
+    .pd-act-check { color: var(--pd-accent); }
   `,
 })
 export class PdActivityBar {

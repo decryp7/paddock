@@ -69,3 +69,11 @@ test('parseReviewed reads rows, ignores headers and malformed rows, lower-cases 
   assert.equal(parseReviewed(null).size, 0);
   assert.equal(parseReviewed(`| \`a.png\` | ${'a'.repeat(64)} | Ada | 2026-10-25 |`).get('a.png').hash, 'a'.repeat(64));
 });
+
+test('C24 checks the folders named in screenshotDirs (an app whose images live under ui/)', async () => {
+  const files = { 'ui/docs/screenshots/dark/a.png': A, 'ui/docs/screenshots/hashes.json': JSON.stringify({ 'dark/a.png': sha(A) }), 'ui/docs/screenshots/REVIEWED.md': reviewed(), 'paddock.conformance.json': JSON.stringify({ screenshotDirs: ['ui/docs/screenshots'] }) };
+  assert.match(messages(await run(files)), /dark\/a\.png|has no review in ui\/docs\/screenshots\/REVIEWED\.md/);
+  assert.deepEqual(await run({ ...files, 'ui/docs/screenshots/REVIEWED.md': reviewed(row('dark/a.png', A)) }), []);
+  // Without the setting the folder is not looked at.
+  assert.deepEqual(await run({ ...files, 'paddock.conformance.json': '{}' }), []);
+});

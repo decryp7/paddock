@@ -1,4 +1,6 @@
-import { type EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
+import { type EnvironmentProviders, inject, Injector, makeEnvironmentProviders } from '@angular/core';
+import { NOTICE_ACTION_HANDLERS } from '@decryp7/paddock-ui/shell/notify';
+import { dockNoticeHandler } from './dock-notice';
 import { DOCK_PORT, EXPLORER_PLAN } from '@decryp7/paddock-ui/workbench';
 import { DockAutoHide } from './dock-auto-hide';
 import { DockContext } from './dock-context';
@@ -41,5 +43,6 @@ export function provideWorkbenchDock(options: DockOptions = {}): EnvironmentProv
     { provide: DOCK_PORT, useExisting: WorkbenchDock },
     { provide: EXPLORER_PLAN, useExisting: WorkbenchDock },
     provideDockContributions(),
+    { provide: NOTICE_ACTION_HANDLERS, multi: true, useFactory: () => dockNoticeHandler(inject(Injector)) },
   ]);
 }

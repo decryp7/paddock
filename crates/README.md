@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-panels/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`, `paddock-build/src/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-panels/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`, `paddock-build/src/native.rs`, `paddock-siblings/src/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -110,6 +110,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-files` | user files: path grants (open only paths the user chose, canonicalised), validated open/save pickers behind a port, recent lists (recorded only after a granted open, re-granted on use), reveal, open with the default program (never what runs on open) and web addresses (plan X31; from Debrief `paths.rs`, `recent.rs`, `opener.rs`) | yes (all apps; Pacenotes and Sighter from their first commit); built |
+| `paddock-storage` | what an app keeps on disk and clearing it safely: declared categories (cache the app can rebuild, the user's data), a bounded size walk (entries, time on an injected clock, depth, no links, one volume), a preview that is measured first, a re-check before every delete, confirmation for data, nothing outside the app's own folders, as jobs with progress and Cancel (plan X32; from Debrief `storage/`, Dyno `cleanup/{walk,guard}.rs`, Pitwall `leftovers.rs`, Pitcrew cache clean) | yes (all apps); built |
 | `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
@@ -118,6 +119,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
+| `paddock-siblings` | hand-off between the family's apps: the apps and what each accepts (`docs/ecosystem.md`), a typed `Handoff` (open, import files, show an item), discovery of an installed sibling per OS, starting it detached with paths or a deep link, plain "not installed" and "needs update" answers, the receiving side's parsers (plan X45; from Pitcrew's `debrief_link.rs` and `handoff.rs`) | yes (Pitcrew, Dyno, Debrief, Spotter); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
 | `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
 | `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
@@ -457,22 +459,42 @@ Pop-out panel windows: a panel of a window's dock moved into an OS window of its
 
 ## `paddock-workbench` (plan X50 W2a, W7)
 
-The Rust side of the workbench (ADR 0013 §3). Today: the dock's layout store. The workbench Tauri plugin (pop-out panels
-of `paddock-panels` and the assistant of `paddock-assistant` folded behind one guard) joins it in W7.
+The Rust side of the workbench (ADR 0013 §3): the dock's layout store and the workbench Tauri plugin, built exactly like
+`paddock-shell` (one guard over a composed table, generated permission sets per window class, generated TypeScript names).
 
 ```rust
-app.manage(paddock_workbench::tauri::Layouts::open(dirs.config()));     // <config>/workbench-layout.json
-// in a table: paddock_workbench::COMMANDS (layout_get [MAIN | POPOUT], layout_set [MAIN]); handler: tauri::invoke_handler()
+let workbench = paddock_workbench::Builder::new()                 // every part optional (a missing one answers "not set up")
+    .layouts(dirs.config())                                       // <config>/workbench-layout.json
+    .panels(Panels::builder().route("index.html#/popout").bounds_file(data.join("popout-places.json")).build())
+    .window_hooks(WindowHooks::new())                             // optional: the app's steps in building a pop-out
+    .assistant(Arc::new(assistant))                               // paddock_assistant::Assistant
+    .build();
+tauri::Builder::default().plugin(shell.build()).plugin(workbench) // the shell first: the dialogs' grants are its state
 ```
 
+- Plugin `paddock-workbench` (`links`): commands are `plugin:paddock-workbench|<command>`. `COMMANDS` folds `LAYOUT`
+  (`layout_get [MAIN | POPOUT]`, `layout_set [MAIN]`), `paddock_panels::COMMANDS` (11 commands) and
+  `paddock_assistant::tauri::COMMANDS` (7) behind one `Guard` (`paddock_dialogs::tauri::grant_of` for the dialog contracts)
+  over `Routes` to each crate's unguarded handler. The plugin also hooks every window's events into the panel layer
+  (a pop-out closing docks back, a host closing closes its pop-outs). The app serves the drag ghost's page
+  (`paddock_panels::ghost`) and calls `Panels::set_exiting(true)` when it quits.
+- Permissions: `build.rs` makes `allow-<command>`; `permissions/window-classes.toml` (generated from the table, checked by
+  a test; `PADDOCK_WRITE_TS=1 cargo test -p paddock-workbench --all-features --lib generated` rewrites it) holds the sets
+  `default` (= `main`), `popout` and `dialog`. An app's capabilities grant `paddock-workbench:default` to `main`/`w-*`,
+  `paddock-workbench:popout` to `p-*` and `paddock-workbench:dialog` to `d-*`. The drag ghost window (`drag-ghost`) matches
+  none of them.
+- Generated TypeScript (`ui/projects/paddock-ui/workbench/generated/`): `WORKBENCH_COMMANDS` / `WorkbenchCommand`
+  (`workbench-commands.ts`) and `WORKBENCH_PLUGIN` (`workbench.ts`), exported from `workbench/public-api.ts`.
 - `layout::LayoutStore`: a `paddock-env` `VersionedFile` (format 1). Keys `[a-z0-9._:-]{1,64}`, values JSON objects of at
   most 1 MiB, at most 128 keys and 8 MiB in all; a damaged file gives an empty store and one `Problem` (logged), a newer
   file is left alone and saves are refused (the change stays in memory for the run). The UI owns the content (the dock's
   versioned envelope, parsed at its edge).
 - Commands answer the one envelope of `paddock_commands::CommandError` (boxed): `invalid` with `field` for a bad key or a
   value that is not an object, `limit` for too large or full, `io` for a refused write; file I/O runs on the blocking pool.
-- Tests: the store in temporary folders (damaged, newer, out-of-bound files), the commands behind the guard on Tauri's
-  mock runtime (a pop-out reads but cannot write, a dialog cannot read).
+- Tests: the store in temporary folders (damaged, newer, out-of-bound files); on Tauri's mock runtime through the plugin:
+  every command reaches its handler from a window of a class it is open to and is refused (by Tauri's ACL) from the
+  others, a dialog reaches only its contract, the drag ghost's label reaches nothing, parts left out answer "not set up";
+  the generated files are current.
 
 ## `paddock-window` (plan S12)
 
@@ -760,7 +782,10 @@ a size only), arguments validated against the tool's schema (a wrong call is a t
 tool's byte limit with a cursor for more, a call that passes its time limit is cancelled and abandoned (at most 8 still running),
 a panicking tool is contained, actions (`ToolDef::action`) are hidden and refused until `Policy::allow_action(name)`. Sighter's own
 rules sit on top and are not relaxed. `client` has the request builders and typed results for a host (Pitwall); the wire types are
-shared. The contract test pins the message shapes against the specification's JSON Schema. Not built: `prompts`, subscriptions,
+shared. The contract test pins the message shapes against the specification's JSON Schema. `notifications/cancelled` stops a running call; a
+connection runs up to 4 tool calls at once and answers them as they finish. With the `tauri` feature, `McpControl` + `paddock_mcp::tauri`
+are the settings page's engine (`Builder::mcp` in the shell): the on/off switch, tools shown, actions allowed by name, client keys (issued
+once, only the hash kept, the list persisted through `paddock-secrets`), the audit log and its `paddock://mcp` event. Not built: `prompts`, subscriptions,
 sampling, HTTP transport (stdio and loopback only, as ADR 0007 decides).
 ## `paddock-archive` (plan X24)
 
@@ -1037,6 +1062,35 @@ archive::verify_installed(&installed, &sha)?;                                   
   versioned owner-only state file (missing or damaged gives nothing trusted and developer mode off).
 - `fuzz/` holds the manifest and archive fuzz targets (`cargo +nightly fuzz run manifest`, `... package`); `tests/properties.rs` runs
   never-panic and never-accept-other-content properties with the tests.
+## `paddock-storage` (plan X32)
+
+The Settings > Storage mechanism in one place. The app declares what it keeps; the crate measures, previews and clears.
+
+```rust
+use paddock_storage::{Category, Item, Kind, Storage, from_this_run};
+
+// shell: Builder::new(identity).files(..).storage(|_| Ok(Storage::new(Arc::new(categories)).within(&dirs)))
+let cache = Category::new("cache", "Cache", Kind::Cache).folder(dirs.cache()).entries(|_| None).note("Rebuilt when needed.");
+let logs = Category::new("logs", "Logs", Kind::Data).folder(dirs.logs())
+    .entries(move |p| from_this_run(p, Some(started), "written")).note("Logs written in this session are kept.");
+let models = Category::new("models", "Models", Kind::Data).folder(models_dir)
+    .item(Item::path(model).removed_by(|p| engine.delete_model(p)).protected(active_reason)); // the engine stops using it first
+```
+
+- **Boundary.** `Storage::within(&dirs)` (plus `also_within` for the web view's profile or a temp folder the app owns): a category
+  whose folder resolves, links included, outside those folders is shown but never cleared.
+- **Preview first.** `scan` returns sizes, `clearable_bytes`, the biggest items and `capped` (lower bounds) and keeps what it saw.
+  `clear` refuses without that preview (`noPreview`) and uses it up; `validate` refuses unknown, duplicate or too many categories
+  before a job exists.
+- **Confirmation.** A `data` category is cleared only when the request says `confirmed`; the UI gets that from a modal window.
+  Nothing is ever cleared by itself (Pitwall's leftovers are a category the user clears).
+- **Re-check before every delete** (`guard::recheck`, from Dyno): the item still exists, is not a link, has the kind the preview
+  saw, resolves through its real parent inside the category's folder, was listed by the preview and has not changed since. What
+  fails stays, with the reason, in the result.
+- **Jobs.** `storage_scan` and `storage_clear` start a job (phase-labelled progress from the first moment, Cancel in every phase,
+  one job at a time) and return at once; the outcome is a `paddock://storage` event. `Run` is the port, `Recorder` its fake.
+- **UI.** `@decryp7/paddock-ui/shell/storage` (+ `/page`, `/dialog`): `StorageBackend` (Tauri, memory with the same rules),
+  `StorageStore`, the Storage page and the `pd.storage.confirm` decision window.
 
 ## `paddock-files` (plan X31)
 
@@ -1623,6 +1677,31 @@ io), `String`/`&str` (`failed`) and the guard's `Refusal` (`denied`, `limit`). `
 by `PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated` and checked on every run. Domain errors stay in their libraries
 and convert once at the command edge.
 
+## `paddock-shell` set-up checklist (plan X19)
+
+`Builder::first_run(|app| FirstRun::new().notifications(access).pitwall(port, Caps::chat(8192)).item(tour))` turns on the first-run
+checklist: the service and Start at login steps appear when the app has `Builder::service`, the notification and Pitwall steps when the
+app names them, then the app's own `SetupItem`s. State: `setup.json` in the app's config folder (`{skipped, finished}`, versioned by
+`paddock-env`). Commands: `setup_state` (blocking pool), `setup_act` / `setup_repair` (return at once; the step is marked working
+and the outcome arrives on `paddock://setup`), `setup_skip`, `setup_finish`. Ports for tests: `ServicePort`, `NotificationAccess`
+(`ToasterAccess` over the OS notifier), `PitwallPort` (`LinkPort` over `paddock_pitwall::Link`); the apps' own: `SetupItem`. The UI is
+`@decryp7/paddock-ui/shell/setup`.
+
+## `paddock-siblings` (plan X45)
+
+```rust
+let siblings = paddock_siblings::Siblings::native("dyno")?;
+match siblings.open("pitcrew", &Handoff::show(Item::new("machine", "mac-mini")?))? {
+    Outcome::Opened { .. } => {}
+    Outcome::NotInstalled { message } | Outcome::NeedsUpdate { message } => show(message),
+}
+siblings.import("debrief", vec![log_path])?;        // files to import
+```
+
+The receiving app reads the same call back: `Handoff::from_paths(&args.paths, spec, &DiskProbe)` and `Handoff::from_link(&link, spec)` over
+`paddock_window::launch::parse_args`. The contract per app is `FAMILY` (Debrief: any file; Spotter: `.json`; Pitcrew: `machine` items;
+every app can be opened). Replaces Pitcrew's `crates/pitcrew-core/src/debrief_link.rs` and `app/src-tauri/src/handoff.rs` (the
+log-extract logic stays in Pitcrew; only the finding and starting moves).
 ## `paddock-build` and `paddock_proc::self_test` (plan X34)
 
 `paddock-build` is a build-dependency; the build.rs of an app is one line (`paddock_build::Build::new().sidecars(["x-service"]).run()`, feature

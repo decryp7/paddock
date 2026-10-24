@@ -1,5 +1,6 @@
 {
   "app": "paddock",
+  "screenshotDirs": ["ui/docs/screenshots"],
   "perCrateSteps": ["crates"],
   "ownTestBinaries": {
     "crates/paddock-assistant/tests/tauri.rs": "needs the tauri feature (required-features), which the crate's other tests do not",

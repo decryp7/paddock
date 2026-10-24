@@ -58,7 +58,10 @@ const ACTIONS: PdRowAction[] = [
 })
 class Host {
   readonly rows = signal<Plugin[]>(DATA);
-  readonly columns = COLUMNS;
+  columnsOverride: typeof COLUMNS | null = null;
+  get columns() {
+    return this.columnsOverride ?? COLUMNS;
+  }
   readonly key = (r: Plugin): string => r.id;
   readonly actions = (r: Plugin): readonly PdRowAction[] => (r.id === 'p3' ? [] : ACTIONS);
   readonly groupBy = signal<string | null>(null);
@@ -111,6 +114,17 @@ describe('pd-table', () => {
     expect(el(f).querySelector('.custom')?.textContent).toBe('30 KiB');
     // Paths are shortened in the middle with the full value as the tooltip.
     expect(el(f).querySelector('pd-middle-text')?.getAttribute('title')).toBe('/opt/plugins/zeta/plugin.so');
+  });
+
+  it('keeps a hidden header for assistive technology only (a glyph column)', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Host);
+    f.componentInstance.columnsOverride = COLUMNS.map((c, i) => (i === 0 ? { ...c, headerHidden: true } : i === 1 ? { ...c, headerHidden: true, sortable: false } : c));
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    const hidden = [...el(f).querySelectorAll('[role=columnheader] .pd-th-text.pd-sr')].map((h) => h.textContent?.trim());
+    expect(hidden).toEqual(['Name', 'Size (KiB)']);
+    expect(el(f).querySelector('[role=columnheader]')?.textContent?.trim()).toBe('Name');
   });
 
   it('sorts by a header: ascending, descending, none, with aria-sort', async () => {
@@ -338,6 +352,8 @@ describe('pd-table', () => {
     sorts[0]!.click();
     await settle(f);
     expect(el(f).querySelector('.pd-sorted .pd-sort-icon')?.querySelector('svg path')?.getAttribute('d')).toBe('M6 15l6-6 6 6');
+    // An unsorted header shows the two-way glyph, which a descending sort never uses.
+    expect(el(f).querySelectorAll('.pd-sort:not(.pd-sorted) .pd-sort-icon svg path')[0]?.getAttribute('d')).toBe('M8 9l4-4 4 4M8 15l4 4 4-4');
     sorts[0]!.click();
     await settle(f);
     expect(el(f).querySelector('.pd-sorted .pd-sort-icon')?.querySelector('svg path')?.getAttribute('d')).toBe('M6 9l6 6 6-6');
@@ -360,6 +376,12 @@ describe('pd-table', () => {
     f.componentInstance.state.set('loading');
     await settle(f);
     expect(el(f).querySelector('[data-testid=table-loading]')).not.toBeNull();
+    // The filter stays in the toolbar (the bar keeps its shape) but is disabled until there is something to filter.
+    expect(el(f).querySelector<HTMLInputElement>('input[type=search]')?.disabled).toBe(true);
+    // Nothing is counted while loading, and the action track stays (the columns do not move when the rows arrive).
+    expect(el(f).querySelector('[data-testid=table-count]')).toBeNull();
+    const cols = el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols');
+    expect(cols).toMatch(/84px$/);
     expect(el(f).querySelector('[role=grid]')?.getAttribute('aria-busy')).toBe('true');
     expect(el(f).querySelectorAll('.pd-skel').length).toBeGreaterThan(0);
     f.componentInstance.state.set('error');
@@ -370,6 +392,19 @@ describe('pd-table', () => {
     f.componentInstance.state.set('ready');
     await settle(f);
     expect(rowEls(f)).toHaveLength(3);
+    expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols')).toBe(cols);
+    expect(el(f).querySelector<HTMLInputElement>('input[type=search]')?.disabled).toBe(false);
+    expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe('3 rows');
+  });
+
+  it('counts with the locale’s thousands separators and says nothing when there are no rows', async () => {
+    const f = await setup();
+    f.componentInstance.rows.set(Array.from({ length: 1250 }, (_, i): Plugin => ({ id: `r${i}`, name: `R${i}`, size: i, kind: 'k', path: `/p/${i}` })));
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe(`${new Intl.NumberFormat().format(1250)} rows`);
+    f.componentInstance.rows.set([]);
+    await settle(f);
+    expect(el(f).querySelector('[data-testid=table-count]')).toBeNull();
   });
 
   it('shows the next step the app projects when there are no rows at all, and the filter message when a filter hides them', async () => {

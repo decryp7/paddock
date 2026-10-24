@@ -5,10 +5,13 @@
 # (trap: success, failure, Ctrl-C, timeout). At most one VM at a time (a lock), disk and load are checked first.
 #
 #   bash paddock/tools/macos-vm-smoke.sh --old <N build> --new <N+1 build> [--guest macos|linux] [--smoke <script>]
+#     [--then <script>]
 #
 # --guest macos (default): --old/--new are the two .app bundles; the smoke is scripts/shell-demo/smoke-service-update.sh.
 # --guest linux: an arm64 Ubuntu guest with a real systemd --user session; --old/--new are folders holding the two builds'
-#   linux-arm64 binaries; the smoke is scripts/shell-demo/smoke-service-update-linux.sh. (Same VM tool, another image.)
+#   linux-arm64 binaries (the agent and the app); the smoke is scripts/shell-demo/smoke-service-update-linux.sh, then
+#   (--then) scripts/shell-demo/smoke-desktop-linux.sh on build N+1: tray, notification and Quit in a light X session.
+#   tart exec has no login session, so the guest turns on lingering for its user to get a systemd --user manager.
 # The guest gets the staged files read-only through a virtio-fs share, copies them into its home and runs the smoke there with
 # PADDOCK_DISPOSABLE_MAC=1 and PADDOCK_DISPOSABLE_VM=1; the smoke's output is the script's output and its exit code is ours.
 #
@@ -22,13 +25,14 @@ MACOS_IMAGE="ghcr.io/cirruslabs/macos-tahoe-base@sha256:4aaa751fa7538902d73c767f
 LINUX_IMAGE="ghcr.io/cirruslabs/ubuntu@sha256:3acc11bebedcbcb813fb17dd0a4671a8c2e6baed537f3caa7922e170ed8a04ed" # 24.04
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-old=""; new=""; guest="macos"; smoke=""
+old=""; new=""; guest="macos"; smoke=""; then=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --old) old="${2:?--old needs a value}"; shift ;;
     --new) new="${2:?--new needs a value}"; shift ;;
     --guest) guest="${2:?--guest needs a value}"; shift ;;
     --smoke) smoke="${2:?--smoke needs a value}"; shift ;;
+    --then) then="${2:?--then needs a value}"; shift ;;
     *) echo "macos-vm-smoke: unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -37,6 +41,7 @@ case "$guest" in
   macos) image="${PADDOCK_VM_IMAGE:-$MACOS_IMAGE}"; smoke="${smoke:-$here/../scripts/shell-demo/smoke-service-update.sh}"
          share="/Volumes/My Shared Files/stage" ;;
   linux) image="${PADDOCK_VM_IMAGE:-$LINUX_IMAGE}"; smoke="${smoke:-$here/../scripts/shell-demo/smoke-service-update-linux.sh}"
+         then="${then:-$here/../scripts/shell-demo/smoke-desktop-linux.sh}"
          share="/mnt/shared/stage" ;;
   *) echo "macos-vm-smoke: --guest must be macos or linux" >&2; exit 2 ;;
 esac
@@ -119,6 +124,7 @@ stage="$(mktemp -d "${TMPDIR:-/tmp}/paddock-vm-stage-XXXXXX")"
 mkdir -p "$stage/stage/old" "$stage/stage/new"
 cp -R "$old" "$stage/stage/old/"; cp -R "$new" "$stage/stage/new/"
 cp "$smoke" "$stage/stage/smoke.sh"
+[ -z "$then" ] || cp "$then" "$stage/stage/then.sh"
 name="$(basename "$old")"
 
 log "cloning $vm"
@@ -139,10 +145,18 @@ log "$vm is up"
 guest_script='set -euo pipefail
 share="$1"; name="$2"; guest="$3"; shift 3
 for kv in "$@"; do export "$kv"; done
-if [ "$guest" = linux ]; then sudo mkdir -p /mnt/shared && (mountpoint -q /mnt/shared || sudo mount -t virtiofs com.apple.virtio-fs.automount /mnt/shared); fi
+if [ "$guest" = linux ]; then
+  sudo mkdir -p /mnt/shared && (mountpoint -q /mnt/shared || sudo mount -t virtiofs com.apple.virtio-fs.automount /mnt/shared)
+  # tart exec has no login session, so no systemd --user manager: lingering starts one (as a desktop login would).
+  sudo loginctl enable-linger "$(id -un)"
+  for _ in $(seq 1 60); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 1; done
+  export XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+fi
 rm -rf "$HOME/smoke" && mkdir -p "$HOME/smoke" && cp -R "$share"/. "$HOME/smoke/"
 export PADDOCK_DISPOSABLE_MAC=1 PADDOCK_DISPOSABLE_VM=1
-exec bash "$HOME/smoke/smoke.sh" "$HOME/smoke/old/$name" "$HOME/smoke/new/$name"'
+bash "$HOME/smoke/smoke.sh" "$HOME/smoke/old/$name" "$HOME/smoke/new/$name"
+# The second smoke (Linux: the desktop session with tray, notification and Quit) runs on build N+1 after the first passed.
+if [ -f "$HOME/smoke/then.sh" ]; then bash "$HOME/smoke/then.sh" "$HOME/smoke/new/$name"; fi'
 # PADDOCK_SMOKE_* variables of the caller (e.g. the two versions) are handed to the guest.
 forward=(); while IFS= read -r kv; do forward+=("$kv"); done < <(env | grep '^PADDOCK_SMOKE_' || true)
 rc=0

@@ -166,7 +166,7 @@ describe('workbench contributions lint (plan W1)', () => {
   });
 
   it('fails on Explorer providers missing their parts', () => {
-    const bad = { id: 'wd.tree', title: msg('wd.tree', 'Tree'), order: 1, icon: 'x', roots: 1, children: 1, open: 1, actions: () => [], drag: 1, changes: 1, empty: { text: 'x', command: 'wd.gone' } };
+    const bad = { id: 'wd.tree', title: msg('wd.tree', 'Tree'), order: 1, icon: 'x', roots: 1, children: 1, open: 1, actions: () => [], drag: 1, changes: 1, reveal: 1, empty: { text: 'x', command: 'wd.gone' } };
     expect(problems({ explorerProviders: [bad] })).toEqual(
       [
         'has no icon (namespace:name)',
@@ -176,11 +176,12 @@ describe('workbench contributions lint (plan W1)', () => {
         'has actions but no run function',
         'drag is not a function',
         'changes is not a function',
+        'reveal is not a function',
         "empty.text has no message id (use msg('<ns>.<name>', 'Text'))",
         'empty state runs the missing command wd.gone',
       ].map((p) => `Explorer provider wd.tree: ${p}`),
     );
-    expect(problems({ explorerProviders: [{ ...bad, actions: 1, run: 1, icon: undefined, roots: () => null, children: undefined, open: undefined, drag: undefined, changes: undefined, empty: undefined }] })).toEqual([
+    expect(problems({ explorerProviders: [{ ...bad, actions: 1, run: 1, icon: undefined, roots: () => null, children: undefined, open: undefined, drag: undefined, changes: undefined, reveal: undefined, empty: undefined }] })).toEqual([
       'Explorer provider wd.tree: actions is not a function',
       'Explorer provider wd.tree: run is not a function',
     ]);

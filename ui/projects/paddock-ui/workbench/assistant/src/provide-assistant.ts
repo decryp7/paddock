@@ -26,7 +26,7 @@ export function provideAssistant(options: AssistantOptions): EnvironmentProvider
           id: ASSISTANT_FOCUS_COMMAND,
           title: msg('pd.wb.assistant.cmd.focus', 'Ask the assistant'),
           category: msg('pd.wb.category.view', 'View'),
-          icon: 'pd:activity',
+          icon: 'pd:chat',
           run: async () => {
             await injector.get(WORKBENCH_PORTS).showView(ASSISTANT_VIEW_ID);
           },

@@ -3347,6 +3347,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-jobs",
+ "paddock-proc",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3429,14 +3430,19 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "log",
+ "paddock-commands",
+ "paddock-env",
  "paddock-jobs",
  "paddock-log",
+ "paddock-secrets",
  "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tauri",
  "tempfile",
+ "ts-rs",
 ]
 
 [[package]]
@@ -3710,6 +3716,7 @@ dependencies = [
 name = "paddock-shell"
 version = "0.2.0"
 dependencies = [
+ "log",
  "paddock-channels",
  "paddock-commands",
  "paddock-diag",
@@ -3720,11 +3727,16 @@ dependencies = [
  "paddock-health",
  "paddock-jobs",
  "paddock-log",
+ "paddock-mcp",
  "paddock-menu",
  "paddock-packs",
+ "paddock-pitwall",
+ "paddock-secrets",
  "paddock-service",
  "paddock-settings",
+ "paddock-siblings",
  "paddock-startup",
+ "paddock-storage",
  "paddock-updater",
  "paddock-window",
  "paddock-workspace-hack",
@@ -3768,6 +3780,22 @@ dependencies = [
  "sysinfo",
  "tauri",
  "tauri-plugin-dialog",
+ "tempfile",
+ "ts-rs",
+]
+
+[[package]]
+name = "paddock-storage"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-files",
+ "paddock-jobs",
+ "serde",
+ "serde_json",
+ "tauri",
  "tempfile",
  "ts-rs",
 ]
@@ -3863,13 +3891,20 @@ name = "paddock-workbench"
 version = "0.1.0"
 dependencies = [
  "log",
+ "paddock-assistant",
  "paddock-commands",
+ "paddock-dialogs",
  "paddock-env",
+ "paddock-health",
+ "paddock-panels",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
+ "tauri-plugin",
+ "tauri-utils",
  "tempfile",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
