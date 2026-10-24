@@ -525,11 +525,18 @@ user, quit, dropped connection, stalled loads, back during a close, event flood,
 whole install of a local build); `tests/real_browser.rs` with Chrome for Testing (headless; `Browser.close`; no process or
 profile left). Line coverage 100% of both crates (the fake browser is excluded like `paddock-proc`'s test child).
 
+Closed after the first push (2026-10-25):
+- The real-browser test runs in Paddock's Linux `crate` job against the `paddock-ci` image's Chrome for Testing, as root with
+  the explicit no-sandbox opt-in, and a missing browser fails it (`PADDOCK_REQUIRE_TEST_BROWSER`). The image pinned
+  156.0.8078.4 (the build Playwright 1.64.1 bundles, an early patch of milestone 156) while the apps download 156.0.8078.47
+  (the newest patch of 156): the image now carries the apps' build (image v2), Playwright keeps its own Chromium beside it, and
+  `scripts/ci-image.test.mjs` fails when the Dockerfile and `chromium.toml` disagree.
+- `start_page`, the start-up wait and `Page::wait_ready` wait and time out on the injected clock (`LaunchOptions::clock`),
+  with tests that drive them on a `FakeClock`; only `close_gracefully`'s grace for a real process uses the OS clock.
+- One pin script for every runtime catalogue: `conformance/ci/pin-runtime.mjs` (replaces Spotter's `pin-chromium.mjs`), and
+  `install-test-browser.mjs --catalogue` (replaces Debrief's `install-test-browser.mjs`); tested against a local server.
+
 Gaps left:
-- The real-browser test runs in CI only where a job installs Chrome for Testing and sets `CHROMIUM_TEST_PATH` (the apps'
-  CI does; Paddock's `crate` job does not yet).
 - Windows: `taskkill /T /F` ends the browser tree (no job object yet, see `paddock-proc`); the fake browser is Unix only,
-  so the launch tests run on Linux and macOS; the pure command-line tests run everywhere.
-- `wait_ready`, `start_page` and the start wait poll the OS clock (bounded production waits); only the lifetime limit runs on
-  the injected clock.
-- Spotter's `pin-chromium.mjs` and Debrief's `install-test-browser.mjs` are still per app (X9 scripts survey).
+  so the launch tests run on Linux and macOS; the pure command-line tests run everywhere. The real-browser test runs on Linux
+  CI only (macOS and Windows would need the install action with `catalogue:`).

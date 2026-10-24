@@ -28,6 +28,32 @@ fn opts(base: &Path) -> LaunchOptions {
     o
 }
 
+/// Ten years: limits a test runs out on purpose only (the fake time a launch pumps through never reaches them).
+const FAR: Duration = Duration::from_secs(10 * 365 * 24 * 3600);
+
+/// Options whose limits and waits run on `clock`.
+fn opts_on(f: &Fixture, clock: &FakeClock) -> LaunchOptions {
+    let mut o = opts(&f.base());
+    (o.clock, o.max_lifetime, o.start_limit) = (Arc::new(clock.clone()), FAR, FAR);
+    o
+}
+
+/// Launches with a fake clock: the start-up wait polls on it, so time is moved on whenever the watchdog and the start-up
+/// wait both wait (the launch then reads the port file again). The fake time this takes has nothing to do with how long
+/// the real fake browser needs, so `opts_on` puts the limits out of reach.
+fn launch_on(f: &Fixture, clock: &FakeClock, o: LaunchOptions) -> Result<Chromium> {
+    std::thread::scope(|s| {
+        let h = s.spawn(|| Chromium::launch_with(&f.exe(), &o, Sandbox::On));
+        while !h.is_finished() {
+            if clock.waiters() >= 2 {
+                clock.advance(POLL);
+            }
+            std::thread::yield_now();
+        }
+        h.join().unwrap()
+    })
+}
+
 struct Fixture {
     dir: tempfile::TempDir,
     fake: FakeBrowser,
@@ -148,12 +174,89 @@ fn the_start_page_is_driven_so_the_window_has_one_tab() {
 }
 
 #[test]
-fn a_browser_without_a_start_page_gets_a_new_one() {
+fn a_browser_without_a_start_page_gets_a_new_one_after_the_wait_on_its_clock() {
     let f = Fixture::new(Mode::Obey, 0);
-    let b = f.launch();
-    let p = b.start_page().unwrap();
-    assert!(!p.is_closed());
+    let clock = FakeClock::new();
+    let b = launch_on(&f, &clock, opts_on(&f, &clock)).unwrap();
+    std::thread::scope(|s| {
+        let h = s.spawn(|| b.start_page());
+        // The watchdog and the start-page wait both wait on the clock.
+        assert!(clock.wait_for_waiters(2, Duration::from_secs(20)));
+        assert!(
+            !f.fake.calls().contains(&"Target.createTarget".to_string()),
+            "no new page before the wait is over"
+        );
+        clock.advance(START_PAGE_WAIT);
+        let p = h.join().unwrap().unwrap();
+        assert!(!p.is_closed());
+    });
     assert!(f.fake.calls().contains(&"Target.createTarget".to_string()));
+}
+
+#[test]
+fn the_start_up_wait_runs_on_the_clock() {
+    let d = tempfile::tempdir().unwrap();
+    let silent = script(d.path(), "silent.sh", "exec sleep 30");
+    let clock = FakeClock::new();
+    let mut o = opts(&d.path().join("p"));
+    (o.clock, o.max_lifetime, o.start_limit) = (
+        Arc::new(clock.clone()),
+        Duration::from_secs(3600),
+        Duration::from_secs(20),
+    );
+    std::thread::scope(|s| {
+        let h = s.spawn(|| Chromium::launch_with(&silent, &o, Sandbox::On));
+        assert!(
+            clock.wait_for_waiters(2, Duration::from_secs(20)),
+            "the watchdog and the start-up wait"
+        );
+        clock.advance(Duration::from_secs(20));
+        let e = h.join().unwrap().err().unwrap();
+        assert!(matches!(e, Error::Timeout("the browser start")), "{e}");
+    });
+}
+
+#[test]
+fn waiting_for_a_page_polls_and_times_out_on_the_clock() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let clock = FakeClock::new();
+    let b = launch_on(&f, &clock, opts_on(&f, &clock)).unwrap();
+    let p = b.start_page().unwrap();
+    let rule = Rule::default();
+    f.fake.page_shows(&json!({"state": "loading"})).unwrap();
+    std::thread::scope(|s| {
+        let h = s.spawn(|| p.wait_ready(None, &rule, Duration::from_secs(10)));
+        assert!(
+            clock.wait_for_waiters(2, Duration::from_secs(20)),
+            "a poll waits on the clock"
+        );
+        f.fake
+            .page_shows(&json!({"state": "complete", "quiet": 900.0}))
+            .unwrap();
+        clock.advance(Duration::from_millis(100));
+        assert_eq!(
+            h.join().unwrap().unwrap(),
+            Outcome::Ready,
+            "ready on the next poll"
+        );
+    });
+    f.fake.page_shows(&json!({"state": "loading"})).unwrap();
+    std::thread::scope(|s| {
+        let h = s.spawn(|| p.wait_ready(None, &rule, Duration::from_secs(10)));
+        assert!(clock.wait_for_waiters(2, Duration::from_secs(20)));
+        clock.advance(Duration::from_secs(10));
+        // The poll after the deadline sees the time is up.
+        while !h.is_finished() {
+            if clock.waiters() >= 2 {
+                clock.advance(Duration::from_millis(100));
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            h.join().unwrap().unwrap(),
+            Outcome::TimedOut(Readiness::Loading)
+        );
+    });
 }
 
 #[test]
@@ -228,15 +331,13 @@ fn quitting_and_a_lost_connection_are_told_apart() {
 fn the_time_limit_runs_on_the_injected_clock() {
     let f = Fixture::new(Mode::IgnoreClose, 1);
     let clock = FakeClock::new();
-    let mut o = opts(&f.base());
-    (o.clock, o.max_lifetime) = (Arc::new(clock.clone()), Duration::from_secs(60));
-    let mut b = Chromium::launch_with(&f.exe(), &o, Sandbox::On).unwrap();
+    let mut b = launch_on(&f, &clock, opts_on(&f, &clock)).unwrap();
     assert!(
         clock.wait_for_waiters(1, Duration::from_secs(20)),
         "the watchdog waits on the clock"
     );
     assert_eq!(b.ended_by(), EndedBy::Nothing);
-    clock.advance(Duration::from_secs(60));
+    clock.advance(FAR);
     wait_until("the browser to be ended", || !b.process.is_running());
     assert_eq!(b.ended_by(), EndedBy::TimeLimit);
     b.kill();
@@ -264,11 +365,13 @@ fn the_memory_cap_ends_the_tree() {
 
 #[test]
 fn a_browser_over_the_cap_while_it_starts_fails_to_launch_and_says_why() {
-    let f = Fixture::new(Mode::IgnoreClose, 1);
-    let mut o = opts(&f.base());
+    // A browser that never gets as far as its port file, so the cap (not the start) decides, whatever the machine's speed.
+    let d = tempfile::tempdir().unwrap();
+    let starting = script(d.path(), "starting.sh", "exec sleep 30");
+    let mut o = opts(&d.path().join("p"));
     o.memory_cap = Some(1);
     o.memory_sampler = Some(Arc::new(|_| u64::MAX));
-    let e = Chromium::launch_with(&f.exe(), &o, Sandbox::On)
+    let e = Chromium::launch_with(&starting, &o, Sandbox::On)
         .err()
         .unwrap()
         .to_string();

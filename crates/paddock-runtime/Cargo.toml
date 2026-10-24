@@ -18,6 +18,7 @@ toml = "0.9"
 log = "0.4"
 
 [dev-dependencies]
+paddock-testkit = { workspace = true }
 tempfile = "3"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 tar = { version = "0.4", default-features = false }

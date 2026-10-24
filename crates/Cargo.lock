@@ -3523,6 +3523,7 @@ dependencies = [
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "tar",

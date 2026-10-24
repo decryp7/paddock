@@ -6,7 +6,7 @@ use crate::discover::Browser;
 use crate::page::Page;
 use crate::{Error, Result};
 use paddock_jobs::CancelToken;
-use paddock_jobs::time::{Clock, SystemClock};
+use paddock_jobs::time::{Clock, Deadline, SystemClock};
 use paddock_proc::{MemoryCap, Sampler, Supervised};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -21,10 +21,9 @@ pub const START_LIMIT: Duration = Duration::from_secs(20);
 /// How long a browser gets to quit by itself after `Browser.close` before its tree is ended.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 /// How long [`Chromium::start_page`] waits for the page the browser opens with.
-#[cfg(not(test))]
 pub const START_PAGE_WAIT: Duration = Duration::from_secs(5);
-#[cfg(test)]
-pub const START_PAGE_WAIT: Duration = Duration::from_millis(300);
+/// How often the start-up and start-page waits look again (on the browser's clock).
+const POLL: Duration = Duration::from_millis(50);
 /// Set to `1` (by a CI job that runs as root in a container) to start the browser without its sandbox.
 pub const NO_SANDBOX_ENV: &str = "PADDOCK_BROWSER_NO_SANDBOX";
 /// The browser's error output is kept in this file inside the profile, so a failed start can say why.
@@ -384,6 +383,8 @@ pub struct Chromium {
     stop: CancelToken,
     timed_out: Arc<AtomicBool>,
     exe: Browser,
+    /// `LaunchOptions::clock`: the time limit, the start-page wait and the pages' waits run on it.
+    clock: Arc<dyn Clock>,
 }
 
 impl Chromium {
@@ -441,7 +442,7 @@ impl Chromium {
             stop.clone(),
             timed_out.clone(),
         );
-        match connect(&dir, &mut process, opts.start_limit) {
+        match connect(&dir, &mut process, &opts.clock, opts.start_limit) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
                 process,
@@ -450,6 +451,7 @@ impl Chromium {
                 stop,
                 timed_out,
                 exe: exe.clone(),
+                clock: opts.clock.clone(),
             }),
             Err(e) => {
                 stop.cancel();
@@ -504,25 +506,25 @@ impl Chromium {
 
     /// Opens another page (tab) to drive, beside the ones the browser has.
     pub fn new_page(&self) -> Result<Page> {
-        Page::attach(self.conn.clone())
+        Page::attach(self.conn.clone(), self.clock.clone())
     }
 
     /// The page the browser opened with (its [`START_PAGE`]), to drive instead of opening a second one beside it: the
     /// window then has exactly one tab, and any further page is one the user opened. Waits up to [`START_PAGE_WAIT`] for
     /// it to appear; a browser that shows none by then gets a new page.
     pub fn start_page(&self) -> Result<Page> {
-        let end = Instant::now() + START_PAGE_WAIT;
+        let end = Deadline::after(self.clock.clone(), START_PAGE_WAIT);
         loop {
             if let Some(target) = self.first_page_target()? {
-                return Page::adopt(self.conn.clone(), target);
+                return Page::adopt(self.conn.clone(), target, self.clock.clone());
             }
-            if Instant::now() >= end {
+            if end.passed() {
                 log::warn!(
                     "The browser showed no start page within {START_PAGE_WAIT:?}; a new one is opened"
                 );
                 return self.new_page();
             }
-            std::thread::sleep(Duration::from_millis(50));
+            let _ = self.clock.wait(POLL, &CancelToken::new());
         }
     }
 
@@ -641,8 +643,14 @@ fn cleanup_with(dir: &Path, remove: &dyn Fn(&Path) -> std::io::Result<()>) -> bo
 }
 
 /// Waits for the `DevToolsActivePort` file the browser writes into the profile and connects to its endpoint.
-fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Connection> {
-    let end = Instant::now() + limit;
+/// Polls on `clock`, so a test drives the start-up wait with a fake clock.
+fn connect(
+    dir: &Path,
+    process: &mut Supervised,
+    clock: &Arc<dyn Clock>,
+    limit: Duration,
+) -> Result<Connection> {
+    let end = Deadline::after(clock.clone(), limit);
     loop {
         if let Ok(s) = std::fs::read_to_string(dir.join("DevToolsActivePort")) {
             let mut l = s.lines();
@@ -664,10 +672,10 @@ fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Conn
                 dir,
             )));
         }
-        if Instant::now() > end {
+        if end.passed() {
             return Err(Error::Timeout("the browser start"));
         }
-        std::thread::sleep(Duration::from_millis(50));
+        let _ = clock.wait(POLL, &CancelToken::new());
     }
 }
 
