@@ -47,7 +47,7 @@ const type = async (fixture: ComponentFixture<unknown>, input: HTMLInputElement,
 describe('the layout dialogs are declared as ADR 0009 asks', () => {
   it('declares save as a modal form and manage as a modeless tool, each with its own contract', () => {
     expect([SAVE.id, SAVE.kind, SAVE.modality, SAVE.commands]).toEqual([LAYOUT_SAVE_DIALOG_ID, 'form', 'modal', []]);
-    expect([MANAGE.id, MANAGE.kind, MANAGE.modality, MANAGE.commands]).toEqual([LAYOUT_MANAGE_DIALOG_ID, 'tool', 'modeless', []]);
+    expect([MANAGE.id, MANAGE.kind, MANAGE.modality, MANAGE.commands]).toEqual([LAYOUT_MANAGE_DIALOG_ID, 'tool', 'modeless', ['layout_get', 'layout_set']]);
     expect(LAYOUT_SAVE_DIALOG_ID).toBe('pd.wb.dock.layout-save');
     expect(LAYOUT_MANAGE_DIALOG_ID).toBe('pd.wb.dock.layout-manage');
     expect(MANAGE.minWidth).toBeLessThanOrEqual(MANAGE.width ?? 0);
