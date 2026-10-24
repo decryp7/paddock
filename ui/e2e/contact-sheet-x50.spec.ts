@@ -1,37 +1,44 @@
-import { expect, test, WorkbenchApp, type Page } from '@decryp7/paddock-e2e';
+import { expect, test, WorkbenchApp, type Locator, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// The contact sheet of the workbench (plan X50; ADR 0013) for the independent review (rule 22): the workbench demo in both
-// themes: the first screen, files open in the dock with the Explorer, the palette (commands, a provider by prefix, did you
-// mean), the Explorer's context menu, an activity fly-out, the assistant's needs-AI state, the Jobs pane, and the narrow
-// window (Explorer closed by the plan, 320 px). `CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x50`
-// rewrites docs/review/x50-workbench/. The reviewer looks at the sheet; this test only proves it was made from the real parts.
+// The contact sheet of the workbench (plan X50; ADR 0013) for the independent review (rule 22), review 2: the workbench demo
+// at @2x in both themes with real app accents (dark: Pacenotes, light: Debrief), covering every state review 1 asked for:
+// the first screen; documents, Problems and the Explorer; the palette (commands with groups, a provider, did you mean, no
+// match); the Explorer menu at the pointer; an activity fly-out; the assistant (needs-AI, streaming with Stop, a tool card
+// with a citation, the write approval, a failed turn); a running job; a pop-out window; keyboard focus on each surface;
+// a narrow window; 320 px with the Explorer and with Problems.
+// `CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x50` rewrites docs/review/x50-workbench/.
 
 const DEMO = `http://localhost:${process.env['WORKBENCH_DEMO_PORT'] ?? 4302}`;
 const OUT = join(__dirname, '..', 'docs', 'review', 'x50-workbench');
-const THEMES = ['dark', 'light'] as const;
+const SETS = [
+  { theme: 'dark', accent: 'pacenotes' },
+  { theme: 'light', accent: 'debrief' },
+] as const;
+type Set = (typeof SETS)[number];
 
 test.describe('contact sheet: workbench', () => {
   test.skip(!process.env['CONTACT_SHEET'], 'set CONTACT_SHEET=1 to rewrite docs/review/x50-workbench');
-  test.use({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  test.describe.configure({ timeout: 240_000 });
+  test.use({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
 
   const shots: { theme: string; title: string; file: string }[] = [];
 
-  async function open(page: Page, theme: string, width = 1440, height = 900): Promise<WorkbenchApp> {
-    await page.emulateMedia({ colorScheme: theme as 'dark' | 'light', reducedMotion: 'reduce' });
-    await page.setViewportSize({ width, height });
-    await page.goto(DEMO);
+  async function open(page: Page, set: Set, options: { width?: number; height?: number; query?: string; hash?: string } = {}): Promise<WorkbenchApp> {
+    await page.emulateMedia({ colorScheme: set.theme, reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: options.width ?? 1440, height: options.height ?? 900 });
+    await page.goto(`${DEMO}/?accent=${set.accent}${options.query ? `&${options.query}` : ''}${options.hash ?? ''}`);
     const wb = new WorkbenchApp(page);
-    if (width >= 1024) await expect(wb.explorer.node('wd.files', 'src')).toBeVisible();
-    await expect(page.locator('[data-testid="pd-dock-tab"]').first()).toBeVisible();
+    if (!options.hash) await expect(page.locator('pd-activity-bar')).toBeVisible();
     return wb;
   }
-  async function shoot(page: Page, theme: string, name: string, title: string): Promise<void> {
+  async function shoot(page: Page, set: Set, name: string, title: string, clip?: Locator): Promise<void> {
     mkdirSync(OUT, { recursive: true });
-    const file = join(OUT, `${theme}-${name}.png`);
-    await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
-    shots.push({ theme, title, file });
+    const file = join(OUT, `${set.theme}-${name}.png`);
+    if (clip) await clip.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+    else await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+    shots.push({ theme: set.theme, title, file });
   }
   async function openFiles(wb: WorkbenchApp): Promise<void> {
     await wb.explorer.expand('wd.files', 'src');
@@ -40,51 +47,115 @@ test.describe('contact sheet: workbench', () => {
     await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
     await expect(wb.page.getByTestId('code-lines')).toBeVisible();
   }
+  async function ask(page: Page, text: string): Promise<void> {
+    const input = page.getByTestId('assistant-input');
+    await input.fill(text);
+    await input.press('Enter');
+  }
 
-  for (const theme of THEMES) {
-    test(`workbench ${theme}`, async ({ page }) => {
-      let wb = await open(page, theme);
-      await shoot(page, theme, 'first', 'First screen: activity bar, Explorer, Welcome document and Outline in the dock, status bar');
+  for (const set of SETS) {
+    test(`workbench ${set.theme}`, async ({ page }) => {
+      let wb = await open(page, set);
+      await expect(wb.explorer.node('wd.files', 'src')).toBeVisible();
+      await shoot(page, set, '01-first', `First screen (${set.accent} accent): one primary on Welcome, sentence-case Explorer, a status item at the start`);
+
       await openFiles(wb);
       await wb.activity.item('wd.act.problems').click();
-      await expect(page.locator('[data-testid="pd-dock-tab"][data-panel-id="wd.problems"]')).toBeVisible();
-      await expect(page.locator('pd-table [role=row]').nth(1)).toBeVisible();
-      await expect.poll(() => page.locator('wd-problems-view').evaluate((e) => e.getBoundingClientRect().height)).toBeGreaterThanOrEqual(160);
-      await shoot(page, theme, 'files', 'Two files as instances of Code, Problems (pd-table) below, Outline at the side; every group at or above its minimum');
+      await expect(page.locator('wd-problems-view [role=row]').nth(3)).toBeVisible();
+      await shoot(page, set, '02-files', 'Code instances named by file; Problems by severity below (all rows in view); the Explorer follows the active file');
+
       await wb.palette.open();
-      await shoot(page, theme, 'palette', 'Palette: commands and "Open <view>", recent and common first, keys and categories, prefixes listed');
+      await shoot(page, set, '03-palette', 'Palette, empty: "Frequently used", then "Other commands"; sans key hints');
       await wb.palette.search('@handle');
-      await shoot(page, theme, 'palette-symbols', 'Palette, "@": the names search provider (engine matching) with why it matched');
+      await shoot(page, set, '04-palette-symbols', 'Palette, "@": the names search provider; matches underlined in the accent');
       await wb.palette.search('>indx repositry');
-      await shoot(page, theme, 'palette-typo', 'Palette: nothing matches, "Did you mean" offers the close command');
+      await shoot(page, set, '05-palette-typo', 'Palette: no match, "Did you mean" quotes the words without the prefix');
+      await wb.palette.search('>zzzzzz');
+      await shoot(page, set, '06-palette-none', 'Palette: no match and no suggestion');
       await page.keyboard.press('Escape');
-      await wb.explorer.node('wd.files', 'README.md').click({ button: 'right' });
-      await expect(wb.explorer.menu).toBeVisible();
-      await shoot(page, theme, 'explorer-menu', 'Explorer: context menu of a file (also Shift+F10); folders paged with "Show more"');
+
+      const readme = wb.explorer.node('wd.files', 'README.md');
+      const box = (await readme.boundingBox())!;
+      await page.mouse.click(box.x + 60, box.y + box.height / 2, { button: 'right' });
+      await expect.poll(async () => Math.abs(((await wb.explorer.menu.boundingBox()) ?? { x: 0 }).x - (box.x + 60))).toBeLessThanOrEqual(8);
+      await shoot(page, set, '07-explorer-menu', 'Explorer: the menu at the pointer, its row marked; the shared menu style');
       await page.keyboard.press('Escape');
+
       await wb.activity.item('wd.act.layouts').click();
       await expect(wb.activity.menu('wd.act.layouts')).toBeVisible();
-      await shoot(page, theme, 'activity-flyout', 'Activity bar: a fly-out item (perspectives); the Problems badge is part of its name');
+      await page.keyboard.press('ArrowDown');
+      await shoot(page, set, '08-activity-flyout', 'Activity fly-out with a focused item; one selected item, open dots for views in the dock');
       await page.keyboard.press('Escape');
+
       await wb.activity.item('pd.wb.assistant.activity').click();
       await expect(page.locator('pd-assistant')).toContainText('not running');
-      await shoot(page, theme, 'assistant', 'Assistant pane on Pitwall: the calm "not running" state with its fix (pd-needs-ai)');
+      await shoot(page, set, '09-assistant-needs-ai', 'Assistant, Pitwall not running: one primary (Open Pitwall), the composer inert with its reason');
+
+      wb = await open(page, set, { query: 'pitwall=ready' });
+      await wb.activity.item('pd.wb.assistant.activity').click();
+      await ask(page, '/slow Explain the request pipeline');
+      await expect(page.getByTestId('assistant-stop')).toBeVisible();
+      await shoot(page, set, '10-assistant-streaming', 'Assistant streaming: Stop in the place of Send; the conversation title as the heading');
+      await page.getByTestId('assistant-stop').click();
+      await expect(page.getByTestId('assistant-send')).toBeVisible();
+      await ask(page, '/tool request handler');
+      await expect(page.getByTestId('assistant-cite').first()).toBeVisible();
+      await shoot(page, set, '11-assistant-tool', 'Assistant: a tool card and an answer with a citation button');
+      await page.getByTestId('assistant-allow-actions').check();
+      await ask(page, '/write');
+      await expect(page.getByTestId('assistant-approval')).toBeVisible();
+      await page.getByTestId('assistant-approval-details').click();
+      await shoot(page, set, '12-assistant-approval', 'Assistant: a write tool waits for Allow or Decline, with its tool and arguments');
+      await page.getByTestId('assistant-decline').click();
+      await expect(page.getByTestId('assistant-send')).toBeVisible();
+      await ask(page, '/fail');
+      await expect(page.getByTestId('assistant-failure').or(page.getByTestId('assistant-error')).first()).toBeVisible();
+      await shoot(page, set, '13-assistant-failed', 'Assistant: a failed turn, its partial text kept');
+
+      await page.getByTestId('assistant-input').blur();
+      await wb.palette.open();
+      await wb.palette.search('>index the repository');
+      await wb.palette.run('Index the repository');
       await wb.palette.open();
       await wb.palette.search('>show jobs');
       await wb.palette.run('Show jobs');
-      await shoot(page, theme, 'jobs', 'Jobs: the shell jobs list as a status pane at the bottom edge');
-      wb = await open(page, theme, 600, 800);
-      await expect.poll(() => wb.frame.explorer()).toBe('closed');
-      await shoot(page, theme, 'narrow', 'A 600 px window: the layout plan closed the Explorer for the document (Mod+B brings it back)');
-      wb = await open(page, theme, 320, 640);
-      await shoot(page, theme, '320', '320 px: nothing scrolls sideways (rule 18)');
+      await expect(page.locator('pd-jobs-list')).toBeVisible();
+      await shoot(page, set, '14-job-running', 'A running job: its phase in the Jobs pane and in the status bar');
+
+      await open(page, set, { hash: '#/popout?panel=wd.code%23src%2Fmain.rs&host=main&label=p-main-1', width: 900, height: 560 });
+      await expect(page.getByTestId('code-lines')).toBeVisible({ timeout: 15_000 });
+      await shoot(page, set, '15-popout', 'A pop-out window: a slim title bar with Dock back (dock-in) and Keep on top (layers), the one view');
+
+      wb = await open(page, set);
+      await wb.explorer.node('wd.files', 'src').click();
+      await page.keyboard.press('ArrowDown');
+      await shoot(page, set, '16-focus-tree', 'Focus: a tree row', page.getByTestId('workbench-sidebar'));
+      await wb.activity.item('wd.act.problems').focus();
+      await shoot(page, set, '17-focus-activity', 'Focus: an activity item', page.locator('pd-activity-bar'));
+      await page.locator('[data-testid="pd-dock-tab"]').first().focus();
+      await shoot(page, set, '18-focus-tab', 'Focus: a dock tab', page.locator('pd-dock'));
+      await wb.palette.open();
+      await page.keyboard.press('ArrowDown');
+      await shoot(page, set, '19-focus-palette', 'Focus: the palette input with the highlighted row', page.getByTestId('palette'));
+      await page.keyboard.press('Escape');
+
+      await open(page, set, { width: 700, height: 560 });
+      await shoot(page, set, '20-narrow', 'A 700 px window: the layout plan closed the Explorer for the documents');
+
+      wb = await open(page, set, { width: 320, height: 640 });
+      await wb.activity.item('wd.act.explorer').click();
+      await expect(wb.explorer.node('wd.files', 'src')).toBeVisible();
+      await shoot(page, set, '21-320-explorer', '320 px with the Explorer opened by hand');
+      await wb.activity.item('wd.act.explorer').click();
+      await wb.activity.item('wd.act.problems').click();
+      await expect(page.locator('wd-problems-view .where').first()).toBeVisible();
+      await shoot(page, set, '22-320-problems', '320 px: Problems folds file:line under each problem; nothing scrolls sideways');
     });
   }
 
   test('compose', async ({ page }) => {
-    const rows = THEMES.map((theme) => shots.filter((s) => s.theme === theme));
-    const cell = (s: { title: string; file: string }) =>
-      `<figure><figcaption>${s.title}</figcaption><img alt="${s.title}" src="${s.file.split('/').pop()}"></figure>`;
+    const rows = SETS.map((s) => shots.filter((x) => x.theme === s.theme));
+    const cell = (s: { title: string; file: string }) => `<figure><figcaption>${s.title}</figcaption><img alt="${s.title}" src="${s.file.split('/').pop()}"></figure>`;
     const html = `<!doctype html><meta charset="utf-8"><style>
       body{margin:0;font:14px system-ui;background:#888;color:#111}
       .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;padding:16px;align-items:start}
@@ -93,8 +164,7 @@ test.describe('contact sheet: workbench', () => {
       img{width:100%;display:block}
       h1{margin:16px;font-size:18px;color:#fff}
     </style>
-    ${THEMES.map((theme, i) => `<h1>${theme}</h1><div class="row">${(rows[i] ?? []).map(cell).join('')}</div>`).join('')}`;
-    // A page beside the shots (file URLs, not data URLs: twenty full windows inline exhaust the renderer).
+    ${SETS.map((s, i) => `<h1>${s.theme} · ${s.accent}</h1><div class="row">${(rows[i] ?? []).map(cell).join('')}</div>`).join('')}`;
     const sheet = join(OUT, 'contact-sheet.html');
     writeFileSync(sheet, html);
     await page.setViewportSize({ width: 1800, height: 1200 });
@@ -104,7 +174,7 @@ test.describe('contact sheet: workbench', () => {
     await page.screenshot({ path: file, fullPage: true, type: 'png' });
     writeFileSync(
       join(OUT, 'README.md'),
-      'Contact sheet of the Paddock workbench (plan X50, ADR 0013): the workbench demo in both themes (first screen, documents and panes in the dock, palette with commands, a provider and "did you mean", Explorer context menu, activity fly-out, the assistant\'s needs-AI state, Jobs pane, a narrow window and 320 px), for the independent review (rule 22). Rewritten by `CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x50`. NOT self-approved: awaiting the independent reviewer.\n',
+      'Contact sheet of the Paddock workbench (plan X50, ADR 0013), review 2: the workbench demo at @2x, dark with the Pacenotes accent and light with the Debrief accent, with every state review 1 asked for (see REVIEW.md and RESPONSE-1.md). Rewritten by `CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x50`. NOT self-approved: awaiting the independent reviewer.\n',
     );
     expect(readFileSync(file).length).toBeGreaterThan(10_000);
   });

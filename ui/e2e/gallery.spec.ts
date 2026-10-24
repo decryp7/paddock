@@ -1,7 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@decryp7/paddock-e2e';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { PD_ICON_DOTS } from '../projects/paddock-ui/icons/src/paths';
 
 const DOTS = Object.fromEntries(Object.entries(PD_ICON_DOTS).map(([k, v]) => [k, (v ?? []).map((d) => [d[0], d[1]])]));
@@ -251,33 +249,4 @@ test.describe('UI basics review fixes (regressions)', () => {
     const gap = await page.locator('.pd-kbd').nth(1).evaluate((e) => e.getBoundingClientRect().left - (e.previousElementSibling as Element).getBoundingClientRect().right);
     expect(gap).toBeGreaterThanOrEqual(2);
   });
-});
-
-test.describe('screenshots', () => {
-  test.skip(!process.env['SCREENSHOTS'], 'set SCREENSHOTS=1 to rewrite docs/screenshots');
-  const root = join(__dirname, '..', 'docs', 'screenshots');
-
-  for (const theme of THEMES) {
-    for (const accent of ACCENTS) {
-      test(`gallery ${theme} ${accent}`, async ({ page }) => {
-        await open(page, theme, accent);
-        const dir = join(root, theme, accent);
-        mkdirSync(dir, { recursive: true });
-        for (const section of SECTIONS) {
-          await page.locator(`section[data-testid="${section}"]`).screenshot({ path: join(dir, `${section}.png`) });
-        }
-        if (accent === 'debrief' || accent === 'dyno') {
-          await page.screenshot({ path: join(root, `gallery-${theme}-${accent}.png`), fullPage: false });
-        }
-      });
-    }
-  }
-
-  for (const density of ['comfortable', 'compact'] as const) {
-    test(`density ${density}`, async ({ page }) => {
-      await open(page, 'dark', 'debrief', density);
-      mkdirSync(join(root, 'density'), { recursive: true });
-      await page.locator('[data-testid="card"]').screenshot({ path: join(root, 'density', `card-${density}.png`) });
-    });
-  }
 });

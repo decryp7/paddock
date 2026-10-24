@@ -120,6 +120,7 @@ export const EXPLORER_PROVIDERS = defineContributionKind<ExplorerProviderDef>({
       e.actions !== undefined && e.run === undefined && `has actions but no run function`,
       optionalFn(e.drag, 'drag'),
       optionalFn(e.changes, 'changes'),
+      optionalFn(e.reveal, 'reveal'),
       e.empty !== undefined && messageProblem('empty.text', e.empty?.text),
       e.empty?.command !== undefined && !lookup.has('commands', e.empty.command) && `empty state runs the missing command ${e.empty.command}`,
     ),

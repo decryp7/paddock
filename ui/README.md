@@ -513,7 +513,7 @@ provideThemes(CONSOLE_THEME),                                                   
 Screenshots for review: [dark](docs/screenshots/shell-demo/theme-dark.png), [light](docs/screenshots/shell-demo/theme-light.png),
 [high contrast dark](docs/screenshots/shell-demo/theme-high-contrast-dark.png),
 [high contrast light](docs/screenshots/shell-demo/theme-high-contrast-light.png),
-[pseudo-locale](docs/screenshots/shell-demo/theme-pseudo-locale-dark.png) (`SCREENSHOTS=1 npx playwright test shell-demo-theme`).
+[pseudo-locale](docs/screenshots/shell-demo/theme-pseudo-locale-dark.png) (`npm run screenshots`: `e2e/screenshots.spec.ts`, the kit's `captureDocScreens`).
 
 ## Tokens
 
@@ -531,7 +531,7 @@ cd ui
 npm ci
 npm run test:tokens      # WCAG contrast of every pair (standard and high contrast) + colour-vision separation (289 tests)
 npm test                 # component and helper specs (Vitest via ng test), 100% lines
-npx playwright test      # gallery: axe (both themes), keyboard, native feel, CSP; SCREENSHOTS=1 rewrites docs/screenshots
+npx playwright test      # gallery: axe (both themes), keyboard, native feel, CSP; `npm run screenshots` (the kit's `captureDocScreens`: fixed clock, locale and time zone, 1440x900 at 2x, `hashes.json` for conformance C24) rewrites docs/screenshots
 npm run build            # ng-packagr build to dist/paddock-ui (every entry point)
 npm run build:e2e        # @decryp7/paddock-e2e to dist/paddock-e2e
 npm run shell-demo       # the shell's reference app on http://localhost:4301 (SHELL_DEMO_PORT for Playwright)

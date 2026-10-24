@@ -30,10 +30,9 @@ export const PD_ICON_PATHS = {
   clock: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 7.5V12l3 2',
   bell: 'M6 10.5a6 6 0 0 1 12 0V16l1.5 2h-15L6 16zM10 20.5a2 2 0 0 0 4 0',
   // Things
-  // File kinds (plan X31 follow-up): a page, a page with lines, a page with code brackets, an archive box.
-  file: 'M6 3.5h8l4 4v13H6zM14 3.5v4h4',
-  'file-text': 'M6 3.5h8l4 4v13H6zM14 3.5v4h4M9 12.5h6M9 16h6',
-  'file-code': 'M6 3.5h8l4 4v13H6zM14 3.5v4h4M10.5 12l-2 2 2 2M13.5 12l2 2-2 2',
+  // File kinds (plan X31 follow-up): beside `file` (below, from the workbench) a page with lines, a page with code brackets, an archive box.
+  'file-text': 'M6 3.5h8l4.5 4.5v12.5H6zM13.5 3.5V8.5H18.5M9 12.5h6M9 16h6',
+  'file-code': 'M6 3.5h8l4.5 4.5v12.5H6zM13.5 3.5V8.5H18.5M10.5 12l-2 2 2 2M13.5 12l2 2-2 2',
   archive: 'M4 5h16v4H4zM5.5 9v10.5h13V9M10 13h4',
   folder: 'M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z',
   globe:
@@ -55,6 +54,12 @@ export const PD_ICON_PATHS = {
   columns: 'M4 5h16v14H4zM9.3 5v14M14.7 5v14',
   sort: 'M8 9l4-4 4 4M8 15l4 4 4-4',
   activity: 'M2.5 12h4l3-7.5 4 15 3-7.5h5',
+  // Workbench (plan X50, review 1): the assistant, its history, a window kept on top, a panel docked back.
+  chat: 'M4.5 5.5h15v10h-8l-4.5 3.5v-3.5h-2.5z',
+  history: 'M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9M4.5 4.5V9H9M12 8v4l2.75 1.75',
+  layers: 'M12 4 20 8.5 12 13 4 8.5zM5.5 12.5 12 16.2l6.5-3.7M5.5 16 12 19.7l6.5-3.7',
+  'dock-in': 'M3.5 5h17v14h-17zM12 5v6.5M9 8.5l3 3 3-3M7 15h10',
+  file: 'M6 3.5h8l4.5 4.5v12.5H6zM13.5 3.5V8.5H18.5',
 } as const satisfies Readonly<Record<string, string>>;
 
 /** A filled dot of a glyph: centre and radius on the 24 px grid. */

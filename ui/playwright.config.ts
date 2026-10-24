@@ -1,10 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
-import { assertChromeForTesting, e2ePort } from './projects/paddock-e2e/src/index.ts';
+import { assertChromeForTesting, e2ePort, SCREENSHOT_SPECS } from './projects/paddock-e2e/src/index.ts';
 
 /**
  * Browser checks of the reference apps (`npx playwright test`): the gallery (`ng serve gallery`) and the shell demo
  * (`ng serve shell-demo`), and the documentation screenshots (`SCREENSHOTS=1 npx playwright test`, written to
- * ../docs/screenshots). Ports come from PW_PORT, SHELL_DEMO_PORT and WORKBENCH_DEMO_PORT (one pair per worktree; CI must set them). The
+ * docs/screenshots with hashes.json). Ports come from PW_PORT, SHELL_DEMO_PORT and WORKBENCH_DEMO_PORT (one pair per worktree; CI must set them). The
  * browser is Playwright's Chromium (Chrome for Testing), never the installed Chrome (rule 7, @decryp7/paddock-e2e).
  */
 const PORT = e2ePort('PW_PORT', 4300);
@@ -29,6 +29,8 @@ export default assertChromeForTesting(
     projects: [
       { name: 'gallery', testMatch: ['gallery.spec.ts', 'data.spec.ts'], use: { baseURL: `http://localhost:${PORT}` } },
       { name: 'review', testMatch: ['contact-sheet.spec.ts', 'contact-sheet-x21.spec.ts', 'contact-sheet-x50.spec.ts', 'contact-sheet-x3x.spec.ts'] },
+      // The documentation screenshots (e2e/screenshots.spec.ts, the kit's captureDocScreens): `SCREENSHOTS=1 npx playwright test --project=screenshots`.
+      { name: 'screenshots', testMatch: SCREENSHOT_SPECS, use: { deviceScaleFactor: 2 } },
       { name: 'shell-demo', testMatch: /shell-demo(-[a-z0-9]+)?\.spec\.ts$/, use: { baseURL: `http://localhost:${SHELL_DEMO_PORT}` } },
       { name: 'workbench-demo', testMatch: /workbench-demo(-[a-z]+)?\.spec\.ts$/, use: { baseURL: `http://localhost:${WORKBENCH_DEMO_PORT}` } },
     ],

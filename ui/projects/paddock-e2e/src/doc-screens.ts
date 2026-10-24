@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { THEMES, type Theme } from './axe.ts';
 import { DOC_SCREEN_VIEWPORT, isOn } from './config.ts';
 import { waitForStableFrame } from './screenshot.ts';
@@ -15,7 +15,7 @@ import { waitForStableFrame } from './screenshot.ts';
  * runs it only then.
  */
 export interface DocScreen {
-  /** The file name without extension, unique in the table. */
+  /** The file name without extension, unique in the table; `folder/name` puts the image in a sub-folder. */
   readonly name: string;
   /** The URL (a path with its query and hash) opened with `page.goto`; relative to the project's `baseURL`. */
   readonly url: string;
@@ -25,6 +25,8 @@ export interface DocScreen {
   readonly frame?: 'page';
   /** Steps after the page has loaded (open a menu, fill a field, advance the fake clock) until the screen shows what it documents. */
   readonly ready?: (page: Page, theme: Theme) => Promise<void>;
+  /** Photograph one element instead of the window (scrolled into view; it wins over `clip`). */
+  readonly element?: (page: Page, theme: Theme) => Locator;
   /** The area to keep (default: the whole window). */
   readonly clip?: (page: Page, theme: Theme) => Promise<{ x: number; y: number; width: number; height: number } | undefined>;
   /** Themes this screen is taken in (default: all). */
@@ -82,7 +84,9 @@ export function planShots(screens: readonly DocScreen[], layout: 'by-theme' | 'f
   const seen = new Set<string>();
   const shots: PlannedShot[] = [];
   for (const screen of screens) {
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(screen.name)) throw new Error(`screen name ${JSON.stringify(screen.name)} must be lower-case words joined by dashes`);
+    if (!/^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/.test(screen.name)) {
+      throw new Error(`screen name ${JSON.stringify(screen.name)} must be lower-case words joined by dashes (folders separated by /)`);
+    }
     if (seen.has(screen.name)) throw new Error(`screen ${JSON.stringify(screen.name)} is listed twice`);
     seen.add(screen.name);
     for (const theme of screen.themes ?? THEMES) shots.push({ screen, theme, file: layout === 'flat' ? `${screen.name}-${theme}.png` : `${theme}/${screen.name}.png` });
@@ -147,7 +151,8 @@ export function captureDocScreens(options: DocScreensOptions): void {
         }
         await waitForStableFrame(page);
         const clip = await screen.clip?.(page, theme);
-        const bytes = await page.screenshot(clip ? { clip } : {});
+        const element = screen.element?.(page, theme);
+        const bytes = element ? await element.screenshot() : await page.screenshot(clip ? { clip } : {});
         const path = join(out, file);
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, bytes);

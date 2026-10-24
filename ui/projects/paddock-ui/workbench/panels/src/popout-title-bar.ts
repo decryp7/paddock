@@ -33,12 +33,12 @@ const EDGES: readonly { dir: ResizeDirection; cls: string }[] = [
         <span class="pd-host" [attr.title]="host() || null" data-testid="popout-host">{{ host() }}</span>
       </div>
       <button type="button" class="pd-btn" data-testid="popout-dock-back" [attr.aria-label]="t.dockBack" [attr.title]="t.dockBack" (click)="dockBack.emit()">
-        <pd-glyph name="window" [size]="14" />
+        <pd-glyph name="dock-in" [size]="14" />
         <span class="pd-wide" aria-hidden="true">{{ t.dockBackShort }}</span>
       </button>
       @if (chrome.supportsKeepOnTop) {
         <button type="button" class="pd-btn pd-icon" data-testid="popout-on-top" [class.pd-on]="onTop()" [attr.aria-pressed]="onTop()" [attr.aria-label]="t.keepOnTop" [attr.title]="onTop() ? t.keepOnTopOn : t.keepOnTop" (click)="toggleOnTop.emit()">
-          <pd-glyph name="pin" [size]="14" />
+          <pd-glyph name="layers" [size]="14" />
         </button>
       }
       @if (chrome.kind === 'frameless') {
@@ -76,8 +76,9 @@ const EDGES: readonly { dir: ResizeDirection; cls: string }[] = [
     .pd-title { margin: 0; font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .pd-host { font-size: var(--pd-text-caption); color: var(--pd-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .pd-btn { height: 28px; min-width: 28px; padding: 0 var(--pd-space-1); gap: var(--pd-space-1); border: 0; border-radius: var(--pd-radius-tag); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
-    .pd-btn.pd-on { color: var(--pd-accent); }
+    .pd-btn.pd-on { color: var(--pd-accent); background: var(--pd-accent-tint); }
     .pd-btn:hover { color: var(--pd-text); background: var(--pd-surface-3); }
+    .pd-btn.pd-on:hover { background: var(--pd-accent-tint); }
     .pd-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     .pd-wide { display: none; }
     @container (min-width: 480px) { .pd-wide { display: inline; } }

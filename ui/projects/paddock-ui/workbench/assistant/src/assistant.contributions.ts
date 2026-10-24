@@ -15,7 +15,7 @@ export const ASSISTANT_FOCUS_COMMAND = 'pd.wb.assistant.focus';
 export const ASSISTANT_VIEW = defineView({
   id: ASSISTANT_VIEW_ID,
   title: msg('pd.wb.assistant.view', 'Assistant'),
-  icon: 'pd:activity',
+  icon: 'pd:chat',
   layout: { area: 'side', min: { width: 320, height: 240 }, pref: { width: 400, height: 480 }, priority: 60 },
   category: msg('pd.wb.category.view', 'View'),
   order: 900,
@@ -26,7 +26,7 @@ export const ASSISTANT_VIEW = defineView({
 export const ASSISTANT_ACTIVITY = defineActivityItem({
   id: 'pd.wb.assistant.activity',
   title: msg('pd.wb.assistant.activity', 'Assistant'),
-  icon: 'pd:activity',
+  icon: 'pd:chat',
   order: 900,
   run: { view: ASSISTANT_VIEW_ID },
 });

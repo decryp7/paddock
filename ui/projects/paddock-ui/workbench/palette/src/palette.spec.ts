@@ -363,6 +363,8 @@ describe('PdCommandPalette', () => {
     const input = element.querySelector<HTMLInputElement>('[data-testid="palette-input"]')!;
     expect(document.activeElement).toBe(input);
     expect(element.querySelectorAll('[role="option"]')).toHaveLength(7);
+    // The empty list reads as frequent, then the rest (no recent yet), under small headings (review P3-1).
+    expect([...element.querySelectorAll('.pd-pal-group')].map((g) => g.textContent)).toEqual(['Frequently used', 'Other commands']);
     expect(input.getAttribute('aria-activedescendant')).toMatch(/-0$/);
     input.value = '>folder';
     input.dispatchEvent(new Event('input'));
@@ -392,7 +394,7 @@ describe('PdCommandPalette', () => {
     expect(element.querySelector('[data-testid="palette-did-you-mean"]')?.textContent).toContain('exprot');
     store.setQuery('>zzzzzz');
     await settle(fixture);
-    expect(element.querySelector('[data-testid="palette-empty"]')).not.toBeNull();
+    expect(element.querySelector('[data-testid="palette-empty"]')?.textContent).toBe('No command matches “zzzzzz”');
     store.setQuery('@x');
     timers.flush();
     await settle(fixture);
@@ -406,7 +408,7 @@ describe('PdCommandPalette', () => {
     symbols.calls[1]!.resolve([{ id: 'a', label: 'alpha', icon: 'wd:sym', detail: 'src/a.rs' }]);
     await settle(fixture);
     const option = element.querySelector<HTMLElement>('[role="option"]')!;
-    expect(option.querySelector('.pd-pal-detail')?.getAttribute('title')).toBe('src/a.rs');
+    expect(option.querySelector('.pd-pal-detail [data-testid="path-text"]')?.getAttribute('title')).toBe('src/a.rs');
     option.dispatchEvent(new MouseEvent('mousemove'));
     store.setQuery('>export');
     await settle(fixture);
