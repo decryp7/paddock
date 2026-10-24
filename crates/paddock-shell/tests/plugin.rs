@@ -15,7 +15,7 @@ use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{App, Listener, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{App, Listener, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_utils::acl::capability::Capability;
 use tauri_utils::acl::manifest::{Manifest, PermissionFile};
 use tauri_utils::acl::resolved::Resolved;
@@ -340,5 +340,70 @@ fn the_update_preferences_live_on_the_settings_section() {
     assert!(
         !dir.path().join("config").join("settings.json").exists(),
         "settings stay in memory"
+    );
+}
+
+#[test]
+fn every_part_is_set_up_in_order_and_the_apps_setup_runs_last() {
+    use paddock_window::tauri::{WindowConfig, Windows};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let order = Arc::new(AtomicUsize::new(0));
+    let (seen_health, seen_setup) = (order.clone(), order.clone());
+    let startup = paddock_startup::tauri::Startup::builder().build().unwrap();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .health(vec![paddock_health::ServiceSpec::new(
+            "sd.engine",
+            "the engine",
+        )])
+        .health_setup(move |_, setup| {
+            seen_health.fetch_add(1, Ordering::SeqCst);
+            setup
+        })
+        .settings(|_| paddock_settings::Settings::in_memory())
+        .startup(startup)
+        .windows(|_| Windows::builder(WindowConfig::new("Shell Demo")).build())
+        .downloader(paddock_download::Downloader::http(Default::default()).unwrap())
+        .setup(move |app| {
+            // The shell's state is there when the app's own set-up runs.
+            assert!(
+                app.try_state::<paddock_settings::tauri::ManagedSettings>()
+                    .is_some()
+            );
+            seen_setup.fetch_add(10, Ordering::SeqCst);
+            Ok(())
+        }));
+    assert_eq!(
+        order.load(Ordering::SeqCst),
+        11,
+        "the health adjustment and the app's set-up both ran"
+    );
+    let main = window(&app, "main");
+    let health = invoke(&main, "health_snapshot", json!({})).unwrap();
+    assert_eq!(health["services"][0]["service"], "sd.engine");
+    let windows = invoke(&main, "windows_list", json!({})).unwrap();
+    assert!(windows.is_array(), "the window layer answers: {windows}");
+    drop(app);
+}
+
+#[test]
+fn a_part_that_fails_to_set_up_stops_the_start_with_its_name() {
+    let built = |b: Builder<MockRuntime>| {
+        mock_builder()
+            .plugin(b.in_memory().native_menu(false).build())
+            .build(context())
+    };
+    let bad_contracts = built(Builder::new(identity()).dialog_contracts("{"));
+    assert!(bad_contracts.is_err());
+    let failing =
+        built(Builder::new(identity()).setup(|_| Err("the app's store is locked".into())));
+    let e = failing.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("locked"), "{e}");
+    let twice =
+        built(Builder::new(identity()).section(Arc::new(paddock_settings::shell::appearance())));
+    assert!(
+        twice.is_err(),
+        "the shell already registers the Appearance section"
     );
 }
