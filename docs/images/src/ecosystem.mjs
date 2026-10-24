@@ -65,10 +65,12 @@ function hand(pts, { later = false, both = false, headless = false } = {}) {
   if (both) s += head(pts[0][0], pts[0][1], dirOf(pts[1], pts[0]), 'ah');
   return s;
 }
-// Pitwall stub: dotted purple line from a card to the hub, arrow towards the hub (both ways when `both`).
-function stub(x, y0, y1, label, { both = false, at } = {}) {
+// Pitwall stub: dotted purple line from a card to the hub, arrow towards the hub (both ways when `both`). `gap`: the y of a
+// hand-off line that crosses the stub; the stub breaks there (a bridge), so the crossing reads at a glance.
+function stub(x, y0, y1, label, { both = false, at, gap } = {}) {
   const down = y1 > y0, mid = at ?? (y0 + y1) / 2;
-  let s = `<path class="stub" d="M${x} ${y0} L${x} ${y1}"/>${head(x, y1, down ? 'd' : 'u', 'ahp')}`;
+  const d = gap == null ? `M${x} ${y0} L${x} ${y1}` : `M${x} ${y0} L${x} ${gap - 9} M${x} ${gap + 9} L${x} ${y1}`;
+  let s = `<path class="stub" d="${d}"/>${head(x, y1, down ? 'd' : 'u', 'ahp')}`;
   if (both) s += head(x, y0, down ? 'u' : 'd', 'ahp');
   return s + pill(x, mid, label);
 }
@@ -104,19 +106,20 @@ links.push(hand([[gapL(1) + 2, m1 + 34], [cardX(2) - 2, m1 + 34]]) + pill((gapL(
 links.push(hand([[cardX(1) - 2, m3], [gapL(0) + 2, m3]]) + pill((gapL(0) + cardX(1)) / 2, m3, 'Machine health'));
 links.push(hand([[gapL(1) + 2, m3], [cardX(2) - 2, m3]]) + pill((gapL(1) + cardX(2)) / 2, m3, 'Installed software'));
 // Pacenotes -> Sighter (test plans) and back (results): nested arcs over the top row
-links.push(hand([[335, R1 - 2], [335, R1 - 40], [1265, R1 - 40], [1265, R1 - 2]]) + pill(800, R1 - 40, 'Test plans, MCP host'));
+links.push(hand([[335, R1 - 2], [335, R1 - 40], [1265, R1 - 40], [1265, R1 - 2]]) + pill(800, R1 - 40, 'Test plans (MCP)'));
 links.push(hand([[1385, R1 - 2], [1385, R1 - 100], [275, R1 - 100], [275, R1 - 2]]) + pill(800, R1 - 100, 'Results'));
 // Pitcrew -> Debrief and Dyno -> Debrief (deep links) pass the hub band on its left end: Dyno's line joins Pitcrew's below the
 // band and one line runs on to Debrief. Spotter -> Sighter (later) passes the band on its right end. Nothing crosses the band.
-const LX = 100, DYX = 660, JOIN = HUB + HUBH + 50, SX = 1470;
+const LX = 122, DYX = 660, JOIN = HUB + HUBH + 50, SX = 1462;
 links.push(hand([[LX, R3 - 2], [LX, laneTop], [DYX, laneTop], [DYX, B1 + 2]]) + pill(LX, (JOIN + R3) / 2, 'Job logs'));
-links.push(hand([[DYX, R3 - 2], [DYX, JOIN], [LX, JOIN], [LX, JOIN - 40]], { headless: true }) + pill(380, JOIN, 'Issues'));
+links.push(hand([[DYX, R3 - 2], [DYX, JOIN], [LX, JOIN]], { headless: true }) + pill(380, JOIN, 'Issues') +
+  `<circle class="ah" cx="${LX}" cy="${JOIN}" r="4.5"/>`); // junction: Issues joins the Job logs line
 links.push(hand([[SX, R3 - 2], [SX, B1 + 2]], { later: true }) + pill(SX, (HUB + HUBH + R3) / 2, 'Smoke tests'));
 
 // ---- Pitwall stubs: what each app uses the hub for ----
 const T = B1 + 4, Bt = HUB - 4, H2 = HUB + HUBH + 4, T3 = R3 - 4;
 const stubs = [
-  stub(cardX(0) + CW / 2, T, Bt, 'Q&amp;A, embeddings', { both: true, at: (T + Bt) / 2 + 14 }),
+  stub(cardX(0) + CW / 2, T, Bt, 'Q&amp;A, embeddings', { both: true, at: (T + Bt) / 2 + 14, gap: laneTop }),
   stub(720, T, Bt, 'AI engine, paired'),
   stub(1265, T, Bt, 'Vision, planner', { both: true }),
   stub(720, T3, H2, 'Diagnosis'),
@@ -193,7 +196,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" 
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E;--line2:#CDD3DD;--wbf:#E8EEF8;--wbs:#B3C2DB}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0;--line2:#3A414D;--wbf:#1F2939;--wbs:#4A5D80}}
 text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;fill:var(--ink)}
-.eyebrow{font-size:15px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
+.eyebrow{font-size:16px;font-weight:600;letter-spacing:.16em;fill:var(--muted)}
 .h1{font-size:44px;font-weight:600;letter-spacing:-.02em}
 .sub{font-size:19px;fill:var(--muted)}
 .chip-design{fill:none;stroke:var(--link);stroke-dasharray:3 3}
