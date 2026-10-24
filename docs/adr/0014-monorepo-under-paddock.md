@@ -2,10 +2,13 @@
 
 - Status: accepted (2026-10-24, by the user); work starts after shell 0.3.0 is tagged
 - Date: 2026-10-24
+- Amended 2026-10-25 after the trial ([2026-10-monorepo-spike.md](../research/2026-10-monorepo-spike.md)): history size,
+  import checklist (§2), sccache wording (§1, §9), affected rules (§6), task runner decided (§7), per-app `latest`
+  releases and the bridge target (§4), CODEOWNERS syntax (§9)
 - Decision by the user (2026-10-24): "finish 0.3.0, then monorepo under paddock". This ADR decides how.
 - Related: rules 1-4, 8, 9, 39, 41, 42, 43; ADRs 0006 (versioning and consumption, partly replaced here), 0012 §8 (the
   canary); plan [shared-next.md](../plans/shared-next.md) X9, X10, X53; research
-  [2026-10-ci-speed.md](../research/2026-10-ci-speed.md)
+  [2026-10-ci-speed.md](../research/2026-10-ci-speed.md), [2026-10-monorepo-spike.md](../research/2026-10-monorepo-spike.md)
 - Users: every app (Debrief, Pitwall, Pitcrew, Spotter, Dyno, Pacenotes, Sighter) and the shared crates and packages
 
 ## Context
@@ -68,7 +71,8 @@ App docs (ADRs, plans) stay in the app; family docs stay in `docs/`. App ADR num
 written as `apps/debrief/docs/adr/0056-...`.
 
 **Cargo: one workspace per app, plus `crates/`; no root workspace.** Apps depend on shared crates by path
-(`paddock-shell = { path = "../../../crates/paddock-shell" }`), as the shell demo does. Reasons:
+(from `apps/<app>/app/src-tauri/`: `paddock-shell = { path = "../../../../crates/paddock-shell" }`; the shell demo's
+`apps/shell-demo/src-tauri/` is one level shallower and uses `../../../crates/...`). Reasons:
 
 - Feature unification. A root workspace resolves one feature set for all members, so Debrief's `tauri/unstable`,
   its `windows` features and DuckDB would leak into Pitcrew's build and change what ships. Per-app workspaces build each
@@ -78,8 +82,13 @@ written as `apps/debrief/docs/adr/0056-...`.
 - Lockfiles. One `Cargo.lock` per app means a dependency bump lands app by app through that app's gates, and an app in
   release freeze is not moved by another app's upgrade. The cost is eight lockfiles; Renovate handles them (§8).
 - Clippy scope. Each workspace keeps its own `clippy.toml` (its own `disallowed-methods`), which already differ.
-- Disk. Each app keeps its own target directory; `sccache` (research option 1) shares compiled dependencies across them,
-  which is most of what one workspace would have saved.
+- Disk. Each app keeps its own target directory. sccache does **not** stand in for a shared workspace (trial, 2026-10-25):
+  its Rust cache key carries the checkout path and the `CARGO_TARGET_DIR` path, so it hits 100% only when both are
+  identical and about 6.5% otherwise (another worktree, another target dir, a separate clone; `SCCACHE_BASEDIRS` does not
+  help rustc), and two apps in one checkout share only about 6% because per-app feature resolution gives common crates
+  different features. sccache is used in CI with a fixed checkout path and a fixed `CARGO_TARGET_DIR` per app, where a
+  warm cache halves a Rust compile; on the dev Mac the saving comes from keeping a target folder per app per worktree
+  (§9), which rebuilt Pitwall in 13 s after a shared-crate change.
 
 `crates/` stays one workspace for the shared crates; its tests are the shared behaviour tests of rule 43.
 Versions of common dependencies are kept equal by Renovate grouping (§8) and a `cargo deny` duplicate check per
@@ -89,9 +98,11 @@ crate's dependency and the duplicate check cannot hold them together.
 **npm: one root npm workspace and one `package-lock.json`** for `ui/` and every `apps/*/app`. All apps are on Angular
 22.2 already, and rule 39 wants one Angular per family. Apps depend on `"@decryp7/paddock-ui": "*"`, resolved to the
 workspace package; the library is built once (`npm run build -w ui`) before an app's build, and an app's `tsconfig`
-maps `@decryp7/paddock-ui/*` to `ui/dist/paddock-ui/*` (the Angular CLI library-in-workspace pattern). If the spike
-(§11, step 0) shows hoisting or builder problems, fall back to per-app lockfiles with `file:` links to `ui/dist`; that
-changes nothing else in this ADR.
+maps `@decryp7/paddock-ui/*` to `ui/dist/paddock-ui/*` (the Angular CLI library-in-workspace pattern). The trial
+confirmed it (one lock, one copy of every Angular package, 600 MB of `node_modules` instead of 2.6 GB; all apps build and
+their unit and Chromium e2e tests pass), so the per-app-lock fallback is dropped. Two conditions: an app's `angular.json`
+names packages by package path (`@angular/cdk/overlay-prebuilt.css`), never `node_modules/...`, because packages are
+hoisted to the root; and every workspace package has a unique `name`.
 
 ### 2. History-preserving import
 
@@ -114,8 +125,26 @@ git merge --allow-unrelated-histories --no-ff import-<app>/main -m "chore(<app>)
   the old repo, or deleted.
 - Debrief's `.gitattributes` (byte-exact samples, CRLF fixtures) keeps working: per-directory `.gitattributes` apply
   below `apps/debrief/`. The root `.gitattributes` gets `* text=auto` once.
-- Expected size of the monorepo history: about 100 MB packed (Debrief dominates; no LFS needed). Revisit LFS only for
-  new binaries above 5 MB.
+- Size of the monorepo history (measured in the trial): **703 MiB** packed after `git gc --aggressive`, not the 100 MB
+  first estimated. 99% of it is PNG screenshot history (696 MB in 2,894 blobs; 203 MB of PNG in the current tree; Dyno's
+  screenshots alone 234 MB). Decision: import the full history as it is (a one-time clone; worktrees share the object
+  store) and recapture an app's screenshot set only for a release. Revisit LFS for `**/docs/screenshots/**` and
+  `**/docs/images/**` if the pack passes 1 GB, and for any new binary above 5 MB. Dropping old screenshot versions at
+  import (about 500 MB less) was considered and not chosen, because it rewrites more history than the move needs.
+- **Import checklist** (each item found by the trial; done in the import commit of the app it concerns, or in the frame):
+  - Rewrite sibling-repo paths: every app's diagram sources import `../../../../paddock/diagrams/tools/*.mjs` (and
+    Sighter `../../../../paddock/docs/images/src/*`), 20 imports in all; inside the monorepo they become
+    `../../../../../diagrams/tools/...`. Grep for `\.\./(\.\./)*(paddock|debrief|pitwall|pitcrew|spotter|dyno|sighter|pacenotes)/`
+    before the merge.
+  - Move the `decryp7` registry definition from `crates/.cargo/config.toml` to the root `.cargo/config.toml` (or drop
+    `registry` from `crates/Cargo.toml`'s workspace dependencies once §5 stops publishing); otherwise every app
+    workspace that uses a shared crate by path fails `cargo metadata` with "registry index was not found".
+  - Cargo reads `.cargo/config.toml` from the current directory upwards, not from the manifest: every cargo call
+    (scripts, CI, `affected.mjs`) runs inside the repo.
+  - Shared crates by path with the right depth (§1): `../../../../crates/<crate>` from `apps/<app>/app/src-tauri/`.
+  - Unique npm package names for the root workspace (Debrief's UI is named `app`; rename it, e.g. `debrief-app`).
+  - App `angular.json` styles and assets by package path, not `node_modules/...` (Pitwall, Dyno, Debrief today).
+  - Root `.gitignore` gets `node_modules/` (and the existing per-app ignores keep working below `apps/<app>/`).
 
 ### 3. Old repositories
 
@@ -141,13 +170,19 @@ Repos are never deleted: old release URLs, old commit hashes and Renovate histor
 - **Release notes:** each app keeps its `CHANGELOG.md` and `cliff.toml` under `apps/<app>/`; `git-cliff` runs with
   `--include-path apps/<app>/** --include-path crates/** --include-path ui/**` and `--tag-pattern '<app>-v.*'`,
   so an app's notes list its own commits and the shared changes it ships.
-- **Moving `latest`:** Gitea's "latest release" is per repo, so each app gets its own moving release tag
-  `<app>-latest` in `paddock`, with `latest.json` as an asset.
+- **Moving `latest`:** there is no release named `latest` in any app repo today: Gitea resolves
+  `/releases/download/latest/<file>` to the repo's **newest release** (checked 2026-10-25: Pitwall's URL serves
+  v1.0.3's `latest.json`). In `paddock` that URL would serve whichever app released last, so each app gets its own
+  moving release `<app>-latest` in `paddock`, with `latest.json` as an asset, and the app's endpoint names that tag.
 - **Installed users keep updating.** Their endpoint is the old repo's `latest/latest.json`, and Gitea does not redirect
   release downloads between repos. So:
   1. Every app release from the monorepo uploads `latest.json` (and nothing else: it points at the installers in
-     `paddock`) to **both** `paddock/releases/download/<app>-latest/latest.json` and the old repo's `latest` release.
-     The release workflow's token gets write access to the old repos for this one purpose.
+     `paddock`) to **both** `paddock/releases/download/<app>-latest/latest.json` and the old repo, where it replaces
+     `latest.json` on the old repo's **newest release** (or creates a new release there for it), because that is what
+     the old endpoint resolves to. The upload uses a user token with `write:repository` stored as a secret: Gitea access
+     tokens are user-wide (the trial read the usual token's scopes as `write:package, write:repository, read:user` and
+     confirmed release writes to other repos pass the scope check, without uploading), while the Actions job token is
+     meant for the workflow's own repository.
   2. The first monorepo release of each app changes its `endpoints` to `[new URL, old URL]` (Tauri tries them in
      order), so every user who installs it moves to the new URL.
   3. The bridge stays for at least two minor releases of the app or six months, whichever is later. Then stage 2 of §3
@@ -180,11 +215,26 @@ the full family on every push.
   then adds every project that depends on them:
   - Rust: `cargo metadata` of each workspace (`crates/`, each `apps/<app>/`) gives path dependencies; a change in
     `crates/paddock-jobs` marks `crates/` and every app whose metadata reaches it.
-  - npm: the root workspace graph (`npm query .workspace` plus each `package.json`); a change in `ui/` marks every app.
-  - Inputs that touch everyone: `.gitea/**`, `rust-toolchain.toml`, root `package-lock.json` (only the apps whose
-    resolved packages changed, by diffing the lock per workspace), `garage` image tag, `scripts/affected.mjs` itself.
-  - Docs-only changes (`**/*.md`, `docs/**`, `apps/*/docs/**`) mark nothing except a link check.
-  - Output: a JSON matrix such as `{"apps":["debrief","pitwall"],"crates":true,"ui":true}`.
+  - npm: the root workspace graph (`npm query .workspace` plus each `package.json`); a change in `ui/` marks every app
+    that reaches it.
+  - Two more dependency kinds that neither graph shows (both found by the trial, both missed without them):
+    a Tauri shell whose `tauri.conf.json` `build.frontendDist` points into another package depends on it
+    (`apps/shell-demo` embeds `ui/dist/shell-demo`; a `ui/` change broke the shell demo job in Paddock's history), and
+    `tsconfig*.json` `paths` or `angular.json` references outside the package are dependencies (an app that maps
+    `@decryp7/paddock-ui` to `ui/dist/paddock-ui` has no npm edge to `ui/` any more).
+  - Inputs that touch everyone: `.gitea/**` (except a per-app release workflow, `release-<app>.yml`, which marks only
+    its app), `.cargo/**`, `rust-toolchain.toml`, root `package.json`, `scripts/release/**`, `garage` image tag,
+    `scripts/affected.mjs` itself; root `package-lock.json` marks only the workspaces whose resolved packages changed
+    (by diffing the lock per workspace). Unknown root files mark everything.
+  - Docs-only changes (`**/*.md`, `docs/**`, `apps/*/docs/**`) mark nothing except a link check, **except declared doc
+    inputs**: markdown that code or tests read (an app's or crate's `CHANGELOG.md` for What's New and `include_str!`,
+    `*.md` under `resources/`, `samples/`, `src/`, `tests/`, `templates/`, `e2e/`, and named files such as Debrief's
+    `docs/ai/sql-views.md` and `docs/testing/quarantine.md`) mark their project. The list lives in the script, and a test
+    greps the code for markdown it reads and fails on an undeclared file.
+  - Output: a JSON matrix such as `{"apps":["debrief","pitwall"],"crates":true,"ui":true,"kinds":{"pitwall":["rust"]}}`,
+    where `kinds` says which half of each app a change reaches (`rust`, `ui` or both), so a leg runs only that half (in
+    the trial 42% of app selections needed one half), and `packages` lists the reverse-dependency crates per Cargo
+    workspace for a nextest `rdeps(...)` filter.
 - **Jobs:** `crates` and `ui` (as today), then one matrix leg per affected app, calling that app's existing gates as a
   shared action with the app folder as input. Inside an app the rule-3 targeting continues (nextest filtersets for the
   touched crates on branches; full app suite on `main`).
@@ -195,7 +245,12 @@ the full family on every push.
   `workflow_dispatch`; release workflows always run the full gates of their app. A wrong filter can hide a failure for at
   most one night and never reaches a release.
 - **Base commit:** for a PR, the merge base; for a push to `main`, the last commit with a green `ci` run (Gitea API), so
-  a red push is not forgotten by the next one.
+  a red push is not forgotten by the next one. This is required, not an optimisation: in the trial's replay, 6 of the 9
+  failing commits the filter did not select were docs-only commits on a red `main`, whose diff from the last green
+  commit selects the project that broke.
+- **Proven on history:** the trial replayed the last 50 commits of every repo (351 commits) and the whole history
+  (about 1,880 commits): after the two extra dependency kinds above, no failure was missed; the remaining unselected
+  failures were flakes, red-`main` inheritance and a tag release job. The script runs in about 0.4 s.
 - The X10 shared actions and the research's options 1 (sccache), 2 (garage image) and 4 (path plan) are the building
   blocks; this ADR makes option 4 family-wide.
 
@@ -230,9 +285,15 @@ Sources (accessed 2026-10-24):
 [9] [Paddock research: CI speed](../research/2026-10-ci-speed.md) (2026-10-24), [Depot: faster Rust builds in CI](https://depot.dev/blog/guide-to-faster-rust-builds-in-ci.md) (2025-08-01);
 [10] [Wiz: s1ngularity](https://www.wiz.io/blog/s1ngularity-supply-chain-attack) (2025-08).
 Not verified: whether `@monodon/rust` handles `[workspace.dependencies]` inheritance and several Cargo workspaces in one
-repo, and whether moon v2 infers the crate graph from Cargo; the spike answers both.
+repo. Answered by the trial: moon v2 does not infer the crate graph across Cargo workspaces.
 
-**Recommendation: plain scripts plus sccache now; moon as the fallback if the spike shows the scripts are not enough.**
+**Decision (after the trial, 2026-10-25): plain scripts plus sccache in CI. moon is a no-go for now and stays the
+fallback.** The trial ran moon 2.6.4 with a local `bazel-remote` on Pitwall: remote hits work (clippy plus `ng test` in
+2 s instead of 11 s after a shared-crate change), but the whole saving is "do not run the UI tests for a Rust-only
+change", which `affected.mjs` reports itself (`kinds`, §6), so over the scripts with that split moon saves 0%, below
+the 20% bar. moon v2 also does not infer dependencies across separate Cargo workspaces (nor npm or `tsconfig` edges): every
+edge would be a hand-written `dependsOn`, and the cache's correctness would rest on hand-written `inputs` (a missing input
+replays a false green). The reasons below still hold.
 
 - Our cost is Rust compilation, which no task runner caches (all advise against caching `target/`). sccache does, on a
   local disk, with no server and no new trust boundary.
@@ -245,7 +306,9 @@ repo, and whether moon v2 infers the crate graph from Cargo; the spike answers b
   and churn are high for agents. Turborepo does not cover Rust. moon is the best fit of the three (native Rust and JS,
   a plain `bazel-remote` on the NAS as the cache, low lock-in), and is the one to adopt if we later want a task cache.
 
-**Spike (1 day, before step 2 of §11), on a throw-away branch with Debrief, Pitwall and `crates/` imported:**
+**Spike (1 day, before step 2 of §11), on a throw-away branch with Debrief, Pitwall and `crates/` imported** (done
+2026-10-25 with all eight repos; results in [2026-10-monorepo-spike.md](../research/2026-10-monorepo-spike.md); the
+Linux runner and the Mac host runner were not measured and are checked when `ci.yml` is built):
 
 1. `scripts/affected.mjs` on the last 50 commits of each repo replayed into the layout: compare its project set with
    a hand check of 10 of them; it must never miss a project whose tests failed in the real history.
@@ -271,14 +334,18 @@ One root `renovate.json` (the apps' configs are identical today):
 
 ### 9. Ownership, agents and docs
 
-- **`CODEOWNERS`** at the root (Gitea reads it for PR reviewers): `apps/<app>/` per app, `crates/`, `ui/`, root configs
-  and `.gitea/` to the coordinator. With one human owner it is not a gate; it is the written form of the existing rule
+- **`CODEOWNERS`** at the root (Gitea reads the first of `./CODEOWNERS`, `./docs/CODEOWNERS`, `./.gitea/CODEOWNERS`
+  and requests the owners as PR reviewers): `apps/<app>/` per app, `crates/`, `ui/`, root configs and `.gitea/` to the
+  coordinator. Gitea's patterns are **Go regular expressions**, not GitHub's globs: write `apps/debrief/.* @decryp7`,
+  `\.gitea/.* @decryp7`, and escape dots. With one human owner it is not a gate; it is the written form of the existing rule
   "each task owns an explicit set of files": an agent brief names its owned paths, and shared integration points
   (`crates/*/src/lib.rs`, root `package.json`, `.gitea/`, `renovate.json`) are changed by the integrating agent only.
 - **Worktrees:** every agent still works in its own worktree of `paddock` (rule 2). Worktrees share one object store, so
   a new one costs only its checkout (about 300 MB for the whole tree, without build output). For app work, an agent uses
   a sparse checkout: `git sparse-checkout set --cone crates ui scripts docs apps/<app>`. `CARGO_TARGET_DIR` is per
-  worktree and per app (`$TMPDIR/cargo/<worktree>/<app>`); sccache is shared.
+  worktree and per app (`$TMPDIR/cargo/<worktree>/<app>`) and is kept between tasks: reusing a worktree for the same app
+  is what makes local rebuilds fast. sccache is shared but gives almost nothing across worktrees on the Mac (its key
+  carries both paths, §1); do not count on it locally.
 - **AGENTS.md:** one root `AGENTS.md` with the family rules (rules.md is then included by link, not copied) and the
   engineering rules common to all apps. Each `apps/<app>/AGENTS.md` keeps only the app's own part (architecture, where
   logic lives, app-specific checks). Agents read the root file and the nearest one. The "copy every rule into every
@@ -301,7 +368,8 @@ One root `renovate.json` (the apps' configs are identical today):
 Order: after shell 0.3.0 is tagged and every app branch is merged or handed off. Apps are imported one at a time, the
 smallest first, Debrief last (largest, most CI).
 
-0. **Spike** (§7), on a branch; decides moon vs scripts and npm workspaces vs per-app locks.
+0. **Spike** (§7), on a branch; decides moon vs scripts and npm workspaces vs per-app locks. Done 2026-10-25: plain
+   scripts, one root npm workspace.
 1. **Freeze and tag:** tag `paddock` as `pre-monorepo`; no open branches in any app repo (merged, or pushed as hand-off
    branches and listed).
 2. **Build the frame** in `paddock`: root `package.json` workspaces, `scripts/affected.mjs` with tests, `ci.yml` plan
@@ -336,7 +404,8 @@ forward fix, not a rollback.
 | Lost history or tags | filter-repo on a fresh clone, compare `git log --oneline | wc -l` and tag lists before and after; old repos stay |
 | Old commit hashes in issues and docs no longer resolve in `paddock` | Old repos stay readable; import merge names the last old hash; a `docs/history.md` table maps repo to import commit |
 | Debrief 1.1 or another release in flight during the move | Migration starts only after 0.3.0 and with no release in progress; one app at a time; its release waits for its own import step |
-| Gitea features not as assumed (CODEOWNERS, cross-repo token for the bridge upload, artifact v4) | Check in step 0 and step 2; the bridge can also use a dedicated release-only token per old repo |
+| Gitea features not as assumed (CODEOWNERS, cross-repo token for the bridge upload, artifact v4) | Step 0 checked CODEOWNERS (supported, regex patterns) and the token (user-wide `write:repository` passes for other repos); artifact v4 is checked in step 2; the bridge can also use a dedicated release-only token per old repo |
+| History larger than planned (703 MiB, mostly screenshots) | Accepted at import; screenshots recaptured only per release; LFS revisited above 1 GB |
 | Renovate opens too many PRs at once | Grouping and weekly schedule as today; one `lockFileMaintenance` PR per lockfile |
 | Feature unification sneaks in via path dependencies | Per-app workspaces (§1); `cargo tree -e features` diff in the spike for one app before and after |
 
