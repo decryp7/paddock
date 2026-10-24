@@ -4,6 +4,8 @@ The engineering rules are in [AGENTS.md](../AGENTS.md); lessons from the other s
 [suite-lessons.md](suite-lessons.md). This page is the practical side: layout, prerequisites, how to run things, the
 quality gates and where to add code.
 
+Machine setup shared by every Paddock app (tools, build cache, worktrees, test runs): [paddock/docs/dev-setup.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/dev-setup.md). This page adds only what is specific to this app.
+
 ## Layout
 
 ```
