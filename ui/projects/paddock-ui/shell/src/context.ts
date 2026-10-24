@@ -17,6 +17,11 @@ export interface ShellNotice {
   readonly level: 'info' | 'success' | 'warning' | 'error';
   readonly message: string;
   readonly kind?: string;
+  /**
+   * One button for a window-local follow-up (Undo a layout fit, Retry a pop-out): the notice stays in this window (the
+   * engine cannot run it) and the button runs the window's `NOTICE_ACTION_HANDLERS` entry of `action.type`.
+   */
+  readonly action?: { readonly type: string } & Readonly<Record<string, unknown>>;
 }
 
 /** The shell's part of every context: what any contribution may ask the shell to do. */

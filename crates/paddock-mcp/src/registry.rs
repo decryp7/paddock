@@ -214,6 +214,21 @@ impl ToolDef {
     }
 }
 
+/// A registered tool as the settings page lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolInfoRaw {
+    /// Its name.
+    pub name: String,
+    /// A name for people.
+    pub title: Option<String>,
+    /// What it does.
+    pub description: String,
+    /// Read-only or action.
+    pub access: Access,
+    /// Whether clients see it now (MCP is on and the policy shows it).
+    pub exposed: bool,
+}
+
 /// A resource to register: text the model can read by address.
 #[derive(Clone)]
 pub struct ResourceDef {
@@ -323,6 +338,10 @@ impl Policy {
 mod tests {
     use super::*;
 
+    fn nop(_: &CallCtx, _: &Value) -> Result<ToolOutput, ToolError> {
+        Ok(ToolOutput::default())
+    }
+
     fn tool(access: Access, name: &str) -> ToolDef {
         let h = |_: &CallCtx, _: &Value| Ok(ToolOutput::text("ok"));
         match access {
@@ -372,9 +391,7 @@ mod tests {
                 "{bad:?}"
             );
         }
-        let no_obj = ToolDef::read_only("t", "d", json!({"type": "string"}), |_, _| {
-            Ok(ToolOutput::default())
-        });
+        let no_obj = ToolDef::read_only("t", "d", json!({"type": "string"}), nop);
         assert!(
             no_obj
                 .validate()
@@ -382,9 +399,13 @@ mod tests {
                 .to_string()
                 .contains("object")
         );
-        let no_desc = ToolDef::read_only("t", " ", json!({"type": "object"}), |_, _| {
-            Ok(ToolOutput::default())
-        });
+        let no_desc = ToolDef::read_only("t", " ", json!({"type": "object"}), nop);
+        let ctx = CallCtx {
+            cancel: CancelToken::new(),
+            client: String::new(),
+            cursor: None,
+        };
+        assert_eq!(nop(&ctx, &json!({})), Ok(ToolOutput::default()));
         assert!(no_desc.validate().unwrap_err().0.contains("description"));
     }
 

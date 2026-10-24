@@ -1,5 +1,6 @@
 import { DOCUMENT } from '@angular/common';
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, Injector, untracked, viewChild } from '@angular/core';
+import { PdPathText } from '@decryp7/paddock-ui';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
 import { titleParts, type TitlePart } from './match';
 import { PaletteStore, type PaletteRow } from './palette.store';
@@ -15,7 +16,7 @@ let nextId = 0;
 @Component({
   selector: 'pd-command-palette',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdIcon],
+  imports: [PdIcon, PdPathText],
   template: `
     @if (store.isOpen()) {
       <div class="pd-pal-backdrop" data-testid="palette-backdrop" (mousedown)="close()"></div>
@@ -49,6 +50,9 @@ let nextId = 0;
         </div>
         <ul class="pd-pal-list" role="listbox" [attr.aria-label]="t.results" [id]="listId" data-testid="palette-list">
           @for (row of store.rows(); track row.key; let i = $index) {
+            @if (row.heading) {
+              <li class="pd-pal-group" role="presentation" aria-hidden="true">{{ row.heading }}</li>
+            }
             <li
               role="option"
               class="pd-pal-opt"
@@ -70,7 +74,11 @@ let nextId = 0;
               }
               <span class="pd-pal-label">@for (p of parts(row); track $index) {@if (p.mark) {<mark>{{ p.text }}</mark>} @else {{{ p.text }}}}</span>
               @if (row.detail) {
-                <span class="pd-pal-detail" [attr.title]="row.detail">{{ row.detail }}</span>
+                @if (row.detailIsPath) {
+                  <pd-path-text class="pd-pal-detail" [value]="row.detail" [plain]="true" />
+                } @else {
+                  <span class="pd-pal-detail" [attr.title]="row.detail">{{ row.detail }}</span>
+                }
               }
               @if (row.keybinding) {
                 <kbd class="pd-pal-kbd">{{ row.keybinding }}</kbd>
@@ -78,7 +86,7 @@ let nextId = 0;
             </li>
           } @empty {
             @if (!store.isLoading()) {
-              <li class="pd-pal-none" role="presentation" data-testid="palette-empty">{{ t.empty }}</li>
+              <li class="pd-pal-none" role="presentation" data-testid="palette-empty">{{ emptyText() }}</li>
             }
           }
         </ul>
@@ -96,7 +104,7 @@ let nextId = 0;
     .pd-pal { position: fixed; z-index: calc(var(--pd-z-overlay) + 1); top: 64px; left: 50%; transform: translateX(-50%); width: min(600px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-2); border-radius: var(--pd-radius-popover); background: var(--pd-surface-2); border: 1px solid var(--pd-border-strong); box-shadow: var(--pd-shadow-3); color: var(--pd-text); font-size: var(--pd-text-body); }
     .pd-pal-input { height: 32px; min-width: 0; padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-input); background: var(--pd-bg); color: var(--pd-text); font: inherit; }
     .pd-pal-input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -1px; }
-    .pd-pal-status { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 20px; padding: 0 var(--pd-space-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .pd-pal-status { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 0; padding: 0 var(--pd-space-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .pd-pal-error { color: var(--pd-danger); min-width: 0; overflow-wrap: anywhere; }
     .pd-pal-retry { padding: 0 var(--pd-space-2); height: 22px; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; cursor: pointer; }
     .pd-pal-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); }
@@ -107,9 +115,10 @@ let nextId = 0;
     .pd-pal-icon { flex: none; }
     .pd-pal-cat { flex: none; color: var(--pd-text-muted); }
     .pd-pal-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-pal-label mark { background: none; color: var(--pd-accent); font-weight: var(--pd-weight-semibold); }
-    .pd-pal-detail { flex: 0 1 40%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: end; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
-    .pd-pal-kbd, .pd-pal-hint kbd { flex: none; font-family: var(--pd-font-mono); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .pd-pal-label mark { background: none; color: var(--pd-text); font-weight: var(--pd-weight-semibold); text-decoration: underline 2px var(--pd-accent-fill); text-underline-offset: 3px; }
+    .pd-pal-detail { flex: 0 1 40%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .pd-pal-group { padding: var(--pd-space-2) var(--pd-space-3) var(--pd-space-1); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); }
+    .pd-pal-kbd, .pd-pal-hint kbd { flex: none; font-family: var(--pd-font-sans); font-variant-numeric: tabular-nums; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-pal-none { padding: var(--pd-space-3); color: var(--pd-text-muted); }
     .pd-pal-hints { display: flex; flex-wrap: wrap; gap: var(--pd-space-3); padding: var(--pd-space-1) var(--pd-space-2) 0; border-top: 1px solid var(--pd-hairline); color: var(--pd-text-muted); font-size: var(--pd-text-label); }
   `,
@@ -129,7 +138,16 @@ export class PdCommandPalette {
     retry: $localize`:@@pd.wb.palette.retry:Try again`,
   };
   protected readonly activeId = computed(() => (this.store.rows().length ? this.optionId(this.store.active()) : null));
-  protected readonly didYouMean = computed(() => $localize`:@@pd.wb.palette.did-you-mean:Nothing matches “${this.store.query()}:query:”. Did you mean:`);
+  protected readonly didYouMean = computed(() => $localize`:@@pd.wb.palette.did-you-mean:Nothing matches “${this.store.searched()}:query:”. Did you mean:`);
+  /** The empty list says what was searched, and where (review P2-9). */
+  protected readonly emptyText = computed(() => {
+    const searched = this.store.searched();
+    const provider = this.store.provider();
+    if (!searched) return this.t.empty;
+    return provider
+      ? $localize`:@@pd.wb.palette.empty-in:Nothing in ${provider.title.text}:source: matches “${searched}:query:”`
+      : $localize`:@@pd.wb.palette.empty-query:No command matches “${searched}:query:”`;
+  });
   private returnFocus: HTMLElement | null = null;
 
   constructor() {

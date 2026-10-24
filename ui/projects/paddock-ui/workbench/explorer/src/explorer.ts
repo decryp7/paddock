@@ -1,7 +1,7 @@
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, untracked } from '@angular/core';
 import { PdPathText } from '@decryp7/paddock-ui';
-import { CommandService, PdIcon } from '@decryp7/paddock-ui/shell';
+import { CommandService, evaluate, PdIcon, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import type { ExplorerAction, ExplorerNode, ExplorerProviderDef } from '@decryp7/paddock-ui/workbench';
 import { ExplorerStore, treeKey, type TreeRow } from './explorer.store';
 
@@ -53,6 +53,7 @@ const INDENT = 12;
               [attr.aria-label]="section.title.text"
               [cdkContextMenuTriggerFor]="menu"
               #trigger="cdkContextMenuTriggerFor"
+              (cdkContextMenuClosed)="menuOpen.set(false)"
               (keydown)="onKey($event, section.id, trigger)"
             >
               @for (row of rowsOf(section.id); track row.key) {
@@ -70,11 +71,12 @@ const INDENT = 12;
                       [attr.draggable]="draggable(row) ? 'true' : null"
                       [class.pd-selected]="store.selected() === row.key"
                       [class.pd-problem]="!!row.node.problem"
+                      [class.pd-menu-target]="menuOpen() && target()?.section === row.section && target()?.node?.id === row.node.id"
                       [style.padding-inline-start.px]="8 + row.depth * indent"
                       [attr.title]="row.node.problem ?? null"
                       (click)="click(row)"
                       (dblclick)="store.open(row.section, row.node)"
-                      (contextmenu)="target.set(menuTarget(row))"
+                      (contextmenu)="onContextMenu(row)"
                       (dragstart)="dragStart($event, row)"
                     >
                       <span class="pd-ex-twisty" aria-hidden="true" (click)="toggle(row, $event)">
@@ -123,19 +125,21 @@ const INDENT = 12;
       <p class="pd-ex-empty">{{ t.none }}</p>
     }
     <ng-template #menu>
-      <div cdkMenu class="pd-ex-menu" [attr.aria-label]="t.actions" data-testid="explorer-menu">
+      <div cdkMenu class="pd-popmenu pd-ex-menu" [attr.aria-label]="t.actions" data-testid="explorer-menu">
         @for (action of target()?.actions ?? []; track action.id; let i = $index) {
-          @if (i > 0 && action.group !== (target()?.actions ?? [])[i - 1]?.group) {
-            <div class="pd-ex-sep" role="separator"></div>
+          @if (i > 0 && grouped() && action.group !== (target()?.actions ?? [])[i - 1]?.group) {
+            <div class="pd-popmenu__sep" role="separator"></div>
           }
-          <button type="button" cdkMenuItem class="pd-ex-mi" [class.pd-danger]="action.danger" [cdkMenuItemDisabled]="!!action.disabled" [attr.title]="action.disabled ?? null" (cdkMenuItemTriggered)="runAction(action)">
-            @if (action.icon) {
-              <pd-icon [name]="action.icon" />
-            }
-            <span>{{ action.label }}</span>
+          <button type="button" cdkMenuItem class="pd-popmenu__item" [class.pd-popmenu__item--danger]="action.danger" [cdkMenuItemDisabled]="!!action.disabled" [attr.title]="action.disabled ?? null" (cdkMenuItemTriggered)="runAction(action)">
+            <span class="pd-popmenu__icon" aria-hidden="true">
+              @if (action.icon) {
+                <pd-icon [name]="action.icon" />
+              }
+            </span>
+            <span class="pd-popmenu__label">{{ action.label }}</span>
           </button>
         } @empty {
-          <div class="pd-ex-mi pd-ex-none">{{ t.noActions }}</div>
+          <div class="pd-popmenu__item" aria-disabled="true">{{ t.noActions }}</div>
         }
       </div>
     </ng-template>
@@ -143,7 +147,7 @@ const INDENT = 12;
   styles: `
     :host { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; font-size: var(--pd-text-body); color: var(--pd-text); container: pd-explorer / inline-size; }
     .pd-ex-head { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); position: sticky; top: 0; background: var(--pd-surface-1); z-index: 1; }
-    .pd-ex-title { flex: 1; display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; height: 24px; padding: 0 var(--pd-space-1); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; text-align: start; }
+    .pd-ex-title { flex: 1; display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; height: 24px; padding: 0 var(--pd-space-1); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); cursor: pointer; text-align: start; }
     .pd-ex-title span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-ex-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
     .pd-ex-icon-btn:hover, .pd-ex-title:hover { background: var(--pd-hover); color: var(--pd-text); }
@@ -153,6 +157,7 @@ const INDENT = 12;
     .pd-ex-row:hover { background: var(--pd-hover); }
     .pd-ex-row.pd-selected { background: var(--pd-accent-tint); box-shadow: inset 2px 0 0 var(--pd-accent); }
     .pd-ex-row.pd-problem { color: var(--pd-text-subtle); }
+    .pd-ex-row.pd-menu-target { box-shadow: inset 0 0 0 1px var(--pd-focus-ring); }
     .pd-ex-twisty { flex: none; display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; color: var(--pd-text-muted); }
     .pd-ex-node-icon { flex: none; }
     .pd-ex-path, .pd-ex-label { flex: 1 1 auto; min-width: 0; }
@@ -165,12 +170,7 @@ const INDENT = 12;
     .pd-ex-empty { margin: 0; padding: var(--pd-space-2) var(--pd-space-4); color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .pd-ex-empty p { margin: 0 0 var(--pd-space-2); }
     .pd-ex-cta { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
-    .pd-ex-menu { display: flex; flex-direction: column; min-width: 180px; padding: var(--pd-space-1); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-popover); background: var(--pd-surface-2); box-shadow: var(--pd-shadow-2); }
-    .pd-ex-mi { display: flex; align-items: center; gap: var(--pd-space-2); height: 28px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; text-align: start; cursor: pointer; }
-    .pd-ex-mi:hover:not([aria-disabled='true']), .pd-ex-mi:focus { background: var(--pd-hover); outline: none; }
-    .pd-ex-mi[aria-disabled='true'], .pd-ex-none { color: var(--pd-text-subtle); cursor: default; }
-    .pd-ex-mi.pd-danger { color: var(--pd-danger); }
-    .pd-ex-sep { height: 1px; margin: var(--pd-space-1) 0; background: var(--pd-hairline); }
+    .pd-ex-menu { min-width: 180px; }
   `,
 })
 export class PdExplorer {
@@ -179,6 +179,10 @@ export class PdExplorer {
   private readonly el = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   protected readonly indent = INDENT;
   protected readonly target = signal<MenuTarget | null>(null);
+  /** The context menu is open (its row keeps a "menu target" outline meanwhile). */
+  protected readonly menuOpen = signal(false);
+  /** Separators only in a menu of three items or more (P3-5): two items need no grouping. */
+  protected readonly grouped = computed(() => (this.target()?.actions.length ?? 0) >= 3);
   protected readonly t = {
     empty: $localize`:@@pd.wb.explorer.empty:Nothing here yet.`,
     none: $localize`:@@pd.wb.explorer.none:Nothing to explore.`,
@@ -197,6 +201,34 @@ export class PdExplorer {
 
   constructor() {
     this.store.ensureRoots();
+    const host = inject(ShellContextHost);
+    const seen = new Map<string, unknown>();
+    // Reloading a section is a side effect (a provider call, usually IPC) of a tracked `changes` value; the first value
+    // of each section is only remembered (its roots are loading already).
+    effect(() => {
+      const ctx = host.context();
+      for (const section of this.store.sections()) {
+        if (!section.changes) continue;
+        const value = evaluate(section.changes, ctx, undefined);
+        const had = seen.has(section.id);
+        const before = seen.get(section.id);
+        seen.set(section.id, value);
+        if (had && !Object.is(before, value)) untracked(() => void this.store.refresh(section.id));
+      }
+    });
+    // Following the active item (review P3-14): expanding and selecting is a side effect (provider loads) of the path.
+    const revealed = new Map<string, string>();
+    effect(() => {
+      const ctx = host.context();
+      for (const section of this.store.sections()) {
+        if (!section.reveal) continue;
+        const ids = evaluate(section.reveal, ctx, null);
+        const sig = Array.isArray(ids) && ids.length ? ids.join('\u0000') : '';
+        if (!sig || revealed.get(section.id) === sig) continue;
+        revealed.set(section.id, sig);
+        untracked(() => void this.store.reveal(section.id, ids as readonly string[]));
+      }
+    });
   }
 
   protected rowsOf(section: string): TreeRow[] {
@@ -304,10 +336,24 @@ export class PdExplorer {
     e.preventDefault();
   }
 
-  /** Opens the actions of a row from the keyboard, at the row. */
-  private openMenuFor(row: Extract<TreeRow, { kind: 'node' }>, from: HTMLElement | null, trigger: CdkContextMenuTrigger): void {
+  /** A right-click on a row: its menu at the pointer (one code path with the keyboard's `openMenuFor`). */
+  protected onContextMenu(row: Extract<TreeRow, { kind: 'node' }>): void {
+    // The row's actions first; the tree's CDK trigger then opens the menu at the pointer for this same event (it keeps the
+    // right button's own mouseup and auxclick from closing it again, which `open()` without the event cannot).
     this.target.set(this.menuTarget(row));
+    this.menuOpen.set(true);
+  }
+
+  /** Opens the actions of a row from the keyboard, at the row (below its label). */
+  private openMenuFor(row: Extract<TreeRow, { kind: 'node' }>, from: HTMLElement | null, trigger: CdkContextMenuTrigger): void {
     const rect = from?.getBoundingClientRect();
-    trigger.open({ x: (rect?.left ?? 0) + 24, y: rect?.bottom ?? 0 });
+    this.openMenu(row, { x: (rect?.left ?? 0) + 24, y: rect?.bottom ?? 0 }, trigger);
+  }
+
+  private openMenu(row: Extract<TreeRow, { kind: 'node' }>, at: { x: number; y: number }, trigger: CdkContextMenuTrigger): void {
+    this.target.set(this.menuTarget(row));
+    trigger.close();
+    trigger.open(at);
+    this.menuOpen.set(true);
   }
 }

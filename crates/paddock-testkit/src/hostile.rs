@@ -51,3 +51,27 @@ pub fn never_panics<I: AsRef<[u8]>, R>(
         .map(|input| input.as_ref().to_vec())
         .collect()
 }
+
+/// The test of a parser in one line: runs `parse` over the [`corpus`] of every seed (and of the empty seed) and panics, naming the
+/// first input that made it panic (lossy text, so the message is readable). A parser returning an error for hostile input is fine.
+///
+/// ```
+/// paddock_testkit::assert_never_panics(&[b"key = value\n"], |bytes| String::from_utf8_lossy(bytes).contains('='));
+/// ```
+pub fn assert_never_panics<R>(seeds: &[&[u8]], mut parse: impl FnMut(&[u8]) -> R) {
+    let inputs: Vec<Vec<u8>> = seeds
+        .iter()
+        .flat_map(|s| corpus(s))
+        .chain(corpus(b""))
+        .collect();
+    let panicked = never_panics(&inputs, &mut parse);
+    assert!(
+        panicked.is_empty(),
+        "the parser panicked on {} of {} input(s), first: {:?}",
+        panicked.len(),
+        inputs.len(),
+        panicked
+            .first()
+            .map(|b| String::from_utf8_lossy(b).into_owned())
+    );
+}

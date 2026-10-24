@@ -59,3 +59,18 @@ describe('providers', () => {
     expect(TestBed.inject(UiSync).started).toBe(false);
   });
 });
+
+describe('mountPopoutWindowHost', () => {
+  it('puts the pop-out shell in place of the main window root (regression: a pop-out window booted into an empty page)', async () => {
+    const { mountPopoutWindowHost } = await import('./provide');
+    const doc = document.implementation.createHTMLDocument('popout');
+    doc.body.innerHTML = '<app-root><div class="pd-splash"></div></app-root>';
+    const el = mountPopoutWindowHost(doc);
+    expect(el.tagName.toLowerCase()).toBe('pd-popout-shell');
+    expect(doc.body.children).toHaveLength(1);
+    expect(doc.querySelector('app-root')).toBeNull();
+    const own = mountPopoutWindowHost();
+    expect(document.body.firstElementChild).toBe(own);
+    own.remove();
+  });
+});

@@ -16,7 +16,7 @@ links = "paddock-shell"
 mock-runtime = ["paddock-dialogs/mock-runtime"]
 # The start-up watchdog asks natively, and Report a Problem asks where to save, through `tauri-plugin-dialog` (the app registers
 # that plugin).
-native-dialogs = ["paddock-startup/dialog", "paddock-diag/dialog"]
+native-dialogs = ["paddock-startup/dialog", "paddock-diag/dialog", "paddock-files/dialog"]
 # The OS notification adapter (`paddock_health::tauri::native::PluginToaster`); the app registers `tauri-plugin-notification`.
 os-notify = ["paddock-health/os-notify"]
 # The installer over `tauri-plugin-updater` (the app registers that plugin).
@@ -29,19 +29,26 @@ tauri = { workspace = true }
 paddock-commands = { workspace = true, features = ["tauri"] }
 paddock-dialogs = { workspace = true, features = ["tauri"] }
 paddock-diag = { workspace = true, features = ["tauri"] }
+paddock-files = { workspace = true, features = ["tauri"] }
 paddock-download = { workspace = true, features = ["tauri"] }
 paddock-health = { workspace = true, features = ["tauri"] }
 paddock-jobs = { workspace = true, features = ["tauri"] }
+paddock-env = { workspace = true }
 paddock-menu = { workspace = true, features = ["tauri"] }
+paddock-pitwall = { workspace = true }
+paddock-siblings = { workspace = true }
 paddock-packs = { workspace = true, features = ["tauri"] }
 paddock-channels = { workspace = true, features = ["tauri"] }
+paddock-mcp = { workspace = true, features = ["tauri"] }
 paddock-service = { workspace = true, features = ["tauri"] }
 paddock-settings = { workspace = true, features = ["tauri"] }
+paddock-storage = { workspace = true, features = ["tauri"] }
 paddock-startup = { workspace = true, features = ["tauri"] }
 paddock-updater = { workspace = true, features = ["tauri"] }
 paddock-window = { workspace = true, features = ["tauri"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+log = { version = "0.4", features = ["kv"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [build-dependencies]
@@ -54,7 +61,10 @@ tauri = { workspace = true, features = ["test"] }
 paddock-dialogs = { workspace = true, features = ["tauri", "mock-runtime"] }
 # The diagnostics test installs a scoped log and folders in a temporary directory.
 paddock-log = { workspace = true }
-paddock-env = { workspace = true }
+# The Pitwall step is tested against the fake Pitwall on an ephemeral loopback port.
+paddock-pitwall = { workspace = true, features = ["testing"] }
+paddock-siblings = { workspace = true, features = ["testing"] }
+paddock-secrets = { workspace = true }
 # The permission sets are resolved through Tauri's own ACL in the tests.
 tauri-utils = "2.10"
 toml = "0.9"

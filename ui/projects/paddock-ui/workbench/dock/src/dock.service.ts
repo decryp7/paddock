@@ -1,3 +1,4 @@
+import { panelTitle } from '@decryp7/paddock-ui/workbench';
 import { afterNextRender, ApplicationRef, computed, createComponent, DestroyRef, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
 import { panelId as makePanelId, parsePanelId, WorkbenchRegistry, type PerspectiveDef, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
@@ -208,7 +209,7 @@ export class WorkbenchDock {
       },
       defaultTabComponent: TAB_COMPONENT,
       createTabComponent: (o) =>
-        o.name === TAB_COMPONENT ? new PanelTab((id, el) => this.openPanelMenu(id, el), (id, host) => this.drawTabIcon(id, host), (id) => this.isClosable(id)) : undefined,
+        o.name === TAB_COMPONENT ? new PanelTab((id, host) => this.drawTabIcon(id, host), (id) => this.isClosable(id)) : undefined,
       createRightHeaderActionComponent: () =>
         new GroupActions({
           openMenu: (g, anchor) => g.activePanel && this.openPanelMenu(g.activePanel.id, anchor),
@@ -461,7 +462,7 @@ export class WorkbenchDock {
       return;
     }
     if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
-    api.addPanel({ id, component: view.id, title: view.title.text, position: { referencePanel, direction } });
+    api.addPanel({ id, component: view.id, title: panelTitle(view, id), position: { referencePanel, direction } });
   }
 
   close(id: string): void {

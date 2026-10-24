@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-ui-sync-publish"
+description = "Enables the ui_sync_publish command without any pre-configured scope."
+commands.allow = ["ui_sync_publish"]
+
+[[permission]]
+identifier = "deny-ui-sync-publish"
+description = "Denies the ui_sync_publish command without any pre-configured scope."
+commands.deny = ["ui_sync_publish"]

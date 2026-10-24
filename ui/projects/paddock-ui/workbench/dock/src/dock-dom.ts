@@ -1,3 +1,4 @@
+import { glyphSvg } from './dock-glyph';
 /**
  * A group never scrolls sideways. Focusing something wider than a group (a dialog opened from a narrow tool window)
  * would scroll the group's box (overflow: hidden still scrolls programmatically) and push its tab strip over the
@@ -36,6 +37,25 @@ export function overflowLabel(hidden: number): string {
     : $localize`:Tab strip overflow chip, several hidden tabs@@pd.wb.dock.overflow.many:${hidden}:count: more tabs`;
 }
 
+/** The chip's tooltip: the count and the titles of the tabs the strip hides ("1 more tab: Jobs"). */
+export function overflowTooltip(hidden: number, titles: readonly string[]): string {
+  return titles.length ? `${overflowLabel(hidden)}: ${titles.join(', ')}` : overflowLabel(hidden);
+}
+
+/** Titles of the tabs of the chip's group that the strip does not show entirely (the ones dockview lists in the chip). */
+function hiddenTabTitles(chip: HTMLElement): string[] {
+  const strip = chip.closest('.dv-tabs-and-actions-container')?.querySelector<HTMLElement>('.dv-tabs-container');
+  if (!strip) return [];
+  const box = strip.getBoundingClientRect();
+  return Array.from(strip.querySelectorAll<HTMLElement>('.dv-tab'))
+    .filter((tab) => {
+      const r = tab.getBoundingClientRect();
+      return r.left < box.left || r.right > box.right;
+    })
+    .map((tab) => tab.querySelector('.pd-dock-tab-label')?.textContent?.trim() ?? '')
+    .filter((title) => title !== '');
+}
+
 /**
  * dockview's overflow chip ("⌄ 2", the tabs a narrow strip hides) is a bare `div` that opens its list on click. It is
  * made a button here: named and titled "2 more tabs", focusable, and opened with Enter or Space (at the chip, since
@@ -45,14 +65,16 @@ export function labelTabOverflow(root: HTMLElement): { dispose(): void } {
   const label = () =>
     root.querySelectorAll<HTMLElement>('.dv-tabs-overflow-dropdown-root').forEach((chip) => {
       const hidden = Number.parseInt(chip.textContent?.trim() ?? '', 10);
-      const name = overflowLabel(Number.isFinite(hidden) ? hidden : 0);
-      if (chip.getAttribute('aria-label') !== name) {
-        chip.setAttribute('aria-label', name);
-        chip.title = name;
-      }
+      const count = Number.isFinite(hidden) ? hidden : 0;
+      const name = overflowLabel(count);
+      const tip = overflowTooltip(count, hiddenTabTitles(chip));
+      if (chip.getAttribute('aria-label') !== name) chip.setAttribute('aria-label', name);
+      if (chip.title !== tip) chip.title = tip;
       if (chip.getAttribute('role') === 'button') return;
       chip.setAttribute('role', 'button');
       chip.tabIndex = 0;
+      // The chip points down like the list it opens (dockview draws a right-pointing chevron).
+      chip.querySelector('svg')?.replaceWith(glyphSvg('chevron-down', 14));
       chip.querySelectorAll('svg, span').forEach((el) => el.setAttribute('aria-hidden', 'true'));
     });
   const onKey = (e: KeyboardEvent) => {
@@ -66,11 +88,16 @@ export function labelTabOverflow(root: HTMLElement): { dispose(): void } {
   const observer = new MutationObserver(label);
   observer.observe(root, { childList: true, subtree: true, characterData: true });
   root.addEventListener('keydown', onKey);
+  // Which tabs are hidden changes with the width, not with the DOM: refresh the tooltip as the pointer or focus arrives.
+  root.addEventListener('mouseover', label);
+  root.addEventListener('focusin', label);
   label();
   return {
     dispose: () => {
       observer.disconnect();
       root.removeEventListener('keydown', onKey);
+      root.removeEventListener('mouseover', label);
+      root.removeEventListener('focusin', label);
     },
   };
 }

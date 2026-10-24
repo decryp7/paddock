@@ -9,6 +9,7 @@ use std::sync::{Mutex, MutexGuard};
 
 /// How a call ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum Outcome {
     /// A result.
@@ -21,6 +22,8 @@ pub enum Outcome {
     TimedOut,
     /// The tool panicked (contained).
     Panicked,
+    /// The client cancelled the call (`notifications/cancelled`); it got no answer.
+    Cancelled,
 }
 
 /// One call.

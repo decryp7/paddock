@@ -45,7 +45,7 @@ pd-dock .pd-dock-ah-head {
   display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 4px 0 10px; flex: none;
   background: var(--pd-bg); border-bottom: 1px solid var(--pd-hairline); box-shadow: inset 0 2px 0 var(--pd-accent);
 }
-pd-dock .pd-dock-ah-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--pd-text-caption); color: var(--pd-text); }
+pd-dock .pd-dock-ah-spacer { flex: 1; min-width: 0; }
 pd-dock .pd-dock-ah-body { flex: 1; min-height: 0; display: flex; }
 pd-dock .pd-dock-ah-body > .pd-panel { flex: 1; }
 pd-dock .pd-dock-ah-grip { position: absolute; background: transparent; }
@@ -53,17 +53,10 @@ pd-dock .pd-dock-ah-flyout-left .pd-dock-ah-grip { right: -3px; top: 0; bottom: 
 pd-dock .pd-dock-ah-flyout-right .pd-dock-ah-grip { left: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
 pd-dock .pd-dock-ah-flyout-bottom .pd-dock-ah-grip { top: -3px; left: 0; right: 0; height: 6px; cursor: ns-resize; }
 
-/* The notice over the dock: calm, one action. */
-pd-dock .pd-dock-notice {
-  position: absolute; z-index: 995; inset-inline-start: 50%; top: 8px; transform: translateX(-50%); max-width: 80%;
-  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; border-radius: var(--pd-radius-popover);
-  background: var(--pd-surface-3); border: 1px solid var(--pd-border-strong); color: var(--pd-text); box-shadow: var(--pd-shadow-2);
-}
-
 /* Buttons the dock draws itself (notice, error card). */
 .pd-dock-btn, pd-dock .pd-dock-btn {
   min-height: 24px; padding: 2px 10px; border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control);
-  background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); cursor: pointer;
+  background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer;
 }
 .pd-dock-btn:hover { background: var(--pd-hover); }
 .pd-dock-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
@@ -142,20 +135,18 @@ body.pd-dock-drag-cancel .dv-tab-ghost-drag { opacity: 0.5 !important; }
 .dv-tabs-overflow-dropdown-default { min-width: 24px; min-height: 24px; }
 .pd-dockview .dv-tabs-and-actions-container, .pd-dock-actions { -webkit-user-select: none; user-select: none; }
 
-/* Tabs: view icon (14 px), pin mark, title, menu chevron and close, each a target of at least 16 px. */
-.pd-dock-tab { display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 8px 0 12px; white-space: nowrap; }
+/* Tabs: view icon, pin mark, title and close (14 px glyph in a 20 px hit area). */
+.pd-dock-tab { display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 6px 0 12px; white-space: nowrap; }
 .pd-dock-tab-icon { display: inline-flex; width: 16px; height: 16px; flex: none; align-items: center; justify-content: center; }
 .pd-dock-tab-icon > * { width: 16px; height: 16px; }
 .pd-dock-tab-label { overflow: hidden; text-overflow: ellipsis; }
 .pd-dock-tab-pin { display: none; color: var(--pd-text-subtle); }
 .pd-dock-tab.pinned .pd-dock-tab-pin { display: inline-flex; }
-.pd-dock-tab-menu, .pd-dock-tab-close { width: 16px; height: 16px; line-height: 15px; text-align: center; border-radius: var(--pd-radius-tag); color: var(--pd-text-subtle); visibility: hidden; flex: none; }
-.pd-dock-tab-menu { font-size: var(--pd-text-label); }
-.pd-dock-tab-close { font-size: var(--pd-text-body-lg); }
-.dv-tab:hover .pd-dock-tab-menu, .dv-tab.dv-active-tab .pd-dock-tab-menu, .dv-tab:focus-visible .pd-dock-tab-menu,
-.dv-tab:hover .pd-dock-tab-close, .dv-tab.dv-active-tab .pd-dock-tab-close, .dv-tab:focus-visible .pd-dock-tab-close { visibility: visible; }
-.dv-tab:not(.dv-active-tab) .pd-dock-tab-menu { display: none; }
-.pd-dock-tab-menu:hover, .pd-dock-tab-close:hover { background: var(--pd-hover); color: var(--pd-text); }
+.pd-dock-tab-close { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--pd-radius-tag); color: var(--pd-text-subtle); flex: none; }
+/* Inactive tabs keep the × at 40 % (its space is used, so the strip does not jump on hover); hover, focus and the active tab show it fully. */
+.dv-tab:not(.dv-active-tab) .pd-dock-tab-close { opacity: 0.4; }
+.dv-tab:hover .pd-dock-tab-close, .dv-tab:focus-visible .pd-dock-tab-close { opacity: 1; }
+.pd-dock-tab-close:hover { background: var(--pd-hover); color: var(--pd-text); }
 
 /* Group header actions keep a full 24x24 target. */
 .pd-dock-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; height: 100%; }
@@ -177,15 +168,13 @@ body.pd-dock-drag-cancel .dv-tab-ghost-drag { opacity: 0.5 !important; }
 .pd-dock-skeleton span:nth-child(1) { width: 60%; } .pd-dock-skeleton span:nth-child(2) { width: 90%; } .pd-dock-skeleton span:nth-child(3) { width: 75%; } .pd-dock-skeleton span:nth-child(4) { width: 40%; }
 @keyframes pd-dock-shine { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 
-/* Popup menu (panel menu, auto-hide side). */
+/* Popup menu (panel menu, auto-hide side): placement only; the look is the shared pd-popmenu. */
 .pd-dock-menu-backdrop { position: fixed; inset: 0; z-index: 1990; }
 .pd-dock-menu {
-  position: fixed; z-index: 1991; min-width: 180px; max-width: 80vw; margin: 0; padding: 4px; list-style: none;
-  background: var(--pd-surface-3); color: var(--pd-text); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-3);
+  position: fixed; z-index: 1991; min-width: 180px; max-width: 80vw; margin: 0; list-style: none;
 }
-.pd-dock-menu button { display: block; width: 100%; text-align: start; min-height: 24px; padding: 4px 10px; border: 0; border-radius: var(--pd-radius-tag); background: transparent; color: inherit; font: inherit; font-size: var(--pd-text-body); cursor: pointer; }
-.pd-dock-menu button:hover:not(:disabled), .pd-dock-menu button:focus-visible { background: var(--pd-hover); outline: none; box-shadow: inset 0 0 0 2px var(--pd-focus-ring); }
-.pd-dock-menu button:disabled { color: var(--pd-text-subtle); cursor: default; }
+.pd-dock-menu > li { display: flex; }
+
 
 /* Full screen: the frame hides its chrome on html.pd-dock-full-screen; the dock hides its auto-hide bars. */
 html.pd-dock-full-screen .pd-dock-ah-bar { display: none !important; }

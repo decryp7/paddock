@@ -21,7 +21,7 @@ pub mod scratch;
 
 pub use env::{EnvLock, env_lock};
 pub use golden::{Golden, GoldenError, GoldenMode, assert_golden, check_golden};
-pub use hostile::{corpus, never_panics};
+pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{Leftovers, Scratch, ScratchError};

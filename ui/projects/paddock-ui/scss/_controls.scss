@@ -63,6 +63,15 @@
   &:active:not(:disabled, [aria-disabled='true']) {
     background: var(--pd-accent-fill-hover);
   }
+
+  // Disabled drops the fill (outline + subtle text), so it never looks like an enabled grey primary (review X50 P2-12).
+  &:disabled,
+  &[aria-disabled='true'] {
+    border-color: var(--pd-border-control);
+    background: transparent;
+    color: var(--pd-text-subtle);
+    opacity: 1;
+  }
 }
 
 // Danger: the text and icon in the danger colour; the fill is for the confirmation of a destructive action only.
@@ -167,8 +176,11 @@
     border-color: var(--pd-text-muted);
   }
 
+  // Disabled reads as read-only at a glance: a quieter fill and a hairline border, not an enabled field with grey text.
   &:disabled {
-    opacity: 0.6;
+    border-color: var(--pd-hairline);
+    background: color-mix(in srgb, var(--pd-surface-2), var(--pd-text) 3%);
+    color: var(--pd-text-muted);
     cursor: not-allowed;
   }
 
@@ -547,4 +559,89 @@
   + .pd-kbd {
     margin-inline-start: 2px;
   }
+}
+
+// ---- Popup menus (the data table's row and column menus, any CDK menu): surface-3 with shadow-2 (design guide §8). Items keep the
+// pointer's 5 % hover fill, but the keyboard's focus is the family's 2 px ring inset in the item, 3:1 or better (SC 2.4.11), so the
+// item Enter will run is always visible. When some item has an icon, every item reserves the 14 px slot (`.pd-popmenu__icon`).
+.pd-popmenu {
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: var(--pd-space-1);
+  border: 1px solid var(--pd-border-strong);
+  border-radius: var(--pd-radius-popover);
+  background: var(--pd-surface-3);
+  box-shadow: var(--pd-shadow-2);
+}
+
+.pd-popmenu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--pd-space-2);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--pd-space-3);
+  border: 0;
+  border-radius: var(--pd-radius-tag);
+  background: transparent;
+  color: var(--pd-text);
+  font: inherit;
+  font-size: var(--pd-text-body);
+  text-align: start;
+  cursor: pointer;
+
+  &:hover:not(:disabled):not([aria-disabled='true']),
+  &[aria-expanded='true'] {
+    background: var(--pd-hover);
+  }
+
+  &:focus-visible {
+    background: var(--pd-hover);
+    outline: 2px solid var(--pd-focus-ring);
+    outline-offset: -2px;
+  }
+
+  &:disabled,
+  &[aria-disabled='true'] {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+/* A label that takes the rest of the row, and a key hint at the end (CDK menus in the workbench). */
+.pd-popmenu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-popmenu__hint {
+  flex: none;
+  margin-inline-start: var(--pd-space-6);
+  color: var(--pd-text-muted);
+  font-size: var(--pd-text-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.pd-popmenu__icon {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--pd-text-muted);
+}
+
+.pd-popmenu__item--danger,
+.pd-popmenu__item--danger .pd-popmenu__icon {
+  color: var(--pd-danger);
+}
+
+.pd-popmenu__sep {
+  height: 1px;
+  margin: var(--pd-space-1) 0;
+  background: var(--pd-hairline);
 }

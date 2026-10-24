@@ -1,4 +1,5 @@
-import { keepGroupsUnscrolled, labelTabOverflow, overflowLabel } from './dock-dom';
+import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
+import { keepGroupsUnscrolled, labelTabOverflow, overflowLabel, overflowTooltip } from './dock-dom';
 
 describe('keepGroupsUnscrolled', () => {
   it('puts a group scrolled sideways back, leaves vertical scrolling and other elements alone, and stops when disposed', () => {
@@ -22,6 +23,46 @@ describe('keepGroupsUnscrolled', () => {
     left = 20;
     group.dispatchEvent(new Event('scroll'));
     expect(left).toBe(20);
+  });
+});
+
+describe('overflow chip tooltip', () => {
+  const rect = (left: number, right: number) => () => ({ left, right }) as DOMRect;
+  it('names the hidden tabs and shows the same down chevron as the group menu', () => {
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<div class="dv-tabs-and-actions-container"><div class="dv-tabs-container">' +
+      '<div class="dv-tab"><span class="pd-dock-tab-label">Files</span></div>' +
+      '<div class="dv-tab"><span class="pd-dock-tab-label">Jobs</span></div>' +
+      '<div class="dv-tab"><span class="pd-dock-tab-label">  </span></div></div>' +
+      '<div class="dv-tabs-overflow-dropdown-root"><div class="dv-tabs-overflow-dropdown-default"><svg><path d="M0 0"/></svg><span>1</span></div></div></div>';
+    document.body.appendChild(root);
+    const [files, jobs, blank] = Array.from(root.querySelectorAll<HTMLElement>('.dv-tab'));
+    root.querySelector<HTMLElement>('.dv-tabs-container')!.getBoundingClientRect = rect(0, 100);
+    files!.getBoundingClientRect = rect(0, 60);
+    jobs!.getBoundingClientRect = rect(60, 140);
+    blank!.getBoundingClientRect = rect(-20, 10);
+    const watch = labelTabOverflow(root);
+    const chip = root.querySelector<HTMLElement>('.dv-tabs-overflow-dropdown-root')!;
+    expect(chip.title).toBe('1 more tab: Jobs');
+    expect(chip.getAttribute('aria-label')).toBe('1 more tab');
+    expect(chip.querySelector('svg path')!.getAttribute('d')).toBe(PD_ICON_PATHS['chevron-down']);
+    // The hidden set follows the width: refreshed when the pointer arrives.
+    jobs!.getBoundingClientRect = rect(60, 90);
+    chip.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    expect(chip.title).toBe('1 more tab');
+    watch.dispose();
+    root.remove();
+  });
+
+  it('falls back to the count alone without a strip', () => {
+    expect(overflowTooltip(2, [])).toBe('2 more tabs');
+    expect(overflowTooltip(2, ['A', 'B'])).toBe('2 more tabs: A, B');
+    const root = document.createElement('div');
+    root.innerHTML = '<div class="dv-tabs-overflow-dropdown-root"><div><span>3</span></div></div>';
+    const watch = labelTabOverflow(root);
+    expect(root.querySelector<HTMLElement>('.dv-tabs-overflow-dropdown-root')!.title).toBe('3 more tabs');
+    watch.dispose();
   });
 });
 

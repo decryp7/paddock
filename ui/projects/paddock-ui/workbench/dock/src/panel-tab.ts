@@ -1,19 +1,17 @@
 import type { DockviewPanelApi, ITabRenderer, TabPartInitParameters } from 'dockview';
+import { glyphSvg } from './dock-glyph';
 
 /** Component name dockview uses for the tab renderer of every panel. */
 export const TAB_COMPONENT = 'pd-dock-tab';
-
-/** Opens the panel menu of a tab (the ▾); `anchor` is where the menu appears. */
-export type OpenPanelMenu = (id: string, anchor: HTMLElement) => void;
 
 /** Draws the panel's view icon into `host` (a 16 px box); returns what tears it down. */
 export type DrawTabIcon = (id: string, host: HTMLElement) => (() => void) | void;
 
 /**
- * Tab content: a pin mark (pinned tabs), the title, the panel menu "▾" and a close "×". The default dockview tab
- * nests buttons inside the `role=tab` element, which assistive tech reports as nested interactive controls. Here
- * the ▾ and × are decorative for the mouse; keyboard users open the menu of a focused tab with Shift+F10 (or the
- * Menu key) and close it with Delete.
+ * Tab content: a pin mark (pinned tabs), the title and a close `pd:close` glyph (14 px in a 20 px hit area). The
+ * default dockview tab nests buttons inside the `role=tab` element, which assistive tech reports as nested interactive
+ * controls. Here the × is decorative for the mouse; the panel menu is the tab's right-click menu (keyboard: Shift+F10 or
+ * the Menu key on a focused tab) and a tab closes with Delete.
  */
 export class PanelTab implements ITabRenderer {
   readonly element = document.createElement('div');
@@ -21,13 +19,11 @@ export class PanelTab implements ITabRenderer {
   private readonly icon = document.createElement('span');
   private stopIcon: (() => void) | void = undefined;
   private readonly label = document.createElement('span');
-  private readonly menu = document.createElement('span');
   private readonly close = document.createElement('span');
   private api?: DockviewPanelApi;
   private subscription?: { dispose(): void };
 
   constructor(
-    private readonly openMenu: OpenPanelMenu | null = null,
     private readonly drawIcon: DrawTabIcon | null = null,
     private readonly closable: (id: string) => boolean = () => true,
   ) {
@@ -38,15 +34,11 @@ export class PanelTab implements ITabRenderer {
     this.icon.className = 'pd-dock-tab-icon';
     this.icon.setAttribute('aria-hidden', 'true');
     this.label.className = 'pd-dock-tab-label';
-    this.menu.className = 'pd-dock-tab-menu';
-    this.menu.setAttribute('aria-hidden', 'true');
-    this.menu.textContent = '▾';
-    this.menu.title = $localize`:@@pd.wb.dock.panelTab.menu:Panel menu (Shift+F10)`;
     this.close.className = 'pd-dock-tab-close';
     this.close.setAttribute('aria-hidden', 'true');
-    this.close.textContent = '×';
+    this.close.appendChild(glyphSvg('close', 14));
     this.close.title = $localize`:@@pd.wb.dock.panelTab.close:Close (Delete)`;
-    this.element.append(this.pin, ...(drawIcon ? [this.icon] : []), this.label, ...(openMenu ? [this.menu] : []), this.close);
+    this.element.append(this.pin, ...(drawIcon ? [this.icon] : []), this.label, this.close);
   }
 
   init(params: TabPartInitParameters): void {
@@ -61,13 +53,8 @@ export class PanelTab implements ITabRenderer {
       e.stopPropagation();
       this.api?.close();
     });
-    this.menu.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (this.api) this.openMenu?.(this.api.id, this.element.closest<HTMLElement>('[role="tab"]') ?? this.element);
-    });
-    // Do not start a drag when pressing the close or menu affordance.
+    // Do not start a drag when pressing the close affordance.
     this.close.addEventListener('pointerdown', (e) => e.stopPropagation());
-    this.menu.addEventListener('pointerdown', (e) => e.stopPropagation());
   }
 
   dispose(): void {

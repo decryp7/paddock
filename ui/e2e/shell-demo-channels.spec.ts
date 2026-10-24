@@ -56,8 +56,17 @@ test.describe('notification channels (plan X17)', () => {
     await page.getByTestId('channel-save').click();
     await expect(page.getByTestId('channel-row-Build-Hook')).toContainText('Ops Hook');
 
+    // Remove asks in a dialog of its own: Keep is the default and Escape keeps the channel.
     await page.getByTestId('channel-row-Build-Hook').getByRole('button', { name: 'Remove Ops Hook' }).click();
-    await page.getByTestId('channel-remove-confirm').click();
+    const confirm = page.getByRole('dialog', { name: 'Remove "Ops Hook"?' });
+    await expect(confirm).toContainText('Its stored secret is deleted too.');
+    await expect(confirm.getByRole('button', { name: 'Keep' })).toBeFocused();
+    expect(await axeViolations(page)).toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(confirm).toHaveCount(0);
+    await expect(page.getByTestId('channel-row-Build-Hook')).toBeVisible();
+    await page.getByTestId('channel-row-Build-Hook').getByRole('button', { name: 'Remove Ops Hook' }).click();
+    await page.getByRole('dialog', { name: 'Remove "Ops Hook"?' }).getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(page.locator('tbody tr')).toHaveCount(2);
     await expect(page.getByTestId('channel-row-Build-Hook')).toHaveCount(0);
     expect(pageErrors).toEqual([]);
@@ -74,10 +83,28 @@ test.describe('notification channels (plan X17)', () => {
     expect(await axeViolations(page)).toEqual([]);
   });
 
+  test('a test shows its attempt and phase while it retries, then Delivered after 2 attempts', async ({ app, page }) => {
+    // The demo engine's steps wait for the test (`?channels-step=manual`), so each phase is seen for as long as the test
+    // wants: a poll can miss a phase that lasts as long as a 400 ms timer.
+    await app.settings.open({ page: 'pd.channels' }, '?channels-test=retry&channels-step=manual');
+    const step = () => page.evaluate(() => (window as unknown as { __sdChannelsStep: () => void }).__sdChannelsStep());
+    await page.getByRole('button', { name: 'Send a test to Team Slack' }).click();
+    const progress = page.getByTestId('channel-test-progress-slack');
+    await step();
+    await expect(progress).toHaveText('Attempt 1 of 3 · sending…');
+    await step();
+    await expect(progress).toHaveText('Attempt 1 of 3 · waiting 4 s before the next try');
+    await step();
+    await expect(progress).toHaveText('Attempt 2 of 3 · sending…');
+    await step();
+    await expect(page.getByTestId('channel-test-result-slack')).toHaveText('Delivered after 2 attempts');
+  });
+
   test('a test that hangs keeps saying Still working', async ({ app, page }) => {
     await app.settings.open({ page: 'pd.channels' }, '?channels-test=hang');
     await page.getByRole('button', { name: 'Send a test to Team Slack' }).click();
     await expect(page.getByTestId('channel-test-result-slack')).toContainText('Still working');
+    await expect(page.getByTestId('channel-test-progress-slack')).toHaveText('Attempt 1 of 3 · sending…');
     await page.waitForTimeout(1500);
     await expect(page.getByTestId('channel-test-result-slack')).toContainText('Still working');
   });
