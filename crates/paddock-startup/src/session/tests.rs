@@ -306,3 +306,72 @@ fn dropping_the_autosaver_writes_what_was_queued() {
     }
     assert_eq!(s.current().windows["main"], json!({"last": true}));
 }
+
+#[test]
+fn every_session_error_says_what_to_fix() {
+    let errors = [
+        SessionError::InvalidLabel,
+        SessionError::NotAnObject,
+        SessionError::TooLarge { bytes: 5_000_000 },
+        SessionError::TooManyWindows,
+        SessionError::Write("disk full".into()),
+    ];
+    let texts: Vec<String> = errors.iter().map(ToString::to_string).collect();
+    assert!(texts[0].contains("label"));
+    assert!(texts[1].contains("object"));
+    assert!(texts[2].contains("5000000"));
+    assert!(texts[3].contains("windows"));
+    assert!(texts[4].contains("disk full"));
+}
+
+#[test]
+fn a_recovered_file_that_cannot_be_written_is_reported_and_the_run_still_starts() {
+    let t = tempfile::tempdir().unwrap();
+    let a = store(t.path());
+    a.rotate();
+    a.put("main", &json!({"n": 1})).unwrap();
+    drop(a);
+    // A folder where the recovered file belongs: the previous session cannot be kept for recovery.
+    std::fs::create_dir(t.path().join("recovered.json")).unwrap();
+    let b = store(t.path());
+    b.rotate();
+    let info = b.previous_info();
+    assert!(info.available, "the session is still offered from memory");
+    assert!(info.problem.is_some());
+    b.put("main", &json!({"n": 2})).unwrap();
+}
+
+#[test]
+fn start_fresh_survives_a_recovered_file_that_cannot_be_emptied() {
+    let t = tempfile::tempdir().unwrap();
+    let a = store(t.path());
+    a.rotate();
+    a.put("main", &json!({"n": 1})).unwrap();
+    let b = store(t.path());
+    b.rotate();
+    assert!(b.previous_info().available);
+    let recovered = t.path().join("recovered.json");
+    std::fs::remove_file(&recovered).unwrap();
+    std::fs::create_dir(&recovered).unwrap();
+    b.discard_previous();
+    assert_eq!(b.previous_info(), SessionInfo::default());
+}
+
+#[test]
+fn when_the_writer_thread_cannot_start_checkpoints_are_written_on_the_callers_thread() {
+    let t = tempfile::tempdir().unwrap();
+    let s = store(t.path());
+    s.rotate();
+    let saver = Autosaver::start_with(Arc::clone(&s), |_| Err(std::io::Error::other("no threads")));
+    saver.submit("main", json!({"n": 1})).unwrap();
+    // Nothing is queued: the state is on disk when submit returns.
+    assert_eq!(s.current().windows["main"], json!({"n": 1}));
+    saver.forget("main");
+    assert!(s.current().windows.is_empty());
+    // A write that fails on the caller's thread is logged, not raised.
+    std::fs::remove_file(t.path().join("current.json")).unwrap();
+    std::fs::create_dir(t.path().join("current.json")).unwrap();
+    saver.submit("w-2", json!({"n": 2})).unwrap();
+    saver.flush();
+    saver.stop();
+}

@@ -360,3 +360,10 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   milliseconds; "gone" is waited for on an event (exit status, a closed pipe), not polled against a stopwatch. A real
   wall-clock limit in a test is only a hang guard (seconds to minutes, failing with a message), never the assertion. The
   conformance check C30 (plan shared-next, "Wall-clock assertions") flags the pattern.
+
+## IPC (Paddock X13, 2026-10-25)
+- Fuzz every decoder, also for round trips: a minute of fuzzing the frame codec found that a JSON number carried as text
+  inside postcard changed by one unit in the last place each time it crossed (serde_json parses floats approximately
+  unless `float_roundtrip` is on). A value must cross an IPC unchanged; the fuzz target asserts decode(encode(x)) == x.
+- One oversized message must not take the connection down: read past it without allocating it (the length is in the
+  prefix), and fail only the call its first bytes name. A length beyond the hard limit is garbage and ends the link.
