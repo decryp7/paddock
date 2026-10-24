@@ -45,7 +45,7 @@ fn app() -> (App, WebviewWindow<MockRuntime>, Arc<ChannelsControl>) {
         .build()
         .unwrap();
     let control = install(app.handle(), |emit| {
-        ChannelsControl::new(
+        Ok::<_, std::convert::Infallible>(ChannelsControl::new(
             "Pitcrew",
             Arc::new(MemorySettings::default()),
             Arc::new(MemorySecrets::new("Pitcrew")),
@@ -53,8 +53,9 @@ fn app() -> (App, WebviewWindow<MockRuntime>, Arc<ChannelsControl>) {
             Arc::new(FakeMail::new()),
             Arc::new(SystemClock),
             emit,
-        )
-    });
+        ))
+    })
+    .unwrap();
     (app, window, control)
 }
 
@@ -137,7 +138,7 @@ fn a_test_returns_at_once_and_the_outcome_arrives_on_the_event() {
 #[test]
 fn install_twice_returns_the_managed_control_and_the_table_matches_the_handler() {
     let (app, _w, first) = app();
-    let again = install(app.handle(), |_| unreachable!("already managed"));
+    let again = install(app.handle(), |_| Err::<Arc<ChannelsControl>, ()>(())).unwrap();
     assert!(Arc::ptr_eq(&first, &again));
     let table = &crate::COMMANDS;
     for c in [
