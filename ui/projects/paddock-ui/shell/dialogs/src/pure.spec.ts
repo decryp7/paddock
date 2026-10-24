@@ -192,34 +192,27 @@ describe('modal gate and denials', () => {
   });
 });
 
-describe('coalesced', () => {
-  it('runs once per frame however often it is asked, and can be cancelled (with and without requestAnimationFrame)', async () => {
-    const { coalesced } = await import('./dialog-shell');
-    for (const raf of [true, false]) {
-      const g = globalThis as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown };
-      const saved = [g.requestAnimationFrame, g.cancelAnimationFrame];
-      if (raf) {
-        g.requestAnimationFrame = (cb: () => void) => setTimeout(cb, 0) as unknown as number;
-        g.cancelAnimationFrame = (n: number) => clearTimeout(n);
-      } else {
-        delete g.requestAnimationFrame;
-        delete g.cancelAnimationFrame;
-      }
-      try {
-        let runs = 0;
-        const c = coalesced(() => runs++);
-        c.ask();
-        c.ask();
-        await new Promise<void>((r) => setTimeout(r, 0));
-        expect(runs).toBe(1);
-        c.ask();
-        c.cancel();
-        c.cancel();
-        await new Promise<void>((r) => setTimeout(r, 0));
-        expect(runs).toBe(1);
-      } finally {
-        [g.requestAnimationFrame, g.cancelAnimationFrame] = saved;
-      }
+describe('debounced', () => {
+  it('runs once after the last ask, and can be cancelled', async () => {
+    const { debounced } = await import('./dialog-shell');
+    vi.useFakeTimers();
+    try {
+      let runs = 0;
+      const d = debounced(() => runs++, 60);
+      d.ask();
+      vi.advanceTimersByTime(59);
+      d.ask();
+      vi.advanceTimersByTime(59);
+      expect(runs).toBe(0);
+      vi.advanceTimersByTime(1);
+      expect(runs).toBe(1);
+      d.ask();
+      d.cancel();
+      d.cancel();
+      vi.advanceTimersByTime(120);
+      expect(runs).toBe(1);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
