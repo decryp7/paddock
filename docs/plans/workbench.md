@@ -319,3 +319,12 @@ heartbeat: each visible window answers a cheap ping from Rust on a timer that to
 rule as the start-up watchdog); a window that misses N pings is marked unresponsive (dialogs then allow the OS close,
 `dialog_windows::page_unresponsive`), logged, and offered Reload / Keep Waiting. Tests: a page that stops answering
 after ready; a paused app process does not trigger it.
+
+## 12. Lint precision (2026-10-24)
+
+S9's "no UI timeout" check (`uiTimeoutProblems`) flags every delayed `setTimeout`, which pushed S7 to replace a retry
+and a debounce with `setInterval` loops to satisfy it. Rule 12 is about giving up on running work, not about timers.
+S16 (test kit) narrows the check to timeouts that abandon or fail an awaited operation (`Promise.race` with a timer,
+`AbortSignal.timeout`, a timer that rejects or cancels a request or job) and allows plain debounce/retry timers; S7's
+retry and checkpoint debounce then go back to `setTimeout`. A lint must express the rule, never force workarounds
+(rule 40).
