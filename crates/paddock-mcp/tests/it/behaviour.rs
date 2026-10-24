@@ -1,6 +1,6 @@
 //! Limits, policy, audit and failure containment of the server.
 
-mod common;
+use crate::common;
 
 use common::*;
 use paddock_jobs::FakeClock;
@@ -320,7 +320,13 @@ fn every_call_is_audited_with_redacted_arguments_and_the_servers_clock() {
             "{leaked} was written to the audit log: {args}"
         );
     }
-    assert!(e.arguments["query"].as_str().unwrap().starts_with("<omitted"), "a query is content: only its size is logged");
+    assert!(
+        e.arguments["query"]
+            .as_str()
+            .unwrap()
+            .starts_with("<omitted"),
+        "a query is content: only its size is logged"
+    );
     assert_eq!(e.arguments["limit"], 5);
     assert_eq!(entries[1].outcome, Outcome::ToolError);
     r.audit.clear();

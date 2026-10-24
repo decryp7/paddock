@@ -20,6 +20,7 @@ paddock-proc = { workspace = true }
 paddock-window = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 log = { version = "0.4", features = ["kv"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"

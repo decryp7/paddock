@@ -170,7 +170,7 @@ proptest! {
 
     #[test]
     fn mutated_fixtures_never_panic(cut in 0usize..2000, byte in any::<u8>()) {
-        for fixture in [include_str!("../fixtures/settings.sighterplan"), include_str!("../fixtures/settings.sighterresult")] {
+        for fixture in [include_str!("../../fixtures/settings.sighterplan"), include_str!("../../fixtures/settings.sighterresult")] {
             let mut bytes = fixture.as_bytes().to_vec();
             let at = cut % bytes.len();
             bytes[at] = byte;

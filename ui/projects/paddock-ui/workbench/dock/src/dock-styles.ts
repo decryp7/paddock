@@ -55,15 +55,18 @@ pd-dock .pd-dock-ah-flyout-bottom .pd-dock-ah-grip { top: -3px; left: 0; right: 
 
 /* The notice over the dock: calm, one action. */
 pd-dock .pd-dock-notice {
-  position: absolute; z-index: 995; inset-inline-start: 50%; top: 8px; transform: translateX(-50%); max-width: 80%;
-  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; border-radius: var(--pd-radius-popover);
+  position: absolute; z-index: 995; inset-inline-start: 50%; top: 8px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 16px);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; padding: 6px 8px 6px 12px; border-radius: var(--pd-radius-popover);
   background: var(--pd-surface-3); border: 1px solid var(--pd-border-strong); color: var(--pd-text); box-shadow: var(--pd-shadow-2);
 }
+
+/* The message takes the first line; the buttons wrap below it in a narrow dock. */
+pd-dock .pd-dock-notice > span { flex: 1 1 14em; min-width: 0; }
 
 /* Buttons the dock draws itself (notice, error card). */
 .pd-dock-btn, pd-dock .pd-dock-btn {
   min-height: 24px; padding: 2px 10px; border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control);
-  background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); cursor: pointer;
+  background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer;
 }
 .pd-dock-btn:hover { background: var(--pd-hover); }
 .pd-dock-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }

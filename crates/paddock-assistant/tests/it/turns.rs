@@ -1,6 +1,6 @@
 //! The tool loop and the service: a scripted provider, real files in a temp folder, a fake clock. No sleeps.
 
-mod support;
+use crate::support;
 use paddock_assistant::*;
 use serde_json::json;
 use std::sync::Arc;
