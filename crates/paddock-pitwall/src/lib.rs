@@ -37,6 +37,8 @@ pub mod status;
 pub mod stream;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+#[cfg(test)]
+mod ts;
 pub mod wire;
 
 pub use client::{AppIdentity, ChatReply, Client, EMBED_BATCH, EmbedReply, TaskReply};
@@ -50,6 +52,6 @@ pub use request::{ChatRequest, EmbedRequest, Keep, Message, Part, Role, Task};
 pub use service::{
     API_VERSION, FoundKind, Link, LinkConfig, LinkEvent, LinkView, PairingView, Ready, Tuning,
 };
-pub use status::{AiState, NeedsAiView};
+pub use status::{AiSnapshot, AiState, NeedsAiView};
 pub use stream::ChatStream;
 pub use wire::{CacheStatus, Health, JobInfo, ModelInfo, PairPoll, Provenance, Selected, Usage};

@@ -302,6 +302,9 @@
       <trans-unit id="pd.health.repair.lift-quarantine" datatype="html">
         <source>Allow again</source>
       </trans-unit>
+      <trans-unit id="pd.health.repair.open-login-items" datatype="html">
+        <source>Open Login Items…</source>
+      </trans-unit>
       <trans-unit id="pd.health.repair.open-settings" datatype="html">
         <source>Open Settings…</source>
       </trans-unit>
@@ -584,6 +587,156 @@
       <trans-unit id="pd.pathText.copy" datatype="html">
         <source>Copy the full path</source>
       </trans-unit>
+      <trans-unit id="pd.pitwall.approve" datatype="html">
+        <source>Approve <x id="app"/> in Pitwall &gt; Apps &amp; keys and check that it shows this code.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.builtin-failed" datatype="html">
+        <source>The built-in engine could not be switched on.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.cancel-failed" datatype="html">
+        <source>The pairing could not be cancelled.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.code-label" datatype="html">
+        <source>Pairing code</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.connect-failed" datatype="html">
+        <source>Pitwall could not be reached to connect.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.no-state" datatype="html">
+        <source>Pitwall's state could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.on-builtin" datatype="html">
+        <source>This session uses the built-in engine.</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.open-settings" datatype="html">
+        <source>Open AI settings</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.state-unknown" datatype="html">
+        <source>Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.install" datatype="html">
+        <source>Get Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.model" datatype="html">
+        <source>Download a model in Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.pair" datatype="html">
+        <source>Connect to Pitwall…</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.permissions" datatype="html">
+        <source>Change permissions in Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.start" datatype="html">
+        <source>Open Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.update-app" datatype="html">
+        <source>Update this app</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.step.update-pitwall" datatype="html">
+        <source>Update Pitwall</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.title" datatype="html">
+        <source><x id="feature"/> needs local AI</source>
+      </trans-unit>
+      <trans-unit id="pd.pitwall.use-builtin" datatype="html">
+        <source>Use the built-in engine</source>
+      </trans-unit>
+      <trans-unit id="pd.service.actions" datatype="html">
+        <source>Service actions</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.moved" datatype="html">
+        <source>App moved</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.needs-approval" datatype="html">
+        <source>Needs your approval</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.newer-owner" datatype="html">
+        <source>Looked after by a newer copy</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.not-installed" datatype="html">
+        <source>Not installed</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.not-running" datatype="html">
+        <source>Not running</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.program-missing" datatype="html">
+        <source>Program missing</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.refused" datatype="html">
+        <source>Refused by the system</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.repairing" datatype="html">
+        <source>Repairing</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.running" datatype="html">
+        <source>Running</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.switched-off" datatype="html">
+        <source>Switched off</source>
+      </trans-unit>
+      <trans-unit id="pd.service.condition.unavailable" datatype="html">
+        <source>Not available here</source>
+      </trans-unit>
+      <trans-unit id="pd.service.install" datatype="html">
+        <source>Install</source>
+      </trans-unit>
+      <trans-unit id="pd.service.install-failed" datatype="html">
+        <source>The install did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.lede" datatype="html">
+        <source>A small helper that keeps working while the window is closed. This page shows how it is doing and repairs it when it is not.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.loading" datatype="html">
+        <source>Asking the service how it is doing…</source>
+      </trans-unit>
+      <trans-unit id="pd.service.login-items-failed" datatype="html">
+        <source>Login Items could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.login-items-not-opened" datatype="html">
+        <source>Login Items did not open.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.no-login-items" datatype="html">
+        <source>This system has no Login Items page to open. Look for the app in its startup settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.no-status" datatype="html">
+        <source>The service could not be asked how it is doing.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.no-status-title" datatype="html">
+        <source>The service could not be asked how it is doing.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.open-login-items" datatype="html">
+        <source>Open Login Items…</source>
+      </trans-unit>
+      <trans-unit id="pd.service.refused" datatype="html">
+        <source>The request was not accepted.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.repair" datatype="html">
+        <source>Repair</source>
+      </trans-unit>
+      <trans-unit id="pd.service.repair-failed" datatype="html">
+        <source>The repair did not work.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.service.still-working" datatype="html">
+        <source>Still working. This can take a minute; nothing here gives up on it.</source>
+      </trans-unit>
+      <trans-unit id="pd.service.title" datatype="html">
+        <source>Background service</source>
+      </trans-unit>
+      <trans-unit id="pd.service.working" datatype="html">
+        <source>Working…</source>
+      </trans-unit>
       <trans-unit id="pd.settings.appearance" datatype="html">
         <source>Appearance</source>
       </trans-unit>
@@ -715,6 +868,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.section.unavailable" datatype="html">
         <source>These settings are not available in this app.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.service" datatype="html">
+        <source>Background service</source>
       </trans-unit>
       <trans-unit id="pd.settings.show-advanced" datatype="html">
         <source>Show advanced</source>

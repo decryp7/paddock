@@ -21,6 +21,7 @@ const PARTS: readonly ShellPart[] = [
   { name: 'Pages frame', entry: 'shell/pages', pkg: 'S14' },
   { name: 'Theme and i18n', entry: 'shell/i18n', pkg: 'S15' },
   { name: 'Test kit', entry: 'shell/testing', pkg: 'S16' },
+  { name: 'Local AI (Pitwall)', entry: 'shell/pitwall', pkg: 'X-pitwall' },
 ];
 
 /** The demo's bottom page: what the shell is made of and what this window registered. */

@@ -18,6 +18,8 @@
 /apps/shell-demo/src-tauri/gen/
 /apps/shell-demo/src-tauri/target/
 /apps/shell-demo/dist/
+# The agent copied for Tauri's externalBin (scripts/shell-demo/sidecar.mjs) or the build step's empty placeholder.
+/apps/shell-demo/src-tauri/binaries/
 /eslint/node_modules
 
 # Coverage data (a test child that outlives its parent leaves one in its working folder).

@@ -7,6 +7,7 @@
 use paddock_commands::testing::{WriteMode, sync_generated};
 use paddock_health::ServiceSpec;
 use paddock_shell::{AppIdentity, PLUGIN_NAME};
+use paddock_shell_demo::agent;
 use paddock_shell_demo::engine::{self, DemoJob, Engine};
 use paddock_shell_demo::{
     APP_ID, APP_NAME, COMMANDS, MANIFEST, Place, VERSION, invoke_handler, shell, shell_with_log,
@@ -200,7 +201,10 @@ fn the_contracts_and_manifest_agree_with_the_plugin_and_the_apps_table() {
         dir: std::env::temp_dir(),
     });
     assert_eq!(builder.problems(Some(MANIFEST)), Vec::<String>::new());
-    assert_eq!(builder.service_ids(), [engine::ENGINE, engine::INDEX]);
+    assert_eq!(
+        builder.service_ids(),
+        [engine::ENGINE, engine::INDEX, agent::HEALTH_ID]
+    );
     assert_eq!(
         builder.section_ids(),
         ["pd.notifications", "sd.general", "sd.storage"]
@@ -614,4 +618,83 @@ fn the_tray_shows_what_needs_attention_and_repairs_it_through_the_shell() {
     .unwrap_err();
     assert_eq!(denied["code"], "denied", "{denied}");
     call(&main, true, "job_cancel", json!({ "id": id })).unwrap();
+}
+
+/// The files the bundle ships for the agent are generated from its spec (plan X4): the launch agent in
+/// `Contents/Library/LaunchAgents` and the NSIS hooks. A stale one fails; `PADDOCK_WRITE_TS=1` rewrites them.
+#[test]
+fn the_agents_bundled_plist_and_installer_hooks_are_generated_from_its_spec() {
+    let plist = app_dir().join("macos/agent.plist");
+    sync_generated(&plist, &agent::bundled_plist(), WriteMode::from_env()).unwrap();
+    sync_generated(
+        &app_dir().join("windows/installer-hooks.nsh"),
+        &agent::nsis_hooks(),
+        WriteMode::from_env(),
+    )
+    .unwrap();
+    let mac: Value = serde_json::from_str(
+        &std::fs::read_to_string(app_dir().join("tauri.macos.conf.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        mac["bundle"]["macOS"]["files"][format!("Library/LaunchAgents/{}.plist", agent::LABEL)],
+        "macos/agent.plist"
+    );
+    let win: Value = serde_json::from_str(
+        &std::fs::read_to_string(app_dir().join("tauri.windows.conf.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        win["bundle"]["windows"]["nsis"]["installerHooks"],
+        "windows/installer-hooks.nsh"
+    );
+}
+
+/// The agent in the app: its health entry, the Background service page's commands and the Start at login section, all
+/// over the recording fake in tests (nothing is registered with the OS).
+#[test]
+fn the_agent_is_a_service_of_the_app_with_its_health_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app(dir.path());
+    let main = window(&app, "main");
+    let status = call(&main, true, "service_status", json!({})).unwrap();
+    assert_eq!(status["condition"], "notInstalled", "{status}");
+    let health = call(&main, true, "health_snapshot", json!({})).unwrap();
+    assert_eq!(
+        service(&health, agent::HEALTH_ID)["repair"],
+        "install",
+        "{health}"
+    );
+    let overview = call(&main, true, "settings_overview", json!({})).unwrap();
+    assert!(
+        overview["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "pd.login")
+    );
+}
+
+/// The agent is the app's: same version (each read from its own Cargo.toml) and bundled as `externalBin`.
+#[test]
+fn the_agent_carries_the_apps_version_and_is_bundled_next_to_it() {
+    assert_eq!(agent::VERSION, VERSION);
+    assert_eq!(
+        (agent::APP_ID, agent::APP_NAME),
+        (APP_ID, APP_NAME),
+        "the agent shares the app's folders"
+    );
+    let conf: Value =
+        serde_json::from_str(&std::fs::read_to_string(app_dir().join("tauri.conf.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        conf["bundle"]["externalBin"],
+        json!(["binaries/shell-demo-agent"])
+    );
+    assert!(
+        conf["build"]["beforeBuildCommand"]
+            .as_str()
+            .unwrap()
+            .contains("sidecar.mjs")
+    );
 }
