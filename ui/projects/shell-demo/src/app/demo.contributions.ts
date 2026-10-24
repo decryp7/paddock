@@ -263,6 +263,14 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       providers: () => import('./pages/runners.providers').then((m) => m.RUNNERS_PROVIDERS),
       load: () => import('./pages/runners-page').then((m) => m.RunnersPage),
     }),
+    definePage({
+      id: 'sd.pitwall',
+      title: msg('sd.page.pitwall', 'Local AI'),
+      icon: 'pd:info',
+      order: 180,
+      providers: () => import('./pages/pitwall.providers').then((m) => m.PITWALL_PROVIDERS),
+      load: () => import('./pages/pitwall-page').then((m) => m.PitwallPage),
+    }),
     // Harness pages of the shell's parts: offered in developer mode only (on unless `sd.developer` is "off", as in the
     // reference screenshots, which show a manager app's navigation).
     definePage<DemoContext>({

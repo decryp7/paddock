@@ -2875,6 +2875,7 @@ dependencies = [
 name = "paddock-pitwall"
 version = "0.1.0"
 dependencies = [
+ "paddock-commands",
  "paddock-env",
  "paddock-health",
  "paddock-proc",
@@ -2882,6 +2883,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "ts-rs",
 ]
 
 [[package]]

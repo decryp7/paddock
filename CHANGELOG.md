@@ -5,6 +5,17 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
+  It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
+  actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
+  repair that does not depend on Pitwall, rule 19), Open AI settings, and `(step)` for what only the app can do (open or
+  install Pitwall, update, change permissions). `PitwallBackend` port (Tauri over the four `PITWALL_COMMANDS` and the
+  `paddock://pitwall` event, and an in-memory engine), `PitwallStore` (SignalStore, request status union, listens to the event),
+  `providePitwall`. The wire types and names are generated from Rust (`ts-rs`, stale files fail `cargo test -p paddock-pitwall`).
+  `Session::snapshot` builds the value. The shell demo has a Local AI page on a fake Pitwall (Vitest and a Chromium spec: axe,
+  320 px).
+- `paddock-pitwall` line coverage is above 99% (lcov): the socket error arms are classified by pure functions with tests, and the
+  pairing races (an approval after the request expired, a late answer for a replaced request) are tested deterministically.
 - `paddock-pitwall` (ADR 0004, plan workbench section 15): the one Pitwall client, extracted from Debrief 1.1's engine and checked
   against Pitwall's router. Discovery (`discovery.json` from `paddock-env` folders, Local then Roaming on Windows, else port 11435),
   the key in `paddock-secrets`, pairing with the user's consent on a background thread, a typed `Client` (health, select, models,

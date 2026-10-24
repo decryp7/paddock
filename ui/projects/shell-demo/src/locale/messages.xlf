@@ -89,6 +89,9 @@
       <trans-unit id="sd.page.lab" datatype="html">
         <source>Lab</source>
       </trans-unit>
+      <trans-unit id="sd.page.pitwall" datatype="html">
+        <source>Local AI</source>
+      </trans-unit>
       <trans-unit id="sd.page.runners" datatype="html">
         <source>Runners</source>
       </trans-unit>
