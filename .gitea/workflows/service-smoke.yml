@@ -3,8 +3,9 @@
 # host, build N (the version in Cargo.toml) and build N+1 (its patch number plus one), and hands both .app bundles to
 # tools/macos-vm-smoke.sh, which clones a fresh Tart VM from a pinned base image, runs scripts/shell-demo/smoke-service-update.sh
 # in it and always deletes the VM again. Needs Tart on the runner (cirruslabs/cli) and 60 GB free; one VM at a time.
-# The Linux guest (systemd --user) is the same tool with --guest linux; it needs linux-arm64 builds of the agent and
-# is run by hand until a Linux build job exists.
+# The Linux guest is the same tool with --guest linux: linux-arm64 builds of the app and agent (made in one throw-away
+# arm64 container by scripts/shell-demo/build-linux-arm64.sh, so Docker is needed too), the update smoke in a systemd
+# --user session, then the desktop smoke (tray, notification, Quit) in a light X session. The VMs run one after the other.
 
 name: service-smoke
 
@@ -62,6 +63,17 @@ jobs:
           app="$(basename "$(ls -d "$out"/n/*.app)")"
           PADDOCK_VM_LOG_DIR="$RUNNER_TEMP/smoke-logs" \
             bash tools/macos-vm-smoke.sh --old "$out/n/$app" --new "$out/n1/$app"
+
+      - name: Build N and N+1 for linux-arm64 (one container, removed after)
+        run: bash scripts/shell-demo/build-linux-arm64.sh "$RUNNER_TEMP/smoke-builds-linux"
+
+      - name: Run the Linux update and desktop smokes in a fresh Ubuntu VM (always deleted)
+        run: |
+          out="$RUNNER_TEMP/smoke-builds-linux"
+          read -r PADDOCK_SMOKE_OLD_VERSION PADDOCK_SMOKE_NEW_VERSION < "$out/versions"
+          export PADDOCK_SMOKE_OLD_VERSION PADDOCK_SMOKE_NEW_VERSION
+          PADDOCK_VM_LOG_DIR="$RUNNER_TEMP/smoke-logs-linux" \
+            bash tools/macos-vm-smoke.sh --guest linux --old "$out/n/paddock-shell-demo" --new "$out/n1/paddock-shell-demo"
 
       - name: No VM is left behind
         if: always()
