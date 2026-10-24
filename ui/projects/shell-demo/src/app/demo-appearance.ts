@@ -1,7 +1,6 @@
-import type { EnvironmentProviders } from '@angular/core';
-import { makeEnvironmentProviders } from '@angular/core';
+import { makeEnvironmentProviders, type EnvironmentProviders } from '@angular/core';
 import type { SuAccent } from '@decryp7/paddock-ui';
-import { defineTheme, IpcAppearanceBackend, msg, provideAppearance, provideThemes } from '@decryp7/paddock-ui/shell';
+import { BrowserAppearanceBackend, defineTheme, IpcAppearanceBackend, msg, provideAppearance, provideThemes, type AppearanceBackend } from '@decryp7/paddock-ui/shell';
 import { appearanceIpc } from './demo-ipc';
 
 /** The demo's accent (it is Pitwall's reference app first, plan §4.1). */
@@ -21,14 +20,16 @@ export const WARM_PAPER = defineTheme({
   },
 });
 
-/**
- * The appearance of a demo window (main and dialog windows alike): in the desktop build the windows hear each other's
- * changes through `paddock://appearance`; in the browser through a BroadcastChannel.
- */
-export function provideDemoAppearance(): EnvironmentProviders {
+/** The window's own copy of the look and its channel: `paddock://appearance` in the desktop build, a BroadcastChannel in the browser. */
+export function demoAppearanceLocal(): AppearanceBackend {
   const ipc = appearanceIpc();
-  return makeEnvironmentProviders([
-    provideAppearance({ accent: DEMO_ACCENT, ...(ipc ? { backend: () => new IpcAppearanceBackend(ipc) } : {}) }),
-    provideThemes(WARM_PAPER),
-  ]);
+  return ipc ? new IpcAppearanceBackend(ipc) : new BrowserAppearanceBackend();
+}
+
+/**
+ * The appearance of a demo window. A dialog window follows the others through the channel; the main window passes a
+ * backend that also keeps theme and density in the Appearance settings (plan S10).
+ */
+export function provideDemoAppearance(backend: () => AppearanceBackend = demoAppearanceLocal): EnvironmentProviders {
+  return makeEnvironmentProviders([provideAppearance({ accent: DEMO_ACCENT, backend }), provideThemes(WARM_PAPER)]);
 }

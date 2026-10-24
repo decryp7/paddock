@@ -107,6 +107,9 @@
       <trans-unit id="sd.settings.general" datatype="html">
         <source>General</source>
       </trans-unit>
+      <trans-unit id="sd.settings.storage" datatype="html">
+        <source>Storage</source>
+      </trans-unit>
       <trans-unit id="sd.status.runners" datatype="html">
         <source>Runners online</source>
       </trans-unit>

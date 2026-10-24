@@ -139,6 +139,16 @@ test.describe('screenshots (independent review)', () => {
   test.skip(!process.env['SCREENSHOTS'], 'set SCREENSHOTS=1 to rewrite docs/screenshots');
   const root = join(__dirname, '..', 'docs', 'screenshots', 'shell-demo');
 
+  /** Chooses the look through the demo's commands: the main window keeps theme and density in the engine's settings. */
+  async function look(page: Page, theme: 'dark' | 'light', contrast: 'standard' | 'more'): Promise<void> {
+    await page.locator(`button.cmd[data-command="sd.theme.${theme}"]`).click();
+    await expect(html(page)).toHaveAttribute('data-theme', theme);
+    if (contrast === 'more') {
+      await page.locator('button.cmd[data-command="sd.contrast"]').click();
+      await expect(html(page)).toHaveAttribute('data-contrast', 'more');
+    }
+  }
+
   for (const [name, theme, contrast] of [
     ['dark', 'dark', 'standard'],
     ['light', 'light', 'standard'],
@@ -146,11 +156,9 @@ test.describe('screenshots (independent review)', () => {
     ['high-contrast-light', 'light', 'more'],
   ] as const) {
     test(`shell demo ${name}`, async ({ page }) => {
-      await page.addInitScript(
-        ([t, c]) => localStorage.setItem('paddock.appearance', JSON.stringify({ version: 1, theme: t, contrast: c, motion: 'reduce', density: 'standard', pack: null })),
-        [theme, contrast],
-      );
+      await page.emulateMedia({ reducedMotion: 'reduce' });
       await open(page);
+      await look(page, theme, contrast);
       await page.locator('button.cmd[data-command="sd.job.start"]').click();
       await page.locator('button.cmd[data-command="sd.engine.break"]').click();
       await page.getByTestId('service-health-chip').click();
@@ -160,13 +168,13 @@ test.describe('screenshots (independent review)', () => {
   }
 
   test('shell demo pseudo-locale (dark, the View menu open)', async ({ page }) => {
-    await page.addInitScript(() => {
-      localStorage.setItem('paddock.appearance', JSON.stringify({ version: 1, theme: 'dark', contrast: 'standard', motion: 'reduce', density: 'standard', pack: null }));
-      localStorage.setItem('paddock.language', JSON.stringify({ version: 1, language: 'pseudo' }));
-    });
+    await page.addInitScript(() => localStorage.setItem('paddock.language', JSON.stringify({ version: 1, language: 'pseudo' })));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await open(page);
+    await look(page, 'dark', 'standard');
     await page.locator('button.cmd[data-command="sd.job.start"]').click();
-    await page.getByRole('menubar').getByRole('menuitem').nth(1).click();
+    // The View menu (after the app menu and File).
+    await page.getByRole('menubar').getByRole('menuitem').nth(2).click();
     await page.getByRole('menu').first().locator('[aria-haspopup]').first().click();
     mkdirSync(root, { recursive: true });
     await page.screenshot({ path: join(root, 'theme-pseudo-locale-dark.png'), fullPage: false });

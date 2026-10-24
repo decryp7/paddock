@@ -11,6 +11,8 @@ const PSEUDO = /⟦[^⟧]*⟧/;
 /** Text that is never translated: the app's name, key names and glyphs. */
 const ALLOWED = /^(Ctrl|Shift|Alt|Cmd|Win|Esc|Enter|Tab|F\d+|[A-Z])$/;
 const LANGUAGE_KEY = 'paddock.language';
+/** The app's name (the title of its app menu and title bar) is the app's own text, never translated. */
+const APP_NAME = 'Paddock demo';
 
 async function openPseudo(page: Page, path = '/'): Promise<void> {
   await page.addInitScript((key) => {
@@ -52,7 +54,7 @@ async function unmarkedEnglish(scope: Locator, skip = ''): Promise<string[]> {
     skip,
   );
   const words = new Set<string>();
-  for (const t of texts) for (const w of outsidePseudo(t).match(/[A-Za-z]{2,}/g) ?? []) if (!ALLOWED.test(w)) words.add(w);
+  for (const t of texts) for (const w of outsidePseudo(t.replaceAll(APP_NAME, ' ')).match(/[A-Za-z]{2,}/g) ?? []) if (!ALLOWED.test(w)) words.add(w);
   return [...words];
 }
 
@@ -77,7 +79,7 @@ test.describe('pseudo-locale (plan S15)', () => {
   test('the shell loads the translations: lang, the menu bar and the status items are pseudo text', async ({ page }) => {
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
     await expect(menuBar(page)).toHaveAttribute('aria-label', PSEUDO);
-    await expect(menuBar(page).getByRole('menuitem').first()).toHaveText(PSEUDO);
+    await expect(menuBar(page).getByRole('menuitem').nth(1)).toHaveText(PSEUDO);
     await expect(page.locator('pd-jobs-status .pill')).toHaveText(PSEUDO);
     await expect(page.getByTestId('notifications-status')).toHaveAttribute('aria-label', PSEUDO);
   });
@@ -179,6 +181,17 @@ test.describe('pseudo-locale (plan S15)', () => {
     if (await foot.count()) expect(await unmarkedEnglish(foot)).toEqual([]);
   });
 
+  test('no unmarked English in the Settings window (the engine’s field labels and descriptions are data)', async ({ page }) => {
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Comma' : 'Control+Comma');
+    const win = page.locator('pd-settings-window');
+    await expect(win).toBeVisible();
+    await expect(win.getByTestId('settings-search')).toHaveAttribute('placeholder', PSEUDO);
+    await expect(win.getByRole('navigation')).toHaveAttribute('aria-label', PSEUDO);
+    // Engine-written texts (section titles and descriptions, field labels, hints, option labels) carry English until the
+    // engine's messages get codes (ADR 0012 §6); the shell's own words around them must be translated.
+    expect(await unmarkedEnglish(win, '.nav .item, .title, .desc, .label, .hint, .help, option, select, .status, [data-testid=settings-problem]')).toEqual([]);
+  });
+
   test('every message of the shell catalog is in the demo’s pseudo-locale file (paddock-i18n merge)', () => {
     const catalog = readFileSync(join(__dirname, '..', 'projects', 'paddock-ui', 'i18n', 'messages.pd.xlf'), 'utf8');
     const ids = [...catalog.matchAll(/<trans-unit id="([^"]+)"/g)].map((m) => m[1]);
@@ -197,7 +210,7 @@ test('English stays the default and loads no translation chunk', async ({ page }
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('lang', /^en/);
   await expect(page.getByRole('menubar', { name: 'Application menu' })).toBeVisible();
-  await expect(page.getByRole('menubar').getByRole('menuitem').first()).toHaveText('File');
+  await expect(page.getByRole('menubar').getByRole('menuitem', { name: 'File', exact: true })).toBeVisible();
   expect(chunks).toEqual([]);
 });
 

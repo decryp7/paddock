@@ -133,5 +133,7 @@ test("the shell demo's dialogs declare exactly what they reach", () => {
   const r = run(readConfig(join(here, '../../shell-demo/paddock-dialog-commands.json')));
   assert.deepEqual(r.problems, []);
   assert.deepEqual(r.derived['sd.inspector'], ['demo_status']);
-  assert.equal(r.dialogs, 5);
+  // The Settings window (plan S10) reaches the settings commands through its store and the Tauri backend.
+  assert.deepEqual([...r.derived['pd.settings']].sort(), ['settings_overview', 'settings_reset', 'settings_set']);
+  assert.equal(r.dialogs, 6);
 });

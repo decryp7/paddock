@@ -185,7 +185,8 @@ test.describe('menus and keys (plan S13)', () => {
 
   test('the menu bar shows the contributed menus with keys, states and a submenu, and runs items', async ({ page }) => {
     const mac = await isMac(page);
-    await expect(menuBar(page).getByRole('menuitem')).toHaveText(['File', 'View', 'Help']);
+    // The app menu (named after the app) holds Settings… (plan S10); on macOS it is the native app menu.
+    await expect(menuBar(page).getByRole('menuitem')).toHaveText(['Paddock demo', 'File', 'View', 'Help']);
     const help = await openMenu(page, 'Help');
     const greet = help.getByRole('menuitem', { name: 'Say hello' });
     await expect(greet).toContainText(mac ? '⇧⌘H' : 'Ctrl+Shift+H');

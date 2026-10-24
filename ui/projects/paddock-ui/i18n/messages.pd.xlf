@@ -2,6 +2,9 @@
 <xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
   <file source-language="en-US" datatype="plaintext" original="ng2.template">
     <body>
+      <trans-unit id="pd.category.app" datatype="html">
+        <source>Application</source>
+      </trans-unit>
       <trans-unit id="pd.dialogs.cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
@@ -310,6 +313,162 @@
       </trans-unit>
       <trans-unit id="pd.pages.status-bar" datatype="html">
         <source>Status bar</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.appearance" datatype="html">
+        <source>Appearance</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.check.max-items" datatype="html">
+        <source>At most <x id="count"/> items.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.check.max-len" datatype="html">
+        <source>At most <x id="count"/> characters.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.check.number" datatype="html">
+        <source>Enter a number.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.check.whole" datatype="html">
+        <source>Enter a whole number.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.advanced" datatype="html">
+        <source>Advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.default" datatype="html">
+        <source>Default: <x id="value"/></source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.file" datatype="html">
+        <source>File (empty: the default)</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.folder" datatype="html">
+        <source>Folder (empty: the default)</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.reset" datatype="html">
+        <source>Reset to default</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.reset-named" datatype="html">
+        <source>Reset to default: <x id="setting"/></source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.restart" datatype="html">
+        <source>Needs restart</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.field.restart-title" datatype="html">
+        <source>Takes effect after a restart</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.group.advanced" datatype="html">
+        <source>Advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.group.application" datatype="html">
+        <source>Application</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.group.features" datatype="html">
+        <source>Features</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.hint.file" datatype="html">
+        <source>file</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.hint.folder" datatype="html">
+        <source>folder</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.hint.list" datatype="html">
+        <source>up to <x id="count"/> items, one per line</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.hint.text" datatype="html">
+        <source>up to <x id="count"/> characters</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.load-failed" datatype="html">
+        <source>The settings could not be loaded: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.settings.loading" datatype="html">
+        <source>Loading settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.loading-page" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.no-match" datatype="html">
+        <source>No settings match “<x id="query"/>”.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.open" datatype="html">
+        <source>Settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.page-failed" datatype="html">
+        <source>This page could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.pages" datatype="html">
+        <source>Settings pages</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.restart-now" datatype="html">
+        <source>Restart now</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.restart.one" datatype="html">
+        <source>1 change takes effect after the app restarts (<x id="setting"/>).</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.restart.other" datatype="html">
+        <source><x id="count"/> changes take effect after the app restarts.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.restart.some" datatype="html">
+        <source>Some changes take effect after the app restarts.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.results" datatype="html">
+        <source>Search results</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.search" datatype="html">
+        <source>Search settings</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.empty" datatype="html">
+        <source>This section has no settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.hidden.one" datatype="html">
+        <source>1 advanced setting is hidden.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.hidden.other" datatype="html">
+        <source><x id="count"/> advanced settings are hidden.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.reset" datatype="html">
+        <source>Reset section</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.unavailable" datatype="html">
+        <source>These settings are not available in this app.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.show-advanced" datatype="html">
+        <source>Show advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.load-failed" datatype="html">
+        <source>The settings could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.reset-done" datatype="html">
+        <source><x id="section"/> reset to defaults.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.reset-failed" datatype="html">
+        <source>The settings could not be reset.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.saved" datatype="html">
+        <source><x id="what"/> saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.store.set-failed" datatype="html">
+        <source>The settings could not be changed.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.title" datatype="html">
+        <source>Settings</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.unsaved" datatype="html">
+        <source>Unsaved changes</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.unsaved.ask" datatype="html">
+        <source>Some changes are not saved: <x id="pages"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.unsaved.discard" datatype="html">
+        <source>Discard changes</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.unsaved.keep" datatype="html">
+        <source>Keep editing</source>
       </trans-unit>
       <trans-unit id="pd.shell.context-failed" datatype="html">
         <source>The app context failed to load: <x id="cause"/></source>

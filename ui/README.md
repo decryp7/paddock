@@ -105,7 +105,8 @@ so a manager app never bundles the workbench:
 | `@decryp7/paddock-ui/shell` (theme) | theme packs (`defineTheme`, `provideThemes`, `themeProblems`), the window's appearance (`provideAppearance`, `AppearanceStore`, `applyStoredAppearance`, browser and IPC backends), colour maths | S15 |
 | `/shell/i18n` | `initI18n`, `LanguageStore`, locale, plural and number helpers; the shell's XLIFF catalog and pseudo-locale in `i18n/`; the `paddock-i18n` bin | S15 |
 | `/shell/pages` | the pages frame of the manager apps: `provideShellPages`, `pd-shell-frame`, the sidebar of contributed pages (expanded, rail or over the page by `planLayout`), routed lazy pages with their own providers, `ShellPages` | S14 |
-| `/shell/startup`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/testing` | one shell part each | S5-S16 |
+| `/shell/settings` | settings over the `paddock-settings` adapter: `SettingsBackend` (Tauri, memory), `SettingsStore`, `SettingsDrafts` (Signal Forms), `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `settingsWindowProviders`, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
+| `/shell/startup`, `/shell/dialogs`, `/shell/about`, `/shell/testing` | one shell part each | S5-S16 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -287,6 +288,50 @@ providers: [
   service is back.
 - The wire types mirror `shell/generated/health.ts` (ng-packagr cannot import across entry points); a type-level spec
   fails `npm test` when they drift.
+### Settings (`/shell/settings`, plan S10)
+
+Settings are the engine's (rule 21): `paddock-settings` holds the sections the shell and the app register, validates every
+value in Rust, applies, saves and announces it on `paddock://settings`; the UI renders the schema and sends values. The
+Settings window is a modeless `tool` dialog the app declares itself, so its contract is in the app's registry:
+
+```ts
+// app.contributions.ts: static data and loaders only
+export const SETTINGS_DIALOG = defineDialog({
+  id: 'pd.settings', kind: 'tool', title: msg('pd.settings.title', 'Settings'), width: 880, height: 620,
+  commands: ['settings_overview', 'settings_reset', 'settings_set'],                  // SETTINGS_DIALOG_COMMANDS
+  providers: () => import('./settings-window.providers').then((m) => m.SETTINGS_WINDOW),
+  load: () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsWindow),
+});
+export const APP_SETTINGS_PAGES = [
+  defineSettingsPage({ id: 'pw.models', group: 'features', title: msg('pw.settings.models', 'Models'), order: 100,
+    load: () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsSectionPage) }),   // or a page of its own
+];
+// settings-window.providers.ts: what the Settings window boots with (rule 34)
+export const SETTINGS_WINDOW = settingsWindowProviders({ backend: () => new TauriSettingsBackend(ipc), pages: APP_SETTINGS_PAGES });
+// main window
+provideContributions(SETTINGS_CONTRIBUTIONS),          // Settings… (Mod+,) in the app menu, the shell's Appearance page
+provideContributions({ settingsPages: APP_SETTINGS_PAGES, dialogs: [SETTINGS_DIALOG] }),
+provideShellSettings({ backend: () => new TauriSettingsBackend(ipc) }),   // OPEN_SETTINGS for notices; follows Appearance
+```
+
+- A page's id is the id of its Rust section; `PdSettingsSectionPage` (or `<pd-settings-section section="...">` inside a
+  page of the app's own) renders it from the schema: one native control per field kind (switch, select, text, path,
+  number with its unit and limits, duration and size in their unit, list), help, "Needs restart", Reset to default,
+  Reset section, advanced fields behind "Show advanced". Sections without a page are listed under Advanced, so nothing
+  is unreachable. Every page is listed (a Settings window has no app context, so `when` is not evaluated there).
+- Edits are Signal Forms (`SettingsDrafts`, rule 37): a switch or a choice applies at once, typed values on Enter or on
+  leaving the control. The pre-check (types, ranges) only gives early feedback; the engine's refusal shows at the field
+  while the refused value is there. An edit that is not applied stays unsaved, is marked in the navigation, survives
+  moving between pages, and closing the window (Close, Escape, a close request) asks Discard changes / Keep editing.
+- Search covers every field's label, help, key, unit, choices and section title, and pages without a section by title,
+  however written (parts, joins, separators, case, one typo; rule 20). Escape clears a filled search.
+- The restart bar counts restart-only changes (Restart now when the app provides `restart`); a settings file that could
+  not be used at start-up is one notification (posted by Rust) and a note in the window.
+- Generated in `shell/settings/generated/`: `settings.ts` (wire types, `SETTINGS_EVENT`, `APPEARANCE_SECTION`, limits),
+  `settings-commands.ts` (`SETTINGS_COMMANDS`) and `settings-fixtures.ts` (an overview with every field kind, a refusal, a
+  change and a start-up problem, written by Rust; the shell demo's in-memory engine serves them).
+- Needs `@angular/forms` (^22, an optional peer dependency).
+
 ### Dialogs (`/shell/dialogs`, plan S6)
 
 Dialogs are real OS windows (ADR 0009, rule 17). Declare each with `defineDialog` in a registration file; the kind decides
