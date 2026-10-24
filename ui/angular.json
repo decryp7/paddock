@@ -110,13 +110,14 @@
             "browser": "projects/workbench-demo/src/main.ts",
             "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/workbench-demo/tsconfig.app.json",
-            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "projects/workbench-demo/src/styles.css"]
+            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "node_modules/dockview/dist/styles/dockview.css",
+              "projects/workbench-demo/src/styles.css"]
           },
           "configurations": {
             "production": {
               "outputHashing": "all",
               "optimization": { "scripts": true, "styles": { "minify": true, "inlineCritical": false }, "fonts": false },
-              "budgets": [{ "type": "initial", "maximumWarning": "500kB", "maximumError": "1MB" }]
+              "budgets": [{ "type": "initial", "maximumWarning": "910kB", "maximumError": "1.2MB" }]
             },
             "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
           },

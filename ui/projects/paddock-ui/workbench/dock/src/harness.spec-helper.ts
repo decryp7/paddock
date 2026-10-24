@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal, type EnvironmentProviders, type Provider } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { ViewLayout } from '@decryp7/paddock-ui';
-import { msg } from '@decryp7/paddock-ui/shell';
 import { provideShellTesting, render, settle, type Rendered } from '@decryp7/paddock-ui/shell/testing';
 import {
   definePerspective,
@@ -37,7 +36,8 @@ export class Probe {}
 export const probeView = (id: string, area: ViewLayout['area'] = 'document', extra: Partial<ViewDef<HarnessContext>> = {}): ViewDef<HarnessContext> =>
   defineView<HarnessContext>({
     id,
-    title: msg(`h.${id}`, id.toUpperCase()),
+    // A message built at run time (test views only): an object, not msg(), which the catalog extracts from literals.
+    title: Object.freeze({ id: `h.${id}`, text: id.toUpperCase() }),
     icon: 'pd:x',
     layout: area === 'side' ? layout('side', [200, 200], [300, 300], 50, 'right') : area === 'status' ? layout('status', [200, 120], [300, 200], 20) : layout(area, [200, 150], [500, 300], 100),
     load: () => Promise.resolve(Probe),

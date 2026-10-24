@@ -77,7 +77,7 @@ test.describe('command palette (plan W5)', () => {
     await wb.frame.open();
     await wb.palette.open();
     await expect(wb.palette.options.first()).toContainText('Open README');
-    await wb.palette.search('>reindx');
+    await wb.palette.search('>indx repositry');
     await expect(page.getByTestId('palette-did-you-mean')).toBeVisible();
     await wb.palette.run('Index the repository');
     await wb.palette.open(false);
@@ -91,4 +91,68 @@ test.describe('command palette (plan W5)', () => {
     await expect(wb.palette.dialog).toHaveCount(0);
     expect(await axeViolations(page)).toEqual([]);
   });
+});
+
+test.describe('dock (plan W2a, W2b)', () => {
+  const tab = (page: import('@decryp7/paddock-e2e').Page, panel: string) => page.locator(`[data-testid="pd-dock-tab"][data-panel-id="${panel}"]`);
+
+  test('opens a file from the Explorer as an instance of the Code view, and keeps the layout over a reload', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.explorer.expand('wd.files', 'src');
+    await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
+    await expect(tab(page, 'wd.code#src/main.rs')).toBeVisible();
+    await expect(page.getByTestId('code-lines')).toContainText('Server::bind');
+    await wb.explorer.node('wd.files', 'README.md').dblclick();
+    await expect(tab(page, 'wd.code#README.md')).toBeVisible();
+    // The layout is saved a moment after a change (debounced); wait for it, then reload.
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => (localStorage.getItem(k) ?? '').includes('wd.code#README.md')).length)).toBeGreaterThan(0);
+    await page.reload();
+    await expect(tab(page, 'wd.code#src/main.rs')).toBeVisible();
+    await expect(tab(page, 'wd.code#README.md')).toBeVisible();
+  });
+
+  test('switches perspectives with the keyboard and keeps each arrangement', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    const dock = page.getByTestId('pd-dock');
+    await page.locator('#pd-stage').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('ControlOrMeta+2');
+    await expect(dock).toHaveAttribute('data-perspective', 'wd.review');
+    await expect(tab(page, 'wd.problems')).toBeVisible();
+    await page.keyboard.press('ControlOrMeta+1');
+    await expect(dock).toHaveAttribute('data-perspective', 'wd.understand');
+    await expect(tab(page, 'wd.orientation')).toBeVisible();
+  });
+
+  test('the Jobs view is a status pane that slides out from the bottom edge', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await wb.palette.open();
+    await wb.palette.search('>show jobs');
+    await wb.palette.run('Show jobs');
+    await expect(page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"], [data-testid="pd-dock-tab"][data-panel-id="pd.jobs"]').first()).toBeVisible();
+  });
+
+  for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
+    test(`every docked group is at or above its views' declared minimum at ${size.width}x${size.height} (ADR 0011)`, async ({ page }) => {
+      await page.setViewportSize(size);
+      const wb = new WorkbenchApp(page);
+      await wb.frame.open();
+      await wb.explorer.expand('wd.files', 'src');
+      await wb.explorer.node('wd.files', 'src/main.rs').dblclick();
+      await wb.activity.item('wd.act.problems').click();
+      await wb.activity.item('wd.act.outline').click();
+      await expect(tab(page, 'wd.problems')).toBeVisible();
+      const short = await page.locator('[data-min-width]').evaluateAll((groups) =>
+        groups
+          .map((g) => ({ g, r: g.getBoundingClientRect(), w: Number(g.getAttribute('data-min-width')), h: Number(g.getAttribute('data-min-height')) }))
+          .filter(({ r }) => r.width > 0 && r.height > 0)
+          .filter(({ r, w, h }) => r.width + 1 < w || r.height + 1 < h)
+          .map(({ r, w, h }) => `${Math.round(r.width)}x${Math.round(r.height)} < ${w}x${h}`),
+      );
+      expect(short).toEqual([]);
+      await expectNoHorizontalScroll(page);
+    });
+  }
 });
