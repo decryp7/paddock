@@ -397,3 +397,15 @@ in the branch). "Owned" is in the Paddock repo.
   `-notify` as planned; this plan replaces those rows (`paddock-notify` becomes X8 inside `paddock-health`) and adds
   `paddock-log`, `-diag`, `-secrets`, `-chromium`, `-packs`, `-net`, `-channels`, `-names`; update the table when the
   first of them lands.
+
+## Shell gaps found by Pitcrew's move (2026-10-24, for 0.3.0)
+
+- Job results: a shared result payload / read-once `job_result` in `paddock-jobs` (Pitcrew added its own).
+- External jobs: a generic ingest so jobs run by an app's background service appear in the Jobs list with Cancel (Pitcrew mirrors them by hand).
+- `provideShellPages` should enable `withComponentInputBinding` so detail routes need no wrapper components.
+- Dialog-window providers can't reach root-provided app stores; a per-dialog `providers` loader for the app's backend that works in dialog windows.
+- Browser-build stand-ins: a persistent memory settings backend and a memory health backend that runs real repair callbacks.
+- `ShellTypes` augmentation needs `resolveJsonModule`, localize types and the polyfill via `buildTarget` (the unit-test builder rejects `polyfills`) — document or remove the need.
+- Tray model: checked/toggle items.
+- `uiTimeoutProblems`: false positive on identifiers that merely contain "setTimeout" (e.g. `setTimeoutSecs`).
+- Health `Cause` hints should use the repair button's real label.
