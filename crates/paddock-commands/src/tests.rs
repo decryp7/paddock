@@ -151,7 +151,16 @@ fn window_sets_combine_and_list_their_classes() {
             && !set.contains(WindowClass::Popout)
     );
     assert_eq!(set.classes(), [WindowClass::Main, WindowClass::Dialog]);
-    assert_eq!(Windows::WINDOW.classes(), WindowClass::ALL);
+    assert_eq!(
+        Windows::WINDOW.classes(),
+        [WindowClass::Main, WindowClass::Popout, WindowClass::Dialog],
+        "a tray popover is not a window"
+    );
+    assert!(!Windows::WINDOW.contains(WindowClass::Tray));
+    assert_eq!(
+        Windows::WINDOW.with(Windows::TRAY).classes(),
+        WindowClass::ALL
+    );
     assert!(Windows::NONE.is_empty() && Windows::NONE.classes().is_empty());
     for c in WindowClass::ALL {
         assert_eq!(Windows::of(c).classes(), [c]);
@@ -304,10 +313,32 @@ fn labels_follow_the_shell_scheme() {
         "x-main-1",
         "browser-main",
         "w-99999999999",
+        "tray-",
+        "tray-CPU",
+        "tray--x",
+        "tray-a b",
+        "tray-../x",
+        "trayx",
+        "d-tray-1",
+        "p-tray-1",
+        &format!("tray-{}", "a".repeat(33)),
     ] {
         assert_eq!(Label::parse(not), None, "{not}");
     }
-    for label in ["main", "w-3", "d-main-1", "d-w-2-13", "p-main-1", "p-w-2-4"] {
+    assert_eq!(Label::parse("tray"), Some(Label::Tray { item: None }));
+    assert_eq!(
+        Label::parse("tray-cpu-1"),
+        Some(Label::Tray {
+            item: Some("cpu-1")
+        })
+    );
+    assert_eq!(class_of("tray"), Some(WindowClass::Tray));
+    assert_eq!(class_of("tray-x"), Some(WindowClass::Tray));
+    assert_eq!(resolve("tray"), "tray", "a popover belongs to no window");
+    assert!(crate::labels::valid_tray_item(&"a".repeat(32)));
+    for label in [
+        "main", "w-3", "d-main-1", "d-w-2-13", "p-main-1", "p-w-2-4", "tray", "tray-cpu",
+    ] {
         assert_eq!(
             Label::parse(label).map(|l| l.to_string()).as_deref(),
             Some(label)
@@ -325,7 +356,7 @@ fn labels_follow_the_shell_scheme() {
     assert_eq!(Label::Main.host(), None);
     assert_eq!(
         WindowClass::ALL.map(WindowClass::as_str),
-        ["main", "popout", "dialog"]
+        ["main", "popout", "dialog", "tray"]
     );
 }
 
@@ -792,5 +823,34 @@ fn commands_are_found_with_their_line() {
     assert!(
         testing::commands_in(Path::new("x.rs"), "#[tauri::command]\nfn (").is_empty(),
         "no name"
+    );
+}
+
+crate::command_table! {
+    /// A table with commands for the tray popover.
+    static TRAY_COMMANDS;
+    Query [WINDOW] => status,
+    Mutation [WINDOW | TRAY] => window_focus,
+    Quiet [TRAY] => tray_fit_height,
+}
+
+#[test]
+fn a_tray_popover_calls_only_the_commands_that_name_its_class() {
+    let call = |command: &str, label: &str| check(&TRAY_COMMANDS, command, label, None, 10);
+    assert!(call("window_focus", "tray").is_ok());
+    assert!(call("tray_fit_height", "tray-cpu").is_ok());
+    let refused = call("status", "tray").unwrap_err();
+    assert_eq!(refused.code, RefusalCode::Denied);
+    assert!(
+        call("tray_fit_height", "main").is_err(),
+        "the popover's own"
+    );
+    assert!(
+        call("tray_fit_height", "tray-CPU").is_err(),
+        "outside the scheme"
+    );
+    assert_eq!(
+        TRAY_COMMANDS.spec("window_focus").map(|s| s.info().windows),
+        Some(WindowClass::ALL.to_vec())
     );
 }

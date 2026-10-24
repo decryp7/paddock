@@ -5,6 +5,16 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Crate `paddock-window` 0.1.0 (plan S12, ADR 0012): top-level windows in the shell's label scheme (`main`, `w-<n>`;
+  open, list, reveal, titles, the close setting with quit / keep running in the tray / ask, hide or destroy), remembered
+  bounds restored on the right monitor (versioned file; scaled, shrunk and moved inside the work area; cascade from the
+  parent), single instance with deep links of the app's schemes and the open plan (`second_instance`, macOS `Opened` and
+  `Reopen`), the bounded quit (teardown steps on their own threads, the exit watchdog ending a stalled exit, once), native
+  feel for windows and dialogs, the tray (menu model, redraw on change, the shell's items, `NativeTray` behind `tray`)
+  and the tray popover window (frameless, transparent, OS material, anchored to the icon, fitted height, closed on blur
+  and Escape with a fade); `COMMANDS` and generated `shell/generated/window.ts` and `window-commands.ts`.
+- Window class `TRAY` in `paddock-commands` (plan S12): tray popovers are labelled `tray` and `tray-<item>`, are not
+  part of `WINDOW`, and call only commands that name the class; `paddock-startup`'s default watch leaves them out.
 - Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,
   `problems` against the command table, kind size policy), `Grant` for the `paddock-commands` guard, pure placement on
   the parent's monitor (mixed DPI, negative coordinates, remembered offset, never the primary display as default),
