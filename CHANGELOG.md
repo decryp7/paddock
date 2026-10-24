@@ -5,6 +5,14 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Changed
+- X21 review 2 (`ui/docs/review/x21-data/REVIEW.md`): `pd-middle-text` measures the room it is given (`flex: 1 1 0`), so paths are cut
+  only as far as needed and grow back when the table widens; the donut lays out by the card's own width (list under the ring below
+  400 px, the card grows to hold it), the total in its middle is drawn at the ring's centre (a tree-shaken loader needs
+  ECharts' `GraphicComponent`), shares add up to 100, a two-way sort hint, no count while loading or empty and a stable action
+  track, locale-formatted counts, titles as "Label (unit)", short fields narrow the control only, disabled fields read as
+  read-only. Design guide: dark palette slot 6 is #7A70FF (slot 6 is at least 20 from every other slot under protan and deutan),
+  the scope of the CVD rule is written down, and the row "..." button rests in `--pd-row-action-rest` (subtle text at 75%, 3:1) instead of 40% opacity.
+
 - X21 data parts after the independent review (`ui/docs/review/x21-data/REVIEW.md`): `pd-table` keeps its primary column at 128 px
   or more (optional columns drop out from the right as the table narrows; the action column is sized to what the rows can show;
   compact toolbar), rows are 32 px by default (24/32/36 by density) under a 28 px header, a quiet sort chevron shows on hover and
