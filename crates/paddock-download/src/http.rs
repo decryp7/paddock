@@ -136,10 +136,12 @@ pub fn ureq_agent(
     build_agent(config, proxy)
 }
 
-fn build_agent(
+/// The configuration [`ureq_agent`] builds its agent from, for a crate that builds the agent itself with its own resolver
+/// (`ureq::Agent::with_parts`), such as `paddock-net`'s address guard.
+pub fn ureq_config(
     config: &HttpConfig,
     proxy: Option<&ProxyServer>,
-) -> Result<ureq::Agent, DownloadError> {
+) -> Result<ureq::config::Config, DownloadError> {
     let proxy = proxy.map(to_ureq).transpose()?;
     let tls = TlsConfig::builder()
         .provider(TlsProvider::Rustls)
@@ -155,8 +157,14 @@ fn build_agent(
         .accept_encoding("identity")
         .proxy(proxy)
         .tls_config(tls)
-        .build()
-        .into())
+        .build())
+}
+
+fn build_agent(
+    config: &HttpConfig,
+    proxy: Option<&ProxyServer>,
+) -> Result<ureq::Agent, DownloadError> {
+    Ok(ureq::Agent::new_with_config(ureq_config(config, proxy)?))
 }
 
 /// The proxy for ureq. The login goes in through the builder (percent-encoded there); the error never repeats it.
