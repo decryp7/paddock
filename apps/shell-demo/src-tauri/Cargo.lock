@@ -2529,6 +2529,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-cli"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde_json",
+]
+
+[[package]]
 name = "paddock-commands"
 version = "0.1.0"
 dependencies = [
@@ -2589,6 +2597,20 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "paddock-files"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-proc",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-dialog",
 ]
 
 [[package]]
@@ -2658,6 +2680,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
+ "paddock-cli",
  "paddock-commands",
  "paddock-env",
  "paddock-health",
@@ -2692,6 +2715,7 @@ dependencies = [
  "paddock-diag",
  "paddock-dialogs",
  "paddock-download",
+ "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-menu",
@@ -2715,6 +2739,7 @@ dependencies = [
  "paddock-diag",
  "paddock-dialogs",
  "paddock-env",
+ "paddock-files",
  "paddock-health",
  "paddock-jobs",
  "paddock-log",
