@@ -655,3 +655,10 @@ C21 (install shell demo N, register its agent, install N+1, check the agent runs
 Mac mini (Tart or similar), created per run and deleted afterwards; manual or nightly, not per push. Never on the
 user's session or the shared runner (rule 7). The script stays guarded by `PADDOCK_DISPOSABLE_MAC=1`, which only the
 VM sets.
+
+## Drawings follow-up (review 3, 2026-10-25)
+
+All 9 overview images approved (docs/images/REVIEW.md, REVIEWED.md); C24 is blocking on Paddock. Open P3s and the
+diagram-kit recommendation (one meaning per line style: solid = works today, dashed = later/optional, dotted 2 3 with
+≥3:1 contrast = OS-process boundary, external = neutral dashed node, planned = solid outline + pill) go into
+diagrams/STYLE.md and the next redraw.
