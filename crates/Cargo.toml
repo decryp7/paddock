@@ -4,13 +4,15 @@
 [workspace]
 resolver = "3"
 # Fuzz targets are their own workspaces (cargo-fuzz).
-exclude = ["paddock-ipc/fuzz"]
+exclude = ["paddock-ipc/fuzz", "paddock-testplan/fuzz"]
 members = [
     "paddock-archive",
+    "paddock-assistant",
     "paddock-bench",
     "paddock-cli",
     "paddock-build",
     "paddock-channels",
+    "paddock-chromium",
     "paddock-commands",
     "paddock-dialogs",
     "paddock-diag",
@@ -20,20 +22,29 @@ members = [
     "paddock-ipc",
     "paddock-jobs",
     "paddock-log",
+    "paddock-mcp",
+    "paddock-live",
     "paddock-menu",
     "paddock-metrics",
     "paddock-names",
+    "paddock-net",
     "paddock-packs",
+    "paddock-panels",
     "paddock-pitwall",
     "paddock-proc",
+    "paddock-runtime",
     "paddock-secrets",
     "paddock-service",
     "paddock-settings",
     "paddock-shell",
+    "paddock-siblings",
     "paddock-startup",
     "paddock-testkit",
+    "paddock-testplan",
     "paddock-updater",
+    "paddock-watch",
     "paddock-window",
+    "paddock-workbench",
     "paddock-workspace-hack",
 ]
 
@@ -56,10 +67,12 @@ tauri = { version = "2.12", default-features = false }
 # The workspace's own crates, for one crate depending on another: `paddock-jobs = { workspace = true }`. The version is
 # the one published to the `decryp7` registry (keep it equal to the crate's `version`); the path is used in the workspace.
 paddock-archive = { path = "paddock-archive", version = "0.1.0", registry = "decryp7" }
+paddock-assistant = { path = "paddock-assistant", version = "0.1.0", registry = "decryp7" }
 paddock-bench = { path = "paddock-bench", version = "0.1.0", registry = "decryp7" }
 paddock-cli = { path = "paddock-cli", version = "0.1.0", registry = "decryp7" }
 paddock-build = { path = "paddock-build", version = "0.1.0", registry = "decryp7" }
 paddock-channels = { path = "paddock-channels", version = "0.1.0", registry = "decryp7" }
+paddock-chromium = { path = "paddock-chromium", version = "0.1.0", registry = "decryp7" }
 paddock-commands = { path = "paddock-commands", version = "0.1.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "decryp7" }
 paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
@@ -70,19 +83,28 @@ paddock-ipc = { path = "paddock-ipc", version = "0.1.0", registry = "decryp7" }
 paddock-jobs = { path = "paddock-jobs", version = "0.1.0", registry = "decryp7" }
 paddock-log = { path = "paddock-log", version = "0.1.0", registry = "decryp7" }
 paddock-names = { path = "paddock-names", version = "0.1.0", registry = "decryp7" }
+paddock-mcp = { path = "paddock-mcp", version = "0.1.0", registry = "decryp7" }
+paddock-live = { path = "paddock-live", version = "0.1.0", registry = "decryp7" }
 paddock-metrics = { path = "paddock-metrics", version = "0.1.0", registry = "decryp7" }
 paddock-menu = { path = "paddock-menu", version = "0.1.0", registry = "decryp7" }
+paddock-net = { path = "paddock-net", version = "0.1.0", registry = "decryp7" }
 paddock-packs = { path = "paddock-packs", version = "0.1.0", registry = "decryp7" }
+paddock-panels = { path = "paddock-panels", version = "0.1.0", registry = "decryp7" }
 paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }
+paddock-runtime = { path = "paddock-runtime", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
 paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "decryp7" }
 paddock-shell = { path = "paddock-shell", version = "0.2.0", registry = "decryp7" }
+paddock-siblings = { path = "paddock-siblings", version = "0.1.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "decryp7" }
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
+paddock-testplan = { path = "paddock-testplan", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.1.0", registry = "decryp7" }
+paddock-watch = { path = "paddock-watch", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.1.0", registry = "decryp7" }
+paddock-workbench = { path = "paddock-workbench", version = "0.1.0", registry = "decryp7" }
 
 # Debug info for development and test builds (docs/dev-setup.md, "Build profiles"): line tables are enough for backtraces
 # with file and line, and dependencies get none, which makes the objects smaller and linking faster. A debugger session

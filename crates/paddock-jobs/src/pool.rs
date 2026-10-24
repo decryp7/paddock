@@ -9,13 +9,17 @@ use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::task::{Context, Poll, Waker};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-/// A command handler should return within this budget (ms); anything longer belongs on the pool.
-pub const HANDLER_BUDGET_MS: u64 = 50;
+/// How long [`assert_nonblocking`] waits for a handler that does not return while the pool is held: a hang guard that
+/// only a broken handler reaches, never a measure of a working one.
+pub const BLOCKED_AFTER: Duration = Duration::from_secs(30);
+
+/// Pool holds in force; workers start no task while there is one.
+type Gate = Arc<(Mutex<usize>, Condvar)>;
 
 type Task = Box<dyn FnOnce() + Send>;
 
@@ -42,15 +46,27 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 pub struct JobPool {
     tx: Mutex<Option<Sender<Task>>>,
     threads: Mutex<Vec<JoinHandle<()>>>,
+    gate: Gate,
+}
+
+/// Holds a [`JobPool`]: no queued job starts until it is dropped (see [`JobPool::hold`]).
+pub struct PoolHold(Gate);
+
+impl Drop for PoolHold {
+    fn drop(&mut self) {
+        *lock(&self.0.0) -= 1;
+        self.0.1.notify_all();
+    }
 }
 
 impl JobPool {
     pub fn new(workers: Workers) -> Self {
         let (tx, rx) = mpsc::channel::<Task>();
         let rx = Arc::new(Mutex::new(rx));
+        let gate: Gate = Arc::new((Mutex::new(0), Condvar::new()));
         let threads = (0..workers.get())
             .filter_map(|i| {
-                let rx = rx.clone();
+                let (rx, gate) = (rx.clone(), gate.clone());
                 thread::Builder::new()
                     .name(format!("paddock-job-{i}"))
                     .spawn(move || {
@@ -58,6 +74,12 @@ impl JobPool {
                             let task = lock(&rx).recv();
                             match task {
                                 Ok(t) => {
+                                    let held = lock(&gate.0);
+                                    drop(
+                                        gate.1
+                                            .wait_while(held, |h| *h > 0)
+                                            .unwrap_or_else(|p| p.into_inner()),
+                                    );
                                     let _ = catch_unwind(AssertUnwindSafe(t));
                                 }
                                 Err(_) => return,
@@ -70,7 +92,15 @@ impl JobPool {
         JobPool {
             tx: Mutex::new(Some(tx)),
             threads: Mutex::new(threads),
+            gate,
         }
+    }
+
+    /// Holds the pool: queued jobs (and offloaded work) do not start until the returned guard is dropped. For tests
+    /// that prove a command returns without waiting for its job ([`assert_nonblocking`]).
+    pub fn hold(&self) -> PoolHold {
+        *lock(&self.gate.0) += 1;
+        PoolHold(self.gate.clone())
     }
 
     fn submit(&self, task: Task) -> Result<(), PoolClosed> {
@@ -187,37 +217,51 @@ impl<T> Future for Offload<T> {
     }
 }
 
-/// A handler that took longer than its budget.
+/// A handler that did not return while the pool was held: it waits for work it should have left to a job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SlowHandler {
-    pub elapsed: Duration,
-    pub budget: Duration,
+pub struct Blocked {
+    /// The hang guard it ran into.
+    pub after: Duration,
 }
 
-impl fmt::Display for SlowHandler {
+impl fmt::Display for Blocked {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "handler blocked for {:?} (budget {:?}); move the work to the job pool",
-            self.elapsed, self.budget
+            "the handler did not return while its jobs could not start (waited {:?}); it waits for work that belongs on the job pool",
+            self.after
         )
     }
 }
 
-impl std::error::Error for SlowHandler {}
+impl std::error::Error for Blocked {}
 
-/// Test helper (and optional debug-build guard): runs a command handler and fails if it blocked longer than `budget`. Use it in the
-/// tests of every Tauri command: `assert_nonblocking(Duration::from_millis(HANDLER_BUDGET_MS), || start_import(...))`.
-pub fn assert_nonblocking<T>(
-    budget: Duration,
-    handler: impl FnOnce() -> T,
-) -> Result<T, SlowHandler> {
-    let t = Instant::now();
-    let out = handler();
-    let elapsed = t.elapsed();
-    if elapsed > budget {
-        Err(SlowHandler { elapsed, budget })
-    } else {
-        Ok(out)
-    }
+/// Test helper for every command that starts work: runs `handler` while `pool` is held, so no job can start, let alone
+/// finish. A handler that returns did not wait for its job, whatever the machine's load; one that waits for a job never
+/// returns, and after the hang guard [`BLOCKED_AFTER`] the pool is released, the handler finishes, and the result is
+/// `Err(Blocked)`. Nothing is measured: success is structural.
+pub fn assert_nonblocking<T: Send>(
+    pool: &JobPool,
+    handler: impl FnOnce() -> T + Send,
+) -> Result<T, Blocked> {
+    assert_nonblocking_within(pool, BLOCKED_AFTER, handler)
+}
+
+/// [`assert_nonblocking`] with another hang guard (the helper's own tests).
+pub fn assert_nonblocking_within<T: Send>(
+    pool: &JobPool,
+    guard: Duration,
+    handler: impl FnOnce() -> T + Send,
+) -> Result<T, Blocked> {
+    let hold = pool.hold();
+    thread::scope(|scope| {
+        let (tx, rx) = mpsc::channel();
+        let worker = scope.spawn(move || {
+            let _ = tx.send(handler());
+        });
+        let returned = rx.recv_timeout(guard);
+        drop(hold);
+        let _ = worker.join();
+        returned.map_err(|_| Blocked { after: guard })
+    })
 }

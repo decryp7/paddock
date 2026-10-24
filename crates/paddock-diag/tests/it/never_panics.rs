@@ -6,6 +6,6 @@ use paddock_testkit::assert_never_panics;
 fn the_manifest_survives_hostile_bytes() {
     assert_never_panics(
         &[br#"{"kind":"paddock-diagnostics","version":1,"app":"x","files":[]}"#],
-        |b| Manifest::parse(b),
+        Manifest::parse,
     );
 }

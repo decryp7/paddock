@@ -18,6 +18,8 @@ wry = ["tauri", "tauri/wry", "dep:webview2-com"]
 
 [dependencies]
 paddock-commands = { workspace = true }
+# The clock of the exit limits (`paddock_jobs::time`), so tests run them out without waiting.
+paddock-jobs = { workspace = true }
 paddock-dialogs = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
