@@ -286,3 +286,82 @@ describe('perspective and layout bookkeeping', () => {
     expect(w.apply('nope')).toBe(false);
   });
 });
+
+describe('placement: documents beside tools, slots by geometry, drag cues', () => {
+  const rectOfBox = (x: number, y: number, width: number, height: number) => () => ({ x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }) as DOMRect;
+
+  it('opens the first document to the right of a left-hand tool, or at the window edge when no tool is docked there', async () => {
+    const left = probeView('s.left', 'side', { layout: { ...probeView('s.left', 'side').layout, edge: 'left' } });
+    const { dock, rendered } = await mountDock({ views: [left, doc('d.one'), probeView('s.right', 'side')] });
+    await dock.showView('s.right');
+    await dock.showView('d.one');
+    await settle(rendered.fixture);
+    const api = TestBed.inject(DockContext).api!;
+    expect(api.panels.map((p) => p.id).sort()).toEqual(['d.one', 's.right']);
+    const second = await mountDock({ views: [left, doc('d.two')] });
+    await second.dock.showView('s.left');
+    await second.dock.showView('d.two');
+    await settle(second.rendered.fixture);
+    expect([...second.dock.openPanels()].sort()).toEqual(['d.two', 's.left']);
+  });
+
+  it('captures a column at a window edge with its width, and a group beside another with its size', async () => {
+    const { dock, rendered } = await mountDock({ views: VIEWS });
+    await dock.showView('d.one');
+    await dock.showView('s.one');
+    await settle(rendered.fixture);
+    const ctx = TestBed.inject(DockContext);
+    const api = ctx.api!;
+    const documents = api.getPanel('d.one')!.group.element;
+    const tools = api.getPanel('s.one')!.group.element;
+    ctx.container!.getBoundingClientRect = rectOfBox(0, 0, 1400, 800);
+    documents.getBoundingClientRect = rectOfBox(0, 0, 1100, 800);
+    tools.getBoundingClientRect = rectOfBox(1100, 0, 300, 800);
+    expect(dock.captureSlot('s.one')).toEqual({ referencePanel: null, direction: 'within', edge: 'right', size: 300 });
+    tools.getBoundingClientRect = rectOfBox(1100, 0, 300, 400);
+    expect(dock.captureSlot('s.one')).toEqual({ referencePanel: 'd.one', direction: 'right', size: 300 });
+    tools.getBoundingClientRect = rectOfBox(1100, 400, 300, 400);
+    expect(dock.captureSlot('s.one')).toMatchObject({ referencePanel: 'd.one' });
+    documents.getBoundingClientRect = rectOfBox(0, 0, 100, 100);
+    tools.getBoundingClientRect = rectOfBox(1100, 400, 300, 400);
+    expect(dock.captureSlot('s.one')).toEqual({ referencePanel: null, direction: 'within' });
+  });
+
+  it('draws the drag cue where a release would open a window, and the cancel hint when it would do nothing', async () => {
+    const { dock, rendered } = await mountDock({ views: VIEWS });
+    await dock.showView('d.one');
+    await settle(rendered.fixture);
+    const placement = TestBed.inject(DockPlacement);
+    const at = { x: 40, y: 50 };
+    expect(placement.cueRect('d.one', at, 'window')).not.toBeNull();
+    expect(placement.cueRect('d.one', at, 'cancel')).not.toBeNull();
+    expect(placement.cueRect('d.one', at, 'dock')).toBeNull();
+    expect(placement.cueRect('d.one', at, null)).toBeNull();
+    expect(dock.tabDropOutcome('d.one', at)).toBeDefined();
+  });
+});
+
+describe('growing back a view that was tabbed away', () => {
+  it('docks it again as a group of its own once the window has room, and forgets the record', async () => {
+    const m = await mountDock({ views: VIEWS });
+    const ctx = TestBed.inject(DockContext);
+    const api = ctx.api!;
+    let width = 1600;
+    Object.defineProperty(api, 'width', { get: () => width, configurable: true });
+    Object.defineProperty(api, 'height', { get: () => 900, configurable: true });
+    ctx.container!.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: 900, width, height: 900, toJSON: () => ({}) }) as DOMRect;
+    for (const id of ['d.one', 'd.full', 's.one', 's.two']) await m.dock.showView(id);
+    await settle(m.rendered.fixture);
+    const fit = () => (m.dock as unknown as { fitToWindow(a: unknown, b: unknown): void }).fitToWindow(api, null);
+    width = 300;
+    fit();
+    expect(ctx.displaced.get('d.full')?.into).toBe('d.one');
+    expect(api.getPanel('d.full')!.group).toBe(api.getPanel('d.one')!.group);
+    width = 2400;
+    fit();
+    await settle(m.rendered.fixture);
+    expect(ctx.displaced.size).toBe(0);
+    expect(m.dock.openPanels()).toContain('d.full');
+    expect(api.getPanel('d.full')!.group).not.toBe(api.getPanel('d.one')!.group);
+  });
+});
