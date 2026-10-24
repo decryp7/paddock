@@ -117,6 +117,15 @@ impl From<Cancelled> for RuntimeError {
     }
 }
 
+impl From<RuntimeError> for JobError {
+    fn from(e: RuntimeError) -> Self {
+        match e {
+            RuntimeError::Cancelled(r) => JobError::Cancelled(r),
+            e => JobError::Failed(e.to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,14 +167,5 @@ mod tests {
             RuntimeError::from(DownloadError::Cancelled(CancelReason::User)),
             RuntimeError::Cancelled(_)
         ));
-    }
-}
-
-impl From<RuntimeError> for JobError {
-    fn from(e: RuntimeError) -> Self {
-        match e {
-            RuntimeError::Cancelled(r) => JobError::Cancelled(r),
-            e => JobError::Failed(e.to_string()),
-        }
     }
 }

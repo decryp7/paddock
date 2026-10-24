@@ -13,11 +13,30 @@ pub const MAX_PLATFORMS: usize = 32;
 /// The largest archive a catalogue may pin.
 pub const MAX_ARCHIVE_BYTES: u64 = 4 << 30;
 
-/// How a pinned archive is packed. Only zip today (Chrome for Testing, FFmpeg and llama.cpp builds for Windows and macOS);
-/// a catalogue that pins another kind is refused, so the store never meets one.
+/// How a pinned archive is packed, from its name (`paddock-archive` also checks the content).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveKind {
     Zip,
+    Tar,
+    TarGz,
+    TarXz,
+}
+
+impl ArchiveKind {
+    /// The kind of an archive name, by its extension; `None` for anything else.
+    pub fn of(name: &str) -> Option<ArchiveKind> {
+        let n = name.to_ascii_lowercase();
+        [
+            (".zip", ArchiveKind::Zip),
+            (".tar.gz", ArchiveKind::TarGz),
+            (".tgz", ArchiveKind::TarGz),
+            (".tar.xz", ArchiveKind::TarXz),
+            (".tar", ArchiveKind::Tar),
+        ]
+        .into_iter()
+        .find(|(ext, _)| n.ends_with(ext) && n.len() > ext.len())
+        .map(|(_, k)| k)
+    }
 }
 
 #[derive(Deserialize)]
@@ -128,8 +147,9 @@ fn archive_of(url: &str) -> Option<(String, ArchiveKind)> {
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
-    (plain && name.to_ascii_lowercase().ends_with(".zip"))
-        .then(|| (name.to_string(), ArchiveKind::Zip))
+    ArchiveKind::of(name)
+        .filter(|_| plain)
+        .map(|k| (name.to_string(), k))
 }
 
 impl Catalogue {
@@ -178,8 +198,12 @@ impl Catalogue {
                     e.key
                 )));
             }
-            let (file_name, archive) = archive_of(&e.url)
-                .ok_or_else(|| bad(format!("the archive for {} is not a .zip file", e.key)))?;
+            let (file_name, archive) = archive_of(&e.url).ok_or_else(|| {
+                bad(format!(
+                    "the archive for {} is not a zip or tar archive",
+                    e.key
+                ))
+            })?;
             if e.size == 0 || e.size > MAX_ARCHIVE_BYTES {
                 return Err(bad(format!("the size for {} is out of range", e.key)));
             }
@@ -351,20 +375,20 @@ mod tests {
                 "not an https",
             ),
             (
-                cat(&entry("linux-x86_64", "https://dl.test/a.tar.xz", 1, HASH)),
-                "not a .zip",
+                cat(&entry("linux-x86_64", "https://dl.test/a.7z", 1, HASH)),
+                "not a zip or tar",
             ),
             (
                 cat(&entry("linux-x86_64", "https://dl.test/.zip", 1, HASH)),
-                "not a .zip",
+                "not a zip or tar",
             ),
             (
                 cat(&entry("linux-x86_64", "https://dl.test/a%20b.zip", 1, HASH)),
-                "not a .zip",
+                "not a zip or tar",
             ),
             (
                 cat(&entry("linux-x86_64", "https://dl.test/", 1, HASH)),
-                "not a .zip",
+                "not a zip or tar",
             ),
             (
                 cat(&entry("linux-x86_64", "https://dl.test/a.zip", 0, HASH)),
@@ -420,6 +444,17 @@ mod tests {
                 .to_string()
                 .contains("more than")
         );
+    }
+
+    #[test]
+    fn archive_kinds_come_from_the_name() {
+        assert_eq!(ArchiveKind::of("a.ZIP"), Some(ArchiveKind::Zip));
+        assert_eq!(ArchiveKind::of("ffmpeg.tar.xz"), Some(ArchiveKind::TarXz));
+        assert_eq!(ArchiveKind::of("a.tgz"), Some(ArchiveKind::TarGz));
+        assert_eq!(ArchiveKind::of("a.tar.gz"), Some(ArchiveKind::TarGz));
+        assert_eq!(ArchiveKind::of("a.tar"), Some(ArchiveKind::Tar));
+        assert_eq!(ArchiveKind::of(".zip"), None);
+        assert_eq!(ArchiveKind::of("a.7z"), None);
     }
 
     #[test]

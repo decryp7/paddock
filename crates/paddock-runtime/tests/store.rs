@@ -4,8 +4,8 @@ use paddock_download::{Downloader, Get, Headers, Response, Transport, TransportE
 use paddock_jobs::time::FakeClock;
 use paddock_jobs::{EventSink, JobContext, JobRegistry, JobSnapshot, JobState};
 use paddock_runtime::{
-    Catalogue, Installed, MARKER, Pinned, RuntimeError, RuntimeKind, RuntimeStore, STATE_FILE,
-    Status, UnpackLimits,
+    ArchiveOptions, Catalogue, Installed, MARKER, Pinned, RuntimeError, RuntimeKind, RuntimeStore,
+    STATE_FILE, Status,
 };
 use std::collections::HashMap;
 use std::io::Write;
@@ -167,6 +167,29 @@ impl World {
             sha_hex(&bytes)
         );
         self.host.files.lock().unwrap().insert(url, bytes);
+        Catalogue::parse(&toml).unwrap().entries()[0].clone()
+    }
+
+    /// Publishes a `.tar.gz` build of `version` whose tool says `text`.
+    fn publish_tar(&self, version: &str, text: &str) -> Pinned {
+        let mut gz = Vec::new();
+        {
+            let enc = flate2::write::GzEncoder::new(&mut gz, flate2::Compression::fast());
+            let mut t = tar::Builder::new(enc);
+            let mut h = tar::Header::new_gnu();
+            h.set_size(text.len() as u64);
+            h.set_mode(0o755);
+            h.set_cksum();
+            t.append_data(&mut h, "bin/tool", text.as_bytes()).unwrap();
+            t.into_inner().unwrap().finish().unwrap();
+        }
+        let url = format!("https://dl.test/{version}/tool-{version}.tar.gz");
+        let toml = format!(
+            "format = 1\nname = \"tool\"\nversion = \"{version}\"\n[[platform]]\nkey = \"linux-x86_64\"\nurl = \"{url}\"\nsize = {}\nsha256 = \"{}\"\n",
+            gz.len(),
+            sha_hex(&gz)
+        );
+        self.host.files.lock().unwrap().insert(url, gz);
         Catalogue::parse(&toml).unwrap().entries()[0].clone()
     }
 
@@ -396,16 +419,18 @@ fn bad_downloads_and_archives_install_nothing() {
         Err(RuntimeError::NoExecutable)
     ));
     // Over the unpack limit.
-    let small = w.store().with_limits(UnpackLimits {
-        max_entries: 1,
-        max_expanded: 1 << 20,
-    });
+    let mut few = ArchiveOptions::default();
+    few.limits.max_entries = 1;
+    let small = w.store().with_archive_options(few);
     let e = w
         .install(&small, &w.publish("4.0.0", "a"), &Tool)
         .unwrap_err();
     assert!(matches!(e, RuntimeError::Archive(_)), "{e}");
     assert!(store.active().is_none());
     assert!(!w.root.join(".staging-4.0.0").exists());
+    // A tar archive is unpacked too (FFmpeg's Linux builds).
+    let tar = w.publish_tar("5.0.0", "t");
+    assert_eq!(w.install(&store, &tar, &Tool).unwrap().self_test, "t 5.0.0");
     // A build of another runtime.
     let other = Catalogue::parse(&format!(
         "format = 1\nname = \"other\"\nversion = \"1\"\n[[platform]]\nkey = \"linux-x86_64\"\nurl = \"https://dl.test/o.zip\"\nsize = 1\nsha256 = \"{}\"\n",
