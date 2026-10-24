@@ -14,6 +14,21 @@ Conventional Commits; one semver tag for the whole repo.
   `packs/` folder.
 - `paddock-watch` (plan X23): `Debouncer` on the shared `Clock`, the `ChangeSource` port (`FakeSource`, `NotifySource` behind the
   `notify` feature) with `spawn`, and Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`). `paddock-packs` now watches through it.
+- `paddock-net` (plan X16): the outbound HTTP policy. `Egress` (`send`, `stream`, `set_offline`, `download_transport`), `Policy`
+  (reach, redirects, caps, timeouts, allow-list, per-host gap), `Reach`/`Class` classification, `Wire`/`Lookup` ports with `UreqWire`
+  (paddock-download's TLS and proxy, the address guard on the connecting addresses, one pool per proxy and reach), `FakeWire`,
+  `StaticLookup`. A redirect to 169.254.169.254, to the LAN or to this computer from a public start is refused; offline refuses
+  before any lookup or socket. `paddock_download::ureq_config` exposes the shared agent configuration.
+- `paddock-channels` now sends over `paddock-net` (`EgressPoster`, `channel_policy`; `UreqPoster` is gone), keeps one secret per
+  channel (`channel:<id>:secret`), allows plain http only to this computer, and has the settings-page engine `ChannelsControl`
+  with the `tauri` adapter (commands and the `paddock://channels` event).
+- `@decryp7/paddock-ui/shell/channels` (plan X17, UI half): Settings > Notification channels. `ChannelsBackend` (Tauri adapter and an
+  in-memory engine with the engine's validation, secrets in a map and test outcomes `succeed`, `rejected`, `unreachable`,
+  `missingSecret`, `hang`), `ChannelsStore` (the engine's refusal of a save shown as it is, a per-channel test state that is
+  never timed out, removal clears the secret), and `PdChannelsPage` in `shell/channels/page` (a table with Edit, Send test and
+  Remove on each row, one Add channel, an inline editor on Signal Forms, "Still working" and the engine's advice inline).
+  The token or password is typed in the modal `pd.channels.secret` dialog (`PdChannelSecretDialog` in `shell/channels/dialog`)
+  and goes from that window straight to the engine, never through a store, event, log or URL. The shell demo registers both.
 - `paddock-build` (plan X34): the Tauri build step in one call (the Windows manifest in every binary, sidecar placeholders, rerun
   triggers; the manifest is shared, the shell demo gains it); `paddock_proc::self_test` (the `--self-test` of a sidecar);
   `paddock-sidecar` in `@decryp7/paddock-conformance` (`build` and `self-test` for every app's sidecars; the shell demo's
