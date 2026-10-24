@@ -114,14 +114,12 @@ impl Backend for LaunchdBundled {
         let domain = launchd_domain(self.spec.kind(), self.uid);
         let off = disabled(self.sys.as_mut(), &domain, self.spec.label()) == Some(true);
         let registration = match status {
-            AppServiceStatus::NotFound => Registration::Unavailable(format!(
-                "macOS cannot find {}'s launch agent: open {} from the Applications folder (the agent is part of the app).",
-                self.spec.name(),
-                self.spec.name()
-            )),
             AppServiceStatus::RequiresApproval => Registration::NeedsApproval,
             _ if off => Registration::SwitchedOff,
-            AppServiceStatus::NotRegistered => Registration::Absent,
+            // NotFound is what macOS (13 to 26) reports for an app that never registered: Background Task Management has
+            // no record of it until the first `register`. That is "not installed", and Install must go ahead; when the
+            // app really cannot register from where it is, `register` itself says so.
+            AppServiceStatus::NotRegistered | AppServiceStatus::NotFound => Registration::Absent,
             AppServiceStatus::Enabled => Registration::Registered,
         };
         let target = self.target();

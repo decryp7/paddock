@@ -5,6 +5,9 @@ import {
   activeLocale,
   groupedNumber,
   initI18n,
+  isLocaleTag,
+  languageOptions,
+  nativeName,
   LANGUAGE_CONFIG,
   LANGUAGE_KEY,
   LanguageStore,
@@ -47,6 +50,21 @@ describe('locale', () => {
     expect(resolveLocale('system', ['', 'en-gb'])).toBe('en-GB');
   });
 
+  it('resolves a chosen translation: its locale if shipped, another region of its language, else as the system default', () => {
+    expect(resolveLocale('de', ['en-GB'], ['de-DE'])).toBe('de-DE');
+    expect(resolveLocale('de-DE', ['en-GB'], ['de-DE'])).toBe('de-DE');
+    expect(resolveLocale('DE-de', [], ['de-DE'])).toBe('de-DE');
+    expect(resolveLocale('pt-BR', [], ['pt-PT'])).toBe('pt-PT');
+    // Not shipped any more (or never): the system's language decides, then English.
+    expect(resolveLocale('fr', ['de-DE'], ['de-DE'])).toBe('de-DE');
+    expect(resolveLocale('fr', ['it-IT'], ['de-DE'])).toBe(SOURCE_LOCALE);
+  });
+
+  it('knows a language tag from anything else', () => {
+    for (const ok of ['de', 'pt-BR', 'zh-Hant-TW', 'ast']) expect(isLocaleTag(ok), ok).toBe(true);
+    for (const bad of ['', 'klingon', 'en_US', 'e', 'en-', '<script>', 'a'.repeat(40), 3, null, undefined]) expect(isLocaleTag(bad), String(bad)).toBe(false);
+  });
+
   it('skips a malformed tag', () => {
     expect(resolveLocale('system', ['en-$$', 'en-AU'])).toBe('en-AU');
   });
@@ -80,6 +98,29 @@ describe('language storage', () => {
     localStorage.setItem(LANGUAGE_KEY, '{oops');
     expect(s.load()).toBe('system');
     expect(parseLanguage('klingon')).toBe('system');
+    expect(parseLanguage('de')).toBe('de');
+    expect(parseLanguage('en_US')).toBe('system');
+    expect(parseLanguage({ x: 1 })).toBe('system');
+    s.save('pt-BR');
+    expect(s.load()).toBe('pt-BR');
+  });
+});
+
+describe('language options', () => {
+  const labels = { system: 'System default', english: 'English', pseudo: 'Pseudo' };
+  it('lists System default, English, each translation by its own name in tag order, and the pseudo-locale only where shipped', () => {
+    expect(languageOptions([], labels).map((o) => o.value)).toEqual(['system', 'en']);
+    const all = languageOptions(['fr', 'de', PSEUDO_LOCALE, 'en-GB', 'de'], labels);
+    expect(all.map((o) => o.value)).toEqual(['system', 'en', 'de', 'fr', 'pseudo']);
+    expect(all.find((o) => o.value === 'de')?.label).toBe('Deutsch');
+    expect(all.find((o) => o.value === 'fr')?.label).toBe('Français');
+  });
+
+  it('falls back to the tag where the platform has no name', () => {
+    expect(nativeName('zz', () => null)).toBe('zz');
+    expect(nativeName('zz', () => ({ of: () => 'zz' }) as unknown as Intl.DisplayNames)).toBe('zz');
+    expect(nativeName('zz', () => { throw new Error('boom'); })).toBe('zz');
+    expect(nativeName('de', () => ({ of: () => undefined }) as unknown as Intl.DisplayNames)).toBe('de');
   });
 });
 

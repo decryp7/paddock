@@ -1,4 +1,4 @@
-import { LANGUAGE_CHOICES, type LanguageChoice } from './locale';
+import { isLocaleTag, LANGUAGE_CHOICES, type LanguageChoice } from './locale';
 
 /**
  * Where the language choice is kept. Apart from the other settings so `main.ts` can read it before bootstrap without
@@ -12,9 +12,9 @@ export interface LanguageStorage {
 export const LANGUAGE_KEY = 'paddock.language';
 export const LANGUAGE_VERSION = 1;
 
-/** Validates an untrusted stored value; anything unknown is "System default". */
+/** Validates an untrusted stored value: a known choice or a language tag; anything else is "System default". */
 export function parseLanguage(raw: unknown): LanguageChoice {
-  return LANGUAGE_CHOICES.includes(raw as LanguageChoice) ? (raw as LanguageChoice) : 'system';
+  return LANGUAGE_CHOICES.includes(raw as LanguageChoice) || isLocaleTag(raw) ? (raw as LanguageChoice) : 'system';
 }
 
 /** The choice in localStorage (`{ version: 1, language }`); a missing, corrupt or other-version value is "System default". */

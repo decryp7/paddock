@@ -33,5 +33,7 @@ pub use clock::{Clock, ManualClock, SystemClock};
 pub use error::{BenchError, Result};
 pub use kind::{Direction, Kind};
 pub use recorder::Recorder;
-pub use results::{Host, MAX_FILE_BYTES, MAX_MEASUREMENTS, Measurement, RESULTS_SCHEMA, RESULTS_VERSION, Results};
+pub use results::{
+    Host, MAX_FILE_BYTES, MAX_MEASUREMENTS, Measurement, RESULTS_SCHEMA, RESULTS_VERSION, Results,
+};
 pub use stats::{Samples, summarize};
