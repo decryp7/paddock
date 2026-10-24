@@ -620,3 +620,15 @@ storage page move to Paddock now (overriding the workbench.md deferral), and X45
 
 Kept after 0.3.0 on purpose (large, needed by Debrief/Pacenotes first): the workbench layer (ADR 0013, W0–W8), the rest
 of the plugin platform (ADR 0001 beyond X13), `paddock-testplan` (ADR 0005), and the shared CI image and cache server.
+
+## Everything joins 0.3.0 (user, 2026-10-24 late: "if we are focusing on paddock, we should add all")
+
+The items kept back above also go into 0.3.0:
+
+| Id | Candidate | Source |
+|---|---|---|
+| X50 | Workbench layer: dock and layout planner, activity bar, Explorer, palette, assistant pane | ADR 0013, workbench.md W0–W8 |
+| X51 | Plugin platform beyond X13: `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | ADR 0001 |
+| X52 | `paddock-testplan` | ADR 0005 |
+| X53 | Shared CI image and cache server for every app | ci-speed notes, X10 |
+| X54 | `paddock-proc` follow-up: Windows job object (`KILL_ON_JOB_CLOSE`) so orphaned helpers end too | X6 report |
