@@ -1,6 +1,6 @@
 import { computed, DestroyRef, inject, Injectable, InjectionToken, Injector, signal, type Signal } from '@angular/core';
 import { SHELL_PORTS, ShellContextHost } from '@decryp7/paddock-ui/shell';
-import { WORKBENCH_PORTS, WorkbenchRegistry, type PanelWindowsPort, type PopOutPlacement } from '@decryp7/paddock-ui/workbench';
+import { panelTitle, WORKBENCH_PORTS, WorkbenchRegistry, type PanelWindowsPort, type PopOutPlacement } from '@decryp7/paddock-ui/workbench';
 import { PANEL_LIMITS, type GhostRequest, type PanelsEvent, type PopOutInfo } from '../generated/panels';
 import { GhostSession, type DragOutPreview } from './ghost-session';
 import { PANELS_IO } from './io';
@@ -128,7 +128,7 @@ export class PanelWindows implements PanelWindowsPort {
     try {
       const info = await this.io.popOut({
         panel,
-        title: view.title.text,
+        title: panelTitle(view, panel),
         ...(placement ? { bounds: { x: placement.x, y: placement.y, width: placement.width, height: placement.height, ...(placement.scale ? { scale: placement.scale } : {}) } } : {}),
       });
       this.popped.update((m) => new Map(m).set(panel, info));
