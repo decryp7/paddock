@@ -1,0 +1,85 @@
+# Reusable (plan X10): the end-to-end job of an app with the pinned Chrome for Testing (rule 7: never the installed Chrome),
+# run under the hermetic wrapper (C14) with its own port (rule 2) and the require variable set (C15).
+#
+#   jobs:
+#     e2e:
+#       needs: [plan]
+#       if: needs.plan.outputs.run == 'true'
+#       uses: decryp7/paddock/.gitea/workflows/app-e2e.yml@v0.3.0
+#       with: { paddock-ref: v0.3.0, app-id: pitcrew, env-prefix: PITCREW, browser-pin: app/chromium-pin.json }
+
+name: app-e2e
+
+on:
+  workflow_call:
+    inputs:
+      paddock-ref:
+        description: The Paddock tag whose actions and scripts this run uses (the same tag as in `uses:`).
+        type: string
+        required: true
+      app-id:
+        type: string
+        required: true
+      env-prefix:
+        description: Upper-case prefix of the app's env variables (PITCREW gives PITCREW_REQUIRE_TEST_BROWSER).
+        type: string
+        required: true
+      browser-pin:
+        description: A JSON pin file { version, base, sums } (give this or browser-rust-source).
+        type: string
+        default: ""
+      browser-rust-source:
+        description: A Rust source holding the pin (Debrief's runtime.rs).
+        type: string
+        default: ""
+      app-dir:
+        type: string
+        default: app
+      command:
+        description: The e2e command, run from app-dir (Chromium only in a branch; the full browser matrix runs on the combined result).
+        type: string
+        default: npx playwright test --project=chromium
+      port:
+        description: The e2e web server port (CI names it; the shared config refuses a default).
+        type: string
+        default: "4300"
+      image:
+        type: string
+        default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+
+jobs:
+  e2e:
+    name: e2e (pinned Chrome for Testing)
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: decryp7/paddock
+          ref: ${{ inputs.paddock-ref }}
+          path: .paddock
+
+      - uses: ./.paddock/.gitea/actions/setup-node
+        with:
+          app-dir: ${{ inputs.app-dir }}
+
+      - name: Install
+        working-directory: ${{ inputs.app-dir }}
+        run: npm ci
+
+      # The pinned build, never an installed browser: the REQUIRE variable makes a missing browser a failure.
+      - uses: ./.paddock/.gitea/actions/install-test-browser
+        with:
+          pin: ${{ inputs.browser-pin }}
+          rust-source: ${{ inputs.browser-rust-source }}
+          env-prefix: ${{ inputs.env-prefix }}
+
+      - name: End-to-end tests
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          PW_PORT: ${{ inputs.port }}
+          CI: "true"
+        run: node ../.paddock/conformance/bin/paddock-conformance.mjs run -- ${{ inputs.command }}

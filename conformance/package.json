@@ -1,7 +1,7 @@
 {
   "name": "@decryp7/paddock-conformance",
   "version": "0.2.0",
-  "description": "One shared conformance check every Paddock app runs in CI (checks, waivers that expire, findings, job summary) and the shared release scripts.",
+  "description": "One shared conformance check every Paddock app runs in CI (checks, waivers that expire, findings, job summary), the repo baseline and doc-block sync, the shared release and CI scripts, window budgets and the third-party notices generator.",
   "type": "module",
   "license": "MIT OR Apache-2.0",
   "bin": {
@@ -19,7 +19,8 @@
   "files": [
     "bin",
     "src",
-    "release"
+    "release",
+    "ci"
   ],
   "engines": {
     "node": ">=22"

@@ -42,7 +42,7 @@ export default {
     }
 
     const wf = ctx.workflows();
-    if (!wf.some((w) => /check-icons|paddock-conformance/.test(w.text))) {
+    if (!wf.some((w) => /check-icons|paddock-conformance|\.gitea\/actions\/conformance/.test(w.text))) {
       out.push(error('C03', 22, ctx.config.workflowsDir, 1, 'no CI step checks the icons (check-icons or paddock-conformance)', 'Add a step that runs paddock-conformance (C03) before the bundle job.'));
     }
     return out;

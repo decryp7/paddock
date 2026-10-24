@@ -1,0 +1,94 @@
+# Reusable (plan X10): the licences job of every app: Conventional Commits on pull requests, cargo deny (licences,
+# advisories, sources), the production npm audit, and optionally the third-party notices up to date.
+#
+#   jobs:
+#     licences:
+#       uses: decryp7/paddock/.gitea/workflows/app-licences.yml@v0.3.0
+#       with: { paddock-ref: v0.3.0, app-name: Pitcrew }
+#
+# Cross-repository `uses:` of a workflow needs the Gitea on dev.decryptology.net to resolve it (plan D7: a one-hour spike
+# before the first app adopts it); where it does not, copy this job and use the composite actions it calls.
+
+name: app-licences
+
+on:
+  workflow_call:
+    inputs:
+      paddock-ref:
+        description: The Paddock tag whose actions and scripts this run uses (the same tag as in `uses:`).
+        type: string
+        required: true
+      app-name:
+        description: Product name (for the notices).
+        type: string
+        required: true
+      app-dir:
+        type: string
+        default: app
+      check-notices:
+        description: Also verify THIRD_PARTY_NOTICES.md is up to date (paddock-notices --check).
+        type: boolean
+        default: true
+      image:
+        type: string
+        default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+
+jobs:
+  licences:
+    name: licences, notices + commits
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so pull requests can check every commit message.
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: decryp7/paddock
+          ref: ${{ inputs.paddock-ref }}
+          path: .paddock
+
+      - uses: ./.paddock/.gitea/actions/setup-rust
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about,cargo-deny
+
+      # cargo about reads every crate's licence from its sources and cargo deny clones the advisory database:
+      # without a cache both download everything on every run.
+      - id: cache
+        uses: ./.paddock/.gitea/actions/cache-restore
+        with:
+          kind: licences
+          paths: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+
+      - uses: ./.paddock/.gitea/actions/setup-node
+        with:
+          app-dir: ${{ inputs.app-dir }}
+
+      - uses: ./.paddock/.gitea/actions/licences
+        with:
+          app-dir: ${{ inputs.app-dir }}
+
+      - name: Third-party notices are up to date
+        if: inputs.check-notices
+        run: |
+          (cd "${{ inputs.app-dir }}" && npm ci --omit=dev --ignore-scripts)
+          node .paddock/conformance/bin/paddock-notices.mjs --app "${{ inputs.app-name }}" --npm "${{ inputs.app-dir }}" --check
+          git diff --exit-code -- "${{ inputs.app-dir }}/src-tauri/resources"
+
+      - if: always()
+        uses: ./.paddock/.gitea/actions/cache-save
+        with:
+          kind: licences
+          cache-hit: ${{ steps.cache.outputs.cache-hit }}
+          paths: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs

@@ -1,0 +1,26 @@
+name: strip-signing-keys
+description: "Takes the whitespace out of the Tauri signing keys for the following steps (rule 25; secrets pasted into Gitea carry a trailing newline: 'Invalid symbol 10')."
+inputs:
+  signing-private-key:
+    description: TAURI_SIGNING_PRIVATE_KEY (a secret).
+    default: ""
+  updater-pubkey:
+    description: TAURI_UPDATER_PUBKEY (a secret).
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.signing-private-key }}
+        TAURI_UPDATER_PUBKEY: ${{ inputs.updater-pubkey }}
+      run: |
+        set -euo pipefail
+        P="${{ github.action_path }}/../../../conformance/release/strip-keys.mjs"
+        # The stripped value differs from the secret, so the runner would not mask it: mask it here.
+        eval "$(node "$P")"
+        for n in TAURI_SIGNING_PRIVATE_KEY TAURI_UPDATER_PUBKEY; do
+          v="${!n:-}"
+          if [ -n "$v" ]; then echo "::add-mask::$v"; fi
+        done
+        node "$P" --append-to "$GITHUB_ENV"

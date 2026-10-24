@@ -1,0 +1,7 @@
+name: build-env
+description: "Sets PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE for the following steps, so the About page can show them (paddock-updater reads them with option_env!)."
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: node "${{ github.action_path }}/../../../conformance/ci/build-env.mjs"

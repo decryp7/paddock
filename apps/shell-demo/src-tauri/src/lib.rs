@@ -117,8 +117,8 @@ fn updater(test_dir: Option<PathBuf>) -> UpdatesBuilder {
             include_str!("../../../../LICENSE-APACHE"),
         )
         .build_info(
-            option_env!("SHELL_DEMO_COMMIT"),
-            option_env!("SHELL_DEMO_BUILT"),
+            option_env!("PADDOCK_BUILD_COMMIT"),
+            option_env!("PADDOCK_BUILD_DATE"),
         );
     match test_dir {
         None => b,

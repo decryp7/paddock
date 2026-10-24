@@ -74,6 +74,12 @@ expires = "2026-12-01"
 
 A waiver past its date, or without a reason or date, is an error itself (W001, W002). No silent skips.
 
+## CI scripts (`ci/`) and the shared actions
+
+`plan.mjs`, `build-env.mjs`, `release-notes.mjs`, `install-test-browser.mjs` and `tauri-bundle.sh` are what the composite actions
+in `.gitea/actions/` run (see its README); they are plain Node and bash, tested here, and work from a Paddock checkout. A
+workflow that uses the actions can drop the steps they replace, and C03, C04 and C15 accept them.
+
 ## Release scripts (`release/`)
 
 `publish.mjs`, `latest-json.mjs` (the apps' copies, unified; output equals Pitwall's), `strip-keys.mjs`
