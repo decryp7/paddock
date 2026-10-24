@@ -96,6 +96,9 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
+| `paddock-bench` | benchmark harness with stored budgets (rule 16): `Recorder` with an injected clock (startup, throughput, first event, query latency, memory), a results file per app, `budgets.toml` with tolerance and regression limit, `check`, and the `paddock-bench` command for the nightly workflow (plan X26) | yes (every app's benchmarks); built |
+
+| `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
@@ -108,7 +111,6 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
-| `paddock-cli` | shared CLI conventions (`--json`, exit codes, timeouts) | yes |
 
 ## `paddock-jobs` Tauri adapter (plan S9)
 
@@ -682,6 +684,57 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   when an app's tests set `PADDOCK_SECRETS_FORBID_REAL=1` (put it in the app's test environment), so a test that reaches the
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
+
+## `paddock-bench` (plan X26)
+
+Rule 16's budgets, checked the same way in every app. The app's benchmark records numbers; the harness stores, compares and fails.
+
+```rust
+use paddock_bench::{Kind, Recorder, SystemClock};
+
+let clock = SystemClock::new();
+let mut rec = Recorder::new("debrief", env!("CARGO_PKG_VERSION"));
+rec.throughput(&clock, "import-clef", lines, 5, || import_all())?;       // items/s, median of 5 runs
+rec.time_ms(&clock, "page-unfiltered", Kind::QueryLatency, 7, || page())?; // ms, median of 7 runs
+rec.memory_bytes("rss-querying", peak_rss_bytes)?;                        // MB
+rec.finish().save(&root.join("bench/debrief.results.json"))?;             // versioned, atomic
+```
+
+`bench/budgets.toml` (TOML data, bounded, never executed):
+
+```toml
+[[budget]]
+name = "page-unfiltered"
+kind = "query-latency"   # optional guard
+limit = 500              # a maximum for times and memory, a minimum for throughput
+tolerance_pct = 10       # past the limit but inside this: passes with a warning
+regression_pct = 20      # worse than the previous run by more: fails even inside the limit
+```
+
+`paddock-bench check --budgets bench/budgets.toml --results bench/debrief.results.json [--previous old.json] [--json|--markdown]`
+exits 0, or 5 when a budget is missed, a measurement is missing or a regression is found (1 for an unreadable file, 2 for
+a wrong command line). `paddock-bench propose --results ... --margin 25` writes a first `budgets.toml`. The tests of an app's
+benchmark logic use `ManualClock`, so they do not depend on machine speed. The nightly workflow template is
+`.gitea/workflow-templates/bench-nightly.yml`.
+
+## `paddock-cli` (plan X25)
+
+One look and behaviour for every command line (Pitwall, Dyno, Debrief, the agent and service programs). Pure: writers and
+times are passed in.
+
+```rust
+use paddock_cli::{finish, CliError, CommonFlags, Exit, Format, Help, Progress, Report};
+
+let (flags, rest) = CommonFlags::extract(&std::env::args().skip(1).collect::<Vec<_>>()); // --json -q -h -V
+let result: Result<Report, CliError> = run(&rest);              // Err(CliError::not_running("Pitwall", "Start the app."))
+let exit = finish(flags.format, result, &mut stdout, &mut stderr); // text, or ONE JSON object (errors too)
+std::process::exit(exit.code());
+```
+
+Exit codes (a contract): 0 ok, 1 failure, 2 usage, 3 not running, 4 refused, 5 findings, 130 interrupted. Data goes to
+stdout, progress and notes to stderr. `Progress::update(now, line)` throttles to one line per 500 ms, drops repeats and lets a
+new phase through. `Table` renders text, CSV or JSON with bounded cells and a truncation note. `parse_time`, `parse_size`,
+`format_size` read command-line values once. `paddock_service::Verb` registers its words in `Help` and decides `status`'s exit.
 
 ## `paddock-names` (plan X18)
 

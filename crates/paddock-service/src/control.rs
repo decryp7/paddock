@@ -720,4 +720,72 @@ mod tests {
             serde_json::json!("needsApproval")
         );
     }
+
+    #[test]
+    fn a_service_the_app_did_not_declare_is_logged_and_the_control_still_works() {
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let (emit, seen) = emitter();
+        let h = health();
+        let c = ServiceControl::with_health_or_plain(
+            dyno(&sys, d.path(), true),
+            emit.clone(),
+            h.clone(),
+            "nope",
+        );
+        assert!(
+            h.get("agent").unwrap().repair.is_none(),
+            "nothing was wired"
+        );
+        c.status();
+        assert!(
+            !lock(&seen).is_empty(),
+            "the control publishes without health"
+        );
+        // A declared one is wired as with_health does.
+        let c = ServiceControl::with_health_or_plain(
+            dyno(&sys, d.path(), true),
+            emit,
+            h.clone(),
+            "agent",
+        );
+        drop(c);
+    }
+
+    #[test]
+    fn the_health_registry_repairs_through_the_control_and_the_service_comes_back() {
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let (emit, _) = emitter();
+        let h = health();
+        let c = ServiceControl::with_health(dyno(&sys, d.path(), true), emit, h.clone(), "agent")
+            .unwrap();
+        h.down("agent", Cause::new("stopped"), Some(RepairAction::Install));
+        h.repair("agent").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while h.get("agent").unwrap().state == ServiceState::Repairing {
+            assert!(Instant::now() < deadline, "the repair never ended");
+            std::thread::yield_now();
+        }
+        assert!(
+            sys.calls()
+                .iter()
+                .any(|c| matches!(c, Call::Os(_) | Call::Run(..))),
+            "the repair reached the system"
+        );
+        drop(c);
+    }
+
+    #[test]
+    fn start_checks_run_the_check_on_their_own_thread() {
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let (emit, seen) = emitter();
+        let c = ServiceControl::new(dyno(&sys, d.path(), true), emit);
+        let checks = c
+            .spawn_start_checks(Duration::ZERO, Duration::ZERO, 1)
+            .unwrap();
+        wait_for(&seen, |_| true);
+        checks.stop();
+    }
 }
