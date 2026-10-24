@@ -5,7 +5,7 @@
 use super::manager::{persist_now, state};
 use super::tray::tray_available;
 use crate::close::keeps_running;
-use crate::exit::{end_stalled_exit, teardown_step};
+use crate::exit::{end_stalled_exit, teardown_step_on};
 use ::tauri::{AppHandle, Manager, Runtime};
 
 /// Tauri asks to exit, with `code` for an explicit exit and `None` when the last window closed. Returns whether the
@@ -32,11 +32,12 @@ pub fn exit<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
     let limit = windows.config.step_limit;
+    let clock = windows.config.clock.0.clone();
     let a = app.clone();
-    teardown_step("window bounds", limit, move || persist_now(&a));
+    teardown_step_on(&*clock, "window bounds", limit, move || persist_now(&a));
     for (name, step) in &windows.steps {
         let (a, step) = (app.clone(), step.clone());
-        teardown_step(name, limit, move || step(&a));
+        teardown_step_on(&*clock, name, limit, move || step(&a));
     }
     log::info!("Teardown finished");
 }
@@ -50,10 +51,11 @@ pub fn arm_exit_watchdog<R: Runtime>(app: &AppHandle<R>, code: i32) {
         return;
     }
     let limit = windows.config.exit_stall_limit;
+    let clock = windows.config.clock.0.clone();
     let end = windows.end.clone();
     let app = app.clone();
     super::manager::spawn("paddock-exit-watchdog", move || {
-        std::thread::sleep(limit);
+        paddock_jobs::time::Clock::sleep(&*clock, limit);
         let tearing_down = state(&app).is_ok_and(|w| w.exit.tearing_down());
         let open = || app.webview_windows().into_keys().collect::<Vec<_>>();
         end_stalled_exit(tearing_down, open, || exit(&app), |c| end(c), code, limit);

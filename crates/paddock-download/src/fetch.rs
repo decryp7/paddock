@@ -73,10 +73,13 @@ impl Downloader {
     /// worker or a blocking task, never from a UI or IPC thread.
     pub fn get_bytes(&self, url: &str, fetch: &Fetch) -> Result<Vec<u8>, DownloadError> {
         let host = host_of(url)?;
-        let ctl = Arc::new(Ctl::new(Cancels {
-            job: fetch.cancel.clone().unwrap_or_default(),
-            external: None,
-        }));
+        let ctl = Arc::new(Ctl::new(
+            Cancels {
+                job: fetch.cancel.clone().unwrap_or_default(),
+                external: None,
+            },
+            self.net.hosts.clock().clone(),
+        ));
         let (net, mut retry) = (&self.net, Retry::default());
         loop {
             ctl.cancel.check()?;
