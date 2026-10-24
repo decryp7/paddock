@@ -17,6 +17,7 @@ import {
   panelId,
   parsePanelId,
   provideWorkbenchContributions,
+  provideLiveContributions,
   targetProblems,
   WORKBENCH_PORTS,
   WorkbenchRegistry,
@@ -186,16 +187,17 @@ describe('workbench contributions lint (plan W1)', () => {
 
   it('fails on palette providers with a bad or taken prefix', () => {
     const p = (id: string, prefix: string) => definePaletteProvider({ id, title: msg(id, 'X'), prefix, order: 1, search: () => Promise.resolve([]), accept: () => undefined });
+    expect(problems({ paletteProviders: [p('wd.p0', '>')] })).toEqual(["palette provider wd.p0: prefix > is the palette's commands (choose another symbol)"]);
     expect(problems({ paletteProviders: [p('wd.p1', '@'), p('wd.p2', 'ab'), p('wd.p3', 'a'), p('wd.p4', '')] })).toEqual([
-      'palette provider wd.p2: prefix "ab" must be empty or one symbol (@, #, >)',
-      'palette provider wd.p3: prefix "a" must be empty or one symbol (@, #, >)',
+      'palette provider wd.p2: prefix "ab" must be empty or one symbol (@, #, :)',
+      'palette provider wd.p3: prefix "a" must be empty or one symbol (@, #, :)',
       'palette prefix conflict: wd.symbols and wd.p1 both answer "@"',
       'palette prefix conflict: wd.goto and wd.p4 both answer plain text',
     ]);
     const broken = { id: 'wd.p5', title: msg('wd.p5', 'X'), prefix: 7, order: 1, placeholder: 'x', debounceMs: 9999 };
     expect(problems({ paletteProviders: [broken] })).toEqual(
       [
-        'prefix 7 must be empty or one symbol (@, #, >)',
+        'prefix 7 must be empty or one symbol (@, #, :)',
         "placeholder has no message id (use msg('<ns>.<name>', 'Text'))",
         'has no search function',
         'has no accept function',
@@ -355,5 +357,19 @@ describe('WORKBENCH_PORTS default', () => {
     expect(ports.explorerShown()).toBeNull();
     expect(warn).toHaveBeenCalledTimes(5);
     warn.mockRestore();
+  });
+});
+
+describe('provideLiveContributions', () => {
+  it('builds the batch once per injector and registers every kind it names', () => {
+    const build = vi.fn((injector: Injector) => ({
+      commands: [defineCommand({ id: 'wd.live', title: msg('wd.live', 'Live'), run: () => void injector.get(WORKBENCH_PORTS).openPalette('>') })],
+      views: [code as never],
+    }));
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideLiveContributions(build)] });
+    expect(contributionProblems(TestBed.inject(Injector))).toEqual([]);
+    expect(build).toHaveBeenCalledTimes(1);
+    expect(TestBed.inject(WorkbenchRegistry).views).toEqual([code]);
   });
 });
