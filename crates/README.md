@@ -91,7 +91,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
-| `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
+| `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
@@ -745,3 +745,49 @@ report.save(&path_the_user_chose, &cancel, &progress)?;                   // zip
   native picker; the shell enables it with `native-dialogs`). The shell registers all of it from `Builder::diagnostics`.
 - The crate has no network dependency (a test checks its manifest; `cargo tree` shows none). Tests use temp folders, a fake picker and
   Tauri's mock runtime; no sleeps.
+
+## `paddock-pitwall` (ADR 0004, plan section 15)
+
+The one Pitwall client, extracted from Debrief 1.1's `debrief_ai::engine::pitwall` and checked against Pitwall's own router
+(`crates/pitwall-server/src/http.rs`). Blocking and bounded: apps call it on a worker thread (rule 10). Loopback only
+(`127.0.0.1`, any other host is unrepresentable); no TLS, no cloud.
+
+```rust
+use paddock_pitwall::*;
+
+let app = AppIdentity::new("debrief", "Debrief")?;
+let link = Link::new(LinkConfig::new(app, Locator::system(), secrets /* Arc<dyn paddock_secrets::Secrets> */));
+link.set_listener(Arc::new(|e| /* LinkEvent::Changed | Paired { use_for_app } */ {}));
+let view = link.probe();                                  // discovery, health, key, a model; never pairs by itself
+link.connect(true)?;                                      // the user chose "Use Pitwall": shows view.pairing.code, polls in the background
+let reply = link.chat_with(ChatRequest::new(ModelSel::Auto(Caps::chat(8192)), msgs), &mut |delta| show(delta))?;
+let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> NeedsAiView for <pd-needs-ai>
+```
+
+- `discovery`: `Locator::system()` reads `discovery.json` (16 KiB, strict, `baseUrl` must be `http://127.0.0.1:<port>` with a port of 1024 or more, pid alive)
+  from the folders of `paddock-env` for `pitwall` (Local first and the old Roaming folder second on Windows, D3), else tries port
+  11435. `PITWALL_HOME` names the data folder itself. Tests use `Locator::in_dir`.
+- `keys`: `KeyVault` over `paddock_secrets::Secrets` (service = the app, account `Pitwall:API key`); `adopt_legacy` moves Debrief 1.1's
+  entry; a 401 with a key deletes it (`KeyRevoked`), without one is `NeedsPairing`.
+- `Client`: `health`, `begin_pairing` / `poll_pairing`, `select`, `models`, `model_ids`, `ensure_capability` (a model that cannot see
+  is `Unsupported` locally, with Pitwall's reason), `jobs` / `cancel_job`, `count_tokens` / `truncate`, `task`, `embed` (batches of 64),
+  `chat` / `chat_with` / `chat_stream` (an iterator; dropping it cancels). Every reply carries `Provenance` (`X-Pitwall-Model`,
+  `-Engine`, `-Chosen-By`, `-Cold-Start-Ms`, `-Cache`, `-Alias`, `-Job-Id`). `CallOptions`: priority (`Interactive`, `Background`,
+  `Batch`), cache policy, `CancelToken` (acts within a 50 ms read slice, even while Pitwall is silent), per-phase `Timeouts`
+  (connect 2 s, first byte 120 s, idle 60 s for chat) and a whole-call deadline.
+- `retry`: pure table (250 ms to 8 s, jitter, `Retry-After`; 4 attempts, 8 for batch); connect errors, `503` and `429` with
+  `Retry-After` only; a stream is never retried after its first delta; probes (`health`, pairing poll) never retry.
+- `PitwallError`: typed, each with `user_message(app)` and `next_step()` (`StartPitwall | InstallPitwall | Pair | InstallModel | Wait |
+  UpdateApp | UpdatePitwall | ChangePermissions | None`).
+- `AiState` / `NeedsAiView` (serialisable, camelCase): `Disabled | NotInstalled | NotRunning | Incompatible | NeedsPairing | Paused |
+  NoSuitableModel | Unavailable | Ready`, with the actions that fix each.
+- `engine`: `EngineChoice` (Automatic, Pitwall, Built-in), the pure `select`, `Session` (setting, "use the built-in engine for this
+  session", AI off) and `run_or_fallback` (one engine per request, never a silent mix: `Routed::Unavailable(NeedsAiView)`).
+- `health`: `service_spec` and `report`: Pitwall is `Degraded`, never `Down`, only when the setting wants it, and its Repair is
+  `UseFallback` (or `OpenSettings` for an app without an engine) so it never depends on Pitwall (rule 19).
+- `loopback`: the bounded, cancellable `127.0.0.1` HTTP/1.1 transport itself (header, line and body limits, chunked, injection-proof
+  headers), reusable for other local servers: Debrief's llama-server client (`debrief-ai-worker/src/http.rs`) moves onto it.
+- `testing` (feature `testing`): `FakePitwall`, an in-process fake with exactly the routes of `PITWALL_ROUTES`, Pitwall's answer and
+  error shapes, scripted pairing, failures with `Retry-After`, held and dying streams. It waits on conditions, never on the clock.
+  `tests/contract.rs` runs the client against it; with `PADDOCK_PITWALL_HTTP_RS=<pitwall>/crates/pitwall-server/src/http.rs` it also
+  checks that Pitwall's router still has every route (Pitwall's CI should set it).
