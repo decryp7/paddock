@@ -1,6 +1,7 @@
 //! The shell's window label scheme (plan §5.1): `main`, other top-level windows `w-<n>`, dialogs `d-<host>-<n>` and
-//! pop-out panels `p-<host>-<n>`, where a host is `main` or a `w-<n>`. Every Paddock app uses it, so the command guard,
-//! the dialog and pop-out layers and the capabilities agree on which webview is which.
+//! pop-out panels `p-<host>-<n>`, where a host is `main` or a `w-<n>`, and the tray popovers `tray` and `tray-<item>`
+//! (plan S12). Every Paddock app uses it, so the command guard, the dialog and pop-out layers and the capabilities
+//! agree on which webview is which.
 
 use serde::Serialize;
 use std::fmt;
@@ -13,6 +14,12 @@ pub const WINDOW_PREFIX: &str = "w-";
 pub const DIALOG_PREFIX: &str = "d-";
 /// The prefix of pop-out panel windows (`p-main-1`).
 pub const POPOUT_PREFIX: &str = "p-";
+/// The label of the tray popover (the one opened by a click on the tray icon).
+pub const TRAY_LABEL: &str = "tray";
+/// The prefix of an app's other tray popovers (`tray-cpu`, one per tray item).
+pub const TRAY_PREFIX: &str = "tray-";
+/// The longest item id of a `tray-<item>` popover.
+pub const MAX_TRAY_ITEM: usize = 32;
 
 /// The class of a window for the command table.
 #[cfg_attr(test, derive(ts_rs::TS))]
@@ -25,11 +32,19 @@ pub enum WindowClass {
     Popout,
     /// `d-<host>-<n>`.
     Dialog,
+    /// `tray` and `tray-<item>`: a tray popover. Not part of [`Windows::WINDOW`](crate::Windows::WINDOW): a popover may
+    /// call only the commands that name `TRAY` (least privilege for an always-on-top surface).
+    Tray,
 }
 
 impl WindowClass {
     /// Every class, in a fixed order.
-    pub const ALL: [WindowClass; 3] = [WindowClass::Main, WindowClass::Popout, WindowClass::Dialog];
+    pub const ALL: [WindowClass; 4] = [
+        WindowClass::Main,
+        WindowClass::Popout,
+        WindowClass::Dialog,
+        WindowClass::Tray,
+    ];
 
     /// The class's name on the wire and in generated TypeScript.
     pub const fn as_str(self) -> &'static str {
@@ -37,6 +52,7 @@ impl WindowClass {
             WindowClass::Main => "main",
             WindowClass::Popout => "popout",
             WindowClass::Dialog => "dialog",
+            WindowClass::Tray => "tray",
         }
     }
 }
@@ -52,6 +68,18 @@ pub enum Label<'a> {
     Dialog { host: &'a str, n: u32 },
     /// `p-<host>-<n>`: pop-out `n` of the top-level window `host`.
     Popout { host: &'a str, n: u32 },
+    /// `tray` (`item: None`) or `tray-<item>`: a tray popover. It belongs to no window.
+    Tray { item: Option<&'a str> },
+}
+
+/// A tray item id: lowercase ASCII letters, digits and dashes, 1 to [`MAX_TRAY_ITEM`] characters, starting with a letter
+/// or digit (it becomes part of a window label and of a route).
+pub fn valid_tray_item(id: &str) -> bool {
+    (1..=MAX_TRAY_ITEM).contains(&id.len())
+        && !id.starts_with('-')
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 /// A decimal number of ASCII digits only (no sign, no spaces).
@@ -80,6 +108,10 @@ impl<'a> Label<'a> {
             hosted(rest).map(|(host, n)| Label::Dialog { host, n })
         } else if let Some(rest) = label.strip_prefix(POPOUT_PREFIX) {
             hosted(rest).map(|(host, n)| Label::Popout { host, n })
+        } else if label == TRAY_LABEL {
+            Some(Label::Tray { item: None })
+        } else if let Some(item) = label.strip_prefix(TRAY_PREFIX) {
+            valid_tray_item(item).then_some(Label::Tray { item: Some(item) })
         } else {
             None
         }
@@ -90,13 +122,15 @@ impl<'a> Label<'a> {
             Label::Main | Label::Window(_) => WindowClass::Main,
             Label::Dialog { .. } => WindowClass::Dialog,
             Label::Popout { .. } => WindowClass::Popout,
+            Label::Tray { .. } => WindowClass::Tray,
         }
     }
 
-    /// The top-level window this one works for: a dialog's or pop-out's host; `None` for a top-level window itself.
+    /// The top-level window this one works for: a dialog's or pop-out's host; `None` for a top-level window itself and
+    /// for a tray popover.
     pub fn host(&self) -> Option<&'a str> {
         match self {
-            Label::Main | Label::Window(_) => None,
+            Label::Main | Label::Window(_) | Label::Tray { .. } => None,
             Label::Dialog { host, .. } | Label::Popout { host, .. } => Some(host),
         }
     }
@@ -109,6 +143,8 @@ impl fmt::Display for Label<'_> {
             Label::Window(n) => write!(f, "{WINDOW_PREFIX}{n}"),
             Label::Dialog { host, n } => write!(f, "{DIALOG_PREFIX}{host}-{n}"),
             Label::Popout { host, n } => write!(f, "{POPOUT_PREFIX}{host}-{n}"),
+            Label::Tray { item: None } => f.write_str(TRAY_LABEL),
+            Label::Tray { item: Some(item) } => write!(f, "{TRAY_PREFIX}{item}"),
         }
     }
 }

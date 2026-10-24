@@ -2,7 +2,7 @@
 
 export type CommandKind = "query" | "mutation" | "quiet";
 
-export type WindowClass = "main" | "popout" | "dialog";
+export type WindowClass = "main" | "popout" | "dialog" | "tray";
 
 export type CommandInfo = { kind: CommandKind, windows: Array<WindowClass>, limit: number, };
 

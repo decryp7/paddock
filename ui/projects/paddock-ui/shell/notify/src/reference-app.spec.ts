@@ -47,7 +47,7 @@ describe('shell-demo health', () => {
     await TestBed.inject(CommandService).run('sd.index.break');
     await health.repair('sd.index');
     await new Promise((r) => setTimeout(r, 0));
-    expect(health.health('sd.index')).toMatchObject({ state: 'down', repair: 'retry', cause: { message: 'The search index could not be rebuilt.' } });
+    expect(health.health('sd.index')).toMatchObject({ state: 'down', repair: 'reset', cause: { message: 'The search index could not be rebuilt.' } });
   });
 
   it('notifies three times as one notice with count 3', async () => {

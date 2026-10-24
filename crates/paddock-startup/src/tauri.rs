@@ -88,9 +88,12 @@ impl StartupError {
 }
 
 /// The default [`WatchFilter`]: a window's own webview (not a second webview in it, such as an embedded browser) whose
-/// label is in the shell's scheme (`main`, `w-<n>`, `d-<host>-<n>`, `p-<host>-<n>`).
+/// label is in the shell's scheme (`main`, `w-<n>`, `d-<host>-<n>`, `p-<host>-<n>`). Tray popovers (`tray`, `tray-<item>`)
+/// are not watched: they live only while they have the focus and cannot call the start-up commands (`WINDOW` only).
 pub fn watched_by_default(webview: &str, window: &str) -> bool {
-    webview == window && paddock_commands::class_of(webview).is_some()
+    webview == window
+        && paddock_commands::class_of(webview)
+            .is_some_and(|c| c != paddock_commands::WindowClass::Tray)
 }
 
 /// Builds a [`Startup`]: the timings and the app's hooks.

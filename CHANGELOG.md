@@ -4,6 +4,36 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Changed
+- Pages frame, review round 3: status items sit at equal distances (4 px gap, 4 px item padding; the service chip
+  keeps 5 px of margin for its visible edge) and the chip looks pressed while its details are open. `shell-demo`: the
+  status item says the table's exceptions ("1 offline · 1 updating", the full count in its name and tooltip), and the
+  Runners badge counts the same offline runner ("1 runner offline").
+- Pages frame after its re-review (`ui/docs/screenshots/shell-demo/REVIEW-2.md`): a running job no longer blinks out
+  of a narrowing status bar for a frame (an item not yet measured in its compact form counts as no width; every item is
+  re-measured when the bar changes form; regression tests in the unit specs and in Chromium). The service chip's
+  compact form keeps a subject ("Index stopped"); its Repair button is named for the action and the service
+  (`repairButtonLabel`: "Restart demo engine", "Reset search index"). The jobs status item names the lead job ("1
+  running: Update runner") with the phase or "still working" in its tooltip (`jobsStatusDetail`); its spinner is a quarter
+  arc on a faint ring. `definePage({ badgeLabel })` says what a badge counts (tooltip and accessible name). The drawer
+  starts below the title bar's hairline and casts its shadow to the right only; status-bar focus rings are inset; the
+  job's warning icon sits on the first line. `shell-demo`: consistent runner data (build-mac-2 "Updating"), the harness
+  pages (Dialogs, Keyboard) only in developer mode (`sd.developer` off for the reference screenshots), new focus shots
+  of a selected and an unselected page link.
+- Pages frame after its design review (`ui/docs/screenshots/shell-demo/REVIEW.md`): the status bar shrinks its items to
+  their compact form first (`STATUS_COMPACT`: the service chip says only the state, jobs only the count) and hides only
+  unpinned items behind a counted "More status (n)" button (24 px, text-muted); `defineStatusItem({ pinned })` keeps
+  the service chip and the bell; one selection style in every sidebar mode (accent tint, accent icon, 600, 2 px bar);
+  the rail badge sits off the icon with a ring; the sidebar over the page is modal (scrim over the page and the status
+  bar, both inert); a stable toggle glyph and a truncating app name; a 40 px title bar (design guide §2) with 78 px for
+  the window buttons in the macOS app, whose menus are native only; pages lay out by `@container pd-page` (16 px gutter
+  when narrow). The service chip is a borderless danger tint at 12/500; the unread count is neutral (danger only for
+  an unread error); the running jobs item shows a neutral spinner. `pd-job`: the phase is muted, a stalled step says so
+  with an icon in warning, the fill is the accent on surface-2 (3:1), an unknown total without motion is a striped track
+  and counts its elapsed time (`formatElapsed`, `elapsedMs` from `pd-jobs-list`). `shell-demo` shows a Runners page with
+  sample fleet data, page-scoped state and a "3 of 4 runners online" status item; screenshots re-shot with health
+  popover, keyboard focus and macOS frames.
+
 ### Added
 - Settings (plan S10, rule 21, ADR 0012; ported from Debrief's settings schema, `config_store.rs` and `settings.rs`):
   crate `paddock-settings` 0.1.0 with the section schema (nine field kinds, schema check at registration), validation
@@ -21,6 +51,16 @@ Conventional Commits; one semver tag for the whole repo.
   `settingsWindowProviders`, `provideShellSettings` (`OPEN_SETTINGS`) and `SETTINGS_CONTRIBUTIONS` (Settings…, Mod+,).
   `@angular/forms` (^22) is an optional peer dependency. `shell-demo` has the Settings window over the fixtures, with
   Chromium e2e (every field kind, refusal and unsaved edits, search and keys, a damaged file, axe in both themes, 320 px).
+- Crate `paddock-window` 0.1.0 (plan S12, ADR 0012): top-level windows in the shell's label scheme (`main`, `w-<n>`;
+  open, list, reveal, titles, the close setting with quit / keep running in the tray / ask, hide or destroy), remembered
+  bounds restored on the right monitor (versioned file; scaled, shrunk and moved inside the work area; cascade from the
+  parent), single instance with deep links of the app's schemes and the open plan (`second_instance`, macOS `Opened` and
+  `Reopen`), the bounded quit (teardown steps on their own threads, the exit watchdog ending a stalled exit, once), native
+  feel for windows and dialogs, the tray (menu model, redraw on change, the shell's items, `NativeTray` behind `tray`)
+  and the tray popover window (frameless, transparent, OS material, anchored to the icon, fitted height, closed on blur
+  and Escape with a fade); `COMMANDS` and generated `shell/generated/window.ts` and `window-commands.ts`.
+- Window class `TRAY` in `paddock-commands` (plan S12): tray popovers are labelled `tray` and `tray-<item>`, are not
+  part of `WINDOW`, and call only commands that name the class; `paddock-startup`'s default watch leaves them out.
 - Downloads (plan S8, ADR 0008 §5 and 0012; ported from Debrief's model downloader): crate `paddock-download` 0.1.0.
   `Downloader::download(ctx, req)` runs inside a `paddock-jobs` job with the phases `connect`, `resume` (only when
   resuming), `download` and `verify`, each on its own scale and never backwards, and Cancel noticed within 250 ms in
@@ -35,6 +75,22 @@ Conventional Commits; one semver tag for the whole repo.
   `HttpTransport` (feature `http`, default: ureq, rustls, the OS certificate store) and a `tauri` adapter (`manage`,
   `downloader`). Tests against an in-process HTTP server (no-range host, 429, truncated segments, digest mismatch, a
   file that changes, resume, host caps, cancel in every phase) and a scripted transport; a benchmark against one stream.
+- Pages frame (plan S14, ADR 0012): `@decryp7/paddock-ui/shell/pages` composes a manager app's whole main window from its
+  contributions with `provideShellPages({ appName, notify, jobs, startup, nativeMenu, dialogs, routes, paths, sidebar,
+  icon })` and `<pd-shell-frame />`: routes for the contributed pages (hash URLs by default; each page lazy with its own
+  providers through `loadPart`, `when` guarded, the first page for the empty path and anything unknown, "Page – App"
+  window titles), the sidebar (`pd-pages-sidebar`: top and bottom pages, neutral badges, arrow keys) expanded, an icon rail
+  or over the page with a scrim as `planLayout` leaves room (`sidebarFit`; the user's collapse kept under
+  `paddock.pages.sidebar`), `ShellPages` (`showPage` port, a page that stops being offered gives way), the menu bar and
+  keys (F6/Shift+F6 regions reserved), notifications, jobs, dialogs and the start-up contract with the native menu built
+  after ready. The root shell entry gains the frame parts shared with the workbench: `pd-title-bar`, `pd-status-bar`
+  (contributed status items by side and priority, the lowest hidden when narrow with "Show all status items",
+  `planStatusBar`), `pd-part-outlet` (lazy part with skeleton or error and Try again), `pd-icon` with the `SHELL_ICON`
+  port and the shell's `pd:` icons, and F6 region helpers. `planLayout` (ADR 0011) moves from Debrief to the root entry
+  with its spec. `@angular/router` (^22) is an optional peer dependency. `shell-demo` is now a full pages app (Overview,
+  Dialogs, Keyboard, Activity with page providers and a badge, a conditional Lab, About; a status item of its own; its
+  own icon component) with Chromium e2e for navigation, lazy pages, conditions, status bar parts, every width from 320 px,
+  F6 regions and axe in both themes, and screenshots in `ui/docs/screenshots/shell-demo/`.
 - Menus and keys (plan S13, ADR 0012; ported from Debrief ADR 0008 and `menu.rs`): crate `paddock-menu` 0.1.0 validates the
   UI's menu model (`parse`: limits on menus, entries, depth, ids, labels; key bindings to native accelerators), builds the
   macOS menu bar with the standard items (`native_spec`: app menu with Services and Hide and `pd.app.quit` last, Edit

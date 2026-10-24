@@ -1,4 +1,4 @@
-import { Injector, provideZonelessChangeDetection } from '@angular/core';
+import { Injector, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { CommandService, ContributionRegistry, defineSettingsPage, msg, provideContributions, provideShellCore, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { DIALOG_REF, DialogService } from '@decryp7/paddock-ui/shell/dialogs';
@@ -357,6 +357,23 @@ describe('SETTINGS_CONTRIBUTIONS and provideShellSettings', () => {
       [SETTINGS_DIALOG_ID, { page: 'sd.storage' }],
       [SETTINGS_DIALOG_ID, {}],
     ]);
+  });
+
+  it('applies the appearance in a main window once its gate opens', async () => {
+    const backend = new MemorySettingsBackend();
+    const listen = vi.spyOn(backend, 'listen');
+    const ready = signal(false);
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellSettings({ backend: () => backend, appearance: { gate: () => ready } })] });
+    TestBed.inject(Injector);
+    await settle();
+    expect(listen).not.toHaveBeenCalled();
+    ready.set(true);
+    await settle();
+    expect(listen).toHaveBeenCalledTimes(1);
+    ready.set(false);
+    ready.set(true);
+    await settle();
+    expect(listen).toHaveBeenCalledTimes(1);
   });
 
   it('applies the appearance in a main window unless asked not to', async () => {

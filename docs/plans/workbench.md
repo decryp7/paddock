@@ -235,7 +235,9 @@ second redesign, each part must already have this shape:
 
 1. **No app name anywhere**: commands, events (`paddock://`), window labels, storage keys, message ids (`@@pd.`), log
    targets. The window label scheme (`main`, `w-<n>`, `d-<host>-<n>`, `p-<host>-<n>`) is defined by the shell, including
-   `p-` for pop-outs, even though Pitwall has none, so `paddock-panels` slots in.
+   `p-` for pop-outs, even though Pitwall has none, so `paddock-panels` slots in. Tray popovers are `tray` and
+   `tray-<item>`, window class `TRAY` (decided in S12): outside `WINDOW`, so a popover calls only the commands that name
+   it, hosts no dialogs and is not watched by the start-up watchdog (it lives only while it has the focus).
 2. **Contributions, not configuration objects**: Pitwall registers its pages, status items, menus, dialogs and health
    services through the S2 registries; the workbench adds kinds to the same registry (W1) and never a second mechanism.
 3. **Generic context**: `ShellContext<T>` from the first release, so Debrief's and Pacenotes' contexts extend it.

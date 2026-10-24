@@ -71,7 +71,8 @@ pub mod tauri;
 /// Declares a command table: `Kind [CLASS | CLASS] (limit <bytes>)? => path::to::handler,` per command.
 ///
 /// - `Kind` is a [`Kind`] variant: `Query`, `Mutation` or `Quiet`.
-/// - The classes are [`Windows`] constants: `MAIN`, `POPOUT`, `DIALOG`, `WINDOW` (all three).
+/// - The classes are [`Windows`] constants: `MAIN`, `POPOUT`, `DIALOG`, `WINDOW` (those three) and `TRAY` (tray
+///   popovers, never part of `WINDOW`).
 /// - `limit` is the largest request in bytes ([`DEFAULT_LIMIT`] when omitted); [`KIB`] and [`MIB`] help.
 /// - The wire name is the handler's last path segment; doc comments on entries are allowed.
 ///

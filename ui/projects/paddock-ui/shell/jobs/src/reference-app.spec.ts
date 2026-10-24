@@ -77,7 +77,7 @@ describe('shell-demo jobs', () => {
     expect(await commands.run('sd.job.start')).toBe(true);
     expect(await commands.run('sd.job.quiet')).toBe(true);
     await settle();
-    expect(store.list().map((j) => j.title)).toEqual(['Importing logs', 'Waiting for the device']);
+    expect(store.list().map((j) => j.title)).toEqual(['Importing logs', 'Update runner']);
     TestBed.inject(DemoJobsEngine).ngOnDestroy();
   });
 });

@@ -51,6 +51,15 @@ impl DialogGrant for Grant {
     }
 }
 
+/// The tests share the process-wide logger and [`LOGGED`], so they run one at a time.
+static SERIAL: Mutex<()> = Mutex::new(());
+
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Every log record of the refusals, as (level, message, dialog).
 static LOGGED: Mutex<Vec<(log::Level, String, String)>> = Mutex::new(Vec::new());
 
@@ -131,9 +140,9 @@ fn call(w: &WebviewWindow<MockRuntime>, cmd: &str) -> Result<serde_json::Value, 
     invoke(w, cmd, InvokeBody::Json(serde_json::json!({})))
 }
 
-/// The tests share the process-wide logger, so they run as one.
 #[test]
 fn the_guard_checks_every_call_before_the_handler() {
+    let _serial = serial();
     let app = app(true);
     let main = window(&app, "main");
     let dialog = window(&app, "d-main-1");
@@ -217,6 +226,7 @@ fn the_guard_checks_every_call_before_the_handler() {
 
 #[test]
 fn without_a_grant_lookup_dialogs_may_call_nothing() {
+    let _serial = serial();
     let app = app(false);
     let dialog = window(&app, "d-main-1");
     let e = call(&dialog, "legal_text").unwrap_err();
@@ -230,6 +240,7 @@ fn without_a_grant_lookup_dialogs_may_call_nothing() {
 
 #[test]
 fn request_sizes_are_measured_as_serialised_and_stop_past_the_cap() {
+    let _serial = serial();
     let big = serde_json::json!({ "ui": "x".repeat(1000), "n": [1, 2, true, null] });
     let size = json_size(&big, usize::MAX);
     assert!((1000..1100).contains(&size), "{size}");

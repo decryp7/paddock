@@ -18,7 +18,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(e.message));
       await page.goto('/');
-      await expect(page.getByRole('heading', { level: 1, name: 'Paddock shell demo' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
       await expect(page.locator('.pd-splash')).toHaveCount(0);
       const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
       expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
@@ -62,7 +62,7 @@ test.describe('contributions (plan S2)', () => {
   });
 
   test('every contribution kind is registered', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/#/about');
     const rows = page.getByRole('table', { name: 'Registered contributions' }).getByRole('row');
     await expect(rows).toHaveCount(11);
     for (const kind of ['commands', 'keybindings', 'menus', 'pages', 'statusItems', 'settingsPages', 'dialogs', 'healthServices', 'notificationKinds', 'submenus']) {
@@ -93,7 +93,9 @@ test.describe('jobs (plan S9)', () => {
     const status = page.getByRole('contentinfo', { name: 'Status bar' }).getByRole('button').first();
     await expect(status).toHaveText('Jobs');
     await page.getByRole('button', { name: 'Start sample job' }).click();
-    await expect(status).toHaveText(/^1 running: (Finding files|Reading)$/);
+    // The item names the lead job; its phase is in the tooltip.
+    await expect(status).toHaveText('1 running: Importing logs');
+    await expect(status).toHaveAttribute('title', /^Importing logs: (Finding files|Reading)$/);
 
     await status.click();
     await expect(status).toHaveAttribute('aria-expanded', 'true');
@@ -136,12 +138,13 @@ test.describe('jobs (plan S9)', () => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Start quiet job' }).click();
     const status = page.getByRole('contentinfo', { name: 'Status bar' }).getByRole('button').first();
-    await expect(status).toHaveText('1 running: Waiting for the device');
+    await expect(status).toHaveText('1 running: Update runner');
+    await expect(status).toHaveAttribute('title', 'Update runner: Waiting for the device');
     await page.clock.runFor(1_600);
-    await expect(status).toHaveText('1 running: Still working');
+    await expect(status).toHaveAttribute('title', 'Update runner: still working, this step is taking longer than usual');
     // Ten minutes without an event: still running, still "Still working", never failed.
     await page.clock.fastForward('10:00');
-    await expect(status).toHaveText('1 running: Still working');
+    await expect(status).toHaveAttribute('data-stalled', 'true');
     await status.click();
     const job = page.getByRole('region', { name: 'Jobs' }).getByRole('listitem');
     await expect(job).toContainText('Still working. This step is taking longer than usual.');
@@ -183,7 +186,7 @@ test.describe('menus and keys (plan S13)', () => {
   test('the menu bar shows the contributed menus with keys, states and a submenu, and runs items', async ({ page }) => {
     const mac = await isMac(page);
     // The app menu (named after the app) holds Settings… (plan S10); on macOS it is the native app menu.
-    await expect(menuBar(page).getByRole('menuitem')).toHaveText(['Shell demo', 'File', 'View', 'Help']);
+    await expect(menuBar(page).getByRole('menuitem')).toHaveText(['Paddock demo', 'File', 'View', 'Help']);
     const help = await openMenu(page, 'Help');
     const greet = help.getByRole('menuitem', { name: 'Say hello' });
     await expect(greet).toContainText(mac ? '⇧⌘H' : 'Ctrl+Shift+H');
@@ -203,7 +206,7 @@ test.describe('menus and keys (plan S13)', () => {
     const compact = view.getByRole('menuitemcheckbox', { name: 'Compact layout' });
     await expect(compact).toHaveAttribute('aria-checked', 'false');
     await compact.click();
-    await expect(page.locator('main.page')).toHaveClass(/compact/);
+    await expect(page.locator('sd-page')).toHaveClass(/compact/);
     await expect((await openMenu(page, 'View')).getByRole('menuitemcheckbox', { name: 'Compact layout' })).toHaveAttribute('aria-checked', 'true');
     await page.keyboard.press('Escape');
   });
@@ -231,18 +234,19 @@ test.describe('menus and keys (plan S13)', () => {
     await page.keyboard.press('ControlOrMeta+Shift+H');
     await expect(page.getByTestId('greetings')).toHaveText('Greetings: 2');
     await page.keyboard.press('ControlOrMeta+Alt+K');
-    await expect(page.locator('main.page')).toHaveClass(/compact/);
+    await expect(page.locator('sd-page')).toHaveClass(/compact/);
   });
 
   test('a changed key is kept across a reload, and a taken key is refused with its owner', async ({ page }) => {
     const mac = await isMac(page);
+    await page.getByRole('link', { name: 'Keyboard' }).click();
     const row = (command: string) => page.locator(`tr[data-command="${command}"]`);
     await row('sd.greet').getByRole('button', { name: 'Change key' }).click();
     await expect(row('sd.greet').getByTestId('shortcut-key')).toHaveText('Press a key…');
     // A key pressed while recording runs nothing.
     await page.keyboard.press('ControlOrMeta+Alt+G');
     await expect(page.getByTestId('shortcut-message')).toHaveText(`Say hello is now ${mac ? '⌥⌘G' : 'Ctrl+Alt+G'}.`);
-    await expect(page.getByTestId('greetings')).toHaveText('Greetings: 0');
+    await expect(toasts(page).getByText(/Hello from the shell demo/)).toHaveCount(0);
     // The menu shows the new key.
     await expect((await openMenu(page, 'Help')).getByRole('menuitem', { name: 'Say hello' })).toContainText(mac ? '⌥⌘G' : 'Ctrl+Alt+G');
     await page.keyboard.press('Escape');
@@ -252,13 +256,13 @@ test.describe('menus and keys (plan S13)', () => {
     await expect(page.getByTestId('shortcut-message')).toContainText('is already used by Say hello; Reset greetings keeps its key.');
 
     await page.reload();
-    await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+    await expect(row('sd.greet')).toBeVisible();
     await page.keyboard.press('ControlOrMeta+Shift+H');
     await page.keyboard.press('ControlOrMeta+Alt+G');
-    await expect(page.getByTestId('greetings')).toHaveText('Greetings: 1');
+    await expect(toasts(page).getByText('Hello from the shell demo (1)')).toBeVisible();
     await row('sd.greet').getByRole('button', { name: 'Reset key' }).click();
     await page.keyboard.press('ControlOrMeta+Shift+H');
-    await expect(page.getByTestId('greetings')).toHaveText('Greetings: 2');
+    await expect(toasts(page).getByText('Hello from the shell demo (2)')).toBeVisible();
   });
 
   test('the greetings count has a context menu from the same model', async ({ page }) => {
@@ -304,7 +308,7 @@ test.describe('notifications and service health (plan S4)', () => {
     await page.getByTestId('waiting-for-details').click();
     const details = page.getByRole('region', { name: 'Services' });
     await expect(details).toContainText('The demo engine stopped unexpectedly.');
-    await expect(details).toContainText('Choose Restart.');
+    await expect(details).toContainText('Restarting it brings the engine data back.');
     await details.getByText('Technical details').click();
     await expect(details).toContainText('demo-engine exited (signal: 6)');
     await details.getByRole('button', { name: 'Restart' }).click();
@@ -324,11 +328,12 @@ test.describe('notifications and service health (plan S4)', () => {
     await expect(chip(page)).toHaveText('Search index: stopped');
     await chip(page).click();
     const details = page.getByRole('region', { name: 'Services' });
-    await expect(details).toContainText('The search index is damaged.');
-    await details.getByRole('button', { name: 'Try again' }).click();
+    await expect(details).toContainText('The search index stopped: a segment is damaged.');
+    // The repair is named for what it does (rule 19).
+    await details.getByRole('button', { name: 'Reset search index' }).click();
     await expect(details).toContainText('The search index could not be rebuilt.');
     await expect(details).toContainText('Free some disk space, then try again.');
-    await expect(details.getByRole('button', { name: 'Try again' })).toBeEnabled();
+    await expect(details.getByRole('button', { name: 'Reset search index' })).toBeEnabled();
     await expect(chip(page)).toHaveText('Search index: stopped');
     // Two services down: one chip with a count.
     await page.keyboard.press('Escape');
@@ -472,8 +477,9 @@ test.describe('dialogs (plan S6)', () => {
   });
 
   test('in the page: a modal blocks behind a backdrop, a modeless one leaves the page usable and opens once', async ({ page }) => {
-    await page.goto('/');
-    const open = (id: string) => page.locator(`[data-dialog-open="${id}"]`).click();
+    await page.goto('/#/dialogs');
+    // A modeless dialog may sit over the buttons (it opens in the middle of the window): the button is clicked as itself.
+    const open = (id: string) => page.locator(`[data-dialog-open="${id}"]`).dispatchEvent('click');
     await open('sd.confirm-reset');
     const modal = page.getByRole('dialog', { name: 'Reset greetings?' });
     await expect(modal).toHaveAttribute('aria-modal', 'true');
@@ -488,7 +494,9 @@ test.describe('dialogs (plan S6)', () => {
     await expect(page.getByTestId('dialog-backdrop')).toHaveCount(0);
     await open('sd.about');
     await expect(page.getByRole('dialog', { name: 'About the shell demo' })).toHaveCount(1);
-    await page.getByRole('button', { name: 'Say hello' }).click();
+    // The window stays usable: the page's controls and the keys work beside it.
+    await page.locator('[data-dialog-open="sd.rename"]').focus();
+    await page.keyboard.press('ControlOrMeta+Shift+H');
     await expect(page.getByText('Hello from the shell demo (1)')).toBeVisible();
     await viewer.getByRole('button', { name: 'Close' }).click();
     await expect(page.getByTestId('dialog-answer')).toHaveText('About the shell demo: dismissed');
@@ -508,7 +516,7 @@ test.describe('dialogs (plan S6)', () => {
     await open('sd.inspector');
     await expect(page.getByRole('dialog', { name: 'Engine inspector' }).getByTestId('engine-status')).toContainText('running');
     // A modeless dialog answers Escape from inside it only: from the page it stays open.
-    await page.getByRole('heading', { level: 1 }).click();
+    await page.locator('[data-dialog-open="sd.rename"]').focus();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog', { name: 'Engine inspector' })).toBeVisible();
     await page.getByRole('dialog', { name: 'Engine inspector' }).getByRole('button', { name: 'Refresh' }).press('Escape');

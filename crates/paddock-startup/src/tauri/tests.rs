@@ -468,6 +468,7 @@ fn only_the_apps_own_pages_are_watched() {
     assert!(watched_by_default("main", "main"));
     assert!(watched_by_default("d-main-3", "d-main-3"));
     assert!(watched_by_default("p-w-2-1", "p-w-2-1"));
+    assert!(!watched_by_default("tray", "tray"), "a tray popover");
     assert!(
         !watched_by_default("browser-main-1", "main"),
         "a second webview in a window"
