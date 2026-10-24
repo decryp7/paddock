@@ -38,6 +38,13 @@ impl log::Log for Capture {
 }
 
 /// The records logged for window `label` (tests use their own labels: the logger is process-wide).
+/// Installs the capturing logger. Every test that reads `log_of` calls it (directly or through `app_with`): under nextest
+/// each test is its own process, so a test cannot rely on another one having installed it first.
+fn capture() {
+    let _ = log::set_logger(&Capture);
+    log::set_max_level(log::LevelFilter::Trace);
+}
+
 fn log_of(label: &str) -> Vec<(log::Level, String)> {
     lock(&LOGGED)
         .iter()
@@ -91,8 +98,7 @@ fn builder(seen: &Shared) -> StartupBuilder<MockRuntime> {
 }
 
 fn app_with(startup: Startup<MockRuntime>) -> App {
-    let _ = log::set_logger(&Capture);
-    log::set_max_level(log::LevelFilter::Trace);
+    capture();
     install(mock_builder(), startup)
         .invoke_handler(Guard::new(&crate::COMMANDS).wrap(invoke_handler()))
         .build(mock_context(noop_assets()))
@@ -492,7 +498,7 @@ fn only_the_apps_own_pages_are_watched() {
 
 #[test]
 fn commands_fail_plainly_when_the_contract_is_not_installed() {
-    let _ = log::set_logger(&Capture);
+    capture();
     let app = mock_builder()
         .invoke_handler(invoke_handler())
         .build(mock_context(noop_assets()))
@@ -550,6 +556,7 @@ fn the_ticker_runs_on_its_own_thread_once_and_stops() {
 
 #[test]
 fn errors_on_the_edges_are_logged_with_their_window() {
+    capture();
     assert_eq!(super::logged::<u8, &str>(Ok(1), "w-10", "never"), Some(1));
     assert_eq!(
         super::logged::<u8, &str>(Err("gone"), "w-10", "Could not reload the window"),
