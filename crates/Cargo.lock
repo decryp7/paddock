@@ -3028,6 +3028,7 @@ dependencies = [
 name = "paddock-build"
 version = "0.1.0"
 dependencies = [
+ "paddock-workspace-hack",
  "tauri-build",
  "tempfile",
 ]

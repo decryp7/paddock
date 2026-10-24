@@ -365,7 +365,7 @@ jobs:
 
       - name: paddock-build
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-build --all-targets --all-features -- -D warnings && cargo test -p paddock-build --all-features
+        run: cargo clippy -p paddock-build --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-build --all-features --profile ci && cargo test -p paddock-build --all-features --doc
 
       - name: paddock-packs
         if: ${{ !cancelled() }}
