@@ -20,8 +20,8 @@ export const PALETTE = {
   pitcrew: { top: '#FF8A4C', base: '#EF5F1C', bottom: '#D4440D', deep: '#8A2A04', light: '#FFB58A' },
   spotter: { top: '#FFD257', base: '#F4B315', bottom: '#E59600', deep: '#7A4E00', light: '#FFE08A' },
   pitwall: { top: '#7B46DB', base: '#5A24B0', bottom: '#43198F', deep: '#24094F', light: '#B99AF2' },
-  sighter: { top: '#4FD8F0', base: '#00B8D9', bottom: '#0094B8', deep: '#00485A', light: '#A5ECF8' },
-  pacenotes: { top: '#B3283C', base: '#831826', bottom: '#66131E', deep: '#340A0F', light: '#E0A0A8' },
+  sighter: { top: '#BFA2EE', base: '#A686D6', bottom: '#8B6DB5', deep: '#3C2D52', light: '#CCBAEC' },
+  pacenotes: { top: '#9A8228', base: '#6D590F', bottom: '#6A5500', deep: '#302501', light: '#C0B491' },
   dyno: { top: '#DE559F', base: '#BE3584', bottom: '#A0226A', deep: '#5E0E3C', light: '#F29CCB' },
   // Neutral silver: no family hue, light like Spotter's tile so it takes dark ink. The CVD search over low-chroma
   // tiles kept the family minimums unchanged only for near-black and light silver (tools/cvd.mjs; icons/README.md).
@@ -29,7 +29,7 @@ export const PALETTE = {
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */
-export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#00303B', pacenotes: '#FFFFFF', 'shell-demo': '#1E2530' };
+export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF', 'shell-demo': '#1E2530' };
 
 export const CARBON = { top: '#30333B', bottom: '#15171B', rim: '#4A4E58' };
 

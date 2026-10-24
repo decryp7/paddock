@@ -321,3 +321,40 @@ heartbeat: each visible window answers a cheap ping from Rust on a timer that to
 rule as the start-up watchdog); a window that misses N pings is marked unresponsive (dialogs then allow the OS close,
 `dialog_windows::page_unresponsive`), logged, and offered Reload / Keep Waiting. Tests: a page that stops answering
 after ready; a paused app process does not trigger it.
+
+## 12. Lint precision (2026-10-24)
+
+S9's "no UI timeout" check (`uiTimeoutProblems`) flags every delayed `setTimeout`, which pushed S7 to replace a retry
+and a debounce with `setInterval` loops to satisfy it. Rule 12 is about giving up on running work, not about timers.
+S16 (test kit) narrows the check to timeouts that abandon or fail an awaited operation (`Promise.race` with a timer,
+`AbortSignal.timeout`, a timer that rejects or cancels a request or job) and allows plain debounce/retry timers; S7's
+retry and checkpoint debounce then go back to `setTimeout`. A lint must express the rule, never force workarounds
+(rule 40).
+
+## 13. Follow-ups found while building (2026-10-24)
+
+- S2 `buildManifest` writes `minSize` with 0 for an undeclared side; fill it from the kind's minimum like
+  `dialogContractFile` does (S17 when the Rust manifest check lands).
+- Dialog inputs are typed `Record<string, unknown>`; infer them from the component's `input()` signals as Debrief does
+  (S2/S6 follow-up before Debrief's migration, M1).
+- Once S16 narrows the timeout lint (§12), S6's and S7's coalescing workarounds go back to plain timers.
+- The boot harness yields with bounded `setTimeout(0)` rounds; move it to `whenStable` where possible (rule 38).
+- Generated TypeScript must live inside the entry point that uses it (ng-packagr refuses cross-entry relative imports):
+  S9 did this; S4 had to mirror `shell/generated/health.ts` with a two-way check. S17 moves each crate's generated file
+  into its entry point (`shell/notify/generated/`, `shell/dialogs/generated/`, …) and deletes the mirror.
+- Notices posted from a webview (`SHELL_PORTS.notify`) stay window-local because `paddock-health` has no
+  `notifications_post` command; add it (validated, bounded, cause-keyed) so the engine stays the single source of truth
+  and other windows see them (rule 34).
+- S7 exposes a `windowReady` signal (set when the ready reply is handled) and S13's native-menu gate defaults to it;
+  the demo's AFTER_READY wrapper goes away.
+- `paddock-menu`'s two Tauri menu tests skip on macOS and have never run; run them on Linux locally in Docker (the CI
+  image) before shell/integrate is merged to main, so coverage is confirmed locally first (rule 3).
+- `paddock-download` has no free-disk pre-check (Debrief has one): add it (bounded, platform call, clear "needs N GB,
+  M GB free" error before connecting) before Pitwall's model downloads move onto it.
+
+## 14. What's New is a view, not a popup (user, 2026-10-24)
+
+Debrief showed its changelog as a dialog at start; the user prefers a pane. The shell's What's New (S11) becomes: in
+workbench apps a document view opened in the background once after an update, in pages apps a page; plus one calm
+cause-keyed notification "Updated to X · See what's new". Help ▸ What's New opens the same view. No dialog at startup.
+Debrief does this first (branch feat/whats-new-pane); the shell follows in W/S follow-up work.

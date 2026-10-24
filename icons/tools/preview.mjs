@@ -18,6 +18,8 @@ const CONCEPT = {
   spotter: 'Spotter binoculars with a spark: it watches everywhere and calls the moment a release appears.',
   pitwall: 'A radio bubble with the voice kept inside it: the private, local model every app radios to.',
   dyno: 'A dynamometer gauge with the needle near the redline: health, load and tuning at a glance.',
+  sighter: 'A pointer inside a sighting reticle: it finds any UI element by sight.',
+  pacenotes: 'A spiral notebook with a route curve and a code mark: notes on the shape of a codebase.',
 };
 
 const cvd = check(Object.fromEntries(APPS.map(a => [a, PALETTE[a].base])));

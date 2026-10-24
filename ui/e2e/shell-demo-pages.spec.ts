@@ -167,9 +167,11 @@ test.describe('pages frame (plan S14)', () => {
     await expect(chip).toHaveText('Engine stopped');
     await expect(chip).toHaveAttribute('aria-label', 'Demo engine: stopped');
     await expect(bar.getByRole('button', { name: '1 running: Update runner' })).toHaveText('1');
-    // The bell and its count are pinned.
+    // The bell and its count are pinned. The commands run asynchronously (the app context loads first), so the count is
+    // asserted once settled: two unread, the engine's failure and the three identical notices merged into one message.
     await expect(app.statusBar.bell).toBeVisible();
-    await expect(app.statusBar.bell).toContainText('1');
+    await expect(app.statusBar.bell).toHaveAttribute('aria-label', '2 unread');
+    await expect(app.statusBar.bell).toContainText('2');
     await expect(bar.getByTestId('runners-status')).toBeHidden();
     const more = app.statusBar.more;
     await expect(more).toHaveAttribute('aria-label', 'More status (1)');

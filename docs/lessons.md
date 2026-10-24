@@ -298,3 +298,39 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   exactly) and CI never saw it because the Rust tests ran on Linux only. Run the Rust test suite on every OS the app
   ships for (macOS host runner included). Also: don't run macOS tests under `nice` — it is SIP-protected and strips
   `DYLD_*` variables.
+- Progress that can go backwards is fixed in the owner, not the callers: Spotter's parallel folder walkers reported the
+  found count out of order; the Job now drops lower reports within a phase and calls its sink under the gate lock, so
+  every caller with parallel reporters is fixed at once (rule 11). Replay the exact interleaving in a deterministic test.
+- Every app's macOS verify script checks ad-hoc bundles for the hardened-runtime flag, one TeamIdentifier across all
+  Mach-Os and a `--version`/self-test of every sidecar started from the built app; three of four apps had no macOS
+  bundle check at all, and building the `.app` only when updater keys exist hid that.
+- A stop/cancel token that is one-shot leaves a session unusable after the first Stop (Sighter POC: input stayed
+  locked until a reconnect). Stop ends the run, not the session: give each run its own token and keep the session's
+  input usable afterwards.
+- When an app needs a shared component that isn't published yet, it vendors a copy and marks it (rule 39 debt):
+  Sighter's POC copied paddock-ui's job view. Publish shared parts early (the shell's publish job) so apps never fork.
+- Raw engine error strings reached the UI three times in one Sighter POC (connect failed, Python missing, Pitwall
+  missing), each fixed per screen. Rule 40: one shared problem component (plain words, details folded, a working next
+  step or Repair per rule 19, neutral styling for optional features) and a test that no page renders an engine string
+  directly. The shell's notify entry (`PdServiceError`/`WaitingFor`) is the family's version; apps use it.
+- Lime-vs-amber (and similar hue pairs) can be far apart for normal vision yet collapse under deuteranopia: check every
+  accent against warning/success/danger in CVD simulation, and never let colour alone carry warning (icon + word).
+- The CI image is x86-only, so on the Mac mini it runs under emulation: one container at `--cpus 6` is fine, but three
+  at once plus native test runs drove the load to 107. Run at most one emulated CI container at a time, check
+  `docker ps` before starting one, and keep it for the final local gate (rule 41). An arm64 build of the CI image would
+  remove the emulation cost (CI-speed backlog).
+- A fake that is kinder than the real thing hides bugs: Debrief's research browser never auto-closed because Chrome
+  opens its own start tab and Debrief opened a second one, so "more than one tab" always meant "the user took part";
+  the fake browser reported a fixed tab count and ignored `createTarget`. Fakes must model the real system's observable
+  behaviour (start pages, created targets, recorded calls) and be checked against the real thing at least once; every
+  keep/close style decision logs its reason, so a silent wrong branch shows up in the user's log.
+- A Rust test binary that links `tauri-plugin-dialog` does not load on Windows (0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND):
+  the plugin imports `TaskDialogIndirect` from Common Controls v6, and Tauri embeds that manifest into app binaries
+  only. Every crate whose tests can link the plugin embeds it in its `build.rs` (`/MANIFEST:EMBED` plus the
+  Common-Controls `/MANIFESTDEPENDENCY`, windows-msvc only); `paddock-startup/tests/common_controls_manifest.rs` checks
+  that on every OS, so a new crate fails locally instead of first on the Windows runner. Whether the binary needs it
+  depends on what the linker keeps, so a crate can pass by luck (paddock-shell did) until a test reaches the dialog.
+- An e2e assertion that matches a transient value passes on a fast machine and fails on a slow one: the narrow status
+  bar test expected the bell's "1" while the demo's asynchronous commands were still posting, and the settled count is
+  2. The fast native gate saw the "1" on its first poll; CI did not. Assert the settled state (exact values, full
+  labels), never an intermediate one of asynchronous work.
