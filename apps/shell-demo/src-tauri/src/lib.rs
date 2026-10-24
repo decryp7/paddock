@@ -304,7 +304,16 @@ pub fn run() {
     install_log();
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
-    let shell = shell::<tauri::Wry>(Place::Installed).setup(move |app| {
+    let mut shell = shell::<tauri::Wry>(Place::Installed);
+    // `app_relaunch` (a language change in Settings): the session is written, then the whole app starts again.
+    match paddock_startup::tauri::Startup::builder()
+        .relaunch(|app| app.restart())
+        .build()
+    {
+        Ok(startup) => shell = shell.startup(startup),
+        Err(e) => log::error!("The relaunch hook is not installed: {e}"),
+    }
+    let shell = shell.setup(move |app| {
         tray::create(app);
         paddock_window::tauri::start(app, &launch)?;
         Ok(())

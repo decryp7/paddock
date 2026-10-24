@@ -16,6 +16,43 @@ Conventional Commits; one semver tag for the whole repo.
   Pitcrew's, Pitwall's and Spotter's chart options and the settings window's field. Gallery sections, Playwright specs (gallery and
   shell-demo; the demo's Runners page now uses `pd-table`) and a contact sheet at `ui/docs/review/x21-data/` for the independent
   review (not approved yet).
+- `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
+  macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
+  deleted, one at a time, with disk and load checks (rule 7).
+- `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
+  dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
+  volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.
+- i18n kit (plan X48). `paddock-i18n build [--config paddock-i18n.json] [--check] [--no-extract]` runs an app's whole translation
+  build from one declaration: the `localize-extract` run over its built output, every catalog (sources, manifests, extraction),
+  the pseudo-locale and each translated `messages.<tag>.xlf` into its runtime JSON together with the shell's translations
+  (Debrief's `build-locales` and this repo's `scripts/build-i18n.mjs` are replaced by it; `--check` writes nothing and fails on
+  drift, `--no-extract` reads the committed catalogs so no build is needed). `LanguageChoice` now also names a shipped
+  translation by its tag, `isLocaleTag` validates one, and `@decryp7/paddock-ui/shell/i18n/page` is the Settings > Language page
+  (`PdLanguagePage`, `defineLanguageSettingsPage`): System default, English, each translation by its own name, the pseudo-locale
+  where the app ships it, a restart offer. `paddock-conformance` C32 runs `build --check --no-extract` over the app's
+  `paddock-i18n.json`.
+- `app_relaunch` (`paddock-startup`, a window-class command: any window, a dialog lists it in its contract) and
+  `StartupBuilder::relaunch(|app| app.restart())`: the checkpoints are written to the session first, then the app's relaunch
+  runs, so the whole app restarts (a language change from the Settings window); without a hook it answers `relaunchUnavailable`,
+  a failing one `relaunchFailed` and the app keeps running. The shell demo wires it; the Language page calls it through
+  `LANGUAGE_CONFIG.reload`.
+- The app IPC kit (plan X28). `paddock_commands::CommandError` / `ErrorCode`: the one error envelope (code, message, retryable,
+  hint, field, cause, kind), with constructors, `From` for `io::Error`, strings and the guard's `Refusal`, and its TypeScript
+  generated into `@decryp7/paddock-ui/ipc`. `@decryp7/paddock-ui/ipc`: `toCommandError`, `CommandFailure`, `withCallTimeout` (a
+  Proxy with a default, per-method limits and `untimed` for job-starting commands, rule 12) and `callTimeoutProblems`,
+  `provideBackend` (Tauri or a lazily imported mock). `@decryp7/paddock-ui/ipc/testing`: `parseMockOptions` / `formatMockOptions`
+  (`?mock=&latency=&fail=&hold=`) and `withMockOptions` (latency, failures, held answers, recorded calls).
+- `paddock-bench` (plan X26, rule 16): the benchmark harness with stored budgets. `Recorder` (median of several runs on an
+  injected `Clock`; `ManualClock` for tests), `Kind` (startup, throughput, first event, query latency, memory: unit and
+  direction), `Results` (versioned results file per app, atomic, bounded), `Budgets` (`budgets.toml`: limit, tolerance, regression
+  against the previous run, `propose`), `check` (pass, tolerated, over budget, regressed, missing, wrong kind, unbudgeted;
+  text, Markdown, JSON) and the `paddock-bench check|propose` command (exit 5 on a miss). `.gitea/workflow-templates/bench-nightly.yml`
+  is the nightly workflow template.
+- `paddock-cli` (plan X25): the family's command-line conventions. `Exit` (0 ok, 1 failure, 2 usage, 3 not running, 4 refused,
+  5 findings, 130 interrupted), `CliError` with a next step, `finish` (one JSON object on stdout in `--json` mode, errors
+  included), `Table` (text, CSV, JSON; bounded cells), `Progress` (throttled, de-duplicated phase lines on stderr, injected time)
+  and `StopFlag`, `Help` and `version_line`, `CommonFlags`, `parse_time`, `parse_size`, `format_size`. `paddock_service::Verb`
+  describes itself for `--help`, rejects extra arguments with a hint and decides `status`'s exit code.
 - Paddock runs its own conformance checks in CI (C06, C14, C15, C16, C29, C30, C31; the app-only ones are skipped with reasons in
   `ci.yml`); C24 runs non-blocking until the `docs/images` review lands. New check C31: ADR numbers are unique. The waiver of a
   Rust test sleep (C30) must give a reason: `// conformance: hang-guard — <why>`.
@@ -258,6 +295,14 @@ Conventional Commits; one semver tag for the whole repo.
 - Sentence case for the shell's About items: "Check for updates…", "What’s new" (and "What’s new in <version>").
 - The shell demo's product name is "Paddock Shell Demo"; its Rust side is the app (`apps/shell-demo/src-tauri` writes
   `app-commands.ts`); `paddock-shell`'s `tests/demo.rs` keeps only the plugin's checks over the demo's files.
+
+### Fixed
+- `paddock-service` (C21 VM smoke): the first Install of a bundled macOS agent failed on every fresh Mac with "macOS cannot find
+  ...'s launch agent". `SMAppService.status` is NotFound until the app registers once; that now reads as "not installed" and
+  Install registers (a real failure comes from `register`, with macOS's reason in the message). `parse_job` reads only the job's
+  own level of `launchctl print`, so macOS 26's coalition blocks (`state = active`) no longer make a running agent "refused".
+- The service smoke builds N+1 with the agent's version bumped too (it reported the old version for ever), installs to
+  /Applications as a user does, and checks the app's own status is "running" after install and after the update.
 
 ## 0.2.0 - 2026-10-24 (the first shell release)
 

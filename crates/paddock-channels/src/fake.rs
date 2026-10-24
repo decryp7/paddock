@@ -17,6 +17,7 @@ enum Step<T, E> {
 /// An [`HttpPoster`] that answers from a script (200 once the script is used up) and records every request.
 pub struct FakePoster {
     script: Mutex<VecDeque<Step<PostResponse, TransportError>>>,
+    panic_on: Mutex<Vec<String>>,
     seen: Mutex<Vec<PostRequest>>,
 }
 
@@ -24,6 +25,7 @@ impl Default for FakePoster {
     fn default() -> Self {
         FakePoster {
             script: Mutex::new(VecDeque::new()),
+            panic_on: Mutex::new(Vec::new()),
             seen: Mutex::new(Vec::new()),
         }
     }
@@ -49,9 +51,17 @@ impl FakePoster {
         }))
     }
 
-    /// The next request panics (a channel bug the dispatcher must contain).
+    /// The next request panics (a channel bug the dispatcher must contain). The dispatcher sends to its channels in
+    /// parallel, so with more than one HTTP channel "the next request" can be any of them: use [`FakePoster::panic_on`]
+    /// to make one channel's requests panic.
     pub fn then_panic(self) -> FakePoster {
         lock(&self.script).push_back(Step::Panic);
+        self
+    }
+
+    /// Every request whose URL contains `url_part` panics, whatever the order the channels post in.
+    pub fn panic_on(self, url_part: &str) -> FakePoster {
+        lock(&self.panic_on).push(url_part.to_owned());
         self
     }
 
@@ -64,6 +74,12 @@ impl FakePoster {
 impl HttpPoster for FakePoster {
     fn post(&self, request: &PostRequest) -> Result<PostResponse, TransportError> {
         lock(&self.seen).push(request.clone());
+        if lock(&self.panic_on)
+            .iter()
+            .any(|p| request.url.contains(p.as_str()))
+        {
+            panic!("fake poster panic");
+        }
         let step = lock(&self.script).pop_front();
         match step {
             Some(Step::Answer(a)) => a,
