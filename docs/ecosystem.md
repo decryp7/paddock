@@ -8,7 +8,7 @@ Seven desktop tools for people who keep systems running, built on one shared fou
 the others. All run on Windows, macOS and Linux, are written in Rust with a Tauri 2 shell and an Angular UI, and are local
 only: no cloud, no account, no telemetry.
 
-The foundation has two layers (decided 2026-10-24). The **App shell** is what every app gets: startup protection, notifications
+The foundation has two layers (decided 2026-10-24, [ADR 0012](adr/0012-paddock-app-shell.md) and [ADR 0013](adr/0013-paddock-workbench.md)). The **App shell** is what every app gets: startup protection, notifications
 and service health, dialogs as real windows, jobs and progress, Settings, About and updates, and the theme; Pitcrew, Pitwall,
 Spotter and Dyno are the shell with pages. The **Workbench** sits on top of it for the IDE-style apps, Debrief, Pacenotes and
 Sighter: docked panes with the layout planner, the activity bar, the Explorer, the command palette and the AI pane.
