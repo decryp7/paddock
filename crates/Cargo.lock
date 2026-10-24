@@ -702,6 +702,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d"
+dependencies = [
+ "crc-catalog",
+]
+
+[[package]]
+name = "crc-catalog"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
+
+[[package]]
 name = "crc32fast"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2403,6 +2418,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "lzma-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "297e814c836ae64db86b36cf2a557ba54368d03f6afcd7d947c266692f71115e"
+dependencies = [
+ "byteorder",
+ "crc",
+]
+
+[[package]]
 name = "mac-notification-sys"
 version = "0.6.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3011,12 +3036,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
+name = "paddock-archive"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "lzma-rs",
+ "paddock-jobs",
+ "tar",
+ "tempfile",
+ "zip",
+]
+
+[[package]]
 name = "paddock-bench"
 version = "0.1.0"
 dependencies = [
  "jsonschema",
  "paddock-cli",
  "paddock-env",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",
@@ -3024,18 +3062,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-build"
+version = "0.1.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "tauri-build",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-channels"
 version = "0.1.0"
 dependencies = [
  "lettre",
+ "paddock-commands",
  "paddock-download",
+ "paddock-env",
  "paddock-jobs",
+ "paddock-net",
  "paddock-secrets",
+ "paddock-workspace-hack",
  "proptest",
- "rustls",
  "serde",
  "serde_json",
- "ureq",
+ "tauri",
+ "tempfile",
 ]
 
 [[package]]
@@ -3043,6 +3094,7 @@ name = "paddock-cli"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "paddock-workspace-hack",
  "serde_json",
 ]
 
@@ -3051,6 +3103,7 @@ name = "paddock-commands"
 version = "0.1.0"
 dependencies = [
  "log",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
@@ -3069,6 +3122,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-settings",
+ "paddock-workspace-hack",
  "regex",
  "serde",
  "serde_json",
@@ -3085,6 +3139,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
@@ -3099,6 +3154,7 @@ dependencies = [
  "fs4",
  "httpdate",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "rustls",
  "serde",
  "serde_json",
@@ -3113,6 +3169,7 @@ name = "paddock-env"
 version = "0.1.0"
 dependencies = [
  "log",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",
@@ -3126,6 +3183,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
@@ -3143,6 +3201,7 @@ dependencies = [
  "paddock-env",
  "paddock-jobs",
  "paddock-proc",
+ "paddock-workspace-hack",
  "postcard",
  "proptest",
  "serde",
@@ -3157,12 +3216,26 @@ name = "paddock-jobs"
 version = "0.1.0"
 dependencies = [
  "paddock-commands",
+ "paddock-workspace-hack",
  "proptest",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tauri",
  "tempfile",
+]
+
+[[package]]
+name = "paddock-live"
+version = "0.1.0"
+dependencies = [
+ "paddock-commands",
+ "paddock-jobs",
+ "paddock-testkit",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
 ]
 
 [[package]]
@@ -3173,6 +3246,7 @@ dependencies = [
  "log",
  "paddock-env",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",
@@ -3187,6 +3261,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
@@ -3201,6 +3276,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-proc",
  "paddock-testkit",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "sysinfo",
@@ -3210,23 +3286,43 @@ dependencies = [
 name = "paddock-names"
 version = "0.1.0"
 dependencies = [
+ "paddock-workspace-hack",
  "proptest",
  "serde",
  "serde_json",
 ]
 
 [[package]]
+name = "paddock-net"
+version = "0.1.0"
+dependencies = [
+ "paddock-download",
+ "paddock-jobs",
+ "proptest",
+ "rustls",
+ "ureq",
+ "url",
+]
+
+[[package]]
 name = "paddock-packs"
 version = "0.1.0"
 dependencies = [
- "notify",
+ "log",
+ "paddock-commands",
  "paddock-env",
+ "paddock-health",
  "paddock-jobs",
+ "paddock-watch",
+ "paddock-workspace-hack",
  "regex",
  "serde",
  "serde_ignored",
+ "serde_json",
+ "tauri",
  "tempfile",
  "toml 0.9.12+spec-1.1.0",
+ "ts-rs",
 ]
 
 [[package]]
@@ -3238,6 +3334,7 @@ dependencies = [
  "paddock-health",
  "paddock-proc",
  "paddock-secrets",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",
@@ -3249,6 +3346,7 @@ name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "paddock-workspace-hack",
  "sysinfo",
  "tempfile",
 ]
@@ -3258,6 +3356,7 @@ name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
  "keyring",
+ "paddock-workspace-hack",
  "tempfile",
  "zeroize",
 ]
@@ -3277,6 +3376,8 @@ dependencies = [
  "paddock-health",
  "paddock-proc",
  "paddock-settings",
+ "paddock-testkit",
+ "paddock-workspace-hack",
  "plist",
  "serde",
  "serde_json",
@@ -3294,6 +3395,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-health",
+ "paddock-workspace-hack",
  "regex",
  "serde",
  "serde_json",
@@ -3306,7 +3408,6 @@ dependencies = [
 name = "paddock-shell"
 version = "0.2.0"
 dependencies = [
- "log",
  "paddock-commands",
  "paddock-diag",
  "paddock-dialogs",
@@ -3316,11 +3417,13 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-menu",
+ "paddock-packs",
  "paddock-service",
  "paddock-settings",
  "paddock-startup",
  "paddock-updater",
  "paddock-window",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
@@ -3339,6 +3442,7 @@ dependencies = [
  "paddock-commands",
  "paddock-env",
  "paddock-log",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "sysinfo",
@@ -3353,6 +3457,7 @@ name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
  "paddock-jobs",
+ "paddock-workspace-hack",
  "tempfile",
 ]
 
@@ -3376,6 +3481,8 @@ dependencies = [
  "paddock-commands",
  "paddock-download",
  "paddock-jobs",
+ "paddock-testkit",
+ "paddock-workspace-hack",
  "semver",
  "serde",
  "serde_json",
@@ -3386,12 +3493,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-watch"
+version = "0.1.0"
+dependencies = [
+ "notify",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-window"
 version = "0.1.0"
 dependencies = [
  "log",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
@@ -3401,6 +3519,78 @@ dependencies = [
  "url",
  "webview2-com",
  "windows",
+]
+
+[[package]]
+name = "paddock-workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bitflags 2.13.2",
+ "block2",
+ "cairo-sys-rs",
+ "chrono",
+ "crc32fast",
+ "deranged",
+ "email_address",
+ "flate2",
+ "futures-core",
+ "getrandom 0.3.4",
+ "getrandom 0.4.3",
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "http",
+ "httparse",
+ "idna",
+ "libc",
+ "linux-raw-sys",
+ "log",
+ "memchr",
+ "mio",
+ "num",
+ "num-traits",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "once_cell",
+ "percent-encoding",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "regex-automata",
+ "regex-syntax",
+ "rustix",
+ "security-framework-sys",
+ "semver",
+ "serde",
+ "serde_core",
+ "serde_json",
+ "slab",
+ "smallvec",
+ "socket2",
+ "subtle",
+ "syn 2.0.119",
+ "syn 3.0.9",
+ "sysinfo",
+ "tar",
+ "thiserror 2.0.21",
+ "time",
+ "time-macros",
+ "toml_datetime 1.1.2+spec-1.1.0",
+ "toml_parser",
+ "tracing",
+ "tracing-core",
+ "typenum",
+ "url",
+ "uuid",
+ "windows",
+ "windows-core",
+ "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
+ "winnow 1.0.4",
+ "zlib-rs",
 ]
 
 [[package]]
