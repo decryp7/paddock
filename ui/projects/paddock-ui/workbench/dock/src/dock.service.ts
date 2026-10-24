@@ -344,7 +344,10 @@ export class WorkbenchDock {
     this.attachment++;
     this.unreturned?.();
     this.unreturned = null;
+    // Waiting showView calls see the attachment changed and resolve false.
+    const waiters = this.readyWaiters;
     this.readyWaiters = [];
+    waiters.forEach((w) => w());
     this.persistence.cancel();
     this.disposers.forEach((d) => d.dispose());
     this.disposers = [];
