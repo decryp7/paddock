@@ -52,13 +52,15 @@ describe('PdPopoutShell', () => {
     expect(ctx.seen).toEqual([{ panel: 'wt.code#src/main.rs', view: 'wt.code', key: 'src/main.rs' }]);
     expect(TestBed.inject(VIEW_PANEL).key).toBe('src/main.rs');
     expect(ctx.query()).toBe('host query');
-    expect(view.element.querySelector('[data-testid="popout-title"]')?.textContent).toBe('Code');
+    // The title is the panel's, as on its tab ("main.rs"), with the path in the tooltip; never the view type ("Code").
+    expect(view.element.querySelector('[data-testid="popout-title"]')?.textContent).toBe('main.rs');
+    expect(view.element.querySelector('[data-testid="popout-title"]')?.getAttribute('title')).toBe('src/main.rs');
     expect(view.element.querySelector('[data-testid="popout-host"]')?.textContent).toBe('Incident 7');
-    expect(document.title).toBe('Code - Incident 7');
+    expect(document.title).toBe('main.rs - Incident 7');
     // Another script rewriting the title does not stick.
     document.title = 'Something else';
     await settle(view.fixture);
-    expect(document.title).toBe('Code - Incident 7');
+    expect(document.title).toBe('main.rs - Incident 7');
     host?.stop();
   });
 
@@ -124,10 +126,11 @@ describe('PdPopoutShell', () => {
     host?.stop();
   });
 
-  it('shows the key of the instance in its panel but only the view title in its title bar', async () => {
+  it('titles the window with the instance (the last part of its key), the full key as the tooltip', async () => {
     const { host } = await setup('wt.code#a/very/long/path/that/is/a/key.rs');
     const view = await render(PdPopoutShell);
-    expect(view.one('[data-testid="popout-title"]').textContent).toBe('Code');
+    expect(view.one('[data-testid="popout-title"]').textContent).toBe('key.rs');
+    expect(view.one('[data-testid="popout-title"]').getAttribute('title')).toBe('a/very/long/path/that/is/a/key.rs');
     host?.stop();
   });
 

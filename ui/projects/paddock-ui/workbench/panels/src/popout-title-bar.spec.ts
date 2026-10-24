@@ -10,9 +10,10 @@ import { PdPopoutTitleBar } from './popout-title-bar';
 import { FakeChrome, FakeSyncTimers } from './testing';
 import { SYNC_TIMERS, UiSync } from './ui-sync';
 
-@Component({ imports: [PdPopoutTitleBar], template: `<pd-popout-title-bar title="Inspector" host="Incident" [onTop]="onTop()" (dockBack)="docked = docked + 1" (toggleOnTop)="onTop.set(!onTop())" />` })
+@Component({ imports: [PdPopoutTitleBar], template: `<pd-popout-title-bar title="Inspector" [path]="path()" host="Incident" [onTop]="onTop()" (dockBack)="docked = docked + 1" (toggleOnTop)="onTop.set(!onTop())" />` })
 class Host {
   readonly onTop = signal(false);
+  readonly path = signal('src/main.rs');
   docked = 0;
 }
 
@@ -156,8 +157,29 @@ describe('PdPopoutTitleBar', () => {
     host.stop();
   });
 
-  it('dims while the window is not active', async () => {
+  const allCss = () => Array.from(document.querySelectorAll('style')).map((st) => st.textContent).join('');
+
+  it('keeps the title bar on the 12 px pane inset, flush at the right only where the window draws its own controls', async () => {
+    const frameless = await setup();
+    expect(allCss()).toMatch(/\.pd-bar[^{]*\{[^}]*padding-inline: var\(--pd-space-3\)/);
+    expect(allCss()).toMatch(/\.pd-frameless[^{]*\.pd-bar[^{]*\{\s*padding-inline-end: 0/);
+    expect(frameless.view.element.querySelector('pd-popout-title-bar')?.classList.contains('pd-frameless')).toBe(true);
+    TestBed.resetTestingModule();
+    const mac = await setup(new FakeChrome('overlay'));
+    expect(mac.view.element.querySelector('pd-popout-title-bar')?.classList.contains('pd-frameless')).toBe(false);
+  });
+
+  it('puts the panel path in the tooltip of the title, and none for a view without instances', async () => {
     const { view } = await setup();
+    expect(view.element.querySelector('[data-testid="popout-title"]')!.getAttribute('title')).toBe('src/main.rs');
+    view.component.path.set('');
+    await settle(view.fixture);
+    expect(view.element.querySelector('[data-testid="popout-title"]')!.hasAttribute('title')).toBe(false);
+  });
+
+  it('dims while the window is not active, and the dimmed bar loses its accent line and mutes its text', async () => {
+    const { view } = await setup();
+    expect(allCss()).toMatch(/\.pd-inactive[^{]*\.pd-bar[^{]*\{[^}]*box-shadow: none;[^}]*color: var\(--pd-text-muted\)/);
     window.dispatchEvent(new Event('blur'));
     await settle(view.fixture);
     expect(view.element.querySelector('pd-popout-title-bar')?.classList.contains('pd-inactive')).toBe(true);

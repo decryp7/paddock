@@ -25,11 +25,11 @@ const EDGES: readonly { dir: ResizeDirection; cls: string }[] = [
   selector: 'pd-popout-title-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph],
-  host: { '[class.pd-inactive]': '!active()', '[class.pd-mac]': "chrome.kind === 'overlay'" },
+  host: { '[class.pd-inactive]': '!active()', '[class.pd-mac]': "chrome.kind === 'overlay'", '[class.pd-frameless]': "chrome.kind === 'frameless'" },
   template: `
     <header class="pd-bar" data-testid="popout-bar" (pointerdown)="dragStart($event)" (dblclick)="dblclick($event)">
       <div class="pd-titles">
-        <h1 class="pd-title" data-testid="popout-title">{{ title() }}</h1>
+        <h1 class="pd-title" data-testid="popout-title" [attr.title]="path() || null">{{ title() }}</h1>
         <span class="pd-host" [attr.title]="host() || null" data-testid="popout-host">{{ host() }}</span>
       </div>
       <button type="button" class="pd-btn" data-testid="popout-dock-back" [attr.aria-label]="t.dockBack" [attr.title]="t.dockBack" (click)="dockBack.emit()">
@@ -69,7 +69,8 @@ const EDGES: readonly { dir: ResizeDirection; cls: string }[] = [
   `,
   styles: `
     :host { display: block; flex: none; container-type: inline-size; }
-    .pd-bar { display: flex; align-items: center; gap: var(--pd-space-0); height: 32px; padding-inline: var(--pd-space-2) 0; user-select: none; background: var(--pd-surface-2); color: var(--pd-text); border-bottom: 1px solid var(--pd-border-strong); box-shadow: inset 0 2px 0 var(--pd-accent); }
+    .pd-bar { display: flex; align-items: center; gap: var(--pd-space-0); height: 32px; padding-inline: var(--pd-space-3); user-select: none; background: var(--pd-surface-2); color: var(--pd-text); border-bottom: 1px solid var(--pd-border-strong); box-shadow: inset 0 2px 0 var(--pd-accent); }
+    :host(.pd-frameless) .pd-bar { padding-inline-end: 0; }
     :host(.pd-mac) .pd-bar { padding-inline-start: 78px; }
     :host(.pd-inactive) .pd-bar { box-shadow: none; color: var(--pd-text-muted); }
     .pd-titles { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--pd-space-2); cursor: default; }
@@ -102,6 +103,8 @@ export class PdPopoutTitleBar {
   private readonly route = inject(POPOUT_ROUTE);
   /** The panel's name. */
   readonly title = input.required<string>();
+  /** The panel's full path or key (the tooltip of the title); empty for a view without instances. */
+  readonly path = input('');
   /** The host window's name. */
   readonly host = input('');
   readonly onTop = input(false);
