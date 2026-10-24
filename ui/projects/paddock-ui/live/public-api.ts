@@ -6,6 +6,8 @@
  * - `foldFrame`, `parseFrame`, `initialFolded`: the pure fold (gap, duplicate and stale handling) the feature uses.
  * - `LIVE_TRANSPORT`, `tauriLiveTransport`, `MemoryLiveTransport`: how frames arrive (Tauri events and `live_snapshot`, or memory).
  * - `appendBounded`, `appendThrottled`, `upsertBy`, `prependUnique`: the bounded lists a fold keeps (live tails, event feeds).
+ * - `streamCall`, `tauriChannelFactory`: a command that streams to its caller over a per-call channel (search results, a live tail):
+ *   ordered delivery, nothing after the call settled, failure, handler error, an optional last-message marker and abort.
  * - `Debouncer`: collects a burst of pushes into one reload.
  */
 export { LIVE_COMMANDS, type LiveCommand } from './generated/live-commands';
@@ -23,6 +25,7 @@ export {
   type LiveLink,
 } from './src/fold';
 export { appendBounded, appendThrottled, prependUnique, upsertBy, type ThrottleOptions } from './src/bounded';
+export { streamCall, tauriChannelFactory, type ChannelFactory, type StreamOptions, type TauriChannelClass } from './src/stream-call';
 export { Debouncer } from './src/debounce';
 export { LIVE_TRANSPORT, MemoryLiveTransport, liveEvent, tauriLiveTransport, type LiveIpc, type LiveTransport, type Unlisten } from './src/live-transport';
 export { withLiveFeed, type LiveFeedConfig, type LiveFeedState } from './src/live-feed.store';

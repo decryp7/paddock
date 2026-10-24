@@ -46,6 +46,30 @@ impl Default for RetryPolicy {
     }
 }
 
+/// What a delivery is doing now: attempt `attempt` of `of`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    /// The attempt under way or just made (1 to `of`).
+    pub attempt: u32,
+    /// The most attempts this delivery makes.
+    pub of: u32,
+    /// What it is doing.
+    pub phase: Phase,
+}
+
+/// The phase of a [`Progress`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    /// Sending the message.
+    Sending,
+    /// Waiting this long before the next attempt.
+    Waiting(Duration),
+}
+
+fn delay_of(retry: Retry, max: Duration) -> Duration {
+    if let Retry::After(d) = retry { d } else { max }
+}
+
 /// What happened to one channel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Delivery {
@@ -114,7 +138,9 @@ impl Dispatcher {
             let handles: Vec<_> = wanted
                 .iter()
                 .map(|cfg| {
-                    scope.spawn(|| self.deliver(cfg, None, &msg, self.policy.attempts, cancel))
+                    scope.spawn(|| {
+                        self.deliver(cfg, None, &msg, self.policy.attempts, cancel, &|_| {})
+                    })
                 })
                 .collect();
             handles
@@ -149,6 +175,31 @@ impl Dispatcher {
         app: &str,
         cancel: &CancelToken,
     ) -> Delivery {
+        self.test_run(cfg, secret, app, cancel, 1, &|_| {})
+    }
+
+    /// Like [`test_with`](Self::test_with) but with the dispatcher's retries (a settings page that shows the attempts), reporting
+    /// each attempt and each wait to `report` as it happens (attempt numbers only go up).
+    pub fn test_with_progress(
+        &self,
+        cfg: &ChannelConfig,
+        secret: Option<&Secret>,
+        app: &str,
+        cancel: &CancelToken,
+        report: &dyn Fn(Progress),
+    ) -> Delivery {
+        self.test_run(cfg, secret, app, cancel, self.policy.attempts, report)
+    }
+
+    fn test_run(
+        &self,
+        cfg: &ChannelConfig,
+        secret: Option<&Secret>,
+        app: &str,
+        cancel: &CancelToken,
+        attempts: u32,
+        report: &dyn Fn(Progress),
+    ) -> Delivery {
         let msg = Message::new(
             TEST_KIND,
             Severity::Info,
@@ -168,7 +219,7 @@ impl Dispatcher {
                 result: Err(SendError::Invalid(e.0)),
             };
         }
-        self.deliver(cfg, secret, &msg, 1, cancel)
+        self.deliver(cfg, secret, &msg, attempts, cancel, report)
     }
 
     fn deliver(
@@ -178,6 +229,7 @@ impl Dispatcher {
         msg: &Message,
         attempts: u32,
         cancel: &CancelToken,
+        report: &dyn Fn(Progress),
     ) -> Delivery {
         let max = attempts.clamp(1, MAX_ATTEMPTS);
         let mut backoff = Backoff::new(BackoffPolicy {
@@ -194,6 +246,11 @@ impl Dispatcher {
                 };
             }
             made += 1;
+            report(Progress {
+                attempt: made,
+                of: max,
+                phase: Phase::Sending,
+            });
             let result = catch_unwind(AssertUnwindSafe(|| self.attempt(cfg, secret, msg)))
                 .unwrap_or(Err(SendError::Panicked));
             let Err(err) = result else {
@@ -210,14 +267,19 @@ impl Dispatcher {
                     result: Err(err),
                 };
             }
-            let delay = match backoff.failed(self.clock.monotonic()) {
-                Retry::After(d) => d,
-                Retry::GiveUp => self.policy.backoff.max,
-            };
+            let delay = delay_of(
+                backoff.failed(self.clock.monotonic()),
+                self.policy.backoff.max,
+            );
             let delay = err
                 .retry_after()
                 .map_or(delay, |asked| asked.max(delay))
                 .min(self.policy.backoff.max);
+            report(Progress {
+                attempt: made,
+                of: max,
+                phase: Phase::Waiting(delay),
+            });
             if self.clock.wait(delay, cancel).is_err() {
                 return Delivery {
                     channel: cfg.id.clone(),

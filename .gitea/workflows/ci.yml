@@ -189,12 +189,13 @@ jobs:
       # Merged line coverage over all test binaries, adapters included (the per-binary summary counts unused generic instances).
       # Native glue files are left out (crates/README.md: never logic, reviewed by hand), and so are paddock-proc's test child (a
       # re-executed test binary that its parent ends with SIGKILL, so its coverage data is never written) and paddock-ipc's (the same); paddock-ipc's endpoint/{unix,windows}.rs are
-      # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered).
+      # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered). paddock-chromium's fake browser
+      # runs in re-executed test binaries that are often ended by force (no coverage data), like paddock-proc's test child.
       # The gate (scripts/coverage-gate.mjs) leaves out only the `#[tauri::command]` attribute lines: llvm-cov charges every
       # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -312,6 +313,19 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-proc --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-proc --all-features --profile ci && cargo test -p paddock-proc --all-features --doc
 
+      - name: paddock-runtime
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-runtime --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-runtime --all-features --profile ci && cargo test -p paddock-runtime --all-features --doc
+
+      # The driver against its fake browser (Unix); the real-browser test runs only where CHROMIUM_TEST_PATH names a
+      # Chrome for Testing build, never an installed browser (rule 7).
+      - name: paddock-chromium
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-chromium --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-chromium --all-features --profile ci && cargo test -p paddock-chromium --all-features --doc
+
+      - name: paddock-mcp
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-mcp --all-targets --all-features -- -D warnings && cargo test -p paddock-mcp --all-features
       - name: paddock-archive
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-archive --all-targets --all-features -- -D warnings && cargo test -p paddock-archive --all-features
@@ -359,6 +373,14 @@ jobs:
       - name: paddock-archive
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-archive --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-archive --all-features --profile ci && cargo test -p paddock-archive --all-features --doc
+
+      - name: paddock-net
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-net --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-net --all-features --profile ci && cargo test -p paddock-net --all-features --doc
+
+      - name: paddock-mcp
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-mcp --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-mcp --all-features --profile ci && cargo test -p paddock-mcp --all-features --doc
 
       - name: paddock-build
         if: ${{ !cancelled() }}
