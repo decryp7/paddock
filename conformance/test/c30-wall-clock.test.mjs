@@ -55,8 +55,12 @@ test('C30 sleeps: a thread::sleep in a test that uses threads is flagged; alone,
   assert.equal(threadSleeps(sleepy('    let h = thread::spawn(|| work());\n    thread::sleep(Duration::from_millis(50));\n    h.join().unwrap();')).length, 1);
   assert.equal(threadSleeps(sleepy('    let flag = Arc::new(AtomicBool::new(false));\n    std::thread::sleep(Duration::from_millis(5));')).length, 1);
   assert.deepEqual(threadSleeps(sleepy('    thread::sleep(Duration::from_millis(5));\n    assert!(true);')), [], 'no threads in the test');
-  const [waived] = threadSleeps(sleepy('    let h = thread::spawn(|| work());\n    // conformance: hang-guard\n    thread::sleep(Duration::from_millis(5));'));
-  assert.equal(waived.waived, true);
+  const [waived] = threadSleeps(sleepy('    let h = thread::spawn(|| work());\n    // conformance: hang-guard — the OS has no event for this\n    thread::sleep(Duration::from_millis(5));'));
+  assert.equal(waived.waived, 'reason');
+  const [bare] = threadSleeps(sleepy('    let h = thread::spawn(|| work());\n    // conformance: hang-guard\n    thread::sleep(Duration::from_millis(5));'));
+  assert.equal(bare.waived, 'no-reason', 'the comment alone is not a waiver');
+  const [short] = threadSleeps(sleepy('    let h = thread::spawn(|| work());\n    thread::sleep(Duration::from_millis(5)); // conformance: hang-guard - ok'));
+  assert.equal(short.waived, 'no-reason', 'a one-word reason is not one');
   assert.deepEqual(threadSleeps('fn helper() { thread::spawn(|| thread::sleep(d)); }\n'), [], 'not a test');
   assert.deepEqual(threadSleeps(sleepy('    let h = thread::spawn(|| work());\n    // thread::sleep(d);\n    h.join().unwrap();')), []);
 });
@@ -82,4 +86,11 @@ test('C30 through the runner: sleeps in Rust and wall-clock expects in specs are
   const f = await findingsOf('C30', makeApp({ 'crates/a/tests/s.rs': rs, 'app/src/a.spec.ts': ts, 'app/e2e/b.ts': ts, 'app/src/app.ts': ts }));
   assert.deepEqual(f.map((x) => x.file).sort(), ['app/e2e/b.ts', 'app/src/a.spec.ts', 'crates/a/tests/s.rs']);
   assert.ok(f.every((x) => x.severity === 'warn'));
+});
+
+test('C30 through the runner: a sleep waiver needs a reason', async () => {
+  const body = (c) => sleepy(`    let h = thread::spawn(|| work());\n    ${c}\n    thread::sleep(Duration::from_millis(50));\n    h.join().unwrap();`);
+  assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/a.rs': body('// conformance: hang-guard — the kernel gives no event for a mtime tick') })), []);
+  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/a.rs': body('// conformance: hang-guard') }));
+  assert.match(f[0].message, /gives no reason/);
 });
