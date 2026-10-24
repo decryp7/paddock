@@ -3166,6 +3166,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-live"
+version = "0.1.0"
+dependencies = [
+ "paddock-commands",
+ "paddock-jobs",
+ "paddock-testkit",
+ "serde",
+ "serde_json",
+ "tauri",
+]
+
+[[package]]
 name = "paddock-log"
 version = "0.1.0"
 dependencies = [

@@ -100,6 +100,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
@@ -1130,6 +1131,37 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   four commands of `status::COMMANDS` (`pitwall_state`, `pitwall_connect`, `pitwall_cancel_pairing`, `pitwall_use_builtin`) over
   its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
   by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.
+
+## `paddock-live` (plan X29)
+
+Replaces Pitwall's `live.rs`, Dyno's `link.rs` pump, Pitcrew's `events.rs` forwarder, Spotter's push handling and the ordering gaps
+of Debrief's channels. The UI half is `@decryp7/paddock-ui/live` (see `ui/README.md`).
+
+```rust
+impl LiveState for Overview {                       // the app's state
+    type Delta = OverviewChange;
+    fn apply(&mut self, d: &OverviewChange) { /* the one fold */ }
+    fn merge(prev: &mut OverviewChange, next: &OverviewChange) -> bool { /* latest wins, or false */ }
+}
+let hub = Hub::new(Overview::default());
+let forwarder = paddock_live::tauri::register(app.handle(), "overview", &hub)?;   // paddock://live/overview + live_snapshot
+std::thread::spawn(move || paddock_live::run(&hub, &mut source, &clock, default_policy(), &cancel));
+// a Source: connect, `feed.seed(state)` (link becomes connected, a snapshot goes out), then `feed.publish(delta)` until it ends
+```
+
+- Sequence: every `publish` is the next number; a frame is `from..=seq` because merged deltas stand for several numbers. A window
+  applies a delta only when `from` is next; a gap, a reload or a new window asks `live_snapshot`. Frames are camelCase JSON with a
+  `kind` tag (`snapshot`, `delta`, `link`).
+- Bounded: each `Subscription` queues at most `with_queue_cap` frames (4 to 4096, default 256). Deltas merge into the queued one when
+  `LiveState::merge` says so (a memory sample replaces the last); a consumer that still falls behind has its queue replaced by one
+  snapshot (`resyncs()` counts it): memory never grows, nothing is lost silently. `reset` (a reseed) also replaces what was queued.
+- `run` waits its delays on the injected `Clock` (a `FakeClock` in specs); the link announces `reconnecting { attempt, retryInMs,
+  reason }` before each wait, `down` when the policy gives up and `stopped` on cancel. A connection that lasted `reset_after` starts
+  the delays over. Reasons are short sentences, never content.
+- A panic in an app's `apply` poisons nothing: locks recover (`PoisonError::into_inner`).
+- Channel names are `[a-z][a-z0-9-]{0,31}`; the command is `Query [WINDOW]` and async (rule 10); dialog windows reach it only through a
+  contract (`handler_with_grants`). Not covered: per-call streams to one caller (Debrief's `tauri::ipc::Channel` for search results
+  and the live tail) stay in the app; a feed is for shared state.
 
 ## `paddock-testkit` (plan X40)
 
