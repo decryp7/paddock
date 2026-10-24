@@ -15,6 +15,7 @@ import {
 import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
+import { defineLanguageSettingsPage } from '@decryp7/paddock-ui/shell/i18n/settings';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
@@ -101,8 +102,14 @@ export const SERVICE_PAGE = defineServiceSettingsPage({
   load: () => import('@decryp7/paddock-ui/shell/service/page').then((m) => m.PdServicePage),
 });
 
+/** Settings > Language: System default, English and the pseudo-locale (the demo ships no real translation). */
+export const LANGUAGE_PAGE = defineLanguageSettingsPage({
+  load: () => import('@decryp7/paddock-ui/shell/i18n/page').then((m) => m.PdLanguagePage),
+});
+
 /** The demo's settings pages: those without a component of their own show the Rust section of the same id in the shell's generic form. */
 export const DEMO_SETTINGS_PAGES = [
+  LANGUAGE_PAGE,
   SERVICE_PAGE,
   defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
   defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100 }),
