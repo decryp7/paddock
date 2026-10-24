@@ -116,3 +116,32 @@ test('the shared actions follow the repo rules: no AI attribution text, Gitea-co
     assert.doesNotMatch(text, /actions\/(?:upload|download)-artifact@v4/, `${f}: Gitea supports v3 only`);
   }
 });
+
+test('setup-rust wires the shared sccache backend: inputs from Gitea variables, Linux-only Redis, a cache that never fails a build', () => {
+  const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  const declared = declaredInputs(text);
+  for (const i of ['sccache-redis-endpoint', 'sccache-redis-db']) assert.ok(declared.includes(i), `${i} is declared`);
+  assert.match(text, /default: \$\{\{ vars\.SCCACHE_REDIS_ENDPOINT \}\}/);
+  assert.match(text, /default: \$\{\{ vars\.SCCACHE_REDIS_DB \}\}/);
+  assert.match(text, /REDIS_ENDPOINT: \$\{\{ inputs\.sccache-redis-endpoint \}\}/);
+  assert.match(text, /REDIS_DB: \$\{\{ inputs\.sccache-redis-db \}\}/);
+  for (const v of ['RUSTC_WRAPPER=sccache', 'CARGO_INCREMENTAL=0', 'SCCACHE_IGNORE_SERVER_IO_ERROR=1', 'SCCACHE_REDIS_ENDPOINT=', 'SCCACHE_REDIS_DB=']) {
+    assert.ok(text.includes(v), `${v} is exported`);
+  }
+  // Redis only on Linux and only when an endpoint is set; otherwise sccache's local disk. The database is never part of the URL.
+  assert.match(text, /\[ "\$RUNNER_OS" = "Linux" \] && \[ -n "\$REDIS_ENDPOINT" \]/);
+  assert.match(text, /sccache: local disk/);
+  assert.doesNotMatch(text, /SCCACHE_REDIS_ENDPOINT=\$REDIS_ENDPOINT\//);
+  // No sccache on the runner: a notice and plain rustc, never a failure.
+  assert.match(text, /not installed on this runner; building without the shared compile cache/);
+});
+
+test('the sccache-stats action prints the statistics and tolerates a missing sccache; Paddock CI uses both on Linux Rust jobs', () => {
+  const stats = read(join(ACTIONS, 'sccache-stats', 'action.yml'));
+  assert.match(stats, /sccache --show-stats/);
+  assert.match(stats, /command -v sccache/);
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  assert.ok((ci.match(/\.\/\.gitea\/actions\/setup-rust/g) ?? []).length >= 3, 'setup-rust in the crates, crate (Linux) and shell demo jobs');
+  assert.ok((ci.match(/\.\/\.gitea\/actions\/sccache-stats/g) ?? []).length >= 3, 'stats after each');
+  assert.match(ci, /uses: \.\/\.gitea\/actions\/setup-rust\n\s+if: runner\.os == 'Linux'/);
+});
