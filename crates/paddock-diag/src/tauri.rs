@@ -336,7 +336,7 @@ fn start_save<R: Runtime>(
         })?;
         cached.collected.assemble(description)
     };
-    {
+    let ctx = {
         let mut active = lock(&state.active);
         if active.saving {
             return Err(refuse(
@@ -346,13 +346,16 @@ fn start_save<R: Runtime>(
             ));
         }
         active.saving = true;
-        active.job = None;
-    }
+        // The job exists before the save thread starts, so a Cancel that follows at once finds it (no phase without a job).
+        let ctx = jobs.register(JOB_KIND, "Saving the problem report", None);
+        active.job = Some(ctx.id());
+        ctx
+    };
     let suggested = suggested_name(&state.app, state.clock.now());
     let (app, state, label) = (app.clone(), state.clone(), label.to_string());
     // The save blocks on the native dialog, so it runs on the blocking pool, never on the IPC or main thread.
     ::tauri::async_runtime::spawn_blocking(move || {
-        let outcome = run_save(&state, &jobs, picker.as_ref(), &label, &suggested, &report);
+        let outcome = run_save(ctx, picker.as_ref(), &label, &suggested, &report);
         {
             let mut active = lock(&state.active);
             active.saving = false;
@@ -367,15 +370,12 @@ fn start_save<R: Runtime>(
 /// The save, start to finish, as one job from the first moment: choosing where (a native dialog; Cancel works here too), then
 /// packing with bytes progress. Never panics (the job contains its body's panic).
 fn run_save(
-    state: &Diagnostics,
-    jobs: &Arc<paddock_jobs::JobRegistry>,
+    ctx: paddock_jobs::JobContext,
     picker: &dyn SavePicker,
     label: &str,
     suggested: &str,
     report: &crate::Report,
 ) -> SaveOutcome {
-    let ctx = jobs.register(JOB_KIND, "Saving the problem report", None);
-    lock(&state.active).job = Some(ctx.id());
     let mut dismissed = false;
     let result = ctx.run(|ctx| {
         ctx.phase(Phase::discovering("choose", "Choosing where to save"));
