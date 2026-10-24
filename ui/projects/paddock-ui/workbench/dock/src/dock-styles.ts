@@ -53,16 +53,6 @@ pd-dock .pd-dock-ah-flyout-left .pd-dock-ah-grip { right: -3px; top: 0; bottom: 
 pd-dock .pd-dock-ah-flyout-right .pd-dock-ah-grip { left: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
 pd-dock .pd-dock-ah-flyout-bottom .pd-dock-ah-grip { top: -3px; left: 0; right: 0; height: 6px; cursor: ns-resize; }
 
-/* The notice over the dock: calm, one action. */
-pd-dock .pd-dock-notice {
-  position: absolute; z-index: 995; inset-inline-start: 50%; top: 8px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 16px);
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; padding: 6px 8px 6px 12px; border-radius: var(--pd-radius-popover);
-  background: var(--pd-surface-3); border: 1px solid var(--pd-border-strong); color: var(--pd-text); box-shadow: var(--pd-shadow-2);
-}
-
-/* The message takes the first line; the buttons wrap below it in a narrow dock. */
-pd-dock .pd-dock-notice > span { flex: 1 1 14em; min-width: 0; }
-
 /* Buttons the dock draws itself (notice, error card). */
 .pd-dock-btn, pd-dock .pd-dock-btn {
   min-height: 24px; padding: 2px 10px; border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control);

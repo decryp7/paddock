@@ -72,14 +72,22 @@ export class ActivityItems {
     return Array.isArray(entries) ? entries.slice(0, 50) : [];
   }
 
-  /** Highlighted: `active`, else its view is open or its Explorer section is shown. */
+  /**
+   * Selected (the one highlighted item, review P2-5): `active` when the item says, else its Explorer section owns the side
+   * bar. An item that shows a view is never "on" for that: it gets the open dot (`isOpen`).
+   */
   isActive(item: ActivityItemDef): boolean {
     const ctx = this.registry.context();
     if (item.active) return evaluate(item.active, ctx, false) === true;
     const run = item.run;
-    if ('view' in run) return this.ports.openPanels().some((p) => p === run.view || p.startsWith(`${run.view}#`));
     if ('explorer' in run) return this.ports.explorerShown() === run.explorer;
     return false;
+  }
+
+  /** The item's view is open in the dock (a dot under the icon). */
+  isOpen(item: ActivityItemDef): boolean {
+    const run = item.run;
+    return 'view' in run && this.ports.openPanels().some((p) => p === run.view || p.startsWith(`${run.view}#`));
   }
 
   badge(item: ActivityItemDef): string | null {
