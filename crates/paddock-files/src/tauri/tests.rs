@@ -122,7 +122,7 @@ fn a_dialog_window_picks_for_its_host_and_the_app_reads_with_the_grant() {
         json!({ "request": { "kind": "openFile", "title": "Open" } }),
     )
     .unwrap();
-    assert_eq!(picked, json!([s(&std::fs::canonicalize(&log).unwrap())]));
+    assert_eq!(picked, json!([s(&crate::path::canonical(&log).unwrap())]));
     assert!(
         invoke(&main, "read_it", json!({ "path": s(&log) })).is_ok(),
         "the dialog's grant belongs to its host"
@@ -290,7 +290,7 @@ fn dropped_files_are_granted_to_the_window_and_announced_and_closing_forgets() {
         &drop(vec![log.clone(), t.path().join("missing")]),
     );
     let got = dropped.recv_timeout(Duration::from_secs(10)).unwrap();
-    assert_eq!(got.paths, vec![s(&std::fs::canonicalize(&log).unwrap())]);
+    assert_eq!(got.paths, vec![s(&crate::path::canonical(&log).unwrap())]);
     assert!(invoke(&w2, "read_it", json!({ "path": s(&log) })).is_ok());
     assert!(
         invoke(&pop, "read_it", json!({ "path": s(&log) })).is_ok(),

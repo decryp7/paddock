@@ -205,10 +205,13 @@ fn profiles_are_unique_and_leftovers_of_dead_processes_are_swept() {
         "this process's own profiles stay"
     );
     assert_eq!(sweep_profiles(&base.path().join("none")), 0);
-    let vars = paddock_env::MapVars::new().with("HOME", base.path().as_os_str());
+    let vars = paddock_env::MapVars::new()
+        .with("HOME", base.path().as_os_str())
+        .with("USERPROFILE", base.path().as_os_str())
+        .with("LOCALAPPDATA", base.path().as_os_str());
     let app = paddock_env::AppId::new("demo", "Demo").unwrap();
-    let dirs =
-        paddock_env::AppDirs::resolve(&app, paddock_env::Os::Linux, &vars, None, false).unwrap();
+    let dirs = paddock_env::AppDirs::resolve(&app, paddock_env::Os::current(), &vars, None, false)
+        .unwrap();
     assert_eq!(profiles_dir(&dirs), dirs.cache().join("browser-profiles"));
     assert!(format!("{:?}", opts(base.path())).contains("Headless"));
 }
