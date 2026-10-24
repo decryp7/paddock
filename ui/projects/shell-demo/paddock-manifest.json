@@ -254,6 +254,7 @@
     "sd.home",
     "sd.keys",
     "sd.lab",
+    "sd.pitwall",
     "sd.runners"
   ],
   "statusItems": [
@@ -262,6 +263,7 @@
   "settingsPages": [
     "pd.appearance",
     "pd.logging",
+    "pd.login",
     "pd.notifications",
     "sd.general",
     "sd.storage"
@@ -308,6 +310,10 @@
       "requiredChoice": false,
       "minSize": null,
       "commands": [
+        "open_login_items",
+        "service_install",
+        "service_repair",
+        "service_status",
         "settings_overview",
         "settings_reset",
         "settings_set"
@@ -389,6 +395,7 @@
     }
   },
   "healthServices": [
+    "sd.agent",
     "sd.engine",
     "sd.index"
   ],
@@ -413,6 +420,7 @@
     "pd.settings.logging": "Logging",
     "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",
+    "pd.settings.service": "Background service",
     "pd.settings.title": "Settings",
     "pd.updates.notification.available": "Update available",
     "pd.updates.open": "Check for updates…",
@@ -433,6 +441,7 @@
     "sd.engine.break": "Break the demo engine",
     "sd.fail": "Fail on purpose",
     "sd.greet": "Say hello",
+    "sd.health.agent": "the demo agent",
     "sd.health.engine": "the demo engine",
     "sd.health.index": "the search index",
     "sd.index.break": "Break the search index",
@@ -446,6 +455,7 @@
     "sd.page.home": "Overview",
     "sd.page.keys": "Keyboard",
     "sd.page.lab": "Lab",
+    "sd.page.pitwall": "Local AI",
     "sd.page.runners": "Runners",
     "sd.pseudo-locale": "Pseudo-locale",
     "sd.reset": "Reset greetings",

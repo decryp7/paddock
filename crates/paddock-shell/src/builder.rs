@@ -46,6 +46,7 @@ type BoxError = Box<dyn Error + Send + Sync>;
 type Part<R, T> = Box<dyn FnOnce(&AppHandle<R>) -> T + Send>;
 type DiagSetup<R> =
     Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send>;
+type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
 
@@ -58,6 +59,7 @@ pub struct Builder<R: Runtime> {
     health_setup: Option<HealthAdjust<R>>,
     settings: Option<Part<R, Settings>>,
     diagnostics: Option<DiagSetup<R>>,
+    service: Option<ServiceSetup<R>>,
     sections: Vec<Arc<dyn Configurable>>,
     startup: Option<Startup<R>>,
     updater: Option<Part<R, UpdatesBuilder>>,
@@ -79,6 +81,7 @@ impl<R: Runtime> Builder<R> {
             health_setup: None,
             settings: None,
             diagnostics: None,
+            service: None,
             sections: Vec::new(),
             startup: None,
             updater: None,
@@ -134,6 +137,19 @@ impl<R: Runtime> Builder<R> {
         f: impl FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send + 'static,
     ) -> Self {
         self.diagnostics = Some(Box::new(f));
+        self
+    }
+
+    /// The app's background service (plan X4): its manager, health entry and the app's own login item. The shell manages
+    /// it (`service_status`, `service_repair`, `service_install`, `open_login_items` and the `paddock://service` event),
+    /// keeps the health entry current with its Repair, runs the start-up checks (rule 24) and registers the `pd.login`
+    /// "Start at login" section, whose switch registers or removes the service and the login item together (only a
+    /// change by the user acts; the value at start is never applied).
+    pub fn service(
+        mut self,
+        f: impl FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send + 'static,
+    ) -> Self {
+        self.service = Some(Box::new(f));
         self
     }
 
@@ -263,6 +279,10 @@ impl<R: Runtime> Builder<R> {
                 paddock_diag::tauri::invoke_handler(),
             )
             .route(
+                &paddock_service::COMMANDS,
+                paddock_service::tauri::invoke_handler(),
+            )
+            .route(
                 &paddock_jobs::tauri::COMMANDS,
                 paddock_jobs::tauri::invoke_handler(),
             )
@@ -343,6 +363,32 @@ impl<R: Runtime> Builder<R> {
             }
         }
 
+        if let Some(f) = self.service {
+            let part = f(app).map_err(|e| named("the background service", e))?;
+            let service = paddock_service::tauri::install(app, part.setup);
+            let control = service.control().clone();
+            let autostart = Arc::new(std::sync::Mutex::new(part.autostart));
+            let switch = paddock_service::login::LoginSwitch::default();
+            let section =
+                paddock_service::login::launch_at_login_section(&self.identity.name, true);
+            settings
+                .register(paddock_settings::section(section, move |values| {
+                    let on = values
+                        .bool(paddock_service::login::LAUNCH_AT_LOGIN)
+                        .unwrap_or(false);
+                    if switch.changed(on) {
+                        // Registering is slow: never on the settings call's thread (rule 10).
+                        control
+                            .spawn_launch_at_login(on, autostart.clone())
+                            .map_err(|e| -> paddock_settings::ApplyError {
+                                format!("The change could not start: {e}").into()
+                            })?;
+                    }
+                    Ok(())
+                }))
+                .map_err(|e| named("the Start at login settings", e))?;
+        }
+
         let dialogs = Dialogs::from_json(self.contracts.as_deref().unwrap_or(NO_CONTRACTS))
             .map_err(|e| named("the dialog contracts", e))?;
         app.manage(dialogs);
@@ -386,6 +432,31 @@ impl<R: Runtime> Builder<R> {
             f(app)?;
         }
         Ok(())
+    }
+}
+
+/// What [`Builder::service`] sets up.
+pub struct ServicePart {
+    setup: paddock_service::tauri::Setup,
+    autostart: Box<dyn paddock_service::login::Autostart>,
+}
+
+impl ServicePart {
+    /// The service (`paddock_service::tauri::Setup::new(manager).health("agent")`), with no login item of the app's own.
+    pub fn new(setup: paddock_service::tauri::Setup) -> ServicePart {
+        ServicePart {
+            setup,
+            autostart: Box::new(paddock_service::login::NoAutostart),
+        }
+    }
+
+    /// The app's own login item (e.g. over `tauri-plugin-autostart`), switched together with the service.
+    pub fn autostart(
+        mut self,
+        autostart: Box<dyn paddock_service::login::Autostart>,
+    ) -> ServicePart {
+        self.autostart = autostart;
+        self
     }
 }
 
@@ -436,3 +507,6 @@ fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
         paddock_health::tauri::flush(app);
     }
 }
+
+#[cfg(test)]
+mod tests;

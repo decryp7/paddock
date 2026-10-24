@@ -1225,6 +1225,15 @@ fn malformed_requests_are_refused_before_they_run() {
             json!({ "choice": "later", "remember": true }),
         ),
         ("window_resolve_open", json!({ "choice": "x" })),
+        ("window_resolve_close", json!({ "choice": "later" })),
+        (
+            "window_resolve_close",
+            json!({ "choice": "close", "remember": "yes" }),
+        ),
+        (
+            "window_resolve_close",
+            json!({ "choice": 7, "remember": true }),
+        ),
     ] {
         assert!(invoke(&main, cmd, body).is_err(), "{cmd}");
     }

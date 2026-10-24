@@ -69,9 +69,8 @@ pub fn candidate_dirs(vars: &dyn Vars, os: Os) -> Vec<PathBuf> {
         let home = PathBuf::from(home);
         return vec![home.clone(), home.join("data")];
     }
-    let Ok(app) = AppId::new("pitwall", "Pitwall") else {
-        return vec![];
-    };
+    // Constants that satisfy the id rules (a test covers it).
+    let app = AppId::new("pitwall", "Pitwall").expect("the constant app id is valid");
     // The override variable was handled above; the portable flag and `<ID>_HOME` of the *calling* app do not apply to Pitwall.
     match AppDirs::resolve(&app, os, vars, None, false) {
         Ok(dirs) => {
