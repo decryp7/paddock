@@ -1,13 +1,15 @@
 import { inject } from '@angular/core';
 import { AppearanceStore, type AppContextFactory, type Appearance } from '@decryp7/paddock-ui/shell';
 import { LanguageStore, PSEUDO_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
+import { UndoStore, type UndoContext } from '@decryp7/paddock-ui/shell/undo';
+import { DemoActivity } from './demo-activity';
 import { DEMO_ENGINE } from './demo-engine';
 import { DemoEngineData } from './demo-health';
 import { GreetingLog } from './greeting-log';
 import { RunnerData } from './runner-data';
 
 /** The demo's part of the shell context: small and purpose-built (interface segregation). */
-export interface DemoContext {
+export interface DemoContext extends UndoContext {
   readonly greetings: () => number;
   greet(): number;
   reset(): void;
@@ -66,9 +68,18 @@ export const demoContext: AppContextFactory<DemoContext> = () => {
   const appearance = inject(AppearanceStore);
   const language = inject(LanguageStore);
   const runners = inject(RunnerData);
+  const undo = inject(UndoStore);
+  const activity = inject(DemoActivity);
   return {
+    undo,
     greetings: log.greetings,
-    greet: () => log.greet(),
+    greet: () => {
+      const n = log.greet();
+      // Each greeting can be taken back from Edit > Undo, the toast or the Activity page (plan X44).
+      undo.record({ label: 'greeting', announce: true, do: () => void log.greet(), undo: () => log.undoGreet() });
+      activity.recordGreeting(n);
+      return n;
+    },
     reset: () => log.reset(),
     startJob: () => engine.startImport(),
     startQuietJob: () => engine.startQuiet(),

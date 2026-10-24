@@ -57,6 +57,7 @@ export {
   panelId,
   parsePanelId,
   isOffered,
+  panelTitle,
   type PanelRef,
 } from './src/registry';
 export {

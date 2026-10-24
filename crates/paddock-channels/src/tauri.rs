@@ -7,42 +7,33 @@
 //! - `channels_test` returns at once with a test id; the outcome arrives as a [`ChannelsEvent::Test`] (rule 10).
 
 use crate::config::{ChannelConfig, Settings};
-use crate::control::{ChannelsControl, ChannelsError, ChannelsEvent, ChannelsView};
+use crate::control::{ChannelsControl, ChannelsError, ChannelsEvent, ChannelsView, TestStarted};
 use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Emitter, Manager as _, Runtime, State};
-use serde::Serialize;
 use std::sync::Arc;
 
 /// The event every update is sent on.
 pub const EVENT: &str = crate::EVENT_NAME;
 
 /// Manages the control (a second call returns the managed one).
-pub fn install<R: Runtime>(
+pub fn install<R: Runtime, E>(
     app: &AppHandle<R>,
-    build: impl FnOnce(crate::control::Emit) -> Arc<ChannelsControl>,
-) -> Arc<ChannelsControl> {
+    build: impl FnOnce(crate::control::Emit) -> Result<Arc<ChannelsControl>, E>,
+) -> Result<Arc<ChannelsControl>, E> {
     if let Some(existing) = app.try_state::<Arc<ChannelsControl>>() {
-        return existing.inner().clone();
+        return Ok(existing.inner().clone());
     }
     let handle = app.clone();
     let emit: crate::control::Emit = Arc::new(move |e: &ChannelsEvent| {
         // A failed emit means the app is closing; nothing is left to tell.
         let _ = handle.emit(EVENT, e);
     });
-    let control = build(emit);
+    let control = build(emit)?;
     app.manage(control.clone());
-    control
+    Ok(control)
 }
 
 type Managed<'a> = State<'a, Arc<ChannelsControl>>;
-
-/// The reply of `channels_test`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TestStarted {
-    /// Matches the `testId` of the event that reports the outcome.
-    pub test_id: u64,
-}
 
 /// The settings and which secrets are stored.
 #[::tauri::command]
