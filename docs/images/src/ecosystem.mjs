@@ -14,9 +14,9 @@ const W = 1600; // H follows from the layout (see the legend)
 
 // Layout: Pacenotes, Debrief and Sighter form a triangle on top; Pitcrew, Dyno and Spotter below; Pitwall is the band between.
 const row1 = [
-  { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#831826', lines: ['Understands code in any', 'language: link graph, code', 'review, local search.'] },
+  { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#657C1F', lines: ['Understands code in any', 'language: link graph, code', 'review, local search.'] },
   { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
-  { id: 'sighter', name: 'Sighter', accent: '#00B8D9', lines: ['Finds any UI element by', 'sight. MCP server and', 'agent for any desktop.'] },
+  { id: 'sighter', name: 'Sighter', accent: '#975EA2', lines: ['Finds any UI element by', 'sight. MCP server and', 'agent for any desktop.'] },
 ];
 const row3 = [
   { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] },

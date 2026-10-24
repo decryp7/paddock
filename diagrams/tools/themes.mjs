@@ -32,7 +32,8 @@ export const APPS = {
   pitcrew: { name: 'Pitcrew', accent: ['#BF3A0C', '#FF7A45'], core: GREEN, ui: INDIGO },
   pitwall: { name: 'Pitwall', accent: ['#6D3FD6', '#A58BFA'], core: GREEN, ui: SKY },
   dyno: { name: 'Dyno', accent: ['#B01E6E', '#F063A8'], core: GREEN, ui: INDIGO },
-  sighter: { name: 'Sighter', accent: ['#0A8CA8', '#00B8D9'], core: GREEN, ui: INDIGO },
+  sighter: { name: 'Sighter', accent: ['#884F92', '#C488CF'], core: GREEN, ui: INDIGO },
+  pacenotes: { name: 'Pacenotes', accent: ['#576D07', '#8DA74E'], core: INDIGO, ui: SKY },
   spotter: { name: 'Spotter', accent: ['#0B7A6E', '#2CC4B0'], core: INDIGO, ui: SKY },
 };
 

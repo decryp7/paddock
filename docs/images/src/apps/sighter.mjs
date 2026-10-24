@@ -1,6 +1,6 @@
 export default {
   id: 'sighter', name: 'Sighter', icon: 'sighter', planned: true, status: 'Planned', platforms: 'Windows, macOS and Linux',
-  accent: { dark: '#00B8D9', light: '#00788F', fill: '#00788F' },
+  accent: { dark: '#C488CF', light: '#884F92', fill: '#975EA2' },
   headline: ['Find any UI', 'element by sight.'],
   sub: ['Vision-based UI automation that works alongside', 'your existing UI tests (FlaUI, pywinauto, Appium', 'and more). Everything runs on your machine.'],
   features: {

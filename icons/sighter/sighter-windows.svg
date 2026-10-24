@@ -1,28 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>Sighter</title>
   <defs>
-    <linearGradient id="s1bg" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#4FD8F0"/><stop offset="0.55" stop-color="#00B8D9"/><stop offset="1" stop-color="#0094B8"/>
+    <linearGradient id="s25bg" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#BFA2EE"/><stop offset="0.55" stop-color="#A686D6"/><stop offset="1" stop-color="#8B6DB5"/>
     </linearGradient>
-    <radialGradient id="s1sheen" cx="304.32000000000005" cy="40" r="802.4" gradientUnits="userSpaceOnUse">
+    <radialGradient id="s25sheen" cx="304.32000000000005" cy="40" r="802.4" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="s1edge" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
+    <linearGradient id="s25edge" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
       <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
     </linearGradient>
-    <clipPath id="s1clip"><path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z"/></clipPath>
-    <filter id="s1gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="11.46" stdDeviation="13.75" flood-color="#00485A" flood-opacity="0.32"/></filter>
+    <clipPath id="s25clip"><path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z"/></clipPath>
+    <filter id="s25gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="11.46" stdDeviation="13.75" flood-color="#3C2D52" flood-opacity="0.32"/></filter>
     
     
   </defs>
-  <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="url(#s1bg)"/>
-  <g clip-path="url(#s1clip)">
+  <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="url(#s25bg)"/>
+  <g clip-path="url(#s25clip)">
     <path d="M0 965.12L965.12 0L1097.2800000000002 0L0 1097.2800000000002Z" fill="#FFFFFF" opacity="0.08"/>
     <path d="M0 1163.36L1163.36 0L1201.12 0L0 1201.12Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
-    <rect x="40" y="40" width="944" height="944" fill="url(#s1sheen)"/>
-    <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="none" stroke="url(#s1edge)" stroke-width="6.87"/>
+    <rect x="40" y="40" width="944" height="944" fill="url(#s25sheen)"/>
+    <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="none" stroke="url(#s25edge)" stroke-width="6.87"/>
     
   </g>
-  <g filter="url(#s1gs)" transform="translate(512 512) scale(1.15) translate(-512 -512)"><g opacity="0.6"><path d="M727.6 607.99A236 236 0 0 1 607.99 727.6M416.01 727.6A236 236 0 0 1 296.4 607.99M296.4 416.01A236 236 0 0 1 416.01 296.4M607.99 296.4A236 236 0 0 1 727.6 416.01" fill="none" stroke="#00303B" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><path d="M728 512L812 512M512 728L512 812M296 512L212 512M512 296L512 212" fill="none" stroke="#00303B" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M436 392L436 620L498.32 562.24L543.92 661.04L598.64 638.24L553.04 540.96L639.68 540.96Z" fill="#00303B" stroke="#00303B" stroke-width="20" stroke-linejoin="round"/></g>
+  <g filter="url(#s25gs)" transform="translate(512 512) scale(1.15) translate(-512 -512)"><g opacity="0.6"><path d="M727.6 607.99A236 236 0 0 1 607.99 727.6M416.01 727.6A236 236 0 0 1 296.4 607.99M296.4 416.01A236 236 0 0 1 416.01 296.4M607.99 296.4A236 236 0 0 1 727.6 416.01" fill="none" stroke="#2D1D43" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><path d="M728 512L812 512M512 728L512 812M296 512L212 512M512 296L512 212" fill="none" stroke="#2D1D43" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M436 392L436 620L498.32 562.24L543.92 661.04L598.64 638.24L553.04 540.96L639.68 540.96Z" fill="#2D1D43" stroke="#2D1D43" stroke-width="20" stroke-linejoin="round"/></g>
 </svg>

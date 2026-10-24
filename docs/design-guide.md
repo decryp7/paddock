@@ -123,12 +123,11 @@ accent-coloured text is never placed directly beside a warning. Existing pairs w
 tests in `paddock-ui` check both new accents: CIEDE2000 >= 15 from every status colour and >= 12 from every other
 accent (normal vision), with the usual contrast targets.
 
-App icon tiles are their own palette (Spotter: amber tile, teal accent). A plum Sighter tile (#975EA2) drops the
-family's smallest OKLab distance (`icons/tools/cvd.mjs`) to 10.2 normal and 5.1 deuteranopia (against Dyno's tile); an
-olive Pacenotes tile (#657C1F) to 1.6 protanopia (against Pitcrew). The closest tiles that keep the family minimum
-(17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan) are a lavender Sighter tile #A686D6 (dark ink) and a bronze
-Pacenotes tile #6D590F (white ink); until the design lead decides, the icons keep their cyan (Sighter) and crimson
-(Pacenotes) tiles.
+App icon tiles are their own palette (Spotter: amber tile, teal accent). The tile closest to each new accent that keeps
+the family's smallest OKLab distance (`icons/tools/cvd.mjs`: 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan) was
+chosen (2026-10-24): Sighter on a lavender tile #A686D6 with a dark glyph (#2D1D43, 5.1:1; white reaches only 3.0:1),
+Pacenotes on a bronze-olive tile #6D590F with a white glyph (6.8:1). A plum tile (#975EA2) would have dropped the
+family to 10.2 normal and 5.1 deuteranopia against Dyno, an olive tile (#657C1F) to 1.6 protanopia against Pitcrew.
 
 Accent rules: primary button, selected nav item (tinted bg 14% + 2 px left or full tint, accent icon), focus ring (2 px
 accent, 2 px offset), links, the single highlighted chart series, progress of the app's own primary metric. Not

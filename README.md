@@ -1,7 +1,7 @@
 # Paddock
 
 <p align="center">
-  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=72d60a6a" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%"></a>
+  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=e0b94c96" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%"></a>
 </p>
 
 <p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>

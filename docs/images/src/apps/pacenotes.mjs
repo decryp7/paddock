@@ -1,6 +1,6 @@
 export default {
   id: 'pacenotes', name: 'Pacenotes', icon: 'pacenotes', planned: true, status: 'Planned', platforms: 'Windows, macOS and Linux',
-  accent: { dark: '#EE6677', light: '#831826', fill: '#831826' },
+  accent: { dark: '#8DA74E', light: '#576D07', fill: '#657C1F' },
   headline: ['Understand your', 'code, locally.'],
   sub: ['Navigate, review, diagram and trace a repository,', 'and serve it to local AI over MCP.'],
   features: {

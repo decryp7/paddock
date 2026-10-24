@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 32 32">
   <title>Sighter 48px</title>
   <defs>
-    <linearGradient id="s5bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4FD8F0"/><stop offset="1" stop-color="#0094B8"/></linearGradient>
+    <linearGradient id="s29bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BFA2EE"/><stop offset="1" stop-color="#8B6DB5"/></linearGradient>
     
   </defs>
-  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#s5bg)"/>
-  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#00485A" stroke-opacity="0.35" stroke-width="0.5"/>
-  <g opacity="0.6"><path d="M26.05 20.47A11 11 0 0 1 20.47 26.05M11.53 26.05A11 11 0 0 1 5.95 20.47M5.95 11.53A11 11 0 0 1 11.53 5.95M20.47 5.95A11 11 0 0 1 26.05 11.53" fill="none" stroke="#00303B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M10.3 8.6L10.3 21.35L13.79 18.12L16.34 23.65L19.4 22.37L16.85 16.93L21.69 16.93Z" fill="#00303B"/>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#s29bg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#3C2D52" stroke-opacity="0.35" stroke-width="0.5"/>
+  <g opacity="0.6"><path d="M26.05 20.47A11 11 0 0 1 20.47 26.05M11.53 26.05A11 11 0 0 1 5.95 20.47M5.95 11.53A11 11 0 0 1 11.53 5.95M20.47 5.95A11 11 0 0 1 26.05 11.53" fill="none" stroke="#2D1D43" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M10.3 8.6L10.3 21.35L13.79 18.12L16.34 23.65L19.4 22.37L16.85 16.93L21.69 16.93Z" fill="#2D1D43"/>
 </svg>
