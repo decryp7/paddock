@@ -585,3 +585,9 @@ request scheduler (`scheduler.rs`, LLM priorities), Pitcrew's Gitea API client (
 logic and SSRF guard (in X16 already), the app's own mock data and `api.types.ts` DTOs (only the plumbing is X28), and
 hardware, elevation and domain redaction (§7). Sighter and Pacenotes have no code yet; their needs are counted where
 their plans name them.
+
+## Scope decision on the survey (user, 2026-10-24 night: "find all and add all")
+
+All of X27–X47 and every "Gap in planned items" go into 0.3.0. That settles the open calls: X31 path grants and X32
+storage page move to Paddock now (overriding the workbench.md deferral), and X45 sibling hand-off is shared (overriding
+§7). Every app's `core/native-feel.ts` / `native_feel.rs` is replaced by the shell's native feel.
