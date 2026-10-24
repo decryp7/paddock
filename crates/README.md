@@ -97,6 +97,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
+| `paddock-archive` | safe zip/tar/tar.gz/tar.xz unpacking: limits on entries, sizes and expansion ratio, traversal and link guards, layout and filter, all-or-nothing extract through a staging folder swapped in, progress and Cancel as a paddock-jobs job, fuzz target (plan X24) | yes (Debrief AI/video runtimes, Pitwall engines, Spotter renderer, Pitcrew runners); built |
 | `paddock-bench` | benchmark harness with stored budgets (rule 16): `Recorder` with an injected clock (startup, throughput, first event, query latency, memory), a results file per app, `budgets.toml` with tolerance and regression limit, `check`, and the `paddock-bench` command for the nightly workflow (plan X26) | yes (every app's benchmarks); built |
 
 | `paddock-cli` | command-line conventions: stable exit codes, errors with a next step, `--json` as one object (errors too), tables as text/CSV/JSON, throttled progress on stderr, `--help`/`--version` style, time and size arguments, the Ctrl+C flag (plan X25) | yes (Pitwall, Dyno, Debrief CLIs; agent and service programs); built |
@@ -687,6 +688,24 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   real keychain fails. `PADDOCK_SECRETS_REAL=1 cargo test -p paddock-secrets --features keyring -- --ignored` runs the one
   opt-in round trip by hand.
 
+## `paddock-archive` (plan X24)
+
+```rust
+use paddock_archive::{extract, extract_job, Layout, Links, Modes, NoControl, Options};
+
+let opts = Options { layout: Layout::Flat { max_depth: 2 }, links: Links::Copy, modes: Modes::AllExecutable, ..Options::default() }
+    .filter(|name| name == "llama-server" || name.ends_with(".so") || name.starts_with("LICENSE"));
+let report = extract(&archive, &runtime_dir, &opts, &NoControl)?;          // all or nothing: staging folder, then a rename
+// As a job (Jobs list, phases "Expanding"/"Unpacking" in bytes, Cancel):
+pool.spawn_job(registry.register("unpack", "Unpacking the runtime", None), move |ctx| extract_job(ctx, &archive, &dest, &opts))?;
+```
+
+The format is recognised from the content. Defaults: 10 000 entries, 4 GiB per file, 8 GiB in all, at most 200 times the archive's size
+(never below 64 MiB), 32 folders deep, 1024-character paths. Refused: `..`, absolute paths, drive letters, backslashes, control
+characters, Windows device names, names differing only in case, links when `Links::Refuse` (the default), links that leave the tree.
+`sweep_stale` removes staging leftovers of a crash. Fuzz: `cargo +nightly fuzz run archive` in `crates/paddock-archive`. Zstd is not read
+(no app needs it).
+
 ## `paddock-bench` (plan X26)
 
 Rule 16's budgets, checked the same way in every app. The app's benchmark records numbers; the harness stores, compares and fails.
@@ -1207,5 +1226,5 @@ and convert once at the command edge.
 included, and tells tauri-build to add none of its own; it creates an empty `binaries/<name>-<target>[.exe]` for each sidecar that is not
 built yet (a real file is never overwritten); and it reruns on `TAURI_UPDATER_PUBKEY`. The apps' `windows-app-manifest.xml` copies go.
 App extras (Debrief's commit id) stay in the app's build.rs before the call. `paddock_proc::self_test::handle(name, version, &checks)` is
-the first call in a sidecar's `main`: with `--self-test` it runs the checks, prints one line each and exits 0 or 1 (rule 23; C33 checks
+the first call in a sidecar's `main`: with `--self-test` it runs the checks, prints one line each and exits 0 or 1 (rule 23; C34 checks
 that every sidecar has it, and `paddock-sidecar self-test` starts them from the built bundle).

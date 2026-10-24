@@ -1,4 +1,4 @@
-// C35: a crate that parses untrusted input has a fuzz target (cargo-fuzz) or a never-panics test (plan X41; the AGENTS.md of
+// C36: a crate that parses untrusted input has a fuzz target (cargo-fuzz) or a never-panics test (plan X41; the AGENTS.md of
 // Debrief, Pitcrew and Pitwall promise a target for every parser). A parser crate is one named in `paddock.conformance.json`
 // "parserCrates", or detected: a public `parse*`/`decode*`/`from_str`/`from_bytes` function whose first parameter is text,
 // bytes or a reader. It is covered when a file of the repository that uses the crate (`crate_name::`) is a fuzz target
@@ -17,7 +17,7 @@ export function parseFunctions(source) {
 const identOf = (crate) => crate.replaceAll('-', '_');
 
 export default {
-  id: 'C35',
+  id: 'C36',
   title: 'Parser crates have a fuzz target or a never-panics test',
   rule: 40,
   run(ctx) {
@@ -43,7 +43,7 @@ export default {
       const covered = hardening.some((f) => inCrate(f) || ident.test(ctx.read(f) ?? ''));
       if (covered) continue;
       const first = found[0];
-      out.push(warn('C35', 40, first ? first.file : `${c.dir ? `${c.dir}/` : ''}Cargo.toml`, first?.line ?? 1, `${c.name} parses untrusted input${first ? ` (${found.length} function(s), first ${first.name})` : ''} but has no fuzz target or never-panics test`, 'Add a fuzz target (cargo fuzz) or `assert!(paddock_testkit::never_panics(&paddock_testkit::corpus(SEED), parse).is_empty())`; list a crate that is no parser in "parserSkip".'));
+      out.push(warn('C36', 40, first ? first.file : `${c.dir ? `${c.dir}/` : ''}Cargo.toml`, first?.line ?? 1, `${c.name} parses untrusted input${first ? ` (${found.length} function(s), first ${first.name})` : ''} but has no fuzz target or never-panics test`, 'Add a fuzz target (cargo fuzz) or `assert!(paddock_testkit::never_panics(&paddock_testkit::corpus(SEED), parse).is_empty())`; list a crate that is no parser in "parserSkip".'));
     }
     return out;
   },
