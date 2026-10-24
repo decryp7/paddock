@@ -5,6 +5,25 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `@decryp7/paddock-ui` data parts (plan X21): `/table` (`pd-table`: sortable columns with `aria-sort`, filter, column menu, optional
+  group rows, CDK virtual scroll above 100 lines, one tab stop with arrow/Home/End/Page keys, Enter opens, Shift+F10 and right-click
+  open the row menu, up to two hover icon actions plus a "..." button and the same list in the menu with destructive items last,
+  columns that drop out by the table's own width so nothing scrolls sideways at 320 px, middle ellipsis for paths); `/chart`
+  (`pd-chart` over ECharts loaded lazily through `PD_ECHARTS`, theme and palette from the tokens and re-read on a theme change,
+  accessible name and text twin, `chartOption` for line, area, bar, stacked bar and donut, escaped tooltips, works with the test
+  kit's `FakeECharts` through `fakeEchartsLoader`); `/forms` (`pd-field` and `pdFieldControl` for Signal Forms: label, hint and one error
+  with the alert icon at 14 px, when errors show, words for the built-in kinds). Based on Pitwall's and Spotter's `row-nav`/`row-menu`,
+  Pitcrew's, Pitwall's and Spotter's chart options and the settings window's field. Gallery sections, Playwright specs (gallery and
+  shell-demo; the demo's Runners page now uses `pd-table`) and a contact sheet at `ui/docs/review/x21-data/` for the independent
+  review (not approved yet).
+- `paddock-archive` (plan X24): safe unpacking of zip, tar, tar.gz and tar.xz. Limits on entries, file size, total size, expansion
+  ratio, depth and path length, checked while writing; `..`, absolute paths, drive letters, device names and case-only duplicates
+  refused; `Links` (refuse, skip, copy, keep-relative), `Layout` (keep, strip, flat), a name filter, file modes; all-or-nothing
+  `extract` through a staging folder that is swapped in; `extract_job` for a `paddock-jobs` job with phases and Cancel; `sweep_stale`;
+  a fuzz target.
+- `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
+  macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
+  deleted, one at a time, with disk and load checks (rule 7).
 - `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
   dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
   volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.
@@ -281,6 +300,14 @@ Conventional Commits; one semver tag for the whole repo.
 - Sentence case for the shell's About items: "Check for updates…", "What’s new" (and "What’s new in <version>").
 - The shell demo's product name is "Paddock Shell Demo"; its Rust side is the app (`apps/shell-demo/src-tauri` writes
   `app-commands.ts`); `paddock-shell`'s `tests/demo.rs` keeps only the plugin's checks over the demo's files.
+
+### Fixed
+- `paddock-service` (C21 VM smoke): the first Install of a bundled macOS agent failed on every fresh Mac with "macOS cannot find
+  ...'s launch agent". `SMAppService.status` is NotFound until the app registers once; that now reads as "not installed" and
+  Install registers (a real failure comes from `register`, with macOS's reason in the message). `parse_job` reads only the job's
+  own level of `launchctl print`, so macOS 26's coalition blocks (`state = active`) no longer make a running agent "refused".
+- The service smoke builds N+1 with the agent's version bumped too (it reported the old version for ever), installs to
+  /Applications as a user does, and checks the app's own status is "running" after install and after the update.
 
 ## 0.2.0 - 2026-10-24 (the first shell release)
 
