@@ -33,6 +33,9 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C29 | each window's initial JS (from `ng build --stats-json`) is within its `windowWeight` budget in `paddock.conformance.json`; a budget above measured + 10% warns (rule 35). `window-weight [kind...] [--max kB] [--record]` prints a window's weight and records budgets | the build stats |
 | C30 | Rust tests do not assert on the wall clock: in a `#[test]` fn an assertion comparing `elapsed()`, `Instant::now()`, `SystemTime::now()` (or a variable assigned from one) with a `Duration` is a warning; a hang guard of at least 10 s carries `// conformance: hang-guard`. Also a `thread::sleep` in a test that starts threads or uses channels, atomics or locks (the comment alone waives a deliberate one), and `Date.now()`/`performance.now()` differences under `expect` in TypeScript specs (not when the spec uses fake timers or `page.clock`). Use a `FakeClock` | |
 | C31 | ADR numbers are unique: no two files in `docs/adr/` share a `NNNN-` number, and numbers have four digits (parallel branches each took "the next one") | |
+| C32 | every `bundle.externalBin` sidecar is listed in `sidecars` of `paddock.conformance.json` (C04 starts it from the bundle with `--self-test`) and its crate handles `--self-test` (`paddock_proc::self_test::handle`) (rule 23) | |
+| C33 | every `untimed` entry of a `withCallTimeout` policy (`@decryp7/paddock-ui/ipc`) is declared in `untimedCommands` of `paddock.conformance.json` with a reason (it starts a job / waits for the user, rule 12); stale declarations warn | |
+| C34 | a parser crate (public `parse*`/`decode*`/`from_str`/`from_bytes` over text, bytes or a reader; or named in `parserCrates`) has a fuzz target or a never-panics test (`paddock_testkit::never_panics`, `proptest!`); `parserSkip` lists non-parsers. Warning | |
 
 ## Sync (X27, X43)
 
@@ -63,7 +66,7 @@ a package none of whose licence options is permissive fails both modes. The allo
 
 `paddock.conformance.json` (optional): `app`, `appDir`, `tauriDir`, `workflowsDir`, `sidecars` (`[{ "name": "x-worker", "args": ["--self-test"] }]`),
 `nonGates` (job ids the release job need not wait for), `commitRange`, `appName` (display name for templates; default the id with a capital),
-`docBlocks` (`{ "AGENTS.md": ["rules", ...] }` replaces the default targets), `windowWeight` (`{ stats, windows: { main: { maxKb, entries? } } }`), `baselineSkip` (template paths this app does not take; prefer a waiver).
+`docBlocks` (`{ "AGENTS.md": ["rules", ...] }` replaces the default targets), `untimedCommands` (`{ "method": "why it is never timed out" }`, C33), `parserCrates` / `parserSkip` (C34), `windowWeight` (`{ stats, windows: { main: { maxKb, entries? } } }`), `baselineSkip` (template paths this app does not take; prefer a waiver).
 
 `paddock.waivers.toml`:
 
@@ -87,3 +90,29 @@ workflow that uses the actions can drop the steps they replace, and C03, C04 and
 
 `publish.mjs`, `latest-json.mjs` (the apps' copies, unified; output equals Pitwall's), `strip-keys.mjs`
 (`eval "$(node release/strip-keys.mjs)"`), `macos-verify-bundle.sh` (captures command output before matching).
+
+## Sidecars (`paddock-sidecar`, plan X34)
+
+One mechanism for the helper binaries an app bundles (`bundle.externalBin`), replacing the per-app `sidecar.mjs` scripts:
+
+```sh
+# beforeBuildCommand: build the sidecars and put them at src-tauri/binaries/<name>-<target triple>[.exe]
+paddock-sidecar build --root src-tauri --out src-tauri/binaries --sidecar pitcrew-service
+paddock-sidecar build --root . --out app/src-tauri/binaries --profile dist --sidecar dyno-agent --sidecar dyno-helper --sidecar dyno=dyno-cli
+# rule 23, in CI on the built bundle: every sidecar starts with --self-test and exits 0
+paddock-sidecar self-test --dir "$APP/Contents/MacOS" --sidecar pitcrew-service
+```
+
+`--sidecar name[=package[:bin]]` (repeat). Honours `TAURI_ENV_TARGET_TRIPLE`, `CARGO_TARGET_DIR` and `PADDOCK_CARGO_PROFILE`; `--dev`
+builds the debug profile, `universal-apple-darwin` builds both halves and joins them with `lipo`, an empty built file is an error. An
+app with extras (Debrief's libduckdb) imports `buildSidecars` from `@decryp7/paddock-conformance/sidecar` and adds them. The Rust
+side: `paddock_build::Build` (build.rs: the Windows manifest in every binary, empty placeholders, rerun triggers) and
+`paddock_proc::self_test::handle` (the sidecar's `--self-test`).
+
+## Hardening workflows (plan X41)
+
+Reusable workflows in `.gitea/workflows/`: `app-fuzz.yml` (nightly cargo-fuzz in shards, `shards` is a JSON list), `app-mutants.yml`
+(cargo-mutants weekly and on the changed lines of a pull request) and `app-never-panics.yml` (the proptest / `never_panics` tests with
+many cases, release mode). C34 finds parser crates without a fuzz target or a never-panics test; `paddock_testkit::{corpus,
+never_panics}` is the dependency-free test for a parser. Debrief's `corpus.yml` stays in Debrief (its data and pins are its own); the
+`plan` and `nightly-mark` actions it hand-copied are the shared ones.

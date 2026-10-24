@@ -81,7 +81,7 @@ test('the scripts the actions run are executable programs of this package', () =
 const workflows = readdirSync(WORKFLOWS).filter((f) => f.startsWith('app-') && f.endsWith('.yml')).sort();
 
 test('the reusable workflows are workflow_call workflows that use only actions, inputs and secrets that exist', () => {
-  assert.deepEqual(workflows, ['app-e2e.yml', 'app-licences.yml', 'app-release.yml']);
+  assert.deepEqual(workflows, ['app-e2e.yml', 'app-fuzz.yml', 'app-licences.yml', 'app-mutants.yml', 'app-never-panics.yml', 'app-release.yml']);
   for (const w of workflows) {
     const text = read(join(WORKFLOWS, w));
     assert.match(text, /^on:\n {2}workflow_call:/m, `${w}: workflow_call`);

@@ -1,0 +1,18 @@
+[package]
+name = "paddock-build"
+version = "0.1.0"
+description = "The Tauri build step of the Paddock apps (a build-dependency): the Windows application manifest embedded into every binary, empty placeholders for the sidecars Tauri's externalBin requires, rerun triggers, then tauri-build."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+# `Build::run` calls tauri-build; the pure core (directives, placeholders, the manifest) never depends on it.
+tauri-build = ["dep:tauri-build"]
+
+[dependencies]
+tauri-build = { version = "2.7", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

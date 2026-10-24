@@ -8,6 +8,7 @@ exclude = ["paddock-ipc/fuzz"]
 members = [
     "paddock-bench",
     "paddock-cli",
+    "paddock-build",
     "paddock-channels",
     "paddock-commands",
     "paddock-dialogs",
@@ -46,6 +47,7 @@ tauri = { version = "2.12", default-features = false }
 # the one published to the `decryp7` registry (keep it equal to the crate's `version`); the path is used in the workspace.
 paddock-bench = { path = "paddock-bench", version = "0.1.0", registry = "decryp7" }
 paddock-cli = { path = "paddock-cli", version = "0.1.0", registry = "decryp7" }
+paddock-build = { path = "paddock-build", version = "0.1.0", registry = "decryp7" }
 paddock-channels = { path = "paddock-channels", version = "0.1.0", registry = "decryp7" }
 paddock-commands = { path = "paddock-commands", version = "0.1.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "decryp7" }
