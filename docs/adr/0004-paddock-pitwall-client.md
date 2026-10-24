@@ -1,6 +1,6 @@
 # 4. `paddock-pitwall`: the shared Pitwall client, and "Pitwall is optional" as a standard state
 
-- Status: proposed (2026-10-23); first crate to be built (ADR 0006)
+- Status: accepted; built (shell 0.3.0) as extracted from Debrief 1.1's client and checked against Pitwall's router. As built: blocking only (no async facade), no `mcp` module (Pitwall has no `/x/v1/tool-providers` yet), `Link` is the stateful side (probe, pairing, outcomes), the key lives in `paddock-secrets` (not a Pitwall-specific `KeyStore`), and a single `Client` carries retries; see `crates/README.md`
 - Related: Pitwall ADR 0009 (integration contract), 0003 (API surface), 0005 (queue), 0019 (caching); family rule "Pitwall is always optional"
 
 ## Context

@@ -5,6 +5,15 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-pitwall` (ADR 0004, plan workbench section 15): the one Pitwall client, extracted from Debrief 1.1's engine and checked
+  against Pitwall's router. Discovery (`discovery.json` from `paddock-env` folders, Local then Roaming on Windows, else port 11435),
+  the key in `paddock-secrets`, pairing with the user's consent on a background thread, a typed `Client` (health, select, models,
+  jobs, tokens, tasks, embeddings in batches, chat whole or streamed, cancel within a read slice, provenance from `X-Pitwall-*`,
+  capability checks with Pitwall's reasons), retries with back-off and `Retry-After` that never repeat a stream after its first delta,
+  `PitwallError` with `user_message`/`next_step`, `AiState` and `NeedsAiView` for the shared needs-AI component, the Automatic /
+  Pitwall / Built-in choice with `run_or_fallback` (never a silent mix), health reporting whose Repair does not depend on Pitwall, the
+  bounded loopback HTTP transport (also for Debrief's llama-server client, X16 note) and a fake Pitwall (`testing` feature) with a
+  contract test and an optional check against Pitwall's source.
 - `paddock-diag` and `@decryp7/paddock-ui/shell/diagnostics` (plan X2, decision D9): Report a problem, the three designs of Debrief,
   Dyno and Pitcrew as one. A diagnostics zip of the app's log (newest part, read from the end), system facts, settings (secrets
   masked) and crash marker, plus the sections an app adds; one `Redactor` (secrets from Pitcrew and Debrief, personal data from Dyno,
