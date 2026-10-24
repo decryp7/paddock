@@ -484,6 +484,14 @@ jobs:
           npm ci
           npm run shell-demo:build
 
+      # The one release script for both demos (scripts/demo-release.mjs): the version, the icons and the notes are checked
+      # here, not only on a tag.
+      - name: Release facts (version, icons, notes)
+        run: |
+          node scripts/demo-release.mjs shell-demo version
+          node scripts/demo-release.mjs shell-demo icons
+          node scripts/demo-release.mjs shell-demo notes "$RUNNER_TEMP/notes.md"
+
       - name: App (fmt, clippy, tests on the mock runtime, deny)
         working-directory: apps/shell-demo/src-tauri
         run: |
@@ -524,6 +532,14 @@ jobs:
         run: |
           npm ci
           npm run workbench-demo:build
+
+      # The one release script for both demos (scripts/demo-release.mjs): the version, the icons and the notes are checked
+      # here, not only on a tag.
+      - name: Release facts (version, icons, notes)
+        run: |
+          node scripts/demo-release.mjs workbench-demo version
+          node scripts/demo-release.mjs workbench-demo icons
+          node scripts/demo-release.mjs workbench-demo notes "$RUNNER_TEMP/notes.md"
 
       - name: App (fmt, clippy, tests on the mock runtime, deny)
         working-directory: apps/workbench-demo/src-tauri

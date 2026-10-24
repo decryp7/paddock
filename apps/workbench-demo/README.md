@@ -35,8 +35,8 @@ does not touch the user's credential store.
 cd ui && npm ci && npx ng build workbench-demo                 # the UI the app embeds (tauri.conf.json frontendDist)
 cd apps/workbench-demo/src-tauri && cargo test                  # the app on the mock runtime (no window, no user folders)
 cd ui && npx playwright test --project=workbench-demo           # the UI in the browser (mock backends)
-scripts/workbench-demo/bundle.sh app,dmg                        # a local DMG to try (never published)
-scripts/workbench-demo/verify-macos.sh                          # the ad-hoc seal, `codesign --verify --deep --strict`, the app inside the DMG
+scripts/demo/bundle.sh workbench-demo app,dmg                     # a local DMG to try (never published)
+scripts/demo/verify-macos.sh workbench-demo                       # the ad-hoc seal, `codesign --verify --deep --strict`, the app inside the DMG
 ```
 
 `cd apps/workbench-demo && npm ci && npx tauri dev` runs it against `ng serve workbench-demo`.
@@ -48,7 +48,7 @@ packages' `v*` tags and the shell demo's: the gates, then a DMG (sealed ad-hoc, 
 NSIS installer and Linux deb and AppImage, and the Gitea release with the version's CHANGELOG section and the First launch
 notes. Before tagging: bump `src-tauri/Cargo.toml` and add the CHANGELOG section, `cargo deny check advisories` in
 `src-tauri`, one manual run of the workflow (it builds the installers without releasing), the icon check
-(`node scripts/workbench-demo-release.mjs icons`).
+(`node scripts/demo-release.mjs workbench-demo icons`).
 
 ## Start a new app from the workbench demo
 
@@ -66,5 +66,5 @@ generator knows this layout, copy by hand; each step is small:
 3. Dialogs: add them to `bootDialogWindow`'s `dialogs` and give the shell `Builder` the app's `dialog_contracts`.
 4. Its icon: add it to `icons/tools/design.mjs` (`DEMOS` or `APPS`), run the pipeline with `ONLY=<id>`, check the CVD
    numbers, copy `icons/<id>/tauri` to `src-tauri/icons`; every drawing gets an independent review (rule 22).
-5. CI and releases: copy `.gitea/workflows/workbench-demo-release.yml`, `scripts/workbench-demo/` and
-   `scripts/workbench-demo-release.mjs` and rename the tag prefix.
+5. CI and releases: copy `.gitea/workflows/workbench-demo-release.yml` and rename the tag prefix; the new app's row in `APPS` of
+   `scripts/demo-release.mjs` is all the scripts need (`scripts/demo/` takes the app as its first argument).
