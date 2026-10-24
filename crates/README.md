@@ -93,8 +93,9 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-assistant` | the assistant (plan W6): `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for writes, the bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, Tauri commands and the `paddock://assistant` event | yes (Pacenotes, Sighter; Debrief's chat moves onto it); built |
+| `paddock-guard` | crash containment (ADR 0001, plan X51): `catch`, `Quarantine` (3 failures in 10 minutes, shared `Clock`, persisted through paddock-env), `Guard::call` (time budget, hang abandoned, typed refusal) | yes (Debrief, Pacenotes, Dyno plugin hosts); built |
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
-| `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
+| `paddock-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
@@ -891,6 +892,35 @@ let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // 
   secret. SMTP does not use the HTTP proxy.
 - Tests use `FakePoster` / `FakeMail` (scripted, recording) or an in-process loopback server; the real adapters are tested
   against those servers only.
+
+## `paddock-guard` (plan X51, ADR 0001)
+
+Crash containment from Debrief's `debrief_core::guard`, without its plugin types. Domain-free: the owner is a string, the call
+kind a label, the budget a `Duration`.
+
+```rust
+let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+let (quarantine, problem) = Quarantine::persistent(QuarantinePolicy::default(), clock.clone(), dirs.state("quarantine.json"));
+let guard = Guard::new(Arc::new(quarantine), clock);
+// A remote call: refused while quarantined, 10 s budget, a panic is Crashed, a typed error is Failed (not counted).
+match guard.call("my-plugin", "import", Some(Duration::from_secs(10)), move || remote.import(file)) {
+    Err(CallError::Refused(why)) => show_disabled(why),
+    Err(CallError::Hung { .. } | CallError::Crashed(_)) => {} // already counted
+    other => use_it(other),
+}
+guard.quarantine().record("my-plugin", Failure::Garbled, "oversized frame"); // what the adapter itself detects
+guard.quarantine().release("my-plugin"); // the user re-enabled it
+```
+
+- `Quarantine` counts failures per owner inside the policy window on the injected clock; at `max` the owner is quarantined
+  until `release`. `status`/`all` give failures, total, last error (500 characters), quarantined and hung; `set_observer` hears
+  each start and lift once. Quarantined owners are kept in a versioned file (`VersionedFile`); a missing, damaged or newer file
+  gives an empty quarantine and a `Problem`. Failure times are not kept (the clock restarts).
+- `Guard::call` with a budget runs on a helper thread and a timer on the clock; an overrun marks the owner hung (a counted
+  failure) and refuses calls until the abandoned call returns. In-process guarding cannot stop a running call or survive an
+  abort; that is the process boundary's job.
+- Tests drive a `FakeClock`; nothing sleeps or measures time. Locks poisoned by a panicking thread are recovered.
+
 ## `paddock-ipc` (plan X13, ADR 0001 step 1)
 
 The family's one IPC between an app and its own processes (workers, plugins, agents, services), from Debrief's

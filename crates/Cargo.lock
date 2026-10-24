@@ -3204,6 +3204,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-proc",
  "paddock-runtime",
+ "paddock-workspace-hack",
  "serde_json",
  "tempfile",
  "tungstenite",
@@ -3290,6 +3291,19 @@ name = "paddock-env"
 version = "0.1.0"
 dependencies = [
  "log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "paddock-guard"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-env",
+ "paddock-jobs",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3523,6 +3537,7 @@ dependencies = [
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tar",
@@ -3729,6 +3744,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "deranged",
+ "digest 0.11.3",
  "email_address",
  "flate2",
  "futures-core",
@@ -3755,6 +3771,7 @@ dependencies = [
  "percent-encoding",
  "proc-macro2",
  "quote",
+ "rand 0.10.3",
  "regex",
  "regex-automata",
  "regex-syntax",
