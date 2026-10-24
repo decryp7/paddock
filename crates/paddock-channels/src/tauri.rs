@@ -7,10 +7,9 @@
 //! - `channels_test` returns at once with a test id; the outcome arrives as a [`ChannelsEvent::Test`] (rule 10).
 
 use crate::config::{ChannelConfig, Settings};
-use crate::control::{ChannelsControl, ChannelsError, ChannelsEvent, ChannelsView};
+use crate::control::{ChannelsControl, ChannelsError, ChannelsEvent, ChannelsView, TestStarted};
 use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Emitter, Manager as _, Runtime, State};
-use serde::Serialize;
 use std::sync::Arc;
 
 /// The event every update is sent on.
@@ -35,14 +34,6 @@ pub fn install<R: Runtime>(
 }
 
 type Managed<'a> = State<'a, Arc<ChannelsControl>>;
-
-/// The reply of `channels_test`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TestStarted {
-    /// Matches the `testId` of the event that reports the outcome.
-    pub test_id: u64,
-}
 
 /// The settings and which secrets are stored.
 #[::tauri::command]

@@ -72,10 +72,17 @@ fn settings(channels: Vec<ChannelConfig>) -> Settings {
     Settings { channels }
 }
 
+/// The next event that is the outcome of a test (progress events are skipped).
 fn next(r: &Rig) -> ChannelsEvent {
-    r.events
-        .recv_timeout(Duration::from_secs(30))
-        .expect("the test reports")
+    loop {
+        let e = r
+            .events
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the test reports");
+        if matches!(e, ChannelsEvent::Test { .. }) {
+            return e;
+        }
+    }
 }
 
 #[test]
@@ -335,4 +342,62 @@ fn file_settings_round_trip_and_a_damaged_file_gives_the_defaults() {
         .save(&Settings::default())
         .unwrap_err();
     assert!(e.contains("could not be saved"), "{e}");
+}
+
+#[test]
+fn a_running_test_reports_each_attempt_and_wait_and_the_numbers_only_go_up() {
+    let poster = FakePoster::new().then_status(503).then_status(200);
+    let r = rig_with(Arc::new(poster), Arc::new(FakeMail::new()));
+    let id = r.control.test(webhook("w", false)).unwrap();
+    let mut seen = Vec::new();
+    let end = loop {
+        match r.events.recv_timeout(Duration::from_secs(30)).unwrap() {
+            ChannelsEvent::TestProgress {
+                test_id,
+                channel_id,
+                attempt,
+                of,
+                phase,
+                wait_secs,
+            } => {
+                assert_eq!((test_id, channel_id.as_str(), of), (id, "w", 3));
+                seen.push((attempt, phase, wait_secs));
+            }
+            done @ ChannelsEvent::Test { .. } => break done,
+        }
+    };
+    assert_eq!(
+        seen,
+        [
+            (1, TestPhase::Sending, None),
+            (1, TestPhase::Waiting, Some(2)),
+            (2, TestPhase::Sending, None)
+        ]
+    );
+    assert!(matches!(
+        end,
+        ChannelsEvent::Test {
+            ok: true,
+            attempts: 2,
+            ..
+        }
+    ));
+    let json = serde_json::to_value(ChannelsEvent::TestProgress {
+        test_id: 1,
+        channel_id: "w".into(),
+        attempt: 2,
+        of: 3,
+        phase: TestPhase::Waiting,
+        wait_secs: Some(4),
+    })
+    .unwrap();
+    assert_eq!(
+        (
+            json["kind"].as_str(),
+            json["phase"].as_str(),
+            json["waitSecs"].as_u64(),
+            json["of"].as_u64()
+        ),
+        (Some("testProgress"), Some("waiting"), Some(4), Some(3))
+    );
 }

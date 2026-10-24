@@ -3087,6 +3087,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tempfile",
+ "ts-rs",
 ]
 
 [[package]]
