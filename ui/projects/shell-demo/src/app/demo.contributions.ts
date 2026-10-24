@@ -16,6 +16,7 @@ import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
 import { defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
+import { defineLanguageSettingsPage } from '@decryp7/paddock-ui/shell/i18n/settings';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
@@ -91,7 +92,7 @@ export const SETTINGS_DIALOG = defineDialog({
   width: 880,
   height: 620,
   // The settings commands, the Background service page's (it asks and repairs the service from this window) and the
-  // Notification channels page's (the secret is set in the secret dialog's window, not here).
+  // whole-app relaunch of the Language page, and the Notification channels page's (the secret is set in the secret dialog's window, not here).
   commands: [
     'settings_overview',
     'settings_reset',
@@ -106,6 +107,7 @@ export const SETTINGS_DIALOG = defineDialog({
     'channels_test',
     // The channels page opens the secret dialog (a dialog may open another; the window then lists `dialog_open`).
     'dialog_open',
+    'app_relaunch',
   ],
   providers: () => import('./demo-settings-window').then((m) => m.DEMO_SETTINGS_WINDOW),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
@@ -129,8 +131,14 @@ export const CHANNELS_SECRET_DIALOG = defineChannelsSecretDialog({
   load: () => import('@decryp7/paddock-ui/shell/channels/dialog').then((m) => m.PdChannelSecretDialog),
 });
 
+/** Settings > Language: System default, English and the pseudo-locale (the demo ships no real translation). */
+export const LANGUAGE_PAGE = defineLanguageSettingsPage({
+  load: () => import('@decryp7/paddock-ui/shell/i18n/page').then((m) => m.PdLanguagePage),
+});
+
 /** The demo's settings pages: those without a component of their own show the Rust section of the same id in the shell's generic form. */
 export const DEMO_SETTINGS_PAGES = [
+  LANGUAGE_PAGE,
   SERVICE_PAGE,
   CHANNELS_PAGE,
   defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),

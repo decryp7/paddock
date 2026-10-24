@@ -263,6 +263,7 @@
   "settingsPages": [
     "pd.appearance",
     "pd.channels",
+    "pd.language",
     "pd.logging",
     "pd.login",
     "pd.notifications",
@@ -321,6 +322,7 @@
       "requiredChoice": false,
       "minSize": null,
       "commands": [
+        "app_relaunch",
         "channels_clear_secret",
         "channels_get",
         "channels_save",
@@ -435,6 +437,7 @@
     "pd.diag.title": "Report a problem",
     "pd.settings.appearance": "Appearance",
     "pd.settings.channels": "Notification channels",
+    "pd.settings.language": "Language",
     "pd.settings.logging": "Logging",
     "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",

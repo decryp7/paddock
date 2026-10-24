@@ -7,6 +7,7 @@
  */
 export {
   LANGUAGE_CHOICES,
+  isLocaleTag,
   SOURCE_LOCALE,
   PSEUDO_LOCALE,
   language,
@@ -23,3 +24,4 @@ export {
 export { LocalStorageLanguageStorage, parseLanguage, LANGUAGE_KEY, LANGUAGE_VERSION, type LanguageStorage } from './src/language-storage';
 export { initI18n, loaderFor, type Translations, type TranslationLoader, type I18nOptions } from './src/boot';
 export { LanguageStore, LANGUAGE_CONFIG, type LanguageConfig } from './src/language.store';
+export { languageOptions, nativeName, type LanguageOption, type LanguageLabels } from './src/language-options';
