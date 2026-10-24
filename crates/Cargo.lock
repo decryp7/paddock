@@ -3401,13 +3401,18 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "log",
+ "paddock-commands",
+ "paddock-env",
  "paddock-jobs",
  "paddock-log",
+ "paddock-secrets",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tauri",
  "tempfile",
+ "ts-rs",
 ]
 
 [[package]]
