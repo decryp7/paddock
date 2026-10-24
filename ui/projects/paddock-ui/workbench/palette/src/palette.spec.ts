@@ -60,6 +60,7 @@ function fakePorts(): WorkbenchPorts & { shown: string[]; opened: string[] } {
     applyPerspective: () => Promise.resolve(true),
     activePerspective: signal(null),
     showExplorer: () => undefined,
+    hideExplorer: () => undefined,
     explorerShown: signal(null),
     openPalette: (prefix) => void opened.push(prefix ?? '>'),
   };
