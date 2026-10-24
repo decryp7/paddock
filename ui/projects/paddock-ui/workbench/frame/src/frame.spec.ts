@@ -434,3 +434,42 @@ describe('pd-activity-bar', () => {
   });
 
 });
+
+describe('review 2', () => {
+  it('P1-B: below 480 px the Explorer the user opens slides over the dock; Escape and the scrim dismiss it', async () => {
+    const { element, fixture } = await boot();
+    const frame = TestBed.inject(WorkbenchFrameStore);
+    frame.evaluate(1440);
+    expect(frame.overlay()).toBe(false);
+    frame.evaluate(320);
+    expect(frame.explorerShown()).toBeNull();
+    frame.show('wd.files');
+    expect(frame.overlay()).toBe(true);
+    await settle(fixture);
+    expect(element.querySelector('[data-testid="workbench-sidebar"]')?.classList.contains('pd-side-overlay')).toBe(true);
+    expect(element.querySelector('[data-testid="sidebar-sash"]')).toBeNull();
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    document.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect(frame.explorerShown()).toBeNull();
+    expect(frame.wanted()).toBe('wd.files');
+    frame.show('wd.files');
+    await settle(fixture);
+    element.querySelector<HTMLElement>('[data-testid="sidebar-scrim"]')!.click();
+    expect(frame.overlay()).toBe(false);
+    frame.evaluate(1440);
+    expect(frame.explorerShown()).toBe('wd.files');
+  });
+
+  it('P2-E and P3-10: an open fly-out is not selected; badges are neutral unless the item gives a tone', async () => {
+    const { element, fixture } = await boot();
+    const items = TestBed.inject(ActivityItems);
+    const [, prob] = items.top() as [never, never];
+    expect(items.badgeTone(prob)).toBe('neutral');
+    const menuButton = element.querySelector<HTMLElement>('[data-activity-id="wd.act.menu"]')!;
+    menuButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    await settle(fixture);
+    expect(menuButton.classList.contains('pd-open')).toBe(true);
+    expect(element.querySelector('[data-activity-id="wd.act.problems"] .pd-act-badge')?.getAttribute('data-tone')).toBe('neutral');
+  });
+});

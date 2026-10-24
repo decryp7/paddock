@@ -11,6 +11,8 @@ export const STAGE_LAYOUT: ViewLayout = { area: 'document', min: { width: 420, h
 export const ACTIVITY_BAR_PX = 48;
 /** Grow-back margin: a closed Explorer returns only when this much more room than its minimum need is there. */
 export const EXPLORER_MARGIN_PX = 48;
+/** Below this frame width the Explorer the user opens is an overlay fly-out over the dock, never a column beside it. */
+export const EXPLORER_OVERLAY_BELOW = 480;
 /** Explorer widths the user may drag to, px. */
 export const EXPLORER_MIN_PX = EXPLORER_LAYOUT.min.width;
 export const EXPLORER_MAX_PX = 640;
@@ -109,6 +111,11 @@ export const WorkbenchFrameStore = signalStore(
   withComputed((store) => ({
     /** The section on show (null: the side bar is closed). */
     explorerShown: computed(() => (store.closedByPlan() ? null : store.wanted())),
+    /**
+     * The Explorer is shown over the dock (review 2 P1-B): the window is too narrow for it beside the dock's minimum, so
+     * it slides over instead of squeezing the dock; Escape or a click outside dismisses it.
+     */
+    overlay: computed(() => !store.closedByPlan() && store.wanted() !== null && store.frameWidth() > 0 && store.frameWidth() < EXPLORER_OVERLAY_BELOW),
   })),
   withMethods((store) => {
     const persist = (): void => void saveFramePrefs({ explorer: store.wanted(), explorerWidth: store.explorerWidth() }, store._storage);
@@ -138,6 +145,10 @@ export const WorkbenchFrameStore = signalStore(
         patchState(store, { wanted: section, closedByPlan: false });
         if (reopened && store.frameWidth() > 0 && verdict(true) === 'hide') patchState(store, { keptByUser: true });
         persist();
+      },
+      /** Dismisses the overlay fly-out (Escape, a click outside): closed for want of room, the user's section kept. */
+      dismissOverlay(): void {
+        patchState(store, { closedByPlan: true, keptByUser: false });
       },
       /** Closes the side bar (the user's choice). */
       hide(): void {

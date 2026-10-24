@@ -87,6 +87,8 @@ export interface ActivityItemDef<T extends object = object> {
   readonly badge?: Live<T, string | number | null>;
   /** What the badge counts, as its accessible name ("3 problems"). */
   readonly badgeLabel?: Live<T, string | null>;
+  /** The badge's tone: `neutral` (default) for a plain count, a status tint when the count means a problem. */
+  readonly badgeTone?: Live<T, 'neutral' | 'info' | 'warning' | 'danger'>;
   /** Highlighted while true. Defaults to: its view is open, or its Explorer section is shown. */
   readonly active?: Live<T, boolean>;
   /** A toggle button: `aria-pressed` follows `active`. */

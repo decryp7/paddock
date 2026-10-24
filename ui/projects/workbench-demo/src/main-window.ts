@@ -36,8 +36,8 @@ export function bootMainWindow(): Promise<unknown> {
       provideWorkbenchContributions<WorkbenchDemoContext>(DEMO_CONTRIBUTIONS),
       provideLiveContributions((injector) => ({
         commands: [
-          defineCommand({ id: 'wd.p.understand', title: msg('wd.cmd.p.understand', 'Perspective: Understand'), run: () => void injector.get(WORKBENCH_PORTS).applyPerspective('wd.understand') }),
-          defineCommand({ id: 'wd.p.review', title: msg('wd.cmd.p.review', 'Perspective: Review'), run: () => void injector.get(WORKBENCH_PORTS).applyPerspective('wd.review') }),
+          defineCommand({ id: 'wd.p.understand', title: msg('wd.cmd.p.understand', 'Understand'), category: msg('wd.category.perspective', 'Perspective'), run: () => void injector.get(WORKBENCH_PORTS).applyPerspective('wd.understand') }),
+          defineCommand({ id: 'wd.p.review', title: msg('wd.cmd.p.review', 'Review'), category: msg('wd.category.perspective', 'Perspective'), run: () => void injector.get(WORKBENCH_PORTS).applyPerspective('wd.review') }),
         ],
       })),
       provideShellContext<WorkbenchDemoContext>(() => import('./app/context').then((m) => m.workbenchDemoContext)),

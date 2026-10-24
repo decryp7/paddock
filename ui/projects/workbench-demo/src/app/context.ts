@@ -1,4 +1,4 @@
-import { inject, signal, type Signal } from '@angular/core';
+import { computed, inject, signal, type Signal } from '@angular/core';
 import { inTauri } from '@decryp7/paddock-ui/ipc';
 import { WORKBENCH_PORTS } from '@decryp7/paddock-ui/workbench';
 import { desktopIpc } from './desktop';
@@ -15,6 +15,8 @@ export interface WorkbenchDemoContext {
   openFile(path: string): Promise<boolean>;
   /** Starts the sample indexing job (phases, Cancel). */
   reindex(): void;
+  /** The perspective in use (the activity fly-out checks it). */
+  readonly perspective: Signal<string | null>;
 }
 
 const selected = signal<string | null>(null);
@@ -23,9 +25,16 @@ const selected = signal<string | null>(null);
 export function workbenchDemoContext(): WorkbenchDemoContext {
   const ports = inject(WORKBENCH_PORTS);
   const jobs = inject(DemoJobs);
+  // The file the user works on is the active Code panel's (so the Explorer and the Outline follow the active document,
+  // also after a reload restores the layout: review 2 P2-F), else the last one picked elsewhere.
+  const active = computed(() => {
+    const panel = ports.activePanel();
+    return panel?.startsWith('wd.code#') ? panel.slice('wd.code#'.length) : null;
+  });
   return {
     repo: inject(DemoRepo),
-    selectedPath: selected.asReadonly(),
+    selectedPath: computed(() => active() ?? selected()),
+    perspective: ports.activePerspective,
     select: (path) => selected.set(path),
     openFile: (path) => {
       selected.set(path);
