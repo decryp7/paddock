@@ -5,6 +5,13 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-ipc` (plan X13, ADR 0001 step 1): the family's one IPC from `debrief-ipc` and `dyno-ipc` (with Pitcrew's service
+  pipe SDDL). Postcard frames with a skip of oversized frames (one call fails, not the link), private endpoints, the token +
+  pid + protocol-version handshake, a thread-based peer (calls both ways, streams with credits, cancel, pushes, busy, typed
+  errors), the launcher on `paddock-proc` and the child loop, and the companion `link`: an owner-only discovery file
+  (stale and untrusted files ignored), `LinkServer`, and `LinkClient` with reconnect back-off on `paddock_jobs::time` and
+  replacing a companion of another build. A frame-codec fuzz target (`crates/paddock-ipc/fuzz`); JSON numbers in `Json`
+  now cross unchanged (`float_roundtrip`, found by the fuzzer).
 - `paddock_jobs::time` (plan X20): one clock for the family. `Clock` (monotonic and wall readings, a cancellable `wait`),
   `SystemClock`, `FakeClock` (moves only with `advance`; `wait_for_waiters` lets a test advance once the work is blocked on
   it), `Deadline`, and `Backoff`/`BackoffPolicy`/`Retry` (Pitwall's restart policy; `retry_forever` for reconnecting
