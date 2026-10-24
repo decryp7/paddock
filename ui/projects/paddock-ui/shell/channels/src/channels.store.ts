@@ -1,13 +1,21 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
-import { MAX_CHANNELS, type ChannelConfig, type ChannelsEvent, type ChannelsView } from '../generated/channels';
+import { MAX_CHANNELS, type ChannelConfig, type ChannelsEvent, type ChannelsView, type TestPhase } from '../generated/channels';
 import { ChannelsBackend, type Unlisten } from './backend';
 import { channelsMessage } from './wire';
 
+/** What a running test is doing, as the engine last said (phase-labelled; the attempt only goes up). */
+export interface TestProgress {
+  readonly attempt: number;
+  readonly of: number;
+  readonly phase: TestPhase;
+  readonly waitSecs: number | null;
+}
+
 /** Where a test send of one channel is. The engine decides the outcome; a running test is never timed out (rule 12). */
 export type TestState =
-  | { readonly state: 'running'; readonly testId: number | null }
+  | { readonly state: 'running'; readonly testId: number | null; readonly progress: TestProgress | null }
   | { readonly state: 'delivered'; readonly attempts: number }
   | { readonly state: 'failed'; readonly attempts: number; readonly message: string };
 
@@ -58,7 +66,7 @@ export const ChannelsStore = signalStore(
     const save = async (channels: readonly ChannelConfig[]): Promise<boolean> => {
       patchState(store, { saveStatus: 'saving' });
       try {
-        const view = await backend.save({ channels });
+        const view = await backend.save({ channels: [...channels] });
         patchState(store, { view, saveStatus: 'idle' }, setLoaded());
         return true;
       } catch (e) {
@@ -112,12 +120,12 @@ export const ChannelsStore = signalStore(
       /** Sends a test with `channel` (the draft or a saved one); the outcome arrives as an event and is never timed out. */
       async test(channel: ChannelConfig): Promise<void> {
         if (store.tests()[channel.id]?.state === 'running') return;
-        setTest(channel.id, { state: 'running', testId: null });
+        setTest(channel.id, { state: 'running', testId: null, progress: null });
         try {
           const testId = await backend.test(channel);
           const now = store.tests()[channel.id];
           // The outcome can arrive before the answer; then it already stands.
-          if (now?.state === 'running') setTest(channel.id, { state: 'running', testId });
+          if (now?.state === 'running') setTest(channel.id, { state: 'running', testId: now.testId ?? testId, progress: now.progress });
         } catch (e) {
           setTest(channel.id, { state: 'failed', attempts: 0, message: channelsMessage(e, $localize`:@@pd.channels.test-refused:The test could not be started.`) });
         }
@@ -130,10 +138,17 @@ export const ChannelsStore = signalStore(
       dismissSaveError(): void {
         patchState(store, { saveStatus: 'idle' });
       },
-      /** An event from the engine: the outcome of a test, matched by channel and test id (a stale one is ignored). */
+      /** An event from the engine: progress or the outcome of a test, matched by channel and test id (a stale one is ignored). */
       _event(event: ChannelsEvent): void {
         const now = store.tests()[event.channelId];
         if (now?.state !== 'running' || (now.testId !== null && now.testId !== event.testId)) return;
+        if (event.kind === 'testProgress') {
+          // The attempt never goes backwards: a late event of an earlier attempt changes nothing.
+          if (now.progress && event.attempt < now.progress.attempt) return;
+          const progress = { attempt: event.attempt, of: event.of, phase: event.phase, waitSecs: event.waitSecs };
+          setTest(event.channelId, { state: 'running', testId: event.testId, progress });
+          return;
+        }
         setTest(
           event.channelId,
           event.ok

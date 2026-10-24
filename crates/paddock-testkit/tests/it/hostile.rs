@@ -44,3 +44,23 @@ fn the_fake_clock_is_re_exported_and_moves_only_when_told() {
     assert_eq!(clock.monotonic(), Duration::from_secs(5));
     assert_eq!(clock.wall_ms(), 5_000);
 }
+
+#[test]
+fn assert_never_panics_passes_a_safe_parser_and_names_the_input_a_bad_one_panicked_on() {
+    paddock_testkit::assert_never_panics(&[SEED, b"a=b"], |b| std::str::from_utf8(b).is_ok());
+    let failed = std::panic::catch_unwind(|| {
+        paddock_testkit::assert_never_panics(&[b"boom"], |b| {
+            if b.starts_with(b"boo") && b.len() == 3 {
+                panic!("bad");
+            }
+        })
+    });
+    let message = failed
+        .err()
+        .and_then(|e| e.downcast_ref::<String>().cloned())
+        .unwrap_or_default();
+    assert!(
+        message.contains("the parser panicked on 1 of") && message.contains("\"boo\""),
+        "{message}"
+    );
+}

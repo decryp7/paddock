@@ -4,12 +4,53 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Changed
+- X21 data parts after the independent review (`ui/docs/review/x21-data/REVIEW.md`): `pd-table` keeps its primary column at 128 px
+  or more (optional columns drop out from the right as the table narrows; the action column is sized to what the rows can show;
+  compact toolbar), rows are 32 px by default (24/32/36 by density) under a 28 px header, a quiet sort chevron shows on hover and
+  focus, first column weight 500, selected rows get the accent tint and a 2 px bar, loading and error states and a projected
+  next step for an empty table, middle ellipsis measured as one piece of text (`pd-middle-text`). Menus use shared `.pd-popmenu`
+  classes (surface-3, 2 px focus ring inset, icon slot, rule before destructive items) and `copy-menu` gets the same ring.
+  `pd-chart` draws a visible title (label and unit), loading and error states with Retry; donut: total in the middle, every slice named
+  with value and share, slice order chosen so neighbours (the wrap-around pair too) keep delta-E 20 under protan, deutan and
+  tritan (tested over the real palettes in `test/tokens/ring.spec.ts`), more than five slices merge into "Other"; only the top
+  stacked-bar segment is rounded; a lone value between gaps gets a marker; one series uses the accent. `pd-field` puts the error
+  under the control in place of the hint and takes `size="short"`. New `columns` glyph. Design guide: palette slot 6 (light) is
+  #494FDB as in the CSS.
+
 ### Added
 - `paddock-guard` (plan X51, ADR 0001), from Debrief's `debrief_core::guard` without its plugin types: `catch` (panic to a typed
   `Crashed`), `Quarantine` with a `QuarantinePolicy` (3 failures in 10 minutes by default) on the shared `Clock`, failures as
   `Panic`, `Hang` or `Garbled` (a typed error the owner returns is not one), manual `release`, status, an observer, quarantined
   owners kept in a versioned state file that tolerates a missing or damaged file, and `Guard::call`, the building block of
   guarded adapters (refuses a quarantined or hung owner, runs under a time budget on the clock, catches panics, abandons hangs).
+- `paddock-view` (plan X51, ADR 0002): the declarative view model plugins return. `ViewDoc` with `Node`/`NodeKind` (stack, text,
+  table, tree, graph, diagram, form, review list, matrix, chart, badge, progress, empty, needs-AI, link), `ActionRef` (with a
+  label), `ViewAction`, `ViewPatch` and `apply_patch`; JSON (camelCase) and postcard codecs with a size limit and a decode depth
+  guard; `validate` with the ADR limits (errors name the node path; http and https links only; every interactive node labelled);
+  a never-panics property test and a cargo-fuzz target (`crates/paddock-view/fuzz`); generated TypeScript in
+  `@decryp7/paddock-ui` (`view/generated/view.ts`, stale-checked by a test). The `<pd-view>` renderer is the next step.
+- Every Paddock crate that parses untrusted input has a never-panics test (`paddock_testkit::assert_never_panics`, new: the one-line
+  form of `corpus` + `never_panics`), so C36 reports nothing and is strict in Paddock's own CI (`paddock-conformance --strict C36`: the
+  warnings of the named checks fail the run). C36 now assigns a file to the nearest crate above it.
+- The `sidecar-self-test` composite action (rule 23 on Linux and Windows bundles) and its use in the shell demo's release workflow. The
+  demo agent's `--self-test` is `paddock_proc::self_test` now (a failing check exits 1; before it always exited 0). `paddock-proc` was
+  already in the agent through `paddock-service`, so no dependency was added.
+- `paddock-files` and `@decryp7/paddock-ui/shell/files` (plan X31): the user's files. `PathGrants` (open only paths the user chose,
+  by dialog, drop or command line; per window, bounded, expiring, canonical), the validators (`parse`, `canonical`, `output_file`,
+  `child`, `confined`), validated pickers behind `Picker` (`NativePicker` over `tauri-plugin-dialog`), `Recents` (named lists in a
+  versioned file, recorded only after a granted open, granted again on use), reveal, open and web addresses with command lines per
+  OS (never a file that runs on open; http, https and mailto only), `Files` and the `files_*` commands in the shell plugin
+  (`Builder::files`, drops granted by the window hook, `WindowGrants` for the app's own commands). UI: `FilesBackend`
+  (Tauri, memory), `FilesStore`, `pd-recent-files`; the shell demo has a Files page.
+- Undo and an activity journal (plan X44). `paddock_jobs::journal`: a bounded (at most 5,000 entries, cut texts), persisted (paddock-env
+  versioned file, user-only permissions, a damaged file kept, a newer one never overwritten) log of what the app did on the user's
+  behalf, each entry `NotUndoable`, `Available`, `Undone` or `Expired`; `record`, `mark`, `expire_before`, `entries`, listeners for
+  pushing changes, a save failure kept for the app to show. Undoing stays the app's work. UI: `@decryp7/paddock-ui/shell/undo` with
+  `UndoStore` (the history of the user's edits: labels, merge keys, groups, limit 100; port of Debrief's `UndoStack`), Edit > Undo and
+  Redo (`UNDO_CONTRIBUTIONS`, Mod+Z / Mod+Shift+Z), the `pd-undo-toast` "Done, Undo" toast, `ActivityStore`, the Activity page
+  (`ACTIVITY_CONTRIBUTIONS`) and `TauriActivityBackend` / `MemoryActivityBackend`. The shell demo shows all of it (Say hello is
+  undoable). `paddock-jobs` now depends on `paddock-env`. The `tauri` feature adds `paddock_jobs::tauri_activity`: `manage(app, journal)` emits every entry on `paddock://activity`, the commands `activity_list`, `activity_undo` (runs the app's `Activity::on_undo` handler off the IPC thread, then marks the entry undone; the handler's `Err` text is the user's message) and `activity_mark`, with generated names in `shell/undo/generated/`. The schedule and journal tests moved into the single `it` test binary.
 - `paddock-chromium` and `paddock-runtime` (plan X14). `paddock-chromium` is the one Chromium driver, merged from Debrief's
   `chromium-driver` and Spotter's `spotter-render`: one command-line builder with the start page always last, `Sandbox::decide`
   (root plus an explicit opt-in only), launch as a `paddock-proc` supervised tree with a time limit on an injected clock and a

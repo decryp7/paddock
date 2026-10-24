@@ -95,6 +95,7 @@ const outline = defineExplorerProvider<Ctx>({
   id: 'wd.symbols',
   title: msg('wd.explorer.symbols', 'Outline'),
   order: 200,
+  changes: (ctx) => ctx.selectedPath(),
   roots: (ctx) => {
     const path = ctx.selectedPath();
     const symbols = path ? (ctx.repo.file(path)?.symbols ?? []) : [];
