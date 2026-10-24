@@ -41,30 +41,16 @@ impl RateLimiter {
     }
 
     /// Records and allows a toast for `cause` at `now_ms`, or says which limit holds it back (and records nothing).
-    /// A clock that moved backwards forgets what it remembers instead of holding toasts back until it catches up.
     pub fn allow(
         &mut self,
         settings: &OsSettings,
         cause: &str,
         now_ms: i64,
     ) -> Result<Reservation, Limited> {
-        if self.recent.back().is_some_and(|t| *t > now_ms) {
-            self.recent.clear();
-        }
-        let window = i64::from(settings.burst_window_secs) * MS;
-        while self.recent.front().is_some_and(|t| now_ms - *t >= window) {
-            self.recent.pop_front();
-        }
-        let cooldown = i64::from(settings.cooldown_secs) * MS;
+        self.check(settings, cause, now_ms)?;
         let previous = self.last.get(cause).copied();
-        if previous.is_some_and(|t| t <= now_ms && now_ms - t < cooldown) {
-            return Err(Limited::Cooldown);
-        }
-        if self.recent.len() >= settings.burst as usize {
-            return Err(Limited::Burst);
-        }
         if self.last.len() >= MAX_CAUSES && previous.is_none() {
-            self.forget_old(now_ms, cooldown);
+            self.forget_old(now_ms, i64::from(settings.cooldown_secs) * MS);
         }
         self.last.insert(cause.to_string(), now_ms);
         self.recent.push_back(now_ms);
@@ -73,6 +59,35 @@ impl RateLimiter {
             previous,
             at: now_ms,
         })
+    }
+
+    /// Whether [`RateLimiter::allow`] would allow a toast for `cause` at `now_ms`, without recording it. A clock that
+    /// moved backwards forgets what it remembers instead of holding toasts back until it catches up.
+    pub fn check(
+        &mut self,
+        settings: &OsSettings,
+        cause: &str,
+        now_ms: i64,
+    ) -> Result<(), Limited> {
+        if self.recent.back().is_some_and(|t| *t > now_ms) {
+            self.recent.clear();
+        }
+        let window = i64::from(settings.burst_window_secs) * MS;
+        while self.recent.front().is_some_and(|t| now_ms - *t >= window) {
+            self.recent.pop_front();
+        }
+        let cooldown = i64::from(settings.cooldown_secs) * MS;
+        if self
+            .last
+            .get(cause)
+            .is_some_and(|t| *t <= now_ms && now_ms - *t < cooldown)
+        {
+            return Err(Limited::Cooldown);
+        }
+        if self.recent.len() >= settings.burst as usize {
+            return Err(Limited::Burst);
+        }
+        Ok(())
     }
 
     /// Takes back a reservation (the OS refused the toast, so it must not count).

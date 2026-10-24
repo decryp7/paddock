@@ -396,3 +396,50 @@ fn the_hook_asks_only_posts_that_want_an_os_notification() {
     assert_eq!(presence.len(), 1);
     assert_eq!(presence[0].host, "main");
 }
+
+#[test]
+fn the_digest_is_toasted_once_when_quiet_hours_end_and_merged_the_next_night() {
+    use crate::notify::os::{ClockTime, QuietHours};
+    let q = QuietHours {
+        start: ClockTime::new(0, 0).unwrap(),
+        end: ClockTime::new(7, 0).unwrap(),
+    };
+    // The rig's clock starts at 1_000_000 ms: 00:16 UTC, inside the quiet hours.
+    let r = rig(OsSettings {
+        quiet_hours: Some(q),
+        ..OsSettings::default()
+    });
+    let main = window(&r.app, "main");
+    let opened = hear(&main, OPEN_EVENT);
+    post(r.app.handle(), None, error("job:1", "One failed"), true);
+    post(r.app.handle(), None, error("job:2", "Two failed"), true);
+    assert!(r.toaster.shown().is_empty());
+    assert!(!poll_digest(r.app.handle()), "still quiet");
+    r.clock.advance(7 * 3_600_000);
+    assert!(poll_digest(r.app.handle()));
+    let toast = r.toaster.shown().remove(0);
+    assert_eq!(toast.title, "2 notifications held during quiet hours");
+    assert!(!poll_digest(r.app.handle()), "once");
+    // Its toast opens it like any other.
+    assert!(click(&r, toast.notice, Target::Toast));
+    assert_eq!(take(&opened), [json!(toast.notice.0)]);
+    // A second night; the focus of a window also looks (mock windows are never in front, so it toasts).
+    r.clock.advance(17 * 3_600_000 + 40 * 60_000);
+    post(r.app.handle(), None, error("job:3", "Three failed"), true);
+    r.clock.advance(8 * 3_600_000);
+    on_focus(r.app.handle(), "main");
+    assert_eq!(
+        r.toaster.shown().len(),
+        2,
+        "the second night has its own digest"
+    );
+    let c = centre_of(r.app.handle()).unwrap();
+    let digest = c
+        .snapshot("main")
+        .notices
+        .into_iter()
+        .find(|n| n.cause == "os:quiet-digest")
+        .unwrap();
+    assert_eq!(digest.count, 2, "both digests merged into the one message");
+    assert_eq!(digest.title, "1 notification held during quiet hours");
+}

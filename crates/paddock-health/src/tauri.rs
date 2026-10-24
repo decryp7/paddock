@@ -36,7 +36,9 @@ use std::sync::Arc;
 pub mod native;
 mod os;
 
-pub use os::{ActionHandler, ActionHandlers, Dispatched, dispatch};
+pub use os::{
+    ActionHandler, ActionHandlers, Dispatched, dispatch, poll_digest, spawn_digest_ticker,
+};
 
 /// Shows an OS notification for a message (the app decides: its setting, focus, rate limit) and says whether it did.
 /// Called on the main thread.
@@ -51,6 +53,7 @@ pub struct Setup<R: Runtime> {
     os: Option<Arc<OsNotify<R>>>,
     notifier: Option<Arc<OsNotifier>>,
     handlers: ActionHandlers<R>,
+    digest_every: Option<std::time::Duration>,
 }
 
 impl<R: Runtime> Setup<R> {
@@ -65,6 +68,7 @@ impl<R: Runtime> Setup<R> {
             os: None,
             notifier: None,
             handlers: ActionHandlers::default(),
+            digest_every: None,
         }
     }
 
@@ -105,6 +109,13 @@ impl<R: Runtime> Setup<R> {
         self
     }
 
+    /// Looks for the quiet-hours digest every `every` on a thread that ends with the app (quiet hours end by the clock,
+    /// not by an event). Without it the digest also comes when a window gets the focus ([`poll_digest`]).
+    pub fn os_digest_every(mut self, every: std::time::Duration) -> Setup<R> {
+        self.digest_every = Some(every);
+        self
+    }
+
     /// The app's handler for a kind of action clicked on a toast (`viewJob`, `retry`...); see [`ActionHandler`].
     pub fn on_notice_action(
         mut self,
@@ -133,6 +144,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, setup: Setup<R>) -> Result<Arc<Healt
         os,
         notifier,
         handlers,
+        digest_every,
     } = setup;
     let handle = app.clone();
     let health = Health::new(
@@ -144,6 +156,9 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, setup: Setup<R>) -> Result<Arc<Healt
     app.manage(health.clone());
     if let Some(notifier) = notifier {
         os::install(app, &notifier, handlers);
+        if let Some(every) = digest_every {
+            os::spawn_digest_ticker(app, every);
+        }
     }
     Ok(health)
 }
@@ -290,7 +305,10 @@ pub fn on_focus<R: Runtime>(app: &AppHandle<R>, label: &str) {
     let Some(centre) = centre_of(app) else {
         return;
     };
-    if let Some((id, window)) = centre.take_pending() {
+    let pending = centre.take_pending();
+    // The user is looking now: a due digest is listed in the centre, without a toast.
+    poll_digest(app);
+    if let Some((id, window)) = pending {
         let target = window
             .filter(|w| app.get_webview_window(w).is_some())
             .unwrap_or_else(|| label.to_string());

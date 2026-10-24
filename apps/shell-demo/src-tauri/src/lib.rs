@@ -19,6 +19,8 @@ pub mod tray;
 use paddock_diag::AppInfo;
 use paddock_diag::tauri::Setup;
 use paddock_env::{AppDirs, AppId, MapVars, Os};
+use paddock_health::notify::os::{FakeToaster, OsNotifier, SharedOsSettings, Toaster};
+use paddock_health::tauri::native::PluginToaster;
 use paddock_log::{LogConfig, LogHandle, Logging};
 use paddock_shell::{AppIdentity, Builder};
 use paddock_updater::tauri::UpdatesBuilder;
@@ -123,10 +125,27 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
 /// As [`shell`] with the log to report and tune (a test passes a scoped one).
 pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Builder<R> {
     let tick = place.tick();
+    let installed = matches!(place, Place::Installed);
+    let os_settings = SharedOsSettings::default();
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
         .dialog_contracts(DIALOG_CONTRACTS)
         .health(engine::services(tick))
+        .os_notifications(os_settings.clone())
+        .health_setup(move |app, setup| {
+            // Installed: the real notification plugin. Tests: a toaster that shows nothing (rule 7).
+            let toaster: Arc<dyn Toaster> = if installed {
+                Arc::new(PluginToaster::new(app.clone()))
+            } else {
+                Arc::new(FakeToaster::default())
+            };
+            let setup = setup.os_notifier(Arc::new(OsNotifier::new(os_settings, toaster)));
+            if installed {
+                setup.os_digest_every(Duration::from_secs(30))
+            } else {
+                setup
+            }
+        })
         .section(sections::general())
         .section(sections::storage())
         .setup(move |app| {
@@ -233,6 +252,8 @@ pub fn run() {
     let result = tauri::Builder::default()
         // The native save dialog of Report a Problem (the shell's `native-dialogs`).
         .plugin(tauri_plugin_dialog::init())
+        // The OS notification plugin behind the shell's `PluginToaster`.
+        .plugin(tauri_plugin_notification::init())
         .plugin(shell.build())
         .invoke_handler(invoke_handler())
         .on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated)

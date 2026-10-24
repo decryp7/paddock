@@ -12,8 +12,10 @@ Conventional Commits; one semver tag for the whole repo.
   `FakeToaster` for tests), toasts with up to three labelled buttons, and `route` for clicks: open the message, repair in the
   shell, the app's handler (`Setup::on_notice_action`), or `paddock://notifications-action` to the window
   (`NOTIFICATIONS_ACTION_EVENT`, `NotificationsBackend.onAction`, `NotificationsStore.runFromOs`). `Setup::os_notifier`
-  installs it; `paddock-shell` adds the `pd.notifications` settings page (`Builder::os_notifications`) and the `os-notify`
-  feature.
+  installs it, with a quiet-hours digest ("N notifications held during quiet hours" once when they end, rate-limited,
+  `Setup::os_digest_every`); `paddock-shell` adds the `pd.notifications` settings page (`Builder::os_notifications`) and the `os-notify`
+  feature. The shell demo shows the Notifications settings page and runs the notifier (the real plugin installed, a fake
+  toaster in tests); `OS_NOTIFICATIONS_CONTRIBUTIONS`, `NOTIFICATIONS_SECTION_FIXTURE` and `OsActionRunner` are the UI side.
 - `paddock-diag` and `@decryp7/paddock-ui/shell/diagnostics` (plan X2, decision D9): Report a problem, the three designs of Debrief,
   Dyno and Pitcrew as one. A diagnostics zip of the app's log (newest part, read from the end), system facts, settings (secrets
   masked) and crash marker, plus the sections an app adds; one `Redactor` (secrets from Pitcrew and Debrief, personal data from Dyno,

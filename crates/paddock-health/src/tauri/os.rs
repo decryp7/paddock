@@ -4,8 +4,9 @@
 
 use super::{centre_of, emit_changed, emit_list, labels, warn_on_err};
 use crate::health::Health;
+use crate::notify::centre::{NewNotice, NoticeScope, NoticeSeverity};
 use crate::notify::centre::{Notice, NoticeAction, NoticeId};
-use crate::notify::os::{Click, OsNotifier, Route, WindowPresence, route, user_sees};
+use crate::notify::os::{Click, DIGEST_CAUSE, OsNotifier, Route, WindowPresence, route, user_sees};
 use crate::notify::{ACTION_EVENT, NoticeActionEvent, OPEN_EVENT};
 use ::tauri::{AppHandle, Emitter, Manager, Runtime};
 use paddock_commands::labels::resolve;
@@ -182,11 +183,73 @@ pub fn dispatch<R: Runtime>(
 /// Starts listening for clicks on this app's toasts.
 pub(super) fn install<R: Runtime>(
     app: &AppHandle<R>,
-    notifier: &OsNotifier,
+    notifier: &Arc<OsNotifier>,
     handlers: ActionHandlers<R>,
 ) {
+    app.manage(Managed(notifier.clone()));
     let (handle, handlers) = (app.clone(), Arc::new(handlers));
     notifier.toaster().subscribe(Arc::new(move |click| {
         dispatch(&handle, &handlers, click);
     }));
+}
+
+/// The notifier, managed so the digest can be polled from anywhere in the shell.
+pub(super) struct Managed(pub(super) Arc<OsNotifier>);
+
+/// Posts and shows the quiet-hours digest when quiet hours are over and notifications were held ("N notifications held
+/// during quiet hours"), at most as often as the limits allow. Called when a window gets the focus and by [`spawn_digest_ticker`]. Returns whether a toast was shown. Never fails.
+pub fn poll_digest<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let Some(notifier) = app.try_state::<Managed>().map(|m| m.0.clone()) else {
+        return false;
+    };
+    let Some(count) = notifier.pending_digest() else {
+        return false;
+    };
+    let title = if count == 1 {
+        "1 notification held during quiet hours".to_string()
+    } else {
+        format!("{count} notifications held during quiet hours")
+    };
+    let new = NewNotice::new(
+        DIGEST_CAUSE,
+        "app",
+        NoticeSeverity::Info,
+        title,
+        NoticeScope::App,
+    )
+    .body("They are in the notification centre.")
+    .quiet();
+    let Some(notice) = super::post(app, None, new, false) else {
+        return false;
+    };
+    let seen = user_sees(None, &presence(app));
+    let shown = notifier.send_digest(&notice, seen).shown();
+    if shown && let Some(centre) = centre_of(app) {
+        centre.note_shown(notice.id, None);
+    }
+    shown
+}
+
+/// Starts a thread that polls the digest every `every` while the app lives (it ends with the notifier). Quiet hours end
+/// by the clock, not by an event, so something has to look.
+pub fn spawn_digest_ticker<R: Runtime>(app: &AppHandle<R>, every: std::time::Duration) {
+    let (app, weak) = (
+        app.clone(),
+        app.try_state::<Managed>().map(|m| Arc::downgrade(&m.0)),
+    );
+    let Some(weak) = weak else { return };
+    let spawned = std::thread::Builder::new()
+        .name("os-digest".into())
+        .spawn(move || {
+            loop {
+                std::thread::park_timeout(every);
+                if weak.upgrade().is_none() {
+                    return;
+                }
+                poll_digest(&app);
+            }
+        });
+    if let Err(e) = spawned {
+        log::warn!(target: "paddock_health", "The quiet-hours digest cannot be polled: {e}");
+    }
 }

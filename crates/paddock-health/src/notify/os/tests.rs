@@ -486,3 +486,126 @@ fn slots_name_the_three_actions() {
     assert_eq!(PAYLOAD_KEY, "paddockNotice");
     assert!(is_alert(NoticeSeverity::Warning) && !is_alert(NoticeSeverity::Success));
 }
+
+fn quiet_night() -> OsSettings {
+    OsSettings {
+        quiet_hours: Some(QuietHours {
+            start: t("22:00"),
+            end: t("07:00"),
+        }),
+        cooldown_secs: 30,
+        ..OsSettings::default()
+    }
+}
+
+#[test]
+fn quiet_hours_end_with_one_digest_of_what_was_held_and_it_is_not_repeated() {
+    let r = rig(quiet_night(), at_hour(23, 0));
+    for i in 0..3 {
+        r.notifier.offer(
+            &notice(i, &format!("job:{i}"), NoticeSeverity::Error),
+            false,
+        );
+        r.notifier.offer(
+            &notice(i, &format!("job:{i}"), NoticeSeverity::Error),
+            false,
+        );
+    }
+    assert!(r.toaster.shown().is_empty());
+    assert_eq!(r.notifier.pending_digest(), None, "still quiet");
+    r.clock.advance(7 * 60 * MIN + MIN); // 06:01 next morning... 23:00 + 7 h 1 min
+    assert_eq!(
+        r.notifier.pending_digest(),
+        None,
+        "06:01 is still inside 22:00-07:00"
+    );
+    r.clock.advance(59 * MIN); // 07:00
+    assert_eq!(
+        r.notifier.pending_digest(),
+        Some(3),
+        "three causes, not six posts"
+    );
+    let digest = notice_with(50, DIGEST_CAUSE, NoticeSeverity::Info, |n| n.body("3 held"));
+    assert!(r.notifier.send_digest(&digest, false).shown());
+    assert_eq!(r.toaster.shown().len(), 1);
+    assert_eq!(r.toaster.shown()[0].cause, DIGEST_CAUSE);
+    assert_eq!(r.notifier.pending_digest(), None, "once");
+}
+
+#[test]
+fn the_digest_obeys_the_limits_the_window_the_os_and_the_off_switch() {
+    // Seen: dropped.
+    let r = rig(quiet_night(), at_hour(23, 0));
+    r.notifier
+        .offer(&notice(1, "a", NoticeSeverity::Error), false);
+    r.clock.advance(8 * 60 * MIN);
+    let digest = notice(50, DIGEST_CAUSE, NoticeSeverity::Info);
+    assert_eq!(
+        r.notifier.send_digest(&digest, true),
+        Outcome::Skipped(Skip::Seen)
+    );
+    assert_eq!(r.notifier.pending_digest(), None);
+    // The OS refuses: what was held stays and nothing is charged.
+    let r = rig(quiet_night(), at_hour(23, 0));
+    r.notifier
+        .offer(&notice(1, "a", NoticeSeverity::Error), false);
+    r.clock.advance(8 * 60 * MIN);
+    r.toaster.fail_with(Some("blocked"));
+    assert!(matches!(
+        r.notifier.send_digest(&digest, false),
+        Outcome::Failed(_)
+    ));
+    assert_eq!(r.notifier.pending_digest(), Some(1));
+    r.toaster.fail_with(None);
+    assert!(r.notifier.send_digest(&digest, false).shown());
+    // The burst limit holds it back, and it is asked again once the window slides.
+    let r = rig(
+        OsSettings {
+            burst: 1,
+            burst_window_secs: 60,
+            ..quiet_night()
+        },
+        at_hour(22, 30),
+    );
+    r.notifier
+        .offer(&notice(1, "a", NoticeSeverity::Error), false);
+    r.clock.advance((8 * 60 + 45) * MIN);
+    assert!(
+        r.notifier
+            .offer(&notice(2, "b", NoticeSeverity::Error), false)
+            .shown()
+    );
+    assert_eq!(r.notifier.pending_digest(), None, "the burst is used up");
+    assert_eq!(
+        r.notifier.send_digest(&digest, false),
+        Outcome::Skipped(Skip::Burst)
+    );
+    r.clock.advance(61_000);
+    assert_eq!(r.notifier.pending_digest(), Some(1));
+    // Off forgets what was held.
+    r.settings.set(OsSettings {
+        level: OsLevel::Off,
+        ..OsSettings::default()
+    });
+    assert_eq!(r.notifier.pending_digest(), None);
+    r.settings.set(OsSettings::default());
+    assert_eq!(
+        r.notifier.pending_digest(),
+        None,
+        "forgotten, not just hidden"
+    );
+}
+
+#[test]
+fn what_quiet_hours_hold_is_bounded() {
+    let r = rig(quiet_night(), at_hour(23, 0));
+    for i in 0..(MAX_HELD + 50) {
+        r.notifier
+            .offer(&notice(1, &format!("c{i}"), NoticeSeverity::Error), false);
+    }
+    r.clock.advance(9 * 60 * MIN);
+    assert_eq!(
+        r.notifier.pending_digest(),
+        Some(u32::try_from(MAX_HELD).unwrap())
+    );
+}
