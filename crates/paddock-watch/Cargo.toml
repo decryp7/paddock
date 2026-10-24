@@ -1,0 +1,20 @@
+[package]
+name = "paddock-watch"
+version = "0.1.0"
+description = "Folder watching for the Paddock apps: a debounce on the shared Clock (quiet time plus a longest wait), the ChangeSource port with a notify adapter, a watcher thread, and Debrief's settle rule (a file is ready when its size and time stopped changing) with batching and a bounded folder scan."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+# The real-folder adapter over the `notify` crate (`paddock_watch::NotifySource`); its calls live in `src/native.rs`, which
+# the coverage job leaves out.
+notify = ["dep:notify"]
+
+[dependencies]
+paddock-jobs = { workspace = true }
+notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
+
+[dev-dependencies]
+tempfile = "3"

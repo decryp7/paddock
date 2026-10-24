@@ -8,18 +8,17 @@ repository.workspace = true
 publish = ["decryp7"]
 
 [features]
-# The folder watcher over the `notify` crate (`paddock_packs::watch::NotifySource`), the real-folder adapter of the
-# `ChangeSource` port. Its calls live in `src/watch/native.rs` and are left out of the coverage job.
-watch = ["dep:notify"]
+# The real-folder watcher (`paddock_packs::watch::NotifySource`): `paddock-watch`'s adapter over the `notify` crate.
+watch = ["paddock-watch/notify"]
 
 [dependencies]
 paddock-env = { workspace = true }
 paddock-jobs = { workspace = true }
+paddock-watch = { workspace = true }
 regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 serde = { version = "1", features = ["derive"] }
 serde_ignored = "0.1"
 toml = "0.9"
-notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
 
 [dev-dependencies]
 tempfile = "3"
