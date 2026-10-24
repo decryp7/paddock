@@ -489,7 +489,8 @@ fn a_back_off_wait_ends_when_the_clock_reaches_it() {
 fn a_panicking_channel_is_contained_and_the_others_still_deliver() {
     let r = rig(
         vec![webhook("w", false), email("m", None), ntfy("n", false)],
-        FakePoster::new().then_panic(),
+        // The webhook's requests panic, not whichever HTTP channel happens to post first (they post in parallel).
+        FakePoster::new().panic_on("hooks.example.org"),
         FakeMail::new().then_panic(),
         store(),
     );
