@@ -9,6 +9,7 @@ export const DEFAULT_CONFIG = {
   docBlocks: null,
   baselineSkip: [],
   windowWeight: null,
+  i18n: null,
   appDir: 'app',
   tauriDir: 'app/src-tauri',
   workflowsDir: '.gitea/workflows',

@@ -33,9 +33,10 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C29 | each window's initial JS (from `ng build --stats-json`) is within its `windowWeight` budget in `paddock.conformance.json`; a budget above measured + 10% warns (rule 35). `window-weight [kind...] [--max kB] [--record]` prints a window's weight and records budgets | the build stats |
 | C30 | Rust tests do not assert on the wall clock: in a `#[test]` fn an assertion comparing `elapsed()`, `Instant::now()`, `SystemTime::now()` (or a variable assigned from one) with a `Duration` is a warning; a hang guard of at least 10 s carries `// conformance: hang-guard`. Also a `thread::sleep` in a test that starts threads or uses channels, atomics or locks (the comment alone waives a deliberate one), and `Date.now()`/`performance.now()` differences under `expect` in TypeScript specs (not when the spec uses fake timers or `page.clock`). Use a `FakeClock` | |
 | C31 | ADR numbers are unique: no two files in `docs/adr/` share a `NNNN-` number, and numbers have four digits (parallel branches each took "the next one") | |
-| C32 | every `bundle.externalBin` sidecar is listed in `sidecars` of `paddock.conformance.json` (C04 starts it from the bundle with `--self-test`) and its crate handles `--self-test` (`paddock_proc::self_test::handle`) (rule 23) | |
-| C33 | every `untimed` entry of a `withCallTimeout` policy (`@decryp7/paddock-ui/ipc`) is declared in `untimedCommands` of `paddock.conformance.json` with a reason (it starts a job / waits for the user, rule 12); stale declarations warn | |
-| C34 | a parser crate (public `parse*`/`decode*`/`from_str`/`from_bytes` over text, bytes or a reader; or named in `parserCrates`) has a fuzz target or a never-panics test (`paddock_testkit::never_panics`, `proptest!`); `parserSkip` lists non-parsers. Warning | |
+| C33 | every `bundle.externalBin` sidecar is listed in `sidecars` of `paddock.conformance.json` (C04 starts it from the bundle with `--self-test`) and its crate handles `--self-test` (`paddock_proc::self_test::handle`) (rule 23) | |
+| C34 | every `untimed` entry of a `withCallTimeout` policy (`@decryp7/paddock-ui/ipc`) is declared in `untimedCommands` of `paddock.conformance.json` with a reason (it starts a job / waits for the user, rule 12); stale declarations warn | |
+| C35 | a parser crate (public `parse*`/`decode*`/`from_str`/`from_bytes` over text, bytes or a reader; or named in `parserCrates`) has a fuzz target or a never-panics test (`paddock_testkit::never_panics`, `proptest!`); `parserSkip` lists non-parsers. Warning | |
+| C32 | the translation catalogs are current: `paddock-i18n build --check --no-extract` over the app's `paddock-i18n.json` (every catalog equals its sources, every runtime JSON equals its catalog); a missing config warns | `npm ci` (the app's installed `@decryp7/paddock-ui`) |
 
 ## Sync (X27, X43)
 
@@ -66,7 +67,7 @@ a package none of whose licence options is permissive fails both modes. The allo
 
 `paddock.conformance.json` (optional): `app`, `appDir`, `tauriDir`, `workflowsDir`, `sidecars` (`[{ "name": "x-worker", "args": ["--self-test"] }]`),
 `nonGates` (job ids the release job need not wait for), `commitRange`, `appName` (display name for templates; default the id with a capital),
-`docBlocks` (`{ "AGENTS.md": ["rules", ...] }` replaces the default targets), `untimedCommands` (`{ "method": "why it is never timed out" }`, C33), `parserCrates` / `parserSkip` (C34), `windowWeight` (`{ stats, windows: { main: { maxKb, entries? } } }`), `baselineSkip` (template paths this app does not take; prefer a waiver).
+`docBlocks` (`{ "AGENTS.md": ["rules", ...] }` replaces the default targets), `untimedCommands` (`{ "method": "why it is never timed out" }`, C34), `parserCrates` / `parserSkip` (C35), `windowWeight` (`{ stats, windows: { main: { maxKb, entries? } } }`), `baselineSkip` (template paths this app does not take; prefer a waiver).
 
 `paddock.waivers.toml`:
 
@@ -113,6 +114,6 @@ side: `paddock_build::Build` (build.rs: the Windows manifest in every binary, em
 
 Reusable workflows in `.gitea/workflows/`: `app-fuzz.yml` (nightly cargo-fuzz in shards, `shards` is a JSON list), `app-mutants.yml`
 (cargo-mutants weekly and on the changed lines of a pull request) and `app-never-panics.yml` (the proptest / `never_panics` tests with
-many cases, release mode). C34 finds parser crates without a fuzz target or a never-panics test; `paddock_testkit::{corpus,
+many cases, release mode). C35 finds parser crates without a fuzz target or a never-panics test; `paddock_testkit::{corpus,
 never_panics}` is the dependency-free test for a parser. Debrief's `corpus.yml` stays in Debrief (its data and pins are its own); the
 `plan` and `nightly-mark` actions it hand-copied are the shared ones.
