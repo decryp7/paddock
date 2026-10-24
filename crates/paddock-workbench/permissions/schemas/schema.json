@@ -1,0 +1,552 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PermissionFile",
+  "description": "Permission file that can define a default permission, a set of permissions or a list of inlined permissions.",
+  "type": "object",
+  "properties": {
+    "default": {
+      "description": "The default permission set for the plugin",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DefaultPermission"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "set": {
+      "description": "A list of permissions sets defined",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PermissionSet"
+      }
+    },
+    "permission": {
+      "description": "A list of inlined permissions",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Permission"
+      }
+    }
+  },
+  "definitions": {
+    "DefaultPermission": {
+      "description": "The default permission set of the plugin.\n\nWorks similarly to a permission with the \"default\" identifier.",
+      "type": "object",
+      "required": [
+        "permissions"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PermissionSet": {
+      "description": "A set of direct permissions grouped together under a new name.",
+      "type": "object",
+      "required": [
+        "description",
+        "identifier",
+        "permissions"
+      ],
+      "properties": {
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does.",
+          "type": "string"
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PermissionKind"
+          }
+        }
+      }
+    },
+    "Permission": {
+      "description": "Descriptions of explicit privileges of commands.\n\nIt can enable commands to be accessible in the frontend of the application.\n\nIf the scope is defined it can be used to fine grain control the access of individual or multiple commands.",
+      "type": "object",
+      "required": [
+        "identifier"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri internal convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commands": {
+          "description": "Allowed or denied commands when using this permission.",
+          "default": {
+            "allow": [],
+            "deny": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/Commands"
+            }
+          ]
+        },
+        "scope": {
+          "description": "Allowed or denied scoped when using this permission.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Scopes"
+            }
+          ]
+        },
+        "platforms": {
+          "description": "Target platforms this permission applies. By default all platforms are affected by this permission.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Target"
+          }
+        }
+      }
+    },
+    "Commands": {
+      "description": "Allowed and denied commands inside a permission.\n\nIf two commands clash inside of `allow` and `deny`, it should be denied by default.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Allowed command.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "description": "Denied command, which takes priority.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Scopes": {
+      "description": "An argument for fine grained behavior control of Tauri commands.\n\nIt can be of any serde serializable type and is used to allow or prevent certain actions inside a Tauri command. The configured scope is passed to the command and will be enforced by the command implementation.\n\n## Example\n\n```json { \"allow\": [{ \"path\": \"$HOME/**\" }], \"deny\": [{ \"path\": \"$HOME/secret.txt\" }] } ```",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Data that defines what is allowed by the scope.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        "deny": {
+          "description": "Data that defines what is denied by the scope. This should be prioritized by validation logic.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      }
+    },
+    "Value": {
+      "description": "All supported ACL values.",
+      "anyOf": [
+        {
+          "description": "Represents a null JSON value.",
+          "type": "null"
+        },
+        {
+          "description": "Represents a [`bool`].",
+          "type": "boolean"
+        },
+        {
+          "description": "Represents a valid ACL [`Number`].",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Number"
+            }
+          ]
+        },
+        {
+          "description": "Represents a [`String`].",
+          "type": "string"
+        },
+        {
+          "description": "Represents a list of other [`Value`]s.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        {
+          "description": "Represents a map of [`String`] keys to [`Value`]s.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      ]
+    },
+    "Number": {
+      "description": "A valid ACL number.",
+      "anyOf": [
+        {
+          "description": "Represents an [`i64`].",
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "description": "Represents a [`f64`].",
+          "type": "number",
+          "format": "double"
+        }
+      ]
+    },
+    "Target": {
+      "description": "Platform target.",
+      "oneOf": [
+        {
+          "description": "MacOS.",
+          "type": "string",
+          "enum": [
+            "macOS"
+          ]
+        },
+        {
+          "description": "Windows.",
+          "type": "string",
+          "enum": [
+            "windows"
+          ]
+        },
+        {
+          "description": "Linux.",
+          "type": "string",
+          "enum": [
+            "linux"
+          ]
+        },
+        {
+          "description": "Android.",
+          "type": "string",
+          "enum": [
+            "android"
+          ]
+        },
+        {
+          "description": "iOS.",
+          "type": "string",
+          "enum": [
+            "iOS"
+          ]
+        }
+      ]
+    },
+    "PermissionKind": {
+      "type": "string",
+      "oneOf": [
+        {
+          "description": "Enables the assistant_approve_tool command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assistant-approve-tool",
+          "markdownDescription": "Enables the assistant_approve_tool command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_approve_tool command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assistant-approve-tool",
+          "markdownDescription": "Denies the assistant_approve_tool command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assistant-conversations",
+          "markdownDescription": "Enables the assistant_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_conversations command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assistant-conversations",
+          "markdownDescription": "Denies the assistant_conversations command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_delete command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assistant-delete",
+          "markdownDescription": "Enables the assistant_delete command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_delete command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assistant-delete",
+          "markdownDescription": "Denies the assistant_delete command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assistant-info",
+          "markdownDescription": "Enables the assistant_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assistant-info",
+          "markdownDescription": "Denies the assistant_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_load command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assistant-load",
+          "markdownDescription": "Enables the assistant_load command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_load command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assistant-load",
+          "markdownDescription": "Denies the assistant_load command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assistant-send",
+          "markdownDescription": "Enables the assistant_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assistant-send",
+          "markdownDescription": "Denies the assistant_send command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the assistant_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assistant-stop",
+          "markdownDescription": "Enables the assistant_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assistant-stop",
+          "markdownDescription": "Denies the assistant_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the drag_ghost_end command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-drag-ghost-end",
+          "markdownDescription": "Enables the drag_ghost_end command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the drag_ghost_end command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-drag-ghost-end",
+          "markdownDescription": "Denies the drag_ghost_end command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the drag_ghost_show command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-drag-ghost-show",
+          "markdownDescription": "Enables the drag_ghost_show command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the drag_ghost_show command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-drag-ghost-show",
+          "markdownDescription": "Denies the drag_ghost_show command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the drag_ghost_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-drag-ghost-start",
+          "markdownDescription": "Enables the drag_ghost_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the drag_ghost_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-drag-ghost-start",
+          "markdownDescription": "Denies the drag_ghost_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the layout_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-layout-get",
+          "markdownDescription": "Enables the layout_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the layout_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-layout-get",
+          "markdownDescription": "Denies the layout_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the layout_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-layout-set",
+          "markdownDescription": "Enables the layout_set command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the layout_set command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-layout-set",
+          "markdownDescription": "Denies the layout_set command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the panel_dock_back command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-panel-dock-back",
+          "markdownDescription": "Enables the panel_dock_back command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the panel_dock_back command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-panel-dock-back",
+          "markdownDescription": "Denies the panel_dock_back command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the panel_focus command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-panel-focus",
+          "markdownDescription": "Enables the panel_focus command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the panel_focus command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-panel-focus",
+          "markdownDescription": "Denies the panel_focus command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the panel_keep_on_top command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-panel-keep-on-top",
+          "markdownDescription": "Enables the panel_keep_on_top command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the panel_keep_on_top command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-panel-keep-on-top",
+          "markdownDescription": "Denies the panel_keep_on_top command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the panel_pop_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-panel-pop-out",
+          "markdownDescription": "Enables the panel_pop_out command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the panel_pop_out command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-panel-pop-out",
+          "markdownDescription": "Denies the panel_pop_out command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the panels_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-panels-list",
+          "markdownDescription": "Enables the panels_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the panels_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-panels-list",
+          "markdownDescription": "Denies the panels_list command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pointer_button_down command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pointer-button-down",
+          "markdownDescription": "Enables the pointer_button_down command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pointer_button_down command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pointer-button-down",
+          "markdownDescription": "Denies the pointer_button_down command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ui_sync_publish command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ui-sync-publish",
+          "markdownDescription": "Enables the ui_sync_publish command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ui_sync_publish command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ui-sync-publish",
+          "markdownDescription": "Denies the ui_sync_publish command without any pre-configured scope."
+        },
+        {
+          "description": "The main window's set: every workbench command a top-level window may call.\n#### This default permission set includes:\n\n- `main`",
+          "type": "string",
+          "const": "default",
+          "markdownDescription": "The main window's set: every workbench command a top-level window may call.\n#### This default permission set includes:\n\n- `main`"
+        },
+        {
+          "description": "Every workbench command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-drag-ghost-end`\n- `allow-drag-ghost-show`\n- `allow-drag-ghost-start`\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-pop-out`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`",
+          "type": "string",
+          "const": "main",
+          "markdownDescription": "Every workbench command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-drag-ghost-end`\n- `allow-drag-ghost-show`\n- `allow-drag-ghost-start`\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-pop-out`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`"
+        },
+        {
+          "description": "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-layout-get`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-keep-on-top`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`",
+          "type": "string",
+          "const": "popout",
+          "markdownDescription": "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-layout-get`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-keep-on-top`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`"
+        },
+        {
+          "description": "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract.\n#### This permission set includes:\n\n- `allow-ui-sync-publish`",
+          "type": "string",
+          "const": "dialog",
+          "markdownDescription": "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract.\n#### This permission set includes:\n\n- `allow-ui-sync-publish`"
+        }
+      ]
+    }
+  }
+}

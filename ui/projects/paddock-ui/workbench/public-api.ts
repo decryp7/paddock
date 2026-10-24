@@ -73,3 +73,5 @@ export {
   type ExplorerPlan,
   type ExplorerVerdict,
 } from './src/ports';
+export { WORKBENCH_COMMANDS, type WorkbenchCommand } from './generated/workbench-commands';
+export { WORKBENCH_PLUGIN } from './generated/workbench';

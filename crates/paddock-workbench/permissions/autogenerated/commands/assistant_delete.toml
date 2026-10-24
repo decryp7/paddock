@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-assistant-delete"
+description = "Enables the assistant_delete command without any pre-configured scope."
+commands.allow = ["assistant_delete"]
+
+[[permission]]
+identifier = "deny-assistant-delete"
+description = "Denies the assistant_delete command without any pre-configured scope."
+commands.deny = ["assistant_delete"]
