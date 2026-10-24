@@ -8,7 +8,7 @@ export const DIAGNOSTICS_STYLES = `
   .field { display: flex; flex-direction: column; gap: var(--pd-space-1); }
   .field label { font-weight: var(--pd-weight-medium); }
   textarea { box-sizing: border-box; width: 100%; min-height: 6em; resize: vertical; padding: var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-  .scroller { max-height: 240px; overflow: auto; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); }
+  .scroller { max-height: 300px; overflow: auto; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: var(--pd-space-1) var(--pd-space-3); text-align: left; vertical-align: top; }
   thead th { position: sticky; top: 0; background: var(--pd-surface-1); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); border-bottom: 1px solid var(--pd-border-control); }
