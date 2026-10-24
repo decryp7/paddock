@@ -1,7 +1,10 @@
 /** The attributes an app sets on <html> to select the look. */
 export const SU_THEMES = ['system', 'dark', 'light'] as const;
-/** One accent per app of the family (the token tests measure each in both schemes and both contrast modes). */
-export const SU_ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter'] as const;
+/**
+ * One accent per app of the family, and `graphite` for the demo apps (the token tests measure each in both schemes and
+ * both contrast modes).
+ */
+export const SU_ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter', 'graphite'] as const;
 export const SU_DENSITIES = ['comfortable', 'standard', 'compact'] as const;
 /** `system` follows the OS (Increase Contrast, Windows contrast themes); `more` forces high contrast, `standard` turns it off. */
 export const SU_CONTRASTS = ['system', 'standard', 'more'] as const;

@@ -21,17 +21,17 @@ test('About shows the engine’s version and fetches a legal text only when aske
 
 test('What’s New shows the running version’s notes', async ({ app, page }) => {
   await app.dialogs.openWindow('pd.whats-new');
-  await expect(page.getByTestId('whats-new-heading')).toHaveText(`What’s New in ${VERSION}`);
+  await expect(page.getByTestId('whats-new-heading')).toHaveText(`What’s new in ${VERSION}`);
   await expect(page.getByRole('region', { name: 'Fixed' })).toContainText('running version’s notes only');
 });
 
-test('Help ▸ Check for Updates… finds, downloads and verifies an update, and the main window announces it', async ({ app, page, pageErrors }) => {
+test('Help ▸ Check for updates… finds, downloads and verifies an update, and the main window announces it', async ({ app, page, pageErrors }) => {
   await page.goto('/');
   await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
   const help = await app.menus.open('Help');
-  await expect(help.getByRole('menuitem', { name: 'What’s New' })).toBeVisible();
+  await expect(help.getByRole('menuitem', { name: 'What’s new' })).toBeVisible();
   await expect(help.getByRole('menuitem', { name: 'About', exact: true })).toBeVisible();
-  await help.getByRole('menuitem', { name: 'Check for Updates…' }).click();
+  await help.getByRole('menuitem', { name: 'Check for updates…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Updates' });
   await expect(dialog.getByTestId('updates-current')).toHaveText(`You have version ${VERSION}.`);
   await expect(dialog).toHaveAttribute('aria-modal', 'false');

@@ -54,7 +54,7 @@ export class PdWhatsNewDialog {
   protected readonly notes = resource({ loader: () => this.backend.whatsNew() });
 
   protected heading(version: string): string {
-    return $localize`:@@pd.whats-new.heading:What’s New in ${version}:version:`;
+    return $localize`:@@pd.whats-new.heading:What’s new in ${version}:version:`;
   }
 
   protected released(date: string): string {

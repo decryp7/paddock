@@ -63,7 +63,7 @@ export function defineAboutDialogs(options: AboutDialogsOptions): readonly [Dial
     defineDialog({
       id: ABOUT_DIALOG_IDS.whatsNew,
       kind: 'viewer',
-      title: msg('pd.whats-new.title', 'What’s New'),
+      title: msg('pd.whats-new.title', 'What’s new'),
       commands: ABOUT_DIALOG_COMMANDS.whatsNew,
       providers: options.providers,
       load: () => import('./whats-new-dialog').then((m) => m.PdWhatsNewDialog),
@@ -84,13 +84,13 @@ export function aboutContributions(dialogs: readonly DialogDef[]): ContributionB
       }),
       defineCommand({
         id: 'pd.updates.open',
-        title: msg('pd.updates.open', 'Check for Updates…'),
+        title: msg('pd.updates.open', 'Check for updates…'),
         category,
         run: (ctx) => void ctx.openDialog(ABOUT_DIALOG_IDS.updates),
       }),
       defineCommand({
         id: 'pd.whats-new.open',
-        title: msg('pd.whats-new.open', 'What’s New'),
+        title: msg('pd.whats-new.open', 'What’s new'),
         category,
         run: (ctx) => void ctx.openDialog(ABOUT_DIALOG_IDS.whatsNew),
       }),

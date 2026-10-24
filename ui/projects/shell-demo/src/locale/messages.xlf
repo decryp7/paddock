@@ -128,26 +128,35 @@
       <trans-unit id="sd.tray.failed" datatype="html">
         <source>That did not work: <x id="reason"/></source>
       </trans-unit>
+      <trans-unit id="sd.tray.idle" datatype="html">
+        <source>No jobs running</source>
+      </trans-unit>
       <trans-unit id="sd.tray.job" datatype="html">
         <source>Start sample job</source>
+      </trans-unit>
+      <trans-unit id="sd.tray.open" datatype="html">
+        <source>Open window</source>
       </trans-unit>
       <trans-unit id="sd.tray.quit" datatype="html">
         <source>Quit</source>
       </trans-unit>
-      <trans-unit id="sd.tray.show" datatype="html">
-        <source>Show window</source>
+      <trans-unit id="sd.tray.quit-hint" datatype="html">
+        <source>Quit <x id="app"/></source>
+      </trans-unit>
+      <trans-unit id="sd.tray.reset" datatype="html">
+        <source>Reset <x id="service"/></source>
+      </trans-unit>
+      <trans-unit id="sd.tray.restart" datatype="html">
+        <source>Restart <x id="service"/></source>
+      </trans-unit>
+      <trans-unit id="sd.tray.running" datatype="html">
+        <source>Running</source>
+      </trans-unit>
+      <trans-unit id="sd.tray.stopped" datatype="html">
+        <source><x id="service"/> stopped</source>
       </trans-unit>
       <trans-unit id="sd.tray.unavailable" datatype="html">
         <source>The app did not answer: <x id="reason"/></source>
-      </trans-unit>
-      <trans-unit id="sd.tray.version" datatype="html">
-        <source>Version <x id="version"/></source>
-      </trans-unit>
-      <trans-unit id="sd.tray.windows.one" datatype="html">
-        <source>1 window open</source>
-      </trans-unit>
-      <trans-unit id="sd.tray.windows.other" datatype="html">
-        <source><x id="count"/> windows open</source>
       </trans-unit>
       <trans-unit id="sd.warm-paper" datatype="html">
         <source>Warm paper</source>

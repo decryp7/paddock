@@ -5,7 +5,7 @@
 //
 // Selecting things on <html>:
 //   data-theme="dark|light"          (absent: follow prefers-color-scheme, dark when unknown)
-//   data-accent="debrief|pitcrew|pitwall|dyno|spotter|pacenotes|sighter"   (absent: debrief)
+//   data-accent="debrief|pitcrew|pitwall|dyno|spotter|pacenotes|sighter|graphite"   (absent: debrief; graphite: demo apps)
 //   data-density="comfortable|standard|compact"          (absent: standard)
 //   data-contrast="more|off"         (absent: follow prefers-contrast)
 //   data-motion="reduce|full"        (absent: follow prefers-reduced-motion)
@@ -282,6 +282,9 @@ $accents: (
   'spotter': (dark: #2cc4b0, light: #0b7a6e, fill: #0e8577),
   'pacenotes': (dark: #8da74e, light: #576d07, fill: #657c1f),
   'sighter': (dark: #c488cf, light: #884f92, fill: #975ea2),
+  // Not an app of the family: the neutral accent of the demo apps (Paddock Shell Demo, its silver icon), so a demo never
+  // borrows an app's colour.
+  'graphite': (dark: #a6a8ad, light: #4f5764, fill: #6b7380),
 );
 
 @mixin accent-vars($text, $fill) {

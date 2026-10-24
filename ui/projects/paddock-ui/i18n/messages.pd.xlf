@@ -215,6 +215,9 @@
       <trans-unit id="pd.jobs.status" datatype="html">
         <source>Jobs</source>
       </trans-unit>
+      <trans-unit id="pd.jobs.status.count" datatype="html">
+        <source><x id="phase"/> <x id="count"/></source>
+      </trans-unit>
       <trans-unit id="pd.jobs.status.detail" datatype="html">
         <source><x id="lead"/>: <x id="phase"/></source>
       </trans-unit>
@@ -223,6 +226,9 @@
       </trans-unit>
       <trans-unit id="pd.jobs.status.idle" datatype="html">
         <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.percent" datatype="html">
+        <source><x id="phase"/> <x id="percent"/>%</source>
       </trans-unit>
       <trans-unit id="pd.jobs.status.running" datatype="html">
         <source><x id="count"/> running</source>
@@ -732,7 +738,7 @@
         <source>Update available</source>
       </trans-unit>
       <trans-unit id="pd.updates.open" datatype="html">
-        <source>Check for Updates…</source>
+        <source>Check for updates…</source>
       </trans-unit>
       <trans-unit id="pd.updates.progress" datatype="html">
         <source><x id="phase"/>: <x id="done"/></source>
@@ -771,7 +777,7 @@
         <source>The release notes could not be loaded.</source>
       </trans-unit>
       <trans-unit id="pd.whats-new.heading" datatype="html">
-        <source>What’s New in <x id="version"/></source>
+        <source>What’s new in <x id="version"/></source>
       </trans-unit>
       <trans-unit id="pd.whats-new.loading" datatype="html">
         <source>Loading…</source>
@@ -780,7 +786,7 @@
         <source>There are no release notes for version <x id="version"/>.</source>
       </trans-unit>
       <trans-unit id="pd.whats-new.open" datatype="html">
-        <source>What’s New</source>
+        <source>What’s new</source>
       </trans-unit>
       <trans-unit id="pd.whats-new.released" datatype="html">
         <source>Released <x id="date"/></source>
@@ -789,7 +795,7 @@
         <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.whats-new.title" datatype="html">
-        <source>What’s New</source>
+        <source>What’s new</source>
       </trans-unit>
     </body>
   </file>

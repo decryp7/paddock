@@ -49,6 +49,10 @@ paddock_commands::command_table! {
     Mutation [MAIN] => commands::demo_reset,
     /// What the engine inspector shows.
     Query [MAIN | DIALOG] => commands::demo_status,
+    /// The tray popover's repair of a service (the shell's repair; `health_repair` is not open to the tray).
+    Mutation [TRAY] => commands::demo_tray_repair,
+    /// What the tray popover shows.
+    Query [TRAY] => commands::demo_tray_state,
 }
 
 /// Where the app runs: installed (the user's folders, real ticks) or in a test (nothing outside `dir`, no background

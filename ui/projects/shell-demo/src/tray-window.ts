@@ -1,13 +1,13 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { tauriIpc } from './app/demo-ipc';
-import { TRAY_INVOKE, TrayPopover, type TrayInvoke } from './app/tray-popover';
-import { APP_NAME } from './app/demo-name';
+import { TRAY_IPC, TrayPopover, type TrayIpc, type TrayState } from './app/tray-popover';
 
-/** The browser build's stand-in (e2e and screenshots): one window, the shell's version, every action accepted. */
-const browserInvoke: TrayInvoke = async <T,>(command: string) => {
-  const replies: Record<string, unknown> = { shell_version: { shell: 'browser', app: { id: 'shell-demo', name: APP_NAME, version: 'browser' } }, windows_list: [{ label: 'main' }] };
-  return (replies[command] ?? null) as T;
+/** The browser build's stand-in (e2e and screenshots): a calm app, every action accepted, no events. */
+const BROWSER_STATE: TrayState = { problems: [], job: null };
+const browserIpc: TrayIpc = {
+  invoke: async <T,>(command: string) => (command === 'demo_tray_state' ? BROWSER_STATE : null) as T,
+  listen: async () => () => undefined,
 };
 
 @Component({
@@ -24,7 +24,6 @@ class TrayRoot {}
  */
 export function bootTrayWindow(): Promise<unknown> {
   const ipc = tauriIpc();
-  return bootstrapApplication(TrayRoot, {
-    providers: [{ provide: TRAY_INVOKE, useValue: ipc ? ipc.invoke : browserInvoke }],
-  });
+  const tray: TrayIpc = ipc ? { invoke: ipc.invoke, listen: (event, handler) => ipc.listen(event, () => handler()) } : browserIpc;
+  return bootstrapApplication(TrayRoot, { providers: [{ provide: TRAY_IPC, useValue: tray }] });
 }

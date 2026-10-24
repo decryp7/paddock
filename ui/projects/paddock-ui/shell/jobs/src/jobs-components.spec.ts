@@ -118,7 +118,7 @@ describe('pd-jobs-status', () => {
     expect(button.title).toBe('Job 2: Reading');
     clock.advance(1_000);
     await fixture.whenStable();
-    expect(button.textContent?.trim()).toBe('2 running: Job 2');
+    expect(button.textContent?.trim()).toBe('2 running: Job 2 · Reading 1 so far');
     expect(button.title).toBe('Job 2: still working, this step is taking longer than usual');
     expect(button.dataset['stalled']).toBe('true');
 

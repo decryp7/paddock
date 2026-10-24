@@ -136,7 +136,6 @@ export function uiRewrites({ id, name }) {
     ],
     'src/app/generated/app-commands.ts': [['cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app']],
     'src/index.html': [['<title>Paddock Shell Demo</title>', `<title>${name}</title>`], ['Starting shell demo&hellip;', `Starting ${name}&hellip;`]],
-    'src/tray-window.ts': [["app: { id: 'shell-demo',", `app: { id: '${id}',`]],
     'tsconfig.app.json': [
       ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],
       ['"outDir": "../../out-tsc/shell-demo"', '"outDir": "./out-tsc/app"'],

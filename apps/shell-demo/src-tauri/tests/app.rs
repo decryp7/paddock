@@ -507,3 +507,59 @@ fn the_tray_menu_is_valid_and_uses_the_shells_items() {
     assert_eq!(paddock_window::tray::validate(&view.menu), Ok(()));
     assert_eq!(paddock_shell_demo::tray::POPOVER_ROUTE, "index.html#/tray");
 }
+
+#[test]
+fn the_tray_shows_what_needs_attention_and_repairs_it_through_the_shell() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = app(dir.path());
+    let main = window(&app, "main");
+    let tray = window(&app, "tray");
+    let health = events(&app, "paddock://service-health");
+    let calm = call(&tray, false, "demo_tray_state", json!({})).unwrap();
+    assert_eq!(calm, json!({ "problems": [], "job": null }));
+
+    call(
+        &main,
+        false,
+        "demo_break",
+        json!({ "service": "sd.engine" }),
+    )
+    .unwrap();
+    wait_for(&health, "the engine's outage", |s| {
+        service(s, engine::ENGINE)["state"] == "down"
+    });
+    let id = call(&tray, false, "demo_job_start", json!({ "kind": "quiet" })).unwrap();
+    let state = call(&tray, false, "demo_tray_state", json!({})).unwrap();
+    assert_eq!(state["problems"][0]["service"], engine::ENGINE, "{state}");
+    assert_eq!(state["problems"][0]["repair"], "restart", "{state}");
+    assert_eq!(state["job"]["id"], id, "{state}");
+
+    call(
+        &tray,
+        false,
+        "demo_tray_repair",
+        json!({ "service": "sd.engine" }),
+    )
+    .unwrap();
+    wait_for(&health, "the engine's recovery", |s| {
+        service(s, engine::ENGINE)["state"] == "ok"
+    });
+    let refused = call(
+        &tray,
+        false,
+        "demo_tray_repair",
+        json!({ "service": "sd.engine" }),
+    )
+    .unwrap_err();
+    assert_eq!(refused["code"], "refused", "{refused}");
+    // The main window has the chip's Repair; the tray command is the tray's only.
+    let denied = call(
+        &main,
+        false,
+        "demo_tray_repair",
+        json!({ "service": "sd.engine" }),
+    )
+    .unwrap_err();
+    assert_eq!(denied["code"], "denied", "{denied}");
+    call(&main, true, "job_cancel", json!({ "id": id })).unwrap();
+}

@@ -2,8 +2,8 @@ import { makeEnvironmentProviders, type EnvironmentProviders } from '@angular/co
 import type { SuAccent } from '@decryp7/paddock-ui';
 import { defineTheme, msg, provideAppearance, provideThemes } from '@decryp7/paddock-ui/shell';
 
-/** The demo's accent (it is Pitwall's reference app first, plan §4.1). */
-export const DEMO_ACCENT: SuAccent = 'pitwall';
+/** The demo's accent: the neutral graphite of the demo apps (never an app's colour), matching its silver icon. */
+export const DEMO_ACCENT: SuAccent = 'graphite';
 
 /**
  * A sample theme pack (ADR 0012 §5): token overrides only, measured by `themeProblems` like the shell's own tokens.

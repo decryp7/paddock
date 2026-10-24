@@ -195,7 +195,7 @@ describe('applyPaddockAppearance', () => {
     expect(el.hasAttribute('data-density')).toBe(false);
   });
   it('lists the seven apps, three themes and three densities', () => {
-    expect(SU_ACCENTS).toEqual(['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter']);
+    expect(SU_ACCENTS).toEqual(['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter', 'graphite']);
     expect(SU_THEMES).toEqual(['system', 'dark', 'light']);
     expect(SU_DENSITIES).toEqual(['comfortable', 'standard', 'compact']);
     expect(SU_CONTRASTS).toEqual(['system', 'standard', 'more']);

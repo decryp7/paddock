@@ -64,7 +64,8 @@ test.describe('jobs (plan S9)', () => {
     await expect(status).toHaveText('Jobs');
     await page.getByRole('button', { name: 'Start sample job' }).click();
     // The item names the lead job; its phase is in the tooltip.
-    await expect(status).toHaveText('1 running: Importing logs');
+    // The lead's phase and value follow its name (rule 11).
+    await expect(status).toHaveText(/^1 running: Importing logs · (Finding files [\d,]+ so far|Reading \d+%)$/);
     await expect(status).toHaveAttribute('title', /^Importing logs: (Finding files|Reading)$/);
 
     await status.click();
@@ -107,7 +108,7 @@ test.describe('jobs (plan S9)', () => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Start quiet job' }).click();
     const status = app.statusBar.jobs;
-    await expect(status).toHaveText('1 running: Update runner');
+    await expect(status).toHaveText(/^1 running: Update runner · Waiting for the device/);
     await expect(status).toHaveAttribute('title', 'Update runner: Waiting for the device');
     await page.clock.runFor(1_600);
     await expect(status).toHaveAttribute('title', 'Update runner: still working, this step is taking longer than usual');

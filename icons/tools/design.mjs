@@ -25,7 +25,7 @@ export const PALETTE = {
   dyno: { top: '#DE559F', base: '#BE3584', bottom: '#A0226A', deep: '#5E0E3C', light: '#F29CCB' },
   // Neutral silver: no family hue, light like Spotter's tile so it takes dark ink. The CVD search over low-chroma
   // tiles kept the family minimums unchanged only for near-black and light silver (tools/cvd.mjs; icons/README.md).
-  'shell-demo': { top: '#ECEEF2', base: '#D5D8DE', bottom: '#BBC1CB', deep: '#4A5361', light: '#F6F7F9' },
+  'shell-demo': { top: '#DDE1E7', base: '#D1D4DA', bottom: '#B5BCC7', deep: '#4A5361', light: '#F6F7F9' },
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */
@@ -47,6 +47,9 @@ export const STATUSES = {
 
 /** Light tiles (dark ink): a stronger livery and secondary ink, a softer glyph shadow. */
 const LIGHT_TILE = new Set(['spotter', 'shell-demo']);
+
+/** Tiles close to a white desktop: a 1 px inner rim (8 % black) keeps their outline on white without the shadow. */
+const RIMMED = new Set(['shell-demo']);
 
 export const STATUS_COLOURS = { busy: '#2F8FFF', warning: '#F5A524', error: '#E5484D', new: '#E5484D', serving: '#2FB36B', high: '#F2711C' };
 
@@ -414,6 +417,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     <rect x="${x}" y="${x}" width="${s}" height="${s}" fill="url(#${uid}sheen)"/>
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>
     ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}
+    ${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
   </g>
   <g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>
 </svg>
@@ -488,13 +492,15 @@ function trayGlyph(app, status) {
         { kind: 'fill', d: rr(4.5, 1.5, 8.5, 12, 1.5), tone: 'primary', cutStroke: { d: 'M7 10.5C7 9 9.5 9.4 9.5 7.5', w: 1.2, cap: 'butt' } },
         { kind: 'stroke', d: 'M1.8 4H4.5M1.8 7H4.5M1.8 10H4.5', w: 1.3, tone: 'primary', cap: 'butt' },
       ];
+    // Solid throughout (a template image is alpha only: half-transparent parts read as disabled); the inner parts are
+    // thinner than the frame instead.
     case 'shell-demo':
       return [
         { kind: 'stroke', d: rr(1.75, 2.25, 12.5, 11.5, 2.25), w: 1.5, tone: 'primary' },
         { kind: 'stroke', d: 'M1.75 5.75H14.25', w: 1.5, tone: 'primary', cap: 'butt' },
-        { kind: 'fill', d: rr(3.5, 7.5, 2.25, 4.5, 0.5), tone: 'secondary' },
-        { kind: 'stroke', d: 'M7.75 8.75H12', w: 1.5, tone: 'primary', cap: 'butt' },
-        { kind: 'stroke', d: 'M7.75 11.25H10.5', w: 1.5, tone: 'secondary', cap: 'butt' },
+        { kind: 'fill', d: rr(3.75, 7.75, 1.75, 4, 0.5), tone: 'primary' },
+        { kind: 'stroke', d: 'M7.75 8.75H12', w: 1.25, tone: 'primary', cap: 'butt' },
+        { kind: 'stroke', d: 'M7.75 11.25H10.5', w: 1.25, tone: 'primary', cap: 'butt' },
       ];
     case 'dyno': {
       const n = status === 'high' ? 372 : 300;

@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, signal } from '@angular/core';
-import { formatCount } from '@decryp7/paddock-ui';
+import { formatCount, jobView } from '@decryp7/paddock-ui';
 import { STATUS_COMPACT } from '@decryp7/paddock-ui/shell';
 import { PdJobsList } from './jobs-list';
-import { jobsStatusDetail, jobsStatusText } from './jobs-status-text';
+import { jobsStatusDetail, jobsStatusProgress, jobsStatusText } from './jobs-status-text';
 import { JobsStore } from './jobs.store';
 
 let nextId = 0;
@@ -24,8 +24,12 @@ let nextId = 0;
   template: `
     <button type="button" class="pill" [class.busy]="store.activeCount() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId"
       [attr.aria-label]="compact() ? text() : null" [attr.title]="detail() || text()" [attr.data-stalled]="stalled() || null" (click)="toggle()">
-      <span class="dot" aria-hidden="true"></span>
-      <span class="text">{{ compact() ? compactText() : text() }}</span>
+      <span class="dot" [class.ring]="percent() !== null" [style.--pd-jobs-progress]="percent() ?? 0" aria-hidden="true">
+        @if (store.activeCount() === 0) {
+          <svg viewBox="0 0 16 16" width="14" height="14"><path d="M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" /></svg>
+        }
+      </span>
+      <span class="text">{{ compact() ? compactText() : text() }}@if (!compact() && progress()) {<span class="progress"> · {{ progress() }}</span>}</span>
     </button>
     @if (open()) {
       <div class="popover" role="region" [attr.aria-label]="t.popover" [id]="panelId">
@@ -39,10 +43,14 @@ let nextId = 0;
     .pill:hover, :host(.open) .pill { border-color: var(--pd-border-control); }
     .pill:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
     .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-    .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--pd-text-muted); }
+    /* Idle: the jobs glyph (a list), quiet; running: a spinner, or a ring filled to the lead's share on a known scale. */
+    .dot { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--pd-text-muted); opacity: 0.6; }
+    .dot svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+    .progress { color: var(--pd-text-muted); }
     /* Running: a neutral spinner (accent is for action and selection, design guide §4). */
     /* A full faint track with a quarter arc: a spinner, never a letter (static at 45 degrees without motion). */
-    .busy .dot { width: 10px; height: 10px; border: 2px solid color-mix(in srgb, var(--pd-text-muted) 35%, transparent); border-top-color: var(--pd-text); transform: rotate(45deg); animation: pd-jobs-spin 0.9s linear infinite; }
+    .busy .dot { width: 10px; height: 10px; opacity: 1; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--pd-text-muted) 35%, transparent); border-top-color: var(--pd-text); transform: rotate(45deg); animation: pd-jobs-spin 0.9s linear infinite; }
+    .busy .dot.ring { border: 0; transform: none; animation: none; background: conic-gradient(var(--pd-text) calc(var(--pd-jobs-progress) * 1%), color-mix(in srgb, var(--pd-text-muted) 35%, transparent) 0); -webkit-mask: radial-gradient(circle, transparent 2.5px, #000 3px); mask: radial-gradient(circle, transparent 2.5px, #000 3px); }
     @keyframes pd-jobs-spin { to { transform: rotate(405deg); } }
     @media (prefers-reduced-motion: reduce) { .busy .dot { animation: none; } }
     .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: 10; width: min(360px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-2); }
@@ -70,6 +78,14 @@ export class PdJobsStatus {
     const lead = this.store.lead();
     return lead !== null && this.store.stalledIds().has(lead.id);
   });
+  /** The lead job's view while it runs (null otherwise). */
+  private readonly leadView = computed(() => {
+    const lead = this.store.lead();
+    return lead?.state === 'running' && lead.phase ? jobView(lead, this.stalled()) : null;
+  });
+  /** The lead's share on a known scale (0..100), for the ring; null for the spinner. */
+  protected readonly percent = computed(() => this.leadView()?.percent ?? null);
+  protected readonly progress = computed(() => jobsStatusProgress(this.leadView()));
   protected readonly text = computed(() => jobsStatusText(this.store.activeCount(), this.store.lead()?.title ?? null));
   protected readonly detail = computed(() => {
     const lead = this.store.lead();

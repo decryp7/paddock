@@ -1,4 +1,4 @@
-import { inject, Injectable, signal } from '@angular/core';
+import { computed, inject, Injectable, signal } from '@angular/core';
 import { MemoryNotificationCentre, MemoryServiceHealth, ServiceHealthStore, type Cause } from '@decryp7/paddock-ui/shell/notify';
 
 const cause = (message: string, hint: string, detail: string): Cause => ({ message, hint, detail, code: null, raiseCap: null, settings: null });
@@ -52,7 +52,11 @@ export class DemoEngineData {
   private readonly count = signal(0);
   private readonly lastFailed = signal(false);
   readonly loads = this.count.asReadonly();
-  readonly failed = this.lastFailed.asReadonly();
+  /**
+   * The panel cannot show engine data: its last load met an outage, or the engine is down now (the desktop app hears
+   * that from Rust after the load). Either way the panel waits calmly with the chip's cause instead of showing stale data.
+   */
+  readonly failed = computed(() => this.lastFailed() || (this.health ? !this.health.isServing('sd.engine') : false));
 
   load(): void {
     this.count.update((n) => n + 1);

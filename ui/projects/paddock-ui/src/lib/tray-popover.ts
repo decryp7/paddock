@@ -5,7 +5,8 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
 /**
  * Layout of a tray / menu-bar popup: 360 px wide, header, content fitted to its height (no empty gap, scrolls past 520 px)
  * and a footer toolbar. The window itself is frameless and transparent; this component draws the rounded surface
- * (12 px on macOS, 8 px on Windows 11), hairline border and soft shadow. Escape emits `dismissed`.
+ * (12 px on macOS, 8 px on Windows 11), hairline border and soft shadow, one 16 px inset for header, content and footer.
+ * Escape emits `dismissed`.
  *
  * Slots: `[slot=header]`, default (content), `[slot=footer]`.
  */
@@ -46,7 +47,7 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
     .header { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); }
     .header:empty, .footer:empty { display: none; }
     .content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 var(--pd-space-4) var(--pd-space-3); }
-    .footer { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-top: 1px solid var(--pd-hairline); }
+    .footer { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-4); border-top: 1px solid var(--pd-hairline); }
     @keyframes pd-tray-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { :host { animation: none; } }
   `,

@@ -396,7 +396,7 @@ describe('the dialogs', () => {
     let fixture = TestBed.createComponent(PdWhatsNewDialog);
     await fixture.whenStable();
     let el: HTMLElement = fixture.nativeElement;
-    expect(el.querySelector('[data-testid="whats-new-heading"]')?.textContent).toBe('What’s New in 1.4.0');
+    expect(el.querySelector('[data-testid="whats-new-heading"]')?.textContent).toBe('What’s new in 1.4.0');
     expect(text(el)).toContain('Updates in the app');
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({

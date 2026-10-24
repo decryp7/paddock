@@ -6,6 +6,8 @@ export const APP_COMMANDS = {
   demo_job_start: { kind: 'mutation', windows: ['main', 'tray'], limit: 262144 },
   demo_reset: { kind: 'mutation', windows: ['main'], limit: 262144 },
   demo_status: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
+  demo_tray_repair: { kind: 'mutation', windows: ['tray'], limit: 262144 },
+  demo_tray_state: { kind: 'query', windows: ['tray'], limit: 262144 },
 } as const;
 
 /** A command name of the table. */

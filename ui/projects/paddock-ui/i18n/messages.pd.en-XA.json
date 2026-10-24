@@ -72,9 +72,11 @@
     "pd.jobs.read-failed": "⟦Ţĥéé ĵööƀš çööûļð ñööţ ƀéé ŕééáð⟧",
     "pd.jobs.starting": "⟦Šţááŕţîîñĝ⟧",
     "pd.jobs.status": "⟦Ĵööƀš⟧",
+    "pd.jobs.status.count": "⟦{$phase} {$count}⟧",
     "pd.jobs.status.detail": "⟦{$lead}: {$phase}⟧",
     "pd.jobs.status.doing": "⟦{$count}: {$lead}⟧",
     "pd.jobs.status.idle": "⟦Ĵööƀš⟧",
+    "pd.jobs.status.percent": "⟦{$phase} {$percent}%⟧",
     "pd.jobs.status.running": "⟦{$count} ŕûûññîîñĝ⟧",
     "pd.jobs.still-working": "⟦šţîîļļ ŵööŕķîîñĝ, ţĥîš šţééþ îîš ţááķîñĝ ļööñĝééŕ ţĥááñ ûšûûááļ⟧",
     "pd.menu.bar": "⟦ÅÅþþļîîçááţîööñ ɱééñûû⟧",
@@ -244,7 +246,7 @@
     "pd.updates.notes": "⟦Ŕééļééáášé ñööţééš⟧",
     "pd.updates.notice.available": "⟦Ṽééŕšîîööñ {$version} îîš ááṽááîļááƀļéé (ýööû ĥááṽéé {$current}).⟧",
     "pd.updates.notification.available": "⟦ÛÛþðááţéé áṽááîîļááƀļé⟧",
-    "pd.updates.open": "⟦Çĥééçķ ƒööŕ ÛÛþðáţééš…⟧",
+    "pd.updates.open": "⟦Çĥééçķ ƒööŕ ûûþðáţééš…⟧",
     "pd.updates.progress": "⟦{$phase}: {$done}⟧",
     "pd.updates.progress-in-jobs": "⟦Ţĥéé þŕööĝŕééšš îš îîñ Ĵööƀš.⟧",
     "pd.updates.progress.of": "⟦{$phase}: {$done} ööƒ {$total}⟧",
@@ -257,12 +259,12 @@
     "pd.updates.unavailable.why": "⟦Ţĥîîš ƀûûîîļð ŵáš ɱááðéé ŵîîţĥöûûţ ááñ ûûþðáţéé šîîĝñîîñĝ ķéý, šöö îîţ çááññöţ ṽééŕîîƒý ûûþðáţééš. Ðööŵñļööáð ñééŵ ṽééŕšîîöñš ƒŕööɱ ţĥéé ŕééļéáášééš þááĝé.⟧",
     "pd.updates.up-to-date": "⟦Ýööûû ĥááṽé ţĥéé ļááţééšţ ṽéŕšîîööñ.⟧",
     "pd.whats-new.failed": "⟦Ţĥéé ŕééļééášéé ñööţééš çöûûļð ñööţ ƀéé ļöááðééð.⟧",
-    "pd.whats-new.heading": "⟦Ŵĥááţ’š Ñééŵ îîñ {$version}⟧",
+    "pd.whats-new.heading": "⟦Ŵĥááţ’š ñééŵ îîñ {$version}⟧",
     "pd.whats-new.loading": "⟦Ļööááðîîñĝ…⟧",
     "pd.whats-new.none": "⟦Ţĥééŕéé ááŕé ñöö ŕééļééášéé ñööţééš ƒöŕ ṽééŕšîîööñ {$version}.⟧",
-    "pd.whats-new.open": "⟦Ŵĥááţ’š Ñééŵ⟧",
+    "pd.whats-new.open": "⟦Ŵĥááţ’š ñééŵ⟧",
     "pd.whats-new.released": "⟦Ŕééļééáášéð {$date}⟧",
     "pd.whats-new.retry": "⟦Ŕééţŕý⟧",
-    "pd.whats-new.title": "⟦Ŵĥááţ’š Ñééŵ⟧"
+    "pd.whats-new.title": "⟦Ŵĥááţ’š ñééŵ⟧"
   }
 }

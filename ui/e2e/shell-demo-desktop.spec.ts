@@ -75,12 +75,16 @@ test('a service failure comes from the engine, and Repair asks the shell plugin'
   await expect(chip).toHaveCount(0);
   expect(await ipc.emit('paddock://service-health', health(2, service('sd.engine', 'the demo engine', 'down', ENGINE_DOWN, 'restart')))).toBeGreaterThan(0);
   await expect(chip).toHaveText('Demo engine: stopped');
+  // The engine-bound panel stops showing its data and waits with the chip's cause (a designed state, not stale data).
+  await expect(page.getByTestId('waiting-for-sd.engine')).toContainText('Waiting for the demo engine');
+  await expect(page.getByTestId('engine-data')).toHaveCount(0);
 
   await chip.click();
   await app.notifications.services.getByRole('button', { name: 'Restart' }).click();
   await expect.poll(async () => (await ipc.callsOf('health_repair')).map((c) => c.args)).toEqual([{ service: 'sd.engine' }]);
   await ipc.emit('paddock://service-health', health(4, service('sd.engine', 'the demo engine', 'ok')));
   await expect(chip).toHaveCount(0);
+  await expect(page.getByTestId('engine-data')).toBeVisible();
   // The browser build's stand-ins were never used: the engine's commands went to Rust only.
   expect(await ipc.names()).not.toContain('plugin:paddock-shell|demo_break');
   expect(pageErrors).toEqual([]);
@@ -96,9 +100,11 @@ test('a sample job runs in the engine: its phases come as events, Cancel asks th
   await ipc.emit('paddock://jobs', job(1, { state: 'queued' }));
   await ipc.emit('paddock://jobs', job(2, { state: 'running', phase: { id: 'find', label: 'Finding files', unit: 'items', total: null, done: 70 } }));
   const status = app.statusBar.jobs;
-  await expect(status).toHaveText('1 running: Importing logs');
+  // Rule 11: the phase and its value beside the name, a growing count while the total is unknown, then a percentage.
+  await expect(status).toHaveText('1 running: Importing logs · Finding files 70 so far');
   await expect(status).toHaveAttribute('title', 'Importing logs: Finding files');
   await ipc.emit('paddock://jobs', job(3, { state: 'running', phase: { id: 'read', label: 'Reading', unit: 'bytes', total: 8_388_608, done: 4_194_304 } }));
+  await expect(status).toHaveText('1 running: Importing logs · Reading 50%');
   await status.click();
   const item = app.jobs.items;
   await expect(item).toContainText('Reading');
@@ -144,49 +150,64 @@ test('a dialog window takes its input from the plugin and answers through it', a
 });
 
 test.describe('tray popover', () => {
-  const tray = (page: Page): Promise<TauriFake> =>
+  const ENGINE_PROBLEM = service('sd.engine', 'the demo engine', 'down', ENGINE_DOWN, 'restart');
+  const RUNNING = job(5, { state: 'running', phase: { id: 'read', label: 'Reading', unit: 'bytes', total: 8_388_608, done: 2_097_152 } });
+  const tray = (page: Page, state: unknown): Promise<TauriFake> =>
     installTauriFake(page, {
       replies: {
-        shell_version: VERSION_REPLY,
-        windows_list: [{ label: 'main', title: 'Overview – Paddock Shell Demo', focused: false, visible: true, minimized: false }],
+        demo_tray_state: state,
         tray_fit_height: 180,
         tray_close: null,
         window_focus: null,
-        demo_job_start: 8,
+        demo_tray_repair: null,
         app_quit: null,
       },
     });
 
-  test('shows the app and its windows, fits its height and closes after an action', async ({ page, pageErrors }) => {
-    const ipc = await tray(page);
+  test('calm: the app icon, name and status, no jobs, and Open window closes it', async ({ page, pageErrors }) => {
+    const ipc = await tray(page, { problems: [], job: null });
     await page.goto('/#/tray');
     const popover = page.getByRole('dialog', { name: 'Paddock Shell Demo' });
     await expect(popover).toBeVisible();
-    await expect(page.getByTestId('tray-version')).toHaveText(`Version ${APP_VERSION}`);
-    await expect(page.getByTestId('tray-windows')).toHaveText('1 window open');
+    await expect(page.getByTestId('tray-status')).toHaveText('Running');
+    await expect(page.getByTestId('tray-idle')).toHaveText('No jobs running');
+    await expect(page.getByTestId('tray-attention')).toHaveCount(0);
     await expect.poll(async () => (await ipc.callsOf('tray_fit_height')).length).toBeGreaterThan(0);
     const [fit] = await ipc.callsOf('tray_fit_height');
     expect((fit?.args as { height: number }).height).toBeGreaterThan(0);
+    // It follows the engine: it listens to the health and jobs events.
+    const listened = (await ipc.callsOf('plugin:event|listen')).map((c) => (c.args as { event: string }).event);
+    expect(listened).toEqual(expect.arrayContaining(['paddock://service-health', 'paddock://jobs']));
 
-    await page.getByRole('button', { name: 'Show window' }).click();
+    await page.getByRole('button', { name: 'Open window' }).click();
     await expect.poll(async () => (await ipc.callsOf('window_focus')).map((c) => c.args)).toEqual([{ label: 'main' }]);
     await expect.poll(() => ipc.names()).toContain('tray_close');
     // Only commands open to the tray class: no start-up contract, no health, no settings.
-    const names = new Set(await ipc.names());
-    for (const n of names) expect(['shell_version', 'windows_list', 'tray_fit_height', 'tray_close', 'window_focus', 'plugin:event|listen']).toContain(n);
+    for (const n of new Set(await ipc.names())) expect(['demo_tray_state', 'tray_fit_height', 'tray_close', 'window_focus', 'plugin:event|listen']).toContain(n);
     expect(pageErrors).toEqual([]);
     expect(await axeViolations(page)).toEqual([]);
   });
 
+  test('a stopped service: the pill says so, the banner repairs it as the chip does, and the job shows phase and value', async ({ page }) => {
+    const ipc = await tray(page, { problems: [ENGINE_PROBLEM], job: RUNNING });
+    await page.goto('/#/tray');
+    await expect(page.getByTestId('tray-status')).toHaveText('Demo engine stopped');
+    const banner = page.getByTestId('tray-attention');
+    await expect(banner).toContainText('The demo engine stopped unexpectedly.');
+    await expect(page.getByTestId('tray-job')).toContainText('Importing logs');
+    await expect(page.getByTestId('tray-job')).toContainText('Reading 25%');
+    await banner.getByRole('button', { name: 'Restart demo engine' }).click();
+    await expect.poll(async () => (await ipc.callsOf('demo_tray_repair')).map((c) => c.args)).toEqual([{ service: 'sd.engine' }]);
+    // A repair keeps the popover open (it shows the outcome when the engine's event comes).
+    expect(await ipc.names()).not.toContain('tray_close');
+    const before = (await ipc.callsOf('demo_tray_state')).length;
+    await ipc.emit('paddock://service-health', health(5, service('sd.engine', 'the demo engine', 'ok')));
+    await expect.poll(async () => (await ipc.callsOf('demo_tray_state')).length).toBeGreaterThan(before);
+    expect(await axeViolations(page)).toEqual([]);
+  });
+
   test('a refused action stays on screen with its reason', async ({ page }) => {
-    const ipc = await installTauriFake(page, {
-      replies: {
-        shell_version: VERSION_REPLY,
-        windows_list: [],
-        tray_fit_height: 180,
-        tray_close: null,
-      },
-    });
+    const ipc = await installTauriFake(page, { replies: { demo_tray_state: { problems: [], job: null }, tray_fit_height: 180, tray_close: null } });
     await page.goto('/#/tray');
     await page.getByRole('button', { name: 'Start sample job' }).click();
     await expect(page.getByRole('alert')).toContainText('That did not work: demo_job_start is unavailable in this test');

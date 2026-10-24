@@ -32,7 +32,7 @@ test('system follows the OS; dark and light are fixed; the choice is kept across
   await page.emulateMedia({ colorScheme: 'light' });
   await open(page);
   await expect(html(page)).not.toHaveAttribute('data-theme');
-  await expect(html(page)).toHaveAttribute('data-accent', 'pitwall');
+  await expect(html(page)).toHaveAttribute('data-accent', 'graphite');
   await expect.poll(() => token(page, '--pd-bg')).toBe('#f4f5f7');
   await choose(page, 'Theme: dark');
   await expect(html(page)).toHaveAttribute('data-theme', 'dark');

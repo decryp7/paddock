@@ -16,7 +16,7 @@ const PARTS: readonly ShellPart[] = [
   { name: 'Start-up contract', entry: 'shell/startup', pkg: 'S7' },
   { name: 'Jobs', entry: 'shell/jobs', pkg: 'S9' },
   { name: 'Settings', entry: 'shell/settings', pkg: 'S10' },
-  { name: 'About, Updates, What’s New', entry: 'shell/about', pkg: 'S11' },
+  { name: 'About, updates, what’s new', entry: 'shell/about', pkg: 'S11' },
   { name: 'Menus and keys', entry: 'shell/menu', pkg: 'S13' },
   { name: 'Pages frame', entry: 'shell/pages', pkg: 'S14' },
   { name: 'Theme and i18n', entry: 'shell/i18n', pkg: 'S15' },

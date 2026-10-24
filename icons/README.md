@@ -14,8 +14,9 @@ Open `preview.html` to review them, or see the renders in `screenshots/`.
 
 `DEMOS` in `tools/design.mjs` are built by the same pipeline (`ONLY=shell-demo node tools/build.mjs`) but stay out of
 the family sheet (`preview.html`) and the Carbon concept. Paddock Shell Demo (`apps/shell-demo`) is a neutral silver
-tile (`#D5D8DE`, dark ink `#1E2530`, 10.8:1) with the shell itself as its glyph: a window with its title bar, the pages
-sidebar and the page. Silver is light like Spotter's tile, so it takes the dark ink and the light-tile material. A search
+tile (`#D1D4DA` on a `#DDE1E7` to `#B5BCC7` gradient with a 1 px inner rim at 8 % black, so its outline holds on white; dark ink `#1E2530`, 10.4:1) with the shell itself as its glyph: a window with its title bar, the pages
+sidebar and the page. Silver is light like Spotter's tile, so it takes the dark ink and the light-tile material. Its tray template is solid
+(alpha only: half-transparent parts would read as disabled). A search
 over low-chroma tiles (`tools/cvd.mjs`) kept the family's minimums unchanged (normal 17.7, protan 11.6, deutan 13.6,
 tritan 10.7) only for near-black and light silver; mid greys fell to 1.6 to 5.4 against Dyno or Pitwall. Its
 `tauri/` folder is copied to `apps/shell-demo/src-tauri/icons` (`node scripts/shell-demo-release.mjs icons` checks

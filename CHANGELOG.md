@@ -11,8 +11,14 @@ Conventional Commits; one semver tag for the whole repo.
   signing with the strict verify, and its own release workflow on `shell-demo-v*` tags. In the app the demo's UI uses
   every Tauri backend of the shell (health, notifications, jobs, dialogs as windows); in the browser its stand-ins.
 - `node scripts/new-app.mjs <id> "<Name>"`: a new app from the demo, renamed, in the family layout, on the registries.
+- The `graphite` accent (`data-accent="graphite"`, `SU_ACCENTS`): the neutral accent of the demo apps, so a demo never
+  wears an app's colour; held to the same token tests as Pacenotes and Sighter.
+- The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
+  far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
 ### Changed
+- The tray popover layout has one 16 px inset for its header, content and footer.
+- Sentence case for the shell's About items: "Check for updates…", "What’s new" (and "What’s new in <version>").
 - The shell demo's product name is "Paddock Shell Demo"; its Rust side is the app (`apps/shell-demo/src-tauri` writes
   `app-commands.ts`); `paddock-shell`'s `tests/demo.rs` keeps only the plugin's checks over the demo's files.
 

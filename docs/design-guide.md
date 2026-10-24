@@ -101,6 +101,7 @@ red-orange (hue 18) and not amber, and why it is never used as a status.
 | Spotter | watchful, fresh teal | #2CC4B0 | #0B7A6E | #0E8577 |
 | Pacenotes | route-map olive, steady | #8DA74E | #576D07 | #657C1F |
 | Sighter | optical plum, precise | #C488CF | #884F92 | #975EA2 |
+| Demo apps (`graphite`) | neutral, never an app's colour | #A6A8AD | #4F5764 | #6B7380 |
 
 Pacenotes and Sighter (chosen 2026-10-24; replaces the earlier Sighter lime proposal). With seven accents and four status
 colours the hue wheel is full: under colour-vision deficiency (Machado 2009, severity 1) only two colour dimensions are
@@ -126,7 +127,8 @@ accent-coloured text is never placed directly beside a warning. Existing pairs w
 5.4 (normal), Debrief and Pitwall 0.8 (deuteranopia), Pitcrew and danger 8.9 (normal), Spotter and success 2.6
 (tritanopia). Accents never meet in one window, and status always carries its icon and word (rule 8 below). The token
 tests in `paddock-ui` check both new accents: CIEDE2000 >= 15 from every status colour and >= 12 from every other
-accent (normal vision), with the usual contrast targets.
+accent (normal vision), with the usual contrast targets. `graphite` (2026-10-24) is not an app's: the demo apps
+(Paddock Shell Demo) use it so they never look like the app they demonstrate; the same tests hold for it.
 
 App icon tiles are their own palette (Spotter: amber tile, teal accent). A plum Sighter tile (#975EA2) drops the
 family's smallest OKLab distance (`icons/tools/cvd.mjs`) to 10.2 normal and 5.1 deuteranopia (against Dyno's tile); an
