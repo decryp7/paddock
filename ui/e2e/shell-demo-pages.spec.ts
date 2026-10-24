@@ -113,7 +113,10 @@ test.describe('pages frame (plan S14)', () => {
     await open(page);
     const bar = statusBar(page);
     await expect(bar.locator('.start [data-status-item]')).toHaveCount(1);
-    await expect(bar.getByTestId('runners-status')).toHaveText('3 of 4 runners online');
+    // The table's words, exceptions only; the badge counts the same exception and says so (review R3-1).
+    await expect(bar.getByTestId('runners-status')).toHaveText('1 offline · 1 updating');
+    await expect(bar.getByTestId('runners-status')).toHaveAttribute('aria-label', '2 of 4 runners online, 1 updating, 1 offline');
+    await expect(sidebar(page).getByTestId('page-badge')).toHaveAttribute('title', '1 runner offline');
     await expect(bar.locator('.end [data-status-item]')).toHaveCount(3);
     await expect(bar.locator('.end [data-status-item]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset['statusItem']))).resolves.toEqual([
       'pd.health',
@@ -154,6 +157,29 @@ test.describe('pages frame (plan S14)', () => {
       return w.__dropped;
     });
     expect(dropped).toBe(0);
+  });
+
+  test('status items sit at equal distances, the chip included; the chip looks pressed while open (review R3-2)', async ({ page }) => {
+    await open(page);
+    await page.getByRole('button', { name: 'Break the search index' }).click();
+    await page.getByRole('button', { name: 'Start quiet job' }).click();
+    const bar = statusBar(page);
+    await expect(bar.getByTestId('service-health-chip')).toBeVisible();
+    // From the chip's visible edge to the jobs item's dot, and from the jobs text to the bell's icon.
+    const gaps = await page.evaluate(() => {
+      const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+      const chip = r('[data-testid="service-health-chip"]');
+      const dot = r('[data-status-item="pd.jobs"] .dot');
+      const text = r('[data-status-item="pd.jobs"] .text');
+      const bell = r('[data-testid="notifications-status"] svg');
+      return [dot.left - chip.right, bell.left - text.right];
+    });
+    expect(Math.abs((gaps[0] as number) - (gaps[1] as number))).toBeLessThanOrEqual(3);
+    const chip = bar.getByTestId('service-health-chip');
+    const before = await chip.evaluate((e) => getComputedStyle(e).boxShadow);
+    await chip.click();
+    await expect(chip).toHaveAttribute('aria-expanded', 'true');
+    expect(await chip.evaluate((e) => getComputedStyle(e).boxShadow)).not.toBe(before);
   });
 
   test('a narrow status bar shrinks items first, keeps the bell and the chip, then hides the lowest and counts them', async ({ page }) => {

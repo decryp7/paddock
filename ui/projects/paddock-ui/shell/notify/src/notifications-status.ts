@@ -39,7 +39,7 @@ export function notificationsStatusText(unread: number): string {
   `,
   styles: `
     :host { position: relative; display: inline-flex; min-width: 0; }
-    .pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: 24px; min-width: 24px; padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
+    .pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: 24px; min-width: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
     .pill.unread { color: var(--pd-text); }
     .pill:hover, :host(.open) .pill { border-color: var(--pd-border-control); }
     .pill:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }

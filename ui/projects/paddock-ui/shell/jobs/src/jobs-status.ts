@@ -48,7 +48,7 @@ export function jobsStatusDetail(lead: string | null, phase: string | null, stal
   `,
   styles: `
     :host { position: relative; display: inline-flex; min-width: 0; }
-    .pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 24px; padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
+    .pill { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 24px; padding: 0 var(--pd-space-1); border: 1px solid transparent; border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); cursor: pointer; }
     .pill:hover, :host(.open) .pill { border-color: var(--pd-border-control); }
     .pill:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: -2px; }
     .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }

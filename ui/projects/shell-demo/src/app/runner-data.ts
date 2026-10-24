@@ -20,7 +20,9 @@ const RUNNERS: readonly Runner[] = [
 @Injectable({ providedIn: 'root' })
 export class RunnerData {
   readonly runners = RUNNERS;
-  readonly online = RUNNERS.filter((r) => r.state !== 'offline').length;
-  /** Runners that need the user (offline). */
-  readonly attention = RUNNERS.filter((r) => r.state === 'offline').length;
+  readonly online = RUNNERS.filter((r) => r.state === 'online').length;
+  readonly updating = RUNNERS.filter((r) => r.state === 'updating').length;
+  /** Runners that need the user: offline (the Runners page's badge counts the same). */
+  readonly offline = RUNNERS.filter((r) => r.state === 'offline').length;
+  readonly attention = this.offline;
 }

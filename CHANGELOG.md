@@ -5,6 +5,10 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Changed
+- Pages frame, review round 3: status items sit at equal distances (4 px gap, 4 px item padding; the service chip
+  keeps 5 px of margin for its visible edge) and the chip looks pressed while its details are open. `shell-demo`: the
+  status item says the table's exceptions ("1 offline · 1 updating", the full count in its name and tooltip), and the
+  Runners badge counts the same offline runner ("1 runner offline").
 - Pages frame after its re-review (`ui/docs/screenshots/shell-demo/REVIEW-2.md`): a running job no longer blinks out
   of a narrowing status bar for a frame (an item not yet measured in its compact form counts as no width; every item is
   re-measured when the bar changes form; regression tests in the unit specs and in Chromium). The service chip's

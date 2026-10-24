@@ -23,8 +23,11 @@ import { PdIcon } from './icon';
 import { PdPartOutlet } from './part-outlet';
 import { planStatusBar, statusWidth } from './status-layout';
 
-/** The gap between items and the overflow button's width (px), as in the styles below. */
-const GAP = 8;
+/**
+ * The gap between items and the overflow button's width (px), as in the styles below. Items carry 4 px of padding and a
+ * 1 px border of their own, so their texts end up 14 px apart (design review R3-2).
+ */
+const GAP = 4;
 const MORE = 44;
 
 /**

@@ -111,8 +111,13 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
   `,
   styles: `
     :host { position: relative; display: inline-flex; min-width: 0; }
+    /* The chip's edge is visible, the other items' are not: 5 px of margin gives it the same 14 px to its neighbours'
+       text as they have between them (4 px padding + 1 px border each side, 4 px gap; design review R3-2). */
+    :host:has(.chip) { margin-inline: 5px; }
     .chip { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 20px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-pill); background: var(--pd-danger-tint); color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .chip:hover { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 6%); }
+    /* Pressed while its details are open: the link between the chip and its popover. */
+    .chip[aria-expanded='true'] { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 10%); box-shadow: inset 0 0 0 1px var(--pd-danger); }
     .chip.repairing { background: var(--pd-surface-2); }
     .chip:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-danger); }

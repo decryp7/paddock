@@ -372,7 +372,7 @@ describe('pd-status-bar', () => {
     for (const i of items) i.getBoundingClientRect = () => ({ width: 60 }) as DOMRect;
     Object.defineProperty(el, 'clientWidth', { value: 260, configurable: true });
     observer.fire([el, ...items]);
-    // The full forms (6 x 68 px) do not fit 260 px: the items turn compact. Until they are measured so, nothing is hidden
+    // The full forms (6 x 64 px) do not fit 260 px: the items turn compact. Until they are measured so, nothing is hidden
     // for its full width (regression: the jobs item blinked out for a frame when the window narrowed, review N1).
     const bar = fixture.componentInstance;
     expect(bar.compact()).toBe(true);
@@ -399,8 +399,8 @@ describe('pd-status-bar', () => {
     more.click();
     await fixture.whenStable();
     expect(hidden()).toHaveLength(3);
-    // Measured compact (36 px each, 44 with the gap; 260 px, jsdom has no padding): the two lowest give way.
-    for (const i of items) i.getBoundingClientRect = () => ({ width: 36 }) as DOMRect;
+    // Measured compact (40 px each, 44 with the 4 px gap; 260 px, jsdom has no padding): the two lowest give way.
+    for (const i of items) i.getBoundingClientRect = () => ({ width: 40 }) as DOMRect;
     observer.fire(items);
     await fixture.whenStable();
     expect(hidden()).toEqual(['t.greet', 't.cond']);
