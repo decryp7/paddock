@@ -164,11 +164,14 @@ pub fn run() {
         paddock_window::tauri::start(app, &launch)?;
         Ok(())
     });
-    let result = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(shell.build())
-        .invoke_handler(invoke_handler())
-        .on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated)
-        .run(tauri::generate_context!());
+        .invoke_handler(invoke_handler());
+    // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let builder =
+        builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
+    let result = builder.run(tauri::generate_context!());
     if let Err(e) = result {
         eprintln!("{APP_NAME} could not start: {e}");
         std::process::exit(1);
