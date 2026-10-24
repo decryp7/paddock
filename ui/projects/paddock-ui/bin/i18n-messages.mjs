@@ -311,6 +311,49 @@ export function scanMsgCalls(source) {
   return { messages: found, dynamic };
 }
 
+// ---- $localize`...` in TypeScript sources ----
+
+const LOCALIZE = /\$localize`((?:[^`\\]|\\.)*)`/g;
+
+/**
+ * The `$localize` messages of a TypeScript source, for apps whose own `$localize` texts are not extracted from a build:
+ * `$localize`:@@pw.models.count:${n}:count: models`` becomes `{ id: 'pw.models.count', source: '{$count} models' }`
+ * (an expression without a `:name:` is `PH`, `PH_1`, ... as Angular names it). A message without an `@@id` is returned in
+ * `unnamed` (with its line): the catalog keys by id, so it cannot be extracted.
+ */
+export function scanLocalizeCalls(source) {
+  const code = blank(source, false);
+  const messages = [];
+  const unnamed = [];
+  for (const m of code.matchAll(LOCALIZE)) {
+    const raw = source.slice(m.index + '$localize`'.length, m.index + m[0].length - 1);
+    const parts = raw.split(/\$\{[^}]*\}/);
+    const head = /^:([^:]*):/.exec(parts[0] ?? '');
+    const id = head ? /@@([^:]+)$/.exec(head[1])?.[1] : undefined;
+    if (!id) {
+      unnamed.push(source.slice(0, m.index).split('\n').length);
+      continue;
+    }
+    let text = unquoteTemplate((parts[0] ?? '').slice(head[0].length));
+    let unnamedPh = 0;
+    for (const part of parts.slice(1)) {
+      const name = /^:([^:]+):/.exec(part);
+      const ph = name ? name[1] : unnamedPh++ === 0 ? 'PH' : `PH_${unnamedPh - 1}`;
+      text += `{$${ph}}` + unquoteTemplate(name ? part.slice(name[0].length) : part);
+    }
+    messages.push({ id, source: text });
+  }
+  return { messages, unnamed };
+}
+
+function unquoteTemplate(text) {
+  return text.replace(/\\(u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|.)/g, (_, e) => {
+    if (e[0] === 'u') return String.fromCodePoint(parseInt(e.replace(/[u{}]/g, ''), 16));
+    if (e[0] === 'x') return String.fromCharCode(parseInt(e.slice(1), 16));
+    return { n: '\n', t: '\t', r: '\r', 0: '\0' }[e] ?? e;
+  });
+}
+
 // ---- the catalog: $localize messages and msg() messages together ----
 
 /**

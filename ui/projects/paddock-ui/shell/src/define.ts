@@ -71,6 +71,8 @@ export interface PageDef<T extends object = object> extends LazyPart {
   readonly when?: Live<T, boolean>;
   /** A short count drawn on the icon (null draws none). */
   readonly badge?: Live<T, string | number | null>;
+  /** What the badge counts, as its tooltip and accessible name ("1 runner offline"); without it, the count alone. */
+  readonly badgeLabel?: Live<T, string | null>;
 }
 
 /** An item of the status bar, laid out by priority when the bar is narrow (plan §5.7). */
@@ -81,6 +83,11 @@ export interface StatusItemDef<T extends object = object> extends LazyPart {
   readonly side: 'start' | 'end';
   /** Higher stays visible longer when the bar is narrow (0..1000). */
   readonly priority: number;
+  /**
+   * Never hidden for want of room (it shrinks to its compact form instead): an item that carries attention, such as the
+   * notifications' unread count or the service chip (plan S14 review).
+   */
+  readonly pinned?: boolean;
   readonly when?: Live<T, boolean>;
 }
 

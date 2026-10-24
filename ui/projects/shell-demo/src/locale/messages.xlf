@@ -74,8 +74,23 @@
       <trans-unit id="sd.notify.three" datatype="html">
         <source>Notify three times</source>
       </trans-unit>
+      <trans-unit id="sd.page.about" datatype="html">
+        <source>About</source>
+      </trans-unit>
+      <trans-unit id="sd.page.dialogs" datatype="html">
+        <source>Dialogs</source>
+      </trans-unit>
       <trans-unit id="sd.page.home" datatype="html">
-        <source>Home</source>
+        <source>Overview</source>
+      </trans-unit>
+      <trans-unit id="sd.page.keys" datatype="html">
+        <source>Keyboard</source>
+      </trans-unit>
+      <trans-unit id="sd.page.lab" datatype="html">
+        <source>Lab</source>
+      </trans-unit>
+      <trans-unit id="sd.page.runners" datatype="html">
+        <source>Runners</source>
       </trans-unit>
       <trans-unit id="sd.pseudo-locale" datatype="html">
         <source>Pseudo-locale</source>
@@ -83,11 +98,17 @@
       <trans-unit id="sd.reset" datatype="html">
         <source>Reset greetings</source>
       </trans-unit>
+      <trans-unit id="sd.runners.offline.one" datatype="html">
+        <source>1 runner offline</source>
+      </trans-unit>
+      <trans-unit id="sd.runners.offline.other" datatype="html">
+        <source><x id="count"/> runners offline</source>
+      </trans-unit>
       <trans-unit id="sd.settings.general" datatype="html">
         <source>General</source>
       </trans-unit>
-      <trans-unit id="sd.status.greetings" datatype="html">
-        <source>Greetings</source>
+      <trans-unit id="sd.status.runners" datatype="html">
+        <source>Runners online</source>
       </trans-unit>
       <trans-unit id="sd.theme.dark" datatype="html">
         <source>Theme: dark</source>

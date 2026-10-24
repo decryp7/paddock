@@ -5,7 +5,7 @@ import { Injector } from '@angular/core';
 import { JobsBackend, type Unlisten } from './jobs-backend';
 import { JOBS_CONTRIBUTIONS } from './jobs.contributions';
 import { PdJobsList } from './jobs-list';
-import { jobsStatusText, PdJobsStatus } from './jobs-status';
+import { jobsStatusDetail, jobsStatusText, PdJobsStatus } from './jobs-status';
 import { jobsBed, phase, settle, snap } from './spec-helpers';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 
@@ -88,10 +88,13 @@ describe('pd-jobs-list', () => {
 
 describe('pd-jobs-status', () => {
   it('says how many jobs run and what the first one does', () => {
-    expect(jobsStatusText(0, null, false)).toBe('Jobs');
-    expect(jobsStatusText(1, null, false)).toBe('1 running');
-    expect(jobsStatusText(1200, 'Reading', false)).toBe('1,200 running: Reading');
-    expect(jobsStatusText(2, 'Reading', true)).toBe('2 running: Still working');
+    expect(jobsStatusText(0, null)).toBe('Jobs');
+    expect(jobsStatusText(1, null)).toBe('1 running');
+    expect(jobsStatusText(1200, 'Update runner')).toBe('1,200 running: Update runner');
+    expect(jobsStatusDetail(null, 'Reading', false)).toBe('');
+    expect(jobsStatusDetail('Import', null, false)).toBe('Import');
+    expect(jobsStatusDetail('Import', 'Reading', false)).toBe('Import: Reading');
+    expect(jobsStatusDetail('Import', 'Reading', true)).toBe('Import: still working, this step is taking longer than usual');
   });
 
   it('opens the Jobs list in a popover; Escape closes it and returns focus, a click outside closes it', async () => {
@@ -106,14 +109,17 @@ describe('pd-jobs-status', () => {
     expect(button.textContent?.trim()).toBe('1 running');
     backend.emit(snap(2, 1, 'running'));
     await fixture.whenStable();
-    expect(button.textContent?.trim()).toBe('2 running: Starting');
+    expect(button.textContent?.trim()).toBe('2 running: Job 2');
+    expect(button.title).toBe('Job 2: Starting');
     backend.emit(snap(2, 2, 'running', { phase: phase('Reading', 1) }));
     await settle();
     await fixture.whenStable();
-    expect(button.textContent?.trim()).toBe('2 running: Reading');
+    expect(button.title).toBe('Job 2: Reading');
     clock.advance(1_000);
     await fixture.whenStable();
-    expect(button.textContent?.trim()).toBe('2 running: Still working');
+    expect(button.textContent?.trim()).toBe('2 running: Job 2');
+    expect(button.title).toBe('Job 2: still working, this step is taking longer than usual');
+    expect(button.dataset['stalled']).toBe('true');
 
     expect(button.getAttribute('aria-expanded')).toBe('false');
     button.click();

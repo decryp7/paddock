@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // paddock-i18n: the translation files of a Paddock app (Paddock ADR 0012 §6, plan S15). Messages come from two places:
-// `$localize` / template `i18n` texts (extracted from the build by `localize-extract --format json`) and the
-// contributions' `msg('id', 'Text')` (scanned from the sources, or read from the manifest's `messages` section).
+// `$localize` / template `i18n` texts (extracted from the build by `localize-extract --format json`, or `$localize` with an
+// `@@id` scanned from the sources) and the contributions' `msg('id', 'Text')` (scanned from the sources, or read from the
+// manifest's `messages` section).
 //
 //   paddock-i18n catalog --out messages.xlf [--json extracted.json]... [--src dir]... [--manifest m.json]... [--prefix pd.] [--check]
 //       writes the XLIFF 1.2 catalog (sorted, no locations): every message once; a message id with two texts fails, and
@@ -23,6 +24,7 @@ import {
   parseXliff,
   pseudoTranslations,
   runtimeJson,
+  scanLocalizeCalls,
   scanMsgCalls,
   targetTranslations,
   writeXliff,
@@ -61,15 +63,22 @@ function sourceFiles(dir) {
   return out.sort();
 }
 
-/** The msg() messages of every source under `dirs` whose id has `prefix`; a dynamic call in such a file fails. */
+/**
+ * The `msg()` and `$localize` messages of every source under `dirs` whose id has `prefix`; a dynamic `msg()` or a
+ * `$localize` without an `@@id` fails.
+ */
 export function scanSources(dirs, prefix) {
   const messages = [];
   const problems = [];
   for (const dir of dirs) {
     for (const file of sourceFiles(dir)) {
-      const { messages: found, dynamic } = scanMsgCalls(readFileSync(file, 'utf8'));
-      messages.push(...found.filter((m) => !prefix || m.id.startsWith(prefix)));
-      for (const line of dynamic) problems.push(`${relative(process.cwd(), file)}:${line}: msg() needs two string literals (its text cannot be extracted)`);
+      const text = readFileSync(file, 'utf8');
+      const at = relative(process.cwd(), file);
+      const { messages: found, dynamic } = scanMsgCalls(text);
+      const { messages: localized, unnamed } = scanLocalizeCalls(text);
+      messages.push(...[...found, ...localized].filter((m) => !prefix || m.id.startsWith(prefix)));
+      for (const line of dynamic) problems.push(`${at}:${line}: msg() needs two string literals (its text cannot be extracted)`);
+      for (const line of unnamed) problems.push(`${at}:${line}: $localize needs an @@id (:@@ns.name:Text)`);
     }
   }
   if (problems.length) throw new Error(problems.join('\n'));

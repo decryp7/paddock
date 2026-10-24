@@ -14,6 +14,7 @@ import {
   placeholders,
   pseudoMessage,
   pseudoText,
+  scanLocalizeCalls,
   scanMsgCalls,
   serializeMessage,
   targetTranslations,
@@ -58,6 +59,24 @@ describe('msg() scanner', () => {
       'const t = msg(`pd.${name}`, label);',
     ].join('\n');
     assert.deepEqual(scanMsgCalls(src).dynamic, [5]);
+  });
+});
+
+describe('$localize scanner', () => {
+  it('reads @@ids, named and unnamed placeholders and escapes; reports messages without an id', () => {
+    const src = [
+      'const a = $localize`:@@sd.runners.offline:${n}:count: runners offline`;',
+      'const b = $localize`:Dialog title@@sd.title:It\\`s ${x} and ${y}`;',
+      '// $localize`:@@sd.comment:Not a message`',
+      'const c = $localize`No id here`;',
+    ].join('\n');
+    assert.deepEqual(scanLocalizeCalls(src), {
+      messages: [
+        { id: 'sd.runners.offline', source: '{$count} runners offline' },
+        { id: 'sd.title', source: 'It`s {$PH} and {$PH_1}' },
+      ],
+      unnamed: [4],
+    });
   });
 });
 
@@ -144,6 +163,12 @@ describe('paddock-i18n commands', () => {
     const bad = join(dir, 'bad');
     file('bad/x.ts', 'msg(id, text);\n');
     assert.throws(() => main(['catalog', '--out', out, '--src', bad]), /x\.ts:1: msg\(\) needs two string literals/);
+    const noId = join(dir, 'no-id');
+    file('no-id/y.ts', '\nconst t = $localize`Hello`;\n');
+    assert.throws(() => main(['catalog', '--out', out, '--src', noId]), /y\.ts:2: \$localize needs an @@id/);
+    file('src2/z.ts', "const t = $localize`:@@sd.hello:Hello ${name}:name:`;\n");
+    main(['catalog', '--out', out, '--src', join(dir, 'src2')]);
+    assert.equal(parseXliff(readFileSync(out, 'utf8'))[0].source, 'Hello {$name}');
   });
 
   it('merge: the pseudo-locale from catalogs plus the package JSON; the locale of a JSON input must match', () => {

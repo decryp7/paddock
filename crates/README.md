@@ -10,6 +10,11 @@ Rules for a crate here:
 - Pure logic and thin adapters, no dependency on any app crate. Edition and licence come from `[workspace.package]`.
 - Library errors are typed, no `unwrap`/`expect` on user data or I/O, `cargo clippy -- -D warnings` clean,
   >= 99% line coverage.
+- Native glue (code only a real desktop runs, that tests cannot reach by rule 7 or because Tauri does not let them build
+  the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
+  `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
+  `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -44,7 +49,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7), `paddock-download` (S8) and `paddock-menu` (S13) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7), `paddock-download` (S8), `paddock-menu` (S13) and `paddock-window` (S12) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -113,6 +118,8 @@ tauri::Builder::default().invoke_handler(
 - `Table::kind_of` classifies a command for the activity log; `Table::contract_problems(base, dialogs, host_only)`
   checks dialog contracts against the table; `labels` is the shell's window label scheme (`Label`, `class_of`,
   `resolve`).
+- Tray popovers (`tray`, `tray-<item>`) are their own class `TRAY` (plan S12): not part of `WINDOW`, so a popover calls
+  only the commands that name it (`[WINDOW | TRAY]`), it hosts no dialogs, and the start-up watchdog does not watch it.
 - In the owning crate's tests: `paddock_commands::testing::assert_async(&COMMANDS, &[src])` fails on any sync
   `#[tauri::command]` and on table entries it cannot find; `testing::sync_generated(path, text, WriteMode::from_env())`
   fails on a stale generated file (`PADDOCK_WRITE_TS=1` rewrites it).
@@ -253,6 +260,63 @@ paddock_startup::tauri::install(tauri::Builder::default(), startup) // manage + 
 - Generated TypeScript: `ui/projects/paddock-ui/shell/startup/generated/startup.ts` (wire types) and
   `startup-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-startup --lib generated`).
 
+## `paddock-window` (plan S12)
+
+Top-level windows, single instance and deep links, the bounded quit, native feel and the tray (ADR 0012 §3), ported
+from Debrief's `window_manager.rs`, `windows.rs`, `instance.rs`, `lifecycle.rs` (exit watchdog), `native_feel.rs` and
+`tray.rs`, Pitwall's `window.rs`/`tray.rs` and Dyno's `popover.rs`, with no app's names, settings or menu items:
+
+```rust
+let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &["pitwall"]);
+if paddock_window::launch::wants_single_instance(&launch, safe_mode_env) {   // first plugin
+    builder = builder.plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance));
+}
+builder.setup(move |app| {
+        app.manage(Windows::builder(WindowConfig::new("Pitwall").schemes(&["pitwall"]))   // .multi_window(32) for Debrief
+            .prefs(settings.clone())                          // impl Prefs: close setting, open-files setting, "remember"
+            .bounds_file(data_dir.join("window-state.json"))
+            .teardown("server client", |app| disconnect(app)) // bounded exit steps, in order
+            .build());
+        app.manage(Windows::dialog_hooks(app.handle()));      // dialogs get the same feel and builder hook
+        app.manage(Popovers::new().popover(None, PopoverSpec::new("index.html#/tray", "Pitwall")));
+        create_tray(app.handle(), Tray::new(NativeTray::new(icons).menu_on_left_click(false), model).popover(true));
+        start(app.handle(), &launch)?;                        // main window, unless `--hidden` and a tray exists
+        Ok(())
+    })
+    .on_window_event(|w, e| { paddock_dialogs::tauri::on_window_event(w, e); paddock_window::tauri::on_window_event(w, e) })
+    .invoke_handler(Guard::new(&paddock_window::COMMANDS).wrap(paddock_window::tauri::handler()))
+    .build(context)?
+    .run(|app, event| paddock_window::tauri::on_run_event(app, &event));
+```
+
+- Pure core: `close` (last window: quit / keep running in the tray / ask; no tray means quit; only an explicit exit
+  ends a tray app; `--hidden` builds no window when a tray can bring it back), `launch` (flags `--new-instance`,
+  `--new-window`, `--safe-mode`, `--hidden`, `--`; paths capped at 256; deep links of the app's schemes parsed once,
+  bounded, no credentials; the open plan: an empty window is reused, links go to the window in front and never ask,
+  the `openFilesIn` setting decides the rest), `bounds` (versioned file, `main` and `window` keys; restored on the
+  monitor the rectangle overlaps most or the nearest, scaled, shrunk and moved inside the work area; new windows
+  cascade on the parent's monitor; built on `paddock_dialogs::placement`), `exit` (`teardown_step` bounded per step,
+  `end_stalled_exit`, once-only `ExitState`), `feel`, `tray` (menu model with validation and the shell's ids `pd.show`,
+  `pd.new-window`, `pd.window:<label>`, `pd.quit`), `popover` (anchoring at the tray icon, fitted height, material per
+  OS, the boot script with `data-popover-open` and Escape).
+- `tauri` feature: `Windows` state and builder, `create_main` (from `tauri.conf.json` with `"create": false`, else
+  `WindowConfig`), `open_new`, `reveal` (rebuilds a destroyed `main`), `list`, `target`, `quit`, `close_requested`,
+  `on_window_event` (close setting, focus of pop-outs and dialogs for their host, bounds, destroyed windows, the
+  popover's blur), `second_instance`, `opened` and `reopen` (macOS), `exit_requested`, `exit` (bounded teardown, once),
+  `arm_exit_watchdog` (8 s, then teardown and process exit), `on_run_event`; `Tray` over a `TrayBackend` (redrawn only
+  when the model changed), `Popovers` with `toggle_popover`, `fit_popover`, `close_popover`. `tray` feature:
+  `NativeTray` (Tauri's tray icon; template images on macOS; no icon in a session without a taskbar). `wry` feature:
+  WebView2's browser keys off in release builds.
+- `COMMANDS`: `window_new` [MAIN | TRAY], `window_close`, `window_set_title` (4 KiB), `window_resolve_close`,
+  `window_take_pending`, `window_resolve_open` [MAIN], `windows_list`, `window_focus`, `app_quit` [WINDOW | TRAY],
+  `tray_fit_height`, `tray_close` [TRAY]. Events: `paddock://windows`, `paddock://window-close-requested`,
+  `paddock://window-open-ask`, `paddock://window-open`.
+- Generated TypeScript: `ui/projects/paddock-ui/shell/generated/window.ts` (wire types, `WINDOW_EVENTS`) and
+  `window-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-window --lib generated`).
+- Tests run on Tauri's mock runtime with a fake tray backend and hooks for Quit and the process exit: no window, tray
+  icon or single-instance lock reaches the desktop (rule 7). The untestable glue (the tray icon's create/update, window
+  effects, the run and close events Tauri does not let tests build) is `src/tauri/native.rs`, outside coverage. `tests/native_menu.rs` has no harness, so the native menu
+  is built on the main thread (macOS builds menus there only); the builder is made, never built.
 ## `paddock-menu` (plan S13)
 
 One menu model for the native menu bar and the in-app menus (ADR 0012 §3, ported from Debrief's `menu.rs`, ADR 0008).

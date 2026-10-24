@@ -16,9 +16,10 @@ impl Focus {
         Self::default()
     }
 
-    /// The window `label` got the focus. Webviews outside the label scheme do not move the menu bar.
+    /// The window `label` got the focus. Webviews outside the label scheme and tray popovers (`tray`, `tray-<item>`:
+    /// they belong to no window) do not move the menu bar.
     pub fn focused(&mut self, label: &str) {
-        if Label::parse(label).is_some() {
+        if hosted(label) {
             self.target = Some(resolve(label).to_string());
         }
     }
@@ -36,6 +37,14 @@ impl Focus {
     }
 }
 
+/// Whether `label` is a top-level window or works for one (a dialog, a pop-out).
+fn hosted(label: &str) -> bool {
+    matches!(
+        Label::parse(resolve(label)),
+        Some(Label::Main | Label::Window(_))
+    )
+}
+
 /// Where a click on item `id` goes: the target window, if the id is one of the shown menu's items (other menus' items,
 /// such as a tray's, arrive at the same handler and are not ours).
 pub fn route(id: &str, shown: &[&str], target: Option<&str>) -> Option<String> {
@@ -48,8 +57,7 @@ pub fn route(id: &str, shown: &[&str], target: Option<&str>) -> Option<String> {
 /// Whether a model sent by window `caller` is shown: the menu bar shows the focused window's menus, so a model is applied
 /// when its window has the focus, is the target, or no window is the target yet (the first window at start).
 pub fn applies(caller: &str, caller_focused: bool, target: Option<&str>) -> bool {
-    Label::parse(caller).is_some()
-        && (caller_focused || target.is_none_or(|t| t == resolve(caller)))
+    hosted(caller) && (caller_focused || target.is_none_or(|t| t == resolve(caller)))
 }
 
 #[cfg(test)]
@@ -92,6 +100,8 @@ mod tests {
             Some("w-3"),
             "a webview outside the scheme does not move the menu bar"
         );
+        f.focused("tray");
+        assert_eq!(f.target(), Some("w-3"), "nor does a tray popover");
         f.destroyed("main");
         assert_eq!(f.target(), Some("w-3"));
         f.destroyed("w-3");
@@ -112,5 +122,6 @@ mod tests {
             !applies("devtools", true, None),
             "a webview outside the scheme never sets the menus"
         );
+        assert!(!applies("tray-cpu", true, None), "nor a tray popover");
     }
 }

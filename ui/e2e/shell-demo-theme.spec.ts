@@ -64,14 +64,22 @@ test('a theme change in one window is shown in the others at once, a dialog wind
 });
 
 test('high contrast: hairlines become control borders, popovers lose their shadow; axe finds nothing in either scheme', async ({ page }) => {
+  // No colour transitions: axe measures the colours of the scheme just chosen, not a frame in between.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await open(page);
   await expect.poll(() => token(page, '--pd-hairline')).not.toBe(await token(page, '--pd-border-control'));
   await choose(page, 'High contrast');
   await expect(html(page)).toHaveAttribute('data-contrast', 'more');
   await expect.poll(() => token(page, '--pd-hairline')).toBe(await token(page, '--pd-border-control'));
   await expect.poll(() => token(page, '--pd-shadow-1')).toBe('none');
-  for (const theme of ['Theme: dark', 'Theme: light']) {
+  for (const [theme, scheme] of [
+    ['Theme: dark', 'dark'],
+    ['Theme: light', 'light'],
+  ] as const) {
     await choose(page, theme);
+    await expect(html(page)).toHaveAttribute('data-theme', scheme);
+    // Two frames: the new scheme's styles are applied everywhere before axe reads colours.
+    await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
     expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`), theme).toEqual([]);
   }
@@ -147,7 +155,7 @@ test.describe('screenshots (independent review)', () => {
       await page.locator('button.cmd[data-command="sd.engine.break"]').click();
       await page.getByTestId('service-health-chip').click();
       mkdirSync(root, { recursive: true });
-      await page.screenshot({ path: join(root, `${name}.png`), fullPage: false });
+      await page.screenshot({ path: join(root, `theme-${name}.png`), fullPage: false });
     });
   }
 
@@ -161,6 +169,6 @@ test.describe('screenshots (independent review)', () => {
     await page.getByRole('menubar').getByRole('menuitem').nth(1).click();
     await page.getByRole('menu').first().locator('[aria-haspopup]').first().click();
     mkdirSync(root, { recursive: true });
-    await page.screenshot({ path: join(root, 'pseudo-locale-dark.png'), fullPage: false });
+    await page.screenshot({ path: join(root, 'theme-pseudo-locale-dark.png'), fullPage: false });
   });
 });

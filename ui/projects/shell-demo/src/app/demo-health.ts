@@ -29,12 +29,16 @@ export class DemoHealthEngine {
   /** Three commands meet the same failure of the demo engine. */
   breakEngine(): void {
     for (let i = 0; i < 3; i++) {
-      this.health.fail('sd.engine', cause('The demo engine stopped unexpectedly.', 'Choose Restart.', 'demo-engine exited (signal: 6)'));
+      this.health.fail('sd.engine', cause('The demo engine stopped unexpectedly.', 'Restarting it brings the engine data back.', 'demo-engine exited (signal: 6)'));
     }
   }
 
   breakIndex(): void {
-    this.health.fail('sd.index', cause('The search index is damaged.', 'Choose Try again to rebuild it.', 'index: checksum mismatch in segment 3'), 'retry');
+    this.health.fail(
+      'sd.index',
+      cause('The search index stopped: a segment is damaged.', 'Search is unavailable until it is reset; resetting rebuilds it from the logs.', 'index: checksum mismatch in segment 3'),
+      'reset',
+    );
   }
 }
 

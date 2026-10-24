@@ -6,7 +6,7 @@ import { noticeTime, PdNotificationsPanel, titleWithCount } from './notification
 import { notificationsStatusText, PdNotificationsStatus } from './notifications-status';
 import { OPEN_SETTINGS, RAISE_CAP } from './notify-config';
 import { provideNoticeAction } from './provide-notify';
-import { chipText, PdServiceStatus, shortName, stateWord } from './service-status';
+import { chipCompactText, chipText, PdServiceStatus, shortName, stateWord } from './service-status';
 import { ServiceHealthStore } from './service-health.store';
 import { all, cause, notifyBed, one, settle } from './spec-helpers';
 import { PdServiceError, PdWaitingFor } from './waiting-for';
@@ -19,6 +19,11 @@ describe('chip text', () => {
     expect((['down', 'degraded', 'quarantined', 'repairing'] as const).map(stateWord)).toEqual(['stopped', 'limited', 'switched off', 'repairing']);
     expect(chipText([{ label: 'the log store', state: 'down' }])).toBe('Log store: stopped');
     expect(chipText([{ label: 'a', state: 'down' }, { label: 'b', state: 'degraded' }])).toBe('2 services need attention');
+    // The compact form of a narrow status bar.
+    expect(chipCompactText([{ label: 'the log store', state: 'down' }])).toBe('Store stopped');
+    expect(chipCompactText([{ label: 'index', state: 'degraded' }])).toBe('Index limited');
+    expect(chipCompactText([{ label: 'a', state: 'down' }, { label: 'b', state: 'degraded' }])).toBe('2 services');
+    expect(chipCompactText([])).toBe('Unknown');
   });
 });
 

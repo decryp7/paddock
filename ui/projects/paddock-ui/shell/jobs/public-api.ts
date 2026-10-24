@@ -11,7 +11,7 @@ export { type RequestStatus } from '@decryp7/paddock-ui/shell/store';
 export { JobsStore, JOB_NOTICE_KINDS, finishedNotice, type JobsStoreType, type JobFollowing } from './src/jobs.store';
 export { JobFollow } from './src/job-follow';
 export { PdJobsList } from './src/jobs-list';
-export { PdJobsStatus, jobsStatusText } from './src/jobs-status';
+export { PdJobsStatus, jobsStatusText, jobsStatusDetail } from './src/jobs-status';
 export { provideShellJobs, type ShellJobsOptions } from './src/provide-jobs';
 export { JOBS_CONTRIBUTIONS } from './src/jobs.contributions';
 export { uiTimeoutProblems, stripCommentsAndStrings } from './src/ui-timeouts';

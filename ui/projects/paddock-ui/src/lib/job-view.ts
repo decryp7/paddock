@@ -90,6 +90,17 @@ export function formatEta(ms: number | null | undefined): string {
     : $localize`:@@pd.ui.eta.hours-minutes:about ${h}:hours: h ${rest}:minutes: min left`;
 }
 
+/** Time spent, short: "8 s", "3 min", "1 h 5 min". */
+export function formatElapsed(ms: number): string {
+  const s = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
+  if (s < 60) return $localize`:@@pd.ui.elapsed.seconds:${s}:seconds: s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return $localize`:@@pd.ui.elapsed.minutes:${m}:minutes: min`;
+  const rest = m % 60;
+  const h = Math.floor(m / 60);
+  return rest === 0 ? $localize`:@@pd.ui.elapsed.hours:${h}:hours: h` : $localize`:@@pd.ui.elapsed.hours-minutes:${h}:hours: h ${rest}:minutes: min`;
+}
+
 function countText(p: SuJobPhase): string {
   const fmt = p.unit === 'bytes' ? formatBytes : formatCount;
   const total = p.total ?? null;
@@ -97,7 +108,11 @@ function countText(p: SuJobPhase): string {
   return $localize`:@@pd.ui.job.of:${fmt(Math.min(p.done, total))}:done: of ${fmt(total)}:total:`;
 }
 
-export function jobView(job: SuJobSnapshot, stalled = false): SuJobView {
+/**
+ * The view of one snapshot. `elapsedMs` is the job's running time now (the snapshot's plus the time since it arrived), so
+ * a step with an unknown total and nothing to count still shows a growing value (rule 11).
+ */
+export function jobView(job: SuJobSnapshot, stalled = false, elapsedMs: number = job.elapsedMs): SuJobView {
   const base = {
     title: job.title,
     subject: job.subject ?? '',
@@ -128,7 +143,7 @@ export function jobView(job: SuJobSnapshot, stalled = false): SuJobView {
       return {
         ...base,
         headline,
-        count: p ? countText(p) : '',
+        count: (p ? countText(p) : '') || (determinate ? '' : $localize`:@@pd.ui.job.elapsed:${formatElapsed(elapsedMs)}:elapsed: elapsed`),
         percent: determinate ? Math.min(100, Math.max(0, (p.done / total) * 100)) : null,
         showBar: true,
         eta: determinate ? formatEta(job.etaMs) : '',

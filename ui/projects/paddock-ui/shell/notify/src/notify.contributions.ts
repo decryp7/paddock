@@ -9,6 +9,7 @@ export const NOTIFY_CONTRIBUTIONS: ContributionBatch = {
       title: msg('pd.health.status', 'Services'),
       side: 'end',
       priority: 1000,
+      pinned: true,
       load: () => import('./service-status').then((m) => m.PdServiceStatus),
     }),
     defineStatusItem({
@@ -16,6 +17,7 @@ export const NOTIFY_CONTRIBUTIONS: ContributionBatch = {
       title: msg('pd.notifications.status', 'Notifications'),
       side: 'end',
       priority: 800,
+      pinned: true,
       load: () => import('./notifications-status').then((m) => m.PdNotificationsStatus),
     }),
   ],

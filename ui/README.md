@@ -104,7 +104,8 @@ so a manager app never bundles the workbench:
 | `/shell/menu` | menus and keys: `defineSubmenu`, the menu model, `AppMenu`, `pd-menu-bar`, `pd-context-menu`, `Keymap` with user overrides, `NativeMenuBridge` over `paddock-menu` | S13 |
 | `@decryp7/paddock-ui/shell` (theme) | theme packs (`defineTheme`, `provideThemes`, `themeProblems`), the window's appearance (`provideAppearance`, `AppearanceStore`, `applyStoredAppearance`, browser and IPC backends), colour maths | S15 |
 | `/shell/i18n` | `initI18n`, `LanguageStore`, locale, plural and number helpers; the shell's XLIFF catalog and pseudo-locale in `i18n/`; the `paddock-i18n` bin | S15 |
-| `/shell/startup`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/pages`, `/shell/testing` | one shell part each | S5-S16 |
+| `/shell/pages` | the pages frame of the manager apps: `provideShellPages`, `pd-shell-frame`, the sidebar of contributed pages (expanded, rail or over the page by `planLayout`), routed lazy pages with their own providers, `ShellPages` | S14 |
+| `/shell/startup`, `/shell/dialogs`, `/shell/settings`, `/shell/about`, `/shell/testing` | one shell part each | S5-S16 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -113,6 +114,55 @@ A new entry point needs only those two files (the publish dry run fails if the b
 `projects/shell-demo` is the shell's reference app (mock backend): every shell change shows up there first, with its e2e in
 `e2e/shell-demo.spec.ts`. `@decryp7/paddock-e2e` (`projects/paddock-e2e`, plain Node, versioned with this package) gets the
 Playwright helpers in S16.
+
+### Pages frame (`/shell/pages`, plan S14)
+
+A manager app's main window (Pitwall, Pitcrew, Spotter, Dyno) is one component and one provider call; everything in it
+comes from contributions:
+
+```ts
+import { provideContributions, provideShellContext } from '@decryp7/paddock-ui/shell';
+import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
+
+@Component({ selector: 'pw-root', imports: [PdShellFrame], template: `<pd-shell-frame />` })
+export class App {}
+
+bootstrapApplication(App, {
+  providers: [
+    provideContributions<PitwallContext>(PITWALL_CONTRIBUTIONS), // pages, status items, commands, menus, keys, dialogs
+    provideShellContext<PitwallContext>(() => import('./app-context').then((m) => m.pitwallContext)),
+    provideShellPages({
+      appName: 'Pitwall',
+      icon: PwIcon, // a component with a `name` input, e.g. wrapping <mat-icon [svgIcon]>; default: the shell's pd: set
+      notify: { health: () => new TauriServiceHealthBackend(ipc), notifications: () => new TauriNotificationsBackend(ipc) },
+      jobs: { backend: () => new TauriJobsBackend(ipc) },
+      startup: { backend: () => new TauriStartupBackend(ipc), checkpoint: () => inject(UiState).checkpoint },
+      nativeMenu: tauriNativeMenuPort(ipc),
+      dialogs: { io: () => tauriDialogIo(bridge) },
+      routes: [{ path: 'tray', loadComponent: () => import('./tray').then((m) => m.Tray) }], // besides the pages
+    }),
+  ],
+});
+```
+
+- **Pages** are `definePage` contributions: `pw.models` is routed at `#/models` (`paths` overrides), loaded on first show
+  with its `providers` loader in an injector of its own that ends with the page (`pd-part-outlet`: skeleton while loading,
+  an error with Try again if it fails). `when` hides a page (and its route; a page that stops being offered gives way to
+  the first page), `badge` draws a neutral count, `section: 'bottom'` pins it at the sidebar's foot. Window titles read
+  "Models – Pitwall". `ShellCore.showPage(id)` navigates.
+- **Sidebar** 216 px, a 56 px icon rail, or over the page with a scrim, decided by `planLayout` (now in the root entry,
+  ADR 0011) from the frame's width: expanded from 776 px, rail from 400 px (`sidebar` option to change the sizes). The
+  title bar's button collapses it (kept per machine), or opens it over the page as a modal (scrim over the page and the
+  status bar, both inert); Escape, the scrim or a page closes it. The title bar is 40 px; on macOS in Tauri the menus
+  are native only and the title bar keeps 78 px for the window buttons. Pages lay out by `@container pd-page`.
+- **Status bar** (`pd-status-bar`, root entry): contributed status items, `start` and `end`, highest priority first. When
+  the full forms do not fit, every item gets its compact form first (`STATUS_COMPACT`: the chip says only the state,
+  jobs only the count, the full text in the tooltip and name); then the lowest unpinned items are hidden behind a
+  counted "More status (n)" button that wraps the bar. `pinned` items (the service chip and the bell) are never hidden.
+  The frame contributes the service chip and the notifications (S4) and, with `jobs`, the jobs item (S9).
+- **Keys**: F6 / Shift+F6 cycle title bar, sidebar, page and status bar (reserved, so a user binding cannot take them);
+  arrow keys, Home and End move between pages; "Skip to page" link. Slots: `[slot=title-end]`, `[slot=sidebar]`.
+- The frame places `pd-notification-host` and `pd-dialog-host` itself; do not mount them again.
 
 ### Start-up contract (`/shell/startup`, plan S7)
 
@@ -294,7 +344,8 @@ provideThemes(CONSOLE_THEME),                                                   
   ids; contributions' `msg(id, text)` read their text through the loaded translations, so they need nothing else.
   `LanguageStore` keeps the choice (`paddock.language`: system, en, pseudo) and says when a restart is needed.
 - Translation files: the package ships `i18n/messages.pd.xlf` (the shell's catalog) and `i18n/messages.pd.en-XA.json`
-  (its pseudo-locale). An app builds its own catalog and loader files with the bin:
+  (its pseudo-locale). An app builds its own catalog (its `msg()` and `$localize` messages with `@@id`s, scanned from the
+  sources) and loader files with the bin:
 
   ```sh
   npx paddock-i18n catalog --out src/locale/messages.xlf --src src --prefix pw. [--json extracted.json] [--manifest paddock.manifest.json]
@@ -307,10 +358,10 @@ provideThemes(CONSOLE_THEME),                                                   
   pack, high contrast, reduced motion and the pseudo-locale; `e2e/shell-demo-locale.spec.ts` finds no unmarked English
   in any shell part in the pseudo-locale, `e2e/shell-demo-theme.spec.ts` checks switching across windows.
 
-Screenshots for review: [dark](docs/screenshots/shell-demo/dark.png), [light](docs/screenshots/shell-demo/light.png),
-[high contrast dark](docs/screenshots/shell-demo/high-contrast-dark.png),
-[high contrast light](docs/screenshots/shell-demo/high-contrast-light.png),
-[pseudo-locale](docs/screenshots/shell-demo/pseudo-locale-dark.png) (`SCREENSHOTS=1 npx playwright test shell-demo-theme`).
+Screenshots for review: [dark](docs/screenshots/shell-demo/theme-dark.png), [light](docs/screenshots/shell-demo/theme-light.png),
+[high contrast dark](docs/screenshots/shell-demo/theme-high-contrast-dark.png),
+[high contrast light](docs/screenshots/shell-demo/theme-high-contrast-light.png),
+[pseudo-locale](docs/screenshots/shell-demo/theme-pseudo-locale-dark.png) (`SCREENSHOTS=1 npx playwright test shell-demo-theme`).
 
 ## Tokens
 

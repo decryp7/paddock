@@ -57,7 +57,10 @@ impl Windows {
     /// dialog's own contract ([`DialogGrant`](crate::DialogGrant), ADR 0009), so a command without this class can never
     /// be reached from any dialog.
     pub const DIALOG: Windows = Windows(4);
-    /// A window, its pop-outs and its dialogs.
+    /// Tray popovers (`tray`, `tray-<item>`). Never part of [`Windows::WINDOW`]: a command opens to a popover only by
+    /// naming this class (`[WINDOW | TRAY]`).
+    pub const TRAY: Windows = Windows(8);
+    /// A window, its pop-outs and its dialogs (not the tray popovers).
     pub const WINDOW: Windows = Windows(1 | 2 | 4);
 
     /// This set plus `other`.
@@ -81,10 +84,11 @@ impl Windows {
             WindowClass::Main => Windows::MAIN,
             WindowClass::Popout => Windows::POPOUT,
             WindowClass::Dialog => Windows::DIALOG,
+            WindowClass::Tray => Windows::TRAY,
         }
     }
 
-    /// The classes in the set, in the order main, popout, dialog.
+    /// The classes in the set, in the order main, popout, dialog, tray.
     pub fn classes(self) -> Vec<WindowClass> {
         WindowClass::ALL
             .into_iter()

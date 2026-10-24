@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
-import { SuEmptyState, SuErrorState, SuJob, SuSkeleton } from '@decryp7/paddock-ui';
+import { SuEmptyState, SuErrorState, SuJob, SuSkeleton, type SuJobSnapshot } from '@decryp7/paddock-ui';
 import { JobsStore } from './jobs.store';
 
 /**
@@ -19,7 +19,7 @@ import { JobsStore } from './jobs.store';
       <ul class="jobs" [attr.aria-label]="label()">
         @for (job of store.list(); track job.id) {
           <li>
-            <pd-job [job]="job" [stalled]="store.stalledIds().has(job.id)" (cancel)="store.cancel($event)" />
+            <pd-job [job]="job" [stalled]="store.stalledIds().has(job.id)" [elapsedMs]="elapsed(job)" (cancel)="store.cancel($event)" />
           </li>
         }
       </ul>
@@ -48,4 +48,11 @@ export class PdJobsList {
   protected readonly store = inject(JobsStore);
   /** The list's accessible name. */
   readonly label = input($localize`:@@pd.jobs.list:Jobs`);
+
+  /** A running job's time now: its last snapshot's plus the time since it arrived (so a quiet step still counts up). */
+  protected elapsed(job: SuJobSnapshot): number {
+    if (job.state !== 'running' && job.state !== 'queued') return job.elapsedMs;
+    const heard = this.store.heardAt()[job.id];
+    return job.elapsedMs + (heard === undefined ? 0 : Math.max(0, this.store.now() - heard));
+  }
 }

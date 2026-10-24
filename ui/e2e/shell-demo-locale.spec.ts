@@ -110,6 +110,16 @@ test.describe('pseudo-locale (plan S15)', () => {
     }
   });
 
+  test('no unmarked English in the pages frame: title bar, sidebar and its toggle, landmarks', async ({ page }) => {
+    // The app's name is the app's own text.
+    expect(await unmarkedEnglish(page.locator('pd-shell-frame header.title'), '[data-testid=app-name], [role=menu]')).toEqual([]);
+    await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', PSEUDO);
+    await expect(page.locator('nav#pd-pages-nav')).toHaveAttribute('aria-label', PSEUDO);
+    expect(await unmarkedEnglish(page.locator('nav#pd-pages-nav'))).toEqual([]);
+    await expect(page.locator('pd-shell-frame footer.status')).toHaveAttribute('aria-label', PSEUDO);
+    await expect(page.locator('pd-shell-frame a.skip')).toHaveText(PSEUDO);
+  });
+
   test('no unmarked English in the status items, the jobs list, the notification centre and toasts', async ({ page }) => {
     // Empty states first.
     await page.locator('pd-jobs-status .pill').click();
@@ -151,6 +161,7 @@ test.describe('pseudo-locale (plan S15)', () => {
   });
 
   test('a dialog in the page and a dialog window: the shell’s chrome and the contributed title are pseudo text', async ({ page }) => {
+    await page.goto('/#/dialogs');
     await page.locator('[data-dialog-open="sd.about"]').click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByTestId('dialog-close')).toHaveAttribute('aria-label', PSEUDO);

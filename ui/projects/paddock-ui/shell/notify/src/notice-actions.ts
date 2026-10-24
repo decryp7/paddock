@@ -5,6 +5,24 @@ import { ServiceHealthStore } from './service-health.store';
 import type { Notice, NoticeAction, RepairAction } from './wire.types';
 
 /** The label of the repair button for an action. */
+/**
+ * The chip's Repair button, named for what it does to which service (rule 19): "Restart demo engine", "Reset search
+ * index", "Install model runtime"; the other actions keep their own words.
+ */
+export function repairButtonLabel(action: RepairAction, service: string): string {
+  const subject = service.replace(/^the /i, '');
+  switch (action) {
+    case 'restart':
+      return $localize`:@@pd.health.repair.restart-named:Restart ${subject}:service:`;
+    case 'reset':
+      return $localize`:@@pd.health.repair.reset-named:Reset ${subject}:service:`;
+    case 'install':
+      return $localize`:@@pd.health.repair.install-named:Install ${subject}:service:`;
+    default:
+      return repairLabel(action);
+  }
+}
+
 export function repairLabel(action: RepairAction): string {
   switch (action) {
     case 'restart':

@@ -4,6 +4,7 @@ import { LanguageStore, PSEUDO_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
 import { DemoEngineData, DemoHealthEngine } from './demo-health';
 import { DemoJobsEngine } from './demo-jobs';
 import { GreetingLog } from './greeting-log';
+import { RunnerData } from './runner-data';
 
 /** The demo's part of the shell context: small and purpose-built (interface segregation). */
 export interface DemoContext {
@@ -34,6 +35,27 @@ export interface DemoContext {
   /** Whether a theme pack (the demo's "Warm paper") is on. */
   readonly pack: () => string | null;
   setPack(id: string | null): void;
+  /** Runners that need the user (the Runners page's badge). */
+  readonly attention: () => number;
+  /** Developer mode: the harness pages are offered (on unless local storage `sd.developer` is "off"). */
+  readonly developer: () => boolean;
+}
+
+/** Whether the demo runs in developer mode (a per-machine flag; unreadable storage means on). */
+export function developerMode(storage: Pick<Storage, 'getItem'> | null = safeStorage()): boolean {
+  try {
+    return storage?.getItem('sd.developer') !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function safeStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Built once, in the root injection context, when the shell first needs the context. */
@@ -44,6 +66,7 @@ export const demoContext: AppContextFactory<DemoContext> = () => {
   const data = inject(DemoEngineData);
   const appearance = inject(AppearanceStore);
   const language = inject(LanguageStore);
+  const runners = inject(RunnerData);
   return {
     greetings: log.greetings,
     greet: () => log.greet(),
@@ -70,5 +93,10 @@ export const demoContext: AppContextFactory<DemoContext> = () => {
       language.choose(language.locale() === PSEUDO_LOCALE ? 'en' : 'pseudo');
       language.reload();
     },
+    attention: () => runners.attention,
+    developer: (() => {
+      const on = developerMode();
+      return () => on;
+    })(),
   };
 };

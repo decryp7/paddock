@@ -17,6 +17,15 @@
       <trans-unit id="pd.dialogs.unknown" datatype="html">
         <source>This dialog is not known to this version of the app: <x id="dialog"/></source>
       </trans-unit>
+      <trans-unit id="pd.health.chip.compact.many" datatype="html">
+        <source><x id="count"/> services</source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.compact.one" datatype="html">
+        <source><x id="service"/> <x id="state"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.compact.unknown" datatype="html">
+        <source>Unknown</source>
+      </trans-unit>
       <trans-unit id="pd.health.chip.many" datatype="html">
         <source><x id="count"/> services need attention</source>
       </trans-unit>
@@ -50,14 +59,23 @@
       <trans-unit id="pd.health.repair.install" datatype="html">
         <source>Install</source>
       </trans-unit>
+      <trans-unit id="pd.health.repair.install-named" datatype="html">
+        <source>Install <x id="service"/></source>
+      </trans-unit>
       <trans-unit id="pd.health.repair.lift-quarantine" datatype="html">
         <source>Allow again</source>
       </trans-unit>
       <trans-unit id="pd.health.repair.open-settings" datatype="html">
         <source>Open Settings…</source>
       </trans-unit>
+      <trans-unit id="pd.health.repair.reset-named" datatype="html">
+        <source>Reset <x id="service"/></source>
+      </trans-unit>
       <trans-unit id="pd.health.repair.restart" datatype="html">
         <source>Restart</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.restart-named" datatype="html">
+        <source>Restart <x id="service"/></source>
       </trans-unit>
       <trans-unit id="pd.health.repair.retry" datatype="html">
         <source>Try again</source>
@@ -143,8 +161,11 @@
       <trans-unit id="pd.jobs.status" datatype="html">
         <source>Jobs</source>
       </trans-unit>
+      <trans-unit id="pd.jobs.status.detail" datatype="html">
+        <source><x id="lead"/>: <x id="phase"/></source>
+      </trans-unit>
       <trans-unit id="pd.jobs.status.doing" datatype="html">
-        <source><x id="count"/>: <x id="phase"/></source>
+        <source><x id="count"/>: <x id="lead"/></source>
       </trans-unit>
       <trans-unit id="pd.jobs.status.idle" datatype="html">
         <source>Jobs</source>
@@ -153,7 +174,7 @@
         <source><x id="count"/> running</source>
       </trans-unit>
       <trans-unit id="pd.jobs.still-working" datatype="html">
-        <source>Still working</source>
+        <source>still working, this step is taking longer than usual</source>
       </trans-unit>
       <trans-unit id="pd.menu.bar" datatype="html">
         <source>Application menu</source>
@@ -257,8 +278,68 @@
       <trans-unit id="pd.notifications.unread-mark" datatype="html">
         <source>, unread</source>
       </trans-unit>
+      <trans-unit id="pd.pages.link-with-badge" datatype="html">
+        <source><x id="page"/>, <x id="badge"/></source>
+      </trans-unit>
+      <trans-unit id="pd.pages.missing" datatype="html">
+        <source>This page does not exist.</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.missing.cause" datatype="html">
+        <source>Choose a page in the sidebar.</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.missing.home" datatype="html">
+        <source>Go to the first page</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.nav" datatype="html">
+        <source>Pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.sidebar.collapse" datatype="html">
+        <source>Collapse sidebar</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.sidebar.expand" datatype="html">
+        <source>Expand sidebar</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.sidebar.hide" datatype="html">
+        <source>Hide pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.sidebar.show" datatype="html">
+        <source>Show pages</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.skip" datatype="html">
+        <source>Skip to page</source>
+      </trans-unit>
+      <trans-unit id="pd.pages.status-bar" datatype="html">
+        <source>Status bar</source>
+      </trans-unit>
       <trans-unit id="pd.shell.context-failed" datatype="html">
         <source>The app context failed to load: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.failed" datatype="html">
+        <source><x id="part"/> did not load: <x id="reason"/></source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.loading" datatype="html">
+        <source>Loading <x id="part"/></source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.open-failed" datatype="html">
+        <source><x id="part"/> could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.retry" datatype="html">
+        <source><x id="part"/> did not load. Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.part.try-again" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.region.next" datatype="html">
+        <source>Focus next region</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.region.previous" datatype="html">
+        <source>Focus previous region</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.status.fewer" datatype="html">
+        <source>Show fewer status items</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.status.more" datatype="html">
+        <source>More status (<x id="count"/>)</source>
       </trans-unit>
       <trans-unit id="pd.startup.recovered-hung" datatype="html">
         <source>The window stopped responding and was reloaded. Your open files and view are kept.</source>
@@ -271,6 +352,18 @@
       </trans-unit>
       <trans-unit id="pd.startup.restore-failed" datatype="html">
         <source>The window's view could not be restored: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.elapsed.hours" datatype="html">
+        <source><x id="hours"/> h</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.elapsed.hours-minutes" datatype="html">
+        <source><x id="hours"/> h <x id="minutes"/> min</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.elapsed.minutes" datatype="html">
+        <source><x id="minutes"/> min</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.elapsed.seconds" datatype="html">
+        <source><x id="seconds"/> s</source>
       </trans-unit>
       <trans-unit id="pd.ui.eta.hours" datatype="html">
         <source>about <x id="hours"/> h left</source>
@@ -310,6 +403,9 @@
       </trans-unit>
       <trans-unit id="pd.ui.job.done" datatype="html">
         <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.elapsed" datatype="html">
+        <source><x id="elapsed"/> elapsed</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.failed" datatype="html">
         <source>Failed</source>

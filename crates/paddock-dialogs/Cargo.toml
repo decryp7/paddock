@@ -10,6 +10,8 @@ publish = ["decryp7"]
 [features]
 # The Tauri adapter (`paddock_dialogs::tauri`); the core above it never depends on Tauri.
 tauri = ["dep:tauri", "dep:log"]
+# For other crates' tests on Tauri's mock runtime: dialogs are not parented to a native window. Never in an app.
+mock-runtime = ["tauri"]
 
 [dependencies]
 paddock-commands = { workspace = true }

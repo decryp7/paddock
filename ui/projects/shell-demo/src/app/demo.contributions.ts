@@ -18,6 +18,7 @@ import type { DemoStatus } from './dialogs/demo-ipc';
 
 // The registration file of the shell demo: static data and loaders only (plan §9). Its lints run in
 // shell/testing/src/reference-apps.spec.ts (contributions) and e2e/shell-demo.spec.ts (lazy imports).
+// Stands in for the settings page until plan S10 renders it.
 const placeholder = () => import('./placeholder').then((m) => m.Placeholder);
 
 /** A decision: modal, fitted to its content. */
@@ -213,8 +214,53 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
     defineMenuItem({ menu: 'sd.greetings', command: 'sd.greet', group: 'demo', order: 100 }),
     defineMenuItem({ menu: 'sd.greetings', command: 'sd.reset', group: 'demo', order: 200 }),
   ],
-  pages: [definePage({ id: 'sd.home', title: msg('sd.page.home', 'Home'), icon: 'pd:home', order: 100, load: placeholder })],
-  statusItems: [defineStatusItem({ id: 'sd.greetings', title: msg('sd.status.greetings', 'Greetings'), side: 'end', priority: 50, load: placeholder })],
+  // The pages of the frame (plan S14): each a lazy chunk; Runners brings providers of its own, Lab has a condition.
+  pages: [
+    definePage({ id: 'sd.home', title: msg('sd.page.home', 'Overview'), icon: 'pd:home', order: 100, load: () => import('./pages/overview-page').then((m) => m.OverviewPage) }),
+    definePage<DemoContext>({
+      id: 'sd.runners',
+      title: msg('sd.page.runners', 'Runners'),
+      icon: 'sd:runner',
+      order: 150,
+      badge: (ctx) => ctx.attention(),
+      badgeLabel: (ctx) =>
+        ctx.attention() === 1
+          ? $localize`:@@sd.runners.offline.one:1 runner offline`
+          : $localize`:@@sd.runners.offline.other:${ctx.attention()}:count: runners offline`,
+      providers: () => import('./pages/runners.providers').then((m) => m.RUNNERS_PROVIDERS),
+      load: () => import('./pages/runners-page').then((m) => m.RunnersPage),
+    }),
+    // Harness pages of the shell's parts: offered in developer mode only (on unless `sd.developer` is "off", as in the
+    // reference screenshots, which show a manager app's navigation).
+    definePage<DemoContext>({
+      id: 'sd.dialogs',
+      title: msg('sd.page.dialogs', 'Dialogs'),
+      icon: 'pd:window',
+      order: 200,
+      when: (ctx) => ctx.developer(),
+      load: () => import('./pages/dialogs-page').then((m) => m.DialogsPage),
+    }),
+    definePage<DemoContext>({
+      id: 'sd.keys',
+      title: msg('sd.page.keys', 'Keyboard'),
+      icon: 'pd:keyboard',
+      order: 300,
+      when: (ctx) => ctx.developer(),
+      load: () => import('./pages/keys-page').then((m) => m.KeysPage),
+    }),
+    definePage<DemoContext>({
+      id: 'sd.lab',
+      title: msg('sd.page.lab', 'Lab'),
+      icon: 'sd:lab',
+      order: 500,
+      when: (ctx) => ctx.greetings() > 0,
+      load: () => import('./pages/lab-page').then((m) => m.LabPage),
+    }),
+    definePage({ id: 'sd.about', title: msg('sd.page.about', 'About'), icon: 'pd:info', order: 100, section: 'bottom', load: () => import('./pages/about-page').then((m) => m.AboutPage) }),
+  ],
+  statusItems: [
+    defineStatusItem({ id: 'sd.runners', title: msg('sd.status.runners', 'Runners online'), side: 'start', priority: 50, load: () => import('./runners-status').then((m) => m.RunnersStatus) }),
+  ],
   settingsPages: [defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100, load: placeholder })],
   // One dialog of each kind (ADR 0009), plus a modal form and a required choice. Contracts: dialog-contracts.json.
   dialogs: DEMO_DIALOGS,
