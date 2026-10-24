@@ -465,3 +465,16 @@ Gaps left:
 - Windows: the endpoint code type-checks here and needs the Windows runner; the discovery file's trust check is a no-op
   there (the profile folder's ACL); children use `paddock-proc` trees (taskkill) instead of a kill-on-close job object.
 - Pitcrew's per-connection cap and push subscriptions are not in `LinkServer` yet (apps keep their own until a second user).
+
+## X25 built: adoption and exit codes (2026-10-25)
+
+`paddock-cli` 0.1.0 (crates/README.md "paddock-cli"). The shared exit codes are a decision (coordinator, 2026-10-25): 0 ok,
+1 failure, 2 usage, 3 not running, 4 refused, 5 findings, 130 interrupted. What each app deletes when it adopts it:
+
+- **Debrief:** `debrief-cli` `output.rs` (tables, error JSON), `progress.rs` (throttled lines), `time_arg.rs`, and its `Exit`
+  enum. **Findings moves from 3 to 5**: a CHANGELOG note ("`--fail-on-findings` now exits 5") and the CLI docs change with it.
+- **Pitwall:** `pitwall-cli` `exit.rs` (its 3 not running and 4 refused already match) and the size/table code in `format.rs`.
+  Pitwall has no findings code today, so nothing moves; a CHANGELOG note says the codes are now the family's.
+- **Dyno:** `dyno-cli` `render.rs` tables, the common flags in `args.rs`, and the exit handling in `lib.rs`.
+- **Agent and service programs** (`debrief-agent`, `pitcrew-service` `cli.rs`, `dyno-agent` `cli.rs`): `Verb::add_to_help`,
+  `Verb::status_exit` (3 when not running), `Verb::reject_extra`.

@@ -136,6 +136,7 @@ so a manager app never bundles the workbench:
 | `/shell/settings` | settings over the `paddock-settings` adapter, what a main window imports: `SettingsBackend` (Tauri, memory), `SettingsStore`, the model, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
 | `/shell/settings/window` | the Settings window, loaded only by it: `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `SettingsDrafts` (Signal Forms), `settingsWindowProviders` | S10, S16 |
 | `/icons`, `/format`, `/prefs`, `/select`, `/testing`, `/shell/feel` | the `pd:` icon set and `outlineIcon`; one formatting API and the middle ellipsis; guarded localStorage; the themed `pd-select`; the DOM test kit (`installTestKit`, helpers, fake ECharts); the native-feel guard | X36, X35, X12, X38 |
+| `/ipc`, `/ipc/testing` | the app IPC kit: `CommandError` (generated from `paddock_commands::CommandError`) with `toCommandError`, `CommandFailure`; `withCallTimeout` for request/reply commands (never jobs, rule 12) and `callTimeoutProblems`; `provideBackend` (Tauri or a lazily imported mock); the mock kit `parseMockOptions` (`?mock=&latency=&fail=&hold=`), `formatMockOptions`, `withMockOptions` | X28 |
 | `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/shell/startup`, `/shell/dialogs`, `/shell/about` | one shell part each | S5-S11 |
 | `/shell/diagnostics` | report a problem over the `paddock-diag` adapter: `DiagnosticsBackend` (Tauri, memory), `DiagnosticsStore`, the Report a Problem decision dialog (description, every file with its size, Save through the engine's native dialog), `diagnosticsContributions` (Help item, the Logging settings page), `provideShellDiagnostics`, `provideWebviewLog` (the page's errors in the engine's log) | X2 |
@@ -549,3 +550,27 @@ Apps adopt the package one by one in their design passes; nothing here edits the
 All apps: remove copied `_tokens`/`_base` rules as components move over; keep the CSP rule (`inlineCritical: false`, no
 inline style attributes: the components only bind styles through Angular's CSSOM bindings, and the gallery test checks
 `index.html` has none).
+
+### The app IPC kit (`@decryp7/paddock-ui/ipc`, plan X28)
+
+```ts
+import { CommandError, provideBackend, toCommandError, withCallTimeout, inTauri } from '@decryp7/paddock-ui/ipc';
+import { parseMockOptions } from '@decryp7/paddock-ui/ipc/testing';
+
+export const BACKEND = new InjectionToken<AppBackend>('AppBackend');
+
+// app.config.ts: the real backend in Tauri, the mock (imported lazily, so not in the release bundle) in a dev browser.
+provideBackend(BACKEND, {
+  tauri: () => withCallTimeout(new TauriBackend(), { subject: 'The Pitwall server', limits: { loadModel: 180_000 }, untimed: ['startImport'] }),
+  mock: async (options) => (await import('./mock-backend')).createMock(options),
+}, () => ({ inTauri: inTauri(), search: location.search, allowMock: isDevMode(), mockOptions: parseMockOptions }));
+```
+
+- A command rejects with `CommandError { code, message, retryable, hint?, field?, cause?, kind? }`; `kind` carries the app's own
+  distinction. Components react to `code` and `retryable`; `toCommandError(e)` makes any rejection one and never throws.
+- `withCallTimeout` rejects a request/reply call that does not answer in time with `code: 'timeout'` (retryable). It is a Proxy, so a
+  new method gets the default (15 s) without a table entry. **A command that starts a job is `untimed`** (rule 12: the UI never
+  times out a running job; the job reports through events, the panel shows "Still working"). `callTimeoutProblems(methods, policy)`
+  finds names in the policy that are not methods (a typo would leave a call on the default).
+- The mock kit plays latency, failures (`?fail=save:2` fails the first two calls), held answers (`?hold=load`, released by
+  `__paddockMockRelease('load')`) and records the calls; `formatMockOptions` builds the query string in Playwright specs.
