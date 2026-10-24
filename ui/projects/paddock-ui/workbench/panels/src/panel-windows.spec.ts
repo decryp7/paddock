@@ -47,8 +47,10 @@ describe('PanelWindows', () => {
     expect(await windows.popOut('wt.log')).toBe(true);
     expect(desktop.window('main').focusLog).toEqual(['wt.log']);
     expect(windows.windows()).toHaveLength(1);
-    // An instance of a view with instances is its own panel.
+    // The OS window of an instance is titled like its tab: the key's last part, not the view's title.
     expect(await windows.popOut('wt.code#src/main.rs')).toBe(true);
+    expect(desktop.all().find((w) => w.panel === 'wt.code#src/main.rs')?.title).toBe('main.rs');
+    // An instance of a view with instances is its own panel.
     expect(windows.poppedOut()).toEqual(['wt.log', 'wt.code#src/main.rs']);
     // The user closes the OS window: the dock hears it once.
     desktop.closeWindow('p-main-1');
