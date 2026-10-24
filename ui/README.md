@@ -15,13 +15,41 @@ The package is published to the Gitea npm registry. In the app, add an `.npmrc` 
 
 ```json
 "dependencies": {
-  "@decryp7/paddock-ui": "^0.1.0"
+  "@decryp7/paddock-ui": "^0.2.0"
+},
+"devDependencies": {
+  "@decryp7/paddock-e2e": "^0.2.0"
 }
 ```
 
 The package is public, so installing needs no token; `npm ci` verifies the integrity hash from `package-lock.json`, and nothing
 is built in the app's CI. Peer dependencies: `@angular/core` and `@angular/common` 22 (echarts 6 is optional, only for the
-chart theme). To upgrade, bump the range and run `npm install`.
+chart theme); the shell entry points add `@angular/router`, `@angular/localize` and, optional per entry point,
+`@angular/cdk`, `@angular/forms` and `@ngrx/signals`. Pre-1.0 the caret range accepts patches of the same minor only
+(`^0.2.0` is `>=0.2.0 <0.3.0`): a minor may break, and its changelog section says how to migrate. To upgrade, bump the
+range (and the Rust crates, below) and run `npm install`. `@decryp7/paddock-e2e` (plain Node, Playwright) is the e2e half
+of the test kit; it carries the same version.
+
+### Adopting the shell (ADR 0012)
+
+The shell is adopted as one pair: this package's `shell` entry points in the UI and the `paddock-shell` Tauri plugin in
+the app's Rust side (`crates/README.md`, "Consuming the crates"). Both carry **one version**: `paddock-shell` 0.2.0 goes
+with `@decryp7/paddock-ui` 0.2.0. The UI asks the plugin once at start-up and logs a plain error when they differ:
+
+```ts
+import { provideShellVersionCheck, shellInvoke } from '@decryp7/paddock-ui/shell';
+import { invoke } from '@tauri-apps/api/core';
+
+// The shell's commands are plugin commands (`plugin:paddock-shell|health_snapshot`); the shell's backends name them
+// plainly, so give every shell backend this IPC. The app's own commands pass through unchanged.
+const ipc = { invoke: shellInvoke(invoke), listen: (event, cb) => listen(event, (e) => cb(e.payload)) };
+providers: [provideShellVersionCheck(ipc.invoke) /* never holds the start-up */, ...]
+```
+
+The app's checks over its own registry, in its specs: `assertContributionsValid` (the lint), the boot-every-dialog
+harness and `dialogTableProblems` with `{ ...APP_COMMANDS, ...SHELL_COMMANDS }`, `dialog-contracts.json` and
+`paddock-manifest.json` written from the registry (`dialogContractFile`, `buildManifest`; written in write mode, compared
+otherwise) and checked in Rust by `paddock_shell::Builder::problems` (see `crates/README.md`).
 
 ## Use
 
@@ -97,7 +125,7 @@ so a manager app never bundles the workbench:
 
 | Entry point | Content | Plan |
 |---|---|---|
-| `@decryp7/paddock-ui/shell` | contributions, `ShellContext`, frame parts, widgets | S2, S14 |
+| `@decryp7/paddock-ui/shell` | contributions, `ShellContext`, frame parts, widgets; the plugin's command names (`SHELL_COMMANDS`, generated from `paddock_shell::COMMANDS`), `shellInvoke`, `checkShellVersion` / `provideShellVersionCheck`, `SHELL_VERSION` | S2, S14, S17 |
 | `/shell/jobs` | jobs over the `paddock-jobs` adapter: `JobsBackend` (Tauri, memory), `JobsStore`, `pd-jobs-list`, `pd-jobs-status` (a lazy chunk: exported as a type), `JobFollow`, `provideShellJobs`, `JOBS_CONTRIBUTIONS` | S9 |
 | `/shell/notify` | notifications and service health over the `paddock-health` adapter: backends (Tauri, memory), `ServiceHealthStore`, `NotificationsStore`, `pd-notification-host`, `pd-service-status` and `pd-notifications-status` (lazy chunks: exported as types), `pd-waiting-for`, `provideShellNotify` | S4 |
 | `/shell/store` | shared SignalStore features: `withRequestStatus` (rule 30) | S4 |
@@ -284,16 +312,18 @@ providers: [
   three, and never a `health:<service>` cause: the chip states outages. Errors and critical failures stay until
   dismissed or resolved; the rest go after 8 s, held while the pointer or focus is on them. The host owns the time
   (`NOTIFY_CLOCK`, a port); sources (`provideNotificationSource`) only post, update and resolve.
-- `SHELL_PORTS.notify` (every `ShellNotice`, e.g. a failed command or a finished job) becomes a toast and a message in
-  the centre for the session, merged by kind and text.
+- `SHELL_PORTS.notify` (every `ShellNotice`, e.g. a failed command or a finished job) goes to the engine's centre
+  (`notifications_post`: validated and bounded, keyed by the engine as `ui:<kind>:<title>`), which lists it for every
+  window and sends each its toast (rule 34). When the engine cannot take it (no centre, a notice out of its bounds), the
+  window keeps it itself for the session, merged by kind and text.
 - `ServiceHealthStore`: the newest snapshot (by `revision`); `isServing(service)` is false until the first snapshot.
   `pd-service-status` appears when a service is not working, opens the cause, the next step, technical details and the
   Repair button (served by the shell, never by the service), and offers Try again when the state could not be read.
 - Panels show `<pd-service-error summary="…" service="engine" (retry)="load()">`: while the service is down it is
   `<pd-waiting-for>` ("Waiting for the engine", "See what happened" opens the chip), and it emits `retry` once when the
   service is back.
-- The wire types mirror `shell/generated/health.ts` (ng-packagr cannot import across entry points); a type-level spec
-  fails `npm test` when they drift.
+- The wire types are the ts-rs output of `paddock-health`, written into this entry point (`shell/notify/generated/`);
+  `NotifyCommand` is a subset of the generated `HealthCommand`, so a command that is not in the table does not compile.
 ### Settings (`/shell/settings`, plan S10)
 
 Settings are the engine's (rule 21): `paddock-settings` holds the sections the shell and the app register, validates every

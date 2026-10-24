@@ -1,0 +1,97 @@
+# The nightly consumer canary (ADR 0012 §8): builds each app's `main` against this repo's `main` as the candidate
+# release, so a breaking change shows up before a tag, not in an app's Renovate PR. The candidate is packed here
+# (`npm pack` of @decryp7/paddock-ui and @decryp7/paddock-e2e) and laid over the app's registry versions (npm: installed
+# from the tarballs; Cargo: `[patch.decryp7]` to this checkout's crates). Then the app's own type-check, lint and unit
+# tests run (not its e2e). Nothing is published and no app repository is changed.
+#
+# An app that does not consume Paddock yet (no `@decryp7/paddock-ui` in its package.json and no `decryp7` registry crate
+# in its Cargo.toml) is skipped with a notice, so the list can name the apps that will adopt the shell before they do.
+
+name: canary
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: canary (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every app's UI is `app/` and its Rust side `app/src-tauri/` (the family layout).
+        app: [pitwall, debrief, pitcrew, spotter, dyno]
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Paddock (the candidate)
+        uses: actions/checkout@v4
+        with:
+          path: paddock
+
+      - name: ${{ matrix.app }} (main)
+        uses: actions/checkout@v4
+        with:
+          repository: decryp7/${{ matrix.app }}
+          ref: main
+          path: app
+          # A read token for the app repositories (the default token reads only this one).
+          token: ${{ secrets.CANARY_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Does the app consume Paddock?
+        id: uses
+        run: |
+          ui=false; rust=false
+          grep -q '"@decryp7/paddock-ui"' app/app/package.json 2>/dev/null && ui=true
+          grep -Eq 'registry *= *"decryp7"' app/app/src-tauri/Cargo.toml 2>/dev/null && rust=true
+          echo "ui=$ui" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          if [ "$ui$rust" = "falsefalse" ]; then echo "::notice::${{ matrix.app }} does not consume Paddock yet; nothing to check"; fi
+
+      - name: Pack the candidate npm packages
+        if: steps.uses.outputs.ui == 'true'
+        working-directory: paddock/ui
+        run: |
+          npm ci
+          npm run build
+          npm run build:e2e
+          mkdir -p ../../candidate
+          npm pack ./dist/paddock-ui --pack-destination ../../candidate
+          npm pack ./dist/paddock-e2e --pack-destination ../../candidate
+          ls -l ../../candidate
+
+      - name: UI against the candidate (type-check, lint, unit tests)
+        if: steps.uses.outputs.ui == 'true'
+        working-directory: app/app
+        run: |
+          npm ci
+          npm install --no-save ../../candidate/decryp7-paddock-ui-*.tgz
+          if grep -q '"@decryp7/paddock-e2e"' package.json; then npm install --no-save ../../candidate/decryp7-paddock-e2e-*.tgz; fi
+          npx tsc --noEmit -p tsconfig.app.json
+          npm run lint --if-present
+          npx ng test --watch=false
+
+      - name: Rust against the candidate (clippy, tests)
+        if: steps.uses.outputs.rust == 'true'
+        working-directory: app/app/src-tauri
+        run: |
+          # Every workspace crate of the candidate replaces its registry version (`[patch.decryp7]`).
+          patch=()
+          for dir in ../../../paddock/crates/paddock-*/; do
+            name=$(basename "$dir")
+            patch+=(--config "patch.decryp7.${name}.path=\"$(cd "$dir" && pwd)\"")
+          done
+          cargo "${patch[@]}" clippy --all-targets -- -D warnings
+          cargo "${patch[@]}" test

@@ -4,6 +4,60 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+## 0.2.0 - not yet tagged (the first shell release)
+
+The app shell of ADR 0012 (plan S0-S17): `@decryp7/paddock-ui` 0.2.0 with the `shell/*` entry points,
+`@decryp7/paddock-e2e` 0.2.0, and the shell crates on the Gitea cargo registry `decryp7` for the first time:
+`paddock-shell` 0.2.0 (the Tauri plugin; lockstep with the npm package) and `paddock-commands`, `-dialogs`, `-download`,
+`-health`, `-jobs`, `-menu`, `-settings`, `-startup`, `-updater`, `-window` 0.1.0. The date is set by the tag.
+
+### Migration
+- From 0.1.0: bump `@decryp7/paddock-ui` to `^0.2.0` and add `@angular/localize/init` to the polyfills (a peer
+  dependency now); the root entry's components and tokens are unchanged. No app has adopted the shell yet: adoption is
+  new work per app (ui/README.md "Adopting the shell", crates/README.md "Consuming the crates"), Pitwall first.
+- Apps take the crates from the registry (`.cargo/config.toml` `[registries.decryp7]`), never from a git tag.
+
+### Added
+- Crate `paddock-shell` 0.2.0 (plan S17, ADR 0012 decision D2): the shell as one Tauri plugin. `Builder` manages the
+  shell's state (jobs, health and the notification centre, settings with the shell's sections, dialog contracts, the
+  start-up watchdog, windows, menu, updater) and its hooks; every shell command is `plugin:paddock-shell|<command>`
+  behind one guard with the per-dialog grants; `shell_version`; permission sets `main` (`default`), `popout`, `dialog` and
+  `tray` generated from the table and resolved through Tauri's ACL in the tests; `Builder::problems` checks the app's
+  table, dialog contracts and `paddock-manifest.json` (menus and keys, dialog commands, health services, settings sections)
+  against the plugin.
+- `paddock-commands`: composed tables (`command_table! { static SHELL = [A, B]; }`, a command two parts declare does not
+  compile) and `tauri::Routes` (each call to the handler of its part, behind one guard).
+- `paddock-health`: `notifications_post`, a window's notice to the engine's centre (validated and bounded, keyed by the
+  engine as `ui:<kind>:<title>`, app or window scope), so `SHELL_PORTS.notify` reaches every window (rule 34).
+- `paddock-settings`: the shell's `pd.updates` section (`shell::updates`); `paddock-updater`: `PreferenceStore`,
+  `Updater::apply_preferences`.
+- `@decryp7/paddock-ui/shell`: `shellInvoke` (the shell's commands to the plugin, the app's as they are),
+  `checkShellVersion` / `provideShellVersionCheck`, `SHELL_PLUGIN`, `SHELL_VERSION`, the generated `SHELL_COMMANDS` of
+  the plugin; the manifest's `settingsForms`.
+- `shell-demo`: `paddock-manifest.json` written from the main window's contributions and checked by the demo's Rust side
+  (`crates/paddock-shell/tests/demo.rs`, which also generates its `app-commands.ts`); the desktop build sends the shell's
+  commands to the plugin and checks its version.
+- CI: the `paddock-shell` crate step; the publish dry run refuses a `paddock-shell` version other than the npm package's;
+  the nightly consumer canary (`.gitea/workflows/canary.yml`, ADR 0012 §8).
+
+### Changed
+- `SHELL_PORTS.notify` posts to the engine (`NotificationsStore.post`, async); a window keeps a notice itself
+  (`postLocal`) only when the engine cannot take it. `NotificationsBackend.postNotice` is new (Tauri and memory).
+- The update preferences live on the `pd.updates` settings section (one writer and source, rule 40):
+  `updates_set_preferences` stores through the settings, and `updates.json` no longer holds `autoCheck` or `channel`.
+- `paddock_dialogs::BASE_COMMANDS` adds `notifications_post` and `notifications_list` (every window may post a notice and
+  read its host's list); `DIALOG_BASE_COMMANDS` and the dialog command check follow.
+- Each crate's unguarded handler is `invoke_handler()` (`paddock-startup`, `-updater` and `-window` renamed `handler()`;
+  `paddock-dialogs`, `-menu`, `-jobs` and `-settings` gained one; `paddock-dialogs` and `paddock-menu` have their
+  `COMMANDS` tables). `paddock-commands` no longer writes `shell-commands.ts`.
+- `paddock-health`'s generated TypeScript moved into `shell/notify/generated/`; the mirrored wire types and their drift
+  spec are gone (plan §13). The e2e kit's Tauri fake and the IPC recorder record the plugin's commands by plain name.
+- `paddock-menu`'s manifest check counts a command once per menu-bar menu only: a context menu may repeat it (lint
+  precision, rule 40).
+
+### Fixed
+- `paddock-dialogs`' contract-file test named the shell demo's dialogs before S10/S11 added `pd.*` ones.
+
 ### Changed
 - Appearance has one writer and one source (rule 40, rule 34): `paddock_settings::shell::appearance` holds the whole
   look (theme, contrast, motion, density and the theme pack; `PACK_ID`); `provideShellSettings` provides it as the
