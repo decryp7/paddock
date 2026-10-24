@@ -9,6 +9,8 @@
 //! - [`check`] is the guard as a pure function: window class from the shell's label scheme ([`labels`]), the
 //!   per-dialog contract through the [`DialogGrant`] hook (implemented by `paddock-dialogs`, ADR 0009), the size limit.
 //!   The Tauri adapter `tauri::Guard` (feature `tauri`) runs it on every call, rejects with a [`Refusal`] and logs it.
+//! - [`CommandError`] is the one error a command rejects with (plan X28): a short general [`ErrorCode`] list, `retryable`,
+//!   a hint, and the app's own distinctions in `kind`.
 //! - [`ts::names_module`] renders the table as TypeScript (command names as a union type); [`testing`] has the checks an
 //!   app runs in its tests: every command async, generated files current.
 //!
@@ -52,12 +54,14 @@
 //! }
 //! ```
 
+pub mod error;
 pub mod guard;
 pub mod labels;
 pub mod table;
 pub mod testing;
 pub mod ts;
 
+pub use error::{CommandError, ErrorCode};
 pub use guard::{DialogGrant, Refusal, RefusalCode, check};
 pub use labels::{Label, WindowClass, class_of};
 pub use table::{
