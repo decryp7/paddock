@@ -48,6 +48,8 @@ type DiagSetup<R> =
     Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send>;
 type FilesSetup<R> =
     Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_files::Files, BoxError> + Send>;
+type PacksSetup<R> =
+    Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_packs::tauri::Setup, BoxError> + Send>;
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
@@ -63,6 +65,7 @@ pub struct Builder<R: Runtime> {
     diagnostics: Option<DiagSetup<R>>,
     service: Option<ServiceSetup<R>>,
     files: Option<FilesSetup<R>>,
+    packs: Option<PacksSetup<R>>,
     sections: Vec<Arc<dyn Configurable>>,
     startup: Option<Startup<R>>,
     updater: Option<Part<R, UpdatesBuilder>>,
@@ -86,6 +89,7 @@ impl<R: Runtime> Builder<R> {
             diagnostics: None,
             service: None,
             files: None,
+            packs: None,
             sections: Vec::new(),
             startup: None,
             updater: None,
@@ -166,6 +170,18 @@ impl<R: Runtime> Builder<R> {
         f: impl FnOnce(&AppHandle<R>) -> Result<paddock_files::Files, BoxError> + Send + 'static,
     ) -> Self {
         self.files = Some(Box::new(f));
+        self
+    }
+
+    /// The app's knowledge packs (plan X15): its pack kinds and, if it has one, the health entry that follows them. The
+    /// shell manages them (`packs_status`, `packs_reload` and the `paddock://packs` event) and keeps the health entry
+    /// current with its Repair (reload). Do the first load (`Reloader::reload_now`) before the closure returns, so the
+    /// first look is real.
+    pub fn packs(
+        mut self,
+        f: impl FnOnce(&AppHandle<R>) -> Result<paddock_packs::tauri::Setup, BoxError> + Send + 'static,
+    ) -> Self {
+        self.packs = Some(Box::new(f));
         self
     }
 
@@ -303,6 +319,10 @@ impl<R: Runtime> Builder<R> {
                 paddock_service::tauri::invoke_handler(),
             )
             .route(
+                &paddock_packs::COMMANDS,
+                paddock_packs::tauri::invoke_handler(),
+            )
+            .route(
                 &paddock_jobs::tauri::COMMANDS,
                 paddock_jobs::tauri::invoke_handler(),
             )
@@ -420,6 +440,11 @@ impl<R: Runtime> Builder<R> {
                     Ok(())
                 }))
                 .map_err(|e| named("the Start at login settings", e))?;
+        }
+
+        if let Some(f) = self.packs {
+            let setup = f(app).map_err(|e| named("the knowledge packs", e))?;
+            paddock_packs::tauri::install(app, setup);
         }
 
         let dialogs = Dialogs::from_json(self.contracts.as_deref().unwrap_or(NO_CONTRACTS))

@@ -135,6 +135,7 @@ so a manager app never bundles the workbench:
 | `/shell/pages` | the pages frame of the manager apps: `provideShellPages`, `pd-shell-frame`, the sidebar of contributed pages (expanded, rail or over the page by `planLayout`), routed lazy pages with their own providers, `ShellPages` | S14 |
 | `/shell/settings` | settings over the `paddock-settings` adapter, what a main window imports: `SettingsBackend` (Tauri, memory), `SettingsStore`, the model, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
 | `/shell/settings/window` | the Settings window, loaded only by it: `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `SettingsDrafts` (Signal Forms), `settingsWindowProviders` | S10, S16 |
+| `/table`, `/chart`, `/forms` | `pd-table` (sort, filter, columns, groups, virtual scroll, row keyboard and menus, hover actions); `pd-chart` over lazy ECharts with the family theme and the generic chart kinds; `pd-field` and the validation display for Signal Forms | X21 |
 | `/icons`, `/format`, `/prefs`, `/select`, `/testing`, `/shell/feel` | the `pd:` icon set and `outlineIcon`; one formatting API and the middle ellipsis; guarded localStorage; the themed `pd-select`; the DOM test kit (`installTestKit`, helpers, fake ECharts); the native-feel guard | X36, X35, X12, X38 |
 | `/ipc`, `/ipc/testing` | the app IPC kit: `CommandError` (generated from `paddock_commands::CommandError`) with `toCommandError`, `CommandFailure`; `withCallTimeout` for request/reply commands (never jobs, rule 12) and `callTimeoutProblems`; `provideBackend` (Tauri or a lazily imported mock); the mock kit `parseMockOptions` (`?mock=&latency=&fail=&hold=`), `formatMockOptions`, `withMockOptions` | X28 |
 | `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
@@ -143,6 +144,7 @@ so a manager app never bundles the workbench:
 | `/shell/pitwall` | the family's one "needs local AI" state over `paddock-pitwall`: `<pd-needs-ai>` (the engine's sentence and actions: Connect with the code to compare, Use the built-in engine for this session, Open AI settings, `(step)` for what only the app can do), `PitwallBackend` (Tauri over `PITWALL_COMMANDS`, memory), `PitwallStore`, `providePitwall`; wire types generated from Rust | ADR 0004 |
 | `/shell/service` | the background service over the `paddock-service` adapter (`service_status`, `service_repair`, `service_install`, `open_login_items`, live phases and outcomes on `paddock://service`): `ServiceBackend` (Tauri, memory with install, repair phases, failure, busy, switched-off, needs-approval), `ServiceStore` (status, event folding, "Still working", inline error with Retry), `defineServiceSettingsPage`/`serviceContributions` (the `pd.login` page and `SERVICE_SETTINGS_COMMANDS` for the Settings dialog's contract), `provideShellService`; the page `PdServicePage` (status word, message, Install/Repair/Open Login Items… only where `can*` says, "Start at login" beneath) is in `/shell/service/page`, a chunk of its own | X4 |
 | `/shell/files` | the user's files over the `paddock-files` adapter (`files_pick`, `files_recent_*`, `files_reveal`, `files_open`, `files_open_app_folder`, `files_open_url`, `paddock://files-recent` and `paddock://files-dropped`): `FilesBackend` (Tauri, memory that keeps the Rust rules: a path is used only after a dialog, a drop or the recent list granted it), `FilesStore` (recent lists kept current from the event, pickers, reveal, open, inline refusal, dropped paths), `provideShellFiles`, `pd-recent-files` (entries with `pd-path-text` middle ellipsis, Reveal and Remove on hover and focus, Clear) | X31 |
+| `/shell/channels` | notification channels over the `paddock-channels` adapter (`channels_get`, `channels_save`, `channels_set_secret`, `channels_clear_secret`, `channels_test`, a test's outcome on `paddock://channels`): `ChannelsBackend` (Tauri; memory with the engine's validation, secrets in a map, `succeed`/`rejected`/`unreachable`/`missingSecret`/`hang` tests), `ChannelsStore` (view, save and remove with the engine's message kept as it is, per-channel test state, a test is never timed out), the draft helpers, `defineChannelsSettingsPage`/`defineChannelsSecretDialog`/`channelsContributions` (the `pd.channels` page, the modal `pd.channels.secret` form, `CHANNELS_SETTINGS_COMMANDS` for the Settings dialog's contract), `provideShellChannels`/`provideChannelsBackend`; the page `PdChannelsPage` (a table with Edit, Send test and Remove per row, one Add channel, an inline editor on Signal Forms) is in `/shell/channels/page` and the secret dialog `PdChannelSecretDialog` (a masked field; the secret goes from its window straight to the engine) in `/shell/channels/dialog`, each a chunk of its own | X17 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -434,7 +436,11 @@ provideThemes(CONSOLE_THEME),                                                   
 - i18n (ADR 0012 §6): `$localize` with runtime-loaded translations, one build for every language. Install
   `@angular/localize/init` in the app's `polyfills` and `"types": ["@angular/localize"]`. The shell's messages use `@@pd.`
   ids; contributions' `msg(id, text)` read their text through the loaded translations, so they need nothing else.
-  `LanguageStore` keeps the choice (`paddock.language`: system, en, pseudo) and says when a restart is needed.
+  `LanguageStore` keeps the choice (`paddock.language`: system, en, pseudo, or a shipped translation's tag such as `de`) and says when a restart is needed.
+  Settings > Language: add `defineLanguageSettingsPage({ load })` (`/shell/i18n/settings`) to the app's `settingsPages` and the Settings
+  window's pages; `load` is `() => import('@decryp7/paddock-ui/shell/i18n/page').then((m) => m.PdLanguagePage)`. The Settings window's
+  own providers carry `LANGUAGE_CONFIG` (the shipped locales, how the app restarts): it is a root token with a default, so a
+  provider added by the lazily loaded page would lose against it. Names come from `Intl.DisplayNames` in the language's own tongue.
 - Translation files: the package ships `i18n/messages.pd.xlf` (the shell's catalog) and `i18n/messages.pd.en-XA.json`
   (its pseudo-locale). An app builds its own catalog (its `msg()` and `$localize` messages with `@@id`s, scanned from the
   sources) and loader files with the bin:
@@ -445,6 +451,17 @@ provideThemes(CONSOLE_THEME),                                                   
     node_modules/@decryp7/paddock-ui/i18n/messages.pd.en-XA.json src/locale/messages.xlf
   ```
 
+  An app does not keep those commands in a script of its own: it declares the build once in `paddock-i18n.json` (the
+  extraction from its built output with Angular's `localize-extract`, its catalogs, the pseudo-locale and any
+  `messages.<tag>.xlf` translations folded into `messages.<tag>.json` together with the shell's) and runs
+
+  ```sh
+  npx paddock-i18n build               # regenerate; after the app build when a catalog takes the built $localize messages
+  npx paddock-i18n build --check       # CI: writes nothing, fails on drift
+  npx paddock-i18n build --check --no-extract   # no build needed: the committed catalogs against their sources (conformance C32)
+  ```
+
+  See `paddock-i18n.json` here (the package and the shell demo) and `projects/paddock-ui/bin/i18n-build.mjs` for the format.
   `--check` writes nothing and fails on drift (CI). Here `npm run i18n` (after `npm run build`) regenerates the package's
   files and the shell demo's; CI runs `npm run i18n:check`. The shell demo's View > Appearance switches theme, a sample
   pack, high contrast, reduced motion and the pseudo-locale; `e2e/shell-demo-locale.spec.ts` finds no unmarked English

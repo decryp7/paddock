@@ -1,0 +1,21 @@
+[package]
+name = "paddock-archive"
+version = "0.1.0"
+description = "Safe unpacking of zip, tar, tar.gz and tar.xz archives: limits on entries, sizes and expansion ratio, path-traversal and symlink guards, special files refused, a layout (keep, strip or flatten) and a name filter, and an atomic extract into a staging folder that is swapped in only when everything was written; progress and cancel through a paddock-jobs job."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[package.metadata.paddock]
+scaffold = true
+
+[dependencies]
+paddock-jobs = { workspace = true }
+flate2 = "1.1"
+lzma-rs = "0.3"
+tar = { version = "0.4", default-features = false }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[dev-dependencies]
+tempfile = "3"
