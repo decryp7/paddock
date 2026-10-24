@@ -139,6 +139,16 @@ test('setup-rust wires the shared sccache backend: inputs from Gitea variables, 
   assert.doesNotMatch(text, /SCCACHE_REDIS_ENDPOINT=\$REDIS_ENDPOINT\//);
 });
 
+test('CI runs its own sccache server on a distinct port, started with the job env and stopped only on that port', () => {
+  const setup = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  const stats = read(join(ACTIONS, 'sccache-stats', 'action.yml'));
+  assert.match(setup, /echo "SCCACHE_SERVER_PORT=4227"/);
+  assert.match(setup, /export SCCACHE_SERVER_PORT=4227\n(?:.*\n)*?.*sccache --start-server/);
+  assert.ok(setup.indexOf('SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT') < setup.indexOf('sccache --start-server'), 'the server starts after the backend env is set');
+  assert.doesNotMatch(setup + stats, /SCCACHE_SERVER_PORT=4226/);
+  assert.match(stats, /if \[ -n "\$SCCACHE_SERVER_PORT" \]; then sccache --stop-server/);
+});
+
 test('setup-rust installs a pinned, checksum-verified sccache when the runner has none, for every supported OS and architecture', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const install = text.slice(text.indexOf('- name: Install sccache'), text.indexOf('- name: sccache\n'));

@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -98,7 +98,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
-| `paddock-service` | background service install/control per OS | yes |
+| `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
@@ -766,6 +766,77 @@ paddock_proc::end_all();                                       // at shutdown / 
   that the pids are gone.
 - Not yet: a Windows job object (`KILL_ON_JOB_CLOSE`). Windows trees end through `taskkill /T /F`, which cannot reach a
   helper whose parent already exited; the stdin lifeline and the sandbox limits of `debrief-ipc` stay with `paddock-ipc` (X13).
+
+## `paddock-service` (plan X4)
+
+Background services and login items, from the four designs in the apps: Pitwall's and Pitcrew's `service_install.rs` /
+`service_repair.rs` (the R03 repair, the registered version, Login Items), Pitcrew's and Pitwall's server `platform/` and
+`service/` (systemd, SCM, the restart after an update), Dyno's `service/` (a `Runner` port, the `Run` value, a per-user
+agent) and `login.rs` (one launch-at-login switch), and Debrief's agent (a launch daemon an administrator installs).
+
+```rust
+use paddock_service::{Manager, ServiceSpec, ProcessType, backend::Side, native, render};
+
+let spec = ServiceSpec::builder("net.decryptology.pitwall.service", "Pitwall", "pitwall-server")
+    .bundle_id("net.decryptology.pitwall").display_name("Pitwall local LLM server")
+    .supervised_env("PITWALL_SERVICE").process_type(ProcessType::Interactive).build()?;
+// The files the app ships, generated and checked in a test (paddock_commands::testing::sync_generated):
+let plist = render::launchd_plist(&spec, render::LaunchdProgram::Bundled);   // src-tauri/macos/<label>.plist
+let hooks = render::nsis_hooks(&spec);                                        // src-tauri/windows/installer-hooks.nsh
+// At run time, on a background thread (rule 10):
+let backend = native::host_backend(&spec, &program, Side::App, dirs.data())?;
+let mut service = Manager::new("Pitwall", backend, dirs.data(), spec.label(), env!("CARGO_PKG_VERSION"), ping);
+service.on_start(&cancel);                      // rule 24, at every start (and again a minute later)
+let status = service.status();                  // the UI; status.health() for paddock-health
+service.repair(&cancel)?;                       // the Repair button (never depends on the service, rule 19)
+```
+
+- **One spec, every file.** `render` is pure and golden-tested (`tests/golden/`, `PADDOCK_WRITE_TS=1` rewrites): the bundled
+  plist (`BundleProgram`, `AssociatedBundleIdentifiers`, the supervised variable) or a plist file (launch agent or daemon),
+  the systemd unit (every word quoted against splitting and `%`/`$` expansion), the `Run` value (C runtime quoting), the
+  service as `sc.exe` calls (delayed automatic start, LocalSystem, restart after 10 s, 1 min, 5 min) and the NSIS hooks (a
+  per-machine installer registers the service; a per-user one only stops and removes the agent). `ServiceSpec::builder`
+  refuses names, arguments and links that would break a file or a command line.
+- **Backends behind ports.** `LaunchdBundled` (`SMAppService` + `launchctl print`/`print-disabled`/`bootout`),
+  `LaunchdFile` (plist + `bootstrap`), `Systemd` (user or system unit), `WindowsRun` (`reg.exe`, Task Manager's
+  `StartupApproved` switch), `WindowsService` (`sc.exe`, inside the elevated `<program> install`) and
+  `ElevatedWindowsService` (the app's side: one UAC prompt per request). All OS access goes through `System`, `AppService`
+  and `Elevator`; `testing::{FakeSystem, FakeAppService, FakeElevator}` record every command, file write and wait on a
+  virtual clock. `backend::choose` picks the mechanism (pure); `native::host_backend` builds it.
+- **Rule 24 as a decision and a sequence.** `plan` decides: the user's switch (Login Items, Startup, Services, `systemctl
+  disable`) and a pending approval are never overridden, not even by Repair; a refused job while the service is down is
+  replaced (R03); where the OS pins the build (macOS) the registration is replaced once per version change, elsewhere only
+  when the definition differs (otherwise the version is just remembered); a missing or moved program is re-pointed; a
+  registration a newer copy made is left to it (two copies never ping-pong); nothing is installed unasked; where every
+  change needs a prompt (a Windows service from the app) a repair is offered, never started. `repair::replace` runs
+  unregister → evict (`launchctl bootout`) → wait until gone (bounded) → register → check, retried with a growing pause,
+  then a bounded wait for the service; approval, elevation, a declined prompt and "unavailable" stop at once; a cancel is
+  honoured only where nothing is left unregistered. Every phase is a `Step` for the log and `RepairTracker` (the UI).
+- **The registered version** is `service-<label>.json` in the data folder (`VersionedFile`; C21's
+  `service_registered_version`), written only after a registration took; a lock beside it keeps two copies from repairing
+  at once (a dead copy's lock is taken over after 10 minutes).
+- **The program's side.** `watch::ExeWatch` exits a supervised program whose executable changed once it is idle (the OS
+  starts the new one); `supervised::supervised_path` merges the login shell's `PATH` (`paddock_proc::login_path`, R05);
+  `Verb` is the shared first argument (`install`, `uninstall`, `status`, `stop`, `print-unit`, `print-plist`, `--service`).
+- **Launch at login.** `login::launch_at_login_section` (`pd.login`, one switch, off by default) and
+  `apply_launch_at_login` (the app's own `Autostart` and the service together, each tried, one message).
+- **The Windows service host (X4b).** `scm_host::supervise` is the `--service` supervisor over a `Sessions` port: the
+  logged-on user's session (connected before disconnected, console first, never session 0; Remote Desktop users are
+  found), the program started there with the user's token and environment plus the supervised variable, restarted after
+  a pause, moved when the session changes, stopped gracefully (its `stop` verb, a grace period, then ended).
+  `native::run_as_service(spec, exe)` is the SCM dispatcher and the Win32 side. Pitcrew's pipe SDDL is the app ↔ service
+  link and stays with `paddock-ipc` (X13).
+- **In the app** (`tauri` feature, `control::ServiceControl`): `service_status`, `service_repair`, `service_install`,
+  `open_login_items` and the `paddock://service` event (`ServiceUpdate { status, error }`); requests run on their own
+  thread, status answers from the last look while a repair holds the manager, the health entry is kept current and is
+  the health registry's Repair (`RepairAction::OpenLoginItems` where macOS has the switch), start-up checks at 3 s then
+  every minute. `paddock_shell::Builder::service(|app| Ok(ServicePart::new(Setup::new(manager).health("agent"))))`
+  wires it and the `pd.login` "Start at login" section (only a change by the user acts). The UI is
+  `@decryp7/paddock-ui/shell/service` (Settings > Background service).
+- **The shell demo's agent** (`apps/shell-demo/src-tauri/src/agent.rs`, binary `shell-demo-agent`): a heartbeat-only
+  per-user agent, bundled with its generated plist and NSIS hooks, so the page, the health entry and
+  `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
+- Not here: Task Scheduler entries (no app uses them).
 
 ## `paddock-diag` (plan X2)
 

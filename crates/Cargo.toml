@@ -16,6 +16,7 @@ members = [
     "paddock-pitwall",
     "paddock-proc",
     "paddock-secrets",
+    "paddock-service",
     "paddock-settings",
     "paddock-shell",
     "paddock-startup",
@@ -46,6 +47,7 @@ paddock-menu = { path = "paddock-menu", version = "0.1.0", registry = "decryp7" 
 paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
+paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "decryp7" }
 paddock-shell = { path = "paddock-shell", version = "0.2.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "decryp7" }

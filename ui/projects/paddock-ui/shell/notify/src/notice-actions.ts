@@ -35,6 +35,8 @@ export function repairLabel(action: RepairAction): string {
       return $localize`:@@pd.health.repair.open-settings:Open Settings…`;
     case 'useFallback':
       return $localize`:@@pd.health.repair.use-fallback:Use the fallback`;
+    case 'openLoginItems':
+      return $localize`:@@pd.health.repair.open-login-items:Open Login Items…`;
     case 'reset':
     case 'retry':
       return $localize`:@@pd.health.repair.retry:Try again`;
