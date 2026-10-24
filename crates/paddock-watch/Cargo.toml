@@ -14,6 +14,7 @@ notify = ["dep:notify"]
 
 [dependencies]
 paddock-jobs = { workspace = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
 
 [dev-dependencies]

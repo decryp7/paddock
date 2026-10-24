@@ -41,7 +41,7 @@ paddock-updater = { workspace = true, features = ["tauri"] }
 paddock-window = { workspace = true, features = ["tauri"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-log = { version = "0.4", features = ["kv"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [build-dependencies]
 tauri-plugin = { version = "2.7", features = ["build"] }

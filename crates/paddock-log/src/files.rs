@@ -162,7 +162,9 @@ impl LineSink for DailyFiles {
             return;
         }
         let len = line.len() as u64 + 1;
-        let admitted = st.written + len <= self.max_bytes || level == log::Level::Error;
+        // Once the budget is reached, only errors pass for the rest of the day, also a shorter line that would still fit.
+        let admitted =
+            level == log::Level::Error || (!st.warned && st.written + len <= self.max_bytes);
         let mut out = String::new();
         if !admitted && !st.warned {
             st.warned = true;
