@@ -2,7 +2,7 @@
 # Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.
 #
-# Runner labels: ubuntu-latest (jobs in the garage image), windows-latest and macos-latest (host runners, tools used as
+# Runner labels: ubuntu-latest (jobs in the shared paddock-ci image, ci-image/), windows-latest and macos-latest (host runners, tools used as
 # installed), as in Debrief and Pitwall.
 
 name: ci
@@ -23,16 +23,12 @@ jobs:
     name: ui (tokens, contrast, components, entry points, reference apps, publish dry run)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: ui
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Install
         run: npm ci
@@ -62,12 +58,12 @@ jobs:
         run: npm run shell-demo:build
 
       - name: Reference app checks (gallery and shell demo; axe, keyboard, CSP, 320 px)
-        # CI names its ports (@decryp7/paddock-e2e refuses a default there: another job could hold it).
+        # CI names its ports (@decryp7/paddock-e2e refuses a default there: another job could hold it). The browsers are baked into
+        # the image (Playwright's Chromium and WebKit, and Chrome for Testing in CHROMIUM_TEST_PATH): nothing is downloaded here.
         env:
           PW_PORT: 4300
           SHELL_DEMO_PORT: 4301
         run: |
-          npx playwright install --with-deps chromium
           npx playwright test
 
       # Lists every npm package, entry point and crate with what a tag would publish; publishes nothing.
@@ -80,16 +76,12 @@ jobs:
     name: conformance (checks, release scripts)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: conformance
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Tests
         run: npm test
@@ -114,13 +106,9 @@ jobs:
     name: tools and shared scripts
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Tools
         run: node --test tools/test/*.test.mjs
@@ -133,16 +121,12 @@ jobs:
     name: eslint preset (rules 27 to 39)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: eslint
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - run: npm ci
 
@@ -152,7 +136,7 @@ jobs:
     name: crates (fmt, coverage, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: crates
@@ -187,8 +171,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # Linux runs in the garage image (Tauri's libraries pre-installed); Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    # Linux runs in the paddock-ci image (Rust, Tauri's libraries, Node, Playwright and Chrome for Testing baked in); Windows and macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v1' || '' }}
     defaults:
       run:
         working-directory: crates
@@ -347,7 +331,7 @@ jobs:
     name: shell demo app (fmt, clippy, tests, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -357,10 +341,6 @@ jobs:
         with:
           sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
       - name: The UI the app embeds
