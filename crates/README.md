@@ -1177,8 +1177,10 @@ browser.close();                                                    // Browser.c
   OffScreen, Headless}`, `QUIET_FLAGS` (no GPU, no component downloads, no throttling; `opts.quiet`), `disk_cache_bytes` for a
   kept profile, `extra_args`. `Sandbox::decide(env, root)`: dropped only as root with `PADDOCK_BROWSER_NO_SANDBOX=1` (CI
   containers), then also `--disable-dev-shm-usage`; `launch_with(exe, opts, sandbox)` lets tests run that branch on any OS.
-- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends). `max_lifetime` runs on
-  `opts.clock` (a `FakeClock` in tests), `memory_cap` through `MemoryCap` (an injectable sampler); `ended_by()` says which.
+- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends). Every wait runs on
+  `opts.clock` (a `FakeClock` in tests): the lifetime limit, the start-up wait (`start_limit`), `start_page`'s wait and the
+  pages' `wait_ready` polls; only `close_gracefully`'s grace for a real process uses the OS clock. `memory_cap` goes through
+  `MemoryCap` (an injectable sampler); `ended_by()` says which limit ended the browser.
   A failed start says why (the end of the browser's error output, or the memory cap). `check_display` explains a headful
   launch on Linux without `DISPLAY`/`WAYLAND_DISPLAY`. Profiles: `Throwaway(base)` (removed at the end; `sweep_profiles`
   removes those of dead processes) or `Persistent(path)` with an accent theme (`write_theme`).
@@ -1194,7 +1196,11 @@ browser.close();                                                    // Browser.c
 - `fake` (feature `test-support`, Unix): a fake DevTools browser that re-runs the test binary; it plays the user (close the
   window, quit, drop the connection, stall loads) and answers page scripts from a file (`page_shows`). Apps refuse to start
   when `PADDOCK_FAKE_BROWSER` is set. `tests/real_browser.rs` drives a real Chrome for Testing headless when
-  `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind.
+  `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind; with `PADDOCK_REQUIRE_TEST_BROWSER` set a missing browser
+  fails it (Paddock's Linux CI job, whose `paddock-ci` image carries the build `chromium.toml` pins).
+- Pins: `node conformance/ci/pin-runtime.mjs crates/paddock-chromium/src/chromium.toml --chrome-for-testing Stable` rewrites
+  version, URLs, sizes and checksums (any `paddock-runtime` catalogue: `--version <v>` or as it is); the CI image's
+  `CHROME_VERSION` must follow (`scripts/ci-image.test.mjs` checks it).
 
 - Windows (plan X54): each supervised child runs in a kill-on-close job object held by the `Supervised` value; dropping it, or
   the app ending in any way, ends the child and every helper it started, orphans included (`Supervised::in_job`).

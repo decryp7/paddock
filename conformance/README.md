@@ -84,6 +84,12 @@ A waiver past its date, or without a reason or date, is an error itself (W001, W
 
 ## CI scripts (`ci/`) and the shared actions
 
+`pin-runtime.mjs` pins a `paddock-runtime` catalogue (Chromium's `chromium.toml`, FFmpeg's, llama.cpp's): it downloads each
+platform's archive once, measures size and SHA-256 while reading and rewrites `version`, `url`, `size` and `sha256` in place
+(`--version <v>` moves the URLs; `--chrome-for-testing [channel]` takes Chrome for Testing's version and URLs). It replaces
+Spotter's `pin-chromium.mjs`. `install-test-browser.mjs --catalogue <toml>` installs the build such a catalogue pins (it replaces
+Debrief's `install-test-browser.mjs`; `--pin` and `--rust-source` stay until the apps move to the catalogue).
+
 `plan.mjs`, `build-env.mjs`, `release-notes.mjs`, `install-test-browser.mjs` and `tauri-bundle.sh` are what the composite actions
 in `.gitea/actions/` run (see its README); they are plain Node and bash, tested here, and work from a Paddock checkout. A
 workflow that uses the actions can drop the steps they replace, and C03, C04 and C15 accept them.
