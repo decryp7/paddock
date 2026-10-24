@@ -51,6 +51,10 @@ jobs:
       - name: Build the library (all entry points)
         run: npm run build
 
+      # The shell's message catalog and the pseudo-locale files match the build (plan S15: `npm run i18n` to refresh).
+      - name: Translation files up to date
+        run: npm run i18n:check
+
       - name: Build @decryp7/paddock-e2e
         run: npm run build:e2e
 

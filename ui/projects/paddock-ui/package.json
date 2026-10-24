@@ -19,12 +19,14 @@
   ],
   "sideEffects": false,
   "bin": {
-    "paddock-check-dialog-commands": "bin/paddock-check-dialog-commands.mjs"
+    "paddock-check-dialog-commands": "bin/paddock-check-dialog-commands.mjs",
+    "paddock-i18n": "bin/paddock-i18n.mjs"
   },
   "peerDependencies": {
     "@angular/cdk": "^22.0.0",
     "@angular/common": "^22.0.0",
     "@angular/core": "^22.0.0",
+    "@angular/localize": "^22.0.0",
     "echarts": "^6.0.0",
     "@ngrx/signals": "^22.0.0",
     "typescript": ">=5.8"
@@ -48,7 +50,8 @@
   },
   "exports": {
     "./css/*": "./css/*",
-    "./scss/*": "./scss/*"
+    "./scss/*": "./scss/*",
+    "./i18n/*": "./i18n/*"
   },
   "publishConfig": {
     "registry": "https://dev.decryptology.net/api/packages/decryp7/npm/",

@@ -126,8 +126,11 @@ export function conflictsOf(bindings: readonly EffectiveBinding[]): KeyConflict[
 
 /** A sentence for a conflict, for a settings page or a log line. */
 export function describeConflict(c: KeyConflict): string {
-  const where = c.platforms.length === 2 ? '' : c.platforms[0] === 'mac' ? ' on macOS' : ' on Windows and Linux';
-  return `${c.first.key} (${c.first.command}) and ${c.second.key} (${c.second.command}) both press ${c.pressed} in scope ${c.scope}${where}`;
+  const both = $localize`:@@pd.menu.conflict:${c.first.key}:first: (${c.first.command}:firstCommand:) and ${c.second.key}:second: (${c.second.command}:secondCommand:) both press ${c.pressed}:pressed: in scope ${c.scope}:scope:`;
+  if (c.platforms.length === 2) return both;
+  return c.platforms[0] === 'mac'
+    ? $localize`:@@pd.menu.conflict.mac:${both}:conflict: on macOS`
+    : $localize`:@@pd.menu.conflict.other:${both}:conflict: on Windows and Linux`;
 }
 
 /** A key the app handles outside the command registry (a focus shortcut, region keys), which bindings must not take. */

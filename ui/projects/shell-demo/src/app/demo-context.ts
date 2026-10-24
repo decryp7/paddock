@@ -1,5 +1,6 @@
 import { inject } from '@angular/core';
-import type { AppContextFactory } from '@decryp7/paddock-ui/shell';
+import { AppearanceStore, type AppContextFactory, type Appearance } from '@decryp7/paddock-ui/shell';
+import { LanguageStore, PSEUDO_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
 import { DemoEngineData, DemoHealthEngine } from './demo-health';
 import { DemoJobsEngine } from './demo-jobs';
 import { GreetingLog } from './greeting-log';
@@ -20,6 +21,19 @@ export interface DemoContext {
   breakEngine(): void;
   /** The search index fails (its Repair fails too). */
   breakIndex(): void;
+  /** The appearance choice, the same in every window (plan S15). */
+  readonly theme: () => Appearance['theme'];
+  setTheme(theme: Appearance['theme']): void;
+  readonly highContrast: () => boolean;
+  toggleHighContrast(): void;
+  readonly reducedMotion: () => boolean;
+  toggleReducedMotion(): void;
+  /** Whether the window runs in the pseudo-locale; switching saves the choice and reloads the window. */
+  readonly pseudoLocale: () => boolean;
+  togglePseudoLocale(): void;
+  /** Whether a theme pack (the demo's "Warm paper") is on. */
+  readonly pack: () => string | null;
+  setPack(id: string | null): void;
 }
 
 /** Built once, in the root injection context, when the shell first needs the context. */
@@ -28,6 +42,8 @@ export const demoContext: AppContextFactory<DemoContext> = () => {
   const jobs = inject(DemoJobsEngine);
   const health = inject(DemoHealthEngine);
   const data = inject(DemoEngineData);
+  const appearance = inject(AppearanceStore);
+  const language = inject(LanguageStore);
   return {
     greetings: log.greetings,
     greet: () => log.greet(),
@@ -41,5 +57,18 @@ export const demoContext: AppContextFactory<DemoContext> = () => {
       data.load();
     },
     breakIndex: () => health.breakIndex(),
+    theme: appearance.theme,
+    setTheme: (theme) => appearance.setTheme(theme),
+    highContrast: () => appearance.resolved().highContrast,
+    toggleHighContrast: () => appearance.setContrast(appearance.resolved().highContrast ? 'standard' : 'more'),
+    reducedMotion: () => appearance.resolved().reducedMotion,
+    toggleReducedMotion: () => appearance.setMotion(appearance.resolved().reducedMotion ? 'full' : 'reduce'),
+    pack: () => appearance.pack()?.id ?? null,
+    setPack: (id) => appearance.setPack(id),
+    pseudoLocale: () => language.locale() === PSEUDO_LOCALE,
+    togglePseudoLocale: () => {
+      language.choose(language.locale() === PSEUDO_LOCALE ? 'en' : 'pseudo');
+      language.reload();
+    },
   };
 };

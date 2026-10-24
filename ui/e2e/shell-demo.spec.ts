@@ -64,8 +64,8 @@ test.describe('contributions (plan S2)', () => {
   test('every contribution kind is registered', async ({ page }) => {
     await page.goto('/');
     const rows = page.getByRole('table', { name: 'Registered contributions' }).getByRole('row');
-    await expect(rows).toHaveCount(11);
-    for (const kind of ['commands', 'keybindings', 'menus', 'pages', 'statusItems', 'settingsPages', 'dialogs', 'healthServices', 'notificationKinds', 'submenus']) {
+    await expect(rows).toHaveCount(12);
+    for (const kind of ['commands', 'keybindings', 'menus', 'pages', 'statusItems', 'settingsPages', 'dialogs', 'healthServices', 'notificationKinds', 'themes', 'submenus']) {
       await expect(rows.filter({ has: page.getByRole('cell', { name: kind, exact: true }) })).toHaveText(new RegExp(`^${kind}[1-9]\\d*$`));
     }
   });

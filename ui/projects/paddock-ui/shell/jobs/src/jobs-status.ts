@@ -7,10 +7,10 @@ let nextId = 0;
 
 /** What the status item says: "Jobs", or how many run and what the first one is doing ("Still working" when it went quiet). */
 export function jobsStatusText(active: number, phase: string | null, stalled: boolean): string {
-  if (active === 0) return 'Jobs';
-  const count = `${formatCount(active)} running`;
-  const doing = stalled ? 'Still working' : phase;
-  return doing ? `${count}: ${doing}` : count;
+  if (active === 0) return $localize`:@@pd.jobs.status.idle:Jobs`;
+  const count = $localize`:@@pd.jobs.status.running:${formatCount(active)}:count: running`;
+  const doing = stalled ? $localize`:@@pd.jobs.still-working:Still working` : phase;
+  return doing ? $localize`:@@pd.jobs.status.doing:${count}:count:: ${doing}:phase:` : count;
 }
 
 /**
@@ -33,7 +33,7 @@ export function jobsStatusText(active: number, phase: string | null, stalled: bo
       <span class="text">{{ text() }}</span>
     </button>
     @if (open()) {
-      <div class="popover" role="region" aria-label="Jobs" [id]="panelId">
+      <div class="popover" role="region" [attr.aria-label]="t.popover" [id]="panelId">
         <pd-jobs-list />
       </div>
     }
@@ -51,6 +51,10 @@ export function jobsStatusText(active: number, phase: string | null, stalled: bo
   `,
 })
 export class PdJobsStatus {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    popover: $localize`:@@pd.jobs.popover:Jobs`,
+  };
   protected readonly store = inject(JobsStore);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   /** Where the popover opens: above (a status bar at the bottom, the default) or below. */
@@ -60,7 +64,7 @@ export class PdJobsStatus {
 
   protected readonly text = computed(() => {
     const lead = this.store.lead();
-    const phase = lead?.state === 'running' ? (lead.phase?.label ?? 'Starting') : null;
+    const phase = lead?.state === 'running' ? (lead.phase?.label ?? $localize`:@@pd.jobs.starting:Starting`) : null;
     return jobsStatusText(this.store.activeCount(), phase, lead !== null && this.store.stalledIds().has(lead.id));
   });
 

@@ -45,7 +45,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
     <header class="head">
       <h2 class="title" [id]="titleId()">{{ entry().title }}</h2>
       @if (!entry().def.requiredChoice) {
-        <button type="button" class="close" data-dialog-close data-testid="dialog-close" aria-label="Close" title="Close" (click)="entry().ref.close()">
+        <button type="button" class="close" data-dialog-close data-testid="dialog-close" [attr.aria-label]="t.close" [title]="t.close" (click)="entry().ref.close()">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
         </button>
       }
@@ -54,7 +54,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
       @if (error(); as e) {
         <p class="failed" role="alert" data-testid="dialog-error">{{ e }}</p>
       } @else if (loading()) {
-        <p class="loading" data-testid="dialog-loading">Loading…</p>
+        <p class="loading" data-testid="dialog-loading">{{ t.loading }}</p>
       }
       <ng-container #content />
     </div>
@@ -72,6 +72,11 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
   `,
 })
 export class InPageDialogView {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    close: $localize`:@@pd.dialogs.close:Close`,
+    loading: $localize`:@@pd.dialogs.loading:Loading…`,
+  };
   readonly entry = input.required<InPageDialog>();
   private readonly environment = inject(EnvironmentInjector);
   private readonly destroyRef = inject(DestroyRef);

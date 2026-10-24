@@ -1,3 +1,4 @@
+import type { AppearanceIpc } from '@decryp7/paddock-ui/shell';
 import type { StartupIpc } from '@decryp7/paddock-ui/shell/startup';
 
 /** The part of Tauri's page globals the demo uses (what `@tauri-apps/api` wraps). */
@@ -20,5 +21,16 @@ export function tauriIpc(): StartupIpc | null {
       const eventId = await internals.invoke('plugin:event|listen', { event, target: { kind: 'Any' }, handler: callback });
       return () => void internals.invoke('plugin:event|unlisten', { event, eventId }).catch(() => undefined);
     },
+  };
+}
+
+/** The app's event bus for the appearance (`paddock://appearance` to every window), or `null` in a plain browser. */
+export function appearanceIpc(): AppearanceIpc | null {
+  const ipc = tauriIpc();
+  const internals = (globalThis as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
+  if (!ipc || !internals) return null;
+  return {
+    emit: async (event, payload) => void (await internals.invoke('plugin:event|emit', { event, payload })),
+    listen: (event, handler) => ipc.listen(event, handler),
   };
 }

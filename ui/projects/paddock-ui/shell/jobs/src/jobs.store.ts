@@ -37,19 +37,19 @@ function message(e: unknown): string {
   if (typeof e === 'string') return e;
   if (e instanceof Error) return e.message;
   if (e && typeof e === 'object' && typeof (e as { message?: unknown }).message === 'string') return (e as { message: string }).message;
-  return 'The jobs service did not answer.';
+  return $localize`:@@pd.jobs.no-answer:The jobs service did not answer.`;
 }
 
 /** The notice for a job that just ended, or null (a job the user cancelled needs none). */
 export function finishedNotice(job: SuJobSnapshot): ShellNotice | null {
   switch (job.state) {
     case 'done':
-      return { level: 'success', kind: JOB_NOTICE_KINDS.finished, message: `${job.title}: done` };
+      return { level: 'success', kind: JOB_NOTICE_KINDS.finished, message: $localize`:@@pd.jobs.notice.done:${job.title}:title:: done` };
     case 'failed':
-      return { level: 'error', kind: JOB_NOTICE_KINDS.failed, message: `${job.title} failed: ${job.message}` };
+      return { level: 'error', kind: JOB_NOTICE_KINDS.failed, message: $localize`:@@pd.jobs.notice.failed:${job.title}:title: failed: ${job.message}:cause:` };
     case 'cancelled':
       return job.reason === 'deadline'
-        ? { level: 'warning', kind: JOB_NOTICE_KINDS.failed, message: `${job.title} stopped: the time limit was reached` }
+        ? { level: 'warning', kind: JOB_NOTICE_KINDS.failed, message: $localize`:@@pd.jobs.notice.deadline:${job.title}:title: stopped: the time limit was reached` }
         : null;
     default:
       return null;
@@ -145,7 +145,7 @@ export const JobsStore = signalStore(
         try {
           return await backend.cancel(id);
         } catch (e) {
-          ports.notify({ level: 'error', kind: JOB_NOTICE_KINDS.failed, message: `The job could not be cancelled: ${message(e)}` });
+          ports.notify({ level: 'error', kind: JOB_NOTICE_KINDS.failed, message: $localize`:@@pd.jobs.cancel-failed:The job could not be cancelled: ${message(e)}:cause:` });
           return false;
         }
       },

@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { CommandService, provideContributions, provideShellContext } from '@decryp7/paddock-ui/shell';
+import { CommandService, provideContributions, provideShellContext, provideAppearance, BrowserAppearanceBackend } from '@decryp7/paddock-ui/shell';
 import { DEMO_CONTRIBUTIONS } from '../../../../shell-demo/src/app/demo.contributions';
 import { demoContext } from '../../../../shell-demo/src/app/demo-context';
 import { DemoJobsEngine } from '../../../../shell-demo/src/app/demo-jobs';
@@ -20,6 +20,8 @@ describe('shell-demo jobs', () => {
         { provide: DemoJobsEngine, useValue: engine },
         provideContributions(DEMO_CONTRIBUTIONS),
         provideShellContext(() => Promise.resolve(demoContext), { prefetch: 'first-use' }),
+        // The demo context reads the appearance (plan S15); no storage or channel in a spec.
+        provideAppearance({ accent: 'pitwall', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) }),
       ],
     });
     return { ...bed, engine };

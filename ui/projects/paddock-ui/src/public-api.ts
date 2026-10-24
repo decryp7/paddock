@@ -42,4 +42,17 @@ export {
   type EventLaneOptions,
   type EventShape,
 } from './lib/echarts/theme';
-export { SU_THEMES, SU_ACCENTS, SU_DENSITIES, applyPaddockAppearance, type SuAccent, type SuDensity, type SuTheme } from './lib/appearance';
+export {
+  SU_THEMES,
+  SU_ACCENTS,
+  SU_DENSITIES,
+  SU_CONTRASTS,
+  SU_MOTIONS,
+  applyPaddockAppearance,
+  type SuAccent,
+  type SuDensity,
+  type SuTheme,
+  type SuContrast,
+  type SuMotion,
+  type SuAppearance,
+} from './lib/appearance';

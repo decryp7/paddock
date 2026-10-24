@@ -1,6 +1,5 @@
 import { inject, signal } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
-import { applyPaddockAppearance } from '@decryp7/paddock-ui';
 import { provideContributions, provideShellContext, SHELL_PORTS, type ShellPorts } from '@decryp7/paddock-ui/shell';
 import { openDialogPort, provideDialogs } from '@decryp7/paddock-ui/shell/dialogs';
 import { JOBS_CONTRIBUTIONS, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
@@ -23,12 +22,13 @@ import { tauriIpc } from './app/demo-ipc';
 import { DemoHealthEngine } from './app/demo-health';
 import { DemoJobsEngine } from './app/demo-jobs';
 import { DemoNote } from './app/demo-note';
+import { provideDemoAppearance } from './app/demo-appearance';
+import { LANGUAGE_CONFIG, LocalStorageLanguageStorage, PSEUDO_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
 import { ShellDemo } from './app/shell-demo';
 
 // Every shell entry point resolves from this app (the reference consumer, ADR 0012 §7): type-only imports, so the build
 // fails when an entry point stops resolving. Each work package replaces its line with the real use of its exports.
 import type * as shellAbout from '@decryp7/paddock-ui/shell/about';
-import type * as shellI18n from '@decryp7/paddock-ui/shell/i18n';
 import type * as shellPages from '@decryp7/paddock-ui/shell/pages';
 import type * as shellSettings from '@decryp7/paddock-ui/shell/settings';
 // shell/store is used through shell/jobs and shell/notify (their stores take its withRequestStatus).
@@ -39,9 +39,19 @@ export function bootMainWindow(): Promise<unknown> {
   const ipc = tauriIpc();
   // The window has reported ready (the start-up contract's reply): the native menu bar is built after it (plan S13).
   const windowReady = signal(false);
-  applyPaddockAppearance(document.documentElement, { theme: 'system', accent: 'pitwall', density: 'standard' });
   return bootstrapApplication(ShellDemo, {
     providers: [
+      // Theme and language (plan S15): the appearance follows every other window; the language applies after a reload.
+      provideDemoAppearance(),
+      {
+        provide: LANGUAGE_CONFIG,
+        useValue: {
+          storage: new LocalStorageLanguageStorage(),
+          systemLanguages: () => navigator.languages,
+          shipped: [PSEUDO_LOCALE],
+          reload: () => location.reload(),
+        },
+      },
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
       provideContributions(JOBS_CONTRIBUTIONS),
       provideContributions(NOTIFY_CONTRIBUTIONS),

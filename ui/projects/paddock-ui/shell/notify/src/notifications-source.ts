@@ -25,7 +25,7 @@ export class NotificationsSource implements NotificationSource {
       a && this.actions.available(a) ? [{ label: this.actions.label(a, t), kind, id, run: () => run(a) }] : [];
     const actions: HostAction[] = [...act(t.primary, 'primary', 'primary'), ...act(t.secondary, 'default', 'secondary'), ...act(t.tertiary, 'default', 'tertiary')];
     actions.push({
-      label: 'Show in Notifications',
+      label: $localize`:@@pd.notifications.show:Show in Notifications`,
       kind: 'ghost',
       id: 'show',
       run: () => {

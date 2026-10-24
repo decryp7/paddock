@@ -10,7 +10,12 @@ export function titleWithCount(n: Pick<Notice, 'title' | 'count'>): string {
   return n.count > 1 ? `${n.title} (×${n.count})` : n.title;
 }
 
-const BUILT_IN_SOURCES: Readonly<Record<string, string>> = { health: 'Services', job: 'Jobs', [LOCAL_SOURCE]: 'App' };
+/** The headings of the shell's own sources (read when shown, so they are in the window's language). */
+const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
+  health: () => $localize`:@@pd.notifications.source.health:Services`,
+  job: () => $localize`:@@pd.notifications.source.jobs:Jobs`,
+  [LOCAL_SOURCE]: () => $localize`:@@pd.notifications.source.app:App`,
+};
 
 /** "14:05" today, else "24 Oct, 14:05". */
 export function noticeTime(at: number, now: number): string {
@@ -30,21 +35,21 @@ export function noticeTime(at: number, now: number): string {
   imports: [SuEmptyState, SuSegmentedControl],
   template: `
     <div class="bar">
-      <pd-segmented-control label="Show" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
+      <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
       <span class="spacer"></span>
-      <button type="button" class="btn ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">Mark all read</button>
+      <button type="button" class="btn ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
     </div>
     @if (store.requestError(); as e) {
       <div class="err" role="alert">
         <span class="grow">{{ e }}</span>
-        <button type="button" class="btn" (click)="store.load()">Retry</button>
+        <button type="button" class="btn" (click)="store.load()">{{ t.retry }}</button>
       </div>
     }
     @if (note(); as n) {
       <p class="err" role="alert">{{ n }}</p>
     }
     @if (!store.notices().length) {
-      <pd-empty-state data-testid="notices-empty" heading="Nothing needs your attention" description="Finished work, alerts and problems show up here." />
+      <pd-empty-state data-testid="notices-empty" [heading]="t.emptyHeading" [description]="t.emptyDescription" />
     }
     @for (g of store.groups(); track g.source) {
       <h3 [id]="headingId(g.source)">{{ sourceLabel(g.source) }}</h3>
@@ -55,16 +60,16 @@ export function noticeTime(at: number, now: number): string {
               <span class="dot" aria-hidden="true"></span>
               <strong class="title">{{ titleWithCount(n) }}</strong>
               @if (!n.read) {
-                <span class="sr-only">, unread</span>
+                <span class="sr-only">{{ t.unreadMark }}</span>
               }
               <span class="time">{{ time(n.at) }}</span>
               <span class="row-actions">
                 @if (!n.read) {
-                  <button type="button" class="icon-btn" [attr.aria-label]="'Mark read: ' + n.title" [attr.data-testid]="'notice-read-' + n.id" (click)="store.markRead(n.id)">
+                  <button type="button" class="icon-btn" [attr.aria-label]="markReadLabel(n.title)" [attr.data-testid]="'notice-read-' + n.id" (click)="store.markRead(n.id)">
                     <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M2.5 7.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
                   </button>
                 }
-                <button type="button" class="icon-btn" [attr.aria-label]="'Dismiss ' + n.title" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="store.dismiss(n.id)">
+                <button type="button" class="icon-btn" [attr.aria-label]="dismissLabel(n.title)" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="store.dismiss(n.id)">
                   <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
                 </button>
               </span>
@@ -117,6 +122,15 @@ export function noticeTime(at: number, now: number): string {
   `,
 })
 export class PdNotificationsPanel {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    filter: $localize`:@@pd.notifications.filter:Show`,
+    emptyHeading: $localize`:@@pd.notifications.empty.heading:Nothing needs your attention`,
+    emptyDescription: $localize`:@@pd.notifications.empty.description:Finished work, alerts and problems show up here.`,
+    markAllRead: $localize`:@@pd.notifications.mark-all-read:Mark all read`,
+    retry: $localize`:@@pd.notifications.retry:Retry`,
+    unreadMark: $localize`:@@pd.notifications.unread-mark:, unread`,
+  };
   protected readonly store = inject(NotificationsStore);
   protected readonly actions = inject(NoticeActions);
   private readonly registry = inject(ContributionRegistry, { optional: true });
@@ -124,8 +138,8 @@ export class PdNotificationsPanel {
   protected readonly note = signal<string | null>(null);
   protected readonly titleWithCount = titleWithCount;
   protected readonly filters = computed<SuSegment[]>(() => [
-    { value: 'all', label: 'All' },
-    { value: 'unread', label: 'Unread', count: this.store.unread() },
+    { value: 'all', label: $localize`:@@pd.notifications.filter.all:All` },
+    { value: 'unread', label: $localize`:@@pd.notifications.filter.unread:Unread`, count: this.store.unread() },
   ]);
 
   constructor() {
@@ -154,7 +168,15 @@ export class PdNotificationsPanel {
   /** A contributed notification kind's title, the shell's own sources, or the source id. */
   protected sourceLabel(source: string): string {
     const kind = this.registry?.notificationKinds().find((k) => k.id === source);
-    return kind?.title.text ?? BUILT_IN_SOURCES[source] ?? source;
+    return kind?.title.text ?? BUILT_IN_SOURCES[source]?.() ?? source;
+  }
+
+  protected markReadLabel(title: string): string {
+    return $localize`:@@pd.notifications.mark-read:Mark read: ${title}:title:`;
+  }
+
+  protected dismissLabel(title: string): string {
+    return $localize`:@@pd.notifications.dismiss:Dismiss ${title}:title:`;
   }
 
   protected time(at: number): string {

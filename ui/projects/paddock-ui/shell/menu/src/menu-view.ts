@@ -131,7 +131,7 @@ abstract class MenuView {
   template:
     `
     @if (app.mode === 'in-app') {
-      <div cdkMenuBar class="bar" aria-label="Application menu">
+      <div cdkMenuBar class="bar" [attr.aria-label]="t.bar">
         @for (menu of app.menus(); track menu.id) {
           <button type="button" cdkMenuItem pdMenuTrigger class="top" [cdkMenuTriggerFor]="list" [cdkMenuTriggerData]="{ $implicit: [menu.id], label: menu.label }">{{ menu.label }}</button>
         }
@@ -148,6 +148,10 @@ abstract class MenuView {
   ` + MENU_STYLES,
 })
 export class PdMenuBar extends MenuView {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    bar: $localize`:@@pd.menu.bar:Application menu`,
+  };
   protected nodesAt(path: readonly string[]): readonly MenuNode[] {
     return itemsAt(this.app.menus(), path);
   }
@@ -173,7 +177,7 @@ export class PdContextMenu extends MenuView {
   /** The menu id whose items this context menu shows. */
   readonly menu = input.required<string>();
   /** The menu's accessible name. */
-  readonly label = input('Context menu');
+  readonly label = input($localize`:@@pd.menu.context:Context menu`);
   protected readonly empty = computed(() => this.app.items(this.menu()).length === 0);
 
   protected nodesAt(path: readonly string[]): readonly MenuNode[] {

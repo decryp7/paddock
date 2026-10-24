@@ -5,6 +5,26 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Theme and i18n in the app shell (plan S15, ADR 0012 §5-6, decision D6). Tokens: accents for Pacenotes (route green,
+  `#7fc85a` / `#3b7114`, fill `#3d7515`) and Sighter (orchid, `#cc8cf2` / `#a224cc`, fill `#a224cc`), a complete high
+  contrast mode (opaque hairlines and scrim, outlined popovers, subtle text as muted; `data-contrast="more|off"`) and
+  reduced motion (`data-motion="reduce|full"`, durations at most 100 ms, `--pd-motion-scale`); `applyPaddockAppearance`
+  takes `contrast` and `motion`. Token tests for seven accents in both schemes and both contrast modes, high contrast
+  and reduced motion (289 tests); the colour maths moved to the shell and is shared with `themeProblems`.
+  `@decryp7/paddock-ui/shell`: theme packs as the `themes` contribution kind (`defineTheme`, `provideThemes`,
+  `themeProblems`), the window's appearance (`provideAppearance`, `AppearanceStore` with the choice resolved against
+  the OS, `applyStoredAppearance` before the first paint) synced across windows by `BrowserAppearanceBackend`
+  (BroadcastChannel) or `IpcAppearanceBackend` (`paddock://appearance`), and `msg()` texts read through the loaded
+  translations (`localizedText`). `@decryp7/paddock-ui/shell/i18n`: `initI18n` (runtime-loaded translation chunks, a
+  broken file falls back to English), `LanguageStore`, locale, plural and number helpers. Every user-visible string of
+  the root components and of `shell/jobs`, `shell/notify`, `shell/dialogs`, `shell/startup` and `shell/menu` is a
+  `$localize` message with a `@@pd.` id (117 in `i18n/messages.pd.xlf`, shipped with its pseudo-locale); the service
+  chip names a service by its contributed `defineHealthService` label. Bin `paddock-i18n` (`catalog`: `$localize`
+  extraction plus `msg()` sources or a manifest into a sorted XLIFF catalog; `merge`: the shell's and the app's
+  translations into the app's loader file, the pseudo-locale generated; `--check` for CI) and `npm run i18n` /
+  `i18n:check` (CI). `shell-demo`: View > Appearance (theme, a sample pack, high contrast, reduced motion,
+  pseudo-locale), Chromium e2e for switching across windows and a pseudo-locale run that finds no unmarked English in
+  any shell part, and review screenshots in `ui/docs/screenshots/shell-demo/`.
 - Downloads (plan S8, ADR 0008 §5 and 0012; ported from Debrief's model downloader): crate `paddock-download` 0.1.0.
   `Downloader::download(ctx, req)` runs inside a `paddock-jobs` job with the phases `connect`, `resume` (only when
   resuming), `download` and `verify`, each on its own scale and never backwards, and Cancel noticed within 250 ms in
@@ -69,6 +89,8 @@ Conventional Commits; one semver tag for the whole repo.
   booted from `#/dialog`, and a Chromium e2e over the contract file.
 
 ### Changed
+- `@angular/localize` (^22) is a peer dependency of `@decryp7/paddock-ui`: apps add `@angular/localize/init` to their
+  polyfills (the root components' texts are `$localize` messages now). The gallery and the shell demo do.
 - `paddock-dialogs`: dialog ids may contain `.`, so the shell's namespaced contribution ids (`sd.about`) are valid
   contract keys; a test parses the shell demo's generated contract file.
 - Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,

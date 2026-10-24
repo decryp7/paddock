@@ -27,7 +27,7 @@ interface NotificationsState {
   focus: number | null;
 }
 
-const FALLBACK = 'The notification centre did not answer.';
+const FALLBACK = (): string => $localize`:@@pd.notifications.no-answer:The notification centre did not answer.`;
 
 /** The cause of a local notice: the same kind and text is the same cause, so a repeat merges with a count. */
 export function localCause(n: ShellNotice): string {
@@ -71,7 +71,7 @@ export const NotificationsStore = signalStore(
       try {
         return await f();
       } catch (e) {
-        patchState(store, setError(errorMessage(e, FALLBACK)));
+        patchState(store, setError(errorMessage(e, FALLBACK())));
         return null;
       }
     };
@@ -95,7 +95,7 @@ export const NotificationsStore = signalStore(
           const s = await backend.list();
           patchState(store, { snapshot: s }, setLoaded());
         } catch (e) {
-          patchState(store, setError(errorMessage(e, FALLBACK)));
+          patchState(store, setError(errorMessage(e, FALLBACK())));
         }
       },
 
@@ -165,7 +165,7 @@ export const NotificationsStore = signalStore(
       if (destroyed) u();
       else offs.push(u);
     };
-    const warn = (e: unknown): void => console.warn(`[paddock-notify] cannot listen for notifications: ${errorMessage(e, FALLBACK)}`);
+    const warn = (e: unknown): void => console.warn(`[paddock-notify] cannot listen for notifications: ${errorMessage(e, FALLBACK())}`);
     return {
       onInit() {
         void backend.listen((e) => store.apply(e)).then(keep).catch(warn);

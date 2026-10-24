@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en-US" datatype="plaintext" original="ng2.template">
+    <body>
+      <trans-unit id="pd.dialogs.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.open-failed" datatype="html">
+        <source>This window couldn't open</source>
+      </trans-unit>
+      <trans-unit id="pd.dialogs.unknown" datatype="html">
+        <source>This dialog is not known to this version of the app: <x id="dialog"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.many" datatype="html">
+        <source><x id="count"/> services need attention</source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.one" datatype="html">
+        <source><x id="service"/>: <x id="state"/></source>
+      </trans-unit>
+      <trans-unit id="pd.health.chip.unknown" datatype="html">
+        <source>Services: unknown</source>
+      </trans-unit>
+      <trans-unit id="pd.health.no-answer" datatype="html">
+        <source>The service-health service did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.no-such-service" datatype="html">
+        <source>No service is called <x id="service"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.not-working" datatype="html">
+        <source><x id="service"/> is not working.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.nothing-to-repair" datatype="html">
+        <source>There is nothing to repair for <x id="service"/> now.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.popover" datatype="html">
+        <source>Services</source>
+      </trans-unit>
+      <trans-unit id="pd.health.raise-cap" datatype="html">
+        <source>Raise the cap…</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair" datatype="html">
+        <source>Repair</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.install" datatype="html">
+        <source>Install</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.lift-quarantine" datatype="html">
+        <source>Allow again</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.open-settings" datatype="html">
+        <source>Open Settings…</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.restart" datatype="html">
+        <source>Restart</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repair.use-fallback" datatype="html">
+        <source>Use the fallback</source>
+      </trans-unit>
+      <trans-unit id="pd.health.repairing" datatype="html">
+        <source>Repairing…</source>
+      </trans-unit>
+      <trans-unit id="pd.health.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.health.see-what-happened" datatype="html">
+        <source>See what happened</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.degraded" datatype="html">
+        <source>limited</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.quarantined" datatype="html">
+        <source>switched off</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.repairing" datatype="html">
+        <source>repairing</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.stopped" datatype="html">
+        <source>stopped</source>
+      </trans-unit>
+      <trans-unit id="pd.health.status" datatype="html">
+        <source>Services</source>
+      </trans-unit>
+      <trans-unit id="pd.health.technical-details" datatype="html">
+        <source>Technical details</source>
+      </trans-unit>
+      <trans-unit id="pd.health.try-again" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.health.unknown" datatype="html">
+        <source>The state of the services is not known yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.health.waiting-for" datatype="html">
+        <source>Waiting for <x id="service"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.cancel-failed" datatype="html">
+        <source>The job could not be cancelled: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.empty.description" datatype="html">
+        <source>Long operations show their progress here.</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.empty.heading" datatype="html">
+        <source>No jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.list" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.no-answer" datatype="html">
+        <source>The jobs service did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notice.deadline" datatype="html">
+        <source><x id="title"/> stopped: the time limit was reached</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notice.done" datatype="html">
+        <source><x id="title"/>: done</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notice.failed" datatype="html">
+        <source><x id="title"/> failed: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notification.failed" datatype="html">
+        <source>Job failed</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.notification.finished" datatype="html">
+        <source>Job finished</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.popover" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.read-failed" datatype="html">
+        <source>The jobs could not be read</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.starting" datatype="html">
+        <source>Starting</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.doing" datatype="html">
+        <source><x id="count"/>: <x id="phase"/></source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.idle" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.status.running" datatype="html">
+        <source><x id="count"/> running</source>
+      </trans-unit>
+      <trans-unit id="pd.jobs.still-working" datatype="html">
+        <source>Still working</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.bar" datatype="html">
+        <source>Application menu</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.conflict" datatype="html">
+        <source><x id="first"/> (<x id="firstCommand"/>) and <x id="second"/> (<x id="secondCommand"/>) both press <x id="pressed"/> in scope <x id="scope"/></source>
+      </trans-unit>
+      <trans-unit id="pd.menu.conflict.mac" datatype="html">
+        <source><x id="conflict"/> on macOS</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.conflict.other" datatype="html">
+        <source><x id="conflict"/> on Windows and Linux</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.context" datatype="html">
+        <source>Context menu</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.edit" datatype="html">
+        <source>Edit</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.file" datatype="html">
+        <source>File</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.help" datatype="html">
+        <source>Help</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.menu.window" datatype="html">
+        <source>Window</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.action-failed" datatype="html">
+        <source>The action failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.action-unknown" datatype="html">
+        <source>This window cannot do “<x id="action"/>”.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.centre" datatype="html">
+        <source>Notifications centre</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.details" datatype="html">
+        <source>Details</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.dismiss" datatype="html">
+        <source>Dismiss <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.dismiss-toast" datatype="html">
+        <source>Dismiss notification</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.empty.description" datatype="html">
+        <source>Finished work, alerts and problems show up here.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.empty.heading" datatype="html">
+        <source>Nothing needs your attention</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.filter" datatype="html">
+        <source>Show</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.filter.all" datatype="html">
+        <source>All</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.filter.unread" datatype="html">
+        <source>Unread</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.mark-all-read" datatype="html">
+        <source>Mark all read</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.mark-read" datatype="html">
+        <source>Mark read: <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.no-answer" datatype="html">
+        <source>The notification centre did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.show" datatype="html">
+        <source>Show in Notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.source.app" datatype="html">
+        <source>App</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.source.health" datatype="html">
+        <source>Services</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.source.jobs" datatype="html">
+        <source>Jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.status" datatype="html">
+        <source>Notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.status.none" datatype="html">
+        <source>Notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.status.unread" datatype="html">
+        <source><x id="count"/> unread</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.toasts" datatype="html">
+        <source>Notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.unread-mark" datatype="html">
+        <source>, unread</source>
+      </trans-unit>
+      <trans-unit id="pd.shell.context-failed" datatype="html">
+        <source>The app context failed to load: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovered-hung" datatype="html">
+        <source>The window stopped responding and was reloaded. Your open files and view are kept.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovered-terminated" datatype="html">
+        <source>The window's content stopped unexpectedly and was reloaded. Your open files and view are kept.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovered-unresponsive" datatype="html">
+        <source>The window did not finish starting and was reloaded. Your open files and view are kept.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.restore-failed" datatype="html">
+        <source>The window's view could not be restored: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.eta.hours" datatype="html">
+        <source>about <x id="hours"/> h left</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.eta.hours-minutes" datatype="html">
+        <source>about <x id="hours"/> h <x id="minutes"/> min left</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.eta.minutes" datatype="html">
+        <source>about <x id="minutes"/> min left</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.eta.seconds" datatype="html">
+        <source><x id="seconds"/> s left</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.cancelled" datatype="html">
+        <source><x id="title"/>: cancelled</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.done" datatype="html">
+        <source><x id="title"/>: done</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.failed" datatype="html">
+        <source><x id="title"/>: failed</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.running" datatype="html">
+        <source><x id="title"/>: <x id="phase"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.announce.waiting" datatype="html">
+        <source><x id="title"/>: waiting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.cancelled" datatype="html">
+        <source>Cancelled</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.deadline" datatype="html">
+        <source>Stopped: the time limit was reached.</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.failed" datatype="html">
+        <source>Failed</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.in-progress" datatype="html">
+        <source>In progress</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.not-cancellable" datatype="html">
+        <source>This step cannot be stopped</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.of" datatype="html">
+        <source><x id="done"/> of <x id="total"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.so-far" datatype="html">
+        <source><x id="done"/> so far</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.stalled" datatype="html">
+        <source>Still working. This step is taking longer than usual.</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.starting" datatype="html">
+        <source>Starting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.user-cancelled" datatype="html">
+        <source>Stopped at your request.</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.waiting" datatype="html">
+        <source>Waiting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.metric.down" datatype="html">
+        <source>Down</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.metric.same" datatype="html">
+        <source>No change</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.metric.up" datatype="html">
+        <source>Up</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sparkline" datatype="html">
+        <source>Trend</source>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

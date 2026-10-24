@@ -35,7 +35,7 @@ import { jobView, type SuJobSnapshot } from './job-view';
         aria-valuemin="0"
         aria-valuemax="100"
         [attr.aria-valuenow]="view().percent === null ? null : round(view().percent)"
-        [attr.aria-valuetext]="view().percent === null ? view().count || 'In progress' : null"
+        [attr.aria-valuetext]="view().percent === null ? view().count || inProgress : null"
         [attr.aria-label]="view().title + ': ' + view().headline"
       >
         <span class="fill" [style.width.%]="view().percent === null ? null : view().percent"></span>
@@ -46,7 +46,7 @@ import { jobView, type SuJobSnapshot } from './job-view';
     }
     @if (view().canCancel) {
       <div class="actions">
-        <button type="button" class="cancel" [disabled]="view().cancelDisabled" (click)="cancel.emit(job().id)">Cancel</button>
+        <button type="button" class="cancel" [disabled]="view().cancelDisabled" (click)="cancel.emit(job().id)">{{ t.jobCancel }}</button>
         @if (view().cancelHint) {
           <span class="hint">{{ view().cancelHint }}</span>
         }
@@ -84,12 +84,18 @@ import { jobView, type SuJobSnapshot } from './job-view';
   `,
 })
 export class SuJob {
+  /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
+  protected readonly t = {
+    jobCancel: $localize`:@@pd.ui.job.cancel:Cancel`,
+  };
   /** The latest snapshot of the job. */
   readonly job = input.required<SuJobSnapshot>();
   /** No event for a while: shows "Still working" (never an error, never a timeout). */
   readonly stalled = input(false);
   /** Emits the job id when Cancel is pressed. */
   readonly cancel = output<number>();
+  /** The progress bar's value text while the total is unknown. */
+  protected readonly inProgress = $localize`:@@pd.ui.job.in-progress:In progress`;
 
   protected readonly view = computed(() => jobView(this.job(), this.stalled()));
 

@@ -93,7 +93,7 @@ export class SuMetric {
   });
   protected readonly deltaAria = computed(() => {
     const d = this.delta() ?? 0;
-    const dir = d > 0 ? 'Up' : d < 0 ? 'Down' : 'No change';
+    const dir = d > 0 ? $localize`:@@pd.ui.metric.up:Up` : d < 0 ? $localize`:@@pd.ui.metric.down:Down` : $localize`:@@pd.ui.metric.same:No change`;
     const amount = d === 0 ? '' : ` ${formatNumber(Math.abs(d), undefined, this.locale())}${this.deltaUnit()}`;
     return `${dir}${amount}${this.deltaLabel() ? ' ' + this.deltaLabel() : ''}`;
   });

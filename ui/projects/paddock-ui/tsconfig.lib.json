@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "outDir": "../../out-tsc/lib", "declaration": true, "declarationMap": true, "inlineSources": true, "types": [] },
+  "compilerOptions": { "outDir": "../../out-tsc/lib", "declaration": true, "declarationMap": true, "inlineSources": true, "types": ["@angular/localize"] },
   "exclude": ["**/*.spec.ts"]
 }
