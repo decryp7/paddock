@@ -116,7 +116,7 @@ test.describe('dock (plan W2a, W2b)', () => {
     const wb = new WorkbenchApp(page);
     await wb.frame.open();
     const dock = page.getByTestId('pd-dock');
-    await page.locator('#pd-stage').click({ position: { x: 5, y: 5 } });
+    await tab(page, 'wd.orientation').click();
     await page.keyboard.press('ControlOrMeta+2');
     await expect(dock).toHaveAttribute('data-perspective', 'wd.review');
     await expect(tab(page, 'wd.problems')).toBeVisible();
@@ -198,17 +198,20 @@ test.describe('review 1 (X50)', () => {
     const at = { x: box.x + 60, y: box.y + box.height / 2 };
     await page.mouse.click(at.x, at.y, { button: 'right' });
     await expect(wb.explorer.menu).toBeVisible();
-    const menu = (await wb.explorer.menu.boundingBox())!;
-    expect(Math.abs(menu.x - at.x)).toBeLessThanOrEqual(8);
-    expect(Math.abs(menu.y - at.y)).toBeLessThanOrEqual(8);
+    // The overlay settles at the pointer within a frame of opening (CDK positions it after it is attached).
+    await expect.poll(async () => {
+      const m = (await wb.explorer.menu.boundingBox())!;
+      return Math.max(Math.abs(m.x - at.x), Math.abs(m.y - at.y));
+    }).toBeLessThanOrEqual(8);
     await expect(row).toHaveClass(/pd-menu-target/);
     await page.keyboard.press('Escape');
     await row.click();
     await page.keyboard.press('Shift+F10');
     await expect(wb.explorer.menu).toBeVisible();
-    const kb = (await wb.explorer.menu.boundingBox())!;
-    expect(Math.abs(kb.y - (box.y + box.height))).toBeLessThanOrEqual(8);
-    expect(kb.x).toBeGreaterThanOrEqual(box.x);
+    await expect.poll(async () => {
+      const kb = (await wb.explorer.menu.boundingBox())!;
+      return Math.abs(kb.y - (box.y + box.height)) <= 8 && kb.x >= box.x;
+    }).toBe(true);
   });
 
   test('P1-2: at 320 px the Problem column takes most of the table, with the file folded under it', async ({ page }) => {

@@ -2147,6 +2147,9 @@
       <trans-unit id="pd.wb.assistant.thinking" datatype="html">
         <source>Thinking…</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.title" datatype="html">
+        <source>Assistant</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
@@ -2483,8 +2486,23 @@
       <trans-unit id="pd.wb.palette.empty" datatype="html">
         <source>Nothing matches</source>
       </trans-unit>
+      <trans-unit id="pd.wb.palette.empty-in" datatype="html">
+        <source>Nothing in <x id="source"/> matches “<x id="query"/>”</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.empty-query" datatype="html">
+        <source>No command matches “<x id="query"/>”</source>
+      </trans-unit>
       <trans-unit id="pd.wb.palette.failed" datatype="html">
         <source>The search failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.common" datatype="html">
+        <source>Frequently used</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.other" datatype="html">
+        <source>Other commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.group.recent" datatype="html">
+        <source>Recently used</source>
       </trans-unit>
       <trans-unit id="pd.wb.palette.input" datatype="html">
         <source>Type a command, or a prefix to search</source>
