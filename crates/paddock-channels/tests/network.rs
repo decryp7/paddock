@@ -219,6 +219,7 @@ fn smtp_replies_become_the_right_error() {
             SmtpScript {
                 rcpt: b"250 ok\r\n",
                 auth: b"454 temporary auth failure\r\n",
+                ..SmtpScript::OK
             },
             |e| matches!(e, SendError::Auth(_)),
         ),
@@ -322,4 +323,73 @@ fn the_whole_stack_delivers_a_webhook_and_an_email_through_the_real_adapters() {
             .join("\n")
             .contains("RCPT TO:<a@example.org>")
     );
+}
+
+#[test]
+fn smtp_edge_cases_are_classified() {
+    // No AUTH offered although a login is set: the library has no mechanism to use.
+    let (port, server) = smtp_server(SmtpScript {
+        ehlo: b"250 fake\r\n",
+        ..SmtpScript::OK
+    });
+    let e = LettreSender.send(&mail(port, Some("pw"))).unwrap_err();
+    assert!(matches!(e, SendError::Auth(_)), "{e:?}");
+    let _ = server.join();
+    // A greeting that is not SMTP.
+    let (port, server) = smtp_server(SmtpScript {
+        greeting: b"HELLO there\r\n",
+        ..SmtpScript::OK
+    });
+    let e = LettreSender.send(&mail(port, None)).unwrap_err();
+    assert!(
+        matches!(e, SendError::Failed(_) | SendError::Connect(_)),
+        "{e:?}"
+    );
+    let _ = server.join();
+    // A server that accepts and never speaks ends at the step limit.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut m = mail(silent.local_addr().unwrap().port(), None);
+    m.step_timeout = Duration::from_millis(300);
+    let e = LettreSender.send(&m).unwrap_err();
+    assert!(
+        matches!(e, SendError::Timeout(_) | SendError::Connect(_)),
+        "{e:?}"
+    );
+    drop(silent);
+    // A name that cannot be a TLS server name.
+    let mut m = mail(1, None);
+    m.security = Security::StartTls;
+    m.host = "a..b".into();
+    let e = LettreSender.send(&m).unwrap_err();
+    assert!(
+        matches!(
+            e,
+            SendError::Invalid(_) | SendError::Connect(_) | SendError::Tls(_)
+        ),
+        "{e:?}"
+    );
+}
+
+#[test]
+fn the_poster_maps_every_network_failure_to_a_transport_kind() {
+    use paddock_net::{FakeWire, NetError, StaticLookup};
+    for (error, kind) in [
+        (NetError::Tls("h".into()), K::Tls),
+        (NetError::Proxy("p".into()), K::Proxy),
+        (NetError::Connect("h".into()), K::Connect),
+        (NetError::Timeout("h".into()), K::Timeout),
+        (NetError::Offline, K::Invalid),
+    ] {
+        let wire = Arc::new(FakeWire::new().then_error(error));
+        let lookup = Arc::new(StaticLookup::new().with("hooks.example.org", &["93.184.216.34"]));
+        let egress = Arc::new(Egress::new(
+            channel_policy(Reach::Public),
+            wire,
+            lookup,
+            Arc::new(SystemClock),
+        ));
+        let mut req = request(1);
+        req.url = "https://hooks.example.org/in".into();
+        assert_eq!(EgressPoster::new(egress).post(&req).unwrap_err().kind, kind);
+    }
 }

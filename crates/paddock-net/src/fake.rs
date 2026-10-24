@@ -4,7 +4,7 @@ use crate::error::NetError;
 use crate::request::Method;
 use crate::wire::{Lookup, Wire, WireRequest, WireResponse};
 use std::collections::{HashMap, VecDeque};
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::net::IpAddr;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -18,6 +18,7 @@ pub struct Reply {
     status: u16,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
+    fail_after: Option<std::io::ErrorKind>,
 }
 
 impl Reply {
@@ -27,6 +28,7 @@ impl Reply {
             status,
             headers: Vec::new(),
             body: Vec::new(),
+            fail_after: None,
         }
     }
 
@@ -41,6 +43,12 @@ impl Reply {
     /// A redirect to `location`.
     pub fn redirect(status: u16, location: &str) -> Reply {
         Reply::status(status).header("Location", location)
+    }
+
+    /// The body breaks with this error after its bytes were read.
+    pub fn failing_body(mut self, kind: std::io::ErrorKind) -> Reply {
+        self.fail_after = Some(kind);
+        self
     }
 
     /// Adds a header.
@@ -119,7 +127,10 @@ impl Wire for FakeWire {
         step.map(|reply| WireResponse {
             status: reply.status,
             headers: reply.headers,
-            body: Box::new(Cursor::new(reply.body)),
+            body: match reply.fail_after {
+                None => Box::new(Cursor::new(reply.body)),
+                Some(kind) => Box::new(Cursor::new(reply.body).chain(Failing(kind))),
+            },
         })
     }
 }
@@ -159,5 +170,14 @@ impl Lookup for StaticLookup {
             .get(&host.to_ascii_lowercase())
             .cloned()
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no such host"))
+    }
+}
+
+/// A reader that fails with this error as soon as it is read.
+struct Failing(std::io::ErrorKind);
+
+impl Read for Failing {
+    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(self.0, "the connection broke"))
     }
 }

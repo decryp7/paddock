@@ -331,37 +331,26 @@ impl ChannelsControl {
             (id, cancel)
         };
         let me = self.clone();
-        let spawned = std::thread::Builder::new()
-            .name("channels-test".into())
-            .spawn({
-                let channel = channel.clone();
-                move || {
-                    let delivery = me.dispatcher().test_with(&channel, None, &me.app, &cancel);
-                    me.tests().running.remove(&channel.id);
-                    let (ok, message) = match &delivery.result {
-                        Ok(()) => (true, None),
-                        Err(e) => (false, Some(e.to_string())),
-                    };
-                    (me.emit)(&ChannelsEvent::Test {
-                        test_id: id,
-                        channel_id: channel.id.clone(),
-                        ok,
-                        attempts: delivery.attempts,
-                        message,
-                    });
-                }
-            });
-        match spawned {
-            Ok(_) => Ok(id),
-            Err(e) => {
-                self.tests().running.remove(&channel.id);
-                Err(ChannelsError::new(
-                    ErrorCode::Failed,
-                    format!("The test could not be started ({e})."),
-                    true,
-                ))
+        // A thread that cannot be created is resource exhaustion the process does not survive anyway.
+        std::thread::spawn({
+            let channel = channel.clone();
+            move || {
+                let delivery = me.dispatcher().test_with(&channel, None, &me.app, &cancel);
+                me.tests().running.remove(&channel.id);
+                let (ok, message) = match &delivery.result {
+                    Ok(()) => (true, None),
+                    Err(e) => (false, Some(e.to_string())),
+                };
+                (me.emit)(&ChannelsEvent::Test {
+                    test_id: id,
+                    channel_id: channel.id.clone(),
+                    ok,
+                    attempts: delivery.attempts,
+                    message,
+                });
             }
-        }
+        });
+        Ok(id)
     }
 
     /// Stops every running test (at app exit); each one still reports.
