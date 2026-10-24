@@ -520,4 +520,20 @@ mod tests {
         }
         drop(s);
     }
+
+    #[test]
+    fn a_capped_child_spawns_in_the_global_registry_and_the_cap_prints_without_its_hooks() {
+        let cap = MemoryCap::new(u64::MAX, "the helper");
+        let text = format!("{cap:?}");
+        assert!(
+            text.contains("MemoryCap") && text.contains("the helper"),
+            "{text}"
+        );
+        let mut s = Supervised::spawn_capped(child(Mode::Sleep), cap).unwrap();
+        let pid = s.id().unwrap();
+        assert!(global_registry().pids().contains(&pid));
+        assert_eq!(s.stopped_over_memory(), None);
+        s.kill();
+        assert!(!global_registry().pids().contains(&pid));
+    }
 }
