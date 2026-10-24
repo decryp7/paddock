@@ -259,15 +259,25 @@ mod tests {
 
     #[test]
     fn a_failing_writer_is_an_error_not_a_panic() {
-        struct Closed;
-        impl Write for Closed {
-            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-                Err(std::io::ErrorKind::BrokenPipe.into())
+        use crate::testutil::FailAfter;
+        for format in [TableFormat::Csv, TableFormat::Json, TableFormat::Table] {
+            // Fail at every write in turn: each `?` is an error, never a panic. The note goes to a failing writer too.
+            for ok in 0..4 {
+                assert!(
+                    write_table(
+                        &table(2, 5),
+                        format,
+                        "",
+                        &mut FailAfter(ok),
+                        &mut Vec::new()
+                    )
+                    .is_err(),
+                    "{format:?} {ok}"
+                );
             }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
+            assert!(
+                write_table(&table(2, 5), format, "", &mut Vec::new(), &mut FailAfter(0)).is_err()
+            );
         }
-        assert!(write_table(&table(1, 1), TableFormat::Csv, "", &mut Closed, &mut Closed).is_err());
     }
 }

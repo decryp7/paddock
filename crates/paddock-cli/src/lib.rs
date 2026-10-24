@@ -21,6 +21,8 @@ mod help;
 mod progress;
 mod report;
 mod table;
+#[cfg(test)]
+mod testutil;
 mod values;
 
 pub use error::CliError;
