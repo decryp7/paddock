@@ -110,3 +110,48 @@ export function deltaE(a: Rgba, b: Rgba): number {
   const [l2, a2, b2] = lab(b);
   return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
 }
+
+/** CIEDE2000 colour difference (Sharma, Wu, Dalal 2005): the perceptual distance the accent choices are measured by. */
+export function deltaE2000(x: Rgba, y: Rgba): number {
+  const [L1, a1, b1] = lab(x);
+  const [L2, a2, b2] = lab(y);
+  const rad = Math.PI / 180;
+  const C1 = Math.hypot(a1, b1);
+  const C2 = Math.hypot(a2, b2);
+  const Cb = (C1 + C2) / 2;
+  const G = 0.5 * (1 - Math.sqrt(Cb ** 7 / (Cb ** 7 + 25 ** 7)));
+  const a1p = (1 + G) * a1;
+  const a2p = (1 + G) * a2;
+  const C1p = Math.hypot(a1p, b1);
+  const C2p = Math.hypot(a2p, b2);
+  const hue = (b: number, a: number): number => {
+    const v = Math.atan2(b, a) / rad;
+    return v < 0 ? v + 360 : v;
+  };
+  const h1p = hue(b1, a1p);
+  const h2p = hue(b2, a2p);
+  let dh = 0;
+  if (C1p * C2p !== 0) {
+    dh = h2p - h1p;
+    if (dh > 180) dh -= 360;
+    else if (dh < -180) dh += 360;
+  }
+  const dL = L2 - L1;
+  const dC = C2p - C1p;
+  const dH = 2 * Math.sqrt(C1p * C2p) * Math.sin((dh * rad) / 2);
+  const Lb = (L1 + L2) / 2;
+  const Cbp = (C1p + C2p) / 2;
+  let hb = h1p + h2p;
+  if (C1p * C2p !== 0) {
+    if (Math.abs(h1p - h2p) > 180) hb += hb < 360 ? 360 : -360;
+    hb /= 2;
+  }
+  const T = 1 - 0.17 * Math.cos((hb - 30) * rad) + 0.24 * Math.cos(2 * hb * rad) + 0.32 * Math.cos((3 * hb + 6) * rad) - 0.2 * Math.cos((4 * hb - 63) * rad);
+  const dTheta = 30 * Math.exp(-(((hb - 275) / 25) ** 2));
+  const RC = 2 * Math.sqrt(Cbp ** 7 / (Cbp ** 7 + 25 ** 7));
+  const SL = 1 + (0.015 * (Lb - 50) ** 2) / Math.sqrt(20 + (Lb - 50) ** 2);
+  const SC = 1 + 0.045 * Cbp;
+  const SH = 1 + 0.015 * Cbp * T;
+  const RT = -Math.sin(2 * dTheta * rad) * RC;
+  return Math.sqrt((dL / SL) ** 2 + (dC / SC) ** 2 + (dH / SH) ** 2 + RT * (dC / SC) * (dH / SH));
+}

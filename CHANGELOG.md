@@ -5,6 +5,12 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Changed
+- Accents for Pacenotes (route-map olive: `#8da74e` dark, `#576d07` light, fill `#657c1f`) and Sighter (optical plum:
+  `#c488cf`, `#884f92`, fill `#975ea2`), chosen by CIEDE2000 against the status colours and the other accents in normal
+  vision and under simulated protanopia, deuteranopia and tritanopia (table and reasons in the design guide §4; they
+  replace S15's green and orchid and the earlier Sighter lime proposal). Token tests: both are CIEDE2000 >= 15 from every
+  status colour and >= 12 from every other accent; `deltaE2000` joins the shared colour maths. App icon tiles are
+  unchanged (the guide lists the closest tiles that keep the family's CVD minimum).
 - Appearance has one writer and one source (rule 40, rule 34): `paddock_settings::shell::appearance` holds the whole
   look (theme, contrast, motion, density and the theme pack; `PACK_ID`); `provideShellSettings` provides it as the
   window's `APPEARANCE_SOURCE`, so `provideAppearance` follows the engine's Appearance settings in every window and
@@ -71,8 +77,8 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock-download`: a free-disk pre-check (plan §13): a pinned size is checked before connecting and an announced
   size before writing, against `Config::disk_reserve` (64 MiB by default); `DownloadError::NotEnoughSpace` says "needs
   N, M is free". `Downloader::with_free_space` and `Downloader::transport`, `human_bytes`.
-- Theme and i18n in the app shell (plan S15, ADR 0012 §5-6, decision D6). Tokens: accents for Pacenotes (route green,
-  `#7fc85a` / `#3b7114`, fill `#3d7515`) and Sighter (orchid, `#cc8cf2` / `#a224cc`, fill `#a224cc`), a complete high
+- Theme and i18n in the app shell (plan S15, ADR 0012 §5-6, decision D6). Tokens: accents for Pacenotes and Sighter (values
+  below), a complete high
   contrast mode (opaque hairlines and scrim, outlined popovers, subtle text as muted; `data-contrast="more|off"`) and
   reduced motion (`data-motion="reduce|full"`, durations at most 100 ms, `--pd-motion-scale`); `applyPaddockAppearance`
   takes `contrast` and `motion`. Token tests for seven accents in both schemes and both contrast modes, high contrast

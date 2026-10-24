@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contrast, deltaE, parseColor, simulate, type Cvd, type Rgba } from './color';
+import { contrast, deltaE, deltaE2000, parseColor, simulate, type Cvd, type Rgba } from './color';
 import { ACCENTS, readRules, resolve, type Contrast, type Scheme, type Vars } from './css';
 
 const rules = readRules();
@@ -187,6 +187,28 @@ describe('seven accents (one per app, ADR 0012 §5)', () => {
         const [b, y] = fills[j] as (typeof fills)[number];
         expect(deltaE(x, y), `${a} vs ${b}`).toBeGreaterThanOrEqual(15);
       }
+  });
+});
+
+describe('Pacenotes and Sighter accents (chosen 2026-10-24 by CIEDE2000, design guide §4)', () => {
+  const text = (accent: (typeof ACCENTS)[number], scheme: Scheme): Rgba => col(resolve(rules, scheme, accent), '--pd-accent');
+  const status = (name: string, scheme: Scheme): Rgba => col(resolve(rules, scheme, 'debrief'), `--pd-${name}`);
+  const known = { reference: deltaE2000(parseColor('#50a0a0'), parseColor('#50a0a0')), sharma: deltaE2000({ r: 0, g: 0, b: 0, a: 1 }, { r: 255, g: 255, b: 255, a: 1 }) };
+
+  it('CIEDE2000 is the published formula (identical colours 0, black to white 100)', () => {
+    expect(known.reference).toBe(0);
+    expect(known.sharma).toBeCloseTo(100, 0);
+  });
+
+  it.each(['pacenotes', 'sighter'] as const)('%s never reads as a status: CIEDE2000 >= 15 from success, warning, danger and info (normal vision)', (accent) => {
+    for (const scheme of SCHEMES)
+      for (const name of STATUS) expect(deltaE2000(text(accent, scheme), status(name, scheme)), `${scheme} ${name}`).toBeGreaterThanOrEqual(15);
+  });
+
+  it.each(['pacenotes', 'sighter'] as const)('%s is its own colour in the family: CIEDE2000 >= 12 from every other accent (normal vision)', (accent) => {
+    for (const scheme of SCHEMES)
+      for (const other of ACCENTS.filter((a) => a !== accent))
+        expect(deltaE2000(text(accent, scheme), text(other, scheme)), `${scheme} ${other}`).toBeGreaterThanOrEqual(12);
   });
 });
 

@@ -280,8 +280,8 @@ $accents: (
   'pitwall': (dark: #a58bfa, light: #6d3fd6, fill: #7546e0),
   'dyno': (dark: #f063a8, light: #b01e6e, fill: #c2287c),
   'spotter': (dark: #2cc4b0, light: #0b7a6e, fill: #0e8577),
-  'pacenotes': (dark: #7fc85a, light: #3b7114, fill: #3d7515),
-  'sighter': (dark: #cc8cf2, light: #a224cc, fill: #a224cc),
+  'pacenotes': (dark: #8da74e, light: #576d07, fill: #657c1f),
+  'sighter': (dark: #c488cf, light: #884f92, fill: #975ea2),
 );
 
 @mixin accent-vars($text, $fill) {
