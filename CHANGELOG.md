@@ -5,6 +5,7 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- ADR 0012 "Paddock app shell" and ADR 0013 "Paddock workbench" (proposed), with the plan in `docs/plans/workbench.md`.
 - ADR 0008 "Long operations: phases, progress, cancel and parallel work".
 - Crate `paddock-jobs` 0.1.0: job/phase/progress wire model, throttled `Reporter`, `CancelToken` with deadline, `JobRegistry`/`JobContext`,
   `HashingWriter`/`copy_hashed`, `par_walk`, `par_map_ordered`, `pipeline_ordered`, `JobPool` (spawn, `offload`) and `assert_nonblocking`.

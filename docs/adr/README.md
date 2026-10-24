@@ -13,3 +13,5 @@
 | [0009](0009-dialogs-kinds-and-declared-contracts.md) | Dialogs as windows: kinds and declared contracts (proposed) |
 | [0010](0010-notifications-and-service-health.md) | Notifications with cause keys and a service-health model (proposed) |
 | [0011](0011-layout-by-declared-constraints.md) | Layout by declared constraints: one pure layout function (proposed) |
+| [0012](0012-paddock-app-shell.md) | Paddock app shell: one shell for every app (frame, startup, notifications and health, dialogs, jobs, settings, updates, menu, pages, test kit) (proposed) |
+| [0013](0013-paddock-workbench.md) | Paddock workbench: the docked IDE layer on the shell for Debrief, Pacenotes and Sighter (proposed) |
