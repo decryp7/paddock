@@ -326,6 +326,8 @@ pub struct Recorder {
     pub snaps: Mutex<Vec<JobSnapshot>>,
     trigger: Mutex<Option<(String, u64)>>,
     token: OnceLock<CancelToken>,
+    /// When set, the trigger cancels this token instead of the job's.
+    external: Mutex<Option<CancelToken>>,
     pub fired: Mutex<Option<Instant>>,
 }
 
@@ -333,6 +335,12 @@ impl Recorder {
     /// Cancels as soon as phase `id` has counted at least `done` (0: the moment it begins).
     pub fn cancel_at(&self, id: &str, done: u64) {
         *self.trigger.lock().unwrap() = Some((id.to_string(), done));
+    }
+
+    /// As [`cancel_at`](Self::cancel_at), but cancels `token` (given to `download_with_cancel`) and not the job.
+    pub fn cancel_external_at(&self, token: &CancelToken, id: &str, done: u64) {
+        *self.external.lock().unwrap() = Some(token.clone());
+        self.cancel_at(id, done);
     }
 
     pub fn phases(&self) -> Vec<String> {
@@ -384,7 +392,13 @@ impl EventSink for Recorder {
         self.snaps.lock().unwrap().push(s.clone());
         if let JobState::Running { phase: Some(p) } = &s.state {
             let hit = matches!(&*self.trigger.lock().unwrap(), Some((id, done)) if *id == p.phase.id && p.done >= *done);
-            if hit && let Some(t) = self.token.get() {
+            let target = self
+                .external
+                .lock()
+                .unwrap()
+                .clone()
+                .or_else(|| self.token.get().cloned());
+            if hit && let Some(t) = target {
                 t.cancel();
                 self.fired.lock().unwrap().get_or_insert_with(Instant::now);
             }
@@ -399,4 +413,138 @@ pub fn job() -> (JobContext, Arc<Recorder>) {
     let ctx = jobs.register("download", "Downloading", Some("file"));
     let _ = rec.token.set(ctx.cancel_token().clone());
     (ctx, rec)
+}
+
+/// What a [`ConnectProxy`] saw of one tunnel request.
+#[derive(Debug, Clone)]
+pub struct Tunnel {
+    /// `host:port` after `CONNECT`.
+    pub target: String,
+    /// The `Proxy-Authorization` header value, if any.
+    pub authorization: Option<String>,
+    /// True when the tunnel was refused with 407.
+    pub refused: bool,
+}
+
+/// An in-process HTTP CONNECT proxy on a loopback port: it checks `Proxy-Authorization: Basic <base64(user:pass)>` when given
+/// credentials, then pipes bytes both ways to the target. No network beyond loopback.
+pub struct ConnectProxy {
+    pub port: u16,
+    log: Arc<Mutex<Vec<Tunnel>>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl ConnectProxy {
+    pub fn start(credentials: Option<(&str, &str)>) -> ConnectProxy {
+        let expected =
+            credentials.map(|(u, p)| format!("Basic {}", base64(format!("{u}:{p}").as_bytes())));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (l, st) = (log.clone(), stop.clone());
+        std::thread::spawn(move || {
+            for conn in listener.incoming() {
+                if st.load(Ordering::Relaxed) {
+                    break;
+                }
+                let Ok(conn) = conn else { continue };
+                let (l, expected) = (l.clone(), expected.clone());
+                std::thread::spawn(move || tunnel(conn, &l, expected.as_deref()));
+            }
+        });
+        ConnectProxy { port, log, stop }
+    }
+
+    /// The proxy's address as an `http://` URL.
+    pub fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    pub fn log(&self) -> Vec<Tunnel> {
+        self.log.lock().unwrap().clone()
+    }
+}
+
+impl Drop for ConnectProxy {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = TcpStream::connect(("127.0.0.1", self.port));
+    }
+}
+
+fn tunnel(mut client: TcpStream, log: &Mutex<Vec<Tunnel>>, expected: Option<&str>) {
+    let mut head = Vec::new();
+    let mut b = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        match client.read(&mut b) {
+            Ok(1) => head.push(b[0]),
+            _ => return,
+        }
+        if head.len() > 16 * 1024 {
+            return;
+        }
+    }
+    let text = String::from_utf8_lossy(&head).into_owned();
+    let mut lines = text.lines();
+    let first = lines.next().unwrap_or_default();
+    let mut parts = first.split(' ');
+    if parts.next() != Some("CONNECT") {
+        let _ = client.write_all(b"HTTP/1.1 405 Method Not Allowed\r\ncontent-length: 0\r\n\r\n");
+        return;
+    }
+    let target = parts.next().unwrap_or_default().to_string();
+    let authorization = lines.find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        k.eq_ignore_ascii_case("proxy-authorization")
+            .then(|| v.trim().to_string())
+    });
+    let refused = expected.is_some_and(|e| authorization.as_deref() != Some(e));
+    log.lock().unwrap().push(Tunnel {
+        target: target.clone(),
+        authorization,
+        refused,
+    });
+    if refused {
+        let _ = client.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nproxy-authenticate: Basic realm=\"t\"\r\ncontent-length: 0\r\n\r\n");
+        return;
+    }
+    let Ok(upstream) = TcpStream::connect(&target) else {
+        let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\n\r\n");
+        return;
+    };
+    if client
+        .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        .is_err()
+    {
+        return;
+    }
+    let (mut c2, mut u2) = (client.try_clone().unwrap(), upstream.try_clone().unwrap());
+    let (mut c1, mut u1) = (client, upstream);
+    let up = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut c1, &mut u1);
+        let _ = u1.shutdown(Shutdown::Both);
+    });
+    let _ = std::io::copy(&mut u2, &mut c2);
+    let _ = c2.shutdown(Shutdown::Both);
+    let _ = up.join();
+}
+
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |a, (i, &b)| a | (b as u32) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }

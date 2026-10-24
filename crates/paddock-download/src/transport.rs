@@ -34,6 +34,71 @@ pub struct Get<'a> {
     /// The validator a range must still match (`If-Range`): a changed file is answered 200 instead of 206.
     pub if_range: Option<&'a str>,
     pub body_timeout: Option<Duration>,
+    /// Headers the caller added to the request ([`Request::header`](crate::Request::header)): send them with every request,
+    /// including range requests. Implementations must not forward them to another host on a redirect.
+    pub headers: &'a [Header],
+}
+
+/// A request header the caller added (an `Authorization` token, an `Accept`). Names and values were checked when it was built:
+/// no control characters, and none of the headers the downloader owns. `Debug` shows the name only, because values are often
+/// secrets.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Header {
+    pub name: String,
+    pub value: String,
+}
+
+impl std::fmt::Debug for Header {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Header({}: <hidden>)", self.name)
+    }
+}
+
+/// Headers the downloader sets itself (or that would break framing); a caller cannot add them.
+const OWNED_HEADERS: [&str; 10] = [
+    "host",
+    "range",
+    "if-range",
+    "accept-encoding",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "te",
+    "upgrade",
+    "proxy-authorization",
+];
+
+impl Header {
+    /// Checks a header: a token as name, a value without control characters other than tab, and not one of the headers the
+    /// downloader owns (`Range`, `If-Range`, `Accept-Encoding`, `Host`, framing headers, `Proxy-Authorization`).
+    pub fn new(name: &str, value: &str) -> Result<Header, crate::DownloadError> {
+        let bad = |why: &str| {
+            crate::DownloadError::InvalidRequest(format!(
+                "header '{}' {why}",
+                name.chars().take(40).collect::<String>()
+            ))
+        };
+        let token = |c: char| c.is_ascii_alphanumeric() || "!#$%&'*+-.^_`|~".contains(c);
+        if name.is_empty() || name.len() > 128 || !name.chars().all(token) {
+            return Err(bad("is not a valid header name"));
+        }
+        if OWNED_HEADERS.iter().any(|h| h.eq_ignore_ascii_case(name)) {
+            return Err(bad("is set by the downloader and cannot be added"));
+        }
+        if value.len() > 8 * 1024
+            || value
+                .chars()
+                .any(|c| (c.is_control() && c != '\t') || c == '\u{7f}')
+        {
+            return Err(bad(
+                "has a value that is too long or has control characters",
+            ));
+        }
+        Ok(Header {
+            name: name.to_string(),
+            value: value.to_string(),
+        })
+    }
 }
 
 /// The headers the downloader reads, as raw values.
