@@ -3456,6 +3456,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-workbench"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-workspace-hack"
 version = "0.1.0"
 dependencies = [
