@@ -41,5 +41,6 @@ export {
   CLOSE_NAMES,
   type DialogContractEntry,
 } from './shell.ts';
+export { WorkbenchApp, WorkbenchFrame, WorkbenchActivityBar, WorkbenchExplorer, WorkbenchPalette } from './workbench.ts';
 export { renderFlaky, type Flaky } from './retried-reporter.ts';
 export { readVersion, RELEASE_VERSION } from './version.ts';
