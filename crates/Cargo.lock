@@ -3042,6 +3042,7 @@ dependencies = [
  "flate2",
  "lzma-rs",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "tar",
  "tempfile",
  "zip",
@@ -3280,6 +3281,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sysinfo",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3298,6 +3300,7 @@ version = "0.1.0"
 dependencies = [
  "paddock-download",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "proptest",
  "rustls",
  "ureq",
