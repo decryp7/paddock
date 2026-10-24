@@ -41,16 +41,20 @@ jobs:
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/smoke-builds"; rm -rf "$out"; mkdir -p "$out/n" "$out/n1"
-          toml=apps/shell-demo/src-tauri/Cargo.toml
+          # The app and its agent carry the same version (the agent's tests check it), so N+1 bumps both: the smoke
+          # waits for the agent's heartbeat to report the app's new version, and a changed agent has a new cdhash.
+          tomls="apps/shell-demo/src-tauri/Cargo.toml apps/shell-demo/src-tauri/agent/Cargo.toml"
           v_old=$(node scripts/shell-demo-release.mjs version)
           v_new=$(node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); console.log(`${a}.${b}.${c+1}`)' "$v_old")
           echo "PADDOCK_SMOKE_OLD_VERSION=$v_old" >> "$GITHUB_ENV"
           echo "PADDOCK_SMOKE_NEW_VERSION=$v_new" >> "$GITHUB_ENV"
           bundle() { bash scripts/shell-demo/bundle.sh app,dmg >/dev/null; cp -R "$CARGO_TARGET_DIR"/release/bundle/macos/*.app "$1/"; }
           bundle "$out/n"
-          sed -i '' "s/^version = \"$v_old\"/version = \"$v_new\"/" "$toml"
+          for toml in $tomls; do sed -i '' "s/^version = \"$v_old\"/version = \"$v_new\"/" "$toml"; done
           bundle "$out/n1"
-          git checkout -- "$toml" apps/shell-demo/src-tauri/Cargo.lock 2>/dev/null || true
+          [ "$("$out"/n1/*.app/Contents/MacOS/shell-demo-agent --self-test | awk '{print $2}')" = "$v_new" ] \
+            || { echo "::error::build N+1's agent does not report $v_new"; exit 1; }
+          git checkout -- $tomls apps/shell-demo/src-tauri/Cargo.lock 2>/dev/null || true
 
       - name: Run the smoke in a fresh VM (always deleted)
         run: |

@@ -246,6 +246,14 @@ Conventional Commits; one semver tag for the whole repo.
 - The shell demo's product name is "Paddock Shell Demo"; its Rust side is the app (`apps/shell-demo/src-tauri` writes
   `app-commands.ts`); `paddock-shell`'s `tests/demo.rs` keeps only the plugin's checks over the demo's files.
 
+### Fixed
+- `paddock-service` (C21 VM smoke): the first Install of a bundled macOS agent failed on every fresh Mac with "macOS cannot find
+  ...'s launch agent". `SMAppService.status` is NotFound until the app registers once; that now reads as "not installed" and
+  Install registers (a real failure comes from `register`, with macOS's reason in the message). `parse_job` reads only the job's
+  own level of `launchctl print`, so macOS 26's coalition blocks (`state = active`) no longer make a running agent "refused".
+- The service smoke builds N+1 with the agent's version bumped too (it reported the old version for ever), installs to
+  /Applications as a user does, and checks the app's own status is "running" after install and after the update.
+
 ## 0.2.0 - 2026-10-24 (the first shell release)
 
 The app shell of ADR 0012 (plan S0-S17): `@decryp7/paddock-ui` 0.2.0 with the `shell/*` entry points,
