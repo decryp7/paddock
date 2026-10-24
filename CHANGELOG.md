@@ -46,6 +46,9 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-chromium` on Windows: every end of the browser (the time limit's included) goes through its `Supervised`, so the
+  kill-on-close job closes with it; the Chrome for Testing self-test checks the version manifest and a headless page dump (Chrome
+  prints no `--version` there). The real-browser test runs on macOS and Windows CI too (install action, `catalogue:`).
 - `conformance/ci/pin-runtime.mjs`: pins any `paddock-runtime` catalogue (size and SHA-256 measured while downloading, `--version`,
   `--chrome-for-testing`); `install-test-browser.mjs --catalogue` and the action's `catalogue:` input install the build a catalogue
   pins. `paddock-chromium`'s waits (`start_page`, start-up, `wait_ready`) run on the injected clock; its real-browser test runs
