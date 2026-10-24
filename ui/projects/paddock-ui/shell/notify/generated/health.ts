@@ -23,7 +23,7 @@ export type NoticeAction = { type: string } & { [arg: string]: unknown };
 
 export type ServiceState = "ok" | "starting" | "degraded" | "down" | "quarantined" | "repairing";
 
-export type RepairAction = "restart" | "reset" | "liftQuarantine" | "install" | "retry" | "openSettings" | "useFallback";
+export type RepairAction = "restart" | "reset" | "liftQuarantine" | "install" | "retry" | "openSettings" | "useFallback" | "openLoginItems";
 
 export type RaiseCap = { 
 /**

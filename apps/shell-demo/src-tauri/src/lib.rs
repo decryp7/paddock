@@ -11,6 +11,7 @@
 //! [`shell`] is the plugin with all of it, for the app ([`run`]) and for the tests on Tauri's mock runtime ([`Place`]).
 //! It is also the starter of new apps: `node scripts/new-app.mjs <id> "<Name>"` copies it (apps/shell-demo/README.md).
 
+pub mod agent;
 pub mod commands;
 pub mod engine;
 pub mod sections;
@@ -117,6 +118,52 @@ fn install_log() {
     }
 }
 
+/// The folders of the app as the agent uses them (the same data folder as the app).
+pub fn agent_dirs() -> Result<AppDirs, Box<dyn std::error::Error + Send + Sync>> {
+    dirs(None)
+}
+
+/// The agent's manager: installed, the real OS next to this app's executable; in tests, the recording fake (rule 7).
+fn agent_manager(
+    test_dir: Option<&std::path::Path>,
+) -> Result<paddock_service::Manager, Box<dyn std::error::Error + Send + Sync>> {
+    let data = dirs(test_dir)?.data().to_path_buf();
+    match test_dir {
+        None => {
+            let exe = std::env::current_exe()?;
+            let program = exe
+                .parent()
+                .ok_or("the app's folder cannot be found")?
+                .join(agent::spec().program_file(cfg!(windows)));
+            Ok(agent::manager(
+                &data,
+                &program,
+                paddock_service::backend::Side::App,
+                VERSION,
+            )?)
+        }
+        Some(_) => {
+            use paddock_service::backend::{Target, WindowsRun};
+            let sys = paddock_service::testing::FakeSystem::new();
+            sys.put_program("C:\\Demo\\shell-demo-agent.exe");
+            let backend = WindowsRun::new(
+                agent::spec(),
+                Target::exe("C:\\Demo\\shell-demo-agent.exe"),
+                Box::new(sys),
+            );
+            let beat_dir = data.clone();
+            Ok(paddock_service::Manager::new(
+                APP_NAME,
+                Box::new(backend),
+                &data,
+                agent::LABEL,
+                VERSION,
+                move || agent::answers(&beat_dir),
+            ))
+        }
+    }
+}
+
 /// The shell plugin with every part of the demo.
 pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
     shell_with_log(place, LOG.get().cloned())
@@ -130,7 +177,14 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .app_commands(&COMMANDS)
         .dialog_contracts(DIALOG_CONTRACTS)
-        .health(engine::services(tick))
+        .health({
+            let mut services = engine::services(tick);
+            services.push(paddock_health::ServiceSpec::new(
+                agent::HEALTH_ID,
+                "the demo agent",
+            ));
+            services
+        })
         .os_notifications(os_settings.clone())
         .health_setup(move |app, setup| {
             // Installed: the real notification plugin. Tests: a toaster that shows nothing (rule 7).
@@ -157,6 +211,16 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
         Place::Test { dir } => Some(dir.clone()),
     };
     let updates_dir = test_dir.clone();
+    let agent_dir = test_dir.clone();
+    // The sample background agent (plan X4): the Background service page, its health entry and Start at login.
+    builder = builder.service(move |_| {
+        let setup = paddock_service::tauri::Setup::new(agent_manager(agent_dir.as_deref())?)
+            .health(agent::HEALTH_ID);
+        Ok(paddock_shell::ServicePart::new(match agent_dir {
+            None => setup,
+            Some(_) => setup.checks(Duration::ZERO, Duration::ZERO, 0),
+        }))
+    });
     let report_dir = test_dir.clone();
     // Report a problem (plan X2) and the Logging section: the app's folders and log, the shell's built-in sections.
     builder = builder.diagnostics(move |_| {
