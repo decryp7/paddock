@@ -22,6 +22,11 @@ name = "paddock_shell_demo"
 name = "paddock-shell-demo"
 path = "src/main.rs"
 
+# The sample background agent (plan X4), bundled next to the app (Tauri bundles every binary of the crate).
+[[bin]]
+name = "shell-demo-agent"
+path = "src/bin/shell-demo-agent.rs"
+
 [build-dependencies]
 tauri-build = { version = "2.7", features = [] }
 
@@ -36,6 +41,7 @@ paddock-env = { path = "../../../crates/paddock-env" }
 paddock-log = { path = "../../../crates/paddock-log" }
 paddock-health = { path = "../../../crates/paddock-health", features = ["tauri"] }
 paddock-jobs = { path = "../../../crates/paddock-jobs", features = ["tauri"] }
+paddock-service = { path = "../../../crates/paddock-service", features = ["tauri"] }
 paddock-settings = { path = "../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../crates/paddock-updater", features = ["tauri"] }
