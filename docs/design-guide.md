@@ -94,21 +94,41 @@ red-orange (hue 18) and not amber, and why it is never used as a status.
 | Pitwall | technical, control-room violet | #A58BFA | #6D3FD6 | #7546E0 |
 | Dyno | lively, vital, magenta | #F063A8 | #B01E6E | #C2287C |
 | Spotter | watchful, fresh teal | #2CC4B0 | #0B7A6E | #0E8577 |
-| Sighter | precise, sight-glass lime | #A8D94A | #4D7300 | #4D7300 |
+| Pacenotes | route-map olive, steady | #8DA74E | #576D07 | #657C1F |
+| Sighter | optical plum, precise | #C488CF | #884F92 | #975EA2 |
 
-Sighter (proposed 2026-10-24, hue 80): 41 deg from warning amber, 70 from success green, far from Spotter teal (172) and
-Debrief blue (217). Measured: dark text 10.8:1 on surface-1, light text 5.6:1 on white and 5.0:1 on surface-2, white on
-the fill 5.6:1. It is a lime, so it must never stand in for success (status always has its word and icon). Under
-colour-vision deficiency (Machado 2009, CIELAB) lime and warning amber merge: ΔE 47 normal but 3 (dark tokens) to 6
-(light tokens) for deuteranopes. Rule for Sighter: warning is never colour alone (always the warning icon, its word in
-the text colour), and accent-coloured text is never placed directly beside a warning. Sighter's app checks this pair in
-its token test. Add the token set to `paddock-ui` with its token tests before freezing.
+Pacenotes and Sighter (chosen 2026-10-24; replaces the earlier Sighter lime proposal). With seven accents and four status
+colours the hue wheel is full: under colour-vision deficiency (Machado 2009, severity 1) only two colour dimensions are
+left and no vivid hue stays clearly apart from everything. The two were chosen by CIEDE2000 (smaller of the dark- and
+light-scheme text colours), first by distance from the status colours in normal vision (an accent must never read as a
+status), then from the other accents, with the deficiency values as a tie-break:
 
-The app icon stays on its cyan tile for now. App icon tiles are their own palette (Spotter: amber tile, teal accent), and
-a lime tile breaks the family's colour-vision separation: with the Sighter tile at #8CC63F the smallest OKLab distance
-(`icons/tools/cvd.mjs`) falls from 11.6 to 1.4 for protanopia (against Spotter's amber tile) and from 13.6 to 6.4 for
-deuteranopia; olive tiles (#4D7300 to #6E9A20) still drop protanopia to 3 to 7.6 against Pitcrew. The cyan tile is clear
-of every other tile, including Spotter's amber. Decide the icon with the design lead before changing it.
+| Pair | Normal | Protan | Deutan | Tritan |
+|---|---|---|---|---|
+| Pacenotes olive vs success | 16.1 | 9.4 | 10.9 | 16.7 |
+| Pacenotes olive vs warning | 23.0 | 1.4 | 4.0 | 32.5 |
+| Pacenotes olive vs danger | 51.7 | 11.5 | 3.6 | 39.3 |
+| Pacenotes olive vs nearest accent (Spotter) | 25.1 | 21.1 | 26.9 | 17.3 |
+| Sighter plum vs info | 25.5 | 4.0 | 4.7 | 46.6 |
+| Sighter plum vs Pitwall | 12.3 | 7.1 | 9.3 | 24.2 |
+| Sighter plum vs Dyno | 13.9 | 8.0 | 13.6 | 15.9 |
+
+The alternatives measured worse: the earlier lime (#A8D94A / #4D7300) is 0.7 from warning amber for deuteranopes and
+4.4 from a green Pacenotes; an orchid Sighter (#CC8CF2 / #A224CC) is 8.6 from Pitwall in normal vision; a brighter green
+Pacenotes (#7FC85A / #3B7114) is 10.6 from success. Every yellow-green merges with warning amber under red-green
+deficiency, so for Pacenotes (and every app) warning is never colour alone: always the warning icon and its word, and
+accent-coloured text is never placed directly beside a warning. Existing pairs with the same limit: Debrief and info
+5.4 (normal), Debrief and Pitwall 0.8 (deuteranopia), Pitcrew and danger 8.9 (normal), Spotter and success 2.6
+(tritanopia). Accents never meet in one window, and status always carries its icon and word (rule 8 below). The token
+tests in `paddock-ui` check both new accents: CIEDE2000 >= 15 from every status colour and >= 12 from every other
+accent (normal vision), with the usual contrast targets.
+
+App icon tiles are their own palette (Spotter: amber tile, teal accent). A plum Sighter tile (#975EA2) drops the
+family's smallest OKLab distance (`icons/tools/cvd.mjs`) to 10.2 normal and 5.1 deuteranopia (against Dyno's tile); an
+olive Pacenotes tile (#657C1F) to 1.6 protanopia (against Pitcrew). The closest tiles that keep the family minimum
+(17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan) are a lavender Sighter tile #A686D6 (dark ink) and a bronze
+Pacenotes tile #6D590F (white ink); until the design lead decides, the icons keep their cyan (Sighter) and crimson
+(Pacenotes) tiles.
 
 Accent rules: primary button, selected nav item (tinted bg 14% + 2 px left or full tint, accent icon), focus ring (2 px
 accent, 2 px offset), links, the single highlighted chart series, progress of the app's own primary metric. Not
