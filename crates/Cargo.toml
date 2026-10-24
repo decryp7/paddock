@@ -6,6 +6,7 @@ resolver = "3"
 members = [
     "paddock-commands",
     "paddock-dialogs",
+    "paddock-diag",
     "paddock-download",
     "paddock-env",
     "paddock-health",
@@ -33,6 +34,7 @@ tauri = { version = "2.12", default-features = false }
 # the one published to the `decryp7` registry (keep it equal to the crate's `version`); the path is used in the workspace.
 paddock-commands = { path = "paddock-commands", version = "0.1.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "decryp7" }
+paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
 paddock-download = { path = "paddock-download", version = "0.1.0", registry = "decryp7" }
 paddock-env = { path = "paddock-env", version = "0.1.0", registry = "decryp7" }
 paddock-health = { path = "paddock-health", version = "0.1.0", registry = "decryp7" }

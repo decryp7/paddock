@@ -1,0 +1,96 @@
+//! The generated TypeScript of reports, checked on every test run (a stale file fails CI): the wire types (ts-rs) and the
+//! command names, in the `shell/diagnostics` entry point of `@decryp7/paddock-ui`. Needs the `tauri` feature (the command
+//! replies live in the adapter); CI runs the crate with `--all-features`.
+
+#![cfg(feature = "tauri")]
+
+use crate::tauri::{DiagCommandError, DiagErrorCode, PreviewReply, SaveOutcome};
+use paddock_commands::testing::{self, WriteMode};
+use std::path::{Path, PathBuf};
+use ts_rs::TS;
+
+const REGENERATE: &str =
+    "PADDOCK_WRITE_TS=1 cargo test -p paddock-diag --all-features --lib generated";
+
+fn generated_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/projects/paddock-ui/shell/diagnostics/generated")
+}
+
+fn generated_files() -> Vec<(&'static str, String)> {
+    let header = format!(
+        "// Generated from the Rust wire types of paddock-diag (ts-rs). Do not edit: {REGENERATE}.\n\n"
+    );
+    let decls = [
+        crate::FileKind::decl(),
+        crate::AppInfo::decl(),
+        crate::RedactionCounts::decl(),
+        crate::PreviewFile::decl(),
+        crate::Preview::decl(),
+        crate::Saved::decl(),
+        PreviewReply::decl(),
+        SaveOutcome::decl(),
+        DiagErrorCode::decl(),
+        DiagCommandError::decl(),
+    ];
+    let types: Vec<String> = decls.into_iter().map(|d| format!("export {d}\n")).collect();
+    let consts = format!(
+        "\n/** The event the outcome of a save is sent on, to every window. */\nexport const DIAGNOSTICS_EVENT = '{}';\n",
+        crate::EVENT_NAME
+    );
+    vec![
+        (
+            "diagnostics.ts",
+            format!("{header}{}{consts}", types.join("\n")),
+        ),
+        (
+            "diagnostics-commands.ts",
+            paddock_commands::ts::names_module(
+                &crate::COMMANDS,
+                "DIAGNOSTICS_COMMANDS",
+                "DiagnosticsCommand",
+                REGENERATE,
+            )
+            .unwrap_or_default(),
+        ),
+    ]
+}
+
+#[test]
+fn generated_typescript_is_current() {
+    let mode = WriteMode::from_env();
+    let stale: Vec<String> = generated_files()
+        .into_iter()
+        .filter_map(|(name, text)| {
+            testing::sync_generated(&generated_dir().join(name), &text, mode).err()
+        })
+        .map(|e| e.to_string())
+        .collect();
+    assert!(stale.is_empty(), "{}", stale.join("\n"));
+}
+
+#[test]
+fn the_table_has_the_report_commands() {
+    let names: Vec<&str> = crate::COMMANDS.specs().iter().map(|s| s.name()).collect();
+    assert_eq!(
+        names,
+        [
+            "diagnostics_preview",
+            "diagnostics_save",
+            "diagnostics_cancel",
+            "log_from_webview"
+        ]
+    );
+    assert!(
+        crate::COMMANDS.opens_to_dialogs("diagnostics_save"),
+        "the Report a Problem dialog saves"
+    );
+    assert!(
+        crate::COMMANDS.opens_to_dialogs("log_from_webview"),
+        "any window may forward its log lines"
+    );
+    assert_eq!(
+        crate::COMMANDS.kind_of("log_from_webview"),
+        paddock_commands::Kind::Quiet
+    );
+}
