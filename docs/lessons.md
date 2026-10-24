@@ -293,3 +293,8 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   to the app log as one bounded line. Only the app process can notice a paused or dead webview.
 - Dialogs on multi-display, mixed-scale Macs open on the wrong display or at the wrong size when position/size are
   absolute or converted with another monitor's scale; place relative to the parent, on the parent's monitor.
+- Platform-only bugs hide when CI runs the Rust tests on one OS: every third-party plugin in Debrief failed to start on
+  macOS (sandbox-exec resolves `/var` → `/private/var`, so profile paths and the IPC socket must be resolved and allowed
+  exactly) and CI never saw it because the Rust tests ran on Linux only. Run the Rust test suite on every OS the app
+  ships for (macOS host runner included). Also: don't run macOS tests under `nice` — it is SIP-protected and strips
+  `DYLD_*` variables.
