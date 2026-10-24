@@ -5,6 +5,9 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Conformance check C24 (rule 22): every image under `docs/screenshots` matches its `hashes.json` entry and has a `REVIEWED.md` row
+  (image, SHA-256, reviewer, date) with the current hash; `docs/images` needs the row. A regenerated image that changed fails until
+  it is reviewed again.
 - `@decryp7/paddock-e2e` `paddockConfig()` and `captureDocScreens()` (plan X39). The config preset: projects Chromium and WebKit
   (plus `screenshots` only with `SCREENSHOTS=1`), the port from an environment variable (required on CI), Chrome for Testing
   only through `CHROMIUM_TEST_PATH`, `retries: 0`, traces on failure, blob reports for shards. The runner takes the five apps'
