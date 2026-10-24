@@ -134,6 +134,8 @@ test.describe('settings (plan S10)', () => {
     const win = page.getByRole('dialog', { name: 'Settings' });
     await expect(win.getByTestId('settings-problem')).toContainText('Defaults are in use; the damaged file was kept as settings.json.corrupt');
     await expect(field(win, 'theme').getByRole('combobox')).toHaveValue('system');
+    // The centre's popover stays open beside the window; closing it leaves the window.
+    if (await centre.isVisible()) await page.getByRole('contentinfo', { name: 'Status bar' }).getByTestId('notifications-status').click();
     await win.getByText('Close', { exact: true }).click();
     await expect(win).toHaveCount(0);
   });
