@@ -5,6 +5,23 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- First-run set-up checklist (plan X19). `paddock_shell::setup` (`Builder::first_run`): the steps in order with their own checks
+  (`SetupItem`), the user's answers (skipped, shown) in `setup.json` through `paddock-env`, actions run on a worker with the
+  outcome on `paddock://setup`, and the commands `setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish`. The shell
+  brings four steps over small ports: the background service (`paddock-service`; Install, Repair, or Open Login Items where the
+  user's switch is off), Start at login (the `pd.login` setting), notification permission (`Toaster::permission` through
+  `ToasterAccess`, Repair opens the system settings) and Pitwall pairing (`paddock-pitwall`'s `Link` through `LinkPort`, with the
+  shared needs-AI view and the pairing code to compare); an app adds its own (Debrief's tour). Every step is skippable and a step
+  with a problem always has a Repair. `@decryp7/paddock-ui/shell/setup`: `SetupBackend` (Tauri and in-memory), `SetupStore`,
+  `defineSetup` (a modeless `tool` window `pd.setup` and the Settings > Set-up page), `SETUP_CONTRIBUTIONS` (Help > Set-up…) and
+  `provideShellSetup` (the main window opens the window once on a first run); the components are in `shell/setup/page`.
+- `paddock-siblings` (plan X45): hand-off between the apps, from Pitcrew's `debrief_link.rs` and `handoff.rs`. `AppSpec` / `FAMILY` hold
+  what each app accepts (the hand-off rows of `docs/ecosystem.md`); `Handoff` is `Open`, `Import { files }` (absolute existing files,
+  at most 32, the app's extensions) or `Show { item }` (plain words); `Siblings::open` refuses an unknown app, itself and anything
+  the app does not accept before looking for it, finds the program (`PATH`, then the install places per OS, the pre-rename name as
+  "needs update"), and starts it detached with the paths or one deep link of its scheme (`pitcrew://show/machine/mac-mini`);
+  "not installed" is a plain `Outcome`. The receiving side parses with `Handoff::from_paths` / `from_link`. `testing` has a file
+  system and a spawner that start nothing.
 - `paddock-metrics` (plan X30): the tiered metrics store (`TieredStore<P: Series>`, checked `Retention`, bounded memory and file, late samples
   dropped, `StoreFile` through paddock-env), the machine series and `Sampler` on the shared `Clock` (CPU, memory, free disk of a path's
   volume, the app's own memory with PSS on Linux), `volume_free` / `free_bytes` and a bounded `folder_size`.

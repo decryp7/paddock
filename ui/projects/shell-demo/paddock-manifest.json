@@ -14,6 +14,10 @@
       "title": "pd.settings.open"
     },
     {
+      "id": "pd.setup.open",
+      "title": "pd.setup.open"
+    },
+    {
       "id": "pd.updates.open",
       "title": "pd.updates.open"
     },
@@ -165,6 +169,13 @@
     },
     {
       "menu": "help",
+      "command": "pd.setup.open",
+      "group": "about",
+      "order": 300,
+      "accelerator": null
+    },
+    {
+      "menu": "help",
       "command": "pd.diagnostics.report",
       "group": "support",
       "order": 400,
@@ -266,6 +277,7 @@
     "pd.logging",
     "pd.login",
     "pd.notifications",
+    "pd.setup",
     "sd.general",
     "sd.storage"
   ],
@@ -318,7 +330,26 @@
         "service_status",
         "settings_overview",
         "settings_reset",
-        "settings_set"
+        "settings_set",
+        "setup_act",
+        "setup_finish",
+        "setup_repair",
+        "setup_skip",
+        "setup_state"
+      ]
+    },
+    "pd.setup": {
+      "kind": "tool",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": [
+        "setup_act",
+        "setup_finish",
+        "setup_repair",
+        "setup_skip",
+        "setup_state"
       ]
     },
     "pd.updates": {
@@ -424,7 +455,10 @@
     "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",
     "pd.settings.service": "Background service",
+    "pd.settings.setup": "Set-up",
     "pd.settings.title": "Settings",
+    "pd.setup.open": "Set-up…",
+    "pd.setup.title": "Set-up",
     "pd.updates.notification.available": "Update available",
     "pd.updates.open": "Check for updates…",
     "pd.updates.title": "Updates",

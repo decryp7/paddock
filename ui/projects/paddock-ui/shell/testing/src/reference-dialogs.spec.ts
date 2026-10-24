@@ -39,6 +39,7 @@ describe('shell-demo dialogs', () => {
       expect(report.sent).toContain('window_ready');
       if (def.id === 'sd.inspector') expect(report.sent).toContain('demo_status');
       if (def.id === 'pd.settings') expect(report.sent).toContain('settings_overview');
+      if (def.id === 'pd.setup') expect(report.sent).toContain('setup_state');
     });
   }
 

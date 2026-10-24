@@ -217,6 +217,8 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
             Some(_) => setup.checks(Duration::ZERO, Duration::ZERO, 0),
         }))
     });
+    // The first-run set-up checklist (plan X19): the service and Start at login steps of the agent above.
+    builder = builder.first_run(|_| paddock_shell::FirstRun::new());
     let report_dir = test_dir.clone();
     // Report a problem (plan X2) and the Logging section: the app's folders and log, the shell's built-in sections.
     builder = builder.diagnostics(move |_| {
