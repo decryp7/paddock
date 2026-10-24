@@ -34,7 +34,7 @@ pub mod types;
 
 pub use audit::{AuditEntry, AuditLog, AuditSink, Outcome, redact_arguments};
 pub use control::{
-    AuditRow, ErrorCode, FileSettings, IssuedKey, KeyInfo, MAX_KEYS, McpControl, McpError,
+    AuditRow, Emit, ErrorCode, FileSettings, IssuedKey, KeyInfo, MAX_KEYS, McpControl, McpError,
     McpEvent, McpSettings, McpView, MemorySettings, SettingsStore, ToolInfo,
 };
 pub use keys::{KEY_PREFIX, KeyEntry, KeyStore, KeyVerifier};
