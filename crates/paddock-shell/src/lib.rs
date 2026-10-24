@@ -37,8 +37,9 @@ pub mod manifest;
 pub mod notifications;
 pub mod permissions;
 mod prefs;
+pub mod setup;
 
-pub use builder::{AppIdentity, Builder, ServicePart};
+pub use builder::{AppIdentity, Builder, FirstRun, ServicePart};
 pub use commands::{VersionReply, shell_version};
 pub use prefs::SettingsPreferences;
 
@@ -63,7 +64,11 @@ paddock_commands::command_table! {
         paddock_health::tauri::COMMANDS,
         paddock_dialogs::COMMANDS,
         paddock_diag::COMMANDS,
+        paddock_files::COMMANDS,
         paddock_service::COMMANDS,
+        setup::COMMANDS,
+        paddock_packs::COMMANDS,
+        paddock_channels::COMMANDS,
         paddock_jobs::tauri::COMMANDS,
         paddock_settings::tauri::COMMANDS,
         paddock_updater::COMMANDS,

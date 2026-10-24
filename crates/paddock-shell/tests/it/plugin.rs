@@ -683,3 +683,168 @@ fn the_start_at_login_switch_also_switches_the_apps_own_login_item() {
     }
     assert_eq!(*asked.lock().unwrap(), [true]);
 }
+
+#[test]
+fn the_knowledge_packs_bring_their_commands_event_and_health_entry() {
+    use paddock_packs::{
+        BuiltinPack, Limits, Origin, PackError, PackKind, PackLoader, PackSource, PackStore,
+    };
+    struct Lines;
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        #[serde(default)]
+        line: Vec<String>,
+    }
+    impl PackKind for Lines {
+        type Raw = Raw;
+        type Pack = Vec<String>;
+        const FORMAT: u32 = 1;
+        fn convert(raw: Raw, _: Origin) -> Result<Vec<String>, PackError> {
+            Ok(raw.line)
+        }
+    }
+    struct Empty;
+    impl PackSource for Empty {
+        fn list(&self) -> std::io::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        fn read(&self, _: &str, _: u64) -> std::io::Result<Vec<u8>> {
+            Err(std::io::ErrorKind::NotFound.into())
+        }
+    }
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .health(vec![paddock_health::ServiceSpec::new(
+            "packs",
+            "the knowledge packs",
+        )])
+        .packs(|_| {
+            let loader = PackLoader::<Lines>::new(
+                vec![
+                    BuiltinPack {
+                        name: "builtin.toml",
+                        text: "format = 1\nline = ['a']\n",
+                    },
+                    BuiltinPack {
+                        name: "bad.toml",
+                        text: "format = 7\n",
+                    },
+                ],
+                Box::new(Empty),
+                Limits::default(),
+            );
+            let store = Arc::new(PackStore::new(loader));
+            store.reload();
+            Ok(paddock_packs::tauri::Setup::new()
+                .kind(paddock_packs::view::kind("lines", "Line packs", store))
+                .health("packs"))
+        }));
+    let main = window(&app, "main");
+    let status = invoke(&main, "packs_status", json!({})).unwrap();
+    assert_eq!(status["kinds"][0]["id"], "lines", "{status}");
+    assert_eq!(status["kinds"][0]["problems"][0]["file"], "bad.toml");
+    let health = invoke(&main, "health_snapshot", json!({})).unwrap();
+    assert!(
+        health.to_string().contains("\"repair\":\"retry\""),
+        "{health}"
+    );
+    assert!(invoke(&main, "packs_reload", json!({})).is_ok());
+}
+
+#[test]
+fn user_files_bring_their_commands_recent_lists_and_drop_grants() {
+    use paddock_files::open::{Invocation, Launcher};
+    use paddock_files::recent::{FILES, Recents};
+    struct Seen(Arc<Mutex<Vec<String>>>);
+    impl Launcher for Seen {
+        fn start(&self, i: &Invocation) -> std::io::Result<()> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(i.program.to_string_lossy().into_owned());
+            Ok(())
+        }
+    }
+    let started = Arc::new(Mutex::new(Vec::new()));
+    let s2 = started.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .files(move |_| {
+            Ok(paddock_files::Files::new(Recents::open(None, &[FILES]))
+                .launcher(Arc::new(Seen(s2))))
+        }));
+    let main = window(&app, "main");
+    let tray = window(&app, "tray");
+    let lists = invoke(&main, "files_recent_list", json!({})).unwrap();
+    assert_eq!(lists["lists"][0]["id"], "files");
+    invoke(
+        &main,
+        "files_open_url",
+        json!({ "url": "https://example.org" }),
+    )
+    .unwrap();
+    assert_eq!(started.lock().unwrap().len(), 1);
+    // Without a picker (and without native dialogs) choosing says so; a tray popover may not choose at all.
+    let e = invoke(
+        &main,
+        "files_pick",
+        json!({ "request": { "kind": "openFile" } }),
+    )
+    .unwrap_err();
+    assert_eq!(e["code"], "unavailable", "{e}");
+    assert!(
+        text(
+            &invoke(
+                &tray,
+                "files_pick",
+                json!({ "request": { "kind": "openFile" } })
+            )
+            .unwrap_err()
+        )
+        .contains("not allowed")
+    );
+    // A file dropped on a window is granted to it.
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("a.log");
+    std::fs::write(&log, "x").unwrap();
+    assert_eq!(
+        invoke(
+            &main,
+            "files_reveal",
+            json!({ "path": log.to_string_lossy() })
+        )
+        .unwrap_err()["code"],
+        "notGranted"
+    );
+    paddock_files::tauri::on_window_event(
+        &main.as_ref().window(),
+        &tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop {
+            paths: vec![log.clone()],
+            position: tauri::PhysicalPosition::new(0.0, 0.0),
+        }),
+    );
+    invoke(
+        &main,
+        "files_reveal",
+        json!({ "path": log.to_string_lossy() }),
+    )
+    .unwrap();
+    assert_eq!(started.lock().unwrap().len(), 2);
+    // A failing set-up names the part.
+    let built = mock_builder()
+        .plugin(
+            Builder::new(identity())
+                .in_memory()
+                .native_menu(false)
+                .files(|_| Err("no config folder".into()))
+                .build(),
+        )
+        .build(context());
+    let e = built.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(
+        e.contains("user files") && e.contains("no config folder"),
+        "{e}"
+    );
+}

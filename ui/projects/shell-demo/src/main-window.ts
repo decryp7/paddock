@@ -9,6 +9,10 @@ import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
 import { TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
 import { OS_NOTIFICATIONS_CONTRIBUTIONS, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
+import { provideShellSetup, SETUP_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/setup';
+import { demoSetupBackend } from './app/demo-setup';
+import { ACTIVITY_CONTRIBUTIONS, provideShellActivity, provideShellUndo, UNDO_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/undo';
+import { DemoActivity } from './app/demo-activity';
 import { provideWebviewLog } from '@decryp7/paddock-ui/shell/diagnostics';
 import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS, SHELL_DIAGNOSTICS_CONTRIBUTIONS } from './app/demo.contributions';
 import { demoAboutBackend, demoUpdatesBackend } from './app/demo-about';
@@ -49,6 +53,11 @@ export function bootMainWindow(): Promise<unknown> {
         },
       },
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
+      // Undo and the activity log (plan X44): Edit > Undo and Redo, the "Done, Undo" toast, the Activity page.
+      provideShellUndo(),
+      provideShellActivity({ backend: () => inject(DemoActivity).backend }),
+      provideContributions<DemoContext>(UNDO_CONTRIBUTIONS),
+      provideContributions(ACTIVITY_CONTRIBUTIONS),
       // The desktop build asks the shell plugin for its version once (ADR 0012 §3): a different one is a plain error.
       ...(ipc ? [provideShellVersionCheck(ipc.invoke)] : []),
       // About, Updates and What's New (plan S11): the Help menu's items; the main window announces a found update and
@@ -58,6 +67,9 @@ export function bootMainWindow(): Promise<unknown> {
       // Report a problem (plan X2): Help > Report a problem…, the Logging settings page, and the page's own errors in the
       // engine's log (desktop build only: the browser build has no log to send them to).
       provideContributions(SHELL_DIAGNOSTICS_CONTRIBUTIONS),
+      // The first-run set-up checklist (plan X19): Help > Set-up…, and the Set-up window opened once on a first run.
+      provideContributions(SETUP_CONTRIBUTIONS),
+      provideShellSetup({ backend: demoSetupBackend, main: true, ready: windowReady }),
       provideContributions(OS_NOTIFICATIONS_CONTRIBUTIONS),
       ...(ipc ? [provideWebviewLog({ ipc: () => ({ invoke: (command, args) => ipc.invoke(command, args) }) })] : []),
       // Settings (plan S10): Settings… (Mod+,) and the shell's Appearance page, Open Settings for notices and repairs, and

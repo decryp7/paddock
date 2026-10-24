@@ -20,22 +20,22 @@ pub const APP_ID: &str = "shell-demo";
 pub const APP_NAME: &str = "Paddock Shell Demo";
 /// The agent's version (equal to the app's; the app's tests check it).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// The argument the bundle check starts the agent with (rule 23).
-pub const SELF_TEST: &str = "--self-test";
 
 /// The app's folders, as the agent uses them.
 pub fn dirs() -> Result<AppDirs, Box<dyn std::error::Error + Send + Sync>> {
     Ok(AppDirs::for_app(&AppId::new(APP_ID, APP_NAME)?)?)
 }
 
-/// What `--self-test` prints: the agent loads, its spec renders and its version, without reading or writing anything.
-pub fn self_test() -> String {
-    let plist = bundled_plist();
-    let ok = plist.contains(LABEL) && !nsis_hooks().is_empty();
-    format!(
-        "{PROGRAM} {VERSION} self-test: {}",
-        if ok { "ok" } else { "spec does not render" }
-    )
+/// What `--self-test` proves (`paddock_proc::self_test`, rule 23): the agent loads and its service spec renders, without reading
+/// or writing anything.
+pub fn self_test_checks() -> Vec<paddock_proc::self_test::Check> {
+    vec![paddock_proc::self_test::Check::new("service spec", || {
+        if bundled_plist().contains(LABEL) && !nsis_hooks().is_empty() {
+            Ok(())
+        } else {
+            Err("the launchd and installer specs do not render".to_string())
+        }
+    })]
 }
 
 /// The launchd label (and the bundled plist's file name without `.plist`).
@@ -305,8 +305,17 @@ mod tests {
 
     #[test]
     fn the_self_test_answers_without_touching_anything() {
-        assert!(self_test().ends_with(": ok"), "{}", self_test());
-        assert!(self_test().contains(VERSION));
+        let mut out = Vec::new();
+        assert_eq!(
+            paddock_proc::self_test::run(PROGRAM, VERSION, &self_test_checks(), &mut out),
+            0
+        );
+        let text = String::from_utf8(out).expect("utf-8 report");
+        assert!(
+            text.starts_with(&format!("{PROGRAM} {VERSION} self-test\n")),
+            "{text}"
+        );
+        assert!(text.contains("ok service spec"), "{text}");
     }
 
     #[test]

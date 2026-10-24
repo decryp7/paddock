@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-channels-save"
+description = "Enables the channels_save command without any pre-configured scope."
+commands.allow = ["channels_save"]
+
+[[permission]]
+identifier = "deny-channels-save"
+description = "Denies the channels_save command without any pre-configured scope."
+commands.deny = ["channels_save"]

@@ -25,3 +25,9 @@
 # Coverage data (a test child that outlives its parent leaves one in its working folder).
 *.profraw
 *.profdata
+
+# The workbench demo app (apps/workbench-demo): its Tauri CLI, Tauri's generated schemas, a local build folder and bundles.
+/apps/workbench-demo/node_modules/
+/apps/workbench-demo/src-tauri/gen/
+/apps/workbench-demo/src-tauri/target/
+/apps/workbench-demo/dist/

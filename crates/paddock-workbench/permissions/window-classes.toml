@@ -1,0 +1,56 @@
+# Generated from the command table of paddock-workbench. Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-workbench --all-features --lib generated.
+
+[default]
+description = "The main window's set: every workbench command a top-level window may call."
+permissions = ["main"]
+
+[[set]]
+identifier = "main"
+description = "Every workbench command a top-level window (`main`, `w-<n>`) may call."
+permissions = [
+  "allow-assistant-approve-tool",
+  "allow-assistant-conversations",
+  "allow-assistant-delete",
+  "allow-assistant-info",
+  "allow-assistant-load",
+  "allow-assistant-send",
+  "allow-assistant-stop",
+  "allow-drag-ghost-end",
+  "allow-drag-ghost-show",
+  "allow-drag-ghost-start",
+  "allow-layout-get",
+  "allow-layout-set",
+  "allow-panel-dock-back",
+  "allow-panel-focus",
+  "allow-panel-pop-out",
+  "allow-panels-list",
+  "allow-pointer-button-down",
+  "allow-ui-sync-publish",
+]
+
+[[set]]
+identifier = "popout"
+description = "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call."
+permissions = [
+  "allow-assistant-approve-tool",
+  "allow-assistant-conversations",
+  "allow-assistant-delete",
+  "allow-assistant-info",
+  "allow-assistant-load",
+  "allow-assistant-send",
+  "allow-assistant-stop",
+  "allow-layout-get",
+  "allow-panel-dock-back",
+  "allow-panel-focus",
+  "allow-panel-keep-on-top",
+  "allow-panels-list",
+  "allow-pointer-button-down",
+  "allow-ui-sync-publish",
+]
+
+[[set]]
+identifier = "dialog"
+description = "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract."
+permissions = [
+  "allow-ui-sync-publish",
+]

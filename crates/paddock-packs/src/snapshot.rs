@@ -2,6 +2,7 @@ use crate::Origin;
 use serde::Serialize;
 
 /// A problem with one pack file, attributed to it.
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Problem {
     /// The pack's file name (or the built-in pack's name).
@@ -49,7 +50,9 @@ impl<P> Default for Snapshot<P> {
 }
 
 /// The one-line summary for a `packs` health or notification entry.
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "level", rename_all = "camelCase")]
 pub enum Health {
     /// Every pack loaded and nothing was ignored.
     Ok,

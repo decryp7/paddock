@@ -1,0 +1,63 @@
+# Paddock Workbench Demo: the workbench demo (ui/projects/workbench-demo) as an installable desktop app on the `paddock-shell`
+# and `paddock-workbench` plugins (plan docs/plans/workbench.md §10, X50 W8). It is its own workspace, as an app's `src-tauri`
+# is, and the starter of new IDE-style apps (README.md, "Start a new app from the workbench demo").
+[workspace]
+
+[package]
+name = "paddock-workbench-demo"
+# The app's version, its single source: tauri.conf.json has none (Tauri reads this one), the release tag is
+# `workbench-demo-v<version>` and CHANGELOG.md has its notes.
+version = "0.1.0"
+description = "Paddock Workbench Demo: the Paddock workbench as an installable app, to check the shared UI and to start new apps from"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://dev.decryptology.net/decryp7/paddock"
+publish = false
+default-run = "paddock-workbench-demo"
+
+[lib]
+name = "paddock_workbench_demo"
+
+[[bin]]
+name = "paddock-workbench-demo"
+path = "src/main.rs"
+
+[build-dependencies]
+paddock-build = { path = "../../../crates/paddock-build", features = ["tauri-build"] }
+
+# The crates from this repository (path dependencies). An app outside the repository names them from the `decryp7`
+# registry instead (crates/README.md, "Consuming the crates").
+[dependencies]
+paddock-shell = { path = "../../../crates/paddock-shell" }
+paddock-workbench = { path = "../../../crates/paddock-workbench", features = ["tauri"] }
+paddock-panels = { path = "../../../crates/paddock-panels", features = ["tauri"] }
+paddock-assistant = { path = "../../../crates/paddock-assistant", features = ["tauri"] }
+paddock-pitwall = { path = "../../../crates/paddock-pitwall" }
+paddock-secrets = { path = "../../../crates/paddock-secrets" }
+paddock-commands = { path = "../../../crates/paddock-commands", features = ["tauri"] }
+paddock-dialogs = { path = "../../../crates/paddock-dialogs", features = ["tauri"] }
+paddock-env = { path = "../../../crates/paddock-env" }
+paddock-health = { path = "../../../crates/paddock-health", features = ["tauri"] }
+paddock-jobs = { path = "../../../crates/paddock-jobs", features = ["tauri"] }
+paddock-startup = { path = "../../../crates/paddock-startup", features = ["tauri"] }
+paddock-updater = { path = "../../../crates/paddock-updater", features = ["tauri"] }
+paddock-window = { path = "../../../crates/paddock-window", features = ["tauri", "wry"] }
+tauri = { version = "2.12", features = ["image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = { version = "0.4", features = ["kv"] }
+
+[dev-dependencies]
+tauri = { version = "2.12", features = ["test"] }
+# Dialogs and pop-outs on Tauri's mock runtime (not parented to a native window).
+paddock-shell = { path = "../../../crates/paddock-shell", features = ["mock-runtime"] }
+paddock-panels = { path = "../../../crates/paddock-panels", features = ["mock-runtime"] }
+# The capabilities are resolved through Tauri's own ACL in the tests.
+tauri-utils = "2.10"
+tempfile = "3"
+toml = "0.9"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
