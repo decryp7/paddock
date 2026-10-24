@@ -330,12 +330,11 @@ impl Runner {
                         Some(peer.clone()),
                     );
                     // `stop` sets its flag before it closes the published peer, so one of the two sees the other.
+                    if !self.stopping() {
+                        peer.wait_closed(None);
+                    }
                     if self.stopping() {
                         peer.close();
-                        break;
-                    }
-                    peer.wait_closed(None);
-                    if self.stopping() {
                         break;
                     }
                     format!("the connection to {} dropped", self.config.peer.label)
@@ -374,8 +373,15 @@ impl Runner {
 
     fn connect(&self, d: &Discovery) -> Result<Peer, String> {
         let token = d.token().ok_or("the discovery file holds no valid token")?;
-        let conn = Client::connect(&d.endpoint, &token, self.config.limit, self.config.protocol)
-            .map_err(|e| format!("{} did not answer ({e})", self.config.peer.label))?;
+        let conn = Client::connect_on(
+            &d.endpoint,
+            &token,
+            self.config.limit,
+            self.config.protocol,
+            &self.config.clock,
+            crate::handshake::HANDSHAKE_TIMEOUT,
+        )
+        .map_err(|e| format!("{} did not answer ({e})", self.config.peer.label))?;
         Peer::start(conn, self.handler.clone(), self.config.peer.clone()).map_err(|e| e.to_string())
     }
 
@@ -389,9 +395,6 @@ impl Runner {
         let label = &self.config.peer.label;
         let mut last = format!("{label} is not running");
         for _ in 0..3 {
-            if self.stopping() {
-                return Err("stopping".into());
-            }
             match plan(self.found(), &self.config.build, self.config.protocol) {
                 Plan::Connect(d) => return self.connect(&d).map(|p| (p, d)),
                 Plan::RemoveStale(d) => {
@@ -417,10 +420,10 @@ impl Runner {
         let Some(launcher) = &self.launcher else {
             return Err(format!("{label} is not running"));
         };
-        if matches!(self.found(), Found::Live(_)) {
-            return Ok(());
+        // One may have appeared meanwhile (another app of this build started it): never start a second.
+        if !matches!(self.found(), Found::Live(_)) {
+            launcher.launch()?;
         }
-        launcher.launch()?;
         let waited = self.poll_until(self.config.start_wait, || {
             matches!(self.found(), Found::Live(_))
         });
