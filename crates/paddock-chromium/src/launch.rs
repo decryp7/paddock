@@ -580,6 +580,9 @@ impl Chromium {
             }
         }
         self.process.kill();
+        if self.throwaway {
+            end_leftovers(&self.dir);
+        }
         cleanup(&self.dir, self.throwaway);
         exited
     }
@@ -620,6 +623,18 @@ fn watchdog(
                 paddock_proc::kill_tree(pid);
             }
         });
+}
+
+/// Ends processes that still name the throwaway profile after the tree was ended: a helper that left the browser's process
+/// group (a crash handler that daemonised) would otherwise outlive it. The folder name is unique to this launch, so only
+/// this browser's processes match. Returns how many were ended.
+fn end_leftovers(dir: &Path) -> usize {
+    let left = paddock_proc::processes_mentioning(&dir.to_string_lossy());
+    for &pid in &left {
+        log::warn!("A browser helper (pid {pid}) outlived the browser and is ended");
+        paddock_proc::end(pid);
+    }
+    left.len()
 }
 
 fn cleanup(dir: &Path, throwaway: bool) {

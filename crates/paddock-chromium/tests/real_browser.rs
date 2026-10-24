@@ -66,8 +66,11 @@ fn a_real_browser_reads_a_page_and_closes_cleanly() {
     assert!(b.close(), "Browser.close ends it by itself");
     assert!(!dir.exists());
     assert!(!paddock_proc::is_alive(pid), "nothing is left behind");
-    assert!(
-        paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty(),
-        "no helper is left behind"
-    );
+    // Helpers end a moment after the browser; a bounded wait, not an immediate check (rule 40).
+    let end = std::time::Instant::now() + Duration::from_secs(20);
+    while !paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty() {
+        // conformance: hang-guard — a helper that never ends fails the test instead of hanging it
+        assert!(std::time::Instant::now() < end, "no helper is left behind");
+        std::thread::yield_now();
+    }
 }
