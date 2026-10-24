@@ -13,6 +13,9 @@ export const DEFAULT_CONFIG = {
   tauriDir: 'app/src-tauri',
   workflowsDir: '.gitea/workflows',
   sidecars: [],
+  untimedCommands: {},
+  parserCrates: [],
+  parserSkip: [],
   nonGates: [],
   commitRange: null,
 };

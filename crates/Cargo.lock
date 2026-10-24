@@ -3024,6 +3024,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-build"
+version = "0.1.0"
+dependencies = [
+ "tauri-build",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-channels"
 version = "0.1.0"
 dependencies = [
@@ -3264,6 +3272,7 @@ dependencies = [
  "paddock-health",
  "paddock-proc",
  "paddock-settings",
+ "paddock-testkit",
  "plist",
  "serde",
  "serde_json",
@@ -3353,6 +3362,7 @@ dependencies = [
  "paddock-commands",
  "paddock-download",
  "paddock-jobs",
+ "paddock-testkit",
  "semver",
  "serde",
  "serde_json",
