@@ -20,6 +20,36 @@ pub trait Autostart: Send {
     fn set(&mut self, on: bool) -> Result<(), String>;
 }
 
+/// Tells a change of the switch from the value the section is applied with at start: the first value is only
+/// remembered (a stored "off" at start must never remove a service the user installed with Install).
+#[derive(Debug, Default)]
+pub struct LoginSwitch {
+    last: std::sync::Mutex<Option<bool>>,
+}
+
+impl LoginSwitch {
+    /// Whether `on` is a change by the user (not the first value, not the same value again).
+    pub fn changed(&self, on: bool) -> bool {
+        let mut last = self
+            .last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let changed = last.is_some_and(|l| l != on);
+        *last = Some(on);
+        changed
+    }
+}
+
+/// An app without a login item of its own (only the service follows the switch).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoAutostart;
+
+impl Autostart for NoAutostart {
+    fn set(&mut self, _on: bool) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// The settings section (`pd.login`): one switch, off by default (nothing starts at login unasked). `with_service`
 /// says whether the app has a background service the switch also covers.
 pub fn launch_at_login_section(app: &str, with_service: bool) -> SettingsSection {
@@ -110,6 +140,17 @@ mod tests {
             "1.0.0",
             || true,
         )
+    }
+
+    #[test]
+    fn only_a_change_of_the_switch_acts() {
+        let s = LoginSwitch::default();
+        assert!(!s.changed(false), "the value at start");
+        assert!(!s.changed(false));
+        assert!(s.changed(true));
+        assert!(!s.changed(true));
+        assert!(s.changed(false));
+        assert!(NoAutostart.set(true).is_ok());
     }
 
     #[test]

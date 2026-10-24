@@ -2933,6 +2933,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-menu",
+ "paddock-service",
  "paddock-settings",
  "paddock-startup",
  "paddock-updater",
