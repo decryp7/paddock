@@ -664,3 +664,24 @@ fn a_save_without_the_jobs_state_is_refused_and_a_panicking_picker_fails_the_sav
         "the failed save did not leave the state stuck"
     );
 }
+
+#[test]
+fn requests_with_missing_or_mistyped_arguments_are_refused_before_they_run() {
+    let rig = rig(|_, _| Pick::Dismiss);
+    let w = window(&rig.app, "d-main-1");
+    for (cmd, body) in [
+        ("diagnostics_preview", json!({ "token": null })),
+        ("diagnostics_preview", json!({ "description": 3 })),
+        ("diagnostics_save", json!({ "token": "t" })),
+        ("diagnostics_save", json!({ "token": 1, "description": "" })),
+        ("log_from_webview", json!({ "level": "info" })),
+        ("log_from_webview", json!({ "level": 1, "message": "m" })),
+    ] {
+        assert!(invoke(&w, cmd, body).is_err(), "{cmd}");
+    }
+    assert_eq!(
+        rig.collects.load(Ordering::SeqCst),
+        0,
+        "nothing was collected for a refused request"
+    );
+}

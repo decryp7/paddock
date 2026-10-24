@@ -259,4 +259,40 @@ mod tests {
         s.kill();
         assert!(processes_mentioning(&marker).iter().all(|p| !is_alive(*p)));
     }
+
+    #[test]
+    fn descendants_are_found_by_walking_the_process_table() {
+        let mut c = child(Mode::Tree);
+        c.stdout(Stdio::piped());
+        let mut s = Supervised::spawn(c).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        let mut grand = None;
+        let mut l = String::new();
+        while grand.is_none() {
+            l.clear();
+            assert!(r.read_line(&mut l).unwrap() > 0);
+            grand = lines(&l)
+                .first()
+                .and_then(|p| p.strip_prefix("pid "))
+                .and_then(|p| p.trim().parse::<u32>().ok());
+        }
+        let root = s.id().unwrap();
+        assert!(descendants_of(root).contains(&grand.unwrap()));
+        assert!(descendants_of(u32::MAX - 1).is_empty());
+        s.kill();
+    }
+
+    #[test]
+    fn a_process_that_ignores_the_request_is_waited_for_until_the_grace_period_ends() {
+        let mut c = child(Mode::IgnoreTerm);
+        c.stdout(Stdio::piped());
+        let mut s = Supervised::spawn(c).unwrap();
+        ready(&mut s);
+        // It cannot stop gracefully, so the outcome does not depend on how long the wait takes.
+        assert_eq!(
+            terminate(s.id().unwrap(), Duration::from_millis(60)),
+            Terminated::Killed
+        );
+        s.kill();
+    }
 }
