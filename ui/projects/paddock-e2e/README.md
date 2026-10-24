@@ -46,6 +46,7 @@ for (const colorScheme of THEMES) {
 | `LAYOUT_WIDTHS`, `WINDOW_SIZES`, `expectNoHorizontalScroll`, `expectWithinWidth`, `resize` | Layout scenarios (rule 18) |
 | `installTauriFake(page, options)` | A fake `__TAURI_INTERNALS__`: replies by command, held until released, recorded calls, events delivered to the page's listeners, a played platform (`mac` has the native menu bar) |
 | `waitForStableFrame`, `captureStable` | Screenshots once the fonts are loaded, nothing animates and the layout held still between two looks (works under `page.clock`) |
+| `readVersion(path)`, `RELEASE_VERSION` | The app's version from its single source (`package.json` or `Cargo.toml`), checked for a release-number shape (rule 6) |
 | `@decryp7/paddock-e2e/retried-reporter` | Lists tests that passed only after a retry (console, `playwright-retried.md`, `$GITHUB_STEP_SUMMARY`); never changes the exit code |
 
 Build: `npm run build:e2e` in `ui/` (writes `ui/dist/paddock-e2e`). Its unit tests run with `npm run test:scripts`.

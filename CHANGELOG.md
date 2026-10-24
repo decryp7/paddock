@@ -110,7 +110,7 @@ Conventional Commits; one semver tag for the whole repo.
   `pageErrors`, and a worker check that refuses the installed Chrome or Edge (`assertChromeForTesting` for the config,
   `PADDOCK_E2E_CHROME` for a pinned binary, rule 7); `e2ePort` (required on CI); `axeViolations` and `THEMES`; layout
   scenarios (`LAYOUT_WIDTHS`, `expectNoHorizontalScroll`); `installTauriFake` (replies by command, held until
-  released, recorded calls, events, a played Mac); `captureStable` screenshots of a settled frame; the retried-test
+  released, recorded calls, events, a played Mac); `captureStable` screenshots of a settled frame; `readVersion` (the app version from its single source, rule 6); the retried-test
   reporter (`@decryp7/paddock-e2e/retried-reporter`); `dialogContracts`. `shell-demo`'s e2e uses only the kit.
   `shell/testing`: `provideShellTesting` (zoneless, shell core, `RecordingShellPorts`, `ManualIdle`, contributions,
   context, `windowReady` set), `ManualClock`, `settle` and `render` on `whenStable` (rule 38), `lazyExportProblems`;
@@ -119,8 +119,8 @@ Conventional Commits; one semver tag for the whole repo.
 - `shell/settings/window`: the Settings window, its section form and field control and `settingsWindowProviders`, split
   from `shell/settings` so a main window loads none of it (and no `@angular/forms`); a settings page without `load` is
   its Rust section in the window's generic form. The status items' components are exported as types only (their words
-  from pure files), so they stay chunks of their own. `shell-demo` loads 545.6 kB of JavaScript before first paint
-  in its main window instead of 661.9 kB, and 437.5 kB instead of 549.8 kB in a dialog window.
+  from pure files), so they stay chunks of their own. `shell-demo` loads 559.5 kB of JavaScript before first paint
+  in its main window instead of 676.2 kB, and 448.8 kB instead of 561.4 kB in a dialog window.
 - `windowReady` (`shell/startup`): set once the window's ready reply was handled; `NATIVE_MENU_GATE` defaults to it
   (with the app context), so `shell/pages` no longer wraps `AFTER_READY` and `PAGES_WINDOW_READY` is gone.
 - `DialogService.open(def, { inputs })` types the inputs from the content component's `input()` signals
