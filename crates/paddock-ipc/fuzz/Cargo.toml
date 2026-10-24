@@ -1,0 +1,24 @@
+# Fuzz targets for paddock-ipc's decoders (ADR 0001: "fuzz targets for the decoder live in paddock-ipc"). Its own
+# workspace, outside the crates' one; run with `cargo +nightly fuzz run frame` from `crates/paddock-ipc`.
+[package]
+name = "paddock-ipc-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+paddock-ipc = { path = ".." }
+
+[[bin]]
+name = "frame"
+path = "fuzz_targets/frame.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
