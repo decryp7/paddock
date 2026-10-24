@@ -11,6 +11,14 @@ Conventional Commits; one semver tag for the whole repo.
   wrong (header and rows differ in font size, which put the tree's Size header 5 px off its values), the header keeps the body's
   scrollbar width and group names truncate; the Storage table counts "3 kinds of data"; the `reveal` arrow is inside the margin; the
   320 px shots show their subject (Settings closed before the Files shot, the table scrolled into view, the row menu open).
+- X51 `@decryp7/paddock-ui/view`: `<pd-view>`, the renderer of the declarative views plugins return (ADR 0002, `paddock-view`). Every
+  node kind (stack, text, table with sort and paging, lazy tree, graph, diagram, form, review list, matrix, chart, badge, progress,
+  empty, needs-AI, link); an unknown kind says "Update the app to view this" for that node only. Documents are validated on receipt by a
+  TypeScript mirror of the engine limits (`validateViewDoc`), patches (`applyViewPatch`: replace by id with the base etag checked, or a
+  whole document) are applied by `ViewStore` (stale or invalid: inline error with Retry, the last good view stays), actions leave as
+  `ViewAction` with the host keys `row`, `page`, `node`, `finding`, `reason`, `values`, `column`, `descending` (matrix cells add `row`,
+  `col`, `rowId`, `colId`). Confirmations, the OS browser and the path and secret pickers are the host's (`VIEW_HOST`, refused by default).
+  Gallery section, Playwright spec (axe, 320 px) and the review sheet `ui/docs/review/x51-view/`.
 - `cargo-paddock-plugin` (X51, ADR 0001): the plugin author's tool, `cargo paddock-plugin new | build | pack | keygen | sign | verify
   | run | test` on `paddock-cli` conventions (ported from Debrief's `cargo-debrief-plugin`). `new` makes a project that depends on
   `paddock-plugin-api` alone; `pack` writes a deterministic `.paddockplugin` (optionally Ed25519-signed); `verify` checks checksums,
