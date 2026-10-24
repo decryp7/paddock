@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  actionColumnWidth,
   cellText,
+  columnTrack,
+  fitColumns,
+  PD_PRIMARY_MIN_PX,
+  rowHeightFor,
   compareValues,
   filterRows,
   fromControl,
@@ -133,5 +138,48 @@ describe('table model', () => {
     ];
     expect(inlineActions(actions).map((a) => a.id)).toEqual(['a', 'b']);
     expect(menuActions(actions).map((a) => a.id)).toEqual(['a', 'b', 'c', 'd', 'e', 'rm']);
+  });
+
+  it('gives a required column a floor in its grid track', () => {
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true })).toBe('minmax(128px, 2fr)');
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true, width: 'minmax(0, 3fr)' })).toBe('minmax(128px, 3fr)');
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true, width: '200px' })).toBe('200px');
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1 })).toBe('minmax(0, 1fr)');
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, width: '96px' })).toBe('96px');
+  });
+
+  it('drops optional columns from the right before the primary column goes under its floor, at every width from 320 up', () => {
+    const wide: PdColumn<Row>[] = [
+      { key: 'name', header: 'Name', value: (r) => r.name, required: true, width: 'minmax(0, 2fr)' },
+      { key: 'kind', header: 'Kind', value: (r) => r.kind, width: '96px' },
+      { key: 'size', header: 'Size', value: (r) => r.size, width: '96px', align: 'end' },
+      { key: 'path', header: 'Path', value: (r) => r.name, width: 'minmax(0, 3fr)' },
+    ];
+    for (let width = 320; width <= 1200; width += 20) {
+      const kept = fitColumns(wide, width, 28);
+      expect(kept.some((c) => c.key === 'name'), `${width}`).toBe(true);
+      // What the other columns, the gaps, the padding and the action column take leaves the primary column its floor.
+      const fixed = kept.filter((c) => !c.required).reduce((a, c) => a + (c.width?.endsWith('px') ? Number.parseInt(c.width, 10) : 64), 0);
+      const gaps = 12 * kept.length;
+      expect(width - (fixed + gaps + 24 + 28), `${width}`).toBeGreaterThanOrEqual(PD_PRIMARY_MIN_PX);
+    }
+    expect(fitColumns(wide, 320, 28).map((c) => c.key)).toEqual(['name', 'kind']);
+    expect(fitColumns(wide, 1200, 28)).toHaveLength(4);
+    // Only required columns left: nothing more can go.
+    expect(fitColumns([wide[0]!], 100, 28).map((c) => c.key)).toEqual(['name']);
+  });
+
+  it('sizes the action column from what the rows can show', () => {
+    expect(actionColumnWidth(false, 2, false)).toBe(0);
+    expect(actionColumnWidth(true, 2, true)).toBe(28);
+    expect(actionColumnWidth(true, 0, false)).toBe(28);
+    expect(actionColumnWidth(true, 1, false)).toBe(56);
+    expect(actionColumnWidth(true, 2, false)).toBe(84);
+    expect(actionColumnWidth(true, 5, false)).toBe(84);
+  });
+
+  it('knows the family row heights', () => {
+    expect([24, 32, 36].map(rowHeightFor)).toEqual([24, 32, 36]);
+    expect([40, 48, 0, Number.NaN].map(rowHeightFor)).toEqual([32, 32, 32, 32]);
   });
 });

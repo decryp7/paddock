@@ -1,7 +1,7 @@
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, untracked } from '@angular/core';
 import { PdPathText } from '@decryp7/paddock-ui';
-import { CommandService, PdIcon } from '@decryp7/paddock-ui/shell';
+import { CommandService, evaluate, PdIcon, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import type { ExplorerAction, ExplorerNode, ExplorerProviderDef } from '@decryp7/paddock-ui/workbench';
 import { ExplorerStore, treeKey, type TreeRow } from './explorer.store';
 
@@ -197,6 +197,21 @@ export class PdExplorer {
 
   constructor() {
     this.store.ensureRoots();
+    const host = inject(ShellContextHost);
+    const seen = new Map<string, unknown>();
+    // Reloading a section is a side effect (a provider call, usually IPC) of a tracked `changes` value; the first value
+    // of each section is only remembered (its roots are loading already).
+    effect(() => {
+      const ctx = host.context();
+      for (const section of this.store.sections()) {
+        if (!section.changes) continue;
+        const value = evaluate(section.changes, ctx, undefined);
+        const had = seen.has(section.id);
+        const before = seen.get(section.id);
+        seen.set(section.id, value);
+        if (had && !Object.is(before, value)) untracked(() => void this.store.refresh(section.id));
+      }
+    });
   }
 
   protected rowsOf(section: string): TreeRow[] {

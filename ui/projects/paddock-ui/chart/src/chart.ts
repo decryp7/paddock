@@ -14,6 +14,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { readPaddockTokens, registerPaddockTheme, type PaddockChartTokens } from '@decryp7/paddock-ui';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { chartOption, chartSummary, type PdChartSpec } from './options';
 
 /** The part of an ECharts instance `pd-chart` calls (`FakeChart` of the test kit has the same shape). */
@@ -73,15 +74,42 @@ let nextId = 0;
 @Component({
   selector: 'pd-chart',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdGlyph],
   host: { '[style.height.px]': 'height()' },
   template: `
-    <div #surface class="pd-surface" role="img" [attr.aria-label]="label()" [attr.aria-describedby]="summaryId"></div>
+    @if (showTitle()) {
+      <h3 class="pd-title" data-testid="chart-title">{{ title() }}</h3>
+    }
+    <div #surface class="pd-surface" role="img" [hidden]="state() !== 'ready'" [attr.aria-label]="label()" [attr.aria-describedby]="summaryId"></div>
+    @switch (state()) {
+      @case ('loading') {
+        <div class="pd-ghost" role="status" [attr.aria-label]="loadingText" data-testid="chart-loading">
+          <span></span><span></span><span></span><span></span>
+        </div>
+      }
+      @case ('error') {
+        <div class="pd-error" role="alert" data-testid="chart-error">
+          <pd-glyph name="alert" [size]="14" /><span>{{ errorText() || defaultError }}</span>
+          <button type="button" class="pd-retry" (click)="retry.emit()">{{ retryText }}</button>
+        </div>
+      }
+    }
     <p class="pd-sr" [id]="summaryId">{{ description() }}</p>
   `,
   styles: `
-    :host { display: block; position: relative; min-width: 0; width: 100%; }
-    .pd-surface { width: 100%; height: 100%; }
+    :host { display: flex; flex-direction: column; position: relative; min-width: 0; width: 100%; }
+    .pd-title { flex: none; margin: 0; padding: var(--pd-space-2) var(--pd-space-3) 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
+    .pd-surface { flex: 1; min-height: 0; width: 100%; }
+    .pd-surface[hidden] { display: none; }
     .pd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
+    .pd-ghost { flex: 1; display: grid; align-content: space-evenly; padding: var(--pd-space-3); }
+    .pd-ghost span { height: 1px; background: var(--pd-hairline); animation: pd-pulse 1.4s ease-in-out infinite; }
+    @keyframes pd-pulse { 50% { opacity: 0.4; } }
+    :root[data-motion='reduce'] .pd-ghost span { animation: none; }
+    .pd-error { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--pd-space-2); padding: var(--pd-space-3); color: var(--pd-text-muted); font-size: var(--pd-text-body); }
+    .pd-error pd-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
+    .pd-retry { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
+    .pd-retry:hover { background: var(--pd-hover); }
   `,
 })
 export class PdChart {
@@ -93,8 +121,16 @@ export class PdChart {
   readonly option = input<Record<string, unknown> | null>(null);
   /** The words for people who cannot see the chart (default: from the spec). */
   readonly summary = input<string | null>(null);
-  /** Height in pixels. */
+  /** Height in pixels, title included. */
   readonly height = input(240);
+  /** Draws `label` (and the unit) as the chart's visible title; turn it off when the card around it already has one. */
+  readonly showTitle = input(true);
+  /** `loading` shows ghosted axes, `error` the message with Retry; the chart is drawn when `ready`. */
+  readonly state = input<'ready' | 'loading' | 'error'>('ready');
+  /** What the error says (default: a plain sentence). */
+  readonly errorText = input('');
+  /** Retry was pressed in the error state. */
+  readonly retry = output<void>();
   /** A series, slice or bar was clicked: ECharts' event, for the app's own handling. */
   readonly chartClick = output<unknown>();
 
@@ -107,6 +143,7 @@ export class PdChart {
   private lib: PdEchartsLib | null = null;
   private instance: PdChartInstance | null = null;
   private destroyed = false;
+  private hidden = false;
   /** The tokens the chart is drawn with; null until the library is loaded. */
   private readonly tokens = signal<PaddockChartTokens | null>(null);
   /** Counts the times the instance was created, so the option is applied to each. */
@@ -114,6 +151,14 @@ export class PdChart {
   /** Counts appearance changes, so a spec is turned into an option again with the new motion setting. */
   private readonly appearance = signal(0);
 
+  protected readonly loadingText = $localize`:@@pd.chart.loading:Loading chart`;
+  protected readonly defaultError = $localize`:@@pd.chart.error:The chart could not be loaded.`;
+  protected readonly retryText = $localize`:@@pd.chart.retry:Retry`;
+  /** The visible title: the label, then the unit ("Requests per hour, req"). */
+  protected readonly title = computed(() => {
+    const unit = this.spec()?.unit;
+    return unit ? `${this.label()}, ${unit}` : this.label();
+  });
   protected readonly description = computed(() => {
     const spec = this.spec();
     return this.summary() ?? (spec ? chartSummary(spec) : '');
@@ -131,8 +176,12 @@ export class PdChart {
     // The one side effect outside the signal graph: hand the option to the ECharts instance.
     effect(() => {
       const option = this.resolved();
+      const ready = this.state() === 'ready';
       this.generation();
       if (option && this.instance) this.instance.setOption(option, { notMerge: true });
+      // A chart that was hidden (loading, error) has no size to follow: measure it when it is shown again.
+      if (ready && this.hidden) this.instance?.resize();
+      this.hidden = !ready;
     });
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
