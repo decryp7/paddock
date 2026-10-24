@@ -2,6 +2,7 @@ import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMe
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { NgTemplateOutlet } from '@angular/common';
 import {
+  afterEveryRender,
   afterNextRender,
   ChangeDetectionStrategy,
   Component,
@@ -119,7 +120,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
         </button>
       }
     </div>
-    <div #grid class="pd-grid" role="grid" [attr.aria-label]="label()" [attr.aria-busy]="state() === 'loading'" [attr.aria-rowcount]="items().length + 1" [style.--pd-cols]="gridTemplate()" (keydown)="onKeydown($event)">
+    <div #grid class="pd-grid" role="grid" [attr.aria-label]="label()" [attr.aria-busy]="state() === 'loading'" [attr.aria-rowcount]="items().length + 1" [style.--pd-cols]="gridTemplate()" [style.--pd-gutter.px]="gutter()" (keydown)="onKeydown($event)">
       <div class="pd-header" role="row" aria-rowindex="1">
         @for (c of columns2(); track c.key) {
           <div role="columnheader" class="pd-th" [class.pd-end]="c.align === 'end'" [attr.aria-sort]="ariaSort(c)">
@@ -196,7 +197,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
             <button type="button" class="pd-group-toggle" tabindex="-1" [attr.aria-expanded]="!item.collapsed" [attr.aria-label]="item.label || t.none">
               <pd-glyph [name]="item.collapsed ? 'chevron-right' : 'chevron-down'" [size]="14" />
             </button>
-            <span class="pd-group-name" [class.pd-mono]="groupMono()">{{ item.label || t.none }}</span>
+            <span class="pd-group-name" [class.pd-mono]="isMono(item.key)">{{ item.label || t.none }}</span>
             <span class="pd-group-count">{{ formatCount(item.count) }}</span>
           </div>
           @if (item.cells) {
@@ -315,6 +316,8 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-sorted .pd-sort-icon { opacity: 1; color: var(--pd-text); }
     .pd-th-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-body { display: block; overflow-y: auto; overflow-x: hidden; min-width: 0; }
+    /* The header keeps the width of the body's scrollbar (measured), so a column's header and its values share one right edge whether or not the body scrolls. */
+    .pd-header { padding-inline-end: calc(var(--pd-space-3) + var(--pd-gutter, 0px)); }
     .pd-row { height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); cursor: default; }
     .pd-row:last-child { border-bottom: 0; }
     .pd-row:hover { background: var(--pd-hover); }
@@ -329,7 +332,8 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-group-summary { color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
     .pd-group-name.pd-mono { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
     .pd-group { display: block; background: var(--pd-surface-2); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-group-cell { display: flex; align-items: center; gap: var(--pd-space-2); height: 100%; }
+    .pd-group-cell { display: flex; align-items: center; gap: var(--pd-space-2); height: 100%; min-width: 0; }
+    .pd-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-group-toggle { display: inline-flex; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
     .pd-group-count { color: var(--pd-text-subtle); font-variant-numeric: tabular-nums; }
     .pd-actions { justify-content: flex-end; gap: 4px; overflow: visible; }
@@ -390,8 +394,8 @@ export class PdTable<T> {
   readonly groupBy = input<string | null>(null);
   /** The group row's own cells by column key (the aggregate of the group's rows), or null for a heading only. */
   readonly groupSummary = input<((rows: readonly T[]) => Readonly<Record<string, string>>) | null>(null);
-  /** Group names are paths or other literal names: set them in the mono face. */
-  readonly groupMono = input(false);
+  /** Group names that are paths or other literal names are set in the mono face: all of them, or the ones the predicate names. */
+  readonly groupMono = input<boolean | ((group: string) => boolean)>(false);
   /** Words the "N rows" count (the app's noun: "7 items"); null keeps "rows". */
   readonly countLabel = input<((shown: number, total: number) => string) | null>(null);
   /** What an empty table says. */
@@ -408,6 +412,11 @@ export class PdTable<T> {
   readonly rowActivate = output<T>();
   /** An action was chosen (hover button or menu). */
   readonly action = output<PdRowActionEvent<T>>();
+
+  protected isMono(group: string): boolean {
+    const mono = this.groupMono();
+    return typeof mono === 'function' ? mono(group) : mono;
+  }
 
   protected readonly t = {
     filter: $localize`:@@pd.table.filter:Filter`,
@@ -429,6 +438,8 @@ export class PdTable<T> {
   protected readonly customCells = computed(() => new Map(this.cells().map((c) => [c.key(), c.template] as const)));
 
   private readonly width = signal(1024);
+  /** The width of the body's scrollbar in pixels (0 when it does not scroll or the bar overlays). */
+  protected readonly gutter = signal(0);
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
   protected readonly active = signal(0);
 
@@ -487,6 +498,11 @@ export class PdTable<T> {
     observer?.observe(this.host);
     const mutation = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => this.density.set(readDensity()));
     mutation?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
+    afterEveryRender(() => {
+      const body = this.host.querySelector<HTMLElement>('.pd-body');
+      const bar = body ? Math.max(0, body.offsetWidth - body.clientWidth) : 0;
+      if (bar !== this.gutter()) this.gutter.set(bar);
+    });
     inject(DestroyRef).onDestroy(() => {
       observer?.disconnect();
       mutation?.disconnect();

@@ -118,7 +118,7 @@ export interface MemoryStorageOptions {
 export function sampleCategories(): StorageCategory[] {
   const item = (name: string, bytes: number, protectedBy?: string) => ({ name, bytes, ...(protectedBy ? { protected: protectedBy } : {}) });
   return [
-    { id: 'cache', label: 'Cache', kind: 'cache', path: '/demo/app/cache', exists: true, bytes: 48_000_000, files: 312, clearableBytes: 48_000_000, clearableItems: 3, capped: false, clearable: true, note: 'Rebuilt when the app needs it.', items: [item('thumbnails', 30_000_000), item('previews', 12_000_000)] },
+    { id: 'cache', label: 'Cache', kind: 'cache', path: '/demo/app/cache', exists: true, bytes: 48_000_000, files: 312, clearableBytes: 48_000_000, clearableItems: 3, capped: false, clearable: true, note: 'Thumbnails and previews.', items: [item('thumbnails', 30_000_000), item('previews', 12_000_000)] },
     { id: 'logs', label: 'Logs', kind: 'data', path: '/demo/app/logs', exists: true, bytes: 6_500_000, files: 9, clearableBytes: 5_000_000, clearableItems: 8, capped: false, clearable: true, note: "Today's log is kept.", items: [item('app.2026-10-23.log', 3_000_000), item('app.2026-10-24.log', 1_500_000, 'being written')] },
     { id: 'models', label: 'Models', kind: 'data', path: '/demo/app/models', exists: true, bytes: 4_200_000_000, files: 2, clearableBytes: 2_100_000_000, clearableItems: 1, capped: true, clearable: true, note: 'The active model is kept.', items: [item('small.gguf', 2_100_000_000), item('large.gguf', 2_100_000_000, 'the active model')] },
   ];

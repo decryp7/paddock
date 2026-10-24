@@ -35,7 +35,7 @@ export const PD_ICON_PATHS = {
   'file-code': 'M5.75 3.5h7.75l4.75 5v12H5.75zM13.5 3.5v5h4.75M9.75 11.5 7.25 14l2.5 2.5M13.75 11.5l2.5 2.5-2.5 2.5',
   archive: 'M4 5h16v3.5H4zM5.5 8.5v11h13v-11M10 12.5h4',
   // Reveal in the file manager: a folder with an arrow out of it (the kind `folder` stays the kind).
-  reveal: 'M12.5 18.5h-8a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1V12M15.5 17.5h5M18.5 14.5l3 3-3 3',
+  reveal: 'M12.5 18.5h-8a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1V12M15 17.5h5M17.5 15l2.5 2.5-2.5 2.5',
   folder: 'M3.5 6.5a1 1 0 0 1 1-1H9l2 2.5h8.5a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z',
   globe:
     'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM3.5 12h17M12 3.5c-2.3 2.4-3.5 5.2-3.5 8.5s1.2 6.1 3.5 8.5c2.3-2.4 3.5-5.2 3.5-8.5S14.3 5.9 12 3.5Z',

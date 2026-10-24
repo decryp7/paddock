@@ -1925,6 +1925,9 @@
       <trans-unit id="pd.storage.cancelling" datatype="html">
         <source>Cancelling…</source>
       </trans-unit>
+      <trans-unit id="pd.storage.categories" datatype="html">
+        <source><x id="count"/> kinds of data</source>
+      </trans-unit>
       <trans-unit id="pd.storage.clear-cache" datatype="html">
         <source>Clear cache</source>
       </trans-unit>
@@ -1977,7 +1980,7 @@
         <source>Keep</source>
       </trans-unit>
       <trans-unit id="pd.storage.confirm-question" datatype="html">
-        <source>Clear <x id="what"/>? Up to <x id="size"/> is removed.</source>
+        <source>Up to <x id="size"/> is removed.</source>
       </trans-unit>
       <trans-unit id="pd.storage.confirm-title" datatype="html">
         <source>Clear <x id="what"/>?</source>
@@ -2087,11 +2090,8 @@
       <trans-unit id="pd.storage.tree-close" datatype="html">
         <source>Close</source>
       </trans-unit>
-      <trans-unit id="pd.storage.tree-files" datatype="html">
-        <source>Files here</source>
-      </trans-unit>
-      <trans-unit id="pd.storage.tree-smaller" datatype="html">
-        <source>Smaller items</source>
+      <trans-unit id="pd.storage.tree-other" datatype="html">
+        <source>Other items</source>
       </trans-unit>
       <trans-unit id="pd.storage.tree-title" datatype="html">
         <source>What is in <x id="name"/></source>

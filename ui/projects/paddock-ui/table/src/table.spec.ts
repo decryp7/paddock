@@ -69,7 +69,7 @@ class Host {
   readonly actions = (r: Plugin): readonly PdRowAction[] => (r.id === 'p3' ? [] : ACTIONS);
   readonly groupBy = signal<string | null>(null);
   readonly summary = signal<((rows: readonly Plugin[]) => Readonly<Record<string, string>>) | null>(null);
-  readonly mono = signal(false);
+  readonly mono = signal<boolean | ((group: string) => boolean)>(false);
   readonly countLabel = signal<((shown: number, total: number) => string) | null>(null);
   readonly virtual = signal<boolean | 'auto'>('auto');
   readonly maxHeight = signal(480);
@@ -304,6 +304,10 @@ describe('pd-table', () => {
     expect(cells.map((c) => c.textContent?.trim()).filter(Boolean)).toHaveLength(1);
     expect(cells.some((c) => /total$/.test(c.textContent ?? '') && c.classList.contains('pd-end'))).toBe(true);
     expect(el(f).textContent).toContain('3 of 3 things');
+    // A predicate sets only the groups it names in mono (a label such as "Other items" is not a name).
+    f.componentInstance.mono.set((g) => g === 'format');
+    await settle(f);
+    expect([...el(f).querySelectorAll('.pd-group-name')].map((n) => n.classList.contains('pd-mono'))).toEqual([true, false]);
     f.componentInstance.summary.set(null);
     await settle(f);
     expect(el(f).querySelector('.pd-group-grid')).toBeNull();

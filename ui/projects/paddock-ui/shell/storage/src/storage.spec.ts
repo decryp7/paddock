@@ -11,6 +11,7 @@ import { provideShellStorage } from './provide-storage';
 import { STORAGE_CONFIRM_DIALOG_ID, STORAGE_SETTINGS_COMMANDS, STORAGE_SETTINGS_PAGE, defineStorageConfirmDialog, defineStorageSettingsPage, storageContributions } from './storage.contributions';
 import { StorageStore } from './storage.store';
 import { floorBytes } from './bytes-text';
+import { inSentence } from './sentence';
 import { treeTable } from './tree-rows';
 import { clearRequest, parseStorageEvent, parseStorageTree, parseStorageUsage } from './wire';
 
@@ -351,14 +352,15 @@ describe('the size tree', () => {
   });
 
   it('is flattened into rows grouped by top-level folder, with the folder size on the group and nothing counted twice', () => {
-    const { rows, groups } = treeTable(TREE, { files: 'Files here', smaller: 'Smaller items', others: (n) => `${n} smaller items` });
+    const { rows, groups } = treeTable(TREE, { files: 'Other items', others: (n) => `${n} smaller items` });
     expect(rows.map((r) => [r.group, r.name, r.kind, r.depth, r.bytes, r.share])).toEqual([
       ['thumbs', 'a', 'file', 0, 40, 40],
       ['thumbs', 'b', 'file', 0, 20, 20],
-      ['Files here', 'x.bin', 'file', 0, 30, 30],
-      ['Smaller items', '4 smaller items', 'fold', 0, 10, 10],
+      ['Other items', 'x.bin', 'file', 0, 30, 30],
+      ['Other items', '4 smaller items', 'fold', 0, 10, 10],
     ]);
-    expect(groups).toEqual({ thumbs: { bytes: 60, share: 60 }, 'Files here': { bytes: 30, share: 30 }, 'Smaller items': { bytes: 10, share: 10 } });
+    // Loose files and the fold share one group, so no heading repeats its only row.
+    expect(groups).toEqual({ thumbs: { bytes: 60, share: 60 }, 'Other items': { bytes: 40, share: 40 } });
     // The direct rows of every group add up to the group; the groups add up to the category.
     for (const [name, g] of Object.entries(groups)) {
       expect(rows.filter((r) => r.group === name && r.depth === 0).reduce((n, r) => n + r.bytes, 0)).toBe(g.bytes);
@@ -369,7 +371,7 @@ describe('the size tree', () => {
   });
 
   it('shows a folder inside a folder one level deeper with its path, and handles empty trees', () => {
-    const words = { files: 'F', smaller: 'S', others: String };
+    const words = { files: 'F', others: String };
     const nested = treeTable({ id: 'c', capped: false, root: node('C', 10, [node('d', 10, [node('e', 6, [node('f', 6)]), node('', 4, [], 3)])]) }, words);
     expect(nested.rows.map((r) => [r.name, r.kind, r.depth])).toEqual([['e', 'folder', 0], ['e/f', 'file', 1], ['3', 'fold', 0]]);
     expect(nested.groups['d']).toEqual({ bytes: 10, share: 100 });
@@ -434,5 +436,16 @@ describe('the size tree', () => {
     const b = new TauriStorageBackend({ invoke: (c, a) => { calls.push([c, a]); return Promise.resolve(undefined as never); }, listen: () => Promise.resolve(() => undefined) });
     await b.tree('logs');
     expect(calls).toEqual([['storage_tree', { id: 'logs' }]]);
+  });
+});
+
+describe('sentence case in prose', () => {
+  it('lower-cases an ordinary label and keeps acronyms and phrases that are already lower case', () => {
+    expect(inSentence('Logs')).toBe('logs');
+    expect(inSentence('Cache')).toBe('cache');
+    expect(inSentence('AI models')).toBe('AI models');
+    expect(inSentence('the cache')).toBe('the cache');
+    expect(inSentence(' Models ')).toBe('models');
+    expect(inSentence('X')).toBe('x');
   });
 });

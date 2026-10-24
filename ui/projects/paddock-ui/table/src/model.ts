@@ -7,7 +7,7 @@ export interface PdColumn<T> {
   readonly header: string;
   readonly value: (row: T) => string | number | boolean | Date | null | undefined;
   readonly text?: (row: T) => string;
-  /** A grid track (`2fr`, `120px`); default `minmax(0, 1fr)`. */
+  /** A grid track (`2fr`, `120px`); default `minmax(0, 1fr)`. Use px or fr, never em: the header and the rows have different font sizes, so an em track would be a different width in each and the columns would not line up. */
   readonly width?: string;
   /** Numbers, sizes and dates: right-aligned, tabular figures, never wrapped. */
   readonly align?: 'start' | 'end';

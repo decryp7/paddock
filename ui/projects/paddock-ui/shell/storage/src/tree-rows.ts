@@ -6,7 +6,7 @@ export type TreeRowKind = 'folder' | 'file' | 'fold';
 /** One line of the tree table: an item inside a top-level folder, with its size and its share of the whole category. */
 export interface TreeRow {
   readonly key: string;
-  /** The top-level folder (or "Files here", "Smaller items") it is in: the table's group heading. */
+  /** The top-level folder (or "Other items") it is in: the table's group heading. */
   readonly group: string;
   /** The item's name, or its path below the folder ("data/index") one level deeper. */
   readonly name: string;
@@ -34,10 +34,8 @@ export interface TreeTable {
 
 /** The words the rows need; the page translates them. */
 export interface TreeWords {
-  /** Files directly in the category's folder. */
+  /** The group of loose top-level entries: files directly in the category's folder and the smallest items folded into one line. */
   readonly files: string;
-  /** The group of top-level items too small to list one by one. */
-  readonly smaller: string;
   /** The smallest items, folded: `n` items. */
   readonly others: (n: number) => string;
 }
@@ -80,11 +78,9 @@ export function treeTable(tree: StorageTree, words: TreeWords): TreeTable {
           rows.push(row(top.name, grand, inner, 1, `${i}/${j}/${k}`));
         });
       });
-    } else if (top.folded > 0) {
-      rows.push(row(words.smaller, top, words.others(top.folded), 0, `${i}`));
-      addTo(words.smaller, top.bytes);
     } else {
-      rows.push(row(words.files, top, top.name, 0, `${i}`));
+      const name = top.folded > 0 ? words.others(top.folded) : top.name;
+      rows.push(row(words.files, top, name, 0, `${i}`));
       addTo(words.files, top.bytes);
     }
   });

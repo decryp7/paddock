@@ -20,6 +20,7 @@ export const STORAGE_STYLES = `
   .pd-storage__name .pd-storage__title { flex: none; max-width: 100%; }
   .pd-storage__note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-regular); }
   .pd-storage__item { display: flex; align-items: center; gap: var(--pd-space-2); min-width: 0; }
+  .pd-storage__nokind { display: inline-block; width: 16px; height: 16px; flex: none; }
   .pd-storage__item pd-glyph { color: var(--pd-text-muted); }
   .pd-storage__link { border: 0; background: transparent; color: var(--pd-text-muted); font: inherit; text-decoration: underline; cursor: pointer; padding: var(--pd-space-1) var(--pd-space-2); border-radius: var(--pd-radius-control); }
   .pd-storage__link:hover { color: var(--pd-text); }
