@@ -31,8 +31,8 @@ export function nextEnabled(options: readonly SuSegment[], from: number, dir: 1 
       <button
         type="button"
         role="radio"
-        class="seg"
-        [class.on]="o.value === value()"
+        class="pd-seg"
+        [class.pd-on]="o.value === value()"
         [attr.aria-checked]="o.value === value()"
         [attr.tabindex]="o.value === value() ? 0 : -1"
         [disabled]="o.disabled ?? false"
@@ -40,18 +40,18 @@ export function nextEnabled(options: readonly SuSegment[], from: number, dir: 1 
       >
         {{ o.label }}
         @if (o.count !== undefined) {
-          <span class="count">{{ o.count }}</span>
+          <span class="pd-count">{{ o.count }}</span>
         }
       </button>
     }
   `,
   styles: `
     :host { display: inline-flex; gap: 2px; padding: 2px; background: var(--pd-surface-2); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); }
-    .seg { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: calc(var(--pd-control-height) - 6px); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 0; border-radius: calc(var(--pd-radius-control) - 2px); background: transparent; color: var(--pd-text-muted); font-size: var(--pd-text-body); font-weight: var(--pd-weight-medium); transition: background var(--pd-duration-micro) var(--pd-ease-enter); }
-    .seg:hover:not(:disabled):not(.on) { background: var(--pd-hover); color: var(--pd-text); }
-    .seg.on { background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-1), 0 0 0 1px var(--pd-hairline); }
-    .seg:disabled { opacity: 0.5; }
-    .count { font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
+    .pd-seg { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: calc(var(--pd-control-height) - 6px); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 0; border-radius: calc(var(--pd-radius-control) - 2px); background: transparent; color: var(--pd-text-muted); font-size: var(--pd-text-body); font-weight: var(--pd-weight-medium); transition: background var(--pd-duration-micro) var(--pd-ease-enter); }
+    .pd-seg:hover:not(:disabled):not(.pd-on) { background: var(--pd-hover); color: var(--pd-text); }
+    .pd-seg.pd-on { background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-1), 0 0 0 1px var(--pd-hairline); }
+    .pd-seg:disabled { opacity: 0.5; }
+    .pd-count { font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
   `,
 })
 export class SuSegmentedControl {

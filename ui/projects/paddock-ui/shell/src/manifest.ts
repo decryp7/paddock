@@ -124,6 +124,7 @@ export function buildManifest(source: ManifestSource): PaddockManifest {
   };
   for (const c of source.commands()) (collect(c.title), collect(c.category));
   for (const p of [...source.pages(), ...source.statusItems(), ...source.settingsPages(), ...source.dialogs(), ...source.notificationKinds()]) collect(p.title);
+  for (const p of source.settingsPages()) collect(p.subgroup);
   for (const h of source.healthServices()) collect(h.label);
 
   return {

@@ -2,10 +2,20 @@ import type { ServiceHealth, ServiceState } from './wire.types';
 
 // The chip's words (pure): split from the component so the entry exports them without loading it (plan S16).
 
-/** "the log store" becomes "Log store". */
+/** A word with no capital in it ("engine", "llama.cpp"): the only kind that may be capitalised, never "iPhone" or "S3". */
+const isPlainLower = (word: string): boolean => word === word.toLowerCase();
+
+/**
+ * The label as a sentence starts with it: "the log store" becomes "Log store" (the article marks a generic noun phrase, which
+ * takes a capital). A label the app wrote without the article is a name and keeps its casing exactly ("llama.cpp server",
+ * "iPhone link"), as does the rest of a phrase whose first word has a capital of its own ("the S3 bucket" is "S3 bucket").
+ */
 export function shortName(label: string): string {
-  const bare = label.replace(/^the /i, '');
-  return bare.charAt(0).toUpperCase() + bare.slice(1);
+  const article = /^the\s+/i.exec(label);
+  if (!article) return label;
+  const bare = label.slice(article[0].length);
+  const first = bare.split(/\s+/)[0] ?? '';
+  return first !== '' && isPlainLower(first) ? bare.charAt(0).toUpperCase() + bare.slice(1) : bare;
 }
 
 /** The state of a service that is not working, in a word. */
@@ -35,7 +45,8 @@ export function chipCompactText(problems: readonly Pick<ServiceHealth, 'label' |
   if (problems.length === 1 && p) {
     // The subject's last word keeps it said what stopped: "Index stopped", "Engine limited".
     const subject = shortName(p.label).split(/\s+/).at(-1) ?? '';
-    const head = subject.charAt(0).toUpperCase() + subject.slice(1);
+    // The word starts the text, so a plain lower-case one takes a capital; a name with its own casing keeps it.
+    const head = isPlainLower(subject) ? subject.charAt(0).toUpperCase() + subject.slice(1) : subject;
     return $localize`:@@pd.health.chip.compact.one:${head}:service: ${stateWord(p.state)}:state:`;
   }
   return problems.length ? $localize`:@@pd.health.chip.compact.many:${problems.length}:count: services` : $localize`:@@pd.health.chip.compact.unknown:Unknown`;

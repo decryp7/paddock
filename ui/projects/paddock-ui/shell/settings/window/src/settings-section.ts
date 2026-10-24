@@ -21,59 +21,61 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
   template: `
     @if (view(); as s) {
       @if (heading()) {
-        <div class="head">
-          <h2 class="title" [id]="headingId()">{{ s.title }}</h2>
-          <span class="spacer"></span>
+        <div class="pd-head">
+          <h2 class="pd-title" [id]="headingId()">{{ s.title }}</h2>
+          <span class="pd-spacer"></span>
           @if (s.fields.length && !keys()) {
-            <button type="button" class="btn" (click)="resetSection()">{{ t.resetSection }}</button>
+            <button type="button" class="pd-btn" (click)="resetSection()">{{ t.resetSection }}</button>
           }
         </div>
         @if (s.description) {
-          <p class="desc">{{ s.description }}</p>
+          <p class="pd-desc">{{ s.description }}</p>
         }
       }
       @for (e of store.sectionRefusals(s.id); track $index) {
-        <p class="error" role="alert">{{ e }}</p>
+        <p class="pd-error" role="alert">{{ e }}</p>
       }
       @if (form(); as f) {
-        <div class="fields" role="group" [attr.aria-labelledby]="heading() ? headingId() : null" [attr.aria-label]="heading() ? null : s.title">
+        <div class="pd-fields" role="group" [attr.aria-labelledby]="heading() ? headingId() : null" [attr.aria-label]="heading() ? null : s.title">
           @for (field of fields(); track field.key) {
             <pd-setting-field [formField]="$any(f.tree)[field.key]" [setting]="field" (commit)="commit()" (resetToDefault)="resetField(field.key)" />
           }
         </div>
       }
       @if (hiddenAdvanced(); as n) {
-        <p class="muted">
+        <p class="pd-hidden" data-testid="settings-hidden-advanced">
           {{ hiddenText(n) }}
-          <button type="button" class="link" (click)="store.setShowAdvanced(true)">{{ t.showAdvanced }}</button>
+          <button type="button" class="pd-link" (click)="store.setShowAdvanced(true)">{{ t.showThem }}</button>
         </p>
       }
       @if (!s.fields.length) {
-        <p class="muted">{{ t.empty }}</p>
+        <p class="pd-muted">{{ t.empty }}</p>
       }
     } @else if (store.isLoaded()) {
-      <p class="muted" role="status">{{ t.unavailable }}</p>
+      <p class="pd-muted" role="status">{{ t.unavailable }}</p>
     }
   `,
   styles: `
     :host { display: flex; flex-direction: column; min-width: 0; }
-    .head { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; }
-    .title { margin: 0; font-size: var(--pd-text-subtitle); font-weight: var(--pd-weight-semibold); }
-    .spacer { flex: 1; }
-    .desc { margin: var(--pd-space-1) 0 var(--pd-space-2); color: var(--pd-text-muted); line-height: 1.45; }
-    .fields { display: flex; flex-direction: column; min-width: 0; }
-    .btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; cursor: pointer; }
-    .btn:focus-visible, .link:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
-    .muted { color: var(--pd-text-muted); }
-    .error { margin: var(--pd-space-1) 0; color: var(--pd-danger-text, var(--pd-text)); }
-    .link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }
+    .pd-head { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; }
+    .pd-title { margin: 0; font-size: var(--pd-text-subtitle); font-weight: var(--pd-weight-semibold); }
+    .pd-spacer { flex: 1; }
+    .pd-desc { margin: var(--pd-space-1) 0 var(--pd-space-2); color: var(--pd-text-muted); line-height: 1.45; }
+    .pd-fields { display: flex; flex-direction: column; min-width: 0; }
+    .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; cursor: pointer; }
+    .pd-btn:focus-visible, .pd-link:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
+    .pd-muted { color: var(--pd-text-muted); }
+    .pd-error { margin: var(--pd-space-1) 0; color: var(--pd-danger-text, var(--pd-text)); }
+    /* The line may wrap and is never clipped: it sits below the fields at its full height. */
+    .pd-hidden { flex: none; margin: var(--pd-space-3) 0 0; padding-block: var(--pd-space-1); color: var(--pd-text-muted); line-height: var(--pd-lh-body); overflow-wrap: anywhere; }
+    .pd-link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }
   `,
 })
 export class PdSettingsSection {
   /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
   protected readonly t = {
     resetSection: $localize`:@@pd.settings.section.reset:Reset section`,
-    showAdvanced: $localize`:@@pd.settings.show-advanced:Show advanced`,
+    showThem: $localize`:@@pd.settings.section.show-them:Show them`,
     empty: $localize`:@@pd.settings.section.empty:This section has no settings.`,
     unavailable: $localize`:@@pd.settings.section.unavailable:These settings are not available in this app.`,
   };

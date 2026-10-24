@@ -9,7 +9,7 @@ import { DialogHost } from './dialog-host';
 import { DialogShell, REFIT_DEBOUNCE_MS } from './dialog-shell';
 import { DialogService } from './dialog.service';
 import { InPageDialogBackend, raise, type InPageDialog } from './in-page';
-import { DIALOG_IO } from './io';
+import { DIALOG_IO, tauriDialogIo } from './io';
 import { ModalGate } from './modal-gate';
 import { DIALOG_ROUTE } from './route';
 import { DIALOG_INPUT, DIALOG_LOOKUP, DIALOG_REF, DialogPresenter } from './types';
@@ -115,6 +115,20 @@ describe('dialogs in the page (browser build)', () => {
     expect(gate.blocked()).toBe(false);
     expect(document.activeElement).toBe(before);
     before.remove();
+  });
+
+  it('shows a title the content sets at run time in the header and keeps the declared one for a blank title', async () => {
+    const { service, root, settle } = await setup();
+    service.open(DECISION);
+    await settle();
+    const ref = TestBed.inject(InPageDialogBackend).stack()[0]!.ref;
+    ref.setTitle?.('Delete 3 runners?');
+    await settle();
+    expect(root.querySelector('[data-dialog="t.decision"] h2')!.textContent).toBe('Delete 3 runners?');
+    ref.setTitle?.('  ');
+    await settle();
+    expect(root.querySelector('[data-dialog="t.decision"] h2')!.textContent).toBe('Delete 3 runners?');
+    expect(root.querySelector('[data-dialog="t.decision"]')!.getAttribute('aria-labelledby')).toBe(root.querySelector('[data-dialog="t.decision"] h2')!.id);
   });
 
   it('dismisses on Escape (inside and outside), the backdrop and the title-bar Close, unless the content refuses', async () => {
@@ -357,6 +371,35 @@ describe('a dialog window', () => {
     root.querySelector<HTMLElement>('[data-testid=ok]')!.click();
     await settle();
     expect(io.closedWith).toEqual(['yes']);
+  });
+
+  it('takes the title the content sets at run time: heading, page title and the OS title bar; blank titles are ignored', async () => {
+    const { io, fixture, root, settle } = boot(DECISION);
+    await settle();
+    const ref = (fixture.componentInstance as unknown as { ref: { setTitle(t: string): void } }).ref;
+    ref.setTitle('  Delete 3 runners?  ');
+    ref.setTitle('   ');
+    await settle();
+    expect(document.title).toBe('Delete 3 runners?');
+    expect(root.querySelector('main')!.getAttribute('aria-label')).toBe('Delete 3 runners?');
+    expect(io.titles).toEqual(['Delete 3 runners?']);
+  });
+
+  it('keeps working when the window system cannot set a title', async () => {
+    const { io, fixture, settle } = boot(DECISION);
+    await settle();
+    io.setTitle = () => Promise.reject(new Error('no permission'));
+    (fixture.componentInstance as unknown as { ref: { setTitle(t: string): void } }).ref.setTitle('Kept');
+    await settle();
+    expect(document.title).toBe('Kept');
+  });
+
+  it('draws the tauri title through the bridge when it has one', async () => {
+    const calls: string[] = [];
+    const bridge = { invoke: () => Promise.resolve(undefined as never), listen: () => Promise.resolve(() => undefined), emitTo: () => Promise.resolve(), setWindowTitle: (t: string) => (calls.push(t), Promise.resolve()) };
+    await tauriDialogIo(bridge).setTitle?.('Hello');
+    expect(calls).toEqual(['Hello']);
+    expect(tauriDialogIo({ ...bridge, setWindowTitle: undefined }).setTitle).toBeUndefined();
   });
 
   it('dismisses on Escape and Cmd+W unless the content refuses', async () => {

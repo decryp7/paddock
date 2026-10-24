@@ -48,7 +48,7 @@ describe('pd-jobs-list', () => {
     clock.advance(2_000);
     await fixture.whenStable();
     expect(items[0]?.textContent).toContain('Still working');
-    items[0]?.querySelector<HTMLButtonElement>('button.cancel')?.click();
+    items[0]?.querySelector<HTMLButtonElement>('button.pd-cancel')?.click();
     expect(cancel).toHaveBeenCalledWith(1);
   });
 
@@ -106,7 +106,7 @@ describe('pd-jobs-status', () => {
     await settle();
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
-    const button = el.querySelector<HTMLButtonElement>('button.pill') as HTMLButtonElement;
+    const button = el.querySelector<HTMLButtonElement>('button.pd-pill') as HTMLButtonElement;
     expect(button.textContent?.trim()).toBe('1 running');
     backend.emit(snap(2, 1, 'running'));
     await fixture.whenStable();
@@ -148,12 +148,32 @@ describe('pd-jobs-status', () => {
     fixture.nativeElement.remove();
   });
 
+  it('draws the lead job\'s phase with a determinate ring on a known scale, and a spinner while the total is unknown', async () => {
+    const { backend } = jobsBed();
+    backend.emit(snap(1, 1, 'running', { title: 'Import', phase: phase('Reading', 40, 100) }));
+    const fixture = TestBed.createComponent(PdJobsStatus);
+    document.body.appendChild(fixture.nativeElement);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    const ring = el.querySelector<HTMLElement>('.pd-dot')!;
+    expect(el.querySelector('button.pd-pill')!.textContent?.trim()).toBe('1 running: Import · Reading 40%');
+    expect(ring.classList.contains('pd-ring')).toBe(true);
+    expect(ring.style.getPropertyValue('--pd-jobs-progress')).toBe('40');
+    backend.emit(snap(1, 2, 'running', { title: 'Import', phase: phase('Finding files', 1_240) }));
+    await settle();
+    await fixture.whenStable();
+    expect(ring.classList.contains('pd-ring')).toBe(false);
+    expect(el.querySelector('button.pd-pill')!.textContent?.trim()).toBe('1 running: Import · Finding files 1,240 so far');
+    fixture.nativeElement.remove();
+  });
+
   it('opens below when the item sits at the top', async () => {
     jobsBed();
     const fixture = TestBed.createComponent(PdJobsStatus);
     fixture.componentRef.setInput('placement', 'below');
     await fixture.whenStable();
-    expect(fixture.nativeElement.classList).toContain('below');
+    expect(fixture.nativeElement.classList).toContain('pd-below');
     expect(fixture.nativeElement.querySelector('button')?.textContent?.trim()).toBe('Jobs');
   });
 });

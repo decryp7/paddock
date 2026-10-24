@@ -19,48 +19,48 @@ let nextId = 0;
   selector: 'pd-service-status',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
-    '[class.open]': 'open()',
-    '[class.below]': 'placement() === "below"',
+    '[class.pd-open]': 'open()',
+    '[class.pd-below]': 'placement() === "below"',
     '(document:keydown.escape)': 'close(true)',
     '(document:pointerdown)': 'outside($event)',
   },
   template: `
     @if (problems().length || unknown()) {
-      <button type="button" class="chip" data-testid="service-health-chip" [class.repairing]="allRepairing()" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="compact() ? text() : null" [attr.title]="text()" (click)="open.set(!open())">
-        <span class="mark" aria-hidden="true"></span>
-        <span class="text">{{ compact() ? compactText() : text() }}</span>
+      <button type="button" class="pd-chip" data-testid="service-health-chip" [class.pd-repairing]="allRepairing()" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="compact() ? text() : null" [attr.title]="text()" (click)="open.set(!open())">
+        <span class="pd-mark" aria-hidden="true"></span>
+        <span class="pd-text">{{ compact() ? compactText() : text() }}</span>
       </button>
       @if (open()) {
-        <div class="popover" role="region" [attr.aria-label]="t.popover" [id]="panelId" data-testid="service-health-details">
+        <div class="pd-popover" role="region" [attr.aria-label]="t.popover" [id]="panelId" data-testid="service-health-details">
           @if (unknown(); as why) {
-            <section class="svc">
+            <section class="pd-svc">
               <strong>{{ t.unknown }}</strong>
-              <span class="hint">{{ why }}</span>
-              <button type="button" class="btn primary" data-testid="service-health-reload" (click)="store.load()">{{ t.tryAgain }}</button>
+              <span class="pd-hint">{{ why }}</span>
+              <button type="button" class="pd-btn pd-primary" data-testid="service-health-reload" (click)="store.load()">{{ t.tryAgain }}</button>
             </section>
           }
           @for (s of problems(); track s.service) {
-            <section class="svc" [attr.data-testid]="'service-health-' + s.service" [attr.aria-label]="shortName(s.label)">
+            <section class="pd-svc" [attr.data-testid]="'service-health-' + s.service" [attr.aria-label]="shortName(s.label)">
               <strong>{{ s.cause?.message ?? notWorking(s.label) }}</strong>
               @if (s.cause?.hint; as hint) {
-                <span class="hint">{{ hint }}</span>
+                <span class="pd-hint">{{ hint }}</span>
               }
-              <div class="actions">
+              <div class="pd-actions">
                 @if (s.state === 'repairing') {
-                  <span class="hint" role="status">{{ t.repairing }}</span>
+                  <span class="pd-hint" role="status">{{ t.repairing }}</span>
                 } @else if (s.repair; as action) {
                   @if (canRepair(s)) {
-                    <button type="button" class="btn primary" [attr.data-testid]="'service-health-repair-' + s.service" (click)="repair(s)">{{ label(action, s.label) }}</button>
+                    <button type="button" class="pd-btn pd-primary" [attr.data-testid]="'service-health-repair-' + s.service" (click)="repair(s)">{{ label(action, s.label) }}</button>
                   }
                 }
                 @if (s.cause?.raiseCap; as cap) {
                   @if (canRaise) {
-                    <button type="button" class="btn" [attr.data-testid]="'service-health-raise-cap-' + s.service" (click)="raise(cap)">{{ t.raiseCap }}</button>
+                    <button type="button" class="pd-btn" [attr.data-testid]="'service-health-raise-cap-' + s.service" (click)="raise(cap)">{{ t.raiseCap }}</button>
                   }
                 }
               </div>
               @if (store.repairErrors()[s.service]; as why) {
-                <span class="err" role="alert">{{ why }}</span>
+                <span class="pd-err" role="alert">{{ why }}</span>
               }
               @if (s.cause?.detail; as detail) {
                 <details><summary>{{ t.technicalDetails }}</summary><code>{{ detail }}</code></details>
@@ -75,27 +75,27 @@ let nextId = 0;
     :host { position: relative; display: inline-flex; min-width: 0; }
     /* The chip's edge is visible, the other items' are not: 5 px of margin gives it the same 14 px to its neighbours'
        text as they have between them (4 px padding + 1 px border each side, 4 px gap; design review R3-2). */
-    :host:has(.chip) { margin-inline: 5px; }
-    .chip { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 20px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-pill); background: var(--pd-danger-tint); color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .chip:hover { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 6%); }
+    :host:has(.pd-chip) { margin-inline: 5px; }
+    .pd-chip { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; min-height: 20px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-pill); background: var(--pd-danger-tint); color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-chip:hover { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 6%); }
     /* Pressed while its details are open: the link between the chip and its popover. */
-    .chip[aria-expanded='true'] { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 10%); box-shadow: inset 0 0 0 1px var(--pd-danger); }
-    .chip.repairing { background: var(--pd-surface-2); }
-    .chip:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-danger); }
-    .repairing .mark { background: var(--pd-text-muted); border-radius: 50%; }
-    .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: var(--pd-z-overlay); display: flex; flex-direction: column; gap: var(--pd-space-3); width: min(380px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; box-sizing: border-box; padding: var(--pd-space-3); background: var(--pd-surface-3); color: var(--pd-text); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); font-size: var(--pd-text-body); }
-    :host(.below) .popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
-    .svc { display: flex; flex-direction: column; align-items: flex-start; gap: var(--pd-space-1); }
-    .svc + .svc { padding-top: var(--pd-space-3); border-top: 1px solid var(--pd-hairline); }
-    .hint { color: var(--pd-text-muted); line-height: var(--pd-lh-body); }
-    .err { color: var(--pd-danger); }
-    .actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); }
-    .actions:empty { display: none; }
-    .btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .btn.primary { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
-    .btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-chip[aria-expanded='true'] { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 10%); box-shadow: inset 0 0 0 1px var(--pd-danger); }
+    .pd-chip.pd-repairing { background: var(--pd-surface-2); }
+    .pd-chip:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-danger); }
+    .pd-repairing .pd-mark { background: var(--pd-text-muted); border-radius: 50%; }
+    .pd-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: var(--pd-z-overlay); display: flex; flex-direction: column; gap: var(--pd-space-3); width: min(380px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; box-sizing: border-box; padding: var(--pd-space-3); background: var(--pd-surface-3); color: var(--pd-text); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-popover); box-shadow: var(--pd-shadow-2); font-size: var(--pd-text-body); }
+    :host(.pd-below) .pd-popover { top: calc(100% + var(--pd-space-1)); bottom: auto; }
+    .pd-svc { display: flex; flex-direction: column; align-items: flex-start; gap: var(--pd-space-1); }
+    .pd-svc + .pd-svc { padding-top: var(--pd-space-3); border-top: 1px solid var(--pd-hairline); }
+    .pd-hint { color: var(--pd-text-muted); line-height: var(--pd-lh-body); }
+    .pd-err { color: var(--pd-danger); }
+    .pd-actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); }
+    .pd-actions:empty { display: none; }
+    .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-btn.pd-primary { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
+    .pd-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     details { max-width: 100%; color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
     summary { cursor: pointer; }
     code { display: block; margin-top: var(--pd-space-1); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--pd-font-mono); user-select: text; }
@@ -146,7 +146,7 @@ export class PdServiceStatus {
   protected close(refocus: boolean): void {
     if (!this.open()) return;
     this.open.set(false);
-    if (refocus) this.host.nativeElement.querySelector<HTMLButtonElement>('.chip')?.focus();
+    if (refocus) this.host.nativeElement.querySelector<HTMLButtonElement>('.pd-chip')?.focus();
   }
 
   protected outside(e: Event): void {

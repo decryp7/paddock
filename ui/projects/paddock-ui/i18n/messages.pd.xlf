@@ -56,6 +56,9 @@
       <trans-unit id="pd.category.help" datatype="html">
         <source>Help</source>
       </trans-unit>
+      <trans-unit id="pd.copyMenu.copy" datatype="html">
+        <source>Copy</source>
+      </trans-unit>
       <trans-unit id="pd.dialogs.cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
@@ -70,6 +73,54 @@
       </trans-unit>
       <trans-unit id="pd.dialogs.unknown" datatype="html">
         <source>This dialog is not known to this version of the app: <x id="dialog"/></source>
+      </trans-unit>
+      <trans-unit id="pd.format.bytes.one" datatype="html">
+        <source><x id="count"/> byte</source>
+      </trans-unit>
+      <trans-unit id="pd.format.bytes.other" datatype="html">
+        <source><x id="count"/> bytes</source>
+      </trans-unit>
+      <trans-unit id="pd.format.eta.days" datatype="html">
+        <source>about <x id="days"/> d left</source>
+      </trans-unit>
+      <trans-unit id="pd.format.eta.hours" datatype="html">
+        <source>about <x id="hours"/> h left</source>
+      </trans-unit>
+      <trans-unit id="pd.format.eta.hoursMinutes" datatype="html">
+        <source>about <x id="hours"/> h <x id="minutes"/> min left</source>
+      </trans-unit>
+      <trans-unit id="pd.format.eta.minutes" datatype="html">
+        <source>about <x id="minutes"/> min left</source>
+      </trans-unit>
+      <trans-unit id="pd.format.eta.underMinute" datatype="html">
+        <source>less than a minute left</source>
+      </trans-unit>
+      <trans-unit id="pd.format.justNow" datatype="html">
+        <source>just now</source>
+      </trans-unit>
+      <trans-unit id="pd.format.perSecond" datatype="html">
+        <source><x id="size"/>/s</source>
+      </trans-unit>
+      <trans-unit id="pd.format.suffix.million" datatype="html">
+        <source>M</source>
+      </trans-unit>
+      <trans-unit id="pd.format.suffix.thousand" datatype="html">
+        <source>k</source>
+      </trans-unit>
+      <trans-unit id="pd.format.unit.d" datatype="html">
+        <source>d</source>
+      </trans-unit>
+      <trans-unit id="pd.format.unit.h" datatype="html">
+        <source>h</source>
+      </trans-unit>
+      <trans-unit id="pd.format.unit.min" datatype="html">
+        <source>min</source>
+      </trans-unit>
+      <trans-unit id="pd.format.unit.ms" datatype="html">
+        <source>ms</source>
+      </trans-unit>
+      <trans-unit id="pd.format.unit.s" datatype="html">
+        <source>s</source>
       </trans-unit>
       <trans-unit id="pd.health.chip.compact.many" datatype="html">
         <source><x id="count"/> services</source>
@@ -398,6 +449,12 @@
       <trans-unit id="pd.pages.status-bar" datatype="html">
         <source>Status bar</source>
       </trans-unit>
+      <trans-unit id="pd.pathText.copied" datatype="html">
+        <source>Copied</source>
+      </trans-unit>
+      <trans-unit id="pd.pathText.copy" datatype="html">
+        <source>Copy the full path</source>
+      </trans-unit>
       <trans-unit id="pd.settings.appearance" datatype="html">
         <source>Appearance</source>
       </trans-unit>
@@ -517,6 +574,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.section.reset" datatype="html">
         <source>Reset section</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.section.show-them" datatype="html">
+        <source>Show them</source>
       </trans-unit>
       <trans-unit id="pd.settings.section.unavailable" datatype="html">
         <source>These settings are not available in this app.</source>

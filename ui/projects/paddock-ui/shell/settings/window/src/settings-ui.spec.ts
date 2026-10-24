@@ -54,7 +54,7 @@ const $$ = <T extends Element = HTMLElement>(el: ParentNode, sel: string) => [..
 const field = (el: ParentNode, key: string) => $(el, `pd-setting-field[data-key="${key}"]`);
 
 async function go(bed: Bed, page: string): Promise<void> {
-  $<HTMLButtonElement>(bed.el, `.nav [data-page="${page}"]`).click();
+  $<HTMLButtonElement>(bed.el, `.pd-nav [data-page="${page}"]`).click();
   await settle();
   await bed.fixture.whenStable();
   await settle();
@@ -71,24 +71,25 @@ async function type(bed: Bed, input: HTMLInputElement | HTMLTextAreaElement, val
 describe('pd-settings-window', () => {
   it('lists the pages by group and opens at the first one', async () => {
     const { el } = await open();
-    expect($$(el, '.nav .group').map((g) => g.textContent?.trim())).toEqual(['Application', 'Features']);
-    expect($$(el, '.nav .item').map((b) => b.dataset['page'])).toEqual(['pd.appearance', 'sd.general', 'sd.storage']);
-    expect($(el, '.item[aria-current="page"]').dataset['page']).toBe('pd.appearance');
+    expect($$(el, '.pd-nav .pd-group').map((g) => g.textContent?.trim())).toEqual(['Application', 'Features']);
+    expect($$(el, '.pd-nav .pd-item').map((b) => b.dataset['page'])).toEqual(['pd.appearance', 'sd.general', 'sd.storage']);
+    expect($(el, '.pd-item[aria-current="page"]').dataset['page']).toBe('pd.appearance');
     expect($(el, 'pd-settings-section h2').textContent).toBe('Appearance');
   });
 
   it('renders every field kind from the engine’s schema', async () => {
     const bed = await open({ page: 'sd.general' });
     const { el } = bed;
-    expect($(el, '.item[aria-current="page"]').dataset['page']).toBe('sd.general');
+    expect($(el, '.pd-item[aria-current="page"]').dataset['page']).toBe('sd.general');
     expect($<HTMLInputElement>(field(el, 'notify'), 'input[role="switch"]').checked).toBe(true);
-    expect($<HTMLSelectElement>(field(el, 'style'), 'select').value).toBe('casual');
+    expect($(field(el, 'style'), 'pd-select button').textContent?.trim()).toBe('Casual');
+    expect(field(el, 'style').querySelector('select')).toBeNull();
     expect($<HTMLInputElement>(field(el, 'greeting'), 'input[type="text"]').value).toBe('Hello');
     expect($<HTMLInputElement>(field(el, 'repeat'), 'input[type="number"]').value).toBe('1');
     expect(field(el, 'repeat').textContent).toContain('times');
     expect(field(el, 'volume').textContent).toContain('Needs restart');
     await go(bed, 'sd.storage');
-    expect($<HTMLInputElement>(field(el, 'folder'), 'input.mono').placeholder).toContain('Folder');
+    expect($<HTMLInputElement>(field(el, 'folder'), 'input.pd-mono').placeholder).toContain('Folder');
     // Durations and sizes are edited in their unit.
     expect($<HTMLInputElement>(field(el, 'keep'), 'input').value).toBe('60');
     expect(field(el, 'keep').textContent).toContain('min');
@@ -96,7 +97,7 @@ describe('pd-settings-window', () => {
     // The advanced list is behind "Show advanced".
     expect(field(el, 'ignore')).toBeNull();
     expect(el.textContent).toContain('1 advanced setting is hidden.');
-    $<HTMLButtonElement>(el, 'pd-settings-section .link').click();
+    $<HTMLButtonElement>(el, 'pd-settings-section .pd-link').click();
     await settle();
     await bed.fixture.whenStable();
     expect($<HTMLTextAreaElement>(field(el, 'ignore'), 'textarea').value).toBe('*.tmp');
@@ -111,10 +112,10 @@ describe('pd-settings-window', () => {
     toggle.dispatchEvent(new Event('change'));
     await settle();
     expect(backend.values('sd.general')?.['notify']).toBe(false);
-    expect($(el, '.foot .status').textContent).toBe('Show a notification saved.');
-    const style = $<HTMLSelectElement>(field(el, 'style'), 'select');
-    style.value = 'formal';
-    style.dispatchEvent(new Event('change'));
+    expect($(el, '.pd-foot .pd-status').textContent).toBe('Show a notification saved.');
+    $(field(el, 'style'), 'pd-select button').click();
+    await settle();
+    [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')].find((o) => o.textContent?.includes('Formal'))!.click();
     await settle();
     expect(backend.values('sd.general')?.['style']).toBe('formal');
     await type(bed, $<HTMLInputElement>(field(el, 'greeting'), 'input'), 'Hi there', false);
@@ -135,12 +136,12 @@ describe('pd-settings-window', () => {
     await type(bed, $<HTMLInputElement>(field(el, 'greeting'), 'input'), 'Hi!');
     expect(field(el, 'greeting').querySelector('[role="alert"]')?.textContent).toBe('Does not have the expected format ([A-Za-z ,]+).');
     expect($<HTMLInputElement>(field(el, 'greeting'), 'input').getAttribute('aria-invalid')).toBe('true');
-    expect($(el, '.nav [data-page="sd.general"] .dot')).not.toBeNull();
+    expect($(el, '.pd-nav [data-page="sd.general"] .pd-dot')).not.toBeNull();
     // Another field still applies; the refused one stays unsaved.
     await type(bed, $<HTMLInputElement>(field(el, 'repeat'), 'input'), '3');
     expect(backend.values('sd.general')).toMatchObject({ repeat: 3, greeting: 'Hello' });
     // Close is held, with a question.
-    $<HTMLButtonElement>(el, '.foot [data-dialog-close]').click();
+    $<HTMLButtonElement>(el, '.pd-foot [data-dialog-close]').click();
     expect(bed.fixture.componentInstance.dialogCanClose()).toBe(false);
     await bed.fixture.whenStable();
     const ask = $(el, '[data-testid="settings-unsaved"]');
@@ -170,17 +171,17 @@ describe('pd-settings-window', () => {
     await backend.set('sd.general', { repeat: 4, greeting: 'Yo' });
     await settle();
     await bed.fixture.whenStable();
-    const reset = $<HTMLButtonElement>(field(el, 'repeat'), 'button.reset');
+    const reset = $<HTMLButtonElement>(field(el, 'repeat'), 'button.pd-reset');
     expect(reset.getAttribute('aria-label')).toBe('Reset to default: Repeat');
     expect(reset.title).toBe('Default: 1 times');
     reset.click();
     await settle();
     expect(backend.values('sd.general')).toMatchObject({ repeat: 1, greeting: 'Yo' });
-    $<HTMLButtonElement>(el, 'pd-settings-section .head .btn').click();
+    $<HTMLButtonElement>(el, 'pd-settings-section .pd-head .pd-btn').click();
     await settle();
     expect(backend.values('sd.general')?.['greeting']).toBe('Hello');
     await bed.fixture.whenStable();
-    expect($(el, '.foot .status').textContent).toBe('General reset to defaults.');
+    expect($(el, '.pd-foot .pd-status').textContent).toBe('General reset to defaults.');
   });
 
   it('searches every setting however it is written, and Escape clears the search', async () => {
@@ -207,13 +208,13 @@ describe('pd-settings-window', () => {
     const custom = defineSettingsPage({ id: 'sd.keys', group: 'application', title: msg('sd.keys', 'Keyboard shortcuts'), order: 200, load: () => Promise.resolve(PdSettingsSectionPage) });
     const bed = await open({ pages: [...SPEC_PAGES, custom] });
     await type(bed, $<HTMLInputElement>(bed.el, '[data-testid="settings-search"]'), 'keyboard', false);
-    const link = $<HTMLButtonElement>(bed.el, '.page-hit .link');
+    const link = $<HTMLButtonElement>(bed.el, '.pd-page-hit .pd-link');
     expect(link.textContent).toBe('Keyboard shortcuts');
     link.click();
     await settle();
     await bed.fixture.whenStable();
     await settle();
-    expect($(bed.el, '.item[aria-current="page"]').dataset['page']).toBe('sd.keys');
+    expect($(bed.el, '.pd-item[aria-current="page"]').dataset['page']).toBe('sd.keys');
     expect(bed.el.textContent).toContain('These settings are not available in this app.');
   });
 
@@ -234,9 +235,9 @@ describe('pd-settings-window', () => {
   it('moves between pages with the arrow keys', async () => {
     const { el, fixture } = await open();
     document.body.appendChild(el);
-    const items = $$<HTMLButtonElement>(el, '.nav .item');
+    const items = $$<HTMLButtonElement>(el, '.pd-nav .pd-item');
     items[0]!.focus();
-    const nav = $(el, '.nav');
+    const nav = $(el, '.pd-nav');
     const key = (k: string) => nav.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
     key('ArrowDown');
     expect(document.activeElement).toBe(items[1]);
@@ -266,7 +267,7 @@ describe('pd-settings-window', () => {
     const bed = await open({ pages: [flaky], page: 'sd.general' });
     expect(bed.el.textContent).toContain('This page could not be opened.');
     fail = false;
-    $<HTMLButtonElement>(bed.el, '.content .btn').click();
+    $<HTMLButtonElement>(bed.el, '.pd-content .pd-btn').click();
     await settle();
     await bed.fixture.whenStable();
     await settle();
@@ -277,11 +278,11 @@ describe('pd-settings-window', () => {
     vi.spyOn(broken, 'overview').mockRejectedValueOnce(new Error('gone'));
     const again = await open({ backend: broken });
     expect(again.el.textContent).toContain('The settings could not be loaded: gone');
-    $<HTMLButtonElement>(again.el, '.content .btn').click();
+    $<HTMLButtonElement>(again.el, '.pd-content .pd-btn').click();
     await settle();
     await again.fixture.whenStable();
     await settle();
-    expect($$(again.el, '.nav .item')).toHaveLength(3);
+    expect($$(again.el, '.pd-nav .pd-item')).toHaveLength(3);
   });
 });
 

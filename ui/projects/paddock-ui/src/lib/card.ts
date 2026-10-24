@@ -23,16 +23,16 @@ let nextId = 0;
     '(keydown.space)': 'activate($event)',
   },
   template: `
-    <header class="head">
-      <span class="icon"><ng-content select="[slot=icon]" /></span>
-      <h3 class="title" [id]="titleId">{{ heading() }}</h3>
-      <span class="status"><ng-content select="[slot=status]" /></span>
+    <header class="pd-head">
+      <span class="pd-icon"><ng-content select="[slot=icon]" /></span>
+      <h3 class="pd-title" [id]="titleId">{{ heading() }}</h3>
+      <span class="pd-status"><ng-content select="[slot=status]" /></span>
     </header>
-    <div class="hero"><ng-content /></div>
-    <div class="spark"><ng-content select="[slot=sparkline]" /></div>
-    <div class="caption"><ng-content select="[slot=caption]" /></div>
+    <div class="pd-hero"><ng-content /></div>
+    <div class="pd-spark"><ng-content select="[slot=sparkline]" /></div>
+    <div class="pd-caption"><ng-content select="[slot=caption]" /></div>
     @if (interactive()) {
-      <svg class="chevron" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+      <svg class="pd-chevron" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
         <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
     }
@@ -55,15 +55,15 @@ let nextId = 0;
     :host(.pd-card--interactive) { cursor: pointer; transition: background var(--pd-duration-micro) var(--pd-ease-enter); }
     :host(.pd-card--interactive:hover) { background: var(--pd-surface-2); }
     :host(.pd-card--interactive:active) { background: var(--pd-pressed); }
-    .head { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 20px; }
-    .icon { display: inline-flex; color: var(--pd-text-muted); }
-    .icon:empty { display: none; }
-    .title { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--pd-text-body); line-height: var(--pd-lh-body); font-weight: var(--pd-weight-semibold); }
-    .status { display: inline-flex; align-items: center; }
-    .spark:empty, .caption:empty { display: none; }
-    .caption { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
-    .chevron { position: absolute; right: var(--pd-space-3); bottom: var(--pd-space-3); color: var(--pd-text-muted); opacity: 0; transition: opacity var(--pd-duration-micro) var(--pd-ease-enter); }
-    :host(.pd-card--interactive:hover) .chevron, :host(.pd-card--interactive:focus-visible) .chevron { opacity: 1; }
+    .pd-head { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 20px; }
+    .pd-icon { display: inline-flex; color: var(--pd-text-muted); }
+    .pd-icon:empty { display: none; }
+    .pd-title { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--pd-text-body); line-height: var(--pd-lh-body); font-weight: var(--pd-weight-semibold); }
+    .pd-status { display: inline-flex; align-items: center; }
+    .pd-spark:empty, .pd-caption:empty { display: none; }
+    .pd-caption { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    .pd-chevron { position: absolute; right: var(--pd-space-3); bottom: var(--pd-space-3); color: var(--pd-text-muted); opacity: 0; transition: opacity var(--pd-duration-micro) var(--pd-ease-enter); }
+    :host(.pd-card--interactive:hover) .pd-chevron, :host(.pd-card--interactive:focus-visible) .pd-chevron { opacity: 1; }
     :host(:focus-visible) { border-radius: var(--pd-radius-card); }
   `,
 })

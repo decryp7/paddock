@@ -80,21 +80,21 @@ const BODY_PADDING_PX = 16;
     '[attr.data-modality]': 'modality()',
   },
   template: `
-    <main #body class="body" tabindex="-1" [attr.aria-label]="title()" [attr.aria-busy]="loading()">
+    <main #body class="pd-body" tabindex="-1" [attr.aria-label]="title()" [attr.aria-busy]="loading()">
       @if (error(); as e) {
-        <div class="failed" role="alert" data-testid="dialog-error">
-          <h1 class="failed-title">{{ t.openFailed }}</h1>
-          <p class="failed-reason" data-testid="dialog-error-reason">{{ e }}</p>
+        <div class="pd-failed" role="alert" data-testid="dialog-error">
+          <h1 class="pd-failed-title">{{ t.openFailed }}</h1>
+          <p class="pd-failed-reason" data-testid="dialog-error-reason">{{ e }}</p>
         </div>
       } @else if (loading()) {
-        <p class="loading" data-testid="dialog-loading">{{ t.loading }}</p>
+        <p class="pd-loading" data-testid="dialog-loading">{{ t.loading }}</p>
       }
       @if (denied(); as d) {
-        <p class="denied" role="alert" data-testid="dialog-denied">{{ d.message }}</p>
+        <p class="pd-denied" role="alert" data-testid="dialog-denied">{{ d.message }}</p>
       }
       <ng-container #host />
       @if (shellClose()) {
-        <div class="foot" data-testid="dialog-shell-foot">
+        <div class="pd-foot" data-testid="dialog-shell-foot">
           <button type="button" class="pd-dialog-button" (click)="dismiss()" data-testid="dialog-shell-close" data-dialog-close>
             {{ modality() === 'modal' && !error() ? t.cancel : t.close }}
           </button>
@@ -104,14 +104,14 @@ const BODY_PADDING_PX = 16;
   `,
   styles: `
     :host { display: block; height: 100vh; background: var(--pd-surface-2); color: var(--pd-text); }
-    .body { box-sizing: border-box; height: 100%; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; outline: none; }
-    .body > :not(.loading):not(.failed):not(.denied):not(.foot) { flex: 1 1 auto; min-height: 0; }
-    .loading { margin: auto; color: var(--pd-text-muted); }
-    .failed { margin: auto 0; }
-    .failed-title { margin: 0 0 8px; font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); }
-    .failed-reason, .denied { margin: 0; color: var(--pd-danger); overflow-wrap: anywhere; }
-    .denied { padding: 8px 10px; border: 1px solid var(--pd-danger); border-radius: var(--pd-radius-control, 6px); }
-    .foot { display: flex; justify-content: flex-end; gap: 8px; }
+    .pd-body { box-sizing: border-box; height: 100%; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; outline: none; }
+    .pd-body > :not(.pd-loading):not(.pd-failed):not(.pd-denied):not(.pd-foot) { flex: 1 1 auto; min-height: 0; }
+    .pd-loading { margin: auto; color: var(--pd-text-muted); }
+    .pd-failed { margin: auto 0; }
+    .pd-failed-title { margin: 0 0 8px; font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); }
+    .pd-failed-reason, .pd-denied { margin: 0; color: var(--pd-danger); overflow-wrap: anywhere; }
+    .pd-denied { padding: 8px 10px; border: 1px solid var(--pd-danger); border-radius: var(--pd-radius-control, 6px); }
+    .pd-foot { display: flex; justify-content: flex-end; gap: 8px; }
     .pd-dialog-button { min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3, 12px); border-radius: var(--pd-radius-control, 6px); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium, 500); }
   `,
 })
@@ -149,7 +149,7 @@ export class DialogShell {
   protected readonly denied = inject(DeniedCommands).last;
 
   /** What the content injects as `DIALOG_REF`: closing answers the opener and ends this window. */
-  readonly ref: DialogRef = { closed: new Promise(() => undefined), close: (result) => void this.close(result) };
+  readonly ref: DialogRef = { closed: new Promise(() => undefined), close: (result) => void this.close(result), setTitle: (title) => this.setTitle(title) };
 
   constructor() {
     const started = this.pending.add();
@@ -191,6 +191,15 @@ export class DialogShell {
     } catch (e) {
       this.fail(e);
     }
+  }
+
+  /** A title the content knows only now: the heading, the page title and (where the window system can) the OS title bar. */
+  private setTitle(title: string): void {
+    const text = title.trim();
+    if (!text) return;
+    this.title.set(text);
+    if (typeof document !== 'undefined') document.title = text;
+    this.io.setTitle?.(text).catch(() => undefined);
   }
 
   private fail(e: unknown): void {

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { PdSelect } from '@decryp7/paddock-ui/select';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import type { SuJobPhase } from '@decryp7/paddock-ui';
 import { UpdatesStore } from './updates.store';
@@ -14,9 +15,10 @@ import { formatBytes } from './format';
 @Component({
   selector: 'pd-updates-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdSelect],
   template: `
     @if (store.status(); as s) {
-      <p class="muted" data-testid="updates-current">{{ current(s.currentVersion) }}</p>
+      <p class="pd-muted" data-testid="updates-current">{{ current(s.currentVersion) }}</p>
       <div aria-live="polite" data-testid="updates-phase">
         @switch (s.phase.kind) {
           @case ('unavailable') {
@@ -37,10 +39,10 @@ import { formatBytes } from './format';
           @case ('downloading') {
             <p role="status">{{ downloading() }}</p>
             @if (progress(); as p) {
-              <p class="muted">{{ p.label }}</p>
+              <p class="pd-muted">{{ p.label }}</p>
               <progress [attr.value]="p.fraction" max="1" [attr.aria-label]="p.label"></progress>
             } @else {
-              <p class="muted">{{ t.progressInJobs }}</p>
+              <p class="pd-muted">{{ t.progressInJobs }}</p>
             }
           }
           @case ('ready') {
@@ -55,79 +57,75 @@ import { formatBytes } from './format';
         }
       </div>
       @if (store.info()?.notes; as notes) {
-        <pre class="text" tabindex="0" [attr.aria-label]="t.notes">{{ notes }}</pre>
+        <pre class="pd-text" tabindex="0" [attr.aria-label]="t.notes">{{ notes }}</pre>
       }
       @if (store.error(); as e) {
-        <div class="problem" role="alert" data-testid="updates-error">
-          <p class="message">{{ e.message }}</p>
+        <div class="pd-problem" role="alert" data-testid="updates-error">
+          <p class="pd-message">{{ e.message }}</p>
           <p>{{ e.nextStep }}</p>
           @if (e.detail) {
-            <p class="detail">{{ e.detail }}</p>
+            <p class="pd-detail">{{ e.detail }}</p>
           }
         </div>
       } @else if (s.phase.kind === 'unavailable') {
-        <p class="muted">{{ t.noKey }}</p>
+        <p class="pd-muted">{{ t.noKey }}</p>
       }
       @if (s.phase.kind !== 'unavailable') {
-        <div class="row">
-          <label class="check">
+        <div class="pd-row">
+          <label class="pd-check">
             <input type="checkbox" [checked]="s.autoCheck" (change)="setAuto($any($event.target).checked)" />
             {{ t.autoCheck }}
           </label>
           @if (s.channels.length > 1) {
-            <label class="check">
+            <label class="pd-check">
               {{ t.channel }}
-              <select [value]="s.channel" (change)="setChannel($any($event.target).value)">
-                @for (c of s.channels; track c.id) {
-                  <option [value]="c.id" [selected]="c.id === s.channel">{{ c.label }}</option>
-                }
-              </select>
+              <pd-select [options]="channelOptions()" [value]="s.channel" [ariaLabel]="t.channel" (valueChange)="setChannel($event)" />
             </label>
           }
         </div>
         @if (s.phase.kind === 'ready') {
-          <label class="check">
+          <label class="pd-check">
             <input type="checkbox" [checked]="installOnQuit()" (change)="store.installOnQuit($any($event.target).checked)" />
             {{ t.installOnQuit }}
           </label>
         }
-        <p class="muted">{{ checkedText() }}</p>
+        <p class="pd-muted">{{ checkedText() }}</p>
       }
-      <div class="actions">
+      <div class="pd-actions">
         @switch (s.phase.kind) {
           @case ('checking') {
-            <button type="button" class="btn" (click)="store.cancel()">{{ t.cancel }}</button>
+            <button type="button" class="pd-btn" (click)="store.cancel()">{{ t.cancel }}</button>
           }
           @case ('downloading') {
-            <button type="button" class="btn" (click)="store.cancel()">{{ t.cancel }}</button>
+            <button type="button" class="pd-btn" (click)="store.cancel()">{{ t.cancel }}</button>
           }
           @case ('ready') {
-            <button type="button" class="btn" (click)="store.cancel()">{{ t.discard }}</button>
-            <button type="button" class="btn primary" (click)="store.restart()">{{ t.restart }}</button>
+            <button type="button" class="pd-btn" (click)="store.cancel()">{{ t.discard }}</button>
+            <button type="button" class="pd-btn pd-primary" (click)="store.restart()">{{ t.restart }}</button>
           }
           @case ('available') {
-            <button type="button" class="btn" (click)="store.check()">{{ t.checkAgain }}</button>
-            <button type="button" class="btn primary" (click)="store.download()">{{ t.download }}</button>
+            <button type="button" class="pd-btn" (click)="store.check()">{{ t.checkAgain }}</button>
+            <button type="button" class="pd-btn pd-primary" (click)="store.download()">{{ t.download }}</button>
           }
           @case ('failed') {
             @if (store.canDownload()) {
-              <button type="button" class="btn primary" (click)="store.download()">{{ t.tryAgain }}</button>
+              <button type="button" class="pd-btn pd-primary" (click)="store.download()">{{ t.tryAgain }}</button>
             } @else {
-              <button type="button" class="btn primary" (click)="store.check()">{{ t.checkAgain }}</button>
+              <button type="button" class="pd-btn pd-primary" (click)="store.check()">{{ t.checkAgain }}</button>
             }
           }
           @case ('idle') {
-            <button type="button" class="btn primary" (click)="store.check()">{{ t.checkNow }}</button>
+            <button type="button" class="pd-btn pd-primary" (click)="store.check()">{{ t.checkNow }}</button>
           }
           @case ('upToDate') {
-            <button type="button" class="btn primary" (click)="store.check()">{{ t.checkNow }}</button>
+            <button type="button" class="pd-btn pd-primary" (click)="store.check()">{{ t.checkNow }}</button>
           }
         }
       </div>
     } @else if (store.requestError(); as error) {
-      <p role="alert">{{ error }} <button type="button" class="btn" (click)="store.load()">{{ t.retry }}</button></p>
+      <p role="alert">{{ error }} <button type="button" class="pd-btn" (click)="store.load()">{{ t.retry }}</button></p>
     } @else {
-      <p class="muted" role="status">{{ t.asking }}</p>
+      <p class="pd-muted" role="status">{{ t.asking }}</p>
     }
   `,
   styles: ABOUT_STYLES,
@@ -209,6 +207,8 @@ export class PdUpdatesDialog {
     const s = this.store.status();
     if (s) void this.store.setPreferences({ autoCheck, channel: s.channel });
   }
+
+  protected readonly channelOptions = computed(() => (this.store.status()?.channels ?? []).map((c) => ({ value: c.id, label: c.label })));
 
   protected setChannel(channel: string): void {
     const s = this.store.status();

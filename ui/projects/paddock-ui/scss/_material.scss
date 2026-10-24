@@ -1,0 +1,303 @@
+// The Angular Material bridge (plan X37): Material 3's system tokens (--mat-sys-*) and the component tokens of the parts the
+// apps use (tooltip, slide toggle, checkbox, radio, form field, select, autocomplete, menu, tabs, datepicker, progress,
+// snack bar, dialog surface) resolve to the --pd-* tokens, so a Material widget follows the app's theme, accent, density and
+// contrast with no per-app overrides. Nothing here has a colour of its own: every value is a var(--pd-…) or a size from the
+// tokens. Material's own theme is still included by the app (`mat.theme` / `mat.core`); this file sits after it.
+//
+// Compact density: the form field and select are --pd-control-height; the slide toggle is scaled as a whole so its handle
+// geometry stays consistent (Pitcrew's rule).
+
+:root {
+  // ---- Colour roles.
+  --mat-sys-primary: var(--pd-accent-fill);
+  --mat-sys-on-primary: var(--pd-on-accent);
+  --mat-sys-primary-container: var(--pd-accent-tint);
+  --mat-sys-on-primary-container: var(--pd-text);
+  --mat-sys-inverse-primary: var(--pd-accent);
+  --mat-sys-surface-tint: var(--pd-accent);
+
+  --mat-sys-secondary: var(--pd-text-muted);
+  --mat-sys-on-secondary: var(--pd-surface-1);
+  --mat-sys-secondary-container: var(--pd-pressed);
+  --mat-sys-on-secondary-container: var(--pd-text);
+
+  --mat-sys-tertiary: var(--pd-accent-fill);
+  --mat-sys-on-tertiary: var(--pd-on-accent);
+  --mat-sys-tertiary-container: var(--pd-accent-tint);
+  --mat-sys-on-tertiary-container: var(--pd-text);
+
+  --mat-sys-error: var(--pd-danger);
+  --mat-sys-on-error: var(--pd-on-danger);
+  --mat-sys-error-container: var(--pd-danger-tint);
+  --mat-sys-on-error-container: var(--pd-danger);
+
+  --mat-sys-background: var(--pd-bg);
+  --mat-sys-on-background: var(--pd-text);
+  --mat-sys-surface: var(--pd-surface-1);
+  --mat-sys-on-surface: var(--pd-text);
+  --mat-sys-surface-variant: var(--pd-surface-2);
+  --mat-sys-on-surface-variant: var(--pd-text-muted);
+  --mat-sys-surface-dim: var(--pd-bg);
+  --mat-sys-surface-bright: var(--pd-surface-3);
+  --mat-sys-surface-container-lowest: var(--pd-bg);
+  --mat-sys-surface-container-low: var(--pd-surface-1);
+  --mat-sys-surface-container: var(--pd-surface-2);
+  --mat-sys-surface-container-high: var(--pd-surface-3);
+  --mat-sys-surface-container-highest: var(--pd-surface-3);
+  --mat-sys-inverse-surface: var(--pd-text);
+  --mat-sys-inverse-on-surface: var(--pd-surface-1);
+  --mat-sys-outline: var(--pd-border-control);
+  --mat-sys-outline-variant: var(--pd-hairline);
+  --mat-sys-shadow: var(--pd-scrim);
+  --mat-sys-scrim: var(--pd-scrim);
+
+  // ---- Elevation: the family's three shadows.
+  --mat-sys-level0: none;
+  --mat-sys-level1: var(--pd-shadow-1);
+  --mat-sys-level2: var(--pd-shadow-2);
+  --mat-sys-level3: var(--pd-shadow-2);
+  --mat-sys-level4: var(--pd-shadow-3);
+  --mat-sys-level5: var(--pd-shadow-3);
+
+  // ---- Shape.
+  --mat-sys-corner-extra-small: var(--pd-radius-tag);
+  --mat-sys-corner-small: var(--pd-radius-control);
+  --mat-sys-corner-medium: var(--pd-radius-card);
+  --mat-sys-corner-large: var(--pd-radius-popover);
+  --mat-sys-corner-extra-large: var(--pd-radius-dialog);
+  --mat-sys-corner-full: var(--pd-radius-pill);
+
+  // ---- Typography.
+  --mat-sys-body-large-font: var(--pd-font-sans);
+  --mat-sys-body-large-size: var(--pd-text-body-lg);
+  --mat-sys-body-medium-font: var(--pd-font-sans);
+  --mat-sys-body-medium-size: var(--pd-text-body);
+  --mat-sys-body-small-font: var(--pd-font-sans);
+  --mat-sys-body-small-size: var(--pd-text-label);
+  --mat-sys-label-large-font: var(--pd-font-sans);
+  --mat-sys-label-large-size: var(--pd-text-body);
+  --mat-sys-label-medium-font: var(--pd-font-sans);
+  --mat-sys-label-medium-size: var(--pd-text-label);
+  --mat-sys-label-small-font: var(--pd-font-sans);
+  --mat-sys-label-small-size: var(--pd-text-caption);
+  --mat-sys-title-medium-font: var(--pd-font-sans);
+  --mat-sys-title-medium-size: var(--pd-text-body-lg);
+  --mat-sys-title-large-font: var(--pd-font-sans);
+  --mat-sys-title-large-size: var(--pd-text-subtitle);
+
+  // ---- Tooltip: the inverse surface, 12 px text.
+  --mat-tooltip-container-color: var(--pd-text);
+  --mat-tooltip-supporting-text-color: var(--pd-surface-1);
+  --mat-tooltip-container-shape: var(--pd-radius-control);
+  --mat-tooltip-supporting-text-font: var(--pd-font-sans);
+  --mat-tooltip-supporting-text-size: var(--pd-text-label);
+  --mat-tooltip-supporting-text-line-height: var(--pd-lh-label);
+
+  // ---- Slide toggle.
+  --mat-slide-toggle-selected-track-color: var(--pd-accent-fill);
+  --mat-slide-toggle-selected-hover-track-color: var(--pd-accent-fill-hover);
+  --mat-slide-toggle-selected-focus-track-color: var(--pd-accent-fill);
+  --mat-slide-toggle-selected-pressed-track-color: var(--pd-accent-fill);
+  --mat-slide-toggle-selected-handle-color: var(--pd-on-accent);
+  --mat-slide-toggle-selected-hover-handle-color: var(--pd-on-accent);
+  --mat-slide-toggle-selected-focus-handle-color: var(--pd-on-accent);
+  --mat-slide-toggle-selected-pressed-handle-color: var(--pd-on-accent);
+  --mat-slide-toggle-selected-icon-color: var(--pd-accent-fill);
+  --mat-slide-toggle-unselected-track-color: var(--pd-surface-3);
+  --mat-slide-toggle-unselected-hover-track-color: var(--pd-surface-3);
+  --mat-slide-toggle-unselected-focus-track-color: var(--pd-surface-3);
+  --mat-slide-toggle-unselected-pressed-track-color: var(--pd-surface-3);
+  --mat-slide-toggle-unselected-track-outline-color: var(--pd-border-control);
+  --mat-slide-toggle-unselected-handle-color: var(--pd-text-muted);
+  --mat-slide-toggle-unselected-hover-handle-color: var(--pd-text);
+  --mat-slide-toggle-unselected-focus-handle-color: var(--pd-text);
+  --mat-slide-toggle-unselected-pressed-handle-color: var(--pd-text);
+  --mat-slide-toggle-unselected-icon-color: var(--pd-surface-3);
+  --mat-slide-toggle-label-text-color: var(--pd-text);
+  --mat-slide-toggle-label-text-font: var(--pd-font-sans);
+  --mat-slide-toggle-label-text-size: var(--pd-text-body);
+
+  // ---- Checkbox and radio.
+  --mat-checkbox-selected-icon-color: var(--pd-accent-fill);
+  --mat-checkbox-selected-hover-icon-color: var(--pd-accent-fill-hover);
+  --mat-checkbox-selected-focus-icon-color: var(--pd-accent-fill);
+  --mat-checkbox-selected-pressed-icon-color: var(--pd-accent-fill);
+  --mat-checkbox-selected-checkmark-color: var(--pd-on-accent);
+  --mat-checkbox-unselected-icon-color: var(--pd-border-control);
+  --mat-checkbox-unselected-hover-icon-color: var(--pd-text-muted);
+  --mat-checkbox-unselected-focus-icon-color: var(--pd-text-muted);
+  --mat-checkbox-label-text-color: var(--pd-text);
+  --mat-checkbox-label-text-font: var(--pd-font-sans);
+  --mat-checkbox-label-text-size: var(--pd-text-body);
+  --mat-radio-selected-icon-color: var(--pd-accent-fill);
+  --mat-radio-selected-hover-icon-color: var(--pd-accent-fill-hover);
+  --mat-radio-selected-focus-icon-color: var(--pd-accent-fill);
+  --mat-radio-selected-pressed-icon-color: var(--pd-accent-fill);
+  --mat-radio-unselected-icon-color: var(--pd-border-control);
+  --mat-radio-unselected-hover-icon-color: var(--pd-text-muted);
+  --mat-radio-label-text-color: var(--pd-text);
+  --mat-radio-label-text-font: var(--pd-font-sans);
+  --mat-radio-label-text-size: var(--pd-text-body);
+
+  // ---- Form field and input (outlined, compact).
+  --mat-form-field-container-height: var(--pd-control-height);
+  --mat-form-field-container-vertical-padding: 0px;
+  --mat-form-field-container-text-font: var(--pd-font-sans);
+  --mat-form-field-container-text-size: var(--pd-text-body);
+  --mat-form-field-container-text-line-height: var(--pd-lh-body);
+  --mat-form-field-input-text-color: var(--pd-text);
+  --mat-form-field-input-text-placeholder-color: var(--pd-text-subtle);
+  --mat-form-field-outlined-input-text-color: var(--pd-text);
+  --mat-form-field-outlined-input-text-placeholder-color: var(--pd-text-subtle);
+  --mat-form-field-outlined-outline-color: var(--pd-border-control);
+  --mat-form-field-outlined-hover-outline-color: var(--pd-text-muted);
+  --mat-form-field-outlined-focus-outline-color: var(--pd-accent);
+  --mat-form-field-outlined-error-outline-color: var(--pd-danger);
+  --mat-form-field-outlined-error-hover-outline-color: var(--pd-danger);
+  --mat-form-field-outlined-error-focus-outline-color: var(--pd-danger);
+  --mat-form-field-outlined-label-text-color: var(--pd-text-muted);
+  --mat-form-field-outlined-hover-label-text-color: var(--pd-text);
+  --mat-form-field-outlined-focus-label-text-color: var(--pd-accent);
+  --mat-form-field-outlined-error-label-text-color: var(--pd-danger);
+  --mat-form-field-outlined-caret-color: var(--pd-accent);
+  --mat-form-field-outlined-container-shape: var(--pd-radius-input);
+  --mat-form-field-subscript-text-color: var(--pd-text-muted);
+  --mat-form-field-error-text-color: var(--pd-danger);
+  --mat-form-field-error-focus-trailing-icon-color: var(--pd-danger);
+  --mat-form-field-leading-icon-color: var(--pd-text-muted);
+  --mat-form-field-trailing-icon-color: var(--pd-text-muted);
+  --mat-form-field-disabled-input-text-placeholder-color: var(--pd-text-subtle);
+
+  // ---- Select, autocomplete and their options.
+  --mat-select-panel-background-color: var(--pd-surface-3);
+  --mat-select-enabled-trigger-text-color: var(--pd-text);
+  --mat-select-disabled-trigger-text-color: var(--pd-text-subtle);
+  --mat-select-placeholder-text-color: var(--pd-text-subtle);
+  --mat-select-enabled-arrow-color: var(--pd-text-muted);
+  --mat-select-focused-arrow-color: var(--pd-accent);
+  --mat-select-invalid-arrow-color: var(--pd-danger);
+  --mat-select-trigger-text-font: var(--pd-font-sans);
+  --mat-select-trigger-text-size: var(--pd-text-body);
+  --mat-autocomplete-background-color: var(--pd-surface-3);
+  --mat-autocomplete-container-shape: var(--pd-radius-popover);
+  --mat-option-label-text-color: var(--pd-text);
+  --mat-option-label-text-font: var(--pd-font-sans);
+  --mat-option-label-text-size: var(--pd-text-body);
+  --mat-option-hover-state-layer-color: var(--pd-hover);
+  --mat-option-focus-state-layer-color: var(--pd-hover);
+  --mat-option-selected-state-label-text-color: var(--pd-text);
+  --mat-option-selected-state-layer-color: var(--pd-accent-tint);
+  --mat-optgroup-label-text-color: var(--pd-text-muted);
+
+  // ---- Menu (a context menu or dropdown that is not the CDK menu of the shell).
+  --mat-menu-container-color: var(--pd-surface-3);
+  --mat-menu-container-shape: var(--pd-radius-popover);
+  --mat-menu-item-label-text-color: var(--pd-text);
+  --mat-menu-item-label-text-font: var(--pd-font-sans);
+  --mat-menu-item-label-text-size: var(--pd-text-body);
+  --mat-menu-item-icon-color: var(--pd-text-muted);
+  --mat-menu-item-hover-state-layer-color: var(--pd-hover);
+  --mat-menu-item-focus-state-layer-color: var(--pd-hover);
+  --mat-menu-divider-color: var(--pd-hairline);
+
+  // ---- Tabs.
+  --mat-tab-active-label-text-color: var(--pd-text);
+  --mat-tab-inactive-label-text-color: var(--pd-text-muted);
+  --mat-tab-active-hover-label-text-color: var(--pd-text);
+  --mat-tab-active-focus-label-text-color: var(--pd-text);
+  --mat-tab-inactive-hover-label-text-color: var(--pd-text);
+  --mat-tab-inactive-focus-label-text-color: var(--pd-text);
+  --mat-tab-active-indicator-color: var(--pd-accent);
+  --mat-tab-active-hover-indicator-color: var(--pd-accent);
+  --mat-tab-active-focus-indicator-color: var(--pd-accent);
+  --mat-tab-divider-color: var(--pd-hairline);
+  --mat-tab-label-text-font: var(--pd-font-sans);
+  --mat-tab-label-text-size: var(--pd-text-body);
+
+  // ---- Datepicker.
+  --mat-datepicker-calendar-container-background-color: var(--pd-surface-3);
+  --mat-datepicker-calendar-container-text-color: var(--pd-text);
+  --mat-datepicker-calendar-container-shape: var(--pd-radius-popover);
+  --mat-datepicker-calendar-header-text-color: var(--pd-text-muted);
+  --mat-datepicker-calendar-header-divider-color: var(--pd-hairline);
+  --mat-datepicker-calendar-date-text-color: var(--pd-text);
+  --mat-datepicker-calendar-date-outline-color: transparent;
+  --mat-datepicker-calendar-date-today-outline-color: var(--pd-border-control);
+  --mat-datepicker-calendar-date-selected-state-background-color: var(--pd-accent-fill);
+  --mat-datepicker-calendar-date-selected-state-text-color: var(--pd-on-accent);
+  --mat-datepicker-calendar-date-hover-state-background-color: var(--pd-hover);
+  --mat-datepicker-calendar-date-focus-state-background-color: var(--pd-hover);
+  --mat-datepicker-calendar-date-in-range-state-background-color: var(--pd-accent-tint);
+  --mat-datepicker-calendar-period-button-text-color: var(--pd-text);
+  --mat-datepicker-calendar-navigation-button-icon-color: var(--pd-text-muted);
+
+  // ---- Progress, chips, snack bar and the dialog surface.
+  --mat-progress-bar-active-indicator-color: var(--pd-accent);
+  --mat-progress-bar-track-color: var(--pd-surface-3);
+  --mat-progress-spinner-active-indicator-color: var(--pd-accent);
+  --mat-chip-elevated-container-color: var(--pd-surface-2);
+  --mat-chip-label-text-color: var(--pd-text-muted);
+  --mat-chip-outline-color: var(--pd-hairline);
+  --mat-snack-bar-container-color: var(--pd-text);
+  --mat-snack-bar-supporting-text-color: var(--pd-surface-1);
+  --mat-snack-bar-button-color: var(--pd-accent);
+  --mat-dialog-container-color: var(--pd-surface-3);
+  --mat-dialog-container-shape: var(--pd-radius-dialog);
+  --mat-dialog-subhead-color: var(--pd-text);
+  --mat-dialog-supporting-text-color: var(--pd-text-muted);
+  --mat-icon-color: currentcolor;
+}
+
+// ---- Shape of the pieces the tokens cannot reach.
+// The compact slide toggle: Material's toggle scaled as a whole (its handle geometry stays consistent).
+.mat-mdc-slide-toggle {
+  zoom: 0.75;
+  --mat-slide-toggle-label-text-size: calc(var(--pd-text-body) / 0.75);
+}
+
+// Icons in Material parts are the family's 16 px; a mat-icon in a button or a chip follows its parent.
+.mat-icon {
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  color: inherit;
+}
+
+// Overlays sit above the shell's own and take the popover surface.
+.cdk-overlay-container {
+  z-index: var(--pd-z-toast);
+}
+
+.cdk-overlay-dark-backdrop {
+  background: var(--pd-scrim);
+}
+
+.mat-mdc-select-panel,
+.mat-mdc-autocomplete-panel,
+.mat-mdc-menu-panel,
+.mat-datepicker-content {
+  border: 1px solid var(--pd-hairline);
+  box-shadow: var(--pd-shadow-2);
+}
+
+// Options and menu items are 28 px rows with the 6 px radius of the shell's menus.
+.mat-mdc-option,
+.mat-mdc-menu-item {
+  min-height: var(--pd-control-height);
+  border-radius: var(--pd-radius-control);
+}
+
+// The tooltip: wraps at a readable width, never wider than the window.
+.mat-mdc-tooltip .mdc-tooltip__surface {
+  max-width: min(320px, calc(100vw - var(--pd-space-4)));
+}
+
+// Hint and error lines under a field are the field's own (.pd-field__hint): the empty subscript row is dropped.
+.mat-mdc-form-field-subscript-wrapper:empty {
+  display: none;
+}
+
+// The keyboard ring is the global one; Material's own focus rings and state layers stay off.
+.mat-mdc-focus-indicator::before {
+  display: none;
+}

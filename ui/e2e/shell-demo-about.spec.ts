@@ -36,7 +36,7 @@ test('Help ▸ Check for updates… finds, downloads and verifies an update, and
   await expect(dialog.getByTestId('updates-current')).toHaveText(`You have version ${VERSION}.`);
   await expect(dialog).toHaveAttribute('aria-modal', 'false');
   await dialog.getByRole('button', { name: 'Check now' }).click();
-  await expect(dialog.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (41 MB).');
+  await expect(dialog.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (39 MB).');
   await expect(app.notifications.toasts).toContainText('Version 99.0.0 is available');
   await dialog.getByRole('button', { name: 'Download' }).click();
   await expect(dialog.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
@@ -103,7 +103,7 @@ test('over Tauri: the Updates window follows the engine’s events and shows its
   await page.getByRole('button', { name: 'Check now' }).click();
   await expect.poll(() => ipc.names()).toContain('updates_check');
   expect(await ipc.emit('paddock://updates', status({ kind: 'available', info: INFO }))).toBeGreaterThan(0);
-  await expect(page.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (1 KB).');
+  await expect(page.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (1,000 bytes).');
   await page.getByRole('button', { name: 'Download' }).click();
   await expect.poll(() => ipc.names()).toContain('updates_download');
   await ipc.emit(

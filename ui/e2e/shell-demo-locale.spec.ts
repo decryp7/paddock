@@ -79,7 +79,7 @@ test.describe('pseudo-locale (plan S15)', () => {
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
     await expect(menuBar(page)).toHaveAttribute('aria-label', PSEUDO);
     await expect(menuBar(page).getByRole('menuitem').nth(1)).toHaveText(PSEUDO);
-    await expect(page.locator('pd-jobs-status .pill')).toHaveText(PSEUDO);
+    await expect(page.locator('pd-jobs-status .pd-pill')).toHaveText(PSEUDO);
     await expect(page.getByTestId('notifications-status')).toHaveAttribute('aria-label', PSEUDO);
   });
 
@@ -113,17 +113,17 @@ test.describe('pseudo-locale (plan S15)', () => {
 
   test('no unmarked English in the pages frame: title bar, sidebar and its toggle, landmarks', async ({ page }) => {
     // The app's name is the app's own text.
-    expect(await unmarkedEnglish(page.locator('pd-shell-frame header.title'), '[data-testid=app-name], [role=menu]')).toEqual([]);
+    expect(await unmarkedEnglish(page.locator('pd-shell-frame header.pd-title'), '[data-testid=app-name], [role=menu]')).toEqual([]);
     await expect(page.getByTestId('sidebar-toggle')).toHaveAttribute('aria-label', PSEUDO);
     await expect(page.locator('nav#pd-pages-nav')).toHaveAttribute('aria-label', PSEUDO);
     expect(await unmarkedEnglish(page.locator('nav#pd-pages-nav'))).toEqual([]);
-    await expect(page.locator('pd-shell-frame footer.status')).toHaveAttribute('aria-label', PSEUDO);
-    await expect(page.locator('pd-shell-frame a.skip')).toHaveText(PSEUDO);
+    await expect(page.locator('pd-shell-frame footer.pd-status')).toHaveAttribute('aria-label', PSEUDO);
+    await expect(page.locator('pd-shell-frame a.pd-skip')).toHaveText(PSEUDO);
   });
 
   test('no unmarked English in the status items, the jobs list, the notification centre and toasts', async ({ page }) => {
     // Empty states first.
-    await page.locator('pd-jobs-status .pill').click();
+    await page.locator('pd-jobs-status .pd-pill').click();
     expect(await unmarkedEnglish(page.locator('pd-jobs-status'))).toEqual([]);
     await page.keyboard.press('Escape');
     await page.getByTestId('notifications-status').click();
@@ -132,10 +132,10 @@ test.describe('pseudo-locale (plan S15)', () => {
 
     // A running job: its card's buttons, counts and labels (the title and the phase are the engine's data).
     await page.locator('button.cmd[data-command="sd.job.start"]').click();
-    await page.locator('pd-jobs-status .pill').click();
+    await page.locator('pd-jobs-status .pd-pill').click();
     const job = page.locator('pd-jobs-status pd-job').first();
     await expect(job.getByRole('button')).toHaveText(PSEUDO);
-    expect(await unmarkedEnglish(page.locator('pd-jobs-status'), '.title, .headline, .subject, [role=status], [role=progressbar]')).toEqual([]);
+    expect(await unmarkedEnglish(page.locator('pd-jobs-status'), '.pd-title, .pd-headline, .pd-subject, [role=status], [role=progressbar]')).toEqual([]);
     await job.getByRole('button').click();
     await page.keyboard.press('Escape');
 
@@ -143,11 +143,11 @@ test.describe('pseudo-locale (plan S15)', () => {
     await page.locator('button.cmd[data-command="sd.notify.three"]').click();
     const toast = page.getByRole('region', { name: PSEUDO }).filter({ has: page.getByTestId('notification-dismiss') });
     await expect(toast.getByTestId('notification-dismiss')).toHaveAttribute('aria-label', PSEUDO);
-    expect(await unmarkedEnglish(toast, '.title, .body')).toEqual([]);
+    expect(await unmarkedEnglish(toast, '.pd-title, .pd-body')).toEqual([]);
     await page.getByTestId('notifications-status').click();
     const centre = page.locator('pd-notifications-panel');
     await expect(centre.getByTestId('notices-mark-all')).toHaveText(PSEUDO);
-    expect(await unmarkedEnglish(centre, '.title, .body, .time')).toEqual([]);
+    expect(await unmarkedEnglish(centre, '.pd-title, .pd-body, .pd-time')).toEqual([]);
   });
 
   test('no unmarked English in the service chip and its details (the engine’s cause text is data)', async ({ page }) => {
@@ -158,7 +158,7 @@ test.describe('pseudo-locale (plan S15)', () => {
     const details = page.getByTestId('service-health-details');
     await expect(details).toBeVisible();
     await expect(details.locator('button').first()).toHaveText(PSEUDO);
-    expect(await unmarkedEnglish(page.locator('pd-service-status'), '.svc > strong, .hint, code')).toEqual([]);
+    expect(await unmarkedEnglish(page.locator('pd-service-status'), '.pd-svc > strong, .pd-hint, code')).toEqual([]);
   });
 
   test('a dialog in the page and a dialog window: the shell’s chrome and the contributed title are pseudo text', async ({ app, page }) => {
@@ -166,8 +166,8 @@ test.describe('pseudo-locale (plan S15)', () => {
     await page.locator('[data-dialog-open="sd.about"]').click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByTestId('dialog-close')).toHaveAttribute('aria-label', PSEUDO);
-    await expect(dialog.locator('.title')).toHaveText(PSEUDO);
-    expect(await unmarkedEnglish(dialog.locator('.head'))).toEqual([]);
+    await expect(dialog.locator('.pd-title')).toHaveText(PSEUDO);
+    expect(await unmarkedEnglish(dialog.locator('.pd-head'))).toEqual([]);
     await dialog.getByTestId('dialog-close').click();
 
     // A dialog window (the desktop build's OS window, opened by URL in the browser build): the shell's own Close.
@@ -187,7 +187,7 @@ test.describe('pseudo-locale (plan S15)', () => {
     await expect(win.getByRole('navigation')).toHaveAttribute('aria-label', PSEUDO);
     // Engine-written texts (section titles and descriptions, field labels, hints, option labels) carry English until the
     // engine's messages get codes (ADR 0012 §6); the shell's own words around them must be translated.
-    expect(await unmarkedEnglish(win, '.nav .item, .title, .desc, .label, .hint, .help, option, select, .status, [data-testid=settings-problem]')).toEqual([]);
+    expect(await unmarkedEnglish(win, '.pd-nav .pd-item, .pd-title, .pd-desc, .pd-label, .pd-hint, .pd-help, option, pd-select, .pd-status, [data-testid=settings-problem]')).toEqual([]);
   });
 });
 
