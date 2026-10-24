@@ -10,6 +10,21 @@ Conventional Commits; one semver tag for the whole repo.
   `DialogGrant` hook for per-dialog contracts, the Tauri `Guard` (refuses and logs before arguments are parsed),
   `Table::contract_problems`, the async-only check and generated-file check for tests, and generated TypeScript:
   `shell/generated/commands.ts` (wire types) and `shell/generated/shell-commands.ts` (command names).
+- Crate `paddock-startup` 0.1.0 (plan S7 and §11, ADR 0012; ported from Debrief ADR 0058): the pure `Watchdog` (start-up
+  deadline, reload once then ask, Keep Waiting, the pause rule for a stopped app process, terminated content processes
+  with a reload budget, boot-error cap) plus the liveness heartbeat after ready (`paddock://ping` / `window_pong`; hidden
+  windows are not pinged; N misses mark a window unresponsive, offered Reload / Keep Waiting; a page that answers again
+  recovers), `Checkpoints` and `ready_reply`, `clean_error`, the native question's texts, `Config` with checked timings
+  and the `COMMANDS` table (`window_ready`, `window_boot_error`, `ui_checkpoint`, `window_pong`). Feature `tauri`:
+  `Startup::builder()` (Safe Mode restart, unresponsive hook for `paddock-dialogs`, ready hook, watch filter, asker),
+  `install`, `on_page_load`, `web_content_terminated`, the ticker thread and the commands; feature `dialog`: `NativeAsker`
+  over `tauri-plugin-dialog`. Generated TypeScript in `shell/startup/generated/`.
+- `@decryp7/paddock-ui/shell/startup` (plan S7): `provideStartupContract` (ready after the first render, then answers
+  liveness pings), `retryUntilAnswered`, boot error forwarding, `StartupBackend` with `TauriStartupBackend` (over an
+  app-given `StartupIpc`, no `@tauri-apps/api` dependency) and `MockStartupBackend`, `WindowRecovery` with `UiCheckpoint`
+  (`provideUiCheckpoint`) and the recovery notice through `SHELL_PORTS.notify`, and `splashProblems` for an app's
+  `index.html`. The shell demo wires it (note kept across a recovery reload) with Chromium e2e for the splash, withheld
+  IPC, recovery and a page that stops answering after ready.
 - App shell contributions core (plan S2, ADR 0012 §2, lazy by construction per plan §9) in `@decryp7/paddock-ui/shell`:
   `defineCommand`, `defineKeybinding`, `defineMenuItem`, `definePage`, `defineStatusItem`, `defineSettingsPage`,
   `defineDialog`, `defineHealthService`, `defineNotificationKind` (frozen static data plus loaders; texts are `msg(id, text)`
