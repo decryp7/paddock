@@ -2975,9 +2975,9 @@ dependencies = [
 name = "paddock-packs"
 version = "0.1.0"
 dependencies = [
- "notify",
  "paddock-env",
  "paddock-jobs",
+ "paddock-watch",
  "regex",
  "serde",
  "serde_ignored",
@@ -3120,6 +3120,15 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "ts-rs",
+]
+
+[[package]]
+name = "paddock-watch"
+version = "0.1.0"
+dependencies = [
+ "notify",
+ "paddock-jobs",
+ "tempfile",
 ]
 
 [[package]]

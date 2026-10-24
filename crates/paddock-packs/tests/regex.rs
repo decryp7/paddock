@@ -97,3 +97,15 @@ fn a_malicious_regex_in_a_pack_refuses_that_pack_only() {
         Err(PackError::Limit(_))
     ));
 }
+
+#[test]
+fn the_default_limits_are_debriefs_and_strict_is_spotters() {
+    assert_eq!(RegexLimits::default(), RegexLimits::DEFAULT);
+    assert_eq!(
+        (
+            RegexLimits::DEFAULT.size_limit,
+            RegexLimits::STRICT.size_limit
+        ),
+        (8 << 20, 1 << 20)
+    );
+}

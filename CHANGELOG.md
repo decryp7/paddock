@@ -5,6 +5,8 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-watch` (plan X23): `Debouncer` on the shared `Clock`, the `ChangeSource` port (`FakeSource`, `NotifySource` behind the
+  `notify` feature) with `spawn`, and Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`). `paddock-packs` now watches through it.
 - `paddock-packs` (plan X15, decision D11): knowledge packs for all apps. `PackKind` (serde type, format number, the app's own
   rules), `parse_pack` with `Limits` (file size, entries, string length, nesting, values, files), unknown keys as named warnings,
   a bad pack refused whole with a reason while the rest load (last good version kept), `PackLoader`/`PackStore` (build new, then

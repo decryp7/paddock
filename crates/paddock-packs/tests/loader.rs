@@ -307,3 +307,23 @@ fn a_second_kind_with_a_different_format_loads_through_the_same_loader() {
     assert_eq!(s.packs[0].pack[0].0, "ubuntu");
     assert!(s.problems[0].message.contains("older format"));
 }
+
+#[test]
+fn the_folder_source_names_its_folder_and_skips_names_that_are_not_text() {
+    let t = tempfile::tempdir().unwrap();
+    assert_eq!(DirSource::new(t.path()).dir(), t.path());
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let odd = std::ffi::OsStr::from_bytes(b"bad\xff.toml");
+        // Some file systems (APFS) refuse non-UTF-8 names; then there is nothing to skip.
+        if std::fs::write(t.path().join(odd), pack("x")).is_ok() {
+            let mut l = PackLoader::<Cleanup>::new(
+                vec![],
+                Box::new(DirSource::new(t.path())),
+                Limits::default(),
+            );
+            assert!(l.reload().unwrap().packs.is_empty());
+        }
+    }
+}

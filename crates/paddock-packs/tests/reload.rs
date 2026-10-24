@@ -219,3 +219,12 @@ fn dropping_the_handle_stops_the_thread_and_a_start_failure_is_reported() {
     std::fs::write(&file, "x").unwrap();
     assert!(watch::spawn(r, &FakeSource::new(), &file.join("sub")).is_err());
 }
+
+#[test]
+fn the_default_timing_is_the_documented_one() {
+    let (_src, store, clock, _r) = setup();
+    let r = Reloader::new(store, Arc::new(clock.clone()));
+    r.note_change();
+    assert_eq!(r.poll(), Polled::Waiting(Reloader::<Cleanup>::DEBOUNCE));
+    assert_eq!(Reloader::<Cleanup>::MAX_WAIT, Duration::from_millis(1500));
+}

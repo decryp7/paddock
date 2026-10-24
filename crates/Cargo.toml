@@ -22,6 +22,7 @@ members = [
     "paddock-shell",
     "paddock-startup",
     "paddock-updater",
+    "paddock-watch",
     "paddock-window",
 ]
 
@@ -54,4 +55,5 @@ paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "d
 paddock-shell = { path = "paddock-shell", version = "0.2.0", registry = "decryp7" }
 paddock-startup = { path = "paddock-startup", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.1.0", registry = "decryp7" }
+paddock-watch = { path = "paddock-watch", version = "0.1.0", registry = "decryp7" }
 paddock-window = { path = "paddock-window", version = "0.1.0", registry = "decryp7" }
