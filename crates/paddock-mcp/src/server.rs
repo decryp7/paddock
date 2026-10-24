@@ -194,6 +194,21 @@ impl Server {
         write(&self.tools).remove(name).is_some()
     }
 
+    /// Every registered tool with whether the current policy shows it (for the app's settings page).
+    pub fn tool_infos(&self) -> Vec<crate::registry::ToolInfoRaw> {
+        let policy = read(&self.policy);
+        read(&self.tools)
+            .values()
+            .map(|t| crate::registry::ToolInfoRaw {
+                name: t.name.clone(),
+                title: t.title.clone(),
+                description: t.description.clone(),
+                access: t.access,
+                exposed: policy.exposes(t),
+            })
+            .collect()
+    }
+
     /// Registers (or replaces) a resource.
     pub fn add_resource(&self, resource: ResourceDef) -> Result<(), RegisterError> {
         resource.validate()?;

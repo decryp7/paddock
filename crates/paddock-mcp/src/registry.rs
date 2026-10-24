@@ -214,6 +214,21 @@ impl ToolDef {
     }
 }
 
+/// A registered tool as the settings page lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolInfoRaw {
+    /// Its name.
+    pub name: String,
+    /// A name for people.
+    pub title: Option<String>,
+    /// What it does.
+    pub description: String,
+    /// Read-only or action.
+    pub access: Access,
+    /// Whether the current policy shows it to clients.
+    pub exposed: bool,
+}
+
 /// A resource to register: text the model can read by address.
 #[derive(Clone)]
 pub struct ResourceDef {
