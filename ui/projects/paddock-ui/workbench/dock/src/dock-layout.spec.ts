@@ -25,6 +25,7 @@ const VIEWS = [
   view('events', layout('document', [560, 240], [900, 400], 110)),
   view('home', layout('document', [420, 400], [700, 600], 60), { fullHeight: true }),
   view('ai-chat', layout('side', [320, 240], [372, 400], 70, 'right')),
+  view('problems', layout('analysis', [420, 160], [800, 240], 55)),
 ];
 
 interface FakeGroup {
@@ -167,13 +168,21 @@ describe('displaced views and grow-back', () => {
     expect(layout.plan(api)!.tabbed.map((t) => t.id)).toEqual(['home']);
   });
 
-  it('a second instance of a view is stacked below the first in a row of its own, never side by side with it', () => {
+  it('instances of a view share its row: in separate groups they sit side by side in it', () => {
     const layout = setup();
-    const { api } = fakeDock(1440, 1000, { timeline: { width: 1440, height: 400 }, 'timeline#2': { width: 1440, height: 600 } });
+    const { api } = fakeDock(1440, 1000, { timeline: { width: 720, height: 1000 }, 'timeline#2': { width: 720, height: 1000 } });
     const plan = layout.plan(api)!;
     expect(plan.violations).toEqual([]);
     expect(plan.tabbed).toEqual([]);
-    expect(plan.columns[0]!.rows.map((r) => r.key).sort()).toEqual(['main', 'timeline#2']);
+    expect(plan.columns[0]!.rows.map((r) => r.key)).toEqual(['main']);
+  });
+
+  it('regression: three documents tabbed in one group leave the analysis row its room (instances do not stack rows)', () => {
+    const layout = setup();
+    const { api } = fakeDock(820, 834, { 'events+timeline#a+timeline#b': { width: 820, height: 594 }, problems: { width: 820, height: 240 } });
+    const plan = layout.plan(api)!;
+    expect(plan.tabbed).toEqual([]);
+    expect(plan.columns[0]!.rows.map((r) => r.key).sort()).toEqual(['analysis', 'main']);
   });
 
   it('records an auto-hidden side tool with no host', () => {
