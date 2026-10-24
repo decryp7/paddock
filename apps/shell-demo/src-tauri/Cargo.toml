@@ -2,6 +2,8 @@
 # (plan docs/plans/workbench.md §10, S18). It is its own workspace, as an app's `src-tauri` is, and the starter of new apps
 # (`node scripts/new-app.mjs`, which turns the path dependencies below into registry ones).
 [workspace]
+# The sample background agent (plan X4): its own crate, bundled as `externalBin`.
+members = ["agent"]
 
 [package]
 name = "paddock-shell-demo"
@@ -37,6 +39,9 @@ paddock-log = { path = "../../../crates/paddock-log" }
 paddock-health = { path = "../../../crates/paddock-health", features = ["tauri", "os-notify"] }
 tauri-plugin-notification = "2.7"
 paddock-jobs = { path = "../../../crates/paddock-jobs", features = ["tauri"] }
+paddock-service = { path = "../../../crates/paddock-service", features = ["tauri"] }
+# The sample agent's spec, heartbeat and manager (its binary is bundled as `externalBin`).
+shell-demo-agent = { path = "agent" }
 paddock-settings = { path = "../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../crates/paddock-updater", features = ["tauri"] }

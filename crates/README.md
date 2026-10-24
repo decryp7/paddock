@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -91,15 +91,16 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008); `time`: the family's clock port, fake clock, deadlines, restart back-off (plan X20) | yes (all five apps); built |
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
-| `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
+| `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
 | `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
-| `paddock-service` | background service install/control per OS | yes |
+| `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
@@ -748,6 +749,48 @@ file.save(&loaded.value)?;                                // atomic; refused whe
   Saves write a temporary file, fsync, rename; the previous good file becomes `.bak` (a damaged one never replaces it).
   `write_atomic` is the same replace for non-JSON files.
 
+## `paddock-packs` (plan X15)
+
+Knowledge packs (rule 21), from Spotter's `pack.rs`, Pitwall's `packs.rs`, Dyno's `cleanup/pack.rs` and the two `user_regex.rs` copies:
+
+```rust
+use paddock_packs::{BuiltinPack, DirSource, Limits, Origin, PackError, PackKind, PackLoader, PackStore, Reloader, user_packs_dir};
+
+struct Cleanup;
+impl PackKind for Cleanup {
+    type Raw = RawPack;                    // serde type of one file; no `deny_unknown_fields`, no `format` field
+    type Pack = Vec<Category>;             // what the app uses
+    const FORMAT: u32 = 1;
+    fn convert(raw: RawPack, origin: Origin) -> Result<Vec<Category>, PackError> { /* the app's own rules; origin tells user from built-in */ }
+}
+
+let loader = PackLoader::<Cleanup>::new(
+    vec![BuiltinPack { name: "builtin.toml", text: include_str!("builtin.toml") }],
+    Box::new(DirSource::new(user_packs_dir(&dirs))),
+    Limits::default(),
+);
+let store = Arc::new(PackStore::new(loader));
+store.observe(|snapshot| emit_packs_changed(snapshot));                    // once per real change
+let reloader = Arc::new(Reloader::new(store.clone(), Arc::new(SystemClock)));
+reloader.reload_now();                                                      // first load
+let _watch = paddock_packs::watch::spawn(reloader, &NotifySource, &user_packs_dir(&dirs))?;   // feature `watch`
+let snapshot = store.current();                                             // Arc<Snapshot>: packs, problems, warnings, health()
+```
+
+- One answer to a bad pack (decision D11): refused whole with a named reason (a syntax error names line and column); keys the
+  kind does not know are warnings naming the key (`unknown key "category.0.flavour" is ignored`). One bad pack never touches the
+  others; a pack that turns bad while running keeps its last good version and says so; a file deleted during a reload is gone,
+  not an error.
+- Limits (`Limits`, all bounded before the typed parse): file bytes (read at most max + 1), entries per list, string and key
+  length, nesting depth, values in the file, `*.toml` files in the folder. The folder source ignores dot-files, `~` files,
+  sub-folders and symbolic links. Nothing in a pack is executed or followed.
+- Reload: `Reloader` debounces on a `paddock_jobs::time::Clock` (300 ms quiet, 1.5 s at most), so a storm is one reload and
+  tests move a `FakeClock`. The new snapshot is built whole, then swapped; readers keep theirs. `watch::ChangeSource` is the
+  port (`FakeSource` for tests, `NotifySource` behind the `watch` feature); X23 (`paddock-watch`) replaces the adapter.
+- `user_regex`: `compile`, `compile_with`, `compile_set`; `RegexLimits::DEFAULT` (Debrief: 8 MiB) and `STRICT` (Spotter: 1 MiB);
+  typed `RegexError` (`TooLong`, `TooComplex`, `Invalid`) whose messages say what to fix.
+- `Snapshot::health()` gives the one line (`Ok`, `Notes`, `Degraded`) for the `packs` health or notification entry.
+
 ## `paddock-log` (plan X1)
 
 The log of every app, service and sidecar, from Debrief's `logging.rs` + `clef.rs` + the generic half of `activity/logger.rs`:
@@ -811,6 +854,79 @@ paddock_proc::end_all();                                       // at shutdown / 
 - Not yet: a Windows job object (`KILL_ON_JOB_CLOSE`). Windows trees end through `taskkill /T /F`, which cannot reach a
   helper whose parent already exited; the stdin lifeline and the sandbox limits of `debrief-ipc` stay with `paddock-ipc` (X13).
 
+## `paddock-service` (plan X4)
+
+Background services and login items, from the four designs in the apps: Pitwall's and Pitcrew's `service_install.rs` /
+`service_repair.rs` (the R03 repair, the registered version, Login Items), Pitcrew's and Pitwall's server `platform/` and
+`service/` (systemd, SCM, the restart after an update), Dyno's `service/` (a `Runner` port, the `Run` value, a per-user
+agent) and `login.rs` (one launch-at-login switch), and Debrief's agent (a launch daemon an administrator installs).
+
+```rust
+use paddock_service::{Manager, ServiceSpec, ProcessType, backend::Side, native, render};
+
+let spec = ServiceSpec::builder("net.decryptology.pitwall.service", "Pitwall", "pitwall-server")
+    .bundle_id("net.decryptology.pitwall").display_name("Pitwall local LLM server")
+    .supervised_env("PITWALL_SERVICE").process_type(ProcessType::Interactive).build()?;
+// The files the app ships, generated and checked in a test (paddock_commands::testing::sync_generated):
+let plist = render::launchd_plist(&spec, render::LaunchdProgram::Bundled);   // src-tauri/macos/<label>.plist
+let hooks = render::nsis_hooks(&spec);                                        // src-tauri/windows/installer-hooks.nsh
+// At run time, on a background thread (rule 10):
+let backend = native::host_backend(&spec, &program, Side::App, dirs.data())?;
+let mut service = Manager::new("Pitwall", backend, dirs.data(), spec.label(), env!("CARGO_PKG_VERSION"), ping);
+service.on_start(&cancel);                      // rule 24, at every start (and again a minute later)
+let status = service.status();                  // the UI; status.health() for paddock-health
+service.repair(&cancel)?;                       // the Repair button (never depends on the service, rule 19)
+```
+
+- **One spec, every file.** `render` is pure and golden-tested (`tests/golden/`, `PADDOCK_WRITE_TS=1` rewrites): the bundled
+  plist (`BundleProgram`, `AssociatedBundleIdentifiers`, the supervised variable) or a plist file (launch agent or daemon),
+  the systemd unit (every word quoted against splitting and `%`/`$` expansion), the `Run` value (C runtime quoting), the
+  service as `sc.exe` calls (delayed automatic start, LocalSystem, restart after 10 s, 1 min, 5 min) and the NSIS hooks (a
+  per-machine installer registers the service; a per-user one only stops and removes the agent). `ServiceSpec::builder`
+  refuses names, arguments and links that would break a file or a command line.
+- **Backends behind ports.** `LaunchdBundled` (`SMAppService` + `launchctl print`/`print-disabled`/`bootout`),
+  `LaunchdFile` (plist + `bootstrap`), `Systemd` (user or system unit), `WindowsRun` (`reg.exe`, Task Manager's
+  `StartupApproved` switch), `WindowsService` (`sc.exe`, inside the elevated `<program> install`) and
+  `ElevatedWindowsService` (the app's side: one UAC prompt per request). All OS access goes through `System`, `AppService`
+  and `Elevator`; `testing::{FakeSystem, FakeAppService, FakeElevator}` record every command, file write and wait on a
+  virtual clock. `backend::choose` picks the mechanism (pure); `native::host_backend` builds it.
+- **Rule 24 as a decision and a sequence.** `plan` decides: the user's switch (Login Items, Startup, Services, `systemctl
+  disable`) and a pending approval are never overridden, not even by Repair; a refused job while the service is down is
+  replaced (R03); where the OS pins the build (macOS) the registration is replaced once per version change, elsewhere only
+  when the definition differs (otherwise the version is just remembered); a missing or moved program is re-pointed; a
+  registration a newer copy made is left to it (two copies never ping-pong); nothing is installed unasked; where every
+  change needs a prompt (a Windows service from the app) a repair is offered, never started. `repair::replace` runs
+  unregister → evict (`launchctl bootout`) → wait until gone (bounded) → register → check, retried with a growing pause,
+  then a bounded wait for the service; approval, elevation, a declined prompt and "unavailable" stop at once; a cancel is
+  honoured only where nothing is left unregistered. Every phase is a `Step` for the log and `RepairTracker` (the UI).
+- **The registered version** is `service-<label>.json` in the data folder (`VersionedFile`; C21's
+  `service_registered_version`), written only after a registration took; a lock beside it keeps two copies from repairing
+  at once (a dead copy's lock is taken over after 10 minutes).
+- **The program's side.** `watch::ExeWatch` exits a supervised program whose executable changed once it is idle (the OS
+  starts the new one); `supervised::supervised_path` merges the login shell's `PATH` (`paddock_proc::login_path`, R05);
+  `Verb` is the shared first argument (`install`, `uninstall`, `status`, `stop`, `print-unit`, `print-plist`, `--service`).
+- **Launch at login.** `login::launch_at_login_section` (`pd.login`, one switch, off by default) and
+  `apply_launch_at_login` (the app's own `Autostart` and the service together, each tried, one message).
+- **The Windows service host (X4b).** `scm_host::supervise` is the `--service` supervisor over a `Sessions` port: the
+  logged-on user's session (connected before disconnected, console first, never session 0; Remote Desktop users are
+  found), the program started there with the user's token and environment plus the supervised variable, restarted after
+  a pause, moved when the session changes, stopped gracefully (its `stop` verb, a grace period, then ended).
+  `native::run_as_service(spec, exe)` is the SCM dispatcher and the Win32 side. Pitcrew's pipe SDDL is the app ↔ service
+  link and stays with `paddock-ipc` (X13).
+- **In the app** (`tauri` feature, `control::ServiceControl`): `service_status`, `service_repair`, `service_install`,
+  `open_login_items` and the `paddock://service` event (`ServiceUpdate { status, error }`); requests run on their own
+  thread, status answers from the last look while a repair holds the manager, the health entry is kept current and is
+  the health registry's Repair (`RepairAction::OpenLoginItems` where macOS has the switch), start-up checks at 3 s then
+  every minute. `paddock_shell::Builder::service(|app| Ok(ServicePart::new(Setup::new(manager).health("agent"))))`
+  wires it and the `pd.login` "Start at login" section (only a change by the user acts). The UI is
+  `@decryp7/paddock-ui/shell/service` (Settings > Background service).
+- **The shell demo's agent** (crate `apps/shell-demo/src-tauri/agent`, binary `shell-demo-agent`): a heartbeat-only
+  per-user agent, bundled as Tauri's `externalBin` (`agent/sidecar.mjs` builds it per target triple in
+  `beforeBuildCommand`; the bundle check starts it from the built app with `--self-test`, rule 23), with its generated
+  plist and NSIS hooks, so the page, the health entry and
+  `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
+- Not here: Task Scheduler entries (no app uses them).
+
 ## `paddock-diag` (plan X2)
 
 Report a problem, from Debrief's `activity/report` (the best of the three: manifest, sections, a zip the user reviews), Dyno's
@@ -849,3 +965,54 @@ report.save(&path_the_user_chose, &cancel, &progress)?;                   // zip
   native picker; the shell enables it with `native-dialogs`). The shell registers all of it from `Builder::diagnostics`.
 - The crate has no network dependency (a test checks its manifest; `cargo tree` shows none). Tests use temp folders, a fake picker and
   Tauri's mock runtime; no sleeps.
+
+## `paddock-pitwall` (ADR 0004, plan section 15)
+
+The one Pitwall client, extracted from Debrief 1.1's `debrief_ai::engine::pitwall` and checked against Pitwall's own router
+(`crates/pitwall-server/src/http.rs`). Blocking and bounded: apps call it on a worker thread (rule 10). Loopback only
+(`127.0.0.1`, any other host is unrepresentable); no TLS, no cloud.
+
+```rust
+use paddock_pitwall::*;
+
+let app = AppIdentity::new("debrief", "Debrief")?;
+let link = Link::new(LinkConfig::new(app, Locator::system(), secrets /* Arc<dyn paddock_secrets::Secrets> */));
+link.set_listener(Arc::new(|e| /* LinkEvent::Changed | Paired { use_for_app } */ {}));
+let view = link.probe();                                  // discovery, health, key, a model; never pairs by itself
+link.connect(true)?;                                      // the user chose "Use Pitwall": shows view.pairing.code, polls in the background
+let reply = link.chat_with(ChatRequest::new(ModelSel::Auto(Caps::chat(8192)), msgs), &mut |delta| show(delta))?;
+let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> NeedsAiView for <pd-needs-ai>
+```
+
+- `discovery`: `Locator::system()` reads `discovery.json` (16 KiB, strict, `baseUrl` must be `http://127.0.0.1:<port>` with a port of 1024 or more, pid alive)
+  from the folders of `paddock-env` for `pitwall` (Local first and the old Roaming folder second on Windows, D3), else tries port
+  11435. `PITWALL_HOME` names the data folder itself. Tests use `Locator::in_dir`.
+- `keys`: `KeyVault` over `paddock_secrets::Secrets` (service = the app, account `Pitwall:API key`); `adopt_legacy` moves Debrief 1.1's
+  entry; a 401 with a key deletes it (`KeyRevoked`), without one is `NeedsPairing`.
+- `Client`: `health`, `begin_pairing` / `poll_pairing`, `select`, `models`, `model_ids`, `ensure_capability` (a model that cannot see
+  is `Unsupported` locally, with Pitwall's reason), `jobs` / `cancel_job`, `count_tokens` / `truncate`, `task`, `embed` (batches of 64),
+  `chat` / `chat_with` / `chat_stream` (an iterator; dropping it cancels). Every reply carries `Provenance` (`X-Pitwall-Model`,
+  `-Engine`, `-Chosen-By`, `-Cold-Start-Ms`, `-Cache`, `-Alias`, `-Job-Id`). `CallOptions`: priority (`Interactive`, `Background`,
+  `Batch`), cache policy, `CancelToken` (acts within a 50 ms read slice, even while Pitwall is silent), per-phase `Timeouts`
+  (connect 2 s, first byte 120 s, idle 60 s for chat) and a whole-call deadline.
+- `retry`: pure table (250 ms to 8 s, jitter, `Retry-After`; 4 attempts, 8 for batch); connect errors, `503` and `429` with
+  `Retry-After` only; a stream is never retried after its first delta; probes (`health`, pairing poll) never retry.
+- `PitwallError`: typed, each with `user_message(app)` and `next_step()` (`StartPitwall | InstallPitwall | Pair | InstallModel | Wait |
+  UpdateApp | UpdatePitwall | ChangePermissions | None`).
+- `AiState` / `NeedsAiView` (serialisable, camelCase): `Disabled | NotInstalled | NotRunning | Incompatible | NeedsPairing | Paused |
+  NoSuitableModel | Unavailable | Ready`, with the actions that fix each.
+- `engine`: `EngineChoice` (Automatic, Pitwall, Built-in), the pure `select`, `Session` (setting, "use the built-in engine for this
+  session", AI off) and `run_or_fallback` (one engine per request, never a silent mix: `Routed::Unavailable(NeedsAiView)`).
+- `health`: `service_spec` and `report`: Pitwall is `Degraded`, never `Down`, only when the setting wants it, and its Repair is
+  `UseFallback` (or `OpenSettings` for an app without an engine) so it never depends on Pitwall (rule 19).
+- `loopback`: the bounded, cancellable `127.0.0.1` HTTP/1.1 transport itself (header, line and body limits, chunked, injection-proof
+  headers), reusable for other local servers: Debrief's llama-server client (`debrief-ai-worker/src/http.rs`) moves onto it.
+- `testing` (feature `testing`): `FakePitwall`, an in-process fake with exactly the routes of `PITWALL_ROUTES`, Pitwall's answer and
+  error shapes, scripted pairing, failures with `Retry-After`, held and dying streams. It waits on conditions, never on the clock.
+  `tests/contract.rs` runs the client against it; with `PADDOCK_PITWALL_HTTP_RS=<pitwall>/crates/pitwall-server/src/http.rs` it also
+  checks that Pitwall's router still has every route (Pitwall's CI should set it).
+- `AiSnapshot` (`Session::snapshot`): the one value the shared `<pd-needs-ai>` draws (`@decryp7/paddock-ui/shell/pitwall`): state,
+  the engine's sentence and buttons, the waiting pairing code, whether the app has an engine of its own. The app registers the
+  four commands of `status::COMMANDS` (`pitwall_state`, `pitwall_connect`, `pitwall_cancel_pairing`, `pitwall_use_builtin`) over
+  its `Link` and `Session` and emits `status::EVENT` (`paddock://pitwall`) when the snapshot changes. The TypeScript is generated
+  by `PADDOCK_WRITE_TS=1 cargo test -p paddock-pitwall --all-features --lib generated`.

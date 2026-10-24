@@ -516,3 +516,90 @@ fn os_notifications_add_the_notifications_page_and_a_change_reaches_the_notifier
     assert_eq!(set["applied"], true, "{set}");
     assert_eq!(shared.get().level, OsLevel::Off);
 }
+
+#[test]
+fn the_background_service_brings_its_commands_health_entry_and_start_at_login_switch() {
+    use paddock_service::backend::{Target, WindowsRun};
+    use paddock_service::testing::FakeSystem;
+    use paddock_service::{Manager, Output, ServiceSpec as Svc};
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    let sys = FakeSystem::new();
+    sys.put_program("C:\\Demo\\demo-agent.exe");
+    sys.answer("reg query", Output::code(1));
+    let os = sys.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .health(vec![paddock_health::ServiceSpec::new(
+            "agent",
+            "the demo agent",
+        )])
+        .service(move |_| {
+            let spec = Svc::builder(
+                "net.decryptology.shell-demo.agent",
+                "ShellDemo",
+                "demo-agent",
+            )
+            .build()?;
+            let backend =
+                WindowsRun::new(spec, Target::exe("C:\\Demo\\demo-agent.exe"), Box::new(os));
+            let manager = Manager::new(
+                "Shell Demo",
+                Box::new(backend),
+                &data,
+                "net.decryptology.shell-demo.agent",
+                "1.0.0",
+                || false,
+            );
+            Ok(paddock_shell::ServicePart::new(
+                paddock_service::tauri::Setup::new(manager)
+                    .health("agent")
+                    .checks(std::time::Duration::ZERO, std::time::Duration::ZERO, 0),
+            ))
+        }));
+    let main = window(&app, "main");
+    let status = invoke(&main, "service_status", json!({})).unwrap();
+    assert_eq!(status["condition"], "notInstalled", "{status}");
+    let health = invoke(&main, "health_snapshot", json!({})).unwrap();
+    assert!(
+        health.to_string().contains("\"repair\":\"install\""),
+        "{health}"
+    );
+    // The section's value at start is never applied; a change by the user registers the service.
+    let overview = invoke(&main, "settings_overview", json!({})).unwrap();
+    assert!(
+        overview["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == "pd.login")
+    );
+    assert!(
+        !sys.commands()
+            .iter()
+            .any(|c| c.starts_with("reg add") || c.starts_with("reg delete"))
+    );
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    tauri::Listener::listen_any(&app, paddock_service::EVENT_NAME, move |_| {
+        let _ = tx.send(());
+    });
+    let set = invoke(
+        &main,
+        "settings_set",
+        json!({ "section": "pd.login", "values": { "launchAtLogin": true } }),
+    )
+    .unwrap();
+    assert_eq!(set["applied"], true, "{set}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !sys.commands().iter().any(|c| c.starts_with("reg add")) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the switch registered nothing"
+        );
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(1));
+    }
+    // A tray popover may look but not change it.
+    let tray = window(&app, "tray");
+    assert!(text(&invoke(&tray, "service_repair", json!({})).unwrap_err()).contains("not allowed"));
+}

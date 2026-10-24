@@ -668,6 +668,32 @@ Denies the notifications_restore command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-open-login-items`
+
+</td>
+<td>
+
+Enables the open_login_items command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-open-login-items`
+
+</td>
+<td>
+
+Denies the open_login_items command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-recovery-restore`
 
 </td>
@@ -765,6 +791,84 @@ Enables the recovery_status command without any pre-configured scope.
 <td>
 
 Denies the recovery_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-service-install`
+
+</td>
+<td>
+
+Enables the service_install command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-service-install`
+
+</td>
+<td>
+
+Denies the service_install command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-service-repair`
+
+</td>
+<td>
+
+Enables the service_repair command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-service-repair`
+
+</td>
+<td>
+
+Denies the service_repair command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-service-status`
+
+</td>
+<td>
+
+Enables the service_status command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-service-status`
+
+</td>
+<td>
+
+Denies the service_status command without any pre-configured scope.
 
 </td>
 </tr>

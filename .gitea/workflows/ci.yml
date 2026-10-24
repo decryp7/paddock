@@ -155,7 +155,7 @@ jobs:
       # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered).
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           awk -F'[:,]' '/^DA:/{t++; if($3>0)h++} END{p=100*h/t; printf "lines %d/%d = %.2f%%\n", h, t, p; if(p<99) exit 1}' lcov.info
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -275,9 +275,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo test -p paddock-env --all-features
 
+      - name: paddock-packs
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-packs --all-targets --all-features -- -D warnings && cargo test -p paddock-packs --all-features
+
       - name: paddock-log
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-log --all-targets --all-features -- -D warnings && cargo test -p paddock-log --all-features
+
+      - name: paddock-service
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-service --all-targets --all-features -- -D warnings && cargo test -p paddock-service --all-features
+
+      - name: paddock-pitwall
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-pitwall --all-targets --all-features -- -D warnings && cargo test -p paddock-pitwall --all-features
 
       - name: paddock-secrets
         if: ${{ !cancelled() }}
@@ -322,9 +334,9 @@ jobs:
       - name: App (fmt, clippy, tests on the mock runtime, deny)
         working-directory: apps/shell-demo/src-tauri
         run: |
-          cargo fmt --check
-          cargo clippy --all-targets -- -D warnings
-          cargo test
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
           cargo deny check
 
       - uses: ./.gitea/actions/sccache-stats
