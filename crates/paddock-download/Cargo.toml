@@ -20,6 +20,8 @@ paddock-jobs = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 httpdate = "1"
+# The free space of the destination's disk (one platform call, checked before a download writes).
+fs4 = { version = "0.13", default-features = false, features = ["sync"] }
 tauri = { workspace = true, optional = true }
 # No gzip: a download asks for `identity`, so byte ranges stay byte ranges.
 ureq = { version = "3.1", default-features = false, features = ["rustls-no-provider", "platform-verifier"], optional = true }

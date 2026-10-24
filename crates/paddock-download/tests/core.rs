@@ -936,3 +936,107 @@ fn a_sized_stream_that_ends_early_is_retried() {
     assert_eq!(std::fs::read(got.unwrap().path).unwrap(), data);
     assert_eq!(t.calls.load(Ordering::SeqCst), 2);
 }
+
+// ---- free disk space (plan §13: checked before anything is written) ----
+
+#[test]
+fn a_pinned_size_that_does_not_fit_the_disk_is_refused_before_connecting() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = Arc::new(Script::new(|_, _| {
+        unreachable!("no request when the disk is too small")
+    }));
+    let d = Downloader::new(t.clone())
+        .with_config(Config {
+            disk_reserve: 100,
+            ..quick()
+        })
+        .with_free_space(|_| Ok(1_000));
+    let (ctx, _) = job();
+    let req = req_in(&dir, Integrity::Unpinned).size(950);
+    match d.download(&ctx, &req) {
+        Err(
+            e @ DownloadError::NotEnoughSpace {
+                needed: 1_050,
+                free: 1_000,
+            },
+        ) => {
+            assert!(e.keeps_partial());
+            assert_eq!(
+                e.to_string(),
+                "the download needs 1.1 KB of free disk space, 1 KB is free; free some space and run it again"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(t.calls.load(Ordering::SeqCst), 0);
+    assert!(!req.part_path().exists());
+}
+
+#[test]
+fn the_announced_size_is_checked_once_known_and_a_kept_prefix_counts_as_written() {
+    let data = blob(200 * 1024);
+    let dir = tempfile::tempdir().unwrap();
+    let d2 = data.clone();
+    let t = Arc::new(Script::new(move |g, _| match g.range {
+        Some(_) => ranged(&d2, g),
+        None => whole(&d2),
+    }));
+    // Too little room for 200 KiB plus the reserve: refused after the probe, nothing written.
+    let tight = Downloader::new(t.clone())
+        .with_config(Config {
+            disk_reserve: 0,
+            ..quick()
+        })
+        .with_free_space(|_| Ok(100 * 1024));
+    let (ctx, _) = job();
+    let req = req_in(&dir, Integrity::Unpinned);
+    assert!(matches!(
+        tight.download(&ctx, &req),
+        Err(DownloadError::NotEnoughSpace { needed, free }) if needed == 200 * 1024 && free == 100 * 1024
+    ));
+    assert!(!req.dest().exists());
+    // A partial file of 150 KiB leaves 50 KiB to write, which fits (without its resume state it is then fetched again).
+    std::fs::write(req.part_path(), vec![0u8; 150 * 1024]).unwrap();
+    let (ctx, _) = job();
+    assert_eq!(tight.download(&ctx, &req).unwrap().bytes, data.len() as u64);
+    std::fs::remove_file(req.dest()).unwrap();
+    // When the free space cannot be read the download goes on.
+    let blind = Downloader::new(t)
+        .with_config(quick())
+        .with_free_space(|_| Err(io::Error::other("no statvfs")));
+    let (ctx, _) = job();
+    assert_eq!(blind.download(&ctx, &req).unwrap().bytes, data.len() as u64);
+}
+
+#[test]
+fn the_platform_free_space_is_read_and_sizes_read_well() {
+    // The default asks the operating system (the temp folder's disk has room for a few bytes plus the reserve).
+    let dir = tempfile::tempdir().unwrap();
+    let data = blob(4 * 1024);
+    let d2 = data.clone();
+    let d = Downloader::new(Arc::new(Script::new(move |_, _| whole(&d2)))).with_config(Config {
+        disk_reserve: 1,
+        ..quick()
+    });
+    let (ctx, _) = job();
+    let req = req_in(&dir, Integrity::Unpinned).size(data.len() as u64);
+    assert_eq!(d.download(&ctx, &req).unwrap().bytes, data.len() as u64);
+    assert!(Arc::strong_count(d.transport()) >= 1);
+    for (n, text) in [
+        (12, "12 bytes"),
+        (1_000, "1 KB"),
+        (1_550_000, "1.6 MB"),
+        (999_000, "999 KB"),
+        (2_000_000_000, "2 GB"),
+        (1_234_000_000_000, "1234 GB"),
+    ] {
+        assert_eq!(
+            DownloadError::NotEnoughSpace { needed: n, free: 0 }
+                .to_string()
+                .split(" of free")
+                .next()
+                .unwrap(),
+            format!("the download needs {text}")
+        );
+    }
+}

@@ -81,7 +81,7 @@ jobs:
       # Native glue files are left out (crates/README.md: never logic, reviewed by hand).
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov --workspace --all-features --ignore-filename-regex 'paddock-window/src/tauri/native\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window|paddock-updater)/src/tauri/native\.rs$' --lcov --output-path lcov.info
           awk -F'[:,]' '/^DA:/{t++; if($3>0)h++} END{p=100*h/t; printf "lines %d/%d = %.2f%%\n", h, t, p; if(p<99) exit 1}' lcov.info
       - run: cargo deny check
 
@@ -169,7 +169,7 @@ jobs:
 
       - name: paddock-updater
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-updater --all-targets --all-features -- -D warnings && cargo test -p paddock-updater --all-features
+        run: cargo clippy -p paddock-updater --all-targets --all-features -- -D warnings && cargo test -p paddock-updater --all-features && cargo test -p paddock-updater
 
       - name: paddock-window
         if: ${{ !cancelled() }}

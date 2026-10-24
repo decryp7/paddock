@@ -3,9 +3,11 @@ import { bootstrapApplication } from '@angular/platform-browser';
 import { applyPaddockAppearance } from '@decryp7/paddock-ui';
 import { provideContributions, provideShellContext } from '@decryp7/paddock-ui/shell';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
-import { provideShellPages } from '@decryp7/paddock-ui/shell/pages';
+import { PAGES_WINDOW_READY, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend } from '@decryp7/paddock-ui/shell/startup';
-import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS } from './app/demo.contributions';
+import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
+import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS, SHELL_ABOUT_CONTRIBUTIONS } from './app/demo.contributions';
+import { demoAboutBackend, demoUpdatesBackend } from './app/demo-about';
 import type { DemoContext } from './app/demo-context';
 import { DemoIcon } from './app/demo-icon';
 import { tauriIpc } from './app/demo-ipc';
@@ -16,7 +18,6 @@ import { ShellDemo } from './app/shell-demo';
 
 // Every shell entry point resolves from this app (the reference consumer, ADR 0012 §7): type-only imports, so the build
 // fails when an entry point stops resolving. Each work package replaces its line with the real use of its exports.
-import type * as shellAbout from '@decryp7/paddock-ui/shell/about';
 import type * as shellI18n from '@decryp7/paddock-ui/shell/i18n';
 import type * as shellSettings from '@decryp7/paddock-ui/shell/settings';
 // shell/store is used through shell/jobs and shell/notify (their stores take its withRequestStatus).
@@ -29,6 +30,10 @@ export function bootMainWindow(): Promise<unknown> {
   return bootstrapApplication(ShellDemo, {
     providers: [
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
+      // About, Updates and What's New (plan S11): the Help menu's items; the main window announces a found update and
+      // opens What's New once after an update.
+      provideContributions(SHELL_ABOUT_CONTRIBUTIONS),
+      provideShellAbout({ about: demoAboutBackend, updates: demoUpdatesBackend, main: true, ready: () => inject(PAGES_WINDOW_READY) }),
       provideSubmenus<DemoContext>(...DEMO_SUBMENUS),
       // The app's part of the context is a lazy chunk, loaded when the window is idle (plan §9).
       provideShellContext<DemoContext>(() => import('./app/demo-context').then((m) => m.demoContext)),

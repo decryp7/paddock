@@ -35,6 +35,30 @@ Conventional Commits; one semver tag for the whole repo.
   popover, keyboard focus and macOS frames.
 
 ### Added
+- Updates, About and What's New (plan S11, ADR 0012; from Debrief's `updater/`, `legal.rs` and What's New): crate
+  `paddock-updater` 0.1.0. `Updater` is the update phase machine (unavailable, idle, checking, up to date, available,
+  downloading, ready, installing, failed) with typed errors and a next step for each; a check fetches the channel's
+  `latest.json` through `paddock-download`'s transport (bounded, validated, the package chosen by Tauri's target keys)
+  and a download runs through `paddock-download` (size-pinned, resumable, free space checked) followed by a streamed
+  minisign check against the key built into the app that also requires the signature to name the announced version; a
+  refused signature deletes the file. Both are job bodies (`update-check`, `update-download`, phase `signature`), so the
+  commands return at once and Cancel works in every phase; nothing has a UI timeout. A build without a key is
+  "Updates are not available in this build". Installing happens at exit (`install_at_exit`) through an `Installer`
+  (`tauri::PluginInstaller` over `tauri-plugin-updater`, feature `install`, without its `zip` feature) after
+  `ServiceHooks::before_install`; `ServiceHooks::on_version_change` runs once per version change at start-up and again
+  after a failure (rule 24). Preferences (automatic check, release channel), the last check and a failed install live in
+  a versioned `updates.json`. `About` serves the running version, build facts and legal texts on request, and What's New
+  the running version's notes only (`notes`: never another release's). Tauri adapter: `UpdatesBuilder`, `install`,
+  `on_exit`, `COMMANDS` (`updates_*`, `about_*`), the `paddock://updates` event, generated `shell/about/generated/`.
+- `@decryp7/paddock-ui/shell/about` (plan S11): `AboutBackend` and `UpdatesBackend` (Tauri, and in memory with a fake
+  update server), the per-window `UpdatesStore` (events win over a crossed reply; the main window announces a found
+  update once), the About and What's New viewers and the Updates tool (`defineAboutDialogs`), the Help menu's commands
+  (`aboutContributions`) and `provideShellAbout` (the main window asks once, after ready, whether to open What's New).
+  `shell-demo` wires them with `?updates=release|bad-signature|offline|none|unavailable`; Chromium e2e in
+  `e2e/shell-demo-about.spec.ts`, including the Tauri backends against a fake engine.
+- `paddock-download`: a free-disk pre-check (plan §13): a pinned size is checked before connecting and an announced
+  size before writing, against `Config::disk_reserve` (64 MiB by default); `DownloadError::NotEnoughSpace` says "needs
+  N, M is free". `Downloader::with_free_space` and `Downloader::transport`, `human_bytes`.
 - Crate `paddock-window` 0.1.0 (plan S12, ADR 0012): top-level windows in the shell's label scheme (`main`, `w-<n>`;
   open, list, reveal, titles, the close setting with quit / keep running in the tray / ask, hide or destroy), remembered
   bounds restored on the right monitor (versioned file; scaled, shrunk and moved inside the work area; cascade from the

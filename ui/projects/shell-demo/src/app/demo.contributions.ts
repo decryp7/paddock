@@ -13,6 +13,7 @@ import {
   type ContributionBatch,
 } from '@decryp7/paddock-ui/shell';
 import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
+import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
 
@@ -78,7 +79,13 @@ export const CHOOSE_STYLE_DIALOG = defineDialog({
   load: () => import('./dialogs/choose-style-dialog').then((m) => m.ChooseStyleDialog),
 });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG] as const;
+/** The shell's About, Updates and What's New (plan S11); their windows boot the demo's About providers. */
+export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import('./about.providers').then((m) => m.ABOUT_PROVIDERS) });
+
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, ...SHELL_ABOUT_DIALOGS] as const;
+
+/** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
+export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);
 
 export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
   commands: [

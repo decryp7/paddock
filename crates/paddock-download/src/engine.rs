@@ -57,9 +57,13 @@ pub struct Downloaded {
     pub ranges: bool,
 }
 
+/// Free bytes on the disk that holds a folder (the platform call; tests pass their own).
+pub type FreeSpace = dyn Fn(&Path) -> io::Result<u64> + Send + Sync;
+
 /// Runs downloads. Cheap to share (`Arc<Downloader>`); one per app, so the [`HostCaps`] hold across all its downloads.
 pub struct Downloader {
     net: Net,
+    free_space: Arc<FreeSpace>,
 }
 
 /// What the transfer threads need of the downloader.
@@ -79,6 +83,7 @@ impl Downloader {
                 hosts: Arc::new(HostCaps::default()),
                 config: Config::default(),
             },
+            free_space: Arc::new(|dir: &Path| fs4::available_space(dir)),
         }
     }
 
@@ -97,6 +102,20 @@ impl Downloader {
         config.max_buffer = config.max_buffer.max(config.min_block);
         self.net.config = config;
         self
+    }
+
+    /// Another way to learn the free space of a folder's disk (tests; an app with its own quota).
+    pub fn with_free_space(
+        mut self,
+        free: impl Fn(&Path) -> io::Result<u64> + Send + Sync + 'static,
+    ) -> Self {
+        self.free_space = Arc::new(free);
+        self
+    }
+
+    /// The network port this downloader uses (for a small request of the app's own, such as release information).
+    pub fn transport(&self) -> &Arc<dyn Transport> {
+        &self.net.transport
     }
 
     pub fn with_hosts(mut self, hosts: Arc<HostCaps>) -> Self {
@@ -124,6 +143,10 @@ impl Downloader {
             .filter(|d| !d.as_os_str().is_empty())
             .map(std::fs::create_dir_all)
             .transpose()?;
+        if let Some(size) = req.pinned_size() {
+            // Known in advance: refused before connecting.
+            self.check_space(req, size)?;
+        }
         ctx.phase(Phase::items(phases::CONNECT, "Connecting", 1));
         let ctl = Arc::new(Ctl::new(ctx.cancel_token().clone()));
         let probe = self.probe(req, &ctl)?;
@@ -149,6 +172,28 @@ impl Downloader {
         let limit = req.limit(self.net.config.max_bytes);
         if size > limit {
             return Err(DownloadError::TooLarge { size, limit });
+        }
+        self.check_space(req, size)
+    }
+
+    /// Refuses a download of `size` bytes that would leave less than [`Config::disk_reserve`] free on the destination's
+    /// disk (the bytes of a kept partial file count as written). When the free space cannot be read, the download goes on and
+    /// a full disk is reported when it happens.
+    fn check_space(&self, req: &Request, size: u64) -> Result<(), DownloadError> {
+        let dir = req
+            .dest()
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let Ok(free) = (self.free_space)(dir) else {
+            return Ok(());
+        };
+        let written = std::fs::metadata(req.part_path())
+            .map_or(0, |m| m.len())
+            .min(size);
+        let needed = (size - written).saturating_add(self.net.config.disk_reserve);
+        if free < needed {
+            return Err(DownloadError::NotEnoughSpace { needed, free });
         }
         Ok(())
     }

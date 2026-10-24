@@ -35,6 +35,9 @@ pub struct Config {
     pub range_timeout: Duration,
     /// How often the resume state is saved while downloading.
     pub save_every: Duration,
+    /// Free space that must be left on the destination's disk after the download; a download that would leave less is
+    /// refused before anything is written ([`DownloadError::NotEnoughSpace`](crate::DownloadError::NotEnoughSpace)).
+    pub disk_reserve: u64,
 }
 
 impl Default for Config {
@@ -53,6 +56,7 @@ impl Default for Config {
             stall_timeout: Duration::from_secs(120),
             range_timeout: Duration::from_secs(600),
             save_every: Duration::from_secs(1),
+            disk_reserve: 64 * 1024 * 1024,
         }
     }
 }

@@ -5,6 +5,48 @@
     "window_ready"
   ],
   "dialogs": {
+    "pd.about": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": [
+        "about_info",
+        "about_legal"
+      ]
+    },
+    "pd.updates": {
+      "kind": "tool",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "updates_cancel",
+        "updates_check",
+        "updates_download",
+        "updates_install_on_quit",
+        "updates_restart",
+        "updates_set_preferences",
+        "updates_status"
+      ]
+    },
+    "pd.whats-new": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": [
+        "about_whats_new"
+      ]
+    },
     "sd.about": {
       "kind": "viewer",
       "modality": "modeless",
