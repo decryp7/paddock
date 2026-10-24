@@ -328,3 +328,12 @@ S16 (test kit) narrows the check to timeouts that abandon or fail an awaited ope
 `AbortSignal.timeout`, a timer that rejects or cancels a request or job) and allows plain debounce/retry timers; S7's
 retry and checkpoint debounce then go back to `setTimeout`. A lint must express the rule, never force workarounds
 (rule 40).
+
+## 13. Follow-ups found while building (2026-10-24)
+
+- S2 `buildManifest` writes `minSize` with 0 for an undeclared side; fill it from the kind's minimum like
+  `dialogContractFile` does (S17 when the Rust manifest check lands).
+- Dialog inputs are typed `Record<string, unknown>`; infer them from the component's `input()` signals as Debrief does
+  (S2/S6 follow-up before Debrief's migration, M1).
+- Once S16 narrows the timeout lint (§12), S6's and S7's coalescing workarounds go back to plain timers.
+- The boot harness yields with bounded `setTimeout(0)` rounds; move it to `whenStable` where possible (rule 38).
