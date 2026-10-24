@@ -168,27 +168,33 @@ export class MemoryChannelsBackend extends ChannelsBackend {
     const done = (ok: boolean, attempts: number, message: string | null): void => this.emit({ kind: 'test', testId, channelId: channel.id, ok, attempts, message });
     const progress = (attempt: number, phase: 'sending' | 'waiting', waitSecs: number | null): void =>
       this.emit({ kind: 'testProgress', testId, channelId: channel.id, attempt, of: 3, phase, waitSecs });
+    // The engine's steps follow one another: each is scheduled when the one before it has run.
+    const play = (steps: readonly (() => void)[]): void => {
+      const [first, ...rest] = steps;
+      if (!first) return;
+      this.schedule(() => {
+        first();
+        play(rest);
+      });
+    };
     switch (outcome) {
       case 'hang':
-        this.schedule(() => progress(1, 'sending', null));
+        play([() => progress(1, 'sending', null)]);
         break;
       case 'retry':
-        this.schedule(() => progress(1, 'sending', null));
-        this.schedule(() => progress(1, 'waiting', 4));
-        this.schedule(() => progress(2, 'sending', null));
-        this.schedule(() => done(true, 2, null));
+        play([() => progress(1, 'sending', null), () => progress(1, 'waiting', 4), () => progress(2, 'sending', null), () => done(true, 2, null)]);
         break;
       case 'succeed':
-        this.schedule(() => done(true, 1, null));
+        play([() => done(true, 1, null)]);
         break;
       case 'rejected':
-        this.schedule(() => done(false, 1, 'The receiver refused the message (HTTP 401). Check the token, then send the test again.'));
+        play([() => done(false, 1, 'The receiver refused the message (HTTP 401). Check the token, then send the test again.')]);
         break;
       case 'unreachable':
-        this.schedule(() => done(false, 3, 'The receiver could not be reached after 3 attempts. Check the address and your connection.'));
+        play([() => done(false, 3, 'The receiver could not be reached after 3 attempts. Check the address and your connection.')]);
         break;
       case 'missingSecret':
-        this.schedule(() => done(false, 0, 'This channel needs a token and none is stored yet. Set the token first.'));
+        play([() => done(false, 0, 'This channel needs a token and none is stored yet. Set the token first.')]);
         break;
     }
     return Promise.resolve(testId);
