@@ -2,7 +2,7 @@
 //! memory cap, so nothing leaks. A [`Registry`] knows every supervised tree, so [`end_all`] can end them at shutdown or
 //! in a panic hook even when the owners never get to drop them.
 
-use crate::tree::{self, kill_tree};
+use crate::tree::{self, Terminated, kill_tree};
 use crate::usage;
 use crate::watch::{MemoryEvent, MemoryListener, MemoryWatch, Verdict};
 use std::collections::BTreeSet;
@@ -267,14 +267,24 @@ impl Supervised {
     /// Asks the process to quit (SIGTERM; Windows has no polite equivalent without a window), waits up to `grace` for it,
     /// then ends the tree. For browsers, where an abrupt kill during start-up can leave a copy of the app behind on
     /// macOS. Idempotent.
-    pub fn terminate(&mut self, grace: Duration) {
-        if self.is_running() && tree::ask(self.pid) {
-            let end = Instant::now() + grace;
-            while self.is_running() && Instant::now() < end {
+    pub fn terminate(&mut self, grace: Duration) -> Terminated {
+        if !self.is_running() {
+            self.kill();
+            return Terminated::Gone;
+        }
+        if tree::ask(self.pid) {
+            let end = Instant::now().checked_add(grace);
+            while self.is_running() && end.is_some_and(|e| Instant::now() < e) {
                 std::thread::sleep(Duration::from_millis(25));
             }
         }
+        let how = if self.is_running() {
+            Terminated::Killed
+        } else {
+            Terminated::Gracefully
+        };
         self.kill();
+        how
     }
 
     /// Ends the whole process tree now and reaps it. Idempotent.
@@ -410,14 +420,13 @@ mod tests {
             l.clear();
             assert!(r.read_line(&mut l).unwrap() > 0);
         }
-        let t = Instant::now();
-        s.terminate(Duration::from_secs(100));
-        assert!(
-            t.elapsed() < Duration::from_secs(60),
-            "waited out the grace period"
+        // It stops by itself on the polite request: not killed after the grace period.
+        assert_eq!(
+            s.terminate(Duration::from_secs(100)),
+            Terminated::Gracefully
         );
         assert!(!s.is_running());
-        s.terminate(Duration::from_secs(1));
+        assert_eq!(s.terminate(Duration::from_secs(1)), Terminated::Gone);
     }
 
     #[cfg(unix)]
@@ -430,7 +439,7 @@ mod tests {
             l.clear();
             assert!(r.read_line(&mut l).unwrap() > 0);
         }
-        s.terminate(Duration::ZERO);
+        assert_eq!(s.terminate(Duration::ZERO), Terminated::Killed);
         assert!(!s.is_running());
     }
 

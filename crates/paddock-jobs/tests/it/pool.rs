@@ -34,7 +34,7 @@ fn spawn_returns_at_once_and_the_job_runs_off_thread() {
     let ctx = reg.register("scan", "Scan", None);
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let rx = Mutex::new(rx);
-    let handle = assert_nonblocking(Duration::from_millis(HANDLER_BUDGET_MS), || {
+    let handle = assert_nonblocking(&pool, || {
         pool.spawn_job(ctx.clone(), move |c| {
             assert_ne!(std::thread::current().id(), caller);
             rx.lock().unwrap().recv().unwrap(); // blocks the worker, not the handler
@@ -111,11 +111,18 @@ fn offload_resolves_and_contains_panics() {
     assert!(matches!(e, JobError::Panicked(m) if m == "blocking bug"));
     // The pool survives a panic.
     assert_eq!(block_on(pool.offload(|| 1)).unwrap(), 1);
-    // Slow work: the future is pending first, then wakes.
-    let fut = pool.offload(|| {
-        std::thread::sleep(Duration::from_millis(30));
+    // Work that has not finished: the future is pending first, then wakes.
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let mut fut = Box::pin(pool.offload(move || {
+        wait.recv().unwrap();
         "late"
-    });
+    }));
+    assert!(
+        fut.as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    go.send(()).unwrap();
     assert_eq!(block_on(fut).unwrap(), "late");
 }
 
@@ -151,15 +158,22 @@ fn dropped_handle_does_not_matter_and_queue_drains_on_drop() {
 }
 
 #[test]
-fn detects_a_blocking_handler() {
-    let ok = assert_nonblocking(Duration::from_millis(200), || 5).unwrap();
-    assert_eq!(ok, 5);
-    let slow = assert_nonblocking(Duration::from_millis(5), || {
-        std::thread::sleep(Duration::from_millis(30))
+fn detects_a_handler_that_waits_for_its_job() {
+    let pool = JobPool::new(Workers::one());
+    assert_eq!(assert_nonblocking(&pool, || 5).unwrap(), 5);
+    // A handler that joins its job cannot return while the pool is held: whatever the guard, it is reported.
+    let reg = JobRegistry::new(Collect::new());
+    let blocked = assert_nonblocking_within(&pool, Duration::from_millis(1), || {
+        pool.spawn_job(reg.register("a", "A", None), |_| Ok(7))
+            .unwrap()
+            .join()
     })
     .unwrap_err();
-    assert!(slow.elapsed >= Duration::from_millis(30));
-    assert!(slow.to_string().contains("job pool"));
+    assert_eq!(blocked.after, Duration::from_millis(1));
+    assert!(blocked.to_string().contains("job pool"));
+    assert_eq!(BLOCKED_AFTER, Duration::from_secs(30));
+    // The pool works again once released.
+    assert_eq!(block_on(pool.offload(|| 3)).unwrap(), 3);
 }
 
 #[test]
