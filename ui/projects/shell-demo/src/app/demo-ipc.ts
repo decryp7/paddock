@@ -1,4 +1,3 @@
-import type { StartupIpc } from '@decryp7/paddock-ui/shell/startup';
 
 /** The part of Tauri's page globals the demo uses (what `@tauri-apps/api` wraps). */
 interface TauriInternals {
@@ -6,11 +5,17 @@ interface TauriInternals {
   transformCallback(cb: (event: { payload: unknown }) => void, once?: boolean): number;
 }
 
+/** The demo's IPC: any command name, so it serves every shell backend's port (`StartupIpc`, `SettingsIpc`, ...). */
+export interface DemoIpc {
+  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+  listen<T>(event: string, handler: (payload: T) => void): Promise<() => void>;
+}
+
 /**
  * The demo's IPC inside Tauri, without `@tauri-apps/api` (an app passes `invoke` and `listen` from it): `null` in a plain
  * browser, where the mock backends serve. The e2e installs a fake `__TAURI_INTERNALS__` to hold and answer the calls.
  */
-export function tauriIpc(): StartupIpc | null {
+export function tauriIpc(): DemoIpc | null {
   const internals = (globalThis as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
   if (!internals) return null;
   return {

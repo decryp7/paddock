@@ -77,7 +77,29 @@ export const CHOOSE_STYLE_DIALOG = defineDialog({
   load: () => import('./dialogs/choose-style-dialog').then((m) => m.ChooseStyleDialog),
 });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG] as const;
+/**
+ * The Settings window (plan S10): the shell's window as the app's own dialog, so its contract is in this registry. A tool:
+ * modeless, large, remembers its size; it reads and changes settings through the settings commands only.
+ */
+export const SETTINGS_DIALOG = defineDialog({
+  id: 'pd.settings',
+  kind: 'tool',
+  title: msg('pd.settings.title', 'Settings'),
+  width: 880,
+  height: 620,
+  commands: ['settings_overview', 'settings_reset', 'settings_set'],
+  providers: () => import('./demo-settings').then((m) => m.DEMO_SETTINGS_WINDOW),
+  load: () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsWindow),
+});
+
+/** The demo's settings pages: each shows the Rust section of the same id with the shell's generic form. */
+const sectionPage = () => import('@decryp7/paddock-ui/shell/settings').then((m) => m.PdSettingsSectionPage);
+export const DEMO_SETTINGS_PAGES = [
+  defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100, load: sectionPage }),
+  defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100, load: sectionPage }),
+] as const;
+
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG] as const;
 
 export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
   commands: [
@@ -163,7 +185,7 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
   ],
   pages: [definePage({ id: 'sd.home', title: msg('sd.page.home', 'Home'), icon: 'pd:home', order: 100, load: placeholder })],
   statusItems: [defineStatusItem({ id: 'sd.greetings', title: msg('sd.status.greetings', 'Greetings'), side: 'end', priority: 50, load: placeholder })],
-  settingsPages: [defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100, load: placeholder })],
+  settingsPages: DEMO_SETTINGS_PAGES,
   // One dialog of each kind (ADR 0009), plus a modal form and a required choice. Contracts: dialog-contracts.json.
   dialogs: DEMO_DIALOGS,
   healthServices: [

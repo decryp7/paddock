@@ -5,6 +5,22 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Settings (plan S10, rule 21, ADR 0012; ported from Debrief's settings schema, `config_store.rs` and `settings.rs`):
+  crate `paddock-settings` 0.1.0 with the section schema (nine field kinds, schema check at registration), validation
+  in Rust (`validate`, `sanitize`, `ValidValues::decode`), the versioned `settings.json` (missing, damaged, newer or
+  unreadable: defaults and one `LoadProblem`; damaged and newer files kept aside; atomic writes; sections nobody
+  registers kept), the `Settings` service (`register`, `set` laying changes over the values, `reset` of a section or a
+  field, contained `apply`, `restart_pending`, one change event per real change), the shell's Appearance section, and
+  the Tauri adapter (`manage`, `paddock://settings` to every window, one notification for a start-up problem,
+  `settings_overview` / `settings_set` / `settings_reset` on the blocking pool, `route`, dialog grants) with generated
+  wire types, command names and Rust-written fixtures. `@decryp7/paddock-ui/shell/settings`: `SettingsBackend` (Tauri,
+  memory), `SettingsStore`, `SettingsDrafts` (Signal Forms), `pd-setting-field` (a `FormValueControl` per field kind),
+  `pd-settings-section` and `PdSettingsSectionPage`, the Settings window `pd-settings-window` (modeless tool dialog:
+  pages by group with lazy page components and their own providers, search across every setting, restart bar,
+  start-up problem, unsaved edits marked and asked about before closing, keyboard navigation), `followAppearance`,
+  `settingsWindowProviders`, `provideShellSettings` (`OPEN_SETTINGS`) and `SETTINGS_CONTRIBUTIONS` (Settings…, Mod+,).
+  `@angular/forms` (^22) is an optional peer dependency. `shell-demo` has the Settings window over the fixtures, with
+  Chromium e2e (every field kind, refusal and unsaved edits, search and keys, a damaged file, axe in both themes, 320 px).
 - Downloads (plan S8, ADR 0008 §5 and 0012; ported from Debrief's model downloader): crate `paddock-download` 0.1.0.
   `Downloader::download(ctx, req)` runs inside a `paddock-jobs` job with the phases `connect`, `resume` (only when
   resuming), `download` and `verify`, each on its own scale and never backwards, and Cancel noticed within 250 ms in

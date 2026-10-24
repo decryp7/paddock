@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7), `paddock-download` (S8) and `paddock-menu` (S13) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7), `paddock-download` (S8), `paddock-settings` (S10) and `paddock-menu` (S13) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -319,6 +319,43 @@ pool.spawn_job(ctx, move |ctx| Ok(d.download(ctx, &req)?))?;      // the command
   shared `Downloader` in the app state, `tauri::downloader(app)` returns it.
 - Tests run against an in-process HTTP server and a scripted transport (no network); `cargo bench -p paddock-download`
   compares one stream with 2, 4 and 8 connections on a server that limits each connection.
+
+## `paddock-settings` (plan S10)
+
+Settings (rule 21: tunables are settings; ADR 0012 §3), ported from Debrief's `debrief_plugin_api::settings`,
+`config_store.rs` and the generic half of `settings.rs`, without Debrief's sections, plugins or groups:
+
+```rust
+let settings = paddock_settings::tauri::manage(app.handle(), Settings::open(config_dir.join(paddock_settings::FILE_NAME)));
+settings.register(Arc::new(paddock_settings::shell::appearance()))?;                 // the shell's section `pd.appearance`
+settings.register(paddock_settings::section(models_section(), |v| apply_models(v)))?;  // `Configurable`: schema + apply
+let models: ModelsSettings = settings.decode("pw.models")?;                           // the app's own typed struct
+.invoke_handler(paddock_settings::tauri::route(paddock_settings::tauri::handler_with_grants(paddock_dialogs::tauri::grant_of), app_handler))
+```
+
+- Schema: `SettingsSection` (id = the settings page's id, owner `shell` or `app`) of `SettingField`s with a `FieldKind`
+  (bool, int with step and unit, float, text with an anchored `regex` pattern of bounded size, enum, path, duration in ms,
+  size in bytes, string list) and a default; `check` refuses a defective schema at `register` (ids, lengths, limits,
+  patterns, defaults that fail their own validation, duplicates).
+- Values: `validate` (refuses a set as a whole, one `FieldError` per field, messages for the user) and `sanitize` (stored
+  values: each bad one becomes its default and is logged); unknown keys are dropped; `ValidValues` with typed getters and
+  `decode::<T>()`.
+- File: `settings.json` `{ version: 1, sections: { id: { key: value } } }`, at most 1 MiB, read once. Missing: defaults.
+  Damaged (not JSON, wrong shape, too large): defaults, kept as `settings.json.corrupt` (five slots), one `LoadProblem`.
+  Newer format: defaults, kept as `settings.json.v<N>`. Unreadable: defaults, left alone. Sections nobody registers are
+  kept and written back. Writes are atomic (temp file, `sync_all`, rename, folder sync on Unix) and serialised.
+- `Settings::set(id, changes)` lays changes over the current values (`null` = default), validates, applies (a failing or
+  panicking `apply` refuses the change and nothing is saved), saves, and announces one `SettingsChanged` to the
+  `ChangeSink`; the same values again announce nothing; restart-only fields set `restart_pending`. `reset(id, key?)`.
+  Locks recover from poisoning. Errors are typed (`SettingsError`, on the wire `{ code, message, retryable }`).
+- `tauri` feature: `manage` (the `paddock://settings` sink to every window; a start-up problem is posted once to
+  `paddock-health`'s centre as `settings:file` with an Open Settings action), `COMMANDS` (`settings_overview` for every
+  window; `settings_set` (1 MiB) and `settings_reset` for main windows and dialogs whose contract names them; the writes
+  run on the blocking pool), `handler`, `handler_with_grants`, `route`.
+- Generated TypeScript in `ui/projects/paddock-ui/shell/settings/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p
+  paddock-settings --all-features --lib generated`): `settings.ts`, `settings-commands.ts`, `settings-fixtures.ts`.
+- Coverage: 99%+ lines; not covered are the `#[tauri::command]` wrapper lines and the blocking pool's join error (a panic
+  outside `apply`, which is contained already).
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.

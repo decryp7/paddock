@@ -1,4 +1,4 @@
-import { inject, signal } from '@angular/core';
+import { inject, provideEnvironmentInitializer, signal } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { applyPaddockAppearance } from '@decryp7/paddock-ui';
 import { provideContributions, provideShellContext, SHELL_PORTS, type ShellPorts } from '@decryp7/paddock-ui/shell';
@@ -6,6 +6,7 @@ import { openDialogPort, provideDialogs } from '@decryp7/paddock-ui/shell/dialog
 import { JOBS_CONTRIBUTIONS, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
 import { provideKeyboardShortcuts, provideMenus, provideNativeMenu, provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { NOTIFY_CONTRIBUTIONS, notifyPort, provideShellNotify } from '@decryp7/paddock-ui/shell/notify';
+import { appearanceFollower, provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import {
   AFTER_READY,
   MockStartupBackend,
@@ -23,6 +24,7 @@ import { tauriIpc } from './app/demo-ipc';
 import { DemoHealthEngine } from './app/demo-health';
 import { DemoJobsEngine } from './app/demo-jobs';
 import { DemoNote } from './app/demo-note';
+import { DemoSettingsEngine, demoSettingsBackend } from './app/demo-settings';
 import { ShellDemo } from './app/shell-demo';
 
 // Every shell entry point resolves from this app (the reference consumer, ADR 0012 §7): type-only imports, so the build
@@ -30,7 +32,6 @@ import { ShellDemo } from './app/shell-demo';
 import type * as shellAbout from '@decryp7/paddock-ui/shell/about';
 import type * as shellI18n from '@decryp7/paddock-ui/shell/i18n';
 import type * as shellPages from '@decryp7/paddock-ui/shell/pages';
-import type * as shellSettings from '@decryp7/paddock-ui/shell/settings';
 // shell/store is used through shell/jobs and shell/notify (their stores take its withRequestStatus).
 import type * as shellStore from '@decryp7/paddock-ui/shell/store';
 
@@ -42,9 +43,13 @@ export function bootMainWindow(): Promise<unknown> {
   applyPaddockAppearance(document.documentElement, { theme: 'system', accent: 'pitwall', density: 'standard' });
   return bootstrapApplication(ShellDemo, {
     providers: [
+      // Plays paddock-settings' start-up in the browser build: the settings are read (and a damaged file reported) before
+      // any window reads its notifications, as `paddock_settings::tauri::manage` does in the app's setup.
+      ...(ipc ? [] : [provideEnvironmentInitializer(() => void inject(DemoSettingsEngine))]),
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
       provideContributions(JOBS_CONTRIBUTIONS),
       provideContributions(NOTIFY_CONTRIBUTIONS),
+      provideContributions(SETTINGS_CONTRIBUTIONS),
       // Menus and keys (plan S13): one model for the in-app menu bar, context menus and (macOS app) the native menu bar.
       provideMenus({ appName: 'Shell demo' }),
       provideSubmenus<DemoContext>(...DEMO_SUBMENUS),
@@ -53,6 +58,9 @@ export function bootMainWindow(): Promise<unknown> {
       // Notifications and service health of this window (plan S4) over the demo's in-memory paddock-health: the host is
       // mounted over the window; SHELL_PORTS below sends notices to it.
       provideShellNotify({ health: () => inject(DemoHealthEngine).health, notifications: () => inject(DemoHealthEngine).centre, ports: false }),
+      // Settings (plan S10): Open Settings for notices and repairs; the window's look follows the Appearance settings once
+      // the window is ready (AFTER_READY below), so start-up sends nothing but the contract's own calls.
+      provideShellSettings({ backend: demoSettingsBackend, appearance: false }),
       // The jobs of this window (plan S9) over the demo's simulated engine; "Still working" after 1.5 s without events.
       provideShellJobs({ backend: () => inject(DemoJobsEngine).backend, stillWorkingAfterMs: 1_500 }),
       // The start-up contract (plan S7): ready after the first paint, liveness pings, the note kept across a recovery reload.
@@ -63,8 +71,10 @@ export function bootMainWindow(): Promise<unknown> {
         provide: AFTER_READY,
         useFactory: () => {
           const recovery = inject(WindowRecovery);
+          const followAppearance = appearanceFollower();
           return (reply: ReadyReply | null) => {
             void recovery.afterReady(reply);
+            followAppearance();
             windowReady.set(true);
           };
         },
