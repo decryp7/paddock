@@ -2,8 +2,10 @@ import { inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { applyPaddockAppearance } from '@decryp7/paddock-ui';
 import { provideContributions, provideShellContext, SHELL_PORTS, type ShellPorts } from '@decryp7/paddock-ui/shell';
+import { JOBS_CONTRIBUTIONS, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
 import { DEMO_CONTRIBUTIONS } from './app/demo.contributions';
 import type { DemoContext } from './app/demo-context';
+import { DemoJobsEngine } from './app/demo-jobs';
 import { DemoNotices } from './app/demo-notices';
 import { ShellDemo } from './app/shell-demo';
 
@@ -12,7 +14,6 @@ import { ShellDemo } from './app/shell-demo';
 import type * as shellAbout from '@decryp7/paddock-ui/shell/about';
 import type * as shellDialogs from '@decryp7/paddock-ui/shell/dialogs';
 import type * as shellI18n from '@decryp7/paddock-ui/shell/i18n';
-import type * as shellJobs from '@decryp7/paddock-ui/shell/jobs';
 import type * as shellMenu from '@decryp7/paddock-ui/shell/menu';
 import type * as shellNotify from '@decryp7/paddock-ui/shell/notify';
 import type * as shellPages from '@decryp7/paddock-ui/shell/pages';
@@ -24,6 +25,9 @@ applyPaddockAppearance(document.documentElement, { theme: 'system', accent: 'pit
 bootstrapApplication(ShellDemo, {
   providers: [
     provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
+    provideContributions(JOBS_CONTRIBUTIONS),
+    // The jobs of this window (plan S9) over the demo's simulated engine; "Still working" after 1.5 s without events.
+    provideShellJobs({ backend: () => inject(DemoJobsEngine).backend, stillWorkingAfterMs: 1_500 }),
     // The app's part of the context is a lazy chunk, loaded when the window is idle (plan §9).
     provideShellContext<DemoContext>(() => import('./app/demo-context').then((m) => m.demoContext)),
     {

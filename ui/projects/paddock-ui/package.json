@@ -21,10 +21,14 @@
   "peerDependencies": {
     "@angular/common": "^22.0.0",
     "@angular/core": "^22.0.0",
-    "echarts": "^6.0.0"
+    "echarts": "^6.0.0",
+    "@ngrx/signals": "^22.0.0"
   },
   "peerDependenciesMeta": {
     "echarts": {
+      "optional": true
+    },
+    "@ngrx/signals": {
       "optional": true
     }
   },

@@ -1,8 +1,10 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 // The pure lint (no Angular imports), straight from the source: Playwright runs in Node.
 import { checkRegistrationSource } from '../projects/paddock-ui/shell/testing/src/registration-lint';
+import { uiTimeoutProblems } from '../projects/paddock-ui/shell/jobs/src/ui-timeouts';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 for (const colorScheme of ['dark', 'light'] as const) {
@@ -68,5 +70,96 @@ test.describe('contributions (plan S2)', () => {
   test('the registration file imports no store, service, command or component (lazy by construction)', () => {
     const file = 'projects/shell-demo/src/app/demo.contributions.ts';
     expect(checkRegistrationSource(file, readFileSync(file, 'utf8'))).toEqual([]);
+  });
+});
+
+/** Every non-spec TypeScript file under `dir`. */
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return sources(path);
+    return path.endsWith('.ts') && !path.endsWith('.spec.ts') ? [path] : [];
+  });
+}
+
+test.describe('jobs (plan S9)', () => {
+  test('a job reports its phases in the status item and the list, and stops on Cancel', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.goto('/');
+    const status = page.getByRole('contentinfo', { name: 'Status bar' }).getByRole('button').first();
+    await expect(status).toHaveText('Jobs');
+    await page.getByRole('button', { name: 'Start sample job' }).click();
+    await expect(status).toHaveText(/^1 running: (Finding files|Reading)$/);
+
+    await status.click();
+    await expect(status).toHaveAttribute('aria-expanded', 'true');
+    const job = page.getByRole('region', { name: 'Jobs' }).getByRole('listitem');
+    await expect(job).toHaveCount(1);
+    await expect(job).toContainText('Importing logs');
+    // Each phase has its own scale: discovery counts up, then reading has a determinate bar.
+    await expect(job.getByRole('progressbar')).toHaveAttribute('aria-valuenow', /\d+/);
+    await expect(job).toContainText('Reading');
+    await job.getByRole('button', { name: 'Cancel' }).click();
+    await expect(job).toContainText('Cancelled');
+    await expect(job).toContainText('Stopped at your request.');
+    await expect(status).toHaveText('Jobs');
+    await expect(page.getByRole('list', { name: 'Notices' }).getByRole('listitem')).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('region', { name: 'Jobs' })).toHaveCount(0);
+    await expect(status).toBeFocused();
+    expect(errors).toEqual([]);
+  });
+
+  test('a job that finishes is announced; the step that cannot be stopped says so', async ({ page }) => {
+    await page.clock.install();
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Start sample job' }).click();
+    const status = page.getByRole('contentinfo', { name: 'Status bar' }).getByRole('button').first();
+    await status.click();
+    const job = page.getByRole('region', { name: 'Jobs' }).getByRole('listitem');
+    // Finding files (2 s) and reading (5 s) pass; writing the index cannot be interrupted.
+    await page.clock.runFor(7_100);
+    await expect(job).toContainText('Writing the index');
+    await expect(job.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await page.clock.runFor(1_000);
+    await expect(job).toContainText('Done');
+    await expect(page.getByRole('list', { name: 'Notices' })).toContainText('Importing logs: done');
+  });
+
+  test('a quiet job shows "Still working" and is never timed out', async ({ page }) => {
+    await page.clock.install();
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Start quiet job' }).click();
+    const status = page.getByRole('contentinfo', { name: 'Status bar' }).getByRole('button').first();
+    await expect(status).toHaveText('1 running: Waiting for the device');
+    await page.clock.runFor(1_600);
+    await expect(status).toHaveText('1 running: Still working');
+    // Ten minutes without an event: still running, still "Still working", never failed.
+    await page.clock.fastForward('10:00');
+    await expect(status).toHaveText('1 running: Still working');
+    await status.click();
+    const job = page.getByRole('region', { name: 'Jobs' }).getByRole('listitem');
+    await expect(job).toContainText('Still working. This step is taking longer than usual.');
+    await job.getByRole('button', { name: 'Cancel' }).click();
+    await page.clock.runFor(200);
+    await expect(job).toContainText('Cancelled');
+    await expect(status).toHaveText('Jobs');
+  });
+
+  test('the jobs popover has no axe violations', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Start quiet job' }).click();
+    await page.getByRole('contentinfo', { name: 'Status bar' }).getByRole('button').first().click();
+    await expect(page.getByRole('region', { name: 'Jobs' }).getByRole('listitem')).toHaveCount(1);
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
+    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+  });
+
+  test('no UI timeout anywhere in the shell or its reference app (grep check, rule 12)', () => {
+    const files = [...sources('projects/paddock-ui/shell'), ...sources('projects/shell-demo/src')];
+    expect(files.length).toBeGreaterThan(20);
+    expect(files.flatMap((f) => uiTimeoutProblems(f, readFileSync(f, 'utf8')))).toEqual([]);
   });
 });

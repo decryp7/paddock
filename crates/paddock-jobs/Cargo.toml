@@ -12,11 +12,13 @@ publish = ["decryp7"]
 test = false
 
 [features]
-# The Tauri adapter (`paddock_jobs::tauri`: event sink, `jobs_snapshot`, `job_cancel`); the core never depends on Tauri.
-tauri = ["dep:tauri"]
+# The Tauri adapter (`paddock_jobs::tauri`: the `paddock://jobs` sink, `jobs_snapshot`, `job_cancel` in a `paddock-commands`
+# table); the core never depends on Tauri.
+tauri = ["dep:tauri", "dep:paddock-commands", "paddock-commands/tauri"]
 
 [dependencies]
 tauri = { workspace = true, optional = true }
+paddock-commands = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 
@@ -24,6 +26,10 @@ sha2 = "0.10"
 proptest = "1"
 serde_json = "1"
 tempfile = "3"
+# The Tauri adapter is tested on Tauri's mock runtime.
+tauri = { workspace = true, features = ["test"] }
+# The generated TypeScript of the adapter's command table, checked by tests/tauri.rs.
+paddock-commands = { workspace = true }
 
 [[bench]]
 name = "walk"
