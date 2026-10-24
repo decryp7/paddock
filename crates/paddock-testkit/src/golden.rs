@@ -117,9 +117,8 @@ pub fn check_golden(path: &Path, actual: &str, mode: GoldenMode) -> Result<Golde
         return Ok(Golden::Matched);
     }
     if mode == GoldenMode::Update {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(io_err)?;
-        }
+        // The folder of a bare file name is empty, and making an empty folder is a no-op.
+        fs::create_dir_all(path.parent().unwrap_or(Path::new(""))).map_err(io_err)?;
         fs::write(path, actual.as_bytes()).map_err(io_err)?;
         return Ok(Golden::Updated);
     }

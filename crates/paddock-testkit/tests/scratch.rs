@@ -97,3 +97,18 @@ fn a_failed_test_keeps_its_folder_only_when_asked() {
     assert!(kept.exists(), "kept for inspection");
     let _ = fs::remove_dir_all(kept.parent().unwrap_or(&kept));
 }
+
+#[test]
+fn errors_read_as_sentences_and_path_panics_on_a_mistake() {
+    let s = Scratch::default();
+    let escapes = s.try_path("../x").err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(escapes.contains("not a plain relative path"), "{escapes}");
+    let io = s.read("missing").err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(io.starts_with("scratch folder: "), "{io}");
+    let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.path("/abs")))
+        .err()
+        .and_then(|e| e.downcast_ref::<String>().cloned());
+    assert!(message.is_some_and(|m| m.contains("not a plain relative path")));
+    let from_io: ScratchError = std::io::Error::other("boom").into();
+    assert!(matches!(from_io, ScratchError::Io(_)));
+}

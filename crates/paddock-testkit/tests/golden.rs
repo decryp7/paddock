@@ -99,3 +99,25 @@ fn assert_golden_panics_on_a_difference_and_passes_on_a_match() {
     let failed = std::panic::catch_unwind(|| paddock_testkit::assert_golden(&p, "b\n"));
     assert!(failed.is_err());
 }
+
+#[test]
+fn every_error_reads_as_a_sentence_naming_the_file() {
+    let s = Scratch::new();
+    let missing = check_golden(&s.path("a.txt"), "x", GoldenMode::Check)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(missing.contains("a.txt is missing") && missing.contains(UPDATE_VAR), "{missing}");
+    let dir = s.path("d");
+    std::fs::create_dir(&dir).expect("mkdir");
+    let io = check_golden(&dir, "x", GoldenMode::Check)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(io.starts_with("golden file ") && io.contains("d: "), "{io}");
+    let mut env = paddock_testkit::env_lock();
+    env.set(UPDATE_VAR, "1");
+    let p = s.write("x.txt", "a\n").expect("write");
+    paddock_testkit::assert_golden(&p, "b\n");
+    assert_eq!(s.read("x.txt").expect("read"), "b\n", "assert_golden rewrites in update mode");
+}
