@@ -4,10 +4,11 @@
 
 use crate::error::NextStep;
 use crate::model::Caps;
-use crate::service::{FoundKind, LinkView};
+use crate::service::{FoundKind, LinkView, PairingView};
 use serde::Serialize;
 
 /// What an app can do with Pitwall right now.
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum AiState {
@@ -144,6 +145,7 @@ impl AiState {
 }
 
 /// What the shared `<pd-needs-ai>` component shows for a feature that needs local AI.
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NeedsAiView {
@@ -171,6 +173,40 @@ impl NeedsAiView {
         })
     }
 }
+
+/// Everything the shared `<pd-needs-ai>` component draws, in one value the app's `pitwall_state` command returns and its
+/// `paddock://pitwall` event carries.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSnapshot {
+    /// What the app can do with Pitwall now.
+    pub state: AiState,
+    /// The app's name.
+    pub app: String,
+    /// One plain sentence for the user (the engine's wording, naming `app`).
+    pub message: String,
+    /// The buttons that fix it, best first; empty when nothing needs fixing.
+    pub actions: Vec<NextStep>,
+    /// The pairing code while one waits for the user's approval in Pitwall.
+    pub pairing: Option<PairingView>,
+    /// The app has an engine of its own, so "Use the built-in engine" is a working repair (rule 19).
+    pub built_in_available: bool,
+    /// The user already switched this session to the app's own engine.
+    pub built_in_for_session: bool,
+}
+
+/// The event every window hears when the [`AiSnapshot`] changed; the payload is an `AiSnapshot`.
+pub const EVENT: &str = "paddock://pitwall";
+
+/// The commands an app registers for the shared component (the names the UI's Tauri backend invokes): the snapshot, start
+/// pairing, cancel the waiting pairing, use the app's own engine for this session.
+pub const COMMANDS: [&str; 4] = [
+    "pitwall_state",
+    "pitwall_connect",
+    "pitwall_cancel_pairing",
+    "pitwall_use_builtin",
+];
 
 #[cfg(test)]
 mod tests {

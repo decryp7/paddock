@@ -15,6 +15,7 @@ export class DemoHealthEngine {
     [
       { id: 'sd.engine', label: 'the demo engine' },
       { id: 'sd.index', label: 'the search index' },
+      { id: 'sd.agent', label: 'the demo agent' },
     ],
     {
       centre: this.centre,

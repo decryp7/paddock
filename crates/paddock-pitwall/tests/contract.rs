@@ -1531,3 +1531,128 @@ fn a_held_answer_goes_on_when_it_is_released() {
     fake.release();
     assert_eq!(h.join().unwrap().unwrap().text, "late");
 }
+
+#[test]
+fn the_snapshot_the_shared_component_draws_follows_the_session() {
+    let r = rig_with(
+        FakeState {
+            pair: PairMode::Pending,
+            pending_polls: 0,
+            ..FakeState::default()
+        },
+        true,
+        42,
+        1,
+    );
+    let session = Session::new(EngineChoice::Auto);
+    r.link.probe();
+    let s = session.snapshot(&r.link, true);
+    assert_eq!(
+        (
+            s.state.clone(),
+            s.actions.clone(),
+            s.built_in_available,
+            s.built_in_for_session
+        ),
+        (AiState::NeedsPairing, vec![NextStep::Pair], true, false)
+    );
+    assert!(s.message.contains("Debrief is not connected"));
+    assert_eq!(s.pairing, None);
+    r.link.connect(false).unwrap();
+    let s = session.snapshot(&r.link, false);
+    assert_eq!(s.pairing.as_ref().map(|p| p.code.as_str()), Some("482913"));
+    assert!(!s.built_in_available);
+    session.use_built_in_for_session();
+    assert!(session.snapshot(&r.link, true).built_in_for_session);
+    let json = serde_json::to_value(&s).unwrap();
+    assert_eq!(
+        (
+            json["state"]["kind"].as_str(),
+            json["builtInAvailable"].as_bool(),
+            json["actions"][0].as_str()
+        ),
+        (Some("needsPairing"), Some(false), Some("pair"))
+    );
+    assert_eq!(paddock_pitwall::status::COMMANDS[0], "pitwall_state");
+    drop(r.ticks);
+}
+
+#[test]
+fn an_approval_that_comes_after_the_request_expired_is_never_taken() {
+    // Approval is ready on the server, but the request's life is over by the time the poll wakes: the app gives up first,
+    // asks Pitwall nothing and stores no key.
+    let r = rig_with(
+        FakeState {
+            pending_polls: 0,
+            ..FakeState::default()
+        },
+        true,
+        42,
+        1,
+    );
+    r.link.connect(true).unwrap();
+    r.clock.advance(Duration::from_millis(300_001));
+    r.ticks.as_ref().unwrap().send(()).unwrap();
+    next_event(&r, |_| r.link.view().pairing.is_none());
+    assert!(r.link.view().problem.unwrap().contains("expired"));
+    assert!(
+        KeyVault::new(r.secrets.clone()).get().is_none(),
+        "no key was taken"
+    );
+    assert!(
+        r.fake.requests_to("/x/v1/pair/pr1-abc").is_empty(),
+        "Pitwall was not even asked"
+    );
+    assert!(!r.link.view().paired);
+    // A fresh request after the expiry works as a first one.
+    let v = r.link.connect(true).unwrap();
+    assert!(v.pairing.is_some());
+    assert_eq!(r.fake.state().pairs, 2);
+}
+
+#[test]
+fn a_polled_pairing_answers_pending_again_once_its_key_was_delivered() {
+    let fake = FakePitwall::start(FakeState {
+        pending_polls: 0,
+        ..keyed()
+    });
+    let c = client(&fake);
+    assert_eq!(
+        c.poll_pairing("pr1-abc").unwrap(),
+        PairPoll::Approved(Some("pw_fakekey".into()))
+    );
+    assert_eq!(c.poll_pairing("pr1-abc").unwrap(), PairPoll::Pending);
+}
+
+#[test]
+fn every_keyed_call_refuses_a_client_without_a_key_the_same_way() {
+    let fake = FakePitwall::start(keyed());
+    let c = Client::new(fake.port, app());
+    let no = PitwallError::NeedsPairing;
+    assert_eq!(c.select(&ModelSel::Auto(Caps::chat(1024))).unwrap_err(), no);
+    assert_eq!(c.models().unwrap_err(), no);
+    assert_eq!(c.model_ids().unwrap_err(), no);
+    assert_eq!(c.jobs().unwrap_err(), no);
+    assert_eq!(c.cancel_job("1").unwrap_err(), no);
+    assert_eq!(c.count_tokens("x").unwrap_err(), no);
+    assert_eq!(c.truncate("x", 1, Keep::Start).unwrap_err(), no);
+    assert_eq!(
+        c.task(
+            Task::Summarize,
+            &serde_json::json!({"text": "x"}),
+            &CallOptions::default()
+        )
+        .unwrap_err(),
+        no
+    );
+    assert_eq!(
+        c.embed(&EmbedRequest::new(vec!["x".into()])).unwrap_err(),
+        no
+    );
+    assert_eq!(c.chat(&chat_req("x")).unwrap_err(), no);
+    assert_eq!(
+        c.ensure_capability(&ModelSel::Auto(Caps::chat(1024)), "chat")
+            .unwrap_err(),
+        no
+    );
+}
