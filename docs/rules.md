@@ -8,8 +8,9 @@ changes here, the apps' copies are updated when each app is next touched.
 1. **One app at a time.** Finish the current app before starting another; parallel agents only within that app.
 2. **Every agent works in its own git worktree** with its own `CARGO_TARGET_DIR` and its own e2e port; the main checkout
    stays on `main` for the coordinator.
-3. **Tests in a branch: only the affected ones** (touched crates, touched specs, related Playwright files). The full
-   suite runs once on the combined result before a local build or release, plus CI.
+3. **Tests in a branch: only the affected ones** (touched crates, touched specs, related Playwright files), with
+   Playwright in Chromium only. The full suite, Chromium and WebKit, runs once on the combined result before a local
+   build or release, plus CI. Fix everything locally first; CI confirms, it is not where failures are found.
 4. **When CI fails:** fix and re-run only the failed tests locally, push once; never push fix by fix to see what CI says.
    Lint and type-check the touched files before every push.
 5. **Every bug fix starts with a failing regression test.** A test-only failure is fixed properly (deterministic, no
