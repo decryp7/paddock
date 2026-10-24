@@ -6,6 +6,7 @@ use serde::Serialize;
 use std::time::Duration;
 
 /// What a model must be able to do, and how it is preferred (Pitwall's `auto:` selection, ADR 0014).
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Caps {
