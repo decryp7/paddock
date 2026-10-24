@@ -508,8 +508,28 @@ mod tests {
         std::thread::spawn(move || {
             let Ok((mut s, _)) = l.accept() else { return };
             s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-            let mut req = vec![0u8; 8192];
-            let n = s.read(&mut req).unwrap_or(0);
+            // The whole request is read (head and body): closing with unread bytes would reset the connection and the
+            // client could lose the answer.
+            let mut req: Vec<u8> = Vec::new();
+            let mut tmp = [0u8; 8192];
+            loop {
+                if let Some(end) = req.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&req[..end]).to_ascii_lowercase();
+                    let len: usize = head
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(0);
+                    if req.len() >= end + 4 + len {
+                        break;
+                    }
+                }
+                match s.read(&mut tmp) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => req.extend_from_slice(&tmp[..n]),
+                }
+            }
+            let n = req.len();
             let _ = req_tx.send(String::from_utf8_lossy(&req[..n]).into_owned());
             for p in pieces {
                 if s.write_all(&p).is_err() {
