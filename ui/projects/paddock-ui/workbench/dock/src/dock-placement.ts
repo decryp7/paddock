@@ -1,3 +1,4 @@
+import { panelTitle } from '@decryp7/paddock-ui/workbench';
 import { inject, Injectable } from '@angular/core';
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview';
 import type { ViewDef } from '@decryp7/paddock-ui/workbench';
@@ -65,7 +66,7 @@ export class DockPlacement {
   }
 
   private place(api: DockviewApi, view: ViewDef, inactive: boolean, id: string): IDockviewPanel | null {
-    const base: AddPanel = { id, component: view.id, title: view.title.text, inactive };
+    const base: AddPanel = { id, component: view.id, title: panelTitle(view, id), inactive };
     switch (viewArea(view)) {
       case 'side':
         return this.addTool(api, base, view);
@@ -93,7 +94,7 @@ export class DockPlacement {
   /** A status tool window as a tab on the bottom side bar, slid out unless opened in the background. */
   private slideOut(id: string, view: ViewDef, inactive: boolean): void {
     const anchor = this.documentWell()?.activePanel?.id ?? null;
-    const item: AutoHideItem = { id, title: view.title.text, side: 'bottom', size: viewLayout(view).pref.height, slot: { referencePanel: anchor, direction: anchor ? 'below' : 'within' } };
+    const item: AutoHideItem = { id, title: panelTitle(view, id), side: 'bottom', size: viewLayout(view).pref.height, slot: { referencePanel: anchor, direction: anchor ? 'below' : 'within' } };
     this.ctx.autoHide.update((s) => {
       const hidden = autoHideReduce(s, { type: 'unpin', item });
       return inactive ? hidden : autoHideReduce(hidden, { type: 'activate', id });
@@ -232,7 +233,7 @@ export class DockPlacement {
     if (!api || !view || api.getPanel(id)) return;
     if (slot?.edge) {
       // A full-span column or strip goes back to its window edge (a split against one neighbour would only span that neighbour).
-      const panel = api.addPanel({ id, component: view.id, title: view.title.text, inactive: options.inactive ?? false, position: { direction: slot.edge === 'bottom' ? 'below' : slot.edge } });
+      const panel = api.addPanel({ id, component: view.id, title: panelTitle(view, id), inactive: options.inactive ?? false, position: { direction: slot.edge === 'bottom' ? 'below' : slot.edge } });
       if (slot.size) panel.group.api.setSize(slot.edge === 'bottom' ? { height: slot.size } : { width: slot.size });
       return;
     }
@@ -244,7 +245,7 @@ export class DockPlacement {
     const panel = api.addPanel({
       id,
       component: view.id,
-      title: view.title.text,
+      title: panelTitle(view, id),
       inactive: options.inactive ?? false,
       position: { referencePanel: ref.id, direction: slot.direction, ...(slot.direction === 'within' && slot.index !== undefined ? { index: slot.index } : {}) },
     });
@@ -366,7 +367,7 @@ export class DockPlacement {
     const direction = ({ center: 'within', left: 'left', right: 'right', top: 'above', bottom: 'below' } as const)[target.position];
     const group = target.kind === 'group' ? api.getGroup(target.groupId) : undefined;
     if (target.kind === 'group' && !group) return false;
-    const panel = api.addPanel({ id, component: view.id, title: view.title.text, position: group ? { referenceGroup: group.id, direction } : { direction: direction === 'within' ? 'right' : direction } });
+    const panel = api.addPanel({ id, component: view.id, title: panelTitle(view, id), position: group ? { referenceGroup: group.id, direction } : { direction: direction === 'within' ? 'right' : direction } });
     panel.api.setActive();
     return true;
   }

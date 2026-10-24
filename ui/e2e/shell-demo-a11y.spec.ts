@@ -7,7 +7,9 @@ const CONTRACTS = 'projects/shell-demo/dialog-contracts.json';
 
 test('every dialog window passes axe in both themes (the list is the contract file)', async ({ page }) => {
   expect(Object.keys(dialogContracts(CONTRACTS)).length).toBeGreaterThanOrEqual(10);
-  expect(await axeEveryDialog(page, CONTRACTS)).toEqual({});
+  // A dialog that needs an input to open gets a valid one (its window shows an inline error without it, which the unit tests cover).
+  const inputs = { 'pd.channels.secret': { channelId: 'slack', label: 'Team Slack', kind: 'token' }, 'pd.channels.remove': { channelId: 'slack', name: 'Team Slack' } };
+  expect(await axeEveryDialog(page, CONTRACTS, { inputs })).toEqual({});
 });
 
 for (const colorScheme of THEMES) {
