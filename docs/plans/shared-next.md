@@ -610,3 +610,13 @@ storage page move to Paddock now (overriding the workbench.md deferral), and X45
 - Already listed and confirmed again: `withComponentInputBinding` in `provideShellPages`; dialog-window providers for
   app-wide stores.
 - `PADDOCK_SHELL_PERMISSION_FILES` wiring documented in the starter so every app gets the capability ACL test.
+
+## Two more for 0.3.0 (coordinator, 2026-10-24 late)
+
+| Id | Candidate | Home | Who has it today |
+|---|---|---|---|
+| X48 | i18n kit: `$localize` setup, extraction, catalog build and `--check`, locale switch in Settings | `paddock-ui/i18n` + conformance check | Debrief `build-locales`, Spotter partial; others none |
+| X49 | Accessibility checks: axe in e2e, keyboard-only flows, contrast/CVD checks for tokens | `paddock-e2e` + conformance | Debrief a11y e2e only |
+
+Kept after 0.3.0 on purpose (large, needed by Debrief/Pacenotes first): the workbench layer (ADR 0013, W0–W8), the rest
+of the plugin platform (ADR 0001 beyond X13), `paddock-testplan` (ADR 0005), and the shared CI image and cache server.
