@@ -81,42 +81,77 @@ export class ManualIdle {
 }
 
 /**
- * A clock moved by hand for the shell's clock ports (`NOTIFY_CLOCK`, `JOBS_CLOCK`: `now` and `every`). `advance(ms)`
- * moves the time and fires each periodic tick as often as it fell due.
+ * The family's fake clock on the UI side, with the semantics of `paddock_jobs::time::FakeClock`: it moves only when a
+ * test moves it. `now()` is the wall reading (ms since the epoch) the shell's clock ports read (`NOTIFY_CLOCK`,
+ * `JOBS_CLOCK`); `monotonic()` never goes backwards; `advance(ms)` moves both and fires every periodic tick and one-shot
+ * timer as often as it fell due, in time order, at its due time; `setWall(ms)` moves the wall alone (a user changing the
+ * system time) and fires nothing. Nothing in a spec waits for real time.
  */
-export class ManualClock {
-  time: number;
-  private readonly timers = new Set<{ readonly ms: number; next: number; readonly tick: () => void }>();
+export class FakeClock {
+  private wall: number;
+  private mono = 0;
+  private readonly timers = new Set<{ readonly ms: number; next: number; readonly tick: () => void; readonly once: boolean }>();
 
-  constructor(start = 1_000_000) {
-    this.time = start;
+  constructor(startWall = 1_000_000) {
+    this.wall = startWall;
   }
 
+  /** The wall reading, ms since the epoch. */
   now(): number {
-    return this.time;
+    return this.wall;
   }
 
+  /** Time since the clock was made, ms; never goes backwards. */
+  monotonic(): number {
+    return this.mono;
+  }
+
+  /** Calls `tick` every `ms` (at least 1) of monotonic time until the returned function is called. */
   every(ms: number, tick: () => void): () => void {
-    const timer = { ms: Math.max(1, ms), next: this.time + Math.max(1, ms), tick };
-    this.timers.add(timer);
-    return () => void this.timers.delete(timer);
+    return this.add(ms, tick, false);
   }
 
-  /** How many periodic ticks are registered. */
+  /** Calls `fire` once after `ms` of monotonic time unless the returned function is called first. */
+  after(ms: number, fire: () => void): () => void {
+    return this.add(ms, fire, true);
+  }
+
+  /** How many timers (periodic and one-shot) are registered. */
   get ticking(): number {
     return this.timers.size;
   }
 
+  /** The periods of the registered timers, in registration order. */
+  periods(): number[] {
+    return [...this.timers].map((t) => t.ms);
+  }
+
+  /** Moves both readings by `ms`, firing what fell due on the way. */
   advance(ms: number): void {
-    const end = this.time + ms;
+    const end = this.mono + Math.max(0, ms);
     for (;;) {
       const due = [...this.timers].filter((t) => t.next <= end).sort((a, b) => a.next - b.next)[0];
       if (!due) break;
-      this.time = due.next;
-      due.next += due.ms;
+      this.wall += due.next - this.mono;
+      this.mono = due.next;
+      if (due.once) this.timers.delete(due);
+      else due.next += due.ms;
       due.tick();
     }
-    this.time = end;
+    this.wall += end - this.mono;
+    this.mono = end;
+  }
+
+  /** Sets the wall reading only. */
+  setWall(ms: number): void {
+    this.wall = ms;
+  }
+
+  private add(ms: number, tick: () => void, once: boolean): () => void {
+    const period = Math.max(1, ms);
+    const timer = { ms: period, next: this.mono + period, tick, once };
+    this.timers.add(timer);
+    return () => void this.timers.delete(timer);
   }
 }
 

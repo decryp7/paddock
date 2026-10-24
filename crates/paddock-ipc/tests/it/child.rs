@@ -67,7 +67,8 @@ fn closing_the_lifeline_ends_the_child() {
 fn stop_ends_a_child_that_ignores_its_lifeline() {
     let child = launch(&spec(&["stubborn"]), Arc::new(NoCalls)).unwrap();
     assert_eq!(child.peer().call(b"x".to_vec(), T).unwrap(), b"x");
-    child.stop(Duration::ZERO);
+    // A short grace that the child sits out: it is ended after it.
+    child.stop(Duration::from_millis(30));
     assert!(child.exited());
     assert!(gone(child.pid()));
 }

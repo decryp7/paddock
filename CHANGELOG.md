@@ -9,6 +9,44 @@ Conventional Commits; one semver tag for the whole repo.
   strings, unknown keys named by line, newer majors refused), typed ids and the closed `Step` enum, `Plan::to_toml` (canonical) and `Plan::hash`,
   secrets by reference (`SecretRef`, `Resolver`, `Redactor`, `SecretRedactor`, `lint`), `RunResult::to_toml` with redaction, `Coverage::from`,
   `diff`, `junit::write`; property tests and a fuzz target.
+- `@decryp7/paddock-ui/workbench/dock` (plan X50 W2a, W2b): the workbench dock over dockview (optional peer, loaded on first use): `<pd-dock />`,
+  `WorkbenchDock` from `provideWorkbenchDock` (`showView`, `closeView`, `openPanels`, `activePanel`, perspectives, named layouts, `verdict`/`onWindowPlan`
+  for the Explorer column, checkpoint), `planLayout` adapter with grow-back and a "layout adjusted" notice with Undo, auto-hide edges, floating groups,
+  drop guides, pop-out through `PANEL_WINDOWS`, Ctrl+Tab switcher, `pd.wb.dock.*` commands and keys, and a `DockLayoutStore` port (memory, localStorage, IPC).
+- `paddock-panels` (plan X50 W3): pop-out panel windows. Validated panel ids (`<view>` / `<view>#<key>`), placement on any display
+  clamped to its work area (mixed scales), remembered place per view, at most 12 per host, closing a host closes its pop-outs,
+  dock-back events (`paddock://panels`), the drag ghost window (never left behind), and UI-state forwarding only between the windows
+  of one host (512 KiB, rate-limited, dialogs get display state only); commands `panel_*`, `panels_list`, `ui_sync_publish`,
+  `drag_ghost_*`; generated TypeScript in `workbench/panels/generated`.
+- `paddock-assistant` and `@decryp7/paddock-ui/workbench/assistant` (plan X50 W6): the assistant over Pitwall: `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for tools that write, a bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, `assistant_*` commands and the `paddock://assistant` event, and the `pd-assistant` chat pane with its store, safe markdown renderer, context chips, conversation list and tool-approval prompt.
+- `paddock-workbench` (plan X50 W2a/W7): the dock's layout store, a bounded `paddock-env` versioned file in the config folder,
+  served by `layout_get` [MAIN | POPOUT] and `layout_set` [MAIN] with the `CommandError` envelope.
+- `@decryp7/paddock-ui/workbench/palette` (plan X50 W5): `<pd-command-palette>` and `PaletteStore`: the palette's own commands
+  and "Open <view>" entries (`>`, recent and common first, word-start, inner and initials matching, "did you mean"), contributed
+  providers by prefix (debounced, `AbortSignal` aborted on the next keystroke or close, late answers dropped, capped at 50,
+  inline error with Retry), `namesPaletteProvider` over an engine's `names_search` (X18), Mod+Shift+P and Mod+P.
+- `@decryp7/paddock-ui/workbench/explorer` and `/workbench/frame` (plan X50 W4): `<pd-explorer>` (one section per Explorer
+  provider: lazy, paged with "Show more", cancellable on collapse, middle-truncated names, context menu on right-click and
+  Shift+F10, drag data, empty state with a command, errors with Retry) and `<pd-workbench>` with `provideShellWorkbench`:
+  title and menu bar, activity bar (badges in the accessible name, fly-outs, overflow into More, pinned bottom items),
+  the Explorer side bar sized by the user and closed and reopened by the layout plan in a narrow window, the stage slot for
+  the dock, status bar, palette, notifications, dialogs, F6 regions, the Jobs view and "Toggle side bar" (Mod+B).
+- `ui/projects/workbench-demo`: the workbench reference app on mock backends (views with layouts and instances, Explorer
+  sections, palette providers including `@` over a names search, perspectives, shared state, assistant context, jobs).
+- `@decryp7/paddock-ui/workbench` core (plan X50 W1, ADR 0013 §2): the workbench's contribution kinds in the shell's one registry
+  (`defineView` with a required `ViewLayout`, `defineActivityItem`, `defineExplorerProvider` (lazy, paged, cancellable),
+  `definePaletteProvider` (one prefix each, `AbortSignal`, capped), `definePerspective`, `defineSharedState`, `defineAssistantContext`),
+  `provideWorkbenchContributions`, the typed `WorkbenchRegistry` (offered views by `when`, instances as `<view>#<key>` panel ids,
+  palette provider by prefix), `VIEW_PANEL` and the `WORKBENCH_PORTS` the frame provides. The shell's `assertContributionsValid`
+  checks every kind: a view without a layout or with `min > pref`, targets naming missing views, commands or Explorer sections,
+  palette prefix conflicts, perspectives naming missing views.
+- Wall-clock limits on the injected clock everywhere (rule 40, follow-up of X20/X13): `CancelToken::on_cancel` (waits are
+  event-driven), `FakeClock::{waits_started, wait_for_started}`; `paddock-ipc` `PeerOptions::clock`, `Host::with_clock`,
+  `Authenticator`, `Client::connect_on`, per-client handshake threads, `ServerConfig::{max_connections, max_handshakes,
+  handshake_timeout, clock}`, `Subscriptions`, `Peer::id`, the Windows discovery-file owner check; `paddock-download`
+  `HostCaps::{with_clock, clock, held}`; `paddock-window` `WindowConfig::clock` and `teardown_step_on`; `paddock-health`'s
+  debounced writer on the centre's clock; `paddock-proc` `Supervised::terminate` returns `Terminated`; `JobPool::hold`.
+  UI: `FakeClock` in `@decryp7/paddock-ui/shell/testing` (wall and monotonic readings, `every`, `after`, `setWall`).
 - `paddock-live` and `@decryp7/paddock-ui/live` (plan X29): the live feed. `Hub<S: LiveState>` (state, sequence numbers, bounded
   subscriber queues with latest-wins merging and snapshot resynchronisation of slow consumers), `Frame` (snapshot, delta, link),
   `run` (a `Source` kept connected with `Backoff` on the shared `Clock`, announcing the `Link`), `Channel`, and the `tauri` adapter
@@ -337,6 +375,9 @@ Conventional Commits; one semver tag for the whole repo.
   contrast in the dark theme.
 
 ### Changed
+- Breaking (rule 40): `paddock_jobs::assert_nonblocking(&pool, handler)` holds the pool instead of measuring a budget
+  (`Blocked`, `BLOCKED_AFTER`; `HANDLER_BUDGET_MS` and `SlowHandler` are gone); `HostCaps::back_off(host, wait)` takes a
+  duration on the caps' clock; `shell/testing`'s `ManualClock` is now `FakeClock` (ticks fire as often as they fall due).
 - Breaking (plan X20): `paddock-jobs`, `paddock-log` and `paddock-health` share one `Clock` (`paddock_jobs::time`). The old
   `ManualClock`s are gone: use `FakeClock` (`new()`, `at_wall(..)`, `at_wall_ms(..)`, `advance(Duration)`/`advance_ms(u64)`).
   `paddock-health`'s epoch reading is `Clock::wall_ms` (was `now_ms`); `paddock-log`'s UTC reading is `paddock_log::now_utc(&clock)`

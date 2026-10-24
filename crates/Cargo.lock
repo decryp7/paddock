@@ -3048,6 +3048,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-assistant"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-health",
+ "paddock-pitwall",
+ "paddock-secrets",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
+ "ts-rs",
+]
+
+[[package]]
 name = "paddock-bench"
 version = "0.1.0"
 dependencies = [
@@ -3326,6 +3344,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-panels"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "objc2-app-kit",
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-env",
+ "paddock-window",
+ "paddock-workspace-hack",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-runtime",
+ "tempfile",
+ "ts-rs",
+ "windows",
+]
+
+[[package]]
 name = "paddock-pitwall"
 version = "0.1.0"
 dependencies = [
@@ -3510,6 +3549,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-jobs",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3520,6 +3560,20 @@ dependencies = [
  "url",
  "webview2-com",
  "windows",
+]
+
+[[package]]
+name = "paddock-workbench"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tempfile",
 ]
 
 [[package]]
