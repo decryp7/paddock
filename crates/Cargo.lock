@@ -3136,7 +3136,6 @@ dependencies = [
 name = "paddock-assistant"
 version = "0.1.0"
 dependencies = [
- "log",
  "paddock-commands",
  "paddock-env",
  "paddock-health",
@@ -3204,6 +3203,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-proc",
  "paddock-runtime",
+ "paddock-workspace-hack",
  "serde_json",
  "tempfile",
  "tungstenite",
@@ -3524,6 +3524,7 @@ dependencies = [
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tar",
@@ -3625,6 +3626,7 @@ dependencies = [
  "paddock-proc",
  "paddock-siblings",
  "paddock-window",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tempfile",

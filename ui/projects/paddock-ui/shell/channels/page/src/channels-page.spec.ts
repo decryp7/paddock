@@ -1,6 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
+  CHANNELS_REMOVE_DIALOG_ID,
   CHANNELS_SECRET_DIALOG_ID,
   MAX_CHANNELS,
   MemoryChannelsBackend,
@@ -47,11 +48,14 @@ const text = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' '
 class FakeDialogs {
   readonly opened: { id: string; inputs: Record<string, unknown> }[] = [];
   answer: boolean | undefined = true;
+  /** What the remove confirmation answers: true is Remove. */
+  removeAnswer: boolean | undefined = true;
   constructor(private readonly memory: MemoryChannelsBackend) {}
   open(id: string, options: { inputs?: Record<string, unknown> } = {}) {
     const inputs = options.inputs ?? {};
     this.opened.push({ id, inputs });
     const closed = (async () => {
+      if (id === CHANNELS_REMOVE_DIALOG_ID) return this.removeAnswer;
       if (this.answer) await this.memory.setSecret(String(inputs['channelId']), 'typed-elsewhere');
       return this.answer;
     })();
@@ -66,6 +70,10 @@ function held(options: MemoryChannelsOptions = {}) {
   return {
     memory,
     pending: () => queue.length,
+    async next(): Promise<void> {
+      queue.shift()?.();
+      await settle();
+    },
     async all(): Promise<void> {
       while (queue.length) queue.shift()?.();
       await settle();
@@ -351,35 +359,53 @@ describe('the Notification channels page', () => {
     expect(p.row('slack').contains(p.q('channel-test-result-slack'))).toBe(true);
   });
 
-  it('shows the attempts of a delivered test and keeps saying Still working for a hanging one', async () => {
-    const p = await open({ retry: true });
+  it('shows the attempt and phase of a running test, then the attempts of a delivered one', async () => {
+    const p = await open({ outcome: 'retry' });
     await p.click(p.rowButton('slack', 'channel-test'));
+    const progress = () => text(p.q('channel-test-progress-slack')!);
+    await p.h.next();
+    await p.flush();
+    expect(progress()).toBe('Attempt 1 of 3 · sending…');
+    await p.h.next();
+    await p.flush();
+    expect(progress()).toBe('Attempt 1 of 3 · waiting 4 s before the next try');
+    await p.h.next();
+    await p.flush();
+    expect(progress()).toBe('Attempt 2 of 3 · sending…');
+    expect(text(p.q('channel-test-result-slack')!)).toContain('Still working');
     await p.h.all();
     await p.flush();
     expect(text(p.q('channel-test-result-slack')!)).toBe('Delivered after 2 attempts');
+    expect(p.q('channel-test-progress-slack')).toBeNull();
+  });
 
-    TestBed.resetTestingModule();
+  it('keeps saying Still working, with attempt 1 sending, for a hanging test', async () => {
     const hang = await open({ outcome: 'hang' });
     await hang.click(hang.rowButton('slack', 'channel-test'));
     await hang.h.all();
     await hang.flush();
     expect(text(hang.q('channel-test-result-slack')!)).toContain('Still working');
+    expect(text(hang.q('channel-test-progress-slack')!)).toBe('Attempt 1 of 3 · sending…');
     expect((hang.rowButton('slack', 'channel-test') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('removes a channel after a confirmation in the row, and Keep leaves it', async () => {
+  it('removes a channel after the remove dialog answers Remove, and Keep or a dismissal leaves it', async () => {
     const p = await open();
+    p.dialogs.removeAnswer = false;
     await p.click(p.rowButton('slack', 'channel-remove'));
-    expect(p.row('slack').querySelector('[role=group]')?.getAttribute('aria-label')).toBe('Remove Slack');
-    await p.click('channel-remove-keep');
+    expect(p.dialogs.opened.at(-1)).toEqual({ id: CHANNELS_REMOVE_DIALOG_ID, inputs: { channelId: 'slack', name: 'Slack' } });
     expect(p.el.querySelectorAll('tbody tr')).toHaveLength(2);
+    p.dialogs.removeAnswer = undefined;
     await p.click(p.rowButton('slack', 'channel-remove'));
-    await p.click('channel-remove-confirm');
+    expect(p.el.querySelectorAll('tbody tr')).toHaveLength(2);
+    // No inline confirmation any more: the question is the dialog's.
+    expect(p.q('channel-remove-confirm')).toBeNull();
+    p.dialogs.removeAnswer = true;
+    await p.click(p.rowButton('slack', 'channel-remove'));
     expect(p.el.querySelectorAll('tbody tr')).toHaveLength(1);
     expect(p.memory.secretOf('slack')).toBeUndefined();
     // Removing the last one leads to the empty state.
     await p.click(p.rowButton('phone', 'channel-remove'));
-    await p.click('channel-remove-confirm');
     expect(p.q('channels-empty')).not.toBeNull();
   });
 
@@ -387,7 +413,6 @@ describe('the Notification channels page', () => {
     const p = await open();
     await p.click(p.rowButton('slack', 'channel-edit'));
     await p.click(p.rowButton('slack', 'channel-remove'));
-    await p.click('channel-remove-confirm');
     expect(p.q('channel-editor')).toBeNull();
   });
 
@@ -401,7 +426,6 @@ describe('the Notification channels page', () => {
     await p.click(add);
     expect(p.q('channel-editor')).toBeNull();
     await p.click(p.rowButton('c0', 'channel-remove'));
-    await p.click('channel-remove-confirm');
     expect(p.q('channel-add')!.getAttribute('aria-disabled')).toBeNull();
     expect(p.q('channels-limit')).toBeNull();
   });

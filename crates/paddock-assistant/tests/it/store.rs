@@ -1,7 +1,7 @@
 //! Conversation persistence: bounded, versioned, damaged files fall back to defaults with one problem, newer files are
 //! left untouched.
 
-mod support;
+use crate::support;
 use paddock_assistant::*;
 use paddock_health::FakeClock;
 use serde_json::json;
