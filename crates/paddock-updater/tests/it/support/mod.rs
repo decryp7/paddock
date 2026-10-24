@@ -62,7 +62,7 @@ pub fn manifest(version: &str, sig: &str, sized: bool) -> String {
 pub enum Route {
     Body(u16, Vec<u8>),
     Fail(TransportError),
-    /// Never answers within the test (a cancel must not wait for it).
+    /// Does not answer until [`FakeServer::release`] (a cancel must not wait for it).
     Hang,
     /// The transport panics (a bug in an app's own transport).
     Panic,
@@ -72,6 +72,7 @@ pub enum Route {
 pub struct FakeServer {
     routes: Mutex<HashMap<String, Route>>,
     pub hits: Mutex<Vec<String>>,
+    released: (Mutex<bool>, std::sync::Condvar),
 }
 
 impl FakeServer {
@@ -85,6 +86,12 @@ impl FakeServer {
 
     pub fn json(&self, url: &str, text: &str) {
         self.route(url, Route::Body(200, text.as_bytes().to_vec()));
+    }
+
+    /// Lets every hung request end (with a timeout error).
+    pub fn release(&self) {
+        *self.released.0.lock().unwrap() = true;
+        self.released.1.notify_all();
     }
 
     pub fn hits(&self, url: &str) -> usize {
@@ -113,7 +120,8 @@ impl Transport for FakeServer {
             Some(Route::Fail(e)) => Err(e),
             Some(Route::Panic) => panic!("transport bug"),
             Some(Route::Hang) => {
-                std::thread::sleep(Duration::from_secs(5));
+                let g = self.released.0.lock().unwrap();
+                drop(self.released.1.wait_while(g, |r| !*r).unwrap());
                 Err(TransportError::new(
                     paddock_download::TransportErrorKind::Timeout,
                     "hung",

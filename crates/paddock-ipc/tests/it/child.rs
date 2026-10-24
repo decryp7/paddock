@@ -46,6 +46,7 @@ fn a_child_connects_authenticates_answers_and_is_gone_after_drop() {
     );
     assert_eq!(child.peer().call(b"still".to_vec(), T).unwrap(), b"still");
     assert!(!child.exited());
+    assert_eq!(child.in_job(), cfg!(windows));
     assert_eq!(child.memory_peak(), 0);
     assert_eq!(child.stopped_over_memory(), None);
     let pid = child.pid();
@@ -67,7 +68,8 @@ fn closing_the_lifeline_ends_the_child() {
 fn stop_ends_a_child_that_ignores_its_lifeline() {
     let child = launch(&spec(&["stubborn"]), Arc::new(NoCalls)).unwrap();
     assert_eq!(child.peer().call(b"x".to_vec(), T).unwrap(), b"x");
-    child.stop(Duration::ZERO);
+    // A short grace that the child sits out: it is ended after it.
+    child.stop(Duration::from_millis(30));
     assert!(child.exited());
     assert!(gone(child.pid()));
 }

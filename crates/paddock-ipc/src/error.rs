@@ -168,3 +168,26 @@ pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
         "unknown panic".into()
     }
 }
+
+impl From<crate::frame::FrameError> for IpcError {
+    /// A frame that cannot be written: over the limit is [`IpcError::TooLarge`] (only that call fails), anything else a
+    /// protocol error.
+    fn from(e: crate::frame::FrameError) -> Self {
+        match e {
+            crate::frame::FrameError::TooLarge { len, max } => IpcError::TooLarge { len, max },
+            other => IpcError::Protocol(other.to_string()),
+        }
+    }
+}
+
+impl IpcError {
+    /// This error as the typed failure a handler answers with: `tooLarge` for one oversized frame, else `internal`.
+    pub fn to_remote(&self) -> RemoteError {
+        let code = if matches!(self, IpcError::TooLarge { .. }) {
+            codes::TOO_LARGE
+        } else {
+            codes::INTERNAL
+        };
+        RemoteError::new(code, self.to_string())
+    }
+}
