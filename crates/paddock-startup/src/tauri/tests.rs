@@ -38,6 +38,13 @@ impl log::Log for Capture {
 }
 
 /// The records logged for window `label` (tests use their own labels: the logger is process-wide).
+/// Installs the capturing logger. Every test that reads `log_of` calls it (directly or through `app_with`): under nextest
+/// each test is its own process, so a test cannot rely on another one having installed it first.
+fn capture() {
+    let _ = log::set_logger(&Capture);
+    log::set_max_level(log::LevelFilter::Trace);
+}
+
 fn log_of(label: &str) -> Vec<(log::Level, String)> {
     lock(&LOGGED)
         .iter()
@@ -52,6 +59,7 @@ struct Seen {
     unresponsive: Vec<(String, bool)>,
     ready: Vec<(String, Option<Recovery>)>,
     safe_mode: Vec<String>,
+    relaunch: Vec<String>,
     asked: Vec<(String, Prompt)>,
     answers: Vec<Box<dyn FnOnce(Choice) + Send>>,
 }
@@ -75,7 +83,7 @@ impl Asker<MockRuntime> for FakeAsker {
 }
 
 fn builder(seen: &Shared) -> StartupBuilder<MockRuntime> {
-    let (a, b, c) = (seen.clone(), seen.clone(), seen.clone());
+    let (a, b, c, d) = (seen.clone(), seen.clone(), seen.clone(), seen.clone());
     Startup::builder()
         .on_unresponsive(move |_app, label, on| lock(&a).unresponsive.push((label.to_string(), on)))
         .on_ready(move |webview, why| lock(&b).ready.push((webview.label().to_string(), why)))
@@ -87,12 +95,25 @@ fn builder(seen: &Shared) -> StartupBuilder<MockRuntime> {
                 Ok(())
             }
         })
+        .relaunch(move |app| {
+            let label = app
+                .webview_windows()
+                .keys()
+                .min()
+                .cloned()
+                .unwrap_or_default();
+            lock(&d).relaunch.push(label.clone());
+            if label == "w-2" {
+                Err("no restart here".into())
+            } else {
+                Ok(())
+            }
+        })
         .asker(FakeAsker(seen.clone()))
 }
 
 fn app_with(startup: Startup<MockRuntime>) -> App {
-    let _ = log::set_logger(&Capture);
-    log::set_max_level(log::LevelFilter::Trace);
+    capture();
     install(mock_builder(), startup)
         .invoke_handler(Guard::new(&crate::COMMANDS).wrap(invoke_handler()))
         .build(mock_context(noop_assets()))
@@ -492,7 +513,7 @@ fn only_the_apps_own_pages_are_watched() {
 
 #[test]
 fn commands_fail_plainly_when_the_contract_is_not_installed() {
-    let _ = log::set_logger(&Capture);
+    capture();
     let app = mock_builder()
         .invoke_handler(invoke_handler())
         .build(mock_context(noop_assets()))
@@ -510,6 +531,7 @@ fn commands_fail_plainly_when_the_contract_is_not_installed() {
         ("recovery_restore", json!({})),
         ("recovery_start_fresh", json!({})),
         ("recovery_safe_mode", json!({})),
+        ("app_relaunch", json!({})),
     ] {
         assert_eq!(
             invoke(&w, cmd, body).unwrap_err()["code"],
@@ -550,6 +572,7 @@ fn the_ticker_runs_on_its_own_thread_once_and_stops() {
 
 #[test]
 fn errors_on_the_edges_are_logged_with_their_window() {
+    capture();
     assert_eq!(super::logged::<u8, &str>(Ok(1), "w-10", "never"), Some(1));
     assert_eq!(
         super::logged::<u8, &str>(Err("gone"), "w-10", "Could not reload the window"),
@@ -654,3 +677,35 @@ fn the_native_asker_without_the_dialog_plugin_waits() {
 }
 
 mod recovery;
+
+#[test]
+fn a_window_can_ask_for_the_whole_app_to_restart_and_is_told_when_it_cannot() {
+    let (first, seen) = app();
+    let w = window(&first, "w-1");
+    assert_eq!(invoke(&w, "app_relaunch", json!({})).unwrap(), Value::Null);
+    assert_eq!(lock(&seen).relaunch, ["w-1"]);
+    assert!(
+        log_of("w-1")
+            .iter()
+            .any(|(_, m)| m == "Restarting the app on request")
+    );
+
+    let (second, seen) = app();
+    let w = window(&second, "w-2");
+    let err = invoke(&w, "app_relaunch", json!({})).unwrap_err();
+    assert_eq!(err["code"], "relaunchFailed");
+    assert_eq!(err["message"], "no restart here");
+    assert_eq!(lock(&seen).relaunch.len(), 1, "the app keeps running");
+    assert!(
+        log_of("w-2")
+            .iter()
+            .any(|(_, m)| m == "Could not restart the app: no restart here")
+    );
+
+    let bare = app_with(Startup::builder().build().unwrap());
+    let w = window(&bare, "w-1");
+    assert_eq!(
+        invoke(&w, "app_relaunch", json!({})).unwrap_err()["code"],
+        "relaunchUnavailable"
+    );
+}

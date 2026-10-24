@@ -4,6 +4,10 @@ The Playwright half of the Paddock shell test kit (ADR 0012 §7, plan S16; the T
 `@decryp7/paddock-ui/shell/testing`). A plain Node package (ES modules with type declarations), versioned with
 `@decryp7/paddock-ui`. Peer dependencies: `@playwright/test` and `@axe-core/playwright`.
 
+The accent colour check is the unit-test half of accessibility: `accentProblems(cssRules(tokensCss), 'myaccent')` in `@decryp7/paddock-ui/shell`
+(contrast of the accent as text, focus ring and fill, the text on the fill, colour-vision simulation, distance from the warning hue and,
+if asked, from other accents and the status colours). Conformance check C33 requires both halves.
+
 ```ts
 // playwright.config.ts
 import { paddockConfig } from '@decryp7/paddock-e2e';
@@ -63,6 +67,9 @@ for (const colorScheme of THEMES) {
 | `ShellApp` and its parts | `frame` (heading, toggle, sidebar mode, regions, `focusBy`), `sidebar`, `statusBar` (items by id, chip, bell, jobs, "…"), `notifications` (toasts, centre, notices by cause, service details), `jobs`, `menus`, `dialogs` (window URLs, result, fit history, in-page dialogs), `settings` |
 | `dialogContracts(path)` | The dialogs of an app's contract file, to boot every dialog window by URL |
 | `axeViolations(page)`, `THEMES`, `WCAG_TAGS` | axe against WCAG 2.2 AA, as `rule: targets` lines |
+| `axeInThemes(page)`, `axeTargets(page, targets)` | axe in each theme (`theme: rule: targets`); or over a list of windows/screens (URL plus a ready check), returned by name so a failure names the window |
+| `axeEveryDialog(page, contractsPath, { inputs, skip })`, `dialogTargets`, `dialogWindowUrl` | axe over the window of every dialog in the app's `dialog-contracts.json`, both themes: `expect(await axeEveryDialog(page, path)).toEqual({})`. A new dialog is covered the moment it is in the file; one that cannot open alone is named in `skip` with a reason; an empty list is an error |
+| `tabWalk`, `expectTabOrder`, `expectReachableByKeyboard`, `expectEscapeReturnsFocus` | Keyboard-only flows (WCAG 2.1.1, 2.1.2, 2.4.3, 2.4.7): walk the Tab order (ends `left`, `cycled`, `trapped` or `limit`; `walkStep` is the pure rule), fail on a trap or a stop with no visible focus, prove named elements are reachable, prove Escape closes a popup and returns the focus to its trigger |
 | `LAYOUT_WIDTHS`, `WINDOW_SIZES`, `expectNoHorizontalScroll`, `expectWithinWidth`, `resize` | Layout scenarios (rule 18) |
 | `installTauriFake(page, options)` | A fake `__TAURI_INTERNALS__`: replies by command, held until released, recorded calls, events delivered to the page's listeners, a played platform (`mac` has the native menu bar). The shell plugin's commands (`plugin:paddock-shell\|<command>`, `SHELL_PLUGIN_PREFIX`) are recorded and answered by their plain names |
 | `waitForStableFrame`, `captureStable` | Screenshots once the fonts are loaded, nothing animates and the layout held still between two looks (works under `page.clock`) |
