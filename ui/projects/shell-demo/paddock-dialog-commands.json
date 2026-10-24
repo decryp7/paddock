@@ -1,0 +1,7 @@
+{
+  "tsconfig": "tsconfig.app.json",
+  "registry": ["src/app/demo.contributions.ts"],
+  "table": ["src/app/generated/app-commands.ts"],
+  "base": [],
+  "baseEntries": [["src/app/dialog-base.ts", "dialogBaseProviders"]]
+}

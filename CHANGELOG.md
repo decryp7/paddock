@@ -5,6 +5,26 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `@decryp7/paddock-ui/shell/dialogs` (plan S6, ADR 0009; ported from Debrief ADR 0054's UI): the kind policy (sizes,
+  fit and grow-only, Escape/Cmd+W/Enter, a visible Close/Cancel in every state), `DialogService` (typed by the
+  definition, one window per id or per input, `ModalGate`), `WindowDialogBackend` over the `paddock-dialogs` commands and
+  events (remembered size and offset, falls back to the page), `InPageDialogBackend` and `pd-dialog-host` (backdrop,
+  focus trap and restore, scrim while a modal window is open), `DialogShell` and `dialogWindowConfig` (each dialog window
+  its own small bootstrap with only its dialog's providers), `tauriDialogIo` over a passed-in Tauri bridge,
+  `browserDialogIo` (dialog routes opened by URL for e2e), `DeniedCommands`, and the contract file writer
+  (`dialogContractFile`, read by `Contracts::parse`).
+- `@decryp7/paddock-ui/shell/testing` (plan S6): the boot-every-dialog harness (`bootDialog`, `assertDialogBoots`,
+  `bootEveryDialog`: missing provider, failed or empty body, commands the contract does not declare, Close/Escape per
+  kind, fit per kind), `dialogTableProblems` against the generated command table, `FakeDialogIo`, `recordIpc`.
+- Package bin `paddock-check-dialog-commands` (plan S6): the static call-graph check that every dialog declares exactly
+  the commands it can reach, configured per app (`paddock-dialog-commands.json`: registry, table, base set, host-only
+  services, boundaries, reviewed exceptions); `typescript` is an optional peer dependency for it.
+- `shell-demo`: one dialog per kind (plus a modal form and a required choice), its `dialog-contracts.json`, dialog windows
+  booted from `#/dialog`, and a Chromium e2e over the contract file.
+
+### Changed
+- `paddock-dialogs`: dialog ids may contain `.`, so the shell's namespaced contribution ids (`sd.about`) are valid
+  contract keys; a test parses the shell demo's generated contract file.
 - Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,
   `problems` against the command table, kind size policy), `Grant` for the `paddock-commands` guard, pure placement on
   the parent's monitor (mixed DPI, negative coordinates, remembered offset, never the primary display as default),

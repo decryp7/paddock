@@ -122,7 +122,8 @@ contracts and the contributions core type command names as `AppCommand | ShellCo
 Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_contracts.rs`, `dialog_placement.rs` and
 `dialog_windows.rs` (Debrief ADRs 0050, 0054) without Debrief's dialog ids:
 
-- `Contracts::parse(json)` reads the app's generated contract file once (version 1; `base` and per-dialog `kind`,
+- `Contracts::parse(json)` reads the app's generated contract file once (written by `dialogContractFile` in
+  `@decryp7/paddock-ui/shell/dialogs`; dialog ids are the shell's namespaced ids, `[a-z0-9.-]`) (version 1; `base` and per-dialog `kind`,
   `modality`, `requiredChoice`, `instanced`, `minSize`, `commands` with `prefix*`) and refuses one that contradicts
   itself (a modeless decision, a modal viewer or tool, a modeless required choice, bad ids or names, limits).
   `Contracts::allows(dialog, command)` covers `BASE_COMMANDS` (`dialog_take_input`, `dialog_close`, `dialog_fit_height`),

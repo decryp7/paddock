@@ -16,7 +16,8 @@
     "build:e2e": "node scripts/build-e2e.mjs",
     "shell-demo": "npm run build:css && ng serve shell-demo --port 4301",
     "shell-demo:build": "npm run build:css && ng build shell-demo",
-    "test:scripts": "node --test ../scripts/*.test.mjs",
+    "test:scripts": "node --test ../scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs",
+    "check:dialogs": "node projects/paddock-ui/bin/paddock-check-dialog-commands.mjs --config projects/shell-demo/paddock-dialog-commands.json",
     "release": "node ../scripts/publish.mjs"
   },
   "dependencies": {

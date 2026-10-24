@@ -105,6 +105,35 @@ A new entry point needs only those two files (the publish dry run fails if the b
 `e2e/shell-demo.spec.ts`. `@decryp7/paddock-e2e` (`projects/paddock-e2e`, plain Node, versioned with this package) gets the
 Playwright helpers in S16.
 
+### Dialogs (`/shell/dialogs`, plan S6)
+
+Dialogs are real OS windows (ADR 0009, rule 17). Declare each with `defineDialog` in a registration file; the kind decides
+modality, size, keys and buttons:
+
+```ts
+export const RENAME_DIALOG = defineDialog({
+  id: 'pw.rename', kind: 'form', modality: 'modal', title: msg('pw.dialog.rename', 'Rename'), width: 440,
+  result: type<string>(), commands: ['app_rename'],                           // what its window may call
+  providers: () => import('./rename.providers').then((m) => m.RENAME_PROVIDERS), // its own providers only
+  load: () => import('./rename-dialog').then((m) => m.RenameDialog),
+});
+```
+
+- Main window: `provideDialogs({ io: () => tauriDialogIo({ invoke, listen, emitTo }) })` (without `io` dialogs open in the
+  page), `<pd-dialog-host />` in the root template, `openDialog: openDialogPort()` in `SHELL_PORTS`. Open with
+  `inject(DialogService).open(RENAME_DIALOG, { inputs: { current } }).closed` (resolves to `string | undefined`).
+- Content: inject `DIALOG_REF` and call `close(result)`; inputs set the component's `input()`s; `dialogCanClose()` may
+  keep it open; mark a Close/Cancel with `data-dialog-close` (else the shell adds one) and the default with `data-default`.
+- Dialog window: in `main.ts`, `parseDialogRoute(location.hash)`; for a dialog route `mountDialogWindowHost()` and
+  `bootstrapApplication(DialogShell, dialogWindowConfig({ dialogs, providers: dialogBase(), io, route }))`.
+- Contracts: a spec writes `serializeDialogContracts(dialogContractFile(dialogs, { base }))` to `src-tauri/dialog-contracts.json`
+  and compares it on every run; Rust reads it with `paddock_dialogs::Dialogs::from_json`.
+- Checks every app runs (`shell/testing`): `assertDialogBoots(def, { dialogs, providers: dialogBase(), inputs })` per dialog
+  (missing provider, empty or failed body, undeclared command sent at start, Close/Escape per kind, fit per kind),
+  `dialogTableProblems(dialogs, APP_COMMANDS, base)`, and `npx paddock-check-dialog-commands --config paddock-dialog-commands.json`
+  (what a click could send, in both directions; see the header of `bin/paddock-check-dialog-commands.mjs`). The shell
+  demo runs all three (`npm run check:dialogs`).
+
 ## Tokens
 
 All values live in `projects/paddock-ui/scss/_tokens.scss` and compile to `css/tokens.css`: neutral roles (bg, surface-1..3,
