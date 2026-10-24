@@ -8,6 +8,13 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock-secrets` (plan X5, decision D6): the credential store the five apps copied. A `Secrets` port, a `Secret` that never
   prints and is zeroized, the keyring adapter (`keyring` feature, refused in tests unless `PADDOCK_SECRETS_REAL=1`),
   `MemorySecrets`, an opt-in owner-only file fallback (0600), one naming scheme and `rename_entry` for old entries.
+- `@decryp7/paddock-conformance` (`conformance/`, plan X9, not published yet): the `paddock-conformance` CLI with findings
+  (text, JSON, Markdown job summary), waivers that expire (`paddock.waivers.toml`), and checks C03 (icons), C04 (macOS
+  signing and bundle), C06 (key strip), C07 (version agreement, release gates, tag preflight), C08 (release scripts and
+  artifacts), C14 (hermetic test runs, `run --`), C15 (installed Chrome), C16 (hard-coded app version) and C23's first part
+  (`commit-lint`: Conventional Commits, no Co-Authored-By or AI attribution). The apps' release scripts are unified under
+  `conformance/release/` (`publish`, `latest-json`, `strip-keys`, `macos-verify-bundle.sh`, which captures output before it
+  matches); `latest.json` is byte-equal to the apps' copies. CI job `conformance` runs its tests.
 - Paddock Shell Demo (`apps/shell-demo`, plan S18): the shell demo as an installable Tauri app on the `paddock-shell`
   plugin, with a sample engine (a service whose Repair works and one whose Repair fails, jobs with phases and Cancel,
   settings sections, the tray popover), its own neutral icon from the icon pipeline (`icons/shell-demo`), ad-hoc macOS

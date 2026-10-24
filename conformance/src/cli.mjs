@@ -1,0 +1,78 @@
+import { resolve } from 'node:path';
+import { commitLintMain } from './commit-lint.mjs';
+import { checks } from './checks/index.mjs';
+import { runHermetic } from './hermetic.mjs';
+import { formatText, writeOutputs } from './report.mjs';
+import { runChecks } from './runner.mjs';
+
+const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C04,C06] [--json] [--out file] [--summary file]
+                           [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
+                           [--preflight vX.Y.Z [--api url --repo owner/name]]
+       paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
+       paddock-conformance commit-lint --file <path> | --range <rev-range>
+       paddock-conformance list`;
+
+const VALUE = new Set(['app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'allow-home']);
+
+/** Parses `--key value` / `--flag` into an object; throws on anything unknown. */
+export function parseArgs(argv) {
+  const o = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) throw new Error(`unexpected argument: ${a}`);
+    const k = a.slice(2);
+    if (k === 'json' || k === 'keep') o[k] = true;
+    else if (VALUE.has(k)) {
+      if (argv[i + 1] === undefined) throw new Error(`--${k} needs a value`);
+      o[k] = argv[++i];
+    } else throw new Error(`unknown option: ${a}`);
+  }
+  return o;
+}
+
+/** Entry point; returns the exit status. 0 clean, 1 findings, 2 usage. */
+export async function main(argv, { log = console.log, err = console.error, env = process.env } = {}) {
+  const [cmd, ...rest] = argv;
+  try {
+    if (!cmd || cmd === '--help' || cmd === '-h') {
+      err(USAGE);
+      return cmd ? 0 : 2;
+    }
+    if (cmd === 'list') {
+      for (const c of checks) log(`${c.id}  rule ${c.rule}  ${c.title}`);
+      return 0;
+    }
+    if (cmd === 'commit-lint') return commitLintMain(rest, process.cwd(), err);
+    if (cmd === 'run') {
+      const dash = rest.indexOf('--');
+      if (dash < 0 || dash === rest.length - 1) throw new Error('run needs a command after --');
+      const o = parseArgs(rest.slice(0, dash));
+      const [c, ...a] = rest.slice(dash + 1);
+      const r = await runHermetic(c, a, { allowHome: (o['allow-home'] ?? '').split(',').filter(Boolean), keep: !!o.keep });
+      for (const f of r.findings) err(`::error::${f.check} ${f.message} Fix: ${f.fix}`);
+      return r.status !== 0 ? r.status : r.findings.length ? 1 : 0;
+    }
+    const o = parseArgs(argv);
+    const result = await runChecks({
+      root: resolve(o.root ?? '.'),
+      app: o.app,
+      only: o.only ? o.only.split(',').map((s) => s.trim().toUpperCase()) : null,
+      options: {
+        bundle: o.bundle && resolve(o.bundle),
+        artifacts: o.artifacts && resolve(o.artifacts),
+        paddock: o.paddock && resolve(o.paddock),
+        version: o.version,
+        preflight: o.preflight,
+        api: o.api,
+        repo: o.repo,
+        token: env.GITEA_TOKEN,
+      },
+    });
+    writeOutputs(result, { out: o.out, summary: o.summary, env });
+    log(o.json ? JSON.stringify(result, null, 2) : formatText(result));
+    return result.errors ? 1 : 0;
+  } catch (e) {
+    err(`paddock-conformance: ${e.message}`);
+    return 2;
+  }
+}
