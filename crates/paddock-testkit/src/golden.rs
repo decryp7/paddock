@@ -20,7 +20,11 @@ pub enum GoldenMode {
 impl GoldenMode {
     /// [`GoldenMode::Update`] when [`UPDATE_VAR`] is set, else [`GoldenMode::Check`].
     pub fn from_env() -> GoldenMode {
-        Self::from_var(std::env::var_os(UPDATE_VAR).as_deref().and_then(|v| v.to_str()))
+        Self::from_var(
+            std::env::var_os(UPDATE_VAR)
+                .as_deref()
+                .and_then(|v| v.to_str()),
+        )
     }
 
     /// The mode for a value of [`UPDATE_VAR`].
@@ -123,7 +127,9 @@ pub fn check_golden(path: &Path, actual: &str, mode: GoldenMode) -> Result<Golde
         return Ok(Golden::Updated);
     }
     let Some(expected) = expected else {
-        return Err(GoldenError::Missing { path: path.to_path_buf() });
+        return Err(GoldenError::Missing {
+            path: path.to_path_buf(),
+        });
     };
     let (mut e, mut a) = (expected.lines(), actual.lines());
     for line in 1.. {

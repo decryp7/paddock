@@ -160,7 +160,11 @@ impl FakeRunner {
         self.state()
             .calls
             .iter()
-            .filter(|c| c.program == program && c.args.len() >= args_prefix.len() && c.args.iter().zip(args_prefix).all(|(a, b)| a == b))
+            .filter(|c| {
+                c.program == program
+                    && c.args.len() >= args_prefix.len()
+                    && c.args.iter().zip(args_prefix).all(|(a, b)| a == b)
+            })
             .count()
     }
 }
