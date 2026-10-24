@@ -20,7 +20,7 @@ import {
   percent,
   share,
 } from './units';
-import { DEFAULT_KEEP_TAIL, ELLIPSIS, middleEllipsis, splitForEllipsis } from './middle-ellipsis';
+import { DEFAULT_KEEP_TAIL, ELLIPSIS, middleEllipsis, splitForEllipsis, splitPath } from './middle-ellipsis';
 
 afterEach(() => setActiveLocale(SOURCE_LOCALE));
 
@@ -137,6 +137,11 @@ describe('middle ellipsis', () => {
     expect(tail).toBe('😀😀');
     expect(head + tail).toBe(long);
     expect(DEFAULT_KEEP_TAIL).toBe(20);
+  });
+  it('splits a path into directory, start of the name and tail, which shrink in that order (review 2, N-P2-4)', () => {
+    expect(splitPath('C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log')).toEqual({ dir: 'C:\\ProgramData\\Builder\\Logs\\', name: 'Builder.Service.', tail: '2026-10-24.log' });
+    expect(splitPath('/var/log/app/system.log')).toEqual({ dir: '/var/log/app/', name: '', tail: 'system.log' });
+    expect(splitPath('system.log')).toEqual({ dir: '', name: '', tail: 'system.log' });
   });
   it('starts a long name\'s tail at a word, never mid-word (review P2-10)', () => {
     const win = splitForEllipsis('C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log');
