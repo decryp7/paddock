@@ -591,3 +591,12 @@ their plans name them.
 All of X27–X47 and every "Gap in planned items" go into 0.3.0. That settles the open calls: X31 path grants and X32
 storage page move to Paddock now (overriding the workbench.md deferral), and X45 sibling hand-off is shared (overriding
 §7). Every app's `core/native-feel.ts` / `native_feel.rs` is replaced by the shell's native feel.
+
+## Shell gaps from Pitwall's design review (2026-10-24 night, for 0.3.0)
+
+- `pd-waiting-for`: draw the designed offline state (not a spinner) when the service is down.
+- Status-bar jobs item: phase label plus a determinate ring.
+- Bell count in the danger colour, not a neutral pill.
+- Settings window: themed (non-native) selects in Appearance; "Show advanced" shown once; the "N advanced settings
+  hidden" line not clipped; nav sub-groups; an API for the window's footer notice.
+- Service labels keep the app's casing (no forced capital on the first word).
