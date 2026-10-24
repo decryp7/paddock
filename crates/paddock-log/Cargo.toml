@@ -1,0 +1,21 @@
+[package]
+name = "paddock-log"
+version = "0.1.0"
+description = "The app and service log of the Paddock apps: CLEF JSON lines, one file per process per day with a size budget and old files removed, the level changed at run time, `log` and `tracing` in one stream, redaction hooks (no file contents by default), error de-duplication with breadcrumbs, a panic hook with a crash marker, and child-process output capture."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+paddock-env = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+log = { version = "0.4", features = ["std", "kv"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-log = { version = "0.2", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry"] }
+
+[dev-dependencies]
+tempfile = "3"

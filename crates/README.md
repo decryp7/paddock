@@ -96,6 +96,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-env` | per-OS data, config, cache, log and runtime folders (`<APP>_HOME` override in debug builds, portable mode), `VersionedFile` (atomic write with `.bak`, migrations, damaged or newer handled) (plan X7, D3) | yes (all apps); built |
+| `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-service` | background service install/control per OS | yes |
 | `paddock-proc` | child processes with timeouts, caps, kill-tree | yes |
 | `paddock-window` | native window feel, tray, single instance | yes |
@@ -595,3 +596,30 @@ file.save(&loaded.value)?;                                // atomic; refused whe
   clear error; older runs the `with_migration(from, step)` chain once, writes the new format and keeps `<name>.v<from>.bak`.
   Saves write a temporary file, fsync, rename; the previous good file becomes `.bak` (a damaged one never replaces it).
   `write_atomic` is the same replace for non-JSON files.
+
+## `paddock-log` (plan X1)
+
+The log of every app, service and sidecar, from Debrief's `logging.rs` + `clef.rs` + the generic half of `activity/logger.rs`:
+
+```rust
+use paddock_log::{LogConfig, LogLevel, Logging};
+
+let log = Logging::new(LogConfig::new(&app, "app", env!("CARGO_PKG_VERSION")).with_dirs(&dirs).with_commit(commit)).install()?;
+log::info!("started");                         // `log` and `tracing` share one stream
+log.set_level(LogLevel::Debug);                // from Settings > Diagnostics > Logging, no restart
+let _e = paddock_log::ipc_span(window, op_id, command).entered();   // Window / OperationId / Command on every event inside
+paddock_log::log_from_webview(window, level, message);               // the webview's log command
+```
+
+- Files: `<id>.<day>.log` (process `app`) or `<id>-<process>.<day>.log` in `AppDirs::logs()`; `LogSettings` = level, `max_file_mb`
+  (20; after it only errors, with a one-time notice) and `keep_files` (7 older days). An unusable folder never stops the app:
+  lines are dropped, `LogHandle::file_problem()` says why (for a health entry), the open is retried every 30 s.
+- Privacy: the default `Redactor` masks secret-like keys, replaces content-like keys (`Content`, `Body`, `Line`, `Text`,
+  `Query`, `Prompt`, ...) by `<omitted: N characters>` and bounds every value; apps add `with_hook` rules (paths, user names);
+  `fingerprint` shows equality without the value. `Redact` is a trait so X2's report writer can reuse it.
+- Errors: identical errors are written once a minute then summarised (`flush_repeats` at exit); each error carries the
+  window's latest breadcrumbs (events with an `Operation` property).
+- Panics: the hook writes a Fatal entry (thread, location, bounded backtrace, span fields) and `crash-<process>.json`
+  (`CrashMarker`, in `AppDirs::data()`); the next start reads it (plan X3) and clears it.
+- `spawn_child_capture(name, stderr)` logs a child's output line by line (4 KiB per line, `Child` + `child:<name>`).
+- Tests use `Logging::scoped`, a temp folder and `ManualClock`; no sleeps.

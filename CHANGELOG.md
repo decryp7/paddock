@@ -9,6 +9,12 @@ Conventional Commits; one semver tag for the whole repo.
   injectable environment; `<ID>_HOME` override in debug builds only; portable mode; Windows is Local, the old Roaming folder
   is named for the one-time move) and `VersionedFile<T>` (atomic write with fsync and `.bak`, migration chain, a damaged file
   is kept as `.corrupt-<time>` and defaults or the valid backup load, a newer version is refused and left untouched).
+- `paddock-log` (plan X1, decisions D1 and D2): the app and service log the five apps wrote five times. CLEF JSON lines, one
+  file per process per day in `AppDirs::logs()` with a daily size budget (then only errors) and old days removed, the level
+  changed at run time, `log` and `tracing` in one stream, `ipc_span` and `log_from_webview` for `Window`/`OperationId`/`Command`,
+  a `Redactor` that never writes file contents (hooks for the app's rules, `fingerprint`), error de-duplication with
+  breadcrumbs, a panic hook with a crash marker for X3, child-process output capture and the `LogSettings` of the
+  "Diagnostics > Logging" section. No Tauri dependency: services and sidecars use it as is.
 - `paddock-secrets` (plan X5, decision D6): the credential store the five apps copied. A `Secrets` port, a `Secret` that never
   prints and is zeroized, the keyring adapter (`keyring` feature, refused in tests unless `PADDOCK_SECRETS_REAL=1`),
   `MemorySecrets`, an opt-in owner-only file fallback (0600), one naming scheme and `rename_entry` for old entries.
