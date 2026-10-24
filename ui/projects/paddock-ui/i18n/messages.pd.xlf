@@ -1268,6 +1268,183 @@
       <trans-unit id="pd.updates.up-to-date" datatype="html">
         <source>You have the latest version.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.activity" datatype="html">
+        <source>Assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.allow-actions" datatype="html">
+        <source>Allow actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.allow-hint" datatype="html">
+        <source>Lets the assistant propose changes. Each one still asks for your approval.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.allow" datatype="html">
+        <source>Allow</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.decline" datatype="html">
+        <source>Decline</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attached" datatype="html">
+        <source>Attached context</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.chip.add" datatype="html">
+        <source>Send this context</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.chip.remove" datatype="html">
+        <source>Do not send this context</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.cite.open" datatype="html">
+        <source>Open <x id="title"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.cmd.focus" datatype="html">
+        <source>Ask the assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context" datatype="html">
+        <source>Context for this question</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.conversations" datatype="html">
+        <source>Conversations</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.delete" datatype="html">
+        <source>Delete conversation</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.empty" datatype="html">
+        <source>Ask a question. The assistant can look things up with the tools of this app.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.approve" datatype="html">
+        <source>The decision could not be sent.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.delete" datatype="html">
+        <source>The conversation could not be deleted.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.list" datatype="html">
+        <source>The conversations could not be listed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.load" datatype="html">
+        <source>The assistant could not be reached.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.open" datatype="html">
+        <source>The conversation could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.send" datatype="html">
+        <source>The question could not be sent.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.err.stop" datatype="html">
+        <source>The assistant could not be stopped.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.feature" datatype="html">
+        <source>The assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.new" datatype="html">
+        <source>New conversation</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.no-conversations" datatype="html">
+        <source>No conversations yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.placeholder" datatype="html">
+        <source>Ask the assistant (Enter sends, Shift+Enter adds a line)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.question" datatype="html">
+        <source>Your question</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.send" datatype="html">
+        <source>Send</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.stop" datatype="html">
+        <source>Stop</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.stopped" datatype="html">
+        <source>Stopped.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.thinking" datatype="html">
+        <source>Thinking…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.title" datatype="html">
+        <source>Assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
+        <source>Waiting for your decision</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.failed" datatype="html">
+        <source>Did not finish</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.running" datatype="html">
+        <source>Working…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
+        <source>(unreadable call)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.view" datatype="html">
+        <source>Assistant</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.wants-to" datatype="html">
+        <source>The assistant wants to:</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.category.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.accept-failed" datatype="html">
+        <source>That result could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.category.view" datatype="html">
+        <source>View</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.cmd.commands" datatype="html">
+        <source>Show all commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.cmd.quick-open" datatype="html">
+        <source>Go to…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.dialog" datatype="html">
+        <source>Command palette</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.did-you-mean" datatype="html">
+        <source>Nothing matches “<x id="query"/>”. Did you mean:</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.empty" datatype="html">
+        <source>Nothing matches</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.failed" datatype="html">
+        <source>The search failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.input" datatype="html">
+        <source>Type a command, or a prefix to search</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.names-building" datatype="html">
+        <source>Still indexing names…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.open-view" datatype="html">
+        <source>Open <x id="view"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.placeholder" datatype="html">
+        <source>Type a command or search…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.prefix.commands" datatype="html">
+        <source>Commands</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.results" datatype="html">
+        <source>Results</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.searching" datatype="html">
+        <source>Searching…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.palette.unavailable" datatype="html">
+        <source>Not available now</source>
+      </trans-unit>
       <trans-unit id="pd.whats-new.failed" datatype="html">
         <source>The release notes could not be loaded.</source>
       </trans-unit>
