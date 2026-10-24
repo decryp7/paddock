@@ -1,4 +1,4 @@
-import { axeViolations, captureStable, expect, test, type Page } from '@decryp7/paddock-e2e';
+import { axeViolations, expect, test, type Page } from '@decryp7/paddock-e2e';
 
 // Theme switching (plan S15): system / dark / light, high contrast and reduced motion, the same in every window of the
 // app (here: tabs and a dialog window of one origin, through the BroadcastChannel backend), kept across a reload. That
@@ -165,48 +165,4 @@ test('a View-menu change and a Settings change in another window never revert ea
     await expect(html(p)).toHaveAttribute('data-contrast', 'more');
   }
   await other.close();
-});
-
-test.describe('screenshots (independent review)', () => {
-  test.skip(!process.env['SCREENSHOTS'], 'set SCREENSHOTS=1 to rewrite docs/screenshots');
-  const shot = (name: string) => `${__dirname}/../docs/screenshots/shell-demo/${name}.png`;
-
-  /** Chooses the look through the demo's commands: the main window keeps theme and density in the engine's settings. */
-  async function look(page: Page, theme: 'dark' | 'light', contrast: 'standard' | 'more'): Promise<void> {
-    await page.locator(`button.cmd[data-command="sd.theme.${theme}"]`).click();
-    await expect(html(page)).toHaveAttribute('data-theme', theme);
-    if (contrast === 'more') {
-      await page.locator('button.cmd[data-command="sd.contrast"]').click();
-      await expect(html(page)).toHaveAttribute('data-contrast', 'more');
-    }
-  }
-
-  for (const [name, theme, contrast] of [
-    ['dark', 'dark', 'standard'],
-    ['light', 'light', 'standard'],
-    ['high-contrast-dark', 'dark', 'more'],
-    ['high-contrast-light', 'light', 'more'],
-  ] as const) {
-    test(`shell demo ${name}`, async ({ page }) => {
-      await page.emulateMedia({ reducedMotion: 'reduce' });
-      await open(page);
-      await look(page, theme, contrast);
-      await page.locator('button.cmd[data-command="sd.job.start"]').click();
-      await page.locator('button.cmd[data-command="sd.engine.break"]').click();
-      await page.getByTestId('service-health-chip').click();
-      await captureStable(page, shot(`theme-${name}`));
-    });
-  }
-
-  test('shell demo pseudo-locale (dark, the View menu open)', async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem('paddock.language', JSON.stringify({ version: 1, language: 'pseudo' })));
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await open(page);
-    await look(page, 'dark', 'standard');
-    await page.locator('button.cmd[data-command="sd.job.start"]').click();
-    // The View menu (after File).
-    await page.getByRole('menubar').getByRole('menuitem').nth(1).click();
-    await page.getByRole('menu').first().locator('[aria-haspopup]').first().click();
-    await captureStable(page, shot('theme-pseudo-locale-dark'));
-  });
 });

@@ -90,6 +90,7 @@ fn every_command_is_async() {
         "paddock-dialogs",
         "paddock-diag",
         "paddock-files",
+        "paddock-storage",
         "paddock-service",
         "paddock-packs",
         "paddock-channels",

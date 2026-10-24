@@ -3647,6 +3647,7 @@ dependencies = [
  "paddock-settings",
  "paddock-siblings",
  "paddock-startup",
+ "paddock-storage",
  "paddock-updater",
  "paddock-window",
  "paddock-workspace-hack",
@@ -3690,6 +3691,22 @@ dependencies = [
  "sysinfo",
  "tauri",
  "tauri-plugin-dialog",
+ "tempfile",
+ "ts-rs",
+]
+
+[[package]]
+name = "paddock-storage"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-files",
+ "paddock-jobs",
+ "serde",
+ "serde_json",
+ "tauri",
  "tempfile",
  "ts-rs",
 ]

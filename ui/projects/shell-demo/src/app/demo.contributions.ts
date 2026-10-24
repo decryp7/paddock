@@ -18,6 +18,7 @@ import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/padd
 import { defineChannelsRemoveDialog, defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
 import { defineMcpKeyDialog, defineMcpRevokeDialog, defineMcpSettingsPage } from '@decryp7/paddock-ui/shell/mcp';
 import { defineLanguageSettingsPage } from '@decryp7/paddock-ui/shell/i18n/settings';
+import { defineStorageConfirmDialog, defineStorageSettingsPage } from '@decryp7/paddock-ui/shell/storage';
 import { definePacksSettingsPage } from '@decryp7/paddock-ui/shell/packs';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
 import { defineSetup } from '@decryp7/paddock-ui/shell/setup';
@@ -115,6 +116,11 @@ export const SETTINGS_DIALOG = defineDialog({
     'channels_save',
     'channels_clear_secret',
     'channels_test',
+    'storage_last',
+    'storage_scan',
+    'storage_clear',
+    'storage_cancel',
+    'storage_reveal',
     // The AI access page's (MCP_SETTINGS_COMMANDS; the key is issued in the key dialog's window, not here).
     'mcp_get',
     'mcp_save',
@@ -158,6 +164,17 @@ export const CHANNELS_REMOVE_DIALOG = defineChannelsRemoveDialog({
   load: () => import('@decryp7/paddock-ui/shell/channels/dialog').then((m) => m.PdChannelRemoveDialog),
 });
 
+/** Settings > Storage (plan X32): what the app keeps per folder, Clear with a confirmation window; its providers load with the page. */
+export const STORAGE_PAGE = defineStorageSettingsPage({
+  providers: () => import('./storage.providers').then((m) => m.STORAGE_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/storage/page').then((m) => m.PdStoragePage),
+});
+
+/** The clear confirmation (a modal decision, one window per question): it calls nothing. */
+export const STORAGE_CONFIRM_DIALOG = defineStorageConfirmDialog({
+  load: () => import('@decryp7/paddock-ui/shell/storage/dialog').then((m) => m.PdStorageConfirmDialog),
+});
+
 /** Settings > AI access (MCP) (plan X22, ADR 0007): the switch, the tools, the clients' keys and the activity log; its providers load with the page. */
 export const MCP_PAGE = defineMcpSettingsPage({
   providers: () => import('./mcp.providers').then((m) => m.MCP_PROVIDERS),
@@ -198,8 +215,9 @@ export const DEMO_SETTINGS_PAGES = [
   CHANNELS_PAGE,
   MCP_PAGE,
   PACKS_PAGE,
+  STORAGE_PAGE,
   defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
-  defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100 }),
+  defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Demo data'), order: 100 }),
 ] as const;
 
 /** The shell's About, Updates and What's New (plan S11); their windows boot the demo's About providers. */
@@ -208,7 +226,7 @@ export const SHELL_ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import(
 /** Report a problem (plan X2): a decision that shows every file with its size before saving; its window boots the demo's diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
+export const DEMO_DIALOGS = [CONFIRM_RESET_DIALOG, RENAME_DIALOG, ABOUT_DIALOG, INSPECTOR_DIALOG, CHOOSE_STYLE_DIALOG, SETTINGS_DIALOG, CHANNELS_SECRET_DIALOG, CHANNELS_REMOVE_DIALOG, MCP_KEY_DIALOG, STORAGE_CONFIRM_DIALOG, MCP_REVOKE_DIALOG, ...SHELL_ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG, SETUP.dialog] as const;
 
 /** About's commands, Help menu items and notice kind (its dialogs are among `DEMO_DIALOGS`). */
 export const SHELL_ABOUT_CONTRIBUTIONS = aboutContributions([]);
