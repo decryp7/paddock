@@ -1,0 +1,37 @@
+name: plan
+description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one, a push to main whose commit is tagged is covered by the tag run."
+inputs:
+  main-ref:
+    description: The default branch ref.
+    default: refs/heads/main
+outputs:
+  run:
+    description: "'true' or 'false'; later jobs use if: needs.plan.outputs.run == 'true'."
+    value: ${{ steps.decide.outputs.run }}
+runs:
+  using: composite
+  steps:
+    # The caller checks out with fetch-depth 1 on pushes to main (only `git ls-remote` is used: credentials and remote URL).
+    # Exact-key lookup only: nothing is downloaded. The marker is saved by nightly-mark after a fully green run.
+    - id: green
+      if: github.event_name == 'schedule'
+      uses: actions/cache/restore@v4
+      with:
+        path: .nightly-green
+        key: nightly-green-${{ github.sha }}
+        lookup-only: true
+    - id: decide
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+        SHA: ${{ github.sha }}
+        MAIN_REF: ${{ inputs.main-ref }}
+        GREEN: ${{ steps.green.outputs.cache-hit }}
+      run: |
+        TAGS=""
+        if [ "$EVENT" = push ] && [ "$REF" = "$MAIN_REF" ]; then
+          TAGS=$(git ls-remote --tags origin 'refs/tags/v*' || true)
+        fi
+        export TAGS
+        node "${{ github.action_path }}/../../../conformance/ci/plan.mjs"

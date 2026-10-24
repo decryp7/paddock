@@ -15,6 +15,11 @@ export interface UiCheckpoint {
   restore(ui: unknown): void | Promise<void>;
   /** Resolves when the window's data is there to restore onto (e.g. the workspace loaded); default: at once. */
   whenLoaded?(): Promise<void>;
+  /**
+   * After the user chose Restore in the unclean-shutdown notice: the labels of every window of the previous session
+   * (this one included) so the app can reopen the others. Optional: an app with a single window leaves it out.
+   */
+  restoreWindows?(labels: readonly string[]): void | Promise<void>;
 }
 
 export const UI_CHECKPOINT = new InjectionToken<UiCheckpoint>('PADDOCK_UI_CHECKPOINT');

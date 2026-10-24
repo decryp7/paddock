@@ -1,0 +1,23 @@
+name: cache-save
+description: "Saves the cache restored by cache-restore, but only when the key had no exact hit. Use it with if: always() so a failing run still warms the cache."
+inputs:
+  kind:
+    description: The same value as cache-restore.
+    required: true
+  paths:
+    description: The same paths as cache-restore.
+    required: true
+  key-files:
+    description: The same files as cache-restore.
+    default: Cargo.lock
+  cache-hit:
+    description: "The cache-hit output of cache-restore; saved only when it is not 'true'."
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - if: inputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.paths }}
+        key: ${{ inputs.kind }}-${{ runner.os }}-${{ hashFiles(inputs.key-files) }}

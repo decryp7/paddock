@@ -18,3 +18,4 @@
 /apps/shell-demo/src-tauri/gen/
 /apps/shell-demo/src-tauri/target/
 /apps/shell-demo/dist/
+/eslint/node_modules

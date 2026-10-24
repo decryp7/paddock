@@ -1,0 +1,45 @@
+//! Child processes for the Paddock apps (plan X6). Every app forbids `std::process::Command::new` and points at this
+//! crate instead, so the same rules hold everywhere:
+//!
+//! - [`command`]: no console window on Windows (R06), optionally a cleared environment ([`clean_env`]) and lower
+//!   priority ([`lower_priority`], never through `nice(1)`, which strips `DYLD_*` on macOS).
+//! - [`run_bounded`]: run to completion with a timeout and an output cap; on a timeout or the cap the whole process tree
+//!   is ended (T03).
+//! - [`Supervised`]: a long-running child whose whole tree ends on drop, on [`Supervised::terminate`] and when it exceeds
+//!   a memory cap ([`MemoryCap`]); a [`Registry`] ends every supervised tree at shutdown ([`end_all`]).
+//! - [`process_memory`], [`tree_memory`]: proportional memory (PSS from `smaps_rollup`) on Linux, resident size
+//!   elsewhere, thread entries skipped (R07, rule 26).
+//! - [`login_path`]: the `PATH` of the user's login shell, for a service started by launchd or systemd.
+//!
+//! Unix children lead their own process group (killed with `killpg`); Windows trees end through `taskkill /T /F`. Both are
+//! backed by a walk of the process table for helpers that left the group.
+
+mod command;
+mod login;
+mod run;
+mod supervised;
+mod sys;
+mod tree;
+mod usage;
+mod watch;
+
+#[cfg(test)]
+mod testchild;
+
+pub use command::{CREATE_NO_WINDOW, KEPT_ENV, clean_env, command, lower_priority};
+pub use login::{
+    MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
+    probe_script, shell_candidates,
+};
+pub use run::{DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded};
+pub use supervised::{MemoryCap, Registry, Sampler, Supervised, end_all, global_registry};
+pub use tree::{
+    Terminated, ask, descendants_of, end, is_alive, kill_tree, processes_mentioning, terminate,
+};
+pub use usage::{
+    ProcEntry, Table, descendants, parse_pss, process_memory, read_pss, snapshot, table_from,
+    tree_memory, tree_memory_with,
+};
+pub use watch::{
+    MemoryEvent, MemoryListener, MemoryUse, MemoryWatch, REARM_PERCENT, Verdict, WARN_PERCENT,
+};

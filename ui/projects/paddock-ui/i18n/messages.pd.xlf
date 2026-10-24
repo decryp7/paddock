@@ -722,8 +722,47 @@
       <trans-unit id="pd.startup.recovered-unresponsive" datatype="html">
         <source>The window did not finish starting and was reloaded. Your open files and view are kept.</source>
       </trans-unit>
+      <trans-unit id="pd.startup.recovery-detail-in-safe-mode" datatype="html">
+        <source>It stopped while running in safe mode, so extensions and plugins are probably not the cause. Restore the session or start fresh.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-detail-no-session-in-safe-mode" datatype="html">
+        <source>It stopped while running in safe mode, so extensions and plugins are probably not the cause. There is no session to restore; start fresh.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-detail-plain" datatype="html">
+        <source>There is no session to restore. You can start in safe mode (extensions and plugins off) or fresh.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-detail-restore" datatype="html">
+        <source>Your last session can be restored, or you can start in safe mode (extensions and plugins off) or fresh.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-fresh" datatype="html">
+        <source>Start fresh</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-no-answer" datatype="html">
+        <source>The app did not answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-restarting" datatype="html">
+        <source>Restarting in safe mode…</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-restore" datatype="html">
+        <source>Restore last session</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-safe-mode" datatype="html">
+        <source>Start in safe mode</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.recovery-title" datatype="html">
+        <source>The app did not close properly last time.</source>
+      </trans-unit>
       <trans-unit id="pd.startup.restore-failed" datatype="html">
         <source>The window's view could not be restored: <x id="cause"/></source>
+      </trans-unit>
+      <trans-unit id="pd.startup.safe-mode-label" datatype="html">
+        <source>Safe mode</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.safe-mode-title" datatype="html">
+        <source>Safe mode: extensions, plugins and the last session are off. Restart the app to leave it.</source>
+      </trans-unit>
+      <trans-unit id="pd.startup.session-restored" datatype="html">
+        <source>Your last session was restored.</source>
       </trans-unit>
       <trans-unit id="pd.ui.elapsed.hours" datatype="html">
         <source><x id="hours"/> h</source>

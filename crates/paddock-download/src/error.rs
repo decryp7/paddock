@@ -3,6 +3,7 @@
 use paddock_jobs::{CancelReason, JobError};
 use std::fmt;
 use std::io;
+use std::path::{Path, PathBuf};
 
 /// Why a [`Transport`](crate::Transport) request failed before a status line arrived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,8 +89,12 @@ pub enum DownloadError {
     /// The disk is full.
     DiskFull,
     /// The destination's disk has not enough free space for the file (checked before writing): `needed` bytes are still to
-    /// be written plus the reserve, `free` are available.
-    NotEnoughSpace { needed: u64, free: u64 },
+    /// be written plus the reserve, `free` are available on the disk that holds `path` (the destination folder, absolute).
+    NotEnoughSpace {
+        needed: u64,
+        free: u64,
+        path: PathBuf,
+    },
     /// Reading or writing the local file failed.
     Io(io::Error),
 }
@@ -180,10 +185,14 @@ impl fmt::Display for DownloadError {
             DownloadError::DiskFull => {
                 f.write_str("the disk is full; free some space and run it again to resume")
             }
-            DownloadError::NotEnoughSpace { needed, free } => write!(
+            DownloadError::NotEnoughSpace { needed, free, path } => write!(
                 f,
-                "the download needs {} of free disk space, {} is free; free some space and run it again",
+                "the download needs {} of free space in {}{}, {} is free; free some space there or choose another folder, then run it again",
                 human_bytes(*needed),
+                path.display(),
+                drive_of(path)
+                    .map(|d| format!(" (drive {d})"))
+                    .unwrap_or_default(),
                 human_bytes(*free)
             ),
             DownloadError::Io(e) => write!(f, "the file could not be written ({e})"),
@@ -197,6 +206,18 @@ impl std::error::Error for DownloadError {
             DownloadError::Io(e) => Some(e),
             _ => None,
         }
+    }
+}
+
+/// The drive letter of a Windows path (`C:`), `None` elsewhere.
+fn drive_of(path: &Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+    match path.components().next()? {
+        Component::Prefix(p) => match p.kind() {
+            Prefix::Disk(d) | Prefix::VerbatimDisk(d) => Some(format!("{}:", d as char)),
+            _ => None,
+        },
+        _ => None,
     }
 }
 

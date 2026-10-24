@@ -123,4 +123,84 @@ test.describe('start-up contract (plan S7)', () => {
     await expect(heading(page)).toBeVisible();
     await expect(note(page)).toHaveValue('');
   });
+
+  test.describe('unclean shutdown and safe mode (plan X3)', () => {
+    const notice = (page: Page) => page.getByTestId('recovery-notice');
+
+    test('after a crash the notice offers the three choices and Restore brings the note back', async ({ page }) => {
+      await page.addInitScript(() => {
+        sessionStorage.setItem('paddock.mock.unclean', '1');
+        sessionStorage.setItem('paddock.mock.uiCheckpoint', JSON.stringify({ note: 'before the crash' }));
+      });
+      await page.goto('/');
+      await expect(notice(page)).toBeVisible();
+      await expect(notice(page).getByRole('button')).toHaveText(['Restore last session', 'Start in safe mode', 'Start fresh']);
+      await expect(note(page)).toHaveValue('');
+      await notice(page).getByRole('button', { name: 'Restore last session' }).click();
+      await expect(note(page)).toHaveValue('before the crash');
+      await expect(notice(page)).toHaveCount(0);
+    });
+
+    test('Start fresh forgets the session and the notice does not come back after a reload', async ({ page }) => {
+      await page.addInitScript(() => {
+        if (!sessionStorage.getItem('paddock.mock.seeded')) {
+          sessionStorage.setItem('paddock.mock.seeded', '1');
+          sessionStorage.setItem('paddock.mock.unclean', '1');
+        }
+      });
+      await page.goto('/');
+      await notice(page).getByRole('button', { name: 'Start fresh' }).click();
+      await expect(notice(page)).toHaveCount(0);
+      await page.reload();
+      await expect(heading(page)).toBeVisible();
+      await expect(notice(page)).toHaveCount(0);
+    });
+
+    test('Safe mode restarts the window in safe mode: the badge shows in the title bar and the notice is gone', async ({ page }) => {
+      await page.addInitScript(() => {
+        if (!sessionStorage.getItem('paddock.mock.seeded')) {
+          sessionStorage.setItem('paddock.mock.seeded', '1');
+          sessionStorage.setItem('paddock.mock.unclean', '1');
+        }
+      });
+      await page.goto('/');
+      await notice(page).getByRole('button', { name: 'Start in safe mode' }).click();
+      await expect(page.getByTestId('recovery-restarting')).toBeVisible();
+      await page.reload();
+      await expect(page.getByTestId('safe-mode-badge')).toBeVisible();
+      await expect(notice(page)).toHaveCount(0);
+    });
+
+    test('with the real IPC the window asks once and shows what Rust offers (a damaged session starts clean with a notice)', async ({ page }) => {
+      const ipc = await installTauriFake(page, {
+        replies: {
+          recovery_status: {
+            safeMode: false,
+            unclean: {
+              crash: { time: '2026-10-24T10:00:00.000Z', thread: 'worker-3', location: 'x.rs:9', inSafeMode: false },
+              session: { available: false, windows: 0, problem: 'The file could not be read (torn). Defaults are in use.' },
+              offers: { restore: false, safeMode: true, startFresh: true },
+            },
+          },
+          recovery_start_fresh: null,
+        },
+      });
+      await page.goto('/');
+      await expect(page.getByTestId('recovery-session-problem')).toContainText('could not be read');
+      await expect(notice(page).getByRole('button')).toHaveText(['Start in safe mode', 'Start fresh']);
+      expect(await ipc.callsOf('recovery_status')).toHaveLength(1);
+      await notice(page).getByRole('button', { name: 'Start fresh' }).click();
+      await expect(notice(page)).toHaveCount(0);
+      expect(await ipc.callsOf('recovery_start_fresh')).toHaveLength(1);
+    });
+
+    test('the notice lays out at 320 px without horizontal scroll', async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 640 });
+      await page.addInitScript(() => sessionStorage.setItem('paddock.mock.unclean', '1'));
+      await page.goto('/');
+      await expect(notice(page)).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
+    });
+  });
 });

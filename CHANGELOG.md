@@ -15,6 +15,46 @@ Conventional Commits; one semver tag for the whole repo.
   `paddock-shell` installs it and registers the `pd.logging` section ("Diagnostics > Logging": level, MB per day, days kept) on the
   `LogHandle` (the level applies at once), and the new `log_from_webview` command (with `provideWebviewLog`) puts the page's errors
   in the engine's log with their window. The shell demo shows it (browser and desktop).
+- `paddock-proc` (plan X6): child processes. `command` (no console window on Windows), `clean_env` and `lower_priority`;
+  `run_bounded` (timeout, output cap, the whole tree ended, typed `RunError`); `Supervised` children (own process group,
+  `terminate` with grace, tree ended on drop, an optional `MemoryCap` with warning, stop and peak, a `Registry` and
+  `end_all` for shutdown); `process_memory` / `tree_memory` (PSS from `smaps_rollup` on Linux, thread entries skipped);
+  `kill_tree`, `ask`, `end`, `terminate` for single pids; `login_path` and `merge_path`.
+- `paddock-download` gaps for 0.3.0: **system proxy** (`ProxyMode::System` is the default: `HTTPS_PROXY`/`HTTP_PROXY`/
+  `ALL_PROXY`/`NO_PROXY` in either case, then macOS system configuration (`scutil --proxy`) and Windows Internet Settings or
+  WinHTTP; loopback never proxied; `NoProxy` knows domains, `.suffix`, `*` patterns, IPs, CIDR, `<local>` and ports),
+  explicit `ProxyMode::Rules`/`ProxyMode::explicit`, authenticated proxies through `ProxyServer::with_credentials` or the
+  address (Basic, percent-decoded; the password never appears in `Debug`, `Display` or an error), `HttpTransport::reload_proxy`.
+  Also `Request::header` (validated, values hidden), `Request::resumable()`, `Downloader::download_with_cancel`,
+  `Downloader::{get_json, get_text, get_bytes}` with `Fetch`, `NotEnoughSpace.path`, `phases::{ALL, *_LABEL, UNPACK,
+  INSTALL, SELF_TEST, is_download_phase}`, `Downloaded::sink_panics` and `Reporter::sink_panics` in `paddock-jobs`
+  (an `EventSink` panic was dropped silently). The engine stays thread-based and blocking (documented: use `spawn_blocking`
+  or the `JobPool`); there is no private async runtime.
+- Shared CI, lint and repo baseline (plans X10, X11, X27, X42, X43, X46, X47; `@decryp7/paddock-conformance` 0.2.0):
+  - `.gitea/actions/*`: composite actions `plan` and `nightly-mark` (skip a nightly while main is unchanged since a green
+    one, skip a tagged main push), `cache-restore` and `cache-save` (restore, then save-always), `setup-rust` (sccache),
+    `setup-node`, `strip-signing-keys`, `build-env` (`PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE` for the About page, which no
+    CI set before), `tauri-bundle`, `macos-verify`, `install-test-browser` (pinned Chrome for Testing), `licences`,
+    `conformance`, `publish-release` (notes with the First launch block, `latest.json`, the release) and `host-cleanup`; and the
+    reusable workflows `app-release`, `app-e2e` and `app-licences`. Their scripts are in `conformance/ci/`, tested. C03, C04
+    and C15 recognise them.
+  - `@decryp7/paddock-eslint` (`eslint/`): the flat-config preset with rules 27 to 39 as rules (OnPush written out, zoneless,
+    effect justification, signal reads before `await`, request status union, store file, scope and injection count,
+    `patchState` only in stores, no `[ngClass]` or `[innerHTML]`, raw colours and fonts in styles) on angular-eslint and
+    typescript-eslint; Debrief's `lint-effects` and `lint-styles` are rules now. `lint/clippy.toml` and
+    `lint/workspace-lints.toml` are the Rust presets; check C13 keeps an app's copies a superset.
+  - Repo baseline: `templates/repo/` (editorconfig, rustfmt, licences, `deny.toml`, `cliff.toml`, `lefthook.yml`,
+    `about.toml`, Renovate preset, tsconfig, Cargo profiles), `renovate/app.json` (`local>decryp7/paddock//renovate/app`, the
+    Paddock crates and packages in one PR per release), `@decryp7/paddock-tsconfig`, check C28 and
+    `paddock-conformance sync [--write]`. `docs/blocks/` holds the shared AGENTS.md sections, suite lessons, releasing and
+    First launch text; C23 keeps the marked blocks equal. `new-app.mjs` now writes the repo root from both.
+  - `paddock-notices` (X42): `THIRD_PARTY_NOTICES.md` from cargo-about and the npm lock, deterministic, `--check` for CI; the
+    licence list is one list shared by `deny.toml`, `about.toml` and the generator.
+  - C29 (X46): window weight budgets from `ng build --stats-json`, `paddock-conformance window-weight --record` writes measured
+    plus 10%.
+  - `tools/` (X47): `bootstrap.sh`, `verify-installed.sh`, `linux-container.sh`, `prune-build-folders.sh` and `.ps1`,
+    `host-cleanup.sh`, with the app as a parameter.
+  - Shell Demo reads its build commit and date from `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE`.
 - `paddock-env` (plan X7, decision D3): folders and state files. `AppDirs` (data, config, cache, logs, runtime per OS from an
   injectable environment; `<ID>_HOME` override in debug builds only; portable mode; Windows is Local, the old Roaming folder
   is named for the one-time move) and `VersionedFile<T>` (atomic write with fsync and `.bak`, migration chain, a damaged file
@@ -35,6 +75,22 @@ Conventional Commits; one semver tag for the whole repo.
   (`commit-lint`: Conventional Commits, no Co-Authored-By or AI attribution). The apps' release scripts are unified under
   `conformance/release/` (`publish`, `latest-json`, `strip-keys`, `macos-verify-bundle.sh`, which captures output before it
   matches); `latest.json` is byte-equal to the apps' copies. CI job `conformance` runs its tests.
+- `paddock-startup` lifecycle (plan X3, from Debrief's `lifecycle.rs`): unclean-shutdown detection, safe mode and the autosaved
+  UI session. `Lifecycle::begin` writes a running marker (a `paddock-env` `VersionedFile`: pid, start time, safe mode) and
+  `end` removes it on a clean exit; the next start calls the run a crash when the marker's process is gone (PID reuse is
+  caught by the start time; a still-running predecessor is taken over; a damaged or newer marker counts as a crash) or when
+  `paddock-log`'s `CrashMarker` is there (thread and place are told to the UI, the panic message never is). A separate
+  instance (`--new-instance`, always safe mode) keeps its state in `instances/<pid>/`, so it never disturbs the main
+  instance's marker or session; dead ones are pruned. `Mode`/`Feature` make safe mode one answer every part reads
+  (extensions, plugins, last session off). `SessionStore` + `Autosaver` keep each window's `ui_checkpoint` in a versioned
+  session file on a background thread (atomic with backup; torn, damaged or newer files start clean with a notice; bounded
+  labels, sizes and windows); the previous run's session is kept as the recovered one until the user decides. Commands
+  `recovery_status`, `recovery_restore`, `recovery_start_fresh`, `recovery_safe_mode` (main windows), builder option
+  `lifecycle(..)`, `tauri::end_run` (the shell calls it at exit), feature `os-probe` for the process table.
+- `@decryp7/paddock-ui/shell/startup`: `RecoveryStore`, `PdRecoveryNotice` (the unclean-shutdown notice: Restore / Start in
+  safe mode / Start fresh; only what Rust offers; a failed choice stays visible) and `PdSafeModeBadge` (title bar), both placed
+  by `PdShellFrame`; `UiCheckpoint.restoreWindows`; the backend's `recovery*` calls with browser mocks
+  (`paddock.mock.unclean`, `paddock.mock.safeMode`).
 - Paddock Shell Demo (`apps/shell-demo`, plan S18): the shell demo as an installable Tauri app on the `paddock-shell`
   plugin, with a sample engine (a service whose Repair works and one whose Repair fails, jobs with phases and Cancel,
   settings sections, the tray popover), its own neutral icon from the icon pipeline (`icons/shell-demo`), ad-hoc macOS
@@ -47,6 +103,10 @@ Conventional Commits; one semver tag for the whole repo.
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
 ### Changed
+- Breaking, `paddock-download`: `HttpConfig::proxy` is a `ProxyMode` (was `Option<String>`, and the environment was never read;
+  now the system's proxy is used unless `ProxyMode::Direct`); `Get` has a `headers` field and `Transport` implementations
+  must send them; `DownloadError::NotEnoughSpace` has a `path` field and its message changed; `Downloaded` has a
+  `sink_panics` field. `HttpConfig` is no longer constructible with a proxy string: use `ProxyMode::explicit(..)`.
 - The tray popover layout has one 16 px inset for its header, content and footer.
 - `pd-waiting-for` (and `pd-service-error` while it waits) draws a stopped service as an offline state: the warning icon,
   "<Service> stopped", one muted line and the status chip's repair; it spins only while a start or repair is under way

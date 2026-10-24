@@ -1,0 +1,6 @@
+{
+  "extends": "@decryp7/paddock-tsconfig/angular.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.spec.json" }]
+}

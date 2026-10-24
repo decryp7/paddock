@@ -39,10 +39,13 @@ fn main() {
             segment_threshold: 1,
             ..Config::default()
         };
-        let d = Downloader::http(HttpConfig::default())
-            .expect("transport")
-            .with_config(config)
-            .with_hosts(Arc::new(HostCaps::new(connections)));
+        let d = Downloader::http(HttpConfig {
+            proxy: paddock_download::ProxyMode::Direct,
+            ..HttpConfig::default()
+        })
+        .expect("transport")
+        .with_config(config)
+        .with_hosts(Arc::new(HostCaps::new(connections)));
         let req = Request::new(
             &server.url("/f"),
             dir.path().join(format!("f{connections}")),

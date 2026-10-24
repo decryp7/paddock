@@ -1,0 +1,131 @@
+//! Tiny child processes for the tests: the test binary itself, re-executed with a mode in the environment, so the
+//! same helpers work on every OS and nothing outside the test run is started. Every mode ends by itself after
+//! [`LIFETIME`] if a failing test never reaps it, so a broken run cannot leave processes behind.
+
+use std::io::Write;
+use std::process::Command;
+use std::time::Duration;
+
+const MODE: &str = "PADDOCK_PROC_MODE";
+/// A child never outlives this, whatever the test did.
+const LIFETIME: Duration = Duration::from_secs(120);
+/// Prefix of the lines a child prints (libtest prints its own banner on the same stream).
+const PREFIX: &str = "CHILD:";
+
+/// What the re-executed binary does.
+#[derive(Clone, Copy)]
+#[cfg_attr(windows, allow(dead_code))] // some modes are driven by Unix-only tests
+pub enum Mode {
+    /// Wait for [`LIFETIME`].
+    Sleep,
+    /// Start a sleeping grandchild that shares the stdout pipe, print its pid, sleep.
+    Tree,
+    /// Start a sleeping grandchild that shares the pipes and exit at once.
+    Leave,
+    /// Write to stdout forever.
+    Endless,
+    /// Print the environment.
+    PrintEnv,
+    /// Print the niceness.
+    PrintNice,
+    /// Print a line, then exit with code 3.
+    Exit3,
+    /// Ignore SIGTERM, print `ready`, sleep (Unix).
+    IgnoreTerm,
+    /// Print `ready`, sleep; exits cleanly on SIGTERM (the default action).
+    Polite,
+}
+
+impl Mode {
+    fn name(self) -> &'static str {
+        match self {
+            Mode::Sleep => "sleep",
+            Mode::Tree => "tree",
+            Mode::Leave => "leave",
+            Mode::Endless => "endless",
+            Mode::PrintEnv => "print_env",
+            Mode::PrintNice => "print_nice",
+            Mode::Exit3 => "exit3",
+            Mode::IgnoreTerm => "ignore_term",
+            Mode::Polite => "polite",
+        }
+    }
+}
+
+/// A command that re-executes this test binary in `mode`.
+pub fn child(mode: Mode) -> Command {
+    let mut c = crate::command(std::env::current_exe().expect("the test binary has a path"));
+    c.args([
+        "--exact",
+        "testchild::helper_main",
+        "--nocapture",
+        "--test-threads=1",
+    ]);
+    c.env(MODE, mode.name());
+    c
+}
+
+/// The payload of the lines a child printed.
+pub fn lines(text: &str) -> Vec<&str> {
+    // libtest starts the first line with "test name ... ", so the prefix is searched for, not required at the start.
+    text.lines()
+        .filter_map(|l| l.find(PREFIX).map(|i| &l[i + PREFIX.len()..]))
+        .collect()
+}
+
+fn say(line: &str) {
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{PREFIX}{line}");
+    let _ = out.flush();
+}
+
+fn sleep_out() {
+    std::thread::sleep(LIFETIME);
+}
+
+#[test]
+fn helper_main() {
+    let Ok(mode) = std::env::var(MODE) else {
+        return;
+    };
+    match mode.as_str() {
+        "sleep" => sleep_out(),
+        "tree" | "leave" => {
+            let mut g = child(Mode::Sleep);
+            let Ok(grandchild) = g.spawn() else { return };
+            say(&format!("pid {}", grandchild.id()));
+            if mode == "tree" {
+                sleep_out();
+            }
+        }
+        "endless" => {
+            let mut out = std::io::stdout().lock();
+            let block = [b'x'; 4096];
+            while out.write_all(&block).is_ok() {}
+        }
+        "print_env" => {
+            for (k, v) in std::env::vars() {
+                say(&format!("{k}={v}"));
+            }
+        }
+        "print_nice" => {
+            #[cfg(unix)]
+            say(&crate::sys::own_niceness().to_string());
+        }
+        "exit3" => {
+            say("bye");
+            std::process::exit(3);
+        }
+        "ignore_term" => {
+            #[cfg(unix)]
+            crate::sys::ignore_sigterm();
+            say("ready");
+            sleep_out();
+        }
+        "polite" => {
+            say("ready");
+            sleep_out();
+        }
+        _ => {}
+    }
+}

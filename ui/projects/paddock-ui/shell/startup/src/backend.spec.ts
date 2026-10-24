@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { ipcBootErrorSender, MOCK_CHECKPOINT_KEY, MOCK_RECOVER_KEY, MockStartupBackend, provideStartupBackend, StartupBackend, TauriStartupBackend, type StartupIpc } from './backend';
+import { ipcBootErrorSender, MOCK_CHECKPOINT_KEY, MOCK_RECOVER_KEY, MOCK_UNCLEAN_KEY, MockStartupBackend, provideStartupBackend, StartupBackend, TauriStartupBackend, type StartupIpc } from './backend';
 
 function fakeIpc() {
   const calls: { cmd: string; args?: Record<string, unknown> }[] = [];
@@ -102,5 +102,48 @@ describe('provideStartupBackend', () => {
     const mock = new MockStartupBackend();
     TestBed.configureTestingModule({ providers: [provideStartupBackend(() => mock)] });
     expect(TestBed.inject(StartupBackend)).toBe(mock);
+  });
+});
+
+describe('the recovery commands', () => {
+  afterEach(() => sessionStorage.clear());
+
+  it('the Tauri backend calls the four recovery commands', async () => {
+    const f = fakeIpc();
+    const b = new TauriStartupBackend(f.ipc);
+    await b.recoveryStatus();
+    await b.recoveryRestore();
+    await b.recoveryStartFresh();
+    await b.recoverySafeMode();
+    expect(f.calls.map((c) => c.cmd)).toEqual(['recovery_status', 'recovery_restore', 'recovery_start_fresh', 'recovery_safe_mode']);
+  });
+
+  it('the mock plays a normal start, an unclean one (default or given), safe mode and damaged hooks', async () => {
+    const b = new MockStartupBackend();
+    expect(await b.recoveryStatus()).toEqual({ safeMode: false, unclean: null });
+    sessionStorage.setItem(MOCK_UNCLEAN_KEY, '1');
+    expect((await b.recoveryStatus()).unclean?.offers).toEqual({ restore: true, safeMode: true, startFresh: true });
+    const given = { crash: null, session: { available: false, windows: 0, problem: 'x' }, offers: { restore: false, safeMode: false, startFresh: true } };
+    sessionStorage.setItem(MOCK_UNCLEAN_KEY, JSON.stringify(given));
+    expect((await b.recoveryStatus()).unclean).toEqual(given);
+    for (const junk of ['{ not json', '"text"', 'null']) {
+      sessionStorage.setItem(MOCK_UNCLEAN_KEY, junk);
+      expect((await b.recoveryStatus()).unclean?.session.windows, junk).toBe(1);
+    }
+    await b.recoverySafeMode();
+    expect(await b.recoveryStatus()).toEqual({ safeMode: true, unclean: null });
+    expect(b.recoveryCalls).toEqual(['safe-mode']);
+  });
+
+  it('the mock restores the kept checkpoint (or nothing, for a damaged one) and start fresh forgets it', async () => {
+    const b = new MockStartupBackend();
+    await b.checkpointUi({ note: 'kept' });
+    expect(await b.recoveryRestore()).toEqual({ windows: ['main'], ui: { note: 'kept' } });
+    sessionStorage.setItem(MOCK_CHECKPOINT_KEY, '{ torn');
+    expect((await b.recoveryRestore()).ui).toBeNull();
+    await b.checkpointUi({ note: 'x' });
+    await b.recoveryStartFresh();
+    expect(sessionStorage.getItem(MOCK_CHECKPOINT_KEY)).toBeNull();
+    expect(b.recoveryCalls).toEqual(['restore', 'restore', 'start-fresh']);
   });
 });

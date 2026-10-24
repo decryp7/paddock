@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-recovery-safe-mode"
+description = "Enables the recovery_safe_mode command without any pre-configured scope."
+commands.allow = ["recovery_safe_mode"]
+
+[[permission]]
+identifier = "deny-recovery-safe-mode"
+description = "Denies the recovery_safe_mode command without any pre-configured scope."
+commands.deny = ["recovery_safe_mode"]

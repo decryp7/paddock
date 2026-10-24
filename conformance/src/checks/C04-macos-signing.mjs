@@ -61,7 +61,7 @@ export default {
     // CI verifies the .app and the DMG.
     const wf = ctx.workflows();
     const corpus = wf.map((w) => w.text).concat(wf.flatMap((w) => referencedScripts(ctx, w.text).map((p) => ctx.read(p) ?? ''))).join('\n');
-    const shared = /conformance\/release\/macos-verify-bundle|paddock-conformance/.test(corpus);
+    const shared = /conformance\/release\/macos-verify-bundle|paddock-conformance|\.gitea\/actions\/(?:macos-verify|tauri-bundle)|workflows\/app-release\.yml/.test(corpus);
     const noComments = corpus.replace(/^\s*#.*$/gm, '');
     if (!shared && !/codesign\s+--verify\b[^\n]*--deep[^\n]*--strict|codesign\s+--verify\b[^\n]*--strict[^\n]*--deep/.test(noComments)) {
       out.push(error('C04', 23, ctx.config.workflowsDir, 1, 'no CI step runs `codesign --verify --deep --strict` on the built .app', 'Run macos-verify-bundle.sh (conformance/release) after the macOS bundle step.'));

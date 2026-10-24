@@ -70,6 +70,8 @@ The release job `needs` the conformance job and legs; `C07` runs again at the ta
 | C25 | Fixture scan: no hostnames, user names, IPs, e-mail addresses or license keys from a local denylist (`~/.config/paddock/confidential.txt`, never committed) in samples, fixtures, docs or commit messages | S04 |
 | C26 | Nightly: `cargo deny check advisories`, `npm audit`, benchmark budgets (rule 16) against stored baselines | B12, L10, S05 |
 | C27 | Coverage and format guards (`ui-coverage-guard`, units guard) as one shared script with the app's floor in `paddock.conformance.json` | T14 |
+| C28 | Repo baseline (survey X27): the config files every app repo carries equal `templates/repo` (exact, or only the named TOML tables, or a Renovate `extends`); `paddock-conformance sync --write` repairs | P05, P06 |
+| C29 | Window weight (survey X46, rule 35): the JS each window loads before first paint, from `ng build --stats-json`, stays within its budget in `paddock.conformance.json`; budgets are tightened to measured plus 10% | U10 |
 
 ## Where each piece lives (rule 39)
 

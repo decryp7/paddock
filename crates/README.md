@@ -99,7 +99,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background service install/control per OS | yes |
-| `paddock-proc` | child processes with timeouts, caps, kill-tree | yes |
+| `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
@@ -318,6 +318,40 @@ paddock_startup::tauri::install(tauri::Builder::default(), startup) // manage + 
 - Generated TypeScript: `ui/projects/paddock-ui/shell/startup/generated/startup.ts` (wire types) and
   `startup-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-startup --lib generated`).
 
+### Run lifecycle: unclean shutdown, safe mode, session restore (plan X3)
+
+Debrief's `lifecycle.rs`, shared. The app begins the run first thing in `main` (after `paddock-log` is installed with
+`with_app_dirs`, so a panic leaves its `CrashMarker` in the data folder) and hands it to the contract:
+
+```rust
+let mode = paddock_startup::Mode::from_launch(launch.safe_mode, std::env::var("PITWALL_SAFE_MODE").ok().as_deref());
+let life = paddock_startup::Lifecycle::begin(paddock_startup::Start {   // feature `os-probe`
+    data_dir: dirs.data(), process: "pitwall", mode,
+    scope: paddock_startup::InstanceScope::of(single_instance), app_version: env!("CARGO_PKG_VERSION"),
+});
+if !mode.allows(paddock_startup::Feature::Plugins) { /* do not load them */ }
+let startup = Startup::builder().safe_mode(restart_in_safe_mode).lifecycle(life).build()?;
+```
+
+- **Running marker** (`running.json`, a `VersionedFile`): `begin` writes it, `end` removes it on a clean exit (the shell
+  calls `paddock_startup::tauri::end_run` at `RunEvent::Exit`; an app without the plugin calls it itself). Left behind, it is a
+  crash when its process is gone; PID reuse is caught by the start time; a live predecessor is taken over; an unreadable or
+  newer marker is a crash. `paddock-log`'s crash marker also makes the start a crash and says which thread and where.
+- **Instances.** Safe mode and `--new-instance` use `instances/<pid>/` (marker, sessions), so they never rotate the main
+  instance's session or report its crash; dead ones are pruned; a crash in safe mode is told to the next normal start, which
+  then does not offer safe mode again.
+- **Session.** `ui_checkpoint` also goes to `session/current.json` on the autosave thread (newest state per window; the
+  clean exit flushes). At start the previous run's file becomes `recovered.json` and the run starts empty; an empty run
+  never wipes the recovered one. Torn, damaged or newer files start clean with a notice in the offer; at most 8 windows of
+  2 MiB.
+- **The offer.** `recovery_status` (main window only) answers `{ safeMode, unclean: { crash, session, offers } | null }`;
+  `recovery_restore` returns the windows and the asking window's state; `recovery_start_fresh` forgets the session;
+  `recovery_safe_mode` runs the app's restart and settles the notice only when it worked. The UI side is
+  `RecoveryStore` / `PdRecoveryNotice` / `PdSafeModeBadge` in `@decryp7/paddock-ui/shell/startup` (the pages frame places them).
+- Replaces: Debrief `app/src-tauri/src/lifecycle.rs` (marker, instances, `SessionStore`, `Lifecycle`) and
+  `app/src/app/lifecycle/` (`lifecycle-banners.ts`, `lifecycle.service.ts` safe-mode and crash parts, `session.service.ts`
+  checkpoint part). Debrief keeps the project-file format of its sessions: its `UiCheckpoint.capture()` returns the content.
+
 ## `paddock-window` (plan S12)
 
 Top-level windows, single instance and deep links, the bounded quit, native feel and the tray (ADR 0012 §3), ported
@@ -437,9 +471,21 @@ pool.spawn_job(ctx, move |ctx| Ok(d.download(ctx, &req)?))?;      // the command
 - Bounds: `Config::max_bytes` / `Request::max_bytes` before writing and while streaming; a pinned `Request::size` must
   match. Typed `DownloadError` (`keeps_partial()` says whether a rerun resumes); `From<DownloadError> for JobError`.
 - The network is a port (`Transport`); `HttpTransport` (feature `http`, default) is ureq with rustls and the OS
-  certificate store, a proxy only when configured, `Accept-Encoding: identity`. Feature `tauri`: `tauri::manage` puts one
+  certificate store, `Accept-Encoding: identity`, and the system proxy by default (`ProxyMode::System`:
+  `HTTPS_PROXY`/`HTTP_PROXY`/`ALL_PROXY`/`NO_PROXY` in either case, then macOS system configuration or Windows Internet
+  Settings/WinHTTP; loopback always direct; `ProxyMode::Direct`; `ProxyMode::explicit("http://user:pass@host:3128")` or
+  `ProxyMode::Rules(ProxyRules::all(ProxyServer::parse(..)?.with_credentials(u, p)).with_no_proxy("*.corp,10.0.0.0/8"))`;
+  logins never print). No SOCKS and no PAC scripts. Feature `tauri`: `tauri::manage` puts one
   shared `Downloader` in the app state, `tauri::downloader(app)` returns it.
-- Tests run against an in-process HTTP server and a scripted transport (no network); `cargo bench -p paddock-download`
+- Also (0.3.0): `Request::header` (an `Authorization` token or `Accept`, values never printed), `Request::resumable()`
+  (something to continue?), `Downloader::download_with_cancel` (an external `CancelToken` besides the job's),
+  `get_json`/`get_text`/`get_bytes` with `Fetch` (headers, size limit, timeout, cancel, retries, shared proxy and host caps),
+  `NotEnoughSpace { path }` naming the folder (and the drive on Windows), `phases::{ALL, *_LABEL, UNPACK, INSTALL,
+  SELF_TEST, is_download_phase}` for phases an app adds, and `Downloaded::sink_panics` (a panicking `EventSink` is contained
+  and now counted). The engine is thread-based and blocking by design (no async runtime, nothing to share with the app's):
+  from async code call it inside `spawn_blocking`, or run it as a job on the `JobPool`.
+- Tests run against an in-process HTTP server, an in-process CONNECT proxy and a scripted transport (no network);
+  `cargo bench -p paddock-download`
   compares one stream with 2, 4 and 8 connections on a server that limits each connection.
 
 ## `paddock-settings` (plan S10)
@@ -624,6 +670,42 @@ paddock_log::log_from_webview(window, level, message);               // the webv
   (`CrashMarker`, in `AppDirs::data()`); the next start reads it (plan X3) and clears it.
 - `spawn_child_capture(name, stderr)` logs a child's output line by line (4 KiB per line, `Child` + `child:<name>`).
 - Tests use `Logging::scoped`, a temp folder and `ManualClock`; no sleeps.
+
+## `paddock-proc` (plan X6)
+
+Child processes, the code seven helpers in five apps wrote their own copies of. The apps' `clippy.toml` forbids
+`Command::new` and points at `paddock_proc::command`.
+
+```rust
+use paddock_proc::{Limits, MemoryCap, Supervised, command, run_bounded};
+
+let mut git = command("git");                                  // no console window on Windows (R06)
+git.args(["status", "--porcelain"]);
+let out = run_bounded(git, Limits::new(Duration::from_secs(10)).max_output(1 << 20))?;   // tree ended on timeout
+if out.success() { use_it(&out.stdout_text()); }
+
+let browser = Supervised::spawn_capped(cmd, MemoryCap::new(4 << 30, "the browser").listener(listener))?;  // drop ends the tree
+paddock_proc::end_all();                                       // at shutdown / in the panic hook: every supervised tree
+```
+
+- `command(program)`; `clean_env(&mut cmd, KEPT_ENV)` clears the environment to an allow-list; `lower_priority(&mut cmd)` is
+  below-normal on Windows and `setpriority` before exec elsewhere (never `nice(1)`, which drops `DYLD_*` on macOS).
+- `run_bounded(cmd, Limits)`: stdin closed, stdout and stderr captured up to `max_output` each (the rest is read and dropped so
+  the child never blocks); a timeout, or with `stop_on_cap` the cap, ends the whole tree. `Outcome` is `Exited | TimedOut |
+  OutputCap`; spawn failures are a typed `RunError` whose message names the program, not its arguments.
+- `Supervised`: its own process group on Unix; `kill`, `terminate(grace)` (SIGTERM, then the tree), `wait` and drop end and
+  reap the tree. Every one is in a `Registry` (`global_registry()` for `spawn`), so `end_all()` ends them without their owners.
+  `MemoryCap` samples the tree every 200 ms (PSS on Linux), warns at 80%, ends it over the cap and tells a `MemoryListener`
+  (`Warning | Stopped | Ended`, with the peak); `stopped_over_memory()` and `memory_peak()` read it back.
+- `process_memory(pid)` / `tree_memory(root)`: PSS from `/proc/<pid>/smaps_rollup` on Linux (resident size if unreadable),
+  resident size elsewhere; thread entries are skipped (rule 26). `kill_tree`, `ask` / `end` (one pid, not its group, for the
+  leftovers of finished jobs), `terminate(pid, grace)`, `is_alive`, `processes_mentioning(needle)` (leak checks).
+- `login_path()`: the `PATH` of the user's login shell (`$SHELL -l -i -c`, then `-l -c`; bounded, absolute entries only;
+  `None` on Windows or when no shell answers); `merge_path(login, inherited, sep)`. The caller sets `PATH` once at start.
+- Tests start only the test binary itself (re-executed with a mode) or `sh` scripts in a temp folder, and check afterwards
+  that the pids are gone.
+- Not yet: a Windows job object (`KILL_ON_JOB_CLOSE`). Windows trees end through `taskkill /T /F`, which cannot reach a
+  helper whose parent already exited; the stdin lifeline and the sandbox limits of `debrief-ipc` stay with `paddock-ipc` (X13).
 
 ## `paddock-diag` (plan X2)
 
