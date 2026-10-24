@@ -11,7 +11,8 @@
 //! [`shell`] is the plugin with all of it, for the app ([`run`]) and for the tests on Tauri's mock runtime ([`Place`]).
 //! It is also the starter of new apps: `node scripts/new-app.mjs <id> "<Name>"` copies it (apps/shell-demo/README.md).
 
-pub mod agent;
+/// The sample background agent (plan X4): the `shell-demo-agent` crate.
+pub use shell_demo_agent as agent;
 pub mod commands;
 pub mod engine;
 pub mod sections;
@@ -116,11 +117,6 @@ fn install_log() {
         }
         Err(why) => eprintln!("{APP_NAME}: the log could not start ({why})"),
     }
-}
-
-/// The folders of the app as the agent uses them (the same data folder as the app).
-pub fn agent_dirs() -> Result<AppDirs, Box<dyn std::error::Error + Send + Sync>> {
-    dirs(None)
 }
 
 /// The agent's manager: installed, the real OS next to this app's executable; in tests, the recording fake (rule 7).

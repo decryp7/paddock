@@ -6,7 +6,7 @@
       "signingIdentity": "-",
       "hardenedRuntime": false,
       "files": {
-        "Library/LaunchAgents/net.decryptology.paddock-shell-demo.agent.plist": "macos/net.decryptology.paddock-shell-demo.agent.plist"
+        "Library/LaunchAgents/net.decryptology.paddock-shell-demo.agent.plist": "macos/agent.plist"
       }
     }
   }

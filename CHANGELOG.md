@@ -9,6 +9,16 @@ Conventional Commits; one semver tag for the whole repo.
   `EnvLock::hermetic` (HOME, APPDATA, XDG_* and TMPDIR in the scratch folder, restored afterwards), golden files with
   `PADDOCK_UPDATE_GOLDEN`, `FakeRunner` for OS-command seams, `corpus`/`never_panics`, and `FakeClock` re-exported from
   `paddock_jobs::time`.
+- `paddock-packs` (plan X15, decision D11): knowledge packs for all apps. `PackKind` (serde type, format number, the app's own
+  rules), `parse_pack` with `Limits` (file size, entries, string length, nesting, values, files), unknown keys as named warnings,
+  a bad pack refused whole with a reason while the rest load (last good version kept), `PackLoader`/`PackStore` (build new, then
+  swap, observers told once per real change), `Reloader` (debounced hot reload on the fake-able `Clock`), the `ChangeSource` port
+  with a `notify` adapter (feature `watch`; X23 takes it over), `Snapshot::health()` and `user_regex` (length and size caps, typed
+  errors; merges Debrief's and Spotter's copies).
+- Shell demo: the sample agent is its own crate, bundled as `externalBin` on every OS (`agent/sidecar.mjs` in
+  `beforeBuildCommand`), ad-hoc sealed with the app; `shell-demo-agent --self-test` runs from the built bundle in the macOS
+  verification (which also checks every Mach-O's TeamIdentifier) and from the .deb / the bundled .exe in the release
+  workflow. `scripts/new-app.mjs` carries the agent into new apps, renamed.
 - `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
   It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
   actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
