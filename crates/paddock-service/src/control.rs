@@ -252,6 +252,34 @@ impl ServiceControl {
             })
     }
 
+    /// Applies the launch-at-login switch to the service and the app's own login item (blocking: call it on a background
+    /// thread, as [`ServiceControl::spawn_launch_at_login`] does) and publishes the result.
+    pub fn apply_launch_at_login(&self, on: bool, autostart: &mut dyn crate::login::Autostart) {
+        let mut m = lock(&self.manager);
+        let result = crate::login::apply_launch_at_login(on, Some(&mut m), autostart, &self.cancel);
+        let status = m.status();
+        drop(m);
+        let error = result.err().map(|message| ServiceCommandError {
+            code: ServiceErrorCode::Failed,
+            message,
+            retryable: true,
+        });
+        self.publish(&status, error);
+    }
+
+    /// [`ServiceControl::apply_launch_at_login`] on its own thread.
+    pub fn spawn_launch_at_login(
+        self: &Arc<Self>,
+        on: bool,
+        autostart: Arc<Mutex<Box<dyn crate::login::Autostart>>>,
+    ) -> std::io::Result<()> {
+        let me = self.clone();
+        std::thread::Builder::new()
+            .name("paddock-service-login".into())
+            .spawn(move || me.apply_launch_at_login(on, lock(&autostart).as_mut()))
+            .map(drop)
+    }
+
     /// Opens Login Items (macOS); `false` where there is none. Refused while a repair holds the manager.
     pub fn open_login_items(&self) -> Result<bool, ServiceCommandError> {
         match self.manager.try_lock() {
@@ -630,6 +658,29 @@ mod tests {
         );
         let last = lock(&seen).last().cloned().unwrap();
         assert!(last.error.unwrap().message.contains("Registering failed"));
+    }
+
+    #[test]
+    fn the_launch_at_login_switch_registers_publishes_and_reports_a_failure() {
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let (emit, seen) = emitter();
+        let c = ServiceControl::new(dyno(&sys, d.path(), true), emit);
+        let auto: Arc<Mutex<Box<dyn crate::login::Autostart>>> =
+            Arc::new(Mutex::new(Box::new(crate::login::NoAutostart)));
+        c.spawn_launch_at_login(true, auto).unwrap();
+        let u = wait_for(&seen, |u| u.status.repair.is_some() || u.error.is_some());
+        assert_eq!(u.error, None);
+        assert!(sys.commands().iter().any(|c| c.starts_with("reg add")));
+        struct Refuses;
+        impl crate::login::Autostart for Refuses {
+            fn set(&mut self, _: bool) -> Result<(), String> {
+                Err("denied".into())
+            }
+        }
+        c.apply_launch_at_login(false, &mut Refuses);
+        let e = lock(&seen).last().cloned().unwrap().error.unwrap();
+        assert!(e.message.contains("denied"), "{e:?}");
     }
 
     #[test]

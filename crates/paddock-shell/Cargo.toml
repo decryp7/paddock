@@ -31,6 +31,7 @@ paddock-download = { workspace = true, features = ["tauri"] }
 paddock-health = { workspace = true, features = ["tauri"] }
 paddock-jobs = { workspace = true, features = ["tauri"] }
 paddock-menu = { workspace = true, features = ["tauri"] }
+paddock-service = { workspace = true, features = ["tauri"] }
 paddock-settings = { workspace = true, features = ["tauri"] }
 paddock-startup = { workspace = true, features = ["tauri"] }
 paddock-updater = { workspace = true, features = ["tauri"] }
@@ -43,6 +44,8 @@ log = { version = "0.4", features = ["kv"] }
 tauri-plugin = { version = "2.7", features = ["build"] }
 
 [dev-dependencies]
+# The background service test drives a fake OS (`paddock_service::testing`).
+paddock-service = { workspace = true, features = ["tauri"] }
 tauri = { workspace = true, features = ["test"] }
 paddock-dialogs = { workspace = true, features = ["tauri", "mock-runtime"] }
 # The diagnostics test installs a scoped log and folders in a temporary directory.
