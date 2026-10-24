@@ -317,7 +317,7 @@ describe('pd-activity-page', () => {
 describe('the Activity page registration', () => {
   it('is a lazy sidebar page', () => {
     const [page] = ACTIVITY_CONTRIBUTIONS.pages!;
-    expect(page).toMatchObject({ id: 'pd.activity', icon: 'activity', section: 'top' });
+    expect(page).toMatchObject({ id: 'pd.activity', icon: 'pd:activity', section: 'top' });
     expect(typeof page!.load).toBe('function');
   });
 });

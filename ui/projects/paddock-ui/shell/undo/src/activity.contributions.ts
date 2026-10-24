@@ -12,7 +12,7 @@ export const ACTIVITY_CONTRIBUTIONS: ContributionBatch = {
     definePage({
       id: ACTIVITY_PAGE_ID,
       title: msg('pd.activity.page', 'Activity'),
-      icon: 'activity',
+      icon: 'pd:activity',
       order: 800,
       load: () => import('./activity-page').then((m) => m.PdActivityPage),
     }),

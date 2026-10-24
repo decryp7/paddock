@@ -5,6 +5,14 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Undo and an activity journal (plan X44). `paddock_jobs::journal`: a bounded (at most 5,000 entries, cut texts), persisted (paddock-env
+  versioned file, user-only permissions, a damaged file kept, a newer one never overwritten) log of what the app did on the user's
+  behalf, each entry `NotUndoable`, `Available`, `Undone` or `Expired`; `record`, `mark`, `expire_before`, `entries`, listeners for
+  pushing changes, a save failure kept for the app to show. Undoing stays the app's work. UI: `@decryp7/paddock-ui/shell/undo` with
+  `UndoStore` (the history of the user's edits: labels, merge keys, groups, limit 100; port of Debrief's `UndoStack`), Edit > Undo and
+  Redo (`UNDO_CONTRIBUTIONS`, Mod+Z / Mod+Shift+Z), the `pd-undo-toast` "Done, Undo" toast, `ActivityStore`, the Activity page
+  (`ACTIVITY_CONTRIBUTIONS`) and `TauriActivityBackend` / `MemoryActivityBackend`. The shell demo shows all of it (Say hello is
+  undoable). `paddock-jobs` now depends on `paddock-env`.
 - `paddock_jobs::schedule` and the shared schedule editors (plan X33). `Schedule` (every N seconds, days at times of day, cron with five or
   six fields) in the computer's or a chosen IANA zone with daylight saving (a time inside the spring gap runs once, shifted; a repeated
   time runs once), `next_check` (jitter, back-off after failures, a per-source minimum interval), `preview` (the words, the next runs and
