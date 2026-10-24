@@ -5,6 +5,23 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-guard` (plan X51, ADR 0001), from Debrief's `debrief_core::guard` without its plugin types: `catch` (panic to a typed
+  `Crashed`), `Quarantine` with a `QuarantinePolicy` (3 failures in 10 minutes by default) on the shared `Clock`, failures as
+  `Panic`, `Hang` or `Garbled` (a typed error the owner returns is not one), manual `release`, status, an observer, quarantined
+  owners kept in a versioned state file that tolerates a missing or damaged file, and `Guard::call`, the building block of
+  guarded adapters (refuses a quarantined or hung owner, runs under a time budget on the clock, catches panics, abandons hangs).
+- `paddock-chromium` and `paddock-runtime` (plan X14). `paddock-chromium` is the one Chromium driver, merged from Debrief's
+  `chromium-driver` and Spotter's `spotter-render`: one command-line builder with the start page always last, `Sandbox::decide`
+  (root plus an explicit opt-in only), launch as a `paddock-proc` supervised tree with a time limit on an injected clock and a
+  memory cap, the DevTools client that knows when the user closed a window, pages (snapshot, wait until readable, capture),
+  both apps' readiness and challenge rules, discovery that gives tests only `CHROMIUM_TEST_PATH`, the pinned Chrome for Testing
+  runtime and a fake browser for tests. `paddock-runtime` installs pinned runtimes (Chromium now, FFmpeg and llama.cpp later)
+  from a checked catalogue as one job (download hashed while written, unpack through `paddock-archive`, self-test, install), keeps the previous release
+  for rollback and quarantines a release that fails.
+- `@decryp7/paddock-ui/live`: `streamCall` and `tauriChannelFactory` for commands that stream to their caller over a per-call
+  channel (ordered delivery, nothing after the call settled, failure, handler error, last-message marker, abort). `paddock-metrics`:
+  `folder_size` does not cross volumes (`other_volumes`) and reads a folder entry by entry, so a cancel or the time limit is seen
+  between reads. CI: a step for `paddock-net`; `paddock-archive` and `paddock-net` take the workspace hack.
 - `paddock-mcp` (plan X22, ADR 0007): the local-only MCP server. `Server` with `ToolDef`/`ResourceDef` registration, `Policy` (off by
   default, read-only tools, actions only by name), schema validation, result caps, cursors, time limits with cancel, panic
   containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers

@@ -93,8 +93,9 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-assistant` | the assistant (plan W6): `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for writes, the bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, Tauri commands and the `paddock://assistant` event | yes (Pacenotes, Sighter; Debrief's chat moves onto it); built |
+| `paddock-guard` | crash containment (ADR 0001, plan X51): `catch`, `Quarantine` (3 failures in 10 minutes, shared `Clock`, persisted through paddock-env), `Guard::call` (time budget, hang abandoned, typed refusal) | yes (Debrief, Pacenotes, Dyno plugin hosts); built |
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
-| `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
+| `paddock-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
@@ -119,7 +120,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-window` | native window feel, tray, single instance | yes |
 | `paddock-panels` | pop-out panel windows, drag ghost, UI-state forwarding (X50 W3) | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
-| `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
+| `paddock-chromium` | the one Chromium driver: discovery (tests only `CHROMIUM_TEST_PATH`), one command-line builder with the start page last, `Sandbox::decide`, supervised launch with a time limit on an injected clock and a memory cap, DevTools client, pages, readiness and challenge rules, AI cue, the pinned Chrome for Testing runtime, a fake browser for tests (plan X14) | yes (Debrief, Spotter; Sighter later); built |
+| `paddock-runtime` | pinned runtimes (Chromium, FFmpeg, llama.cpp): a TOML catalogue per runtime (per-platform URL, size, SHA-256), a versioned store that installs through `paddock-download` and `paddock-archive` as one job (download, unpack, self-test, install), keeps the previous release for rollback and quarantines a release that fails (plan X14) | yes (Debrief: Chromium, FFmpeg, llama.cpp; Spotter: Chromium; Pitwall: llama.cpp); built |
 
 ## `paddock-jobs` Tauri adapter (plan S9)
 
@@ -890,6 +892,35 @@ let test = d.test_with(&draft, Some(&typed_password), "Spotter", &cancel);   // 
   secret. SMTP does not use the HTTP proxy.
 - Tests use `FakePoster` / `FakeMail` (scripted, recording) or an in-process loopback server; the real adapters are tested
   against those servers only.
+
+## `paddock-guard` (plan X51, ADR 0001)
+
+Crash containment from Debrief's `debrief_core::guard`, without its plugin types. Domain-free: the owner is a string, the call
+kind a label, the budget a `Duration`.
+
+```rust
+let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+let (quarantine, problem) = Quarantine::persistent(QuarantinePolicy::default(), clock.clone(), dirs.state("quarantine.json"));
+let guard = Guard::new(Arc::new(quarantine), clock);
+// A remote call: refused while quarantined, 10 s budget, a panic is Crashed, a typed error is Failed (not counted).
+match guard.call("my-plugin", "import", Some(Duration::from_secs(10)), move || remote.import(file)) {
+    Err(CallError::Refused(why)) => show_disabled(why),
+    Err(CallError::Hung { .. } | CallError::Crashed(_)) => {} // already counted
+    other => use_it(other),
+}
+guard.quarantine().record("my-plugin", Failure::Garbled, "oversized frame"); // what the adapter itself detects
+guard.quarantine().release("my-plugin"); // the user re-enabled it
+```
+
+- `Quarantine` counts failures per owner inside the policy window on the injected clock; at `max` the owner is quarantined
+  until `release`. `status`/`all` give failures, total, last error (500 characters), quarantined and hung; `set_observer` hears
+  each start and lift once. Quarantined owners are kept in a versioned file (`VersionedFile`); a missing, damaged or newer file
+  gives an empty quarantine and a `Problem`. Failure times are not kept (the clock restarts).
+- `Guard::call` with a budget runs on a helper thread and a timer on the clock; an overrun marks the owner hung (a counted
+  failure) and refuses calls until the abandoned call returns. In-process guarding cannot stop a running call or survive an
+  abort; that is the process boundary's job.
+- Tests drive a `FakeClock`; nothing sleeps or measures time. Locks poisoned by a panicking thread are recovered.
+
 ## `paddock-ipc` (plan X13, ADR 0001 step 1)
 
 The family's one IPC between an app and its own processes (workers, plugins, agents, services), from Debrief's
@@ -1124,6 +1155,76 @@ paddock_proc::end_all();                                       // at shutdown / 
   that the pids are gone.
 - Not yet: a Windows job object (`KILL_ON_JOB_CLOSE`). Windows trees end through `taskkill /T /F`, which cannot reach a
   helper whose parent already exited; the stdin lifeline and the sandbox limits of `debrief-ipc` stay with `paddock-ipc` (X13).
+
+## `paddock-runtime` (plan X14)
+
+Programs an app downloads on demand instead of bundling them; nothing outside the app's catalogue is ever downloaded.
+
+```rust
+let catalogue = Catalogue::parse(include_str!("ffmpeg.toml"))?;     // refused whole with a reason when anything is off
+let store = RuntimeStore::in_app_data(&dirs, "ffmpeg")?;            // <data>/runtimes/ffmpeg
+store.sweep(catalogue.for_this_platform().ok())?;                   // at start-up: staging leftovers, stale downloads
+let ctx = jobs.register("runtime", "Downloading FFmpeg", None);
+pool.spawn_job(ctx, move |ctx| Ok(store.install(ctx, &downloader, pinned, &Ffmpeg)?))?;
+let exe = store.active().map(|i| i.executable);                     // the release in use, if any passed its self-test
+```
+
+- Catalogue (`format = 1`, `name`, `version`, `source`, `license`, `[[platform]]` with `key` = `<windows|macos|linux>-<x86_64|
+  aarch64>`, `url` (https, or http to the loopback for tests), `size`, `sha256`): unknown keys, a name or version that is not a
+  folder name, a size of 0 or over 4 GiB, a bad checksum, a platform twice and an archive that is not a zip or tar
+  (`.zip`, `.tar`, `.tar.gz`/`.tgz`, `.tar.xz`) refuse it whole.
+- `RuntimeKind` says what differs: `locate(root)` (the program inside the unpacked tree) and `self_test(exe, version)` (bounded,
+  checks the version). `install` is one job: the download's phases (hashed while written, resumable from `downloads/`), then
+  `unpack` through `paddock-archive` (its limits and guards; links kept inside the tree; `with_archive_options` to change
+  them), `self-test`, `install` (uncancellable rename).
+  Cancel works up to the swap and keeps the partial download.
+- The release in use stays until the new one passed; it becomes `previous` for `rollback(kind)` (which re-tests it); older
+  releases are removed. A release that fails its self-test, and one the app reports with `quarantine(version, reason)`, moves
+  to `.quarantine/` (the newest three kept, listed by `quarantined()` for diagnostics); the previous release takes over.
+- `state.json` is a `paddock_env::VersionedFile`; a lost or damaged one falls back to the newest complete folder on disk
+  (each release folder has its `runtime.json` marker). One install at a time per store (`.lock`, across processes: `Busy`).
+
+## `paddock-chromium` (plan X14)
+
+The one Chromium driver, from Debrief's `chromium-driver` and Spotter's `spotter-render`: no application types.
+
+```rust
+let store = paddock_chromium::runtime::store(&dirs)?;               // the pinned Chrome for Testing, installed as a job
+let exe = discover::find(Some("SPOTTER_CHROMIUM_PATH"), runtime::installed(&store)).ok_or(Error::NotFound)?;
+sweep_profiles(&launch::profiles_dir(&dirs));                       // at start-up: profiles of crashed runs
+let mut opts = LaunchOptions::new(Profile::Throwaway(launch::profiles_dir(&dirs)));
+opts.window = Window::OffScreen;                                    // OnScreen(Some(bounds)) for a window the user sees
+let mut browser = Chromium::launch(&exe, &opts)?;                   // supervised tree: time limit, memory cap (PSS)
+let page = browser.start_page()?;                                   // the window keeps one tab
+page.track_dom_changes()?;                                          // only when the app may add a script to pages
+page.navigate(url, Duration::from_secs(30))?;
+match page.wait_ready(Some("#results"), &Rule::default(), budget)? { Outcome::Ready => read(page.capture()?), .. }
+browser.close();                                                    // Browser.close, then whatever is left; drop does the same
+```
+
+- `launch::command_line(dir, &opts, sandbox)` is the only place the arguments are built; `START_PAGE` is always last (Debrief
+  1.1.1's `--no-sandbox` after the start page). `--enable-automation` stays (no stealth). `Window::{OnScreen(bounds),
+  OffScreen, Headless}`, `QUIET_FLAGS` (no GPU, no component downloads, no throttling; `opts.quiet`), `disk_cache_bytes` for a
+  kept profile, `extra_args`. `Sandbox::decide(env, root)`: dropped only as root with `PADDOCK_BROWSER_NO_SANDBOX=1` (CI
+  containers), then also `--disable-dev-shm-usage`; `launch_with(exe, opts, sandbox)` lets tests run that branch on any OS.
+- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends). `max_lifetime` runs on
+  `opts.clock` (a `FakeClock` in tests), `memory_cap` through `MemoryCap` (an injectable sampler); `ended_by()` says which.
+  A failed start says why (the end of the browser's error output, or the memory cap). `check_display` explains a headful
+  launch on Linux without `DISPLAY`/`WAYLAND_DISPLAY`. Profiles: `Throwaway(base)` (removed at the end; `sweep_profiles`
+  removes those of dead processes) or `Persistent(path)` with an accent theme (`write_theme`).
+- `Chromium::gone(page)` tells `Exited`, `Disconnected` and `PageClosed` (the user closed the window) apart; a closed page
+  fails every call with `Error::Closed`. `close_gracefully(grace)` sends `Browser.close` (no code-sign clone on macOS).
+- `Page`: `navigate`, `back`, `evaluate`, `info`, `text_excerpt`, `snapshot(selector)` (URL, title, text, load state, element,
+  DOM quiet time, password field), `wait_ready`, `challenge`, `capture` (16 MB cap), `screenshot_png`, `block_heavy`.
+  `ready::readiness` (element and region rules of both apps) and `challenge::detect` (consent, human check, login wall) are pure.
+- `discover`: `find(override_var, downloaded)` (an explicit path, then the app's download, then Edge/Chrome/Chromium);
+  `find_for_tests()` returns only `CHROMIUM_TEST_PATH`, and refuses it when it names an installed browser (rule 7, T02).
+- `runtime`: the embedded `chromium.toml` (Chrome for Testing 156.0.8078.47, five platforms), `install(ctx, downloader,
+  store)`, `installed(store)`, `ChromeForTesting` (locate, `--version` names the pinned version).
+- `fake` (feature `test-support`, Unix): a fake DevTools browser that re-runs the test binary; it plays the user (close the
+  window, quit, drop the connection, stall loads) and answers page scripts from a file (`page_shows`). Apps refuse to start
+  when `PADDOCK_FAKE_BROWSER` is set. `tests/real_browser.rs` drives a real Chrome for Testing headless when
+  `CHROMIUM_TEST_PATH` is set and checks that nothing is left behind.
 
 - Windows (plan X54): each supervised child runs in a kill-on-close job object held by the `Supervised` value; dropping it, or
   the app ending in any way, ends the child and every helper it started, orphans included (`Supervised::in_job`).

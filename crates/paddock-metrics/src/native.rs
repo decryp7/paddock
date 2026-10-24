@@ -63,3 +63,44 @@ impl MachineProbe for SystemProbe {
         paddock_proc::tree_memory(pid)
     }
 }
+
+/// The id of the volume holding `path` (device id on Unix, volume serial number on Windows), `None` when unreadable.
+#[cfg(unix)]
+pub(crate) fn volume_id(path: &std::path::Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| m.dev())
+}
+
+/// As the Unix one: the volume serial number of the volume holding `path` (a handle opened for metadata only).
+#[cfg(windows)]
+pub(crate) fn volume_id(path: &std::path::Path) -> Option<u64> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, GetFileInformationByHandle,
+    };
+    let file = std::fs::OpenOptions::new()
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .ok()?;
+    // SAFETY: `info` is plain data the call fills in; the handle stays open until `file` drops at the end of the function.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle().cast(), &mut info) };
+    (ok != 0).then(|| u64::from(info.dwVolumeSerialNumber))
+}
+
+/// The volume id of a folder entry already read: on Unix from its metadata (no extra call), on Windows from a handle.
+pub(crate) fn dir_volume(path: &std::path::Path, meta: &std::fs::Metadata) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let _ = path;
+        Some(meta.dev())
+    }
+    #[cfg(windows)]
+    {
+        let _ = meta;
+        volume_id(path)
+    }
+}
