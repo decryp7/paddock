@@ -350,12 +350,13 @@ describe('WORKBENCH_PORTS default', () => {
     expect(await ports.applyPerspective('x')).toBe(false);
     ports.closeView('x');
     ports.showExplorer('x');
+    ports.hideExplorer();
     ports.openPalette();
     expect(ports.openPanels()).toEqual([]);
     expect(ports.activePanel()).toBeNull();
     expect(ports.activePerspective()).toBeNull();
     expect(ports.explorerShown()).toBeNull();
-    expect(warn).toHaveBeenCalledTimes(5);
+    expect(warn).toHaveBeenCalledTimes(6);
     warn.mockRestore();
   });
 });
