@@ -10,6 +10,11 @@ Rules for a crate here:
 - Pure logic and thin adapters, no dependency on any app crate. Edition and licence come from `[workspace.package]`.
 - Library errors are typed, no `unwrap`/`expect` on user data or I/O, `cargo clippy -- -D warnings` clean,
   >= 99% line coverage.
+- Native glue (code only a real desktop runs, that tests cannot reach by rule 7 or because Tauri does not let them build
+  the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
+  `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
+  `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`.
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -309,7 +314,8 @@ builder.setup(move |app| {
 - Generated TypeScript: `ui/projects/paddock-ui/shell/generated/window.ts` (wire types, `WINDOW_EVENTS`) and
   `window-commands.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-window --lib generated`).
 - Tests run on Tauri's mock runtime with a fake tray backend and hooks for Quit and the process exit: no window, tray
-  icon or single-instance lock reaches the desktop (rule 7). `tests/native_menu.rs` has no harness, so the native menu
+  icon or single-instance lock reaches the desktop (rule 7). The untestable glue (the tray icon's create/update, window
+  effects, the run and close events Tauri does not let tests build) is `src/tauri/native.rs`, outside coverage. `tests/native_menu.rs` has no harness, so the native menu
   is built on the main thread (macOS builds menus there only); the builder is made, never built.
 ## `paddock-menu` (plan S13)
 

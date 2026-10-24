@@ -188,7 +188,7 @@ fn open<R: Runtime>(
 ) -> Result<(), WindowError> {
     let style = pops.style;
     let feel = WebviewFeel::current();
-    let mut b = WebviewWindowBuilder::new(app, label, WebviewUrl::App(spec.route.clone().into()))
+    let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App(spec.route.clone().into()))
         .title(&spec.title)
         .inner_size(spec.width, DEFAULT_HEIGHT)
         .resizable(false)
@@ -202,10 +202,7 @@ fn open<R: Runtime>(
         .zoom_hotkeys_enabled(feel.zoom_hotkeys)
         .browser_extensions_enabled(feel.browser_extensions)
         .initialization_script(init_script(style));
-    if let Some(e) = effects(style) {
-        b = b.effects(e);
-    }
-    let w = b.build()?;
+    let w = super::native::with_material(b, style).build()?;
     apply_feel(&w, feel);
     let monitor = w
         .monitor_from_point(icon.x + icon.w / 2.0, icon.y + icon.h / 2.0)

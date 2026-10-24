@@ -2,7 +2,7 @@
 //! the icon is a template image the menu bar tints; on Windows a session without a taskbar (session 0, a service, a CI
 //! runner) has no tray, and the app runs without one.
 
-use super::tray::{TrayBackend, icon_clicked, menu_chosen};
+use super::tray::{icon_clicked, menu_chosen};
 use crate::popover::Rect;
 use crate::tray::{TrayEntry, TrayView};
 use ::tauri::image::Image;
@@ -17,9 +17,9 @@ type Icons = dyn Fn(&str) -> Option<Image<'static>> + Send + Sync;
 
 /// Draws the tray with Tauri's tray icon.
 pub struct NativeTray {
-    icons: Box<Icons>,
-    template: bool,
-    menu_on_left_click: bool,
+    pub(super) icons: Box<Icons>,
+    pub(super) template: bool,
+    pub(super) menu_on_left_click: bool,
 }
 
 impl NativeTray {
@@ -50,7 +50,7 @@ impl NativeTray {
 }
 
 /// The menu of `entries`. Disabled lines without an id get `pd.none-<n>`.
-pub(crate) fn to_menu<R: Runtime>(
+pub(super) fn to_menu<R: Runtime>(
     app: &AppHandle<R>,
     entries: &[TrayEntry],
 ) -> ::tauri::Result<Menu<R>> {
@@ -89,7 +89,7 @@ pub(crate) fn to_menu<R: Runtime>(
 }
 
 /// Whether the desktop has somewhere to show a tray icon: on Windows, the taskbar's window exists.
-fn host_available() -> bool {
+pub(super) fn host_available() -> bool {
     #[cfg(windows)]
     #[allow(unsafe_code)]
     {
@@ -140,7 +140,7 @@ fn on_menu<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
 }
 
 impl NativeTray {
-    /// The builder [`create`](TrayBackend::create) builds: the view's menu, tooltip and icon and the shell's event
+    /// The builder [`create`](super::TrayBackend::create) builds: the view's menu, tooltip and icon and the shell's event
     /// handlers. Building it creates the icon; making it does not.
     pub fn icon_builder<R: Runtime>(
         &self,
@@ -159,30 +159,6 @@ impl NativeTray {
             .icon_as_template(self.template)
             .on_menu_event(on_menu)
             .on_tray_icon_event(|tray, event| on_icon(tray.app_handle(), &event)))
-    }
-}
-
-impl<R: Runtime> TrayBackend<R> for NativeTray {
-    fn create(&self, app: &AppHandle<R>, view: &TrayView) -> Result<(), String> {
-        if !host_available() {
-            return Err("no taskbar to hold a tray icon".into());
-        }
-        let builder = self.icon_builder(app, view)?;
-        builder.build(app).map(|_| ()).map_err(|e| e.to_string())
-    }
-
-    fn update(&self, app: &AppHandle<R>, view: &TrayView) -> Result<(), String> {
-        let tray = app.tray_by_id(TRAY_ID).ok_or("the tray icon is gone")?;
-        let menu = to_menu(app, &view.menu).map_err(|e| e.to_string())?;
-        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
-        tray.set_tooltip(Some(&view.tooltip))
-            .map_err(|e| e.to_string())?;
-        if let Some(icon) = (self.icons)(&view.icon) {
-            tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
-            tray.set_icon_as_template(self.template)
-                .map_err(|e| e.to_string())?;
-        }
-        Ok(())
     }
 }
 
@@ -247,8 +223,5 @@ mod tests {
                 id: "pd.show".into(),
             },
         );
-        let view = TrayView::new("x", vec![], "idle");
-        let t = NativeTray::new(|_| None);
-        assert!(TrayBackend::update(&t, h, &view).is_err(), "no icon yet");
     }
 }

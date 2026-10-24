@@ -34,6 +34,7 @@ mod commands;
 mod instance;
 mod lifecycle;
 mod manager;
+mod native;
 #[cfg(feature = "tray")]
 mod native_tray;
 mod popover;
@@ -44,11 +45,12 @@ pub use commands::{
     window_resolve_close, window_resolve_open, window_set_title, window_take_pending, windows_list,
 };
 pub use instance::{open_from_outside, opened, queue_open, reopen, second_instance};
-pub use lifecycle::{arm_exit_watchdog, exit, exit_requested, on_run_event};
+pub use lifecycle::{arm_exit_watchdog, exit, exit_requested};
 pub use manager::{
     FixedPrefs, Prefs, WindowConfig, Windows, WindowsBuilder, changed, close_requested,
     create_main, destroyed, list, on_window_event, open_new, quit, reveal, start, target,
 };
+pub use native::on_run_event;
 #[cfg(feature = "tray")]
 pub use native_tray::NativeTray;
 pub use popover::{PopoverSpec, Popovers, close_popover, fit_popover, toggle_popover};

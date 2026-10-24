@@ -2,13 +2,11 @@
 //! quitting and arms the exit watchdog; the exit itself runs the bounded teardown once. Ported from Debrief's
 //! `lifecycle.rs` and `lib.rs` (`on_run_event`) and Pitwall's `window.rs`.
 
-#[cfg(target_os = "macos")]
-use super::instance::{opened, reopen};
 use super::manager::{persist_now, state};
 use super::tray::tray_available;
 use crate::close::keeps_running;
 use crate::exit::{end_stalled_exit, teardown_step};
-use ::tauri::{AppHandle, Manager, RunEvent, Runtime};
+use ::tauri::{AppHandle, Manager, Runtime};
 
 /// Tauri asks to exit, with `code` for an explicit exit and `None` when the last window closed. Returns whether the
 /// exit is refused (the app keeps running in the tray); otherwise quitting begins and the exit watchdog is armed.
@@ -60,23 +58,4 @@ pub fn arm_exit_watchdog<R: Runtime>(app: &AppHandle<R>, code: i32) {
         let open = || app.webview_windows().into_keys().collect::<Vec<_>>();
         end_stalled_exit(tearing_down, open, || exit(&app), |c| end(c), code, limit);
     });
-}
-
-/// The run events of the layer (call it from `App::run`): exit requests, the exit, and on macOS files and links opened
-/// with the app and the Dock icon while no window is visible.
-pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
-    match event {
-        RunEvent::ExitRequested { code, api, .. } if exit_requested(app, *code) => {
-            api.prevent_exit()
-        }
-        RunEvent::Exit => exit(app),
-        #[cfg(target_os = "macos")]
-        RunEvent::Opened { urls } => opened(app, urls),
-        #[cfg(target_os = "macos")]
-        RunEvent::Reopen {
-            has_visible_windows: false,
-            ..
-        } => reopen(app),
-        _ => {}
-    }
 }

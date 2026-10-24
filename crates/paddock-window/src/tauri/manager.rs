@@ -969,11 +969,12 @@ pub(crate) fn keeps_open<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
 pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     let app = window.app_handle();
     let label = window.label();
-    if popover::on_window_event(app, label, event) {
+    if popover::on_window_event(app, label, event)
+        || super::native::close_request(app, label, event)
+    {
         return;
     }
     match event {
-        WindowEvent::CloseRequested { api, .. } if keeps_open(app, label) => api.prevent_close(),
         WindowEvent::Focused(true) => {
             let host = resolve(label);
             if top_level(host)
