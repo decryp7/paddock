@@ -94,7 +94,8 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-assistant` | the assistant (plan W6): `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for writes, the bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, Tauri commands and the `paddock://assistant` event | yes (Pacenotes, Sighter; Debrief's chat moves onto it); built |
 | `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
-| `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
+| `paddock-plugin-package` | the `.paddockplugin` archive, the plugin manifest model (permissions, contributions, namespaces), Ed25519 signing, keys, trust levels and store, installed-binary verification (ADR 0001, plan X51) | yes (Debrief, Pacenotes, Dyno tier 3); built |
+| `paddock-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-test` | the rest of the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
 | `paddock-testplan` | `.sighterplan` / `.sighterresult` (ADR 0005) | two (Pacenotes, Sighter); shared schema, so extracted on purpose |
 | `paddock-mcp` | local-only MCP server (ADR 0007): JSON-RPC 2.0 with the 2025-06-18 shapes, tool and resource registry (read-only by default, actions need an explicit opt-in, off until the user turns it on), schema-validated arguments, result caps, paging, time limits, redacted audit log, stdio and loopback (per-client key) transports, client request builders for Pitwall (plan X22) | yes (Debrief, Pacenotes, Sighter servers; Pitwall client); built |
@@ -936,6 +937,48 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 - Tests start real processes through the `paddock-ipc-test-child` binary and leave none behind; nothing sleeps or measures
   time (gates, channels, a `FakeClock` for the back-off). `fuzz/` holds the frame-codec fuzz target
   (`cargo +nightly fuzz run frame`).
+
+## `paddock-plugin-package` (plan X51, ADR 0001 "Signing and packaging")
+
+The `.paddockplugin` package and the manifest model, from Debrief's `debrief-plugin-package` and the manifest half of
+`debrief-plugin-api` (`manifest.rs`, `sandbox.rs`'s permission names). It depends on no plugin crate (only `paddock-env` for the
+owner-only atomic writes and the versioned trust file); `paddock-plugin-api` re-exports its types and `paddock-plugin-host` installs
+and verifies with it. No Debrief type moves: app contracts appear only as `Namespace { ns, minor }` (`debrief.import/3`).
+
+```rust
+let manifest = Manifest::parse(&std::fs::read_to_string("manifest.toml")?)?;          // limits, typed errors, unknown keys refused
+let key = SecretKey::generate_to(&dir.join("publisher.key"))?;                        // 0600, never replaces an existing key
+archive::build(Build { manifest, programs: vec![(target, &exe)], sign: Some(&key) }, &out)?;   // deterministic .paddockplugin
+let pkg = Package::open(&out)?;                                                       // bounded read, checksums, signature
+pkg.manifest.check_compatible(PLATFORM_PROTOCOL, &app_namespaces, "Debrief")?;        // says who must update
+let trust = policy.decide(&pkg.signature)?;                                           // Builtin | Signed | Unsigned (developer mode)
+let sha = pkg.extract(&out, manifest::host_target(), &installed)?;                    // exec bit, re-verified while copying
+archive::verify_installed(&installed, &sha)?;                                         // before every start: changed binary = Tampered
+```
+
+- `manifest`: `Manifest` (id, name, semver version, publisher, description, platform `ProtocolVersion`, binary and targets, key id,
+  `Contribution`s, `PermissionRequest`s). `Contribution` is `Tool`/`View` (with `Action { id, writes }`: write-capable actions are
+  badged and never exposed over MCP), `Settings`, `McpTool` (read-only by construction) and `Extension(Namespace)`. `Permission` is
+  `OpenedFilePaths`, `ReadFolders`/`WriteFolders(GrantRef)`, `RunPrograms(ProgramRef)`, `Network(HostPattern)`, `Elevated(ops)`,
+  `McpExpose`, `Memory { mib }`, `Cpu { percent }`; default deny, each kind once, lists of 1 to 64 names. `manifest.toml` is
+  bounded (64 KiB, 256 contributions, 64 actions each, 16 targets) and **unknown keys are refused** (as in Debrief); the model
+  types are plain serde (no `untagged`/`flatten`/internal tags), so the same `Manifest` crosses the postcard IPC, where the host
+  runs `Manifest::check` on it. `check_compatible` applies the one rule (same major, known minor) to the platform protocol and to
+  every namespace, with texts that say who must update.
+- `names`: `PluginId`, `GrantRef`, `ProgramRef`, `HostPattern` (`*.example.com`), `Namespace`: newtypes that validate in
+  `new` and in `Deserialize`, so a name from the wire is as valid as one from a file. `version::ProtocolVersion` is a plain serde
+  copy of `paddock_ipc`'s rule on purpose (a package must be verifiable without the IPC crate); conversion is two field moves.
+- `archive`: zip with `manifest.toml`, `bin/<target>/<binary>[.exe]`, `SHA256SUMS` and an optional detached Ed25519 `signature`
+  over the digest of the manifest bytes plus the sums bytes. `Package::read`/`open` (with `Limits`: 256 MiB package, 128 MiB program,
+  512 MiB total, 64 entries; sizes counted while reading) refuse traversal, absolute and drive names, links, encrypted, duplicate and
+  unlisted entries, a hash that differs from `SHA256SUMS`, and a signature that does not match (`Tampered`). `build` is deterministic.
+  `extract` re-hashes while copying; `verify_installed` is the check the host runs before every start.
+- `keys`: `SecretKey`/`PublicKey` text forms, key ids, `save` owner-only through `paddock_env::write_atomic`, `generate_to` never
+  replaces a key. `trust`: `TrustPolicy` (the app's built-in keys plus the user's `TrustSettings`) decides `Trust::Builtin`,
+  `Trust::Signed` or `Trust::Unsigned` (unsigned or unknown key: only with developer mode, with a warning); `TrustStore` is the
+  versioned owner-only state file (missing or damaged gives nothing trusted and developer mode off).
+- `fuzz/` holds the manifest and archive fuzz targets (`cargo +nightly fuzz run manifest`, `... package`); `tests/properties.rs` runs
+  never-panic and never-accept-other-content properties with the tests.
 
 ## `paddock-net` (plan X16)
 
