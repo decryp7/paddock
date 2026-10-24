@@ -24,12 +24,12 @@ describe('formatters', () => {
     expect(formatCount(NaN)).toBe('0');
   });
   it('formats sizes', () => {
-    expect(formatBytes(0)).toBe('0 B');
-    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(0)).toBe('0 bytes');
+    expect(formatBytes(512)).toBe('512 bytes');
     expect(formatBytes(4.2 * 1024 * 1024)).toBe('4.2 MB');
     expect(formatBytes(118 * 1024 * 1024)).toBe('118 MB');
-    expect(formatBytes(5 * 1024 ** 5)).toBe('5120 TB');
-    expect(formatBytes(NaN)).toBe('0 B');
+    expect(formatBytes(5 * 1024 ** 5)).toBe('5 PB');
+    expect(formatBytes(NaN)).toBe('0 bytes');
   });
   it('formats time left', () => {
     expect(formatEta(null)).toBe('');

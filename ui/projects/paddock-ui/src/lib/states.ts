@@ -1,16 +1,22 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 /** Empty state: icon, what is missing (title), why or what happens next, and one next-step action in `[slot=action]`. */
 @Component({
   selector: 'pd-empty-state',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'status' },
+  imports: [PdGlyph],
   template: `
     <span class="pd-icon">
       <ng-content select="[slot=icon]">
+        @if (icon()) {
+          <pd-glyph [name]="icon()" [size]="32" [stroke]="1.5" />
+        } @else {
         <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
           <path d="M3.5 13.5 6 5.5h12l2.5 8M3.5 13.5v5h17v-5M3.5 13.5h5l1 2h5l1-2h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
+        }
       </ng-content>
     </span>
     <h3 class="pd-title">{{ heading() }}</h3>
@@ -33,6 +39,8 @@ export class SuEmptyState {
   readonly heading = input.required<string>();
   /** Why, or what happens next. */
   readonly description = input<string>('');
+  /** A glyph of the `pd:` set drawn above the title ("folder"); an `[slot=icon]` child (an app's logo) wins; none draws an empty tray. */
+  readonly icon = input<string>('');
 }
 
 /**

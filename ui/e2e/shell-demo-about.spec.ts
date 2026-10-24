@@ -36,7 +36,7 @@ test('Help ▸ Check for updates… finds, downloads and verifies an update, and
   await expect(dialog.getByTestId('updates-current')).toHaveText(`You have version ${VERSION}.`);
   await expect(dialog).toHaveAttribute('aria-modal', 'false');
   await dialog.getByRole('button', { name: 'Check now' }).click();
-  await expect(dialog.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (41 MB).');
+  await expect(dialog.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (39 MB).');
   await expect(app.notifications.toasts).toContainText('Version 99.0.0 is available');
   await dialog.getByRole('button', { name: 'Download' }).click();
   await expect(dialog.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
