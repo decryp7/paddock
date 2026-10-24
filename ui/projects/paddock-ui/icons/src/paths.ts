@@ -49,6 +49,12 @@ export const PD_ICON_PATHS = {
   keyboard: 'M2.5 6.5h19v11h-19zM7.5 14h9',
   columns: 'M4 5h16v14H4zM9.3 5v14M14.7 5v14',
   activity: 'M2.5 12h4l3-7.5 4 15 3-7.5h5',
+  // Workbench (plan X50, review 1): the assistant, its history, a window kept on top, a panel docked back.
+  chat: 'M4.5 5.5h15v10h-8l-4.5 3.5v-3.5h-2.5z',
+  history: 'M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9M4.5 4.5V9H9M12 8v4l2.75 1.75',
+  layers: 'M12 4 20 8.5 12 13 4 8.5zM5.5 12.5 12 16.2l6.5-3.7M5.5 16 12 19.7l6.5-3.7',
+  'dock-in': 'M3.5 5h17v14h-17zM12 5v6.5M9 8.5l3 3 3-3M7 15h10',
+  file: 'M6 3.5h8l4.5 4.5v12.5H6zM13.5 3.5V8.5H18.5',
 } as const satisfies Readonly<Record<string, string>>;
 
 /** A filled dot of a glyph: centre and radius on the 24 px grid. */
