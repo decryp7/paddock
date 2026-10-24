@@ -1,3 +1,4 @@
+import type { DialogSize } from '../generated/dialogs';
 import type { ShellContext } from './context';
 import type { ComponentLoader, LazyPart, ProvidersLoader } from './lazy';
 import type { Message } from './message';
@@ -157,6 +158,28 @@ export interface DialogSpec<Id extends string, R, Cmd extends string> {
 /** A defined dialog. `modality` is resolved from the kind when the kind decides (left as declared otherwise). */
 export interface DialogDef<Id extends string = string, R = unknown, Cmd extends string = string> extends DialogSpec<Id, R, Cmd> {
   readonly modality: DialogModality;
+}
+
+/** The least a dialog window can be (`DIALOG_MIN` in `paddock-dialogs`). */
+export const DIALOG_MIN: Readonly<DialogSize> = Object.freeze({ width: 320, height: 200 });
+/** The viewer floor: results open at about 680x560 and only grow (`VIEWER_MIN`). */
+export const VIEWER_MIN: Readonly<DialogSize> = Object.freeze({ width: 680, height: 560 });
+
+/** The smallest window of each kind (the viewer floor), or none (ADR 0009 §1, `Kind::policy` in Rust). */
+export const KIND_MIN_SIZE: Readonly<Record<DialogKind, Readonly<DialogSize> | null>> = Object.freeze({ decision: null, form: null, viewer: VIEWER_MIN, tool: null });
+
+/**
+ * A dialog's minimum window size as the manifest and the contract file state it: the declared minimum raised to the
+ * kind's floor, a side left out taking the least a dialog can be (`DIALOG_MIN`). `null` when neither the dialog nor its
+ * kind states one (Rust then applies `DIALOG_MIN`). Pure.
+ */
+export function dialogMinSize(d: Pick<DialogSpec<string, unknown, string>, 'kind' | 'minWidth' | 'minHeight'>): DialogSize | null {
+  const floor = KIND_MIN_SIZE[d.kind] ?? null;
+  if (d.minWidth === undefined && d.minHeight === undefined && !floor) return null;
+  return {
+    width: Math.max(d.minWidth ?? 0, floor?.width ?? 0, DIALOG_MIN.width),
+    height: Math.max(d.minHeight ?? 0, floor?.height ?? 0, DIALOG_MIN.height),
+  };
 }
 
 /** A service whose health the shell shows (chip, notifications; plan S4). Rust has a supervisor of the same id. */

@@ -1,14 +1,12 @@
-import { KIND_MODALITIES, type DialogDef, type DialogKind, type DialogModality, type DialogSize } from '@decryp7/paddock-ui/shell';
+import { DIALOG_MIN, KIND_MIN_SIZE, KIND_MODALITIES, VIEWER_MIN, type DialogDef, type DialogKind, type DialogModality, type DialogSize } from '@decryp7/paddock-ui/shell';
 
 /*
  * The size and key policy of each dialog kind (ADR 0009 §1), the UI half of `paddock_dialogs::Kind::policy`. The kind
  * decides; a dialog states only what differs. Keep the numbers equal to the Rust constants (`kind.spec.ts` names them).
  */
 
-/** The least a dialog window can be (`DIALOG_MIN` in Rust). */
-export const DIALOG_MIN: Readonly<DialogSize> = Object.freeze({ width: 320, height: 200 });
-/** The viewer floor: results open at about 680x560 and only grow (`VIEWER_MIN`). */
-export const VIEWER_MIN: Readonly<DialogSize> = Object.freeze({ width: 680, height: 560 });
+// The floors are the shell core's (the manifest states them too); re-exported here with the rest of the kind policy.
+export { DIALOG_MIN, VIEWER_MIN };
 /** A tool's default size (`TOOL_DEFAULT`). */
 export const TOOL_DEFAULT: Readonly<DialogSize> = Object.freeze({ width: 960, height: 680 });
 /** The width of a decision or form that declares none (`FALLBACK_SIZE.width`). */
@@ -29,7 +27,7 @@ export interface KindPolicy {
 export const KIND_POLICY: Readonly<Record<DialogKind, KindPolicy>> = Object.freeze({
   decision: { minSize: null, defaultSize: { width: FALLBACK_WIDTH, height: null }, fitsContent: true, growsOnly: false },
   form: { minSize: null, defaultSize: { width: FALLBACK_WIDTH, height: null }, fitsContent: true, growsOnly: false },
-  viewer: { minSize: VIEWER_MIN, defaultSize: VIEWER_MIN, fitsContent: true, growsOnly: true },
+  viewer: { minSize: KIND_MIN_SIZE.viewer, defaultSize: VIEWER_MIN, fitsContent: true, growsOnly: true },
   tool: { minSize: null, defaultSize: TOOL_DEFAULT, fitsContent: false, growsOnly: false },
 });
 

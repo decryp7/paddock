@@ -1,5 +1,4 @@
-import { DIALOG_BASE_COMMANDS, type DialogContract, type DialogContractFile, type DialogDef } from '@decryp7/paddock-ui/shell';
-import { DIALOG_MIN, KIND_POLICY } from './kind';
+import { DIALOG_BASE_COMMANDS, dialogMinSize, type DialogContract, type DialogContractFile, type DialogDef } from '@decryp7/paddock-ui/shell';
 
 /*
  * The contract file Rust reads (ADR 0009 §2): the registry is the source, `dialog-contracts.json` next to the app's
@@ -32,7 +31,7 @@ export function dialogContract(def: DialogDef): DialogContract {
     modality: def.modality,
     requiredChoice: def.requiredChoice === true,
     instanced: def.instanced === true,
-    minSize: minSizeOf(def),
+    minSize: dialogMinSize(def) ?? undefined,
     commands: sortedUnique(def.commands.filter((c) => !PLUGIN_COMMAND.test(c))),
   };
 }
@@ -60,15 +59,3 @@ export function allowedCommands(def: Pick<DialogDef, 'commands'>, base: readonly
   return [...DIALOG_BASE_COMMANDS, ...base, ...def.commands];
 }
 
-/**
- * The declared minimum raised to the kind's floor; a side left out takes the least a dialog can be. `undefined` when the
- * dialog and its kind state none (Rust then applies `DIALOG_MIN`).
- */
-function minSizeOf(d: DialogDef): DialogContract['minSize'] {
-  const floor = KIND_POLICY[d.kind]?.minSize ?? null;
-  if (d.minWidth === undefined && d.minHeight === undefined && !floor) return undefined;
-  return {
-    width: Math.max(d.minWidth ?? 0, floor?.width ?? 0, DIALOG_MIN.width),
-    height: Math.max(d.minHeight ?? 0, floor?.height ?? 0, DIALOG_MIN.height),
-  };
-}
