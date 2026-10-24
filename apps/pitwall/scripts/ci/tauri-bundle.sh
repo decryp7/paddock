@@ -19,6 +19,16 @@ if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
 # installer can never be collected into this release (it once shipped as latest.json's Windows download).
 rm -rf "$dir/dist/bundle"
 
+# Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, Paddock rule 23): ad-hoc code under it cannot
+# load a vendor-signed library ("different Team IDs"). A real signing identity (APPLE_SIGNING_IDENTITY, not "-") turns it
+# back on, as notarization requires.
+extra=()
+if [ "$(uname -s)" = Darwin ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
+  mkdir -p target
+  echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > target/hardened.conf.json
+  extra=(--config ../target/hardened.conf.json)
+fi
+
 # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
 if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"; fi
 if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"; fi
@@ -29,11 +39,11 @@ if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(print
   if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then
     mkdir -p ../target
     node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
-    npx tauri build --bundles "$bundles" --config ../target/updater.conf.json -- --profile dist
+    npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
   else
     echo '::warning::No updater signing secrets: this build cannot update itself.'
     unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-    npx tauri build --bundles "$bundles" -- --profile dist
+    npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
   fi
 )
 

@@ -92,9 +92,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: bash scripts/ci/tauri-bundle.sh "${{ matrix.bundles }}"
 
-      - name: Verify the .app (ad-hoc signature, run path)
+      - name: Verify the .app and the DMG (seal, no hardened runtime while ad hoc, Team IDs, sidecars start, run path)
         if: runner.os == 'macOS' && hashFiles('app/src-tauri/Cargo.toml') != ''
         run: bash scripts/ci/macos-verify-bundle.sh
 

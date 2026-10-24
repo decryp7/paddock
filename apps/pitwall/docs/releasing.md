@@ -30,6 +30,12 @@ The signing secrets are **not set yet**. Builds must work without them, and do:
 - macOS builds are sealed ad hoc (`signingIdentity: "-"`) because launch-agent registration through `SMAppService`
   refuses a linker-signed bundle (error -67056, see [suite-lessons.md](suite-lessons.md)). Ad hoc is not a Developer ID:
   Gatekeeper asks the user to approve the app on first launch ([macos.md](macos.md)).
+- While the build is ad hoc the **hardened runtime is off** (`hardenedRuntime: false` in `tauri.macos.conf.json`): ad-hoc
+  code under the hardened runtime enforces library validation and cannot load a library signed by its vendor ("different
+  Team IDs"). When the `APPLE_SIGNING_IDENTITY` secret names a real identity, `scripts/ci/tauri-bundle.sh` passes
+  `{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). `scripts/ci/macos-verify-bundle.sh` fails the
+  build when an ad-hoc Mach-O has the hardened runtime on, when bundled Mach-Os disagree on their TeamIdentifier, or when a
+  sidecar does not start from the built app (`--version`), on the `.app` and on the copy inside the DMG.
 - Windows installers are not Authenticode-signed; SmartScreen warns on first run ([windows.md](windows.md)).
 - Linux packages are not signed.
 
