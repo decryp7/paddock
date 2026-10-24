@@ -50,7 +50,7 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 | Spotter | `#F4B315` | `#FFD257` → `#E59600` | `#7A4E00` | `#3A2600` | 7.8:1 |
 | Pitwall | `#5A24B0` | `#7B46DB` → `#43198F` | `#24094F` | white | 9.1:1 |
 | Dyno | `#BE3584` | `#DE559F` → `#A0226A` | `#5E0E3C` | white | 5.2:1 |
-| Pacenotes | `#6D590F` | `#8A7635` → `#574601` | `#302501` | white | 6.8:1 |
+| Pacenotes | `#6D590F` | `#9A8228` → `#6A5500` | `#302501` | white | 6.8:1 |
 | Sighter | `#A686D6` | `#BFA2EE` → `#8B6DB5` | `#3C2D52` | `#2D1D43` (dark) | ink 5.1:1 on base |
 
 - **Ink rule:** the glyph is white wherever white reaches at least 3:1 on the tile. Spotter's amber and Sighter's lavender tiles are the light ones, so they take dark ink.

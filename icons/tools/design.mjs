@@ -12,7 +12,7 @@ export const PALETTE = {
   spotter: { top: '#FFD257', base: '#F4B315', bottom: '#E59600', deep: '#7A4E00', light: '#FFE08A' },
   pitwall: { top: '#7B46DB', base: '#5A24B0', bottom: '#43198F', deep: '#24094F', light: '#B99AF2' },
   sighter: { top: '#BFA2EE', base: '#A686D6', bottom: '#8B6DB5', deep: '#3C2D52', light: '#CCBAEC' },
-  pacenotes: { top: '#8A7635', base: '#6D590F', bottom: '#574601', deep: '#302501', light: '#C0B491' },
+  pacenotes: { top: '#9A8228', base: '#6D590F', bottom: '#6A5500', deep: '#302501', light: '#C0B491' },
   dyno: { top: '#DE559F', base: '#BE3584', bottom: '#A0226A', deep: '#5E0E3C', light: '#F29CCB' },
 };
 

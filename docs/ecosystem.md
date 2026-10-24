@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=e0b94c96" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=7c468da5" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -15,7 +15,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=0d95ed1c) and [dark](images/paddock-ecosystem-dark.png?v=49dd1428), integrations
+hero [light](images/paddock-ecosystem-light.png?v=9511e646) and [dark](images/paddock-ecosystem-dark.png?v=41f6fbfe), integrations
 [light](images/paddock-integrations-light.png?v=bb3fc28b) and [dark](images/paddock-integrations-dark.png?v=68a820ad). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
 `CHROME` to override).
