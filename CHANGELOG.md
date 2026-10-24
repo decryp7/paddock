@@ -5,6 +5,11 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `@decryp7/paddock-e2e` `paddockConfig()` and `captureDocScreens()` (plan X39). The config preset: projects Chromium and WebKit
+  (plus `screenshots` only with `SCREENSHOTS=1`), the port from an environment variable (required on CI), Chrome for Testing
+  only through `CHROMIUM_TEST_PATH`, `retries: 0`, traces on failure, blob reports for shards. The runner takes the five apps'
+  screenshot tables: both themes at 1440 x 900 @2x, frozen clock, long pages framed, `docs/screenshots/<theme>/<name>.png` and a
+  `hashes.json` for the review gate (`clock: 'paused'` stops the fake clock at exactly the frozen time). Node tests for the pure parts and a Playwright self-test on `data:` pages.
 - `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
   It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
   actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
