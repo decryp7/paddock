@@ -8,7 +8,7 @@ use crate::error::StorageError;
 use crate::guard::{Seen, recheck};
 use crate::model::{
     CategoryClearResult, ClearRequest, ItemView, Kind, StorageCategory, StorageClearResult,
-    StorageUsage,
+    StorageTree, StorageUsage,
 };
 use crate::run::Run;
 use crate::walk::{Budget, MAX_ENTRIES, MAX_SCAN_TIME, Removal, remove, size_of};
@@ -331,6 +331,41 @@ impl Storage {
             return Err(StorageError::NoPreview);
         }
         Ok(())
+    }
+
+    /// The folder of category `id` that a tree may walk: canonical and inside the app's folders.
+    fn tree_root(&self, id: &str) -> Result<(Category, PathBuf), StorageError> {
+        let c = self
+            .source
+            .categories()
+            .into_iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| StorageError::UnknownCategory(id.to_string()))?;
+        match self.root_of(&c) {
+            Ok(Some(root)) => Ok((c, root)),
+            Ok(None) => Err(StorageError::Unavailable(
+                "This folder does not exist yet".into(),
+            )),
+            Err(why) => Err(StorageError::Unavailable(why)),
+        }
+    }
+
+    /// Checks that category `id` can be walked, without walking it (a command calls this before it starts the job).
+    pub fn validate_tree(&self, id: &str) -> Result<(), StorageError> {
+        self.tree_root(id).map(drop)
+    }
+
+    /// The bounded size tree of category `id`'s folder (depth, items per folder, entries and time limited; no links; one volume).
+    /// A cancelled walk returns what it saw, marked `capped`.
+    pub fn tree(&self, id: &str, run: &dyn Run) -> Result<StorageTree, StorageError> {
+        let (c, root) = self.tree_root(id)?;
+        run.phase("tree", &format!("Measuring {}", c.label), None);
+        let (node, capped) = crate::tree::size_tree(&root, &c.label, &mut self.budget(), run);
+        Ok(StorageTree {
+            id: c.id,
+            root: node,
+            capped,
+        })
     }
 
     /// The folder to show in the file manager for category `id` (it must exist).
@@ -928,6 +963,40 @@ mod tests {
                 .freed_bytes,
             7
         );
+    }
+
+    #[test]
+    fn a_tree_walks_a_categorys_folder_inside_the_boundary_only() {
+        let fx = fx();
+        let outside = tempfile::tempdir().unwrap();
+        write(&outside.path().join("x"), 3);
+        let mut cats = standard(&fx);
+        cats.push(Category::new("out", "Out", Kind::Cache).folder(outside.path()));
+        cats.push(Category::new("none", "None", Kind::Cache).folder(fx.root.join("none")));
+        let s = storage(&fx, cats);
+        let rec = Recorder::new();
+        let tree = s.tree("cache", &rec).unwrap();
+        assert_eq!(
+            (
+                tree.id.as_str(),
+                tree.root.name.as_str(),
+                tree.root.bytes,
+                tree.capped
+            ),
+            ("cache", "Cache", 175, false)
+        );
+        assert_eq!(rec.phases(), [("Measuring Cache".to_string(), None)]);
+        assert!(matches!(
+            s.tree("nope", &()),
+            Err(StorageError::UnknownCategory(_))
+        ));
+        assert!(
+            matches!(s.tree("out", &()), Err(StorageError::Unavailable(w)) if w.contains("outside"))
+        );
+        assert!(
+            matches!(s.tree("none", &()), Err(StorageError::Unavailable(w)) if w.contains("does not exist"))
+        );
+        assert!(s.validate_tree("cache").is_ok() && s.validate_tree("out").is_err());
     }
 
     #[test]

@@ -420,7 +420,12 @@ fn permission_and_subscription_go_through_the_port() {
     Bare.subscribe(Arc::new(|_| {}));
     assert_eq!(Bare.permission(), Permission::Unknown);
     assert_eq!(Bare.request_permission(), Permission::Unknown);
-    assert!(Bare.open_system_settings().unwrap_err().0.contains("notification settings"));
+    assert!(
+        Bare.open_system_settings()
+            .unwrap_err()
+            .0
+            .contains("notification settings")
+    );
     r.toaster.set_permission_after_request(Permission::Granted);
     assert_eq!(r.toaster.request_permission(), Permission::Granted);
     r.toaster.open_system_settings().unwrap();

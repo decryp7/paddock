@@ -45,6 +45,12 @@ Conventional Commits; one semver tag for the whole repo.
   pins. `paddock-chromium`'s waits (`start_page`, start-up, `wait_ready`) run on the injected clock; its real-browser test runs
   in the Linux CI job. The `paddock-ci` image (v2) carries Chrome for Testing 156.0.8078.47, the build `chromium.toml` pins
   (was 156.0.8078.4); `scripts/ci-image.test.mjs` keeps them equal.
+- Files and storage follow-ups (plan X31/X32). `paddock-storage`: the size tree (`Storage::tree`, `storage_tree`, `StorageEvent::Tree`:
+  depth 3, 12 items per folder with the rest folded, bounded in entries and time, no links, one volume) and, in `shell/storage`, a
+  Folders button on the Storage page that shows it as a `pd-table` grouped by top-level folder. `paddock-files`: `Files::open_at_line` and
+  `files_open_at_line` (a granted file in the editor at a bounded line, the editor found per OS, never run); `RecentEntry::folder`.
+  `@decryp7/paddock-ui/icons`: four glyphs (`file`, `file-text`, `file-code`, `archive`) and `fileIcon()` in `shell/files`, which `pd-recent-files`
+  draws at 16 px; a contact sheet for their independent review (`CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x3x`).
 - `paddock-plugin-api`, `paddock-plugin-host` and `paddock-plugin-test` (plan X51, ADR 0001 to 0003), the platform half of
   Debrief's `debrief-plugin-api`, `-host`, `-registry` and `-test`. `paddock-plugin-api`: platform protocol 2.0
   (`PlatformRequest`, `HostCall`), `Plugin`/`Contributions` (tools with checked schemas, settings, views, MCP tools), the

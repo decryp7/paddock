@@ -442,7 +442,12 @@ impl Chromium {
             stop.clone(),
             timed_out.clone(),
         );
-        match connect(&dir, &mut process, &opts.clock, opts.start_limit) {
+        let started = connect(&dir, &mut process, &opts.clock, opts.start_limit).and_then(|conn| {
+            // The memory watcher looks every 200 ms, so a browser that is quick to start can be connected before its first
+            // look: one look now, with the same cap and sampler, so "over the cap while it starts" does not depend on timing.
+            over_cap_at_start(opts, process.id()).map_or(Ok(conn), Err)
+        });
+        match started {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
                 process,
@@ -605,6 +610,17 @@ impl Drop for Chromium {
     }
 }
 
+/// The launch error when the browser `pid` uses more than the cap right after it connected.
+fn over_cap_at_start(opts: &LaunchOptions, pid: Option<u32>) -> Option<Error> {
+    let (limit, pid) = (opts.memory_cap?, pid?);
+    let used = opts
+        .memory_sampler
+        .as_ref()
+        .map_or_else(|| paddock_proc::tree_memory(pid), |sample| sample(pid));
+    (used > limit)
+        .then(|| Error::Launch("the browser used more memory than allowed while it started".into()))
+}
+
 /// Ends the tree when `max` passed on `clock`, even if nobody calls anything. Stops when `stop` is cancelled.
 fn watchdog(
     pid: Option<u32>,
@@ -673,7 +689,12 @@ fn connect(
                 l.next().and_then(|p| p.trim().parse::<u16>().ok()),
                 l.next(),
             ) {
-                return Connection::connect(port, path.trim());
+                // The file can appear a moment before the endpoint takes connections (and a slow machine shows it): a refused or
+                // half-made handshake is tried again until the start limit, not a failed launch.
+                match Connection::connect(port, path.trim()) {
+                    Err(Error::Connection(_)) if !end.passed() && process.is_running() => {}
+                    done => return done,
+                }
             }
         }
         if !process.is_running() {
