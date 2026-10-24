@@ -1268,6 +1268,21 @@
       <trans-unit id="pd.updates.up-to-date" datatype="html">
         <source>You have the latest version.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.activity.empty" datatype="html">
+        <source>Nothing here</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.label-badge" datatype="html">
+        <source><x id="label"/>, <x id="badge"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.more" datatype="html">
+        <source>More</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.tooltip-keys" datatype="html">
+        <source><x id="label"/> (<x id="keys"/>)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.activity.tooltip-reason" datatype="html">
+        <source><x id="label"/> — <x id="reason"/></source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.activity" datatype="html">
         <source>Assistant</source>
       </trans-unit>
@@ -1394,6 +1409,66 @@
       <trans-unit id="pd.wb.category.view" datatype="html">
         <source>View</source>
       </trans-unit>
+      <trans-unit id="pd.wb.cmd.jobs" datatype="html">
+        <source>Show jobs</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.cmd.toggle-sidebar" datatype="html">
+        <source>Toggle side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.action-failed" datatype="html">
+        <source>That action failed.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.empty" datatype="html">
+        <source>Nothing here yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.failed" datatype="html">
+        <source>This list could not be loaded.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.more" datatype="html">
+        <source>Show more</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.more-of" datatype="html">
+        <source>Show more (<x id="count"/> left)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.no-actions" datatype="html">
+        <source>No actions</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.no-children" datatype="html">
+        <source>This item has no children to show.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.none" datatype="html">
+        <source>Nothing to explore.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.open-failed" datatype="html">
+        <source><x id="item"/> could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.refresh" datatype="html">
+        <source>Refresh <x id="section"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.explorer.retry" datatype="html">
+        <source>Try again</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.activity" datatype="html">
+        <source>Activity bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.resize" datatype="html">
+        <source>Resize the side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.sidebar" datatype="html">
+        <source>Side bar</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.skip" datatype="html">
+        <source>Skip to the work area</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.frame.status" datatype="html">
+        <source>Status bar</source>
+      </trans-unit>
       <trans-unit id="pd.wb.palette.accept-failed" datatype="html">
         <source>That result could not be opened.</source>
       </trans-unit>
@@ -1444,6 +1519,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.palette.unavailable" datatype="html">
         <source>Not available now</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.view.jobs" datatype="html">
+        <source>Jobs</source>
       </trans-unit>
       <trans-unit id="pd.whats-new.failed" datatype="html">
         <source>The release notes could not be loaded.</source>
