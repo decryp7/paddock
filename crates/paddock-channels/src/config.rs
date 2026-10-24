@@ -16,6 +16,8 @@ const MAX_URL: usize = 2048;
 
 /// How an SMTP connection is secured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "EmailSecurity"))]
 #[serde(rename_all = "camelCase")]
 pub enum Security {
     /// A plain connection upgraded with STARTTLS, which is required (usually port 587).
@@ -29,6 +31,7 @@ pub enum Security {
 
 /// Where and how a channel delivers. Secrets are never part of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -79,6 +82,7 @@ fn default_ntfy_server() -> String {
 
 /// One configured channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelConfig {
     /// Unique id within the settings (`A-Za-z0-9._-`, at most 64): also the credential store scope.
@@ -107,18 +111,17 @@ impl ChannelConfig {
             && self.events.iter().any(|e| e == &msg.kind)
     }
 
-    /// The name this channel's token or password has in the credential store (scope `channel:<id>`, key `token` or
-    /// `password`), or `None` when the channel needs none (no `auth`, or an e-mail relay without a login). `None` too when the
+    /// The name this channel's token or password has in the credential store (scope `channel:<id>`, key `secret`), or `None` when the channel needs none (no `auth`, or an e-mail relay without a login). `None` too when the
     /// id is not usable, which [`Settings::validate`] reports.
     pub fn secret_name(&self) -> Option<Name> {
-        let key = match &self.transport {
-            Transport::Webhook { auth: true, .. } | Transport::Ntfy { auth: true, .. } => "token",
-            Transport::Email {
+        match &self.transport {
+            Transport::Webhook { auth: true, .. }
+            | Transport::Ntfy { auth: true, .. }
+            | Transport::Email {
                 username: Some(_), ..
-            } => "password",
-            _ => return None,
-        };
-        Name::new(&format!("channel:{}", self.id), key).ok()
+            } => secret_name_of(&self.id),
+            _ => None,
+        }
     }
 
     /// Removes the channel's secret (when the channel is deleted or no longer needs one).
@@ -196,8 +199,16 @@ impl ChannelConfig {
     }
 }
 
+/// The credential store name of the token or password of channel `id` (scope `channel:<id>`, key `secret`); `None` when the id
+/// does not make a valid name. Used where only the id is known (the secret dialog).
+pub fn secret_name_of(id: &str) -> Option<Name> {
+    Name::new(&format!("channel:{id}"), "secret").ok()
+}
+
 /// All notification settings of an app. The default has no channels, so nothing is ever sent unless configured.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ChannelsSettings"))]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     /// Configured channels (at most [`MAX_CHANNELS`]).
@@ -267,10 +278,17 @@ fn check_id(id: &str) -> Result<(), String> {
 
 fn check_http_url(what: &str, url: &str) -> Result<(), String> {
     check_text(what, url, MAX_URL)?;
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .ok_or_else(|| format!("{what} must start with https:// or http://"))?;
+    let (plain, rest) = match url.strip_prefix("https://") {
+        Some(rest) => (false, rest),
+        None => match url.strip_prefix("http://") {
+            Some(rest) => (true, rest),
+            None => {
+                return Err(format!(
+                    "{what} must start with https:// (http:// is only for this computer)"
+                ));
+            }
+        },
+    };
     let host = rest.split(['/', '?', '#']).next().unwrap_or("");
     if host.is_empty() || host.starts_with(':') || host.contains(char::is_whitespace) {
         return Err(format!("{what} needs a valid host name"));
@@ -278,6 +296,17 @@ fn check_http_url(what: &str, url: &str) -> Result<(), String> {
     if host.contains('@') {
         return Err(format!(
             "{what} must not contain a login; use the token field"
+        ));
+    }
+    // A bracketed IPv6 literal keeps its colons; any other host loses its port.
+    let name = if host.starts_with('[') {
+        host.split(']').next().unwrap_or("")
+    } else {
+        host.split(':').next().unwrap_or("")
+    };
+    if plain && !paddock_net::host_is_loopback(name) {
+        return Err(format!(
+            "{what} must use https:// (plain http is only for this computer)"
         ));
     }
     Ok(())

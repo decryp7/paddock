@@ -135,14 +135,19 @@ so a manager app never bundles the workbench:
 | `/shell/pages` | the pages frame of the manager apps: `provideShellPages`, `pd-shell-frame`, the sidebar of contributed pages (expanded, rail or over the page by `planLayout`), routed lazy pages with their own providers, `ShellPages` | S14 |
 | `/shell/settings` | settings over the `paddock-settings` adapter, what a main window imports: `SettingsBackend` (Tauri, memory), `SettingsStore`, the model, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
 | `/shell/settings/window` | the Settings window, loaded only by it: `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `SettingsDrafts` (Signal Forms), `settingsWindowProviders` | S10, S16 |
+| `/table`, `/chart`, `/forms` | `pd-table` (sort, filter, columns, groups, virtual scroll, row keyboard and menus, hover actions); `pd-chart` over lazy ECharts with the family theme and the generic chart kinds; `pd-field` and the validation display for Signal Forms | X21 |
 | `/icons`, `/format`, `/prefs`, `/select`, `/testing`, `/shell/feel` | the `pd:` icon set and `outlineIcon`; one formatting API and the middle ellipsis; guarded localStorage; the themed `pd-select`; the DOM test kit (`installTestKit`, helpers, fake ECharts); the native-feel guard | X36, X35, X12, X38 |
 | `/ipc`, `/ipc/testing` | the app IPC kit: `CommandError` (generated from `paddock_commands::CommandError`) with `toCommandError`, `CommandFailure`; `withCallTimeout` for request/reply commands (never jobs, rule 12) and `callTimeoutProblems`; `provideBackend` (Tauri or a lazily imported mock); the mock kit `parseMockOptions` (`?mock=&latency=&fail=&hold=`), `formatMockOptions`, `withMockOptions` | X28 |
+| `/live` | the window side of the live feed: `withLiveFeed` (SignalStore feature over `paddock-live`: `live`, `liveSeq`, `liveLink`, `connectLive`, `resyncLive`), the pure `foldFrame` / `parseFrame`, `LIVE_TRANSPORT` with `tauriLiveTransport` and `MemoryLiveTransport`, the bounded lists `appendBounded`, `appendThrottled`, `upsertBy`, `prependUnique`, and `Debouncer`, `streamCall` / `tauriChannelFactory` (per-call streams) | X29 |
 | `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
+| `/live` | the window side of the live feed: `withLiveFeed` (SignalStore feature over `paddock-live`: `live`, `liveSeq`, `liveLink`, `connectLive`, `resyncLive`), the pure `foldFrame` / `parseFrame`, `LIVE_TRANSPORT` with `tauriLiveTransport` and `MemoryLiveTransport`, the bounded lists `appendBounded`, `appendThrottled`, `upsertBy`, `prependUnique`, and `Debouncer` | X29 |
+| `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `FakeClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/shell/startup`, `/shell/dialogs`, `/shell/about` | one shell part each | S5-S11 |
 | `/shell/diagnostics` | report a problem over the `paddock-diag` adapter: `DiagnosticsBackend` (Tauri, memory), `DiagnosticsStore`, the Report a Problem decision dialog (description, every file with its size, Save through the engine's native dialog), `diagnosticsContributions` (Help item, the Logging settings page), `provideShellDiagnostics`, `provideWebviewLog` (the page's errors in the engine's log) | X2 |
 | `/shell/pitwall` | the family's one "needs local AI" state over `paddock-pitwall`: `<pd-needs-ai>` (the engine's sentence and actions: Connect with the code to compare, Use the built-in engine for this session, Open AI settings, `(step)` for what only the app can do), `PitwallBackend` (Tauri over `PITWALL_COMMANDS`, memory), `PitwallStore`, `providePitwall`; wire types generated from Rust | ADR 0004 |
 | `/shell/service` | the background service over the `paddock-service` adapter (`service_status`, `service_repair`, `service_install`, `open_login_items`, live phases and outcomes on `paddock://service`): `ServiceBackend` (Tauri, memory with install, repair phases, failure, busy, switched-off, needs-approval), `ServiceStore` (status, event folding, "Still working", inline error with Retry), `defineServiceSettingsPage`/`serviceContributions` (the `pd.login` page and `SERVICE_SETTINGS_COMMANDS` for the Settings dialog's contract), `provideShellService`; the page `PdServicePage` (status word, message, Install/Repair/Open Login Items… only where `can*` says, "Start at login" beneath) is in `/shell/service/page`, a chunk of its own | X4 |
 | `/shell/setup` | the first-run set-up checklist over `paddock_shell::setup` (`setup_state`, `setup_act`, `setup_repair`, `setup_skip`, `setup_finish`, changes on `paddock://setup`): `SetupBackend` (Tauri, memory with working-then-outcome events, failure, busy), `SetupStore`, `defineSetup` (the modeless `pd.setup` window and the Settings > Set-up page), `SETUP_CONTRIBUTIONS` (Help > Set-up…), `provideShellSetup` (`main: true` opens the window once on a first run); the components `PdSetupDialog`, `PdSetupPage` and `PdSetupChecklist` (status word, primary action or Repair, Skip for now, "Still working", inline error with Retry) are in `/shell/setup/page` | X19 |
+| `/shell/channels` | notification channels over the `paddock-channels` adapter (`channels_get`, `channels_save`, `channels_set_secret`, `channels_clear_secret`, `channels_test`, a test's outcome on `paddock://channels`): `ChannelsBackend` (Tauri; memory with the engine's validation, secrets in a map, `succeed`/`rejected`/`unreachable`/`missingSecret`/`hang` tests), `ChannelsStore` (view, save and remove with the engine's message kept as it is, per-channel test state, a test is never timed out), the draft helpers, `defineChannelsSettingsPage`/`defineChannelsSecretDialog`/`channelsContributions` (the `pd.channels` page, the modal `pd.channels.secret` form, `CHANNELS_SETTINGS_COMMANDS` for the Settings dialog's contract), `provideShellChannels`/`provideChannelsBackend`; the page `PdChannelsPage` (a table with Edit, Send test and Remove per row, one Add channel, an inline editor on Signal Forms) is in `/shell/channels/page` and the secret dialog `PdChannelSecretDialog` (a masked field; the secret goes from its window straight to the engine) in `/shell/channels/dialog`, each a chunk of its own | X17 |
 | `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
 
 They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
@@ -590,3 +595,37 @@ provideBackend(BACKEND, {
   finds names in the policy that are not methods (a typo would leave a call on the default).
 - The mock kit plays latency, failures (`?fail=save:2` fails the first two calls), held answers (`?hold=load`, released by
   `__paddockMockRelease('load')`) and records the calls; `formatMockOptions` builds the query string in Playwright specs.
+
+### The live feed (`@decryp7/paddock-ui/live`, plan X29)
+
+Rust owns the state and pushes; the window folds. Per feed, in Rust: a `Hub<S>` (`paddock-live`) registered on a channel; in the
+window: a store with `withLiveFeed`.
+
+```ts
+const empty: Overview = { memory: null, events: [], downloads: [] };
+export const OverviewStore = signalStore(
+  withLiveFeed<Overview, OverviewChange>({ channel: 'overview', empty, apply: applyChange }),   // the same fold as Rust's LiveState::apply
+  withMethods((store) => ({ /* the app's own commands, patchState only here (rule 31) */ })),
+  withHooks({ onInit: (store) => void store.connectLive() }),
+);
+// window providers: { provide: LIVE_TRANSPORT, useValue: tauriLiveTransport(ipc) }  (MemoryLiveTransport in the browser build)
+```
+
+- A frame is a `snapshot` (state, `seq`, link), a `delta` (`from..=seq`) or a `link` change. `foldFrame` applies a delta only when
+  `from` is the next number; a gap triggers one `resyncLive()` (the `live_snapshot` command), a duplicate or an older fetched
+  snapshot is ignored, a pushed snapshot (Rust reseeded after a reconnect) replaces the state. `connectLive()` listens first and
+  fetches second, so a window that opens or reloads mid-stream misses nothing.
+- `liveLink` says what the source is doing (`connecting`, `connected`, `reconnecting` with attempt and delay, `down`, `stopped`);
+  `liveStale` is true for anything but connected: show the last state as stale, never as current. The first load follows rule 30
+  (`requestStatus`, `isLoading`, `requestError`).
+- The fold in TypeScript is the one UI copy of `LiveState::apply`. `live/generated/live-fixtures.ts` is a conversation as Rust sent
+  it (regenerated by `PADDOCK_WRITE_TS=1 cargo test -p paddock-live --features tauri --test it generated`); the app's spec folds
+  it with its own `apply` and compares with Rust's final state, so the two folds cannot drift.
+- Lists a fold keeps are bounded: `appendThrottled` (Pitwall's chart tail: one point per step, at most N), `appendBounded`
+  (Dyno's sparklines), `prependUnique` (events by id), `upsertBy` (downloads by id). `Debouncer` turns a burst of pushes into one
+  reload (Spotter's dashboard).
+- **Per-call streams** (Debrief's search results and live tail, a query's progress): `streamCall(tauriChannelFactory(Channel), (channel) =>
+  invoke('run_query_stream', { request, onProgress: channel }), { onMessage, isLast?, signal? })`. Messages arrive in order and none after
+  the call settled; a command failure rejects at once; a throwing handler stops delivery and rejects with its error; with `isLast` the
+  call resolves only when the answer and the last message are both in (the answer can overtake the final messages); `signal` aborts
+  with an `AbortError` (cancelling the work itself stays a job). Backends take a `ChannelFactory` so specs pass a fake.

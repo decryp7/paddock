@@ -50,6 +50,15 @@ type BoxError = Box<dyn Error + Send + Sync>;
 type Part<R, T> = Box<dyn FnOnce(&AppHandle<R>) -> T + Send>;
 type DiagSetup<R> =
     Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_diag::tauri::Setup, BoxError> + Send>;
+type PacksSetup<R> =
+    Box<dyn FnOnce(&AppHandle<R>) -> Result<paddock_packs::tauri::Setup, BoxError> + Send>;
+type ChannelsSetup<R> = Box<
+    dyn FnOnce(
+            &AppHandle<R>,
+            paddock_channels::Emit,
+        ) -> Result<Arc<paddock_channels::ChannelsControl>, BoxError>
+        + Send,
+>;
 type ServiceSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<ServicePart, BoxError> + Send>;
 type AppSetup<R> = Box<dyn FnOnce(&AppHandle<R>) -> Result<(), BoxError> + Send>;
 type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSetup<R> + Send>;
@@ -65,6 +74,8 @@ pub struct Builder<R: Runtime> {
     diagnostics: Option<DiagSetup<R>>,
     service: Option<ServiceSetup<R>>,
     first_run: Option<Part<R, FirstRun>>,
+    packs: Option<PacksSetup<R>>,
+    channels: Option<ChannelsSetup<R>>,
     sections: Vec<Arc<dyn Configurable>>,
     startup: Option<Startup<R>>,
     updater: Option<Part<R, UpdatesBuilder>>,
@@ -88,6 +99,8 @@ impl<R: Runtime> Builder<R> {
             diagnostics: None,
             service: None,
             first_run: None,
+            packs: None,
+            channels: None,
             sections: Vec::new(),
             startup: None,
             updater: None,
@@ -166,6 +179,35 @@ impl<R: Runtime> Builder<R> {
     /// start naming it.
     pub fn first_run(mut self, f: impl FnOnce(&AppHandle<R>) -> FirstRun + Send + 'static) -> Self {
         self.first_run = Some(Box::new(f));
+        self
+    }
+
+    /// The app's knowledge packs (plan X15): its pack kinds and, if it has one, the health entry that follows them. The
+    /// shell manages them (`packs_status`, `packs_reload` and the `paddock://packs` event) and keeps the health entry
+    /// current with its Repair (reload). Do the first load (`Reloader::reload_now`) before the closure returns, so the
+    /// first look is real.
+    pub fn packs(
+        mut self,
+        f: impl FnOnce(&AppHandle<R>) -> Result<paddock_packs::tauri::Setup, BoxError> + Send + 'static,
+    ) -> Self {
+        self.packs = Some(Box::new(f));
+        self
+    }
+
+    /// The app's notification channels (plan X17): the closure builds the `ChannelsControl` (settings store, secrets, the
+    /// `paddock-net` egress, clock) around the event sender it is given. The shell manages it (`channels_get`, `channels_save`,
+    /// `channels_set_secret`, `channels_clear_secret`, `channels_test` and the `paddock://channels` event); only the secret
+    /// dialog's window may store a secret.
+    pub fn channels(
+        mut self,
+        f: impl FnOnce(
+            &AppHandle<R>,
+            paddock_channels::Emit,
+        ) -> Result<Arc<paddock_channels::ChannelsControl>, BoxError>
+        + Send
+        + 'static,
+    ) -> Self {
+        self.channels = Some(Box::new(f));
         self
     }
 
@@ -303,6 +345,14 @@ impl<R: Runtime> Builder<R> {
                 crate::setup::tauri::invoke_handler(),
             )
             .route(
+                &paddock_packs::COMMANDS,
+                paddock_packs::tauri::invoke_handler(),
+            )
+            .route(
+                &paddock_channels::COMMANDS,
+                paddock_channels::tauri::invoke_handler(),
+            )
+            .route(
                 &paddock_jobs::tauri::COMMANDS,
                 paddock_jobs::tauri::invoke_handler(),
             )
@@ -407,6 +457,16 @@ impl<R: Runtime> Builder<R> {
                     Ok(())
                 }))
                 .map_err(|e| named("the Start at login settings", e))?;
+        }
+
+        if let Some(f) = self.packs {
+            let setup = f(app).map_err(|e| named("the knowledge packs", e))?;
+            paddock_packs::tauri::install(app, setup);
+        }
+
+        if let Some(f) = self.channels {
+            paddock_channels::tauri::install(app, |emit| f(app, emit))
+                .map_err(|e| named("the notification channels", e))?;
         }
 
         let dialogs = Dialogs::from_json(self.contracts.as_deref().unwrap_or(NO_CONTRACTS))

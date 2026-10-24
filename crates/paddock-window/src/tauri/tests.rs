@@ -666,14 +666,25 @@ fn a_tray_app_without_a_window_rebuilds_it_for_a_second_launch_the_dock_and_open
     assert_eq!(list(h).len(), 1);
 }
 
+/// A hang guard around a state the app reaches after an event the test caused (never a timing assertion).
+fn eventually(f: impl Fn() -> bool) {
+    let start = std::time::Instant::now();
+    while !f() {
+        assert!(start.elapsed() < Duration::from_secs(60), "never reached");
+        std::thread::yield_now();
+    }
+}
+
 #[test]
 fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
     let quits = calls();
     let steps = calls();
     let s = steps.clone();
+    let clock = paddock_jobs::time::FakeClock::new();
     let config = WindowConfig::new("Pitwall")
-        .exit_stall_limit(Duration::from_millis(50))
-        .step_limit(Duration::from_millis(200));
+        .exit_stall_limit(Duration::from_secs(8))
+        .step_limit(Duration::from_secs(3))
+        .clock(Arc::new(clock.clone()));
     let (release, stuck) = std::sync::mpsc::channel::<()>();
     let stuck = Mutex::new(stuck);
     // The process end is announced on a channel, so the test waits for the event, not for a poll.
@@ -688,7 +699,7 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
             })
             .teardown("jobs", move |_| s.lock().unwrap().push("jobs".into()))
             .teardown("stuck", move |_| {
-                let _ = stuck.lock().unwrap().recv_timeout(Duration::from_secs(5));
+                let _ = stuck.lock().unwrap().recv();
             })
             .build(),
     );
@@ -696,19 +707,20 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
     with_tray(&app);
     create_main(h).unwrap();
     assert!(exit_requested(h, None), "the last window closed");
-    let started = std::time::Instant::now();
     assert!(!exit_requested(h, Some(3)), "an explicit exit");
     assert!(state(&app).quitting());
-    // The windows never close: the watchdog tears down and ends the process with the code, once.
-    // The watchdog's end is the event; the limit only stops a hung test.
+    // The windows never close: the watchdog (its first wait) tears down after the stall limit on the clock.
+    assert!(clock.wait_for_started(1, Duration::from_secs(60)));
+    clock.advance(Duration::from_secs(8));
+    // Steps: window bounds, jobs, then the stuck one, which holds the exit up for the step limit only.
+    assert!(clock.wait_for_started(4, Duration::from_secs(60)));
+    assert!(taken(&quits).is_empty());
+    clock.advance(Duration::from_secs(3));
+    // The process end is the event; the limit only stops a hung test.
     assert_eq!(
         ended.recv_timeout(Duration::from_secs(60)),
         Ok(3),
         "the watchdog ended the exit"
-    );
-    assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "bounded by the step limits"
     );
     assert_eq!(taken(&steps), ["jobs"]);
     drop(release);
@@ -720,20 +732,23 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
 #[test]
 fn the_normal_exit_tears_down_and_the_watchdog_then_does_nothing() {
     let quits = calls();
-    let config = WindowConfig::new("Debrief").exit_stall_limit(Duration::from_millis(30));
+    let clock = paddock_jobs::time::FakeClock::new();
+    let config = WindowConfig::new("Debrief")
+        .exit_stall_limit(Duration::from_secs(8))
+        .clock(Arc::new(clock.clone()));
     let app = app_with(windows(config, &quits).build());
     let h = app.handle();
     assert!(!exit_requested(h, Some(0)));
+    assert!(clock.wait_for_started(1, Duration::from_secs(60)));
     on_run_event(h, &RunEvent::Exit);
     on_run_event(h, &RunEvent::Ready);
-    let deadline = std::time::Instant::now() + Duration::from_millis(300);
-    while std::time::Instant::now() < deadline {
-        assert!(
-            taken(&quits).is_empty(),
-            "the normal exit owned the teardown"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    // The watchdog wakes after the normal exit began its teardown: it leaves the exit alone.
+    clock.advance(Duration::from_secs(8));
+    eventually(|| clock.waiters() == 0);
+    assert!(
+        taken(&quits).is_empty(),
+        "the normal exit owned the teardown"
+    );
 }
 
 #[cfg(target_os = "macos")]

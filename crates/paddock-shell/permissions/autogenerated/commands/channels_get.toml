@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-channels-get"
+description = "Enables the channels_get command without any pre-configured scope."
+commands.allow = ["channels_get"]
+
+[[permission]]
+identifier = "deny-channels-get"
+description = "Denies the channels_get command without any pre-configured scope."
+commands.deny = ["channels_get"]

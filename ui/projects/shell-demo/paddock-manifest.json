@@ -14,10 +14,6 @@
       "title": "pd.settings.open"
     },
     {
-      "id": "pd.setup.open",
-      "title": "pd.setup.open"
-    },
-    {
       "id": "pd.updates.open",
       "title": "pd.updates.open"
     },
@@ -169,13 +165,6 @@
     },
     {
       "menu": "help",
-      "command": "pd.setup.open",
-      "group": "about",
-      "order": 300,
-      "accelerator": null
-    },
-    {
-      "menu": "help",
       "command": "pd.diagnostics.report",
       "group": "support",
       "order": 400,
@@ -266,18 +255,20 @@
     "sd.keys",
     "sd.lab",
     "sd.pitwall",
-    "sd.runners"
+    "sd.runners",
+    "sd.schedule"
   ],
   "statusItems": [
     "sd.runners"
   ],
   "settingsPages": [
     "pd.appearance",
+    "pd.channels",
     "pd.language",
     "pd.logging",
     "pd.login",
     "pd.notifications",
-    "pd.setup",
+    "pd.packs",
     "sd.general",
     "sd.storage"
   ],
@@ -303,6 +294,16 @@
         "about_legal"
       ]
     },
+    "pd.channels.secret": {
+      "kind": "form",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": [
+        "channels_set_secret"
+      ]
+    },
     "pd.report-problem": {
       "kind": "decision",
       "modality": "modal",
@@ -324,32 +325,20 @@
       "minSize": null,
       "commands": [
         "app_relaunch",
+        "channels_clear_secret",
+        "channels_get",
+        "channels_save",
+        "channels_test",
+        "dialog_open",
         "open_login_items",
+        "packs_reload",
+        "packs_status",
         "service_install",
         "service_repair",
         "service_status",
         "settings_overview",
         "settings_reset",
-        "settings_set",
-        "setup_act",
-        "setup_finish",
-        "setup_repair",
-        "setup_skip",
-        "setup_state"
-      ]
-    },
-    "pd.setup": {
-      "kind": "tool",
-      "modality": "modeless",
-      "instanced": false,
-      "requiredChoice": false,
-      "minSize": null,
-      "commands": [
-        "setup_act",
-        "setup_finish",
-        "setup_repair",
-        "setup_skip",
-        "setup_state"
+        "settings_set"
       ]
     },
     "pd.updates": {
@@ -447,18 +436,18 @@
     "pd.about.title": "About",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
+    "pd.channels.secret.title": "Channel secret",
     "pd.diag.open": "Report a problem…",
     "pd.diag.title": "Report a problem",
     "pd.settings.appearance": "Appearance",
+    "pd.settings.channels": "Notification channels",
     "pd.settings.language": "Language",
     "pd.settings.logging": "Logging",
     "pd.settings.notifications": "Notifications",
     "pd.settings.open": "Settings…",
+    "pd.settings.packs": "Knowledge packs",
     "pd.settings.service": "Background service",
-    "pd.settings.setup": "Set-up",
     "pd.settings.title": "Settings",
-    "pd.setup.open": "Set-up…",
-    "pd.setup.title": "Set-up",
     "pd.updates.notification.available": "Update available",
     "pd.updates.open": "Check for updates…",
     "pd.updates.title": "Updates",
@@ -494,6 +483,7 @@
     "sd.page.lab": "Lab",
     "sd.page.pitwall": "Local AI",
     "sd.page.runners": "Runners",
+    "sd.page.schedule": "Schedules",
     "sd.pseudo-locale": "Pseudo-locale",
     "sd.reset": "Reset greetings",
     "sd.settings.general": "General",

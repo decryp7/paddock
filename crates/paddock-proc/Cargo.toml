@@ -9,9 +9,14 @@ publish = ["decryp7"]
 
 [dependencies]
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# The kill-on-close job object of every supervised child (plan X54).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects"] }
 
 [dev-dependencies]
 tempfile = "3"

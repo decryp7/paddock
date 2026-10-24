@@ -35,6 +35,8 @@ paddock-jobs = { workspace = true, features = ["tauri"] }
 paddock-env = { workspace = true }
 paddock-menu = { workspace = true, features = ["tauri"] }
 paddock-pitwall = { workspace = true }
+paddock-packs = { workspace = true, features = ["tauri"] }
+paddock-channels = { workspace = true, features = ["tauri"] }
 paddock-service = { workspace = true, features = ["tauri"] }
 paddock-settings = { workspace = true, features = ["tauri"] }
 paddock-startup = { workspace = true, features = ["tauri"] }
@@ -43,6 +45,7 @@ paddock-window = { workspace = true, features = ["tauri"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = { version = "0.4", features = ["kv"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [build-dependencies]
 tauri-plugin = { version = "2.7", features = ["build"] }
