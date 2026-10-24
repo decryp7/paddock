@@ -890,6 +890,216 @@
       <trans-unit id="pd.language.title" datatype="html">
         <source>Language</source>
       </trans-unit>
+      <trans-unit id="pd.mcp.actions-title" datatype="html">
+        <source>Actions that change things</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.actions-warn" datatype="html">
+        <source>These tools change something on this computer. They stay off until you allow each one, and a client with a key can then use it without asking you again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.active" datatype="html">
+        <source>Active</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.add" datatype="html">
+        <source>Add a client…</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.allow" datatype="html">
+        <source>Allow <x id="tool"/></source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-clear" datatype="html">
+        <source>Clear</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-empty" datatype="html">
+        <source>No client has called a tool yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-failed" datatype="html">
+        <source>The activity log could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.audit-title" datatype="html">
+        <source>Activity</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clear-failed" datatype="html">
+        <source>The activity log could not be cleared.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clients-lede" datatype="html">
+        <source>Each client has its own key. Revoke a key to cut that client off.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.clients-title" datatype="html">
+        <source>Clients</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-actions" datatype="html">
+        <source>Actions</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-args" datatype="html">
+        <source>Arguments (redacted)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-client" datatype="html">
+        <source>Client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-client-name" datatype="html">
+        <source>Client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-created" datatype="html">
+        <source>Added</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-duration" datatype="html">
+        <source>Took (ms)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-outcome" datatype="html">
+        <source>Result</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-size" datatype="html">
+        <source>Size</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-state" datatype="html">
+        <source>State</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-time" datatype="html">
+        <source>Time</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.col-tool" datatype="html">
+        <source>Tool</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.dismiss" datatype="html">
+        <source>Dismiss</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.client" datatype="html">
+        <source>Client name</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.copied" datatype="html">
+        <source>Copied to the clipboard.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.copy" datatype="html">
+        <source>Copy</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.create" datatype="html">
+        <source>Create key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.failed" datatype="html">
+        <source>The engine could not issue a key.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.how" datatype="html">
+        <source>Give it to the client as the first line it sends when it connects: {&quot;key&quot;: &quot;...&quot;}. Anyone with the key can read what the enabled tools expose.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.key-label" datatype="html">
+        <source>Key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.lede" datatype="html">
+        <source>Name the program that will connect, for example &quot;Pitwall&quot;. It gets its own key, which you can revoke at any time.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.not-copied" datatype="html">
+        <source>The clipboard is not available. Select the key and copy it with the keyboard.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.once" datatype="html">
+        <source>This is the only time the key is shown. Copy it now; the app keeps only a fingerprint and cannot show it again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.key.title" datatype="html">
+        <source>Add a client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.keys-limit" datatype="html">
+        <source><x id="max"/> keys are in use, the most there can be. Revoke one you no longer need before adding another.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.lede" datatype="html">
+        <source>Lets a program on this computer, such as a local AI assistant, ask this app questions over the Model Context Protocol. It is off until you turn it on, it only works on this computer, and every call is logged below.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.load-failed" datatype="html">
+        <source>The AI access settings could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.load-failed-heading" datatype="html">
+        <source>The AI access settings could not be read</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.loading" datatype="html">
+        <source>Loading the AI access settings</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.master-hint" datatype="html">
+        <source>Clients connect with a key you give them. Tools are read-only: they look at data and never change it.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.no-clients" datatype="html">
+        <source>No clients yet</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.no-clients-text" datatype="html">
+        <source>Add a client to get a key for it. Nothing can connect without one.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.off" datatype="html">
+        <source>AI access is off</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.on" datatype="html">
+        <source>AI access is on</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-cancelled" datatype="html">
+        <source>Cancelled by the client</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-ok" datatype="html">
+        <source>Answered</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-panicked" datatype="html">
+        <source>Crashed</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-refused" datatype="html">
+        <source>Refused</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-timed-out" datatype="html">
+        <source>Timed out</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.outcome-tool-error" datatype="html">
+        <source>Failed</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.resources" datatype="html">
+        <source>Resources</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.resources-hint" datatype="html">
+        <source>Documents the client can read by address, such as a summary.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke" datatype="html">
+        <source>Revoke</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-aria" datatype="html">
+        <source>Revoke the key of <x id="client"/></source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-effect" datatype="html">
+        <source>It stops working at once, and the client has to be given a new key to connect again.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-failed" datatype="html">
+        <source>The key could not be revoked.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-invalid" datatype="html">
+        <source>This window was opened without a key to revoke. Close it and choose Revoke on a client in the list.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-keep" datatype="html">
+        <source>Keep</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-question" datatype="html">
+        <source>Revoke the key of &quot;<x id="client"/>&quot;?</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke-yes" datatype="html">
+        <source>Revoke</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoke.title" datatype="html">
+        <source>Revoke key</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.revoked" datatype="html">
+        <source>Revoked</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.save-failed" datatype="html">
+        <source>The change could not be saved.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.title" datatype="html">
+        <source>AI access (MCP)</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.tools-lede" datatype="html">
+        <source>What a connected client may ask. Switch off what you do not want to share.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.tools-title" datatype="html">
+        <source>Tools</source>
+      </trans-unit>
       <trans-unit id="pd.menu.bar" datatype="html">
         <source>Application menu</source>
       </trans-unit>
@@ -1456,6 +1666,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.logging" datatype="html">
         <source>Logging</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.mcp" datatype="html">
+        <source>AI access (MCP)</source>
       </trans-unit>
       <trans-unit id="pd.settings.no-match" datatype="html">
         <source>No settings match “<x id="query"/>”.</source>
