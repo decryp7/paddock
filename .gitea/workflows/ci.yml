@@ -265,6 +265,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-proc --all-targets --all-features -- -D warnings && cargo test -p paddock-proc --all-features
 
+      - name: paddock-cli
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-cli --all-targets --all-features -- -D warnings && cargo test -p paddock-cli --all-features
+
       - name: paddock-env
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo test -p paddock-env --all-features
