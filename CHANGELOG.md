@@ -5,6 +5,14 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-chromium` and `paddock-runtime` (plan X14). `paddock-chromium` is the one Chromium driver, merged from Debrief's
+  `chromium-driver` and Spotter's `spotter-render`: one command-line builder with the start page always last, `Sandbox::decide`
+  (root plus an explicit opt-in only), launch as a `paddock-proc` supervised tree with a time limit on an injected clock and a
+  memory cap, the DevTools client that knows when the user closed a window, pages (snapshot, wait until readable, capture),
+  both apps' readiness and challenge rules, discovery that gives tests only `CHROMIUM_TEST_PATH`, the pinned Chrome for Testing
+  runtime and a fake browser for tests. `paddock-runtime` installs pinned runtimes (Chromium now, FFmpeg and llama.cpp later)
+  from a checked catalogue as one job (download hashed while written, unpack, self-test, install), keeps the previous release
+  for rollback and quarantines a release that fails.
 - `paddock-cli` (plan X25): the family's command-line conventions. `Exit` (0 ok, 1 failure, 2 usage, 3 not running, 4 refused,
   5 findings, 130 interrupted), `CliError` with a next step, `finish` (one JSON object on stdout in `--json` mode, errors
   included), `Table` (text, CSV, JSON; bounded cells), `Progress` (throttled, de-duplicated phase lines on stderr, injected time)

@@ -1,0 +1,21 @@
+[package]
+name = "paddock-runtime"
+version = "0.1.0"
+description = "Pinned runtimes for the Paddock apps (Chromium, FFmpeg, llama.cpp): a catalogue of per-platform archives with size and SHA-256, a versioned store that installs through paddock-download as one job (download, unpack, self-test, install), keeps the previous release for rollback and quarantines a release that fails."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+paddock-download = { workspace = true }
+paddock-env = { workspace = true }
+paddock-jobs = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

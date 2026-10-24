@@ -8,6 +8,7 @@ exclude = ["paddock-ipc/fuzz"]
 members = [
     "paddock-cli",
     "paddock-channels",
+    "paddock-chromium",
     "paddock-commands",
     "paddock-dialogs",
     "paddock-diag",
@@ -22,6 +23,7 @@ members = [
     "paddock-packs",
     "paddock-pitwall",
     "paddock-proc",
+    "paddock-runtime",
     "paddock-secrets",
     "paddock-service",
     "paddock-settings",
@@ -45,6 +47,7 @@ tauri = { version = "2.12", default-features = false }
 # the one published to the `decryp7` registry (keep it equal to the crate's `version`); the path is used in the workspace.
 paddock-cli = { path = "paddock-cli", version = "0.1.0", registry = "decryp7" }
 paddock-channels = { path = "paddock-channels", version = "0.1.0", registry = "decryp7" }
+paddock-chromium = { path = "paddock-chromium", version = "0.1.0", registry = "decryp7" }
 paddock-commands = { path = "paddock-commands", version = "0.1.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "decryp7" }
 paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
@@ -59,6 +62,7 @@ paddock-menu = { path = "paddock-menu", version = "0.1.0", registry = "decryp7" 
 paddock-packs = { path = "paddock-packs", version = "0.1.0", registry = "decryp7" }
 paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }
+paddock-runtime = { path = "paddock-runtime", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
 paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "decryp7" }

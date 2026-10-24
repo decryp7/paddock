@@ -1,0 +1,677 @@
+//! Starting a browser: the command line, the profile (throwaway or kept) with an accent theme, and the supervised process
+//! tree with its time and memory limits. The real user agent and the automation banner are kept on purpose: no stealth.
+
+use crate::cdp::Connection;
+use crate::discover::Browser;
+use crate::page::Page;
+use crate::{Error, Result};
+use paddock_jobs::CancelToken;
+use paddock_jobs::time::{Clock, SystemClock};
+use paddock_proc::{MemoryCap, Sampler, Supervised};
+use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+/// The page the browser opens with; always the last argument of its command line.
+pub const START_PAGE: &str = "about:blank";
+/// How long the browser may take to start and write its DevTools port.
+pub const START_LIMIT: Duration = Duration::from_secs(20);
+/// How long a browser gets to quit by itself after `Browser.close` before its tree is ended.
+pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
+/// How long [`Chromium::start_page`] waits for the page the browser opens with.
+#[cfg(not(test))]
+pub const START_PAGE_WAIT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+pub const START_PAGE_WAIT: Duration = Duration::from_millis(300);
+/// Set to `1` (by a CI job that runs as root in a container) to start the browser without its sandbox.
+pub const NO_SANDBOX_ENV: &str = "PADDOCK_BROWSER_NO_SANDBOX";
+/// The browser's error output is kept in this file inside the profile, so a failed start can say why.
+const STDERR_FILE: &str = "browser-stderr.log";
+/// At most this many bytes from the end of the browser's error output go into a message.
+const STDERR_TAIL: usize = 600;
+/// The prefix of every throwaway profile folder: `chromium-<pid>-<n>`.
+const PROFILE_PREFIX: &str = "chromium-";
+
+/// Where the browser window opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Window {
+    /// A normal window, where the caller placed it (on a display, never off screen) or where the browser chooses.
+    OnScreen(Option<WindowBounds>),
+    /// A headful window moved off screen: behaves like a normal browser nobody looks at.
+    OffScreen,
+    /// New headless (`--headless=new`). Tests use it: no window on the desktop (rule 7).
+    Headless,
+}
+
+/// A window's frame in the screen units the browser reads (points on macOS, device-independent pixels elsewhere).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WindowBounds {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The browser's profile folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Profile {
+    /// A fresh folder below this one (see [`profiles_dir`]), deleted when the browser ends.
+    Throwaway(PathBuf),
+    /// A per-purpose folder that keeps cookies between runs (signed-in research).
+    Persistent(PathBuf),
+}
+
+/// Whether the browser runs inside its own sandbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sandbox {
+    On,
+    Off,
+}
+
+impl Sandbox {
+    /// Chromium refuses to start as root ("Running as root without --no-sandbox is not supported"), which is how CI
+    /// containers run. The sandbox is dropped only when the process is root AND [`NO_SANDBOX_ENV`] asks for it: a user's
+    /// browser keeps its sandbox, and root without the opt-in still gets Chromium's own refusal.
+    pub fn decide(env_value: Option<&str>, root: bool) -> Sandbox {
+        if root && env_value.is_some_and(|v| !v.is_empty() && v != "0") {
+            Sandbox::Off
+        } else {
+            Sandbox::On
+        }
+    }
+
+    /// The decision for this process.
+    pub fn from_environment() -> Sandbox {
+        Sandbox::decide(
+            std::env::var(NO_SANDBOX_ENV).ok().as_deref(),
+            running_as_root(),
+        )
+    }
+}
+
+#[cfg(unix)]
+fn running_as_root() -> bool {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() == 0 }
+}
+
+#[cfg(not(unix))]
+fn running_as_root() -> bool {
+    false
+}
+
+/// Launch parameters.
+#[derive(Clone)]
+pub struct LaunchOptions {
+    pub profile: Profile,
+    pub window: Window,
+    /// Window frame colour as `0xRRGGBB` (best effort; see [`theme_preferences`]).
+    pub accent: Option<u32>,
+    /// The browser tree is ended after this long on [`LaunchOptions::clock`], whatever it does.
+    pub max_lifetime: Duration,
+    /// The browser tree is ended when its memory (PSS on Linux) exceeds this many bytes.
+    pub memory_cap: Option<u64>,
+    /// A limit for the browser's disk cache (a kept profile must not grow without bound).
+    pub disk_cache_bytes: Option<u64>,
+    /// [`QUIET_FLAGS`]: no GPU process, no component downloads, no throttling of a window nobody sees. For a browser
+    /// that reads pages; an interactive window the user browses in may turn them off.
+    pub quiet: bool,
+    /// More switches (before the start page).
+    pub extra_args: Vec<String>,
+    /// How long the browser may take to start and write its DevTools port ([`START_LIMIT`]).
+    pub start_limit: Duration,
+    /// The clock of the time limit (a fake clock in tests runs it out without waiting).
+    pub clock: Arc<dyn Clock>,
+    /// How the memory cap measures the tree; `None` uses PSS / resident size.
+    pub memory_sampler: Option<Sampler>,
+}
+
+impl std::fmt::Debug for LaunchOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchOptions")
+            .field("profile", &self.profile)
+            .field("window", &self.window)
+            .field("max_lifetime", &self.max_lifetime)
+            .field("memory_cap", &self.memory_cap)
+            .finish_non_exhaustive()
+    }
+}
+
+impl LaunchOptions {
+    /// Defaults: on screen where the browser chooses, quiet flags, 30 minutes, 4 GiB, no cache limit.
+    pub fn new(profile: Profile) -> LaunchOptions {
+        LaunchOptions {
+            profile,
+            window: Window::OnScreen(None),
+            accent: None,
+            max_lifetime: Duration::from_secs(30 * 60),
+            memory_cap: Some(4 << 30),
+            disk_cache_bytes: None,
+            quiet: true,
+            extra_args: Vec::new(),
+            start_limit: START_LIMIT,
+            clock: Arc::new(SystemClock),
+            memory_sampler: None,
+        }
+    }
+}
+
+/// Switches that keep a browser quick and predictable on a cold, loaded machine (a CI runner, a VM without a GPU). None of
+/// them changes what a page can detect about automation.
+pub const QUIET_FLAGS: &[&str] = &[
+    "--disable-gpu",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-domain-reliability",
+    "--disable-breakpad",
+    "--disable-hang-monitor",
+    "--disable-background-networking",
+    "--metrics-recording-only",
+    "--no-service-autorun",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-features=Translate,OptimizationHints,MediaRouter,AutofillServerCommunication,msEdgeShopping,msEdgeSync",
+];
+
+/// The whole command line the browser starts with: every switch, then [`START_PAGE`] last. This is the only place the
+/// arguments are assembled, so no switch can end up after the start page. `--enable-automation` keeps Chrome's
+/// "controlled by automated test software" banner and `navigator.webdriver = true`; nothing hides either.
+pub fn command_line(data_dir: &Path, opts: &LaunchOptions, sandbox: Sandbox) -> Vec<String> {
+    let mut a = vec![
+        "--remote-debugging-port=0".to_string(),
+        format!("--user-data-dir={}", data_dir.display()),
+        "--enable-automation".into(),
+        "--no-first-run".into(),
+        "--no-default-browser-check".into(),
+        "--disable-sync".into(),
+        "--disable-extensions".into(),
+        "--password-store=basic".into(),
+        "--use-mock-keychain".into(),
+    ];
+    match opts.window {
+        Window::OnScreen(Some(w)) => {
+            a.push(format!("--window-position={},{}", w.x, w.y));
+            a.push(format!(
+                "--window-size={},{}",
+                w.width.max(1),
+                w.height.max(1)
+            ));
+        }
+        Window::OnScreen(None) => a.push("--window-size=1100,800".into()),
+        Window::OffScreen => {
+            a.push("--window-size=1100,800".into());
+            a.push("--window-position=-32000,-32000".into());
+        }
+        Window::Headless => {
+            a.push("--window-size=1100,800".into());
+            a.push("--headless=new".into());
+        }
+    }
+    if opts.quiet {
+        a.extend(QUIET_FLAGS.iter().map(|f| f.to_string()));
+    }
+    if let Some(bytes) = opts.disk_cache_bytes {
+        a.push(format!("--disk-cache-size={bytes}"));
+    }
+    if sandbox == Sandbox::Off {
+        a.push("--no-sandbox".into());
+        // Containers have a small /dev/shm.
+        a.push("--disable-dev-shm-usage".into());
+    }
+    a.extend(
+        opts.extra_args
+            .iter()
+            .filter(|x| x.as_str() != START_PAGE)
+            .cloned(),
+    );
+    a.push(START_PAGE.into());
+    a
+}
+
+/// Whether a window can be shown: a headful window needs an X server or a Wayland compositor on Linux. Other platforms
+/// always have a window system. Pure: `env` reads one variable.
+pub fn check_display(
+    window: Window,
+    linux: bool,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<()> {
+    let set = |k: &str| env(k).is_some_and(|v| !v.trim().is_empty());
+    let display = set("DISPLAY") || set("WAYLAND_DISPLAY");
+    if !linux || window == Window::Headless || display {
+        return Ok(());
+    }
+    Err(Error::Launch(
+        "there is no display to open the browser on (neither DISPLAY nor WAYLAND_DISPLAY is set); run the app in a desktop \
+         session, or on a server under a virtual display such as `xvfb-run`"
+            .into(),
+    ))
+}
+
+/// The last part of the browser's error output as one bounded, printable line (empty when there is none).
+pub fn stderr_tail(bytes: &[u8]) -> String {
+    let start = bytes.len().saturating_sub(STDERR_TAIL);
+    let text = String::from_utf8_lossy(&bytes[start..]);
+    let lines: Vec<String> = text
+        .lines()
+        .map(|l| {
+            l.chars()
+                .filter(|c| !c.is_control())
+                .collect::<String>()
+                .trim()
+                .to_string()
+        })
+        .filter(|l| !l.is_empty())
+        .collect();
+    lines.join(" | ")
+}
+
+fn with_stderr(message: &str, dir: &Path) -> String {
+    let tail = std::fs::read(dir.join(STDERR_FILE))
+        .map(|b| stderr_tail(&b))
+        .unwrap_or_default();
+    if tail.is_empty() {
+        message.to_string()
+    } else {
+        format!("{message} (browser output: {tail})")
+    }
+}
+
+/// Browser theme preferences that colour the window frame. Chrome and Edge read the user colour from
+/// `browser.theme.user_color2` (ARGB integer) with a scheme and variant; the older `user_color` is written too.
+pub fn theme_preferences(accent: u32) -> Value {
+    let argb = (0xFF00_0000u32 | (accent & 0x00FF_FFFF)) as i32;
+    json!({"browser": {"theme": {"user_color2": argb, "user_color": argb, "color_scheme2": 0, "color_variant2": 1}}})
+}
+
+/// Merges [`theme_preferences`] into `<data_dir>/Default/Preferences`, keeping everything else in it.
+pub fn write_theme(data_dir: &Path, accent: u32) -> std::io::Result<()> {
+    let dir = data_dir.join("Default");
+    std::fs::create_dir_all(&dir)?;
+    let file = dir.join("Preferences");
+    let mut root: Value = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    merge(&mut root, theme_preferences(accent));
+    std::fs::write(file, root.to_string())
+}
+
+fn merge(into: &mut Value, from: Value) {
+    match (into, from) {
+        (Value::Object(a), Value::Object(b)) => {
+            for (k, v) in b {
+                merge(a.entry(k).or_insert(Value::Null), v);
+            }
+        }
+        (slot, v) => *slot = v,
+    }
+}
+
+/// The folder for throwaway profiles in the app's cache folder.
+pub fn profiles_dir(dirs: &paddock_env::AppDirs) -> PathBuf {
+    dirs.cache().join("browser-profiles")
+}
+
+/// A profile folder no other launch uses: the process id and a counter (the clock alone is not enough: two launches at
+/// once got the same folder on macOS).
+fn unique_dir(base: &Path) -> PathBuf {
+    static LAUNCHES: AtomicU64 = AtomicU64::new(0);
+    let k = LAUNCHES.fetch_add(1, Ordering::Relaxed);
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    base.join(format!("{PROFILE_PREFIX}{}-{n}-{k}", std::process::id()))
+}
+
+/// Removes throwaway profiles in `base` left by processes that are gone (a crash, a kill). Call at start-up. Returns how
+/// many were removed.
+pub fn sweep_profiles(base: &Path) -> usize {
+    sweep_profiles_with(base, &paddock_proc::is_alive)
+}
+
+fn sweep_profiles_with(base: &Path, alive: &dyn Fn(u32) -> bool) -> usize {
+    let Ok(rd) = std::fs::read_dir(base) else {
+        return 0;
+    };
+    let me = std::process::id();
+    rd.flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let pid = name
+                .strip_prefix(PROFILE_PREFIX)
+                .and_then(|r| r.split('-').next())
+                .and_then(|p| p.parse::<u32>().ok());
+            pid.is_some_and(|p| p != me && !alive(p)) && std::fs::remove_dir_all(e.path()).is_ok()
+        })
+        .count()
+}
+
+/// Why a launched browser can no longer be used. Each is final: the browser is ended and a new one started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gone {
+    /// The process ended (the user quit the browser, it crashed, or a limit ended it: see [`Chromium::ended_by`]).
+    Exited,
+    /// The DevTools connection ended while the process still runs.
+    Disconnected,
+    /// The page was closed (the user closed its window or tab); on macOS the browser keeps running without a window.
+    PageClosed,
+}
+
+/// Why the supervisor ended the browser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndedBy {
+    /// It still runs, or it ended by itself or on request.
+    Nothing,
+    /// [`LaunchOptions::max_lifetime`] passed.
+    TimeLimit,
+    /// [`LaunchOptions::memory_cap`] was exceeded.
+    MemoryCap,
+}
+
+/// A running browser. Dropping it closes it (as a user would, then ends what is left) and removes a throwaway profile.
+pub struct Chromium {
+    // Field order matters: the connection closes before the process is ended and the profile removed.
+    conn: Arc<Connection>,
+    process: Supervised,
+    dir: PathBuf,
+    throwaway: bool,
+    /// Cancelled when the browser ends on purpose: stops the time-limit watchdog.
+    stop: CancelToken,
+    timed_out: Arc<AtomicBool>,
+    exe: Browser,
+}
+
+impl Chromium {
+    /// Starts `exe` and connects to it. The sandbox follows [`Sandbox::from_environment`].
+    pub fn launch(exe: &Browser, opts: &LaunchOptions) -> Result<Chromium> {
+        Self::launch_with(exe, opts, Sandbox::from_environment())
+    }
+
+    /// [`Chromium::launch`] with the sandbox decided by the caller (tests run the root branch on any OS).
+    pub fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
+        check_display(opts.window, cfg!(target_os = "linux"), |k| {
+            std::env::var(k).ok()
+        })?;
+        let (dir, throwaway) = match &opts.profile {
+            Profile::Throwaway(base) => (unique_dir(base), true),
+            Profile::Persistent(p) => (p.clone(), false),
+        };
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
+        let _ = std::fs::remove_file(dir.join("DevToolsActivePort"));
+        if let Some(c) = opts.accent
+            && let Err(e) = write_theme(&dir, c)
+        {
+            log::warn!("The browser frame colour could not be written: {e}");
+        }
+        let stderr = std::fs::File::create(dir.join(STDERR_FILE))
+            .map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
+        let mut cmd = paddock_proc::command(&exe.path);
+        cmd.args(command_line(&dir, opts, sandbox))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(stderr);
+        let spawned = match opts.memory_cap {
+            Some(limit) => {
+                let mut cap = MemoryCap::new(limit, "the browser");
+                cap.sampler = opts.memory_sampler.clone();
+                Supervised::spawn_capped(cmd, cap)
+            }
+            None => Supervised::spawn(cmd),
+        };
+        let mut process = match spawned {
+            Ok(p) => p,
+            Err(e) => {
+                cleanup(&dir, throwaway);
+                return Err(Error::Launch(e.to_string()));
+            }
+        };
+        let stop = CancelToken::new();
+        let timed_out = Arc::new(AtomicBool::new(false));
+        // The limit runs from the process start, also while it starts.
+        watchdog(
+            process.id(),
+            opts.clock.clone(),
+            opts.max_lifetime,
+            stop.clone(),
+            timed_out.clone(),
+        );
+        match connect(&dir, &mut process, opts.start_limit) {
+            Ok(conn) => Ok(Chromium {
+                conn: Arc::new(conn),
+                process,
+                dir,
+                throwaway,
+                stop,
+                timed_out,
+                exe: exe.clone(),
+            }),
+            Err(e) => {
+                stop.cancel();
+                process.kill();
+                cleanup(&dir, throwaway);
+                Err(e)
+            }
+        }
+    }
+
+    /// The executable that runs.
+    pub fn exe(&self) -> &Browser {
+        &self.exe
+    }
+
+    /// The process id (while running).
+    pub fn pid(&self) -> Option<u32> {
+        self.process.id()
+    }
+
+    /// Whether the browser runs and the connection is open.
+    pub fn is_running(&mut self) -> bool {
+        self.process.is_running() && !self.conn.is_closed()
+    }
+
+    /// The profile folder.
+    pub fn profile_dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Whether the time limit or the memory cap ended the browser.
+    pub fn ended_by(&self) -> EndedBy {
+        if self.process.stopped_over_memory().is_some() {
+            EndedBy::MemoryCap
+        } else if self.timed_out.load(Ordering::Acquire) {
+            EndedBy::TimeLimit
+        } else {
+            EndedBy::Nothing
+        }
+    }
+
+    /// Why the browser and its `page` can no longer be used, if so. No round trip to the browser (see [`Page::exists`]).
+    pub fn gone(&mut self, page: &Page) -> Option<Gone> {
+        if !self.process.is_running() {
+            Some(Gone::Exited)
+        } else if self.conn.is_closed() {
+            Some(Gone::Disconnected)
+        } else {
+            page.is_closed().then_some(Gone::PageClosed)
+        }
+    }
+
+    /// Opens another page (tab) to drive, beside the ones the browser has.
+    pub fn new_page(&self) -> Result<Page> {
+        Page::attach(self.conn.clone())
+    }
+
+    /// The page the browser opened with (its [`START_PAGE`]), to drive instead of opening a second one beside it: the
+    /// window then has exactly one tab, and any further page is one the user opened. Waits up to [`START_PAGE_WAIT`] for
+    /// it to appear; a browser that shows none by then gets a new page.
+    pub fn start_page(&self) -> Result<Page> {
+        let end = Instant::now() + START_PAGE_WAIT;
+        loop {
+            if let Some(target) = self.first_page_target()? {
+                return Page::adopt(self.conn.clone(), target);
+            }
+            if Instant::now() >= end {
+                log::warn!(
+                    "The browser showed no start page within {START_PAGE_WAIT:?}; a new one is opened"
+                );
+                return self.new_page();
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn pages(&self) -> Result<Vec<Value>> {
+        let r = self
+            .conn
+            .call(None, "Target.getTargets", json!({}), Duration::from_secs(5))?;
+        Ok(r.get("targetInfos")
+            .and_then(Value::as_array)
+            .map(|t| {
+                t.iter()
+                    .filter(|i| i.get("type").and_then(Value::as_str) == Some("page"))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn first_page_target(&self) -> Result<Option<String>> {
+        let pages = self.pages()?;
+        let blank = pages
+            .iter()
+            .find(|i| i.get("url").and_then(Value::as_str) == Some(START_PAGE));
+        Ok(blank
+            .or(pages.first())
+            .and_then(|i| i.get("targetId").and_then(Value::as_str))
+            .map(str::to_string))
+    }
+
+    /// The number of open pages (tabs and windows); a page the user opened shows up here.
+    pub fn page_count(&self) -> Result<usize> {
+        Ok(self.pages()?.len())
+    }
+
+    /// Closes the browser the way a user would (`Browser.close`), waits up to `grace` for it to exit, ends what is left of
+    /// the tree, and removes a throwaway profile. Ending a browser that is still starting by force can leave a copy of it
+    /// behind on macOS (the code-sign clone), so every normal end comes through here. Returns true when it exited by itself.
+    /// Idempotent.
+    pub fn close_gracefully(&mut self, grace: Duration) -> bool {
+        self.stop.cancel();
+        let mut exited = !self.process.is_running();
+        if !exited && !self.conn.is_closed() {
+            let _ = self.conn.call(
+                None,
+                "Browser.close",
+                json!({}),
+                grace.min(Duration::from_secs(2)),
+            );
+            let end = Instant::now() + grace;
+            while !exited && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(25));
+                exited = !self.process.is_running();
+            }
+        }
+        self.process.kill();
+        cleanup(&self.dir, self.throwaway);
+        exited
+    }
+
+    /// [`close_gracefully`](Self::close_gracefully) with [`CLOSE_GRACE`].
+    pub fn close(&mut self) -> bool {
+        self.close_gracefully(CLOSE_GRACE)
+    }
+
+    /// Ends the browser tree at once.
+    pub fn kill(&mut self) {
+        self.stop.cancel();
+        self.process.kill();
+    }
+}
+
+impl Drop for Chromium {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+/// Ends the tree when `max` passed on `clock`, even if nobody calls anything. Stops when `stop` is cancelled.
+fn watchdog(
+    pid: Option<u32>,
+    clock: Arc<dyn Clock>,
+    max: Duration,
+    stop: CancelToken,
+    timed_out: Arc<AtomicBool>,
+) {
+    let Some(pid) = pid else { return };
+    let _ = std::thread::Builder::new()
+        .name("chromium-watchdog".into())
+        .spawn(move || {
+            if clock.wait(max, &stop).is_ok() && !stop.is_cancelled() {
+                log::warn!("The browser reached its time limit ({max:?}) and is ended");
+                timed_out.store(true, Ordering::Release);
+                paddock_proc::kill_tree(pid);
+            }
+        });
+}
+
+fn cleanup(dir: &Path, throwaway: bool) {
+    if throwaway {
+        cleanup_with(dir, &|d| std::fs::remove_dir_all(d));
+    }
+}
+
+/// Removes `dir`, retrying for a moment: Chrome may still be flushing after it ended. Gives up quietly (the next
+/// [`sweep_profiles`] removes it).
+fn cleanup_with(dir: &Path, remove: &dyn Fn(&Path) -> std::io::Result<()>) -> bool {
+    for _ in 0..10 {
+        if remove(dir).is_ok() || !dir.exists() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let shown = dir.display();
+    log::warn!("The browser profile {shown} could not be removed (removed at the next start)");
+    false
+}
+
+/// Waits for the `DevToolsActivePort` file the browser writes into the profile and connects to its endpoint.
+fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Connection> {
+    let end = Instant::now() + limit;
+    loop {
+        if let Ok(s) = std::fs::read_to_string(dir.join("DevToolsActivePort")) {
+            let mut l = s.lines();
+            if let (Some(port), Some(path)) = (
+                l.next().and_then(|p| p.trim().parse::<u16>().ok()),
+                l.next(),
+            ) {
+                return Connection::connect(port, path.trim());
+            }
+        }
+        if !process.is_running() {
+            if process.stopped_over_memory().is_some() {
+                return Err(Error::Launch(
+                    "the browser used more memory than allowed while it started".into(),
+                ));
+            }
+            return Err(Error::Launch(with_stderr(
+                "the browser exited right after it started",
+                dir,
+            )));
+        }
+        if Instant::now() > end {
+            return Err(Error::Timeout("the browser start"));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(test)]
+mod pure_tests;
+#[cfg(all(test, unix))]
+mod tests;
