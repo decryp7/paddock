@@ -188,6 +188,24 @@ fn a_panicking_sink_never_breaks_the_job() {
 }
 
 #[test]
+fn sink_panics_are_counted_so_an_owner_can_surface_them() {
+    let clock = ManualClock::new();
+    let r = reporter(Arc::new(Panicky), &clock);
+    let first = r.sink_panics(); // the first snapshot, emitted while the reporter was built
+    r.start();
+    r.begin_phase(Phase::items("x", "X", 1));
+    r.add(1);
+    assert!(
+        r.sink_panics() > first && first > 0,
+        "{first} then {}",
+        r.sink_panics()
+    );
+    let healthy = reporter(Collect::new(), &clock);
+    healthy.start();
+    assert_eq!(healthy.sink_panics(), 0);
+}
+
+#[test]
 fn poisoned_state_recovers() {
     let sink = Collect::new();
     let clock = ManualClock::new();

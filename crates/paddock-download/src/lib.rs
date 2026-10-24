@@ -46,6 +46,13 @@
 //!   the transfer threads, so a cancel never waits for the network. The partial file stays for a resume
 //!   ([`DownloadError::keeps_partial`]).
 //!
+//! - **Proxy**: `HttpTransport` uses the system's proxy by default (environment, then the operating system; [`ProxyMode`],
+//!   [`ProxyRules`]), or an explicit one with a login that is never printed.
+//! - **Small requests**: [`Downloader::get_json`] and friends ([`Fetch`]) use the same transport, proxy and host caps.
+//! - **Threads, not async**: [`Downloader::download`] blocks the calling thread (a job worker) and runs the transfer on its own
+//!   threads; there is no async runtime inside and none needed. From async code call it in `spawn_blocking`, or submit it
+//!   as a job to the `JobPool`.
+//!
 //! The network is a port ([`Transport`]); `HttpTransport` (feature `http`, on by default) is ureq with rustls and the
 //! operating system's certificate store. The core has no Tauri dependency; the adapter is `paddock_download::tauri` behind the
 //! `tauri` feature.
@@ -53,9 +60,12 @@
 mod config;
 mod engine;
 mod error;
+mod fetch;
 mod hosts;
 #[cfg(feature = "http")]
 mod http;
+mod proxy;
+mod proxy_os;
 mod request;
 mod resume;
 mod transport;
@@ -66,11 +76,16 @@ pub mod tauri;
 pub use config::{Config, MAX_CONNECTIONS};
 pub use engine::{Downloaded, Downloader, FreeSpace, phases};
 pub use error::{DownloadError, TransportError, TransportErrorKind, human_bytes};
+pub use fetch::Fetch;
 pub use hosts::{DEFAULT_HOST_CAP, HostCaps, MAX_HOST_CAP};
 #[cfg(feature = "http")]
-pub use http::{HttpConfig, HttpTransport};
-pub use request::{Integrity, MAX_URL_LEN, Request, Sha256Digest, host_of};
+pub use http::{HttpConfig, HttpTransport, ProxyMode};
+pub use proxy::{
+    MAX_NO_PROXY_ENTRIES, MAX_PROXY_TEXT, NoProxy, ProxyCredentials, ProxyRules, ProxyScheme,
+    ProxyServer,
+};
+pub use request::{Integrity, MAX_HEADERS, MAX_URL_LEN, Request, Resumable, Sha256Digest, host_of};
 pub use transport::{
-    ByteRange, ContentRange, Get, Headers, Response, Transport, parse_content_range, parse_length,
-    parse_retry_after,
+    ByteRange, ContentRange, Get, Header, Headers, Response, Transport, parse_content_range,
+    parse_length, parse_retry_after,
 };

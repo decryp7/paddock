@@ -2,8 +2,13 @@
 //! checksum and size, and the size limit.
 
 use crate::error::DownloadError;
+use crate::resume::ResumeState;
+use crate::transport::Header;
 use std::fmt;
 use std::path::{Path, PathBuf};
+
+/// Most headers a request carries.
+pub const MAX_HEADERS: usize = 16;
 
 /// Longest URL a request accepts.
 pub const MAX_URL_LEN: usize = 8 * 1024;
@@ -71,6 +76,16 @@ pub struct Request {
     integrity: Integrity,
     size: Option<u64>,
     max_bytes: Option<u64>,
+    headers: Vec<Header>,
+}
+
+/// What a stopped download left that a run of the same request would continue from ([`Request::resumable`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resumable {
+    /// Leading bytes that are written and hashed, and will not be fetched again.
+    pub bytes: u64,
+    /// The size of the whole file as the host reported it.
+    pub size: u64,
 }
 
 impl Request {
@@ -94,6 +109,42 @@ impl Request {
             integrity,
             size: None,
             max_bytes: None,
+            headers: Vec::new(),
+        })
+    }
+
+    /// Adds a request header, sent with every request of the download (the probe, range requests and the stream): an
+    /// `Authorization` token for a private release, an `Accept`. Not sent to another host after a redirect. Refuses a bad name or
+    /// value and the headers the downloader owns (`Range`, `If-Range`, `Accept-Encoding`, `Host`, framing, `Proxy-Authorization`).
+    /// Values are never shown by `Debug` or in an error. A repeated name is sent twice.
+    pub fn header(mut self, name: &str, value: &str) -> Result<Self, DownloadError> {
+        if self.headers.len() >= MAX_HEADERS {
+            return Err(DownloadError::InvalidRequest(format!(
+                "a request takes at most {MAX_HEADERS} added headers"
+            )));
+        }
+        self.headers.push(Header::new(name, value)?);
+        Ok(self)
+    }
+
+    /// The headers added with [`header`](Self::header).
+    pub fn headers(&self) -> &[Header] {
+        &self.headers
+    }
+
+    /// Whether a run of this request would continue a stopped download rather than start over: the partial file and its saved
+    /// state (`<name>.part` and `<name>.part.json`) exist, the state is readable and the partial file holds the prefix it
+    /// promises. `None` for a fresh start. The host is not asked: a changed file is still detected when the download connects
+    /// (it then starts over), so this says "there is something to continue", for a "Resume" button or the text beside it.
+    pub fn resumable(&self) -> Option<Resumable> {
+        let state = ResumeState::load(&self.resume_path())?;
+        let len = std::fs::metadata(self.part_path()).ok()?.len();
+        (state.hashed > 0
+            && len >= state.hashed
+            && self.pinned_size().is_none_or(|n| n == state.size))
+        .then_some(Resumable {
+            bytes: state.hashed,
+            size: state.size,
         })
     }
 
