@@ -1,5 +1,9 @@
-# Checks the shared UI package on every push and pull request; a v* tag also publishes @decryp7/paddock-ui to the Gitea npm
-# registry and creates the Gitea release with notes. Releases are made only by this workflow, never from a workstation.
+# Checks the shared UI package, its entry points, the reference apps and the Rust crates on every push and pull request.
+# Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
+# workflow ends with the publish dry run, so a tag never meets a packaging problem first.
+#
+# Runner labels: ubuntu-latest (jobs in the garage image), windows-latest and macos-latest (host runners, tools used as
+# installed), as in Debrief and Pitwall.
 
 name: ci
 
@@ -16,7 +20,7 @@ concurrency:
 
 jobs:
   ui:
-    name: ui (tokens, contrast, components, gallery)
+    name: ui (tokens, contrast, components, entry points, reference apps, publish dry run)
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -40,16 +44,30 @@ jobs:
       - name: Component specs
         run: npm test
 
-      - name: Build the library
+      - name: Script tests
+        run: npm run test:scripts
+
+      # Every entry point (root, /shell/*, /workbench/*) is built by ng-packagr; the dry run below checks each is exported.
+      - name: Build the library (all entry points)
         run: npm run build
 
-      - name: Gallery checks (axe, keyboard, CSP)
+      - name: Build @decryp7/paddock-e2e
+        run: npm run build:e2e
+
+      - name: Build the shell demo
+        run: npx ng build shell-demo
+
+      - name: Reference app checks (gallery and shell demo; axe, keyboard, CSP, 320 px)
         run: |
           npx playwright install --with-deps chromium
           npx playwright test
 
+      # Lists every npm package, entry point and crate with what a tag would publish; publishes nothing.
+      - name: Publish dry run
+        run: node ../scripts/publish.mjs --skip-build
+
   crates:
-    name: crates (fmt, clippy, test, coverage, deny)
+    name: crates (fmt, coverage, deny)
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -59,53 +77,99 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
-      # Merged line coverage over all test binaries (the per-binary summary counts unused generic instances).
+      # Merged line coverage over all test binaries, adapters included (the per-binary summary counts unused generic instances).
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          cargo llvm-cov --workspace --all-features --lcov --output-path lcov.info
           awk -F'[:,]' '/^DA:/{t++; if($3>0)h++} END{p=100*h/t; printf "lines %d/%d = %.2f%%\n", h, t, p; if(p<99) exit 1}' lcov.info
       - run: cargo deny check
 
-  release:
-    name: release (npm registry)
-    needs: [ui, crates]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-    container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+  # Each crate on Linux, Windows and macOS (platform-only bugs exist: lessons): clippy and tests with every feature, so the
+  # `tauri` adapters are built too. One step per crate that runs even after another crate failed, so every failure names
+  # its crate; scripts/publish.test.mjs fails when a workspace member has no step here.
+  crate:
+    name: crate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Linux runs in the garage image (Tauri's libraries pre-installed); Windows and macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
     defaults:
       run:
-        working-directory: ui
+        working-directory: crates
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: npm ci
-      - name: Publish to the npm registry and create the release
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-          GITEA_TOKEN: ${{ github.token }}
-        run: |
-          # Basic-auth credential for the registry, built here, masked and never printed.
-          PACKAGE_AUTH=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
-          echo "::add-mask::$PACKAGE_AUTH"
-          export PACKAGE_AUTH
-          node scripts/release.mjs --publish
 
-  # rust:
-  #   name: rust (fmt, clippy, test, deny)
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: dtolnay/rust-toolchain@stable
-  #       with: { components: "clippy, rustfmt" }
-  #     - run: cargo fmt --manifest-path crates/Cargo.toml --all --check
-  #     - run: cargo clippy --manifest-path crates/Cargo.toml --workspace --all-targets -- -D warnings
-  #     - run: cargo test --manifest-path crates/Cargo.toml --workspace
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it), a build folder that outlives the job, and
+      # eight build jobs (the runner runs two jobs at once).
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      # The Mac host runner: a build folder next to the checkout that outlives the job; the host toolchain as installed.
+      - name: Persistent build folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: runner.os == 'Windows'
+        with:
+          components: clippy
+
+      - name: Toolchain present
+        run: |
+          rustc --version && cargo --version
+          cargo clippy --version || { echo "::error::clippy is missing on this runner (rustup component add clippy)"; exit 1; }
+
+      - name: paddock-commands
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-commands --all-targets --all-features -- -D warnings && cargo test -p paddock-commands --all-features
+
+      - name: paddock-dialogs
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-dialogs --all-targets --all-features -- -D warnings && cargo test -p paddock-dialogs --all-features
+
+      - name: paddock-download
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-download --all-targets --all-features -- -D warnings && cargo test -p paddock-download --all-features
+
+      - name: paddock-health
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-health --all-targets --all-features -- -D warnings && cargo test -p paddock-health --all-features
+
+      - name: paddock-jobs
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-jobs --all-targets --all-features -- -D warnings && cargo test -p paddock-jobs --all-features
+
+      - name: paddock-menu
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-menu --all-targets --all-features -- -D warnings && cargo test -p paddock-menu --all-features
+
+      - name: paddock-settings
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-settings --all-targets --all-features -- -D warnings && cargo test -p paddock-settings --all-features
+
+      - name: paddock-startup
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-startup --all-targets --all-features -- -D warnings && cargo test -p paddock-startup --all-features
+
+      - name: paddock-updater
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-updater --all-targets --all-features -- -D warnings && cargo test -p paddock-updater --all-features
+
+      - name: paddock-window
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-window --all-targets --all-features -- -D warnings && cargo test -p paddock-window --all-features

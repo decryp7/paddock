@@ -1,0 +1,19 @@
+[package]
+name = "paddock-dialogs"
+version = "0.1.0"
+description = "Dialogs as OS windows for the Paddock apps: the dialog contract schema and `allows(dialog, command)`, pure placement on the parent's monitor, window creation by kind, fit/grow and bounds."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+# Scaffold from plan S0: the publish job holds the crate back until its work package removes this marker.
+[package.metadata.paddock]
+scaffold = true
+
+[features]
+# The Tauri adapter (`paddock_dialogs::tauri`); the core above it never depends on Tauri.
+tauri = ["dep:tauri"]
+
+[dependencies]
+tauri = { workspace = true, optional = true }

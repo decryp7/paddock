@@ -1,0 +1,19 @@
+[package]
+name = "paddock-health"
+version = "0.1.0"
+description = "Service health for the Paddock apps: service state, cause and repair action, the registry and its snapshot, and the cause-key notification centre with versioned persistence."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+# Scaffold from plan S0: the publish job holds the crate back until its work package removes this marker.
+[package.metadata.paddock]
+scaffold = true
+
+[features]
+# The Tauri adapter (`paddock_health::tauri`); the core above it never depends on Tauri.
+tauri = ["dep:tauri"]
+
+[dependencies]
+tauri = { workspace = true, optional = true }

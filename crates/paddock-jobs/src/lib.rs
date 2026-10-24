@@ -21,6 +21,8 @@ mod model;
 mod pipeline;
 mod pool;
 mod reporter;
+#[cfg(feature = "tauri")]
+pub mod tauri;
 mod walk;
 mod workers;
 

@@ -1,0 +1,28 @@
+{
+  "name": "@decryp7/paddock-e2e",
+  "version": "0.1.0",
+  "description": "Playwright helpers and page objects for the Paddock app shell: e2e port, Chrome for Testing guard, axe in both themes, retried-test reporter.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://dev.decryptology.net/decryp7/paddock.git",
+    "directory": "ui/projects/paddock-e2e"
+  },
+  "keywords": ["playwright", "e2e", "paddock"],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": { "types": "./index.d.ts", "default": "./index.js" },
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "@playwright/test": "^1.64.0"
+  },
+  "paddock": {
+    "scaffold": true
+  },
+  "publishConfig": {
+    "registry": "https://dev.decryptology.net/api/packages/decryp7/npm/",
+    "access": "public"
+  }
+}

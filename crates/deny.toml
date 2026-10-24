@@ -1,6 +1,7 @@
 # cargo-deny for the shared crates. Run in crates/: cargo deny check
 [graph]
-all-features = false
+# Every adapter counts: the apps build the crates with their `tauri` feature.
+all-features = true
 
 [advisories]
 unmaintained = "workspace"
@@ -8,8 +9,10 @@ yanked = "deny"
 
 [licenses]
 confidence-threshold = 0.9
+# The crates are MIT OR Apache-2.0. Dependencies must be permissive or file-level MPL-2.0 (Tauri's tree: cssparser, dtoa-short,
+# selectors, option-ext; the same allowance as Debrief's deny.toml), so the dual licence holds; no GPL/LGPL/AGPL.
 private = { ignore = true }
-allow = ["MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "CC0-1.0", "Unicode-3.0", "Unlicense"]
+allow = ["MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "CC0-1.0", "Unicode-3.0", "Unlicense", "MPL-2.0"]
 
 [bans]
 multiple-versions = "warn"

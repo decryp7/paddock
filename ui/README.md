@@ -87,6 +87,24 @@ a "Reset zoom" chip). `areaGradient(color)` is the 28% to 0 fill; `eventLaneFrag
 returns a 14 px lane grid with shape-coded markers to merge under the plot (see `projects/gallery/src/app/gallery.ts`).
 `sequentialRamp(tokens)` is the six-step heatmap ramp.
 
+## Entry points (app shell and workbench)
+
+Besides the root entry, the package has secondary entry points for the app shell (ADR 0012) and the workbench (ADR 0013),
+so a manager app never bundles the workbench:
+
+| Entry point | Content | Plan |
+|---|---|---|
+| `@decryp7/paddock-ui/shell` | contributions, `ShellContext`, frame parts, widgets | S2, S14 |
+| `/shell/startup`, `/shell/notify`, `/shell/dialogs`, `/shell/jobs`, `/shell/settings`, `/shell/about`, `/shell/menu`, `/shell/pages`, `/shell/i18n`, `/shell/store`, `/shell/testing` | one shell part each | S4-S16 |
+| `@decryp7/paddock-ui/workbench`, `/workbench/dock`, `/workbench/panels`, `/workbench/palette`, `/workbench/explorer`, `/workbench/assistant`, `/workbench/testing` | the workbench | W1-W7 |
+
+They are scaffolds until their work packages in [docs/plans/workbench.md](../docs/plans/workbench.md) land. Each lives in
+`projects/paddock-ui/<entry>/` with an `ng-package.json` and a `public-api.ts`; specs next to the code run with `npm test`.
+A new entry point needs only those two files (the publish dry run fails if the built package does not export one).
+`projects/shell-demo` is the shell's reference app (mock backend): every shell change shows up there first, with its e2e in
+`e2e/shell-demo.spec.ts`. `@decryp7/paddock-e2e` (`projects/paddock-e2e`, plain Node, versioned with this package) gets the
+Playwright helpers in S16.
+
 ## Tokens
 
 All values live in `projects/paddock-ui/scss/_tokens.scss` and compile to `css/tokens.css`: neutral roles (bg, surface-1..3,
@@ -103,8 +121,11 @@ npm ci
 npm run test:tokens      # WCAG contrast of every pair + colour-vision separation of the palette (131 tests)
 npm test                 # component and helper specs (Vitest via ng test), 100% lines
 npx playwright test      # gallery: axe (both themes), keyboard, native feel, CSP; SCREENSHOTS=1 rewrites docs/screenshots
-npm run build            # ng-packagr build to dist/paddock-ui
-npm run release          # dry run: build and list the package contents (CI publishes on a v* tag)
+npm run build            # ng-packagr build to dist/paddock-ui (every entry point)
+npm run build:e2e        # @decryp7/paddock-e2e to dist/paddock-e2e
+npm run shell-demo       # the shell's reference app on http://localhost:4301 (SHELL_DEMO_PORT for Playwright)
+npm run test:scripts     # node tests of ../scripts (publish plan, CI coverage of every crate)
+npm run release          # dry run: builds and lists every crate, npm package and entry point (CI publishes on a v* tag)
 ```
 
 ### What the token test checks

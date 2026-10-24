@@ -1,0 +1,82 @@
+# Publishes Paddock from a v* tag, and only from one (rule 9; ADR 0006, decision D3 of docs/plans/workbench.md): the
+# crates to the Gitea cargo registry `decryp7` in dependency order (versions the registry already has and crates still
+# marked as scaffolds are skipped), the npm packages (@decryp7/paddock-ui with all its entry points, @decryp7/paddock-e2e)
+# to the Gitea npm registry, then the Gitea release with notes. Nothing is ever published from a workstation;
+# `node scripts/publish.mjs` (or `cd ui && npm run release`) is the local dry run, and ci.yml runs it on every push.
+#
+# The gates run again here on the tagged commit before anything is uploaded (a workflow cannot wait for ci.yml).
+# Secrets: DOCKER_USERNAME / DOCKER_PASSWORD (basic auth for both registries), the job token for the release.
+
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gates:
+    name: gates (crates and ui)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Crates (fmt, clippy, test, deny)
+        working-directory: crates
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features
+          cargo deny check
+
+      - name: UI (install, tokens, specs, script tests)
+        working-directory: ui
+        run: |
+          npm ci
+          npm run test:tokens
+          npm test
+          npm run test:scripts
+
+  publish:
+    name: publish (cargo and npm registries, release)
+    needs: [gates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install
+        working-directory: ui
+        run: npm ci
+
+      - name: Publish the crates and npm packages, create the release
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          GITEA_TOKEN: ${{ github.token }}
+        run: |
+          # Basic-auth credential for both registries, built here, masked and never printed. Whitespace is stripped from
+          # the secrets first (a trailing newline in a pasted secret breaks the credential: lessons).
+          DOCKER_USERNAME=$(printf '%s' "$DOCKER_USERNAME" | tr -d '[:space:]')
+          DOCKER_PASSWORD=$(printf '%s' "$DOCKER_PASSWORD" | tr -d '[:space:]')
+          PACKAGE_AUTH=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
+          echo "::add-mask::$PACKAGE_AUTH"
+          export PACKAGE_AUTH
+          node scripts/publish.mjs --publish

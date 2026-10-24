@@ -1,0 +1,19 @@
+[package]
+name = "paddock-updater"
+version = "0.1.0"
+description = "Updates for the Paddock apps: the update state machine, manifest and signature check and the install hand-off, over `paddock-download`."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+# Scaffold from plan S0: the publish job holds the crate back until its work package removes this marker.
+[package.metadata.paddock]
+scaffold = true
+
+[features]
+# The Tauri adapter (`paddock_updater::tauri`); the core above it never depends on Tauri.
+tauri = ["dep:tauri"]
+
+[dependencies]
+tauri = { workspace = true, optional = true }

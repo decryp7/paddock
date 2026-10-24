@@ -93,11 +93,13 @@ https://dev.decryptology.net/decryp7/paddock/raw/branch/main/diagrams/paddock.xm
 Then apply an app's accent with `node diagrams/tools/apply-accent.mjs <app> <template> <out>`; see
 [`diagrams/README.md`](diagrams/README.md).
 
-### Use a crate (planned)
+### Use a crate
+
+The crates are published to the Gitea cargo registry `decryp7`; see [crates/README.md](crates/README.md) for the
+`.cargo/config.toml` and `deny.toml` lines.
 
 ```toml
-# planned: paddock-pitwall, paddock-testplan, the plugin platform
-paddock-pitwall = { git = "https://dev.decryptology.net/decryp7/paddock", tag = "v0.2.0" }
+paddock-jobs = { version = "0.1", registry = "decryp7" }
 ```
 
 ## Status and roadmap
@@ -117,10 +119,13 @@ deprecated.
 
 ## Versioning and releases
 
-One semver tag for the whole repo (`vMAJOR.MINOR.PATCH`). Pushing a `v*` tag runs CI, which publishes
-`@decryp7/paddock-ui` to the Gitea npm registry and creates the release notes. Releases are made only by CI. Steps: update
-the version in `ui/projects/paddock-ui/package.json` and `CHANGELOG.md`, commit, tag, push the tag. `cd ui && npm run release`
-is a local dry run.
+One semver tag for the whole repo (`vMAJOR.MINOR.PATCH`). Pushing a `v*` tag runs `.gitea/workflows/publish.yml`, which runs
+the gates again, publishes the changed crates to the Gitea cargo registry and the npm packages (`@decryp7/paddock-ui` with
+its entry points, `@decryp7/paddock-e2e`) to the Gitea npm registry, and creates the release notes. Releases are made only
+by CI. Steps: update the version in `ui/projects/paddock-ui/package.json` and `ui/projects/paddock-e2e/package.json` (they
+move together), bump each changed crate's `version`, update `CHANGELOG.md`, commit, tag, push the tag.
+`node scripts/publish.mjs` (or `cd ui && npm run release`) is the local dry run: it lists every crate, npm package and
+entry point with what the tag would publish, and uploads nothing.
 
 ## Licence
 

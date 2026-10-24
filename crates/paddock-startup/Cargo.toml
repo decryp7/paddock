@@ -1,0 +1,19 @@
+[package]
+name = "paddock-startup"
+version = "0.1.0"
+description = "The start-up contract of the Paddock apps: the pure watchdog and its ticker, `window_ready`, boot-error forwarding, the UI checkpoint and the native ask dialog."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+# Scaffold from plan S0: the publish job holds the crate back until its work package removes this marker.
+[package.metadata.paddock]
+scaffold = true
+
+[features]
+# The Tauri adapter (`paddock_startup::tauri`); the core above it never depends on Tauri.
+tauri = ["dep:tauri"]
+
+[dependencies]
+tauri = { workspace = true, optional = true }

@@ -1,0 +1,19 @@
+[package]
+name = "paddock-window"
+version = "0.1.0"
+description = "Windows for the Paddock apps: window state, single instance, deep links, title bar and materials, and the tray popover window."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+# Scaffold from plan S0: the publish job holds the crate back until its work package removes this marker.
+[package.metadata.paddock]
+scaffold = true
+
+[features]
+# The Tauri adapter (`paddock_window::tauri`); the core above it never depends on Tauri.
+tauri = ["dep:tauri"]
+
+[dependencies]
+tauri = { workspace = true, optional = true }

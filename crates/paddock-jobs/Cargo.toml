@@ -11,7 +11,12 @@ publish = ["decryp7"]
 # Behaviour is tested through the public API in tests/ (an empty unit-test binary only adds unexecuted generic instances to coverage).
 test = false
 
+[features]
+# The Tauri adapter (`paddock_jobs::tauri`: event sink, `jobs_snapshot`, `job_cancel`); the core never depends on Tauri.
+tauri = ["dep:tauri"]
+
 [dependencies]
+tauri = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 
