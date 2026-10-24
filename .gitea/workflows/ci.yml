@@ -205,6 +205,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-updater --all-targets --all-features -- -D warnings && cargo test -p paddock-updater --all-features && cargo test -p paddock-updater
 
+      - name: paddock-proc
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-proc --all-targets --all-features -- -D warnings && cargo test -p paddock-proc --all-features
+
       - name: paddock-secrets
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-secrets --all-targets --all-features -- -D warnings && cargo test -p paddock-secrets --all-features && cargo test -p paddock-secrets
