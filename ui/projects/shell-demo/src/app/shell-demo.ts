@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { SuEmptyState } from '@decryp7/paddock-ui';
 import { CommandService, ContributionRegistry, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { PdJobsStatus } from '@decryp7/paddock-ui/shell/jobs';
 import { DemoNotices } from './demo-notices';
 
 /** One part of the shell and the work package of docs/plans/workbench.md that brings it to this app. */
@@ -31,7 +32,7 @@ const PARTS: readonly ShellPart[] = [
 @Component({
   selector: 'sd-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState],
+  imports: [SuEmptyState, PdJobsStatus],
   template: `
     <main class="page">
       <h1>Paddock shell demo</h1>
@@ -78,9 +79,15 @@ const PARTS: readonly ShellPart[] = [
         </tbody>
       </table>
     </main>
+    <!-- The status bar the pages frame (plan S14) will own; the jobs status item opens the Jobs list (plan S9). -->
+    <footer class="status-bar" aria-label="Status bar">
+      <pd-jobs-status />
+    </footer>
   `,
   styles: `
-    .page { max-width: var(--pd-content-max); margin: 0 auto; padding: var(--pd-space-6) var(--pd-space-4); display: flex; flex-direction: column; gap: var(--pd-space-4); }
+    :host { display: flex; flex-direction: column; min-height: 100vh; }
+    .status-bar { position: sticky; bottom: 0; display: flex; justify-content: flex-end; min-width: 0; margin-top: auto; padding: var(--pd-space-1) var(--pd-space-4); background: var(--pd-surface-1); border-top: 1px solid var(--pd-hairline); }
+    .page { width: 100%; max-width: var(--pd-content-max); margin: 0 auto; padding: var(--pd-space-6) var(--pd-space-4); display: flex; flex-direction: column; gap: var(--pd-space-4); }
     h1 { margin: 0; font-size: var(--pd-text-title); }
     .parts { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); }
     .parts caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }

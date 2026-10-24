@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` built (S1), the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` built (S1), the `paddock-jobs` adapter (S9), the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -56,6 +56,34 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `chromium-driver` | CDP driver (today in Debrief) | two to three (Debrief, Spotter, Sighter) |
 | `paddock-cli` | shared CLI conventions (`--json`, exit codes, timeouts) | yes |
+
+## `paddock-jobs` Tauri adapter (plan S9)
+
+With the `tauri` feature, `paddock_jobs::tauri` is the jobs part of the shell (ADR 0008 open question 2, ADR 0012 §3):
+
+```rust
+tauri::Builder::default()
+    .setup(|app| {
+        let jobs = paddock_jobs::tauri::manage(app.handle()); // Arc<JobRegistry>; snapshots go out on `paddock://jobs`
+        app.manage(AppState { jobs, pool: JobPool::new(Workers::auto()) });
+        Ok(())
+    })
+    .invoke_handler(paddock_jobs::tauri::route(
+        paddock_jobs::tauri::handler(),                    // or handler_with_grants(lookup): dialogs by their contracts
+        paddock_commands::tauri::Guard::new(&COMMANDS).wrap(handler!()),
+    ))
+```
+
+- `Emit` is the `EventSink` (event `EVENT` = `paddock://jobs`, every snapshot to every webview); `Jobs` is the managed state.
+- `COMMANDS` (a `command_table!`): `jobs_snapshot` (query: every known job, ordered by id) and `job_cancel { id }`
+  (mutation: false for an unknown or ended job). Both are async, return at once and never wait for a job; an app without
+  the state gets `{ code: 'notSetUp', message, retryable: false }`. Starting work stays with the app: its command registers
+  a job, submits it to its `JobPool` and returns the id.
+- `route(jobs, other)` sends the table's commands to the jobs handler and the rest to the app's, so the app keeps one
+  `invoke_handler` until the `paddock-shell` plugin (S17) takes the commands over.
+- Generated TypeScript in `ui/projects/paddock-ui/shell/jobs/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs
+  --features tauri --test tauri generated`): `jobs-commands.ts` (`JOBS_COMMANDS`, `JobsCommand`) and `jobs-fixtures.ts`
+  (one snapshot of every shape, written by the real reporter, decoded by the UI's specs).
 
 ## `paddock-commands` (plan S1)
 

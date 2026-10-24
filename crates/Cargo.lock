@@ -1818,6 +1818,7 @@ dependencies = [
 name = "paddock-jobs"
 version = "0.1.0"
 dependencies = [
+ "paddock-commands",
  "proptest",
  "serde",
  "serde_json",

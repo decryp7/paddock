@@ -39,6 +39,18 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       },
     }),
     defineCommand<DemoContext>({
+      id: 'sd.job.start',
+      title: msg('sd.job.start', 'Start sample job'),
+      category: msg('sd.category.jobs', 'Jobs'),
+      run: (ctx) => void ctx.startJob(),
+    }),
+    defineCommand<DemoContext>({
+      id: 'sd.job.quiet',
+      title: msg('sd.job.quiet', 'Start quiet job'),
+      category: msg('sd.category.jobs', 'Jobs'),
+      run: (ctx) => void ctx.startQuietJob(),
+    }),
+    defineCommand<DemoContext>({
       id: 'sd.fail',
       title: msg('sd.fail', 'Fail on purpose'),
       category: msg('sd.category.demo', 'Demo'),

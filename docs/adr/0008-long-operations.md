@@ -17,7 +17,7 @@ with deterministic results, and every operation off the UI/main/IPC-handler thre
 
 One Rust crate, `paddock-jobs` (no UI or Tauri dependency; apps wire one 10-line event sink) and one Angular component, `pd-job`.
 
-### 1. Job model (wire contract, camelCase JSON, event `paddock-job`)
+### 1. Job model (wire contract, camelCase JSON, event `paddock://jobs`)
 
 A **snapshot** is the whole job as of `seq`; events are snapshots, so they are idempotent, coalescable and safe to drop. The UI keeps
 the highest `seq` per `id` and can ask for `snapshots()` when a pane opens.
@@ -44,7 +44,9 @@ At most one event per job per 100 ms (`DEFAULT_MIN_INTERVAL_MS`, ~10/s); the new
 bypass the throttle; `flush()` publishes a pending value (called by `JobContext::run` before the terminal event). `add` is lock-free
 on the fast path, so hot loops on many threads may call it per item. Sinks run under the reporter lock (events arrive in `seq` order),
 must be quick, and a panicking sink is contained and dropped. The Tauri adapter is
-`impl EventSink for Emit { fn emit(&self, s: &JobSnapshot) { let _ = app.emit(EVENT_NAME, s); } }`; no `tauri` feature in the core.
+`impl EventSink for Emit { fn emit(&self, s: &JobSnapshot) { let _ = app.emit(EVENT_NAME, s); } }` in the crate's `tauri` feature
+(`paddock_jobs::tauri`, with `jobs_snapshot` and `job_cancel`; plan S9); the core has no Tauri dependency. The event was named
+`paddock-job` until ADR 0012's `paddock://<area>` scheme renamed it.
 
 ### 3. Cancel: cooperative, with a guarantee
 
