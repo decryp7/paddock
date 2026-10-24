@@ -334,3 +334,7 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   bar test expected the bell's "1" while the demo's asynchronous commands were still posting, and the settled count is
   2. The fast native gate saw the "1" on its first poll; CI did not. Assert the settled state (exact values, full
   labels), never an intermediate one of asynchronous work.
+- `cmd | grep -q pattern` under `set -o pipefail` can fail although the pattern matched: grep exits early, the writer
+  gets SIGPIPE and the pipeline reports failure (the shell demo's macOS verify said "DMG is not signed" for a signed
+  DMG). Capture the output first (`out=$(codesign …)`), then match. Debrief's and Pitwall's verify scripts use the same
+  pattern and get the same fix when next touched.
