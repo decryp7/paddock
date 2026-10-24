@@ -120,7 +120,7 @@ test('reduced motion: the menu toggle and the OS setting shorten every duration 
   await expect(html(page)).toHaveAttribute('data-motion', 'reduce');
   await expect.poll(() => token(page, '--pd-duration-large')).toBe('100ms');
   await expect.poll(() => token(page, '--pd-motion-scale')).toBe('0');
-  const transition = await page.locator('pd-jobs-status .pill').evaluate((el) => getComputedStyle(el).transitionDuration);
+  const transition = await page.locator('pd-jobs-status .pd-pill').evaluate((el) => getComputedStyle(el).transitionDuration);
   expect(transition.split(',').every((d) => Number.parseFloat(d) <= 0.0001)).toBe(true);
   await choose(page, 'Reduce motion');
   await expect(html(page)).toHaveAttribute('data-motion', 'full');
@@ -150,13 +150,14 @@ test('a View-menu change and a Settings change in another window never revert ea
   await choose(page, 'High contrast');
   await other.getByRole('button', { name: 'Settings…', exact: true }).click();
   const win = other.getByRole('dialog', { name: 'Settings' });
-  await win.locator('pd-setting-field[data-key="theme"]').getByRole('combobox').selectOption('light');
+  await win.locator('pd-setting-field[data-key="theme"]').getByRole('combobox').click();
+  await other.getByRole('option', { name: 'Light', exact: true }).click();
   for (const p of [page, other]) {
     await expect(html(p)).toHaveAttribute('data-theme', 'light');
     await expect(html(p)).toHaveAttribute('data-contrast', 'more');
   }
   // The Settings window shows the menu's change too, and A's next change keeps B's theme.
-  await expect(win.locator('pd-setting-field[data-key="contrast"]').getByRole('combobox')).toHaveValue('more');
+  await expect(win.locator('pd-setting-field[data-key="contrast"]').getByRole('combobox')).toHaveText('High contrast');
   await choose(page, 'Reduce motion');
   for (const p of [page, other]) {
     await expect(html(p)).toHaveAttribute('data-motion', 'reduce');

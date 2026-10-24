@@ -1,4 +1,4 @@
-import { Injectable, Injector, signal } from '@angular/core';
+import { Injectable, Injector, signal, type Signal } from '@angular/core';
 import type { DialogDef } from '@decryp7/paddock-ui/shell';
 import { DialogPresenter, type DialogContent, type DialogRef, type DialogSession, type DialogShowRequest } from './types';
 
@@ -6,7 +6,8 @@ import { DialogPresenter, type DialogContent, type DialogRef, type DialogSession
 export interface InPageDialog {
   readonly n: number;
   readonly def: DialogDef;
-  readonly title: string;
+  /** The title shown in the header; the content may change it (`DialogRef.setTitle`). */
+  readonly title: Signal<string>;
   readonly inputs: Readonly<Record<string, unknown>>;
   readonly ref: DialogRef;
   content: DialogContent | null;
@@ -39,7 +40,11 @@ export class InPageDialogBackend extends DialogPresenter {
       this.list.update((s) => s.filter((d) => d.n !== n));
       resolve(result);
     };
-    const entry: InPageDialog = { n, def: request.def, title: request.title, inputs: request.inputs, ref: { closed, close }, content: null, injector: null };
+    const title = signal(request.title);
+    const setTitle = (text: string) => {
+      if (text.trim()) title.set(text.trim());
+    };
+    const entry: InPageDialog = { n, def: request.def, title: title.asReadonly(), inputs: request.inputs, ref: { closed, close, setTitle }, content: null, injector: null };
     this.list.update((s) => [...s, entry]);
     return { closed, close, isOpen, focus: () => this.list.update((s) => raise(s, n)) };
   }

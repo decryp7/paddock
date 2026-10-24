@@ -133,4 +133,21 @@ describe('settings model', () => {
     expect(nav[2]!.items[0]!.page).toBeNull();
     expect(settingsNav([], [])).toEqual([]);
   });
+
+  it('groups pages under their sub-group headings: unheaded pages first, then each heading in order of its first page', () => {
+    const load = () => Promise.resolve(class {});
+    const page = (id: string, order: number, subgroup?: string) =>
+      defineSettingsPage({ id, group: 'features', title: msg(id, id), order, load, ...(subgroup ? { subgroup: msg(`${id}.sub`, subgroup) } : {}) });
+    const nav = settingsNav([page('f.a', 10, 'Network'), page('f.b', 20), page('f.c', 30, 'Storage'), page('f.d', 40, 'Network')], []);
+    expect(nav).toHaveLength(1);
+    expect(nav[0]!.subgroups.map((s) => [s.title, s.items.map((i) => i.id)])).toEqual([
+      [null, ['f.b']],
+      ['Network', ['f.a', 'f.d']],
+      ['Storage', ['f.c']],
+    ]);
+    // The flat list follows the sub-groups, so keyboard order matches what is drawn.
+    expect(nav[0]!.items.map((i) => i.id)).toEqual(['f.b', 'f.a', 'f.d', 'f.c']);
+    // Without sub-groups there is one unheaded run, as before.
+    expect(settingsNav([page('f.x', 1)], [])[0]!.subgroups).toHaveLength(1);
+  });
 });

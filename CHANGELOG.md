@@ -15,6 +15,7 @@ Conventional Commits; one semver tag for the whole repo.
   `paddock-shell` installs it and registers the `pd.logging` section ("Diagnostics > Logging": level, MB per day, days kept) on the
   `LogHandle` (the level applies at once), and the new `log_from_webview` command (with `provideWebviewLog`) puts the page's errors
   in the engine's log with their window. The shell demo shows it (browser and desktop).
+- Shared sccache backend (plan X10): `setup-rust` takes `sccache-redis-endpoint`/`sccache-redis-db` (defaults from `vars.SCCACHE_REDIS_*`); every OS uses the shared Redis database 5 (`sccache-backend: auto|redis|local`); a pinned, checksum-verified sccache is installed when the runner has none; `CARGO_INCREMENTAL=0`, `SCCACHE_IGNORE_SERVER_IO_ERROR=1`; new `sccache-stats` action; used in Paddock CI.
 - `paddock-proc` (plan X6): child processes. `command` (no console window on Windows), `clean_env` and `lower_priority`;
   `run_bounded` (timeout, output cap, the whole tree ended, typed `RunError`); `Supervised` children (own process group,
   `terminate` with grace, tree ended on drop, an optional `MemoryCap` with warning, stop and peak, a `Registry` and
@@ -55,6 +56,13 @@ Conventional Commits; one semver tag for the whole repo.
   - `tools/` (X47): `bootstrap.sh`, `verify-installed.sh`, `linux-container.sh`, `prune-build-folders.sh` and `.ps1`,
     `host-cleanup.sh`, with the app as a parameter.
   - Shell Demo reads its build commit and date from `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE`.
+- `@decryp7/paddock-ui` UI basics (plan X12, X35 to X38 and the shell gaps): `/icons` (the generic `pd:` set, `outlineIcon`,
+  `registerPaddockIcons`, `pd-glyph`), `/format` (bytes, durations, relative times, counts, middle ellipsis), `/prefs` (guarded
+  localStorage), `/select` (`pd-select`, themed non-native select), `/testing` (`installTestKit`, DOM helpers, fake ECharts),
+  `/shell/feel` (native-feel guard, installed by `provideShellPages`), `pd-path-text`, `pd-copy-menu`, `PdClock`, the
+  `pd-empty-state` icon, `css/controls.css` and `css/material.css`, `DialogRef.setTitle`, `SettingsPageDef.subgroup`,
+  `SettingsStore.setNotice`; every shell and library CSS class is now `pd-` prefixed (breaking for app CSS that targeted them).
+  Contact sheet for the drawing review: `ui/docs/review/contact-sheet.png`.
 - `paddock-env` (plan X7, decision D3): folders and state files. `AppDirs` (data, config, cache, logs, runtime per OS from an
   injectable environment; `<ID>_HOME` override in debug builds only; portable mode; Windows is Local, the old Roaming folder
   is named for the one-time move) and `VersionedFile<T>` (atomic write with fsync and `.bak`, migration chain, a damaged file

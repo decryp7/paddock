@@ -76,7 +76,7 @@ describe('a new app', () => {
     const read = (p) => readFileSync(join(dest, p), 'utf8');
     const cargo = read('app/src-tauri/Cargo.toml');
     assert.match(cargo, /^name = "pacenotes-app"$/m);
-    assert.match(cargo, /paddock-shell = \{ version = "\d+\.\d+", registry = "decryp7", features = \["tray"\] \}/);
+    assert.match(cargo, /paddock-shell = \{ version = "\d+\.\d+", registry = "decryp7", features = \["tray"(, "native-dialogs")?\] \}/);
     assert.doesNotMatch(cargo, /path = "\.\.\//);
     const conf = JSON.parse(read('app/src-tauri/tauri.conf.json'));
     assert.equal(conf.productName, 'Pacenotes');

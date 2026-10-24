@@ -27,6 +27,7 @@ export default assertChromeForTesting(
     },
     projects: [
       { name: 'gallery', testMatch: 'gallery.spec.ts', use: { baseURL: `http://localhost:${PORT}` } },
+      { name: 'review', testMatch: 'contact-sheet.spec.ts' },
       { name: 'shell-demo', testMatch: /shell-demo(-[a-z]+)?\.spec\.ts$/, use: { baseURL: `http://localhost:${SHELL_DEMO_PORT}` } },
     ],
     webServer: [

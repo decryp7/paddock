@@ -15,9 +15,9 @@ import { ABOUT_STYLES } from './styles';
         @if (info.value(); as a) {
           <header>
             <h2>{{ a.appName }}</h2>
-            <p class="muted" data-testid="about-version">{{ versionText(a.version) }}</p>
+            <p class="pd-muted" data-testid="about-version">{{ versionText(a.version) }}</p>
           </header>
-          <dl class="facts" [attr.aria-label]="t.build">
+          <dl class="pd-facts" [attr.aria-label]="t.build">
             @if (a.commit) {
               <dt>{{ t.commit }}</dt>
               <dd [title]="a.commit">{{ a.commit }}</dd>
@@ -38,22 +38,22 @@ import { ABOUT_STYLES } from './styles';
           @if (a.legal.length) {
             <section aria-labelledby="pd-about-legal">
               <h3 id="pd-about-legal">{{ t.legal }}</h3>
-              <div class="row">
+              <div class="pd-row">
                 @for (doc of a.legal; track doc.id) {
-                  <button type="button" class="btn" [attr.aria-pressed]="selected() === doc.id" (click)="show(doc.id)">{{ doc.title }}</button>
+                  <button type="button" class="pd-btn" [attr.aria-pressed]="selected() === doc.id" (click)="show(doc.id)">{{ doc.title }}</button>
                 }
               </div>
             </section>
             @if (selected()) {
               @switch (legal.status()) {
                 @case ('resolved') {
-                  <pre class="text" tabindex="0" [attr.aria-label]="selectedTitle()" data-testid="about-legal">{{ legal.value() }}</pre>
+                  <pre class="pd-text" tabindex="0" [attr.aria-label]="selectedTitle()" data-testid="about-legal">{{ legal.value() }}</pre>
                 }
                 @case ('error') {
-                  <p role="alert">{{ t.legalFailed }} <button type="button" class="btn" (click)="legal.reload()">{{ t.retry }}</button></p>
+                  <p role="alert">{{ t.legalFailed }} <button type="button" class="pd-btn" (click)="legal.reload()">{{ t.retry }}</button></p>
                 }
                 @default {
-                  <p class="muted" role="status">{{ t.loading }}</p>
+                  <p class="pd-muted" role="status">{{ t.loading }}</p>
                 }
               }
             }
@@ -61,10 +61,10 @@ import { ABOUT_STYLES } from './styles';
         }
       }
       @case ('error') {
-        <p role="alert">{{ t.infoFailed }} <button type="button" class="btn" (click)="info.reload()">{{ t.retry }}</button></p>
+        <p role="alert">{{ t.infoFailed }} <button type="button" class="pd-btn" (click)="info.reload()">{{ t.retry }}</button></p>
       }
       @default {
-        <p class="muted" role="status">{{ t.loading }}</p>
+        <p class="pd-muted" role="status">{{ t.loading }}</p>
       }
     }
   `,

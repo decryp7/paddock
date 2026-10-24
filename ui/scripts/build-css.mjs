@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'projects', 'paddock-ui');
 const out = join(root, 'css');
 mkdirSync(out, { recursive: true });
-for (const name of ['tokens', 'paddock']) {
+for (const name of ['tokens', 'paddock', 'controls', 'material']) {
   const { css } = compile(join(root, 'scss', `entry-${name}.scss`), { style: 'expanded' });
   writeFileSync(join(out, `${name}.css`), css);
 }

@@ -5,7 +5,8 @@ import { defineStatusItem, type StatusItemDef } from '../define';
 import { provideContributions } from '../provide';
 import { provideShellContext } from '../context';
 import type { LazyPart } from '../lazy';
-import { iconLetter, PdIcon, PdShellIcon, provideShellIcon, SHELL_ICON_PATHS } from './icon';
+import { iconLetter, PdIcon, PdShellIcon, provideShellIcon } from './icon';
+import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
 import { PdPartOutlet } from './part-outlet';
 import { cycleRegions, regionIndex, regionKey, regionsOf, regionTarget, REGION_ATTR, shown } from './regions';
 import { PdStatusBar, STATUS_COMPACT } from './status-bar';
@@ -47,7 +48,7 @@ describe('icons', () => {
     const fixture = TestBed.createComponent(PdShellIcon);
     fixture.componentRef.setInput('name', 'pd:home');
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelector('path').getAttribute('d')).toBe(SHELL_ICON_PATHS['pd:home']);
+    expect(fixture.nativeElement.querySelector('path').getAttribute('d')).toBe(PD_ICON_PATHS.home);
     fixture.componentRef.setInput('name', 'pw:models');
     await fixture.whenStable();
     expect(fixture.nativeElement.querySelector('svg')).toBeNull();
@@ -179,10 +180,10 @@ describe('pd-title-bar', () => {
     const fixture = TestBed.createComponent(Host);
     await fixture.whenStable();
     const el: HTMLElement = fixture.nativeElement;
-    expect(el.querySelector('.lead')?.textContent).toBe('L');
+    expect(el.querySelector('.pd-lead')?.textContent).toBe('L');
     expect(el.querySelector('[data-testid="app-name"]')?.textContent).toBe('Pitwall');
-    expect(el.querySelector('.menus')?.textContent).toBe('menus');
-    expect(el.querySelector('.end')?.textContent).toBe('E');
+    expect(el.querySelector('.pd-menus')?.textContent).toBe('menus');
+    expect(el.querySelector('.pd-end')?.textContent).toBe('E');
   });
 });
 
@@ -348,7 +349,7 @@ describe('pd-status-bar', () => {
     const fixture = TestBed.createComponent(PdStatusBar);
     await settle();
     await fixture.whenStable();
-    const ids = (side: string) => [...fixture.nativeElement.querySelectorAll(`.${side} [data-status-item]`)].map((e) => (e as HTMLElement).dataset['statusItem']);
+    const ids = (side: string) => [...fixture.nativeElement.querySelectorAll(`.pd-${side} [data-status-item]`)].map((e) => (e as HTMLElement).dataset['statusItem']);
     expect(ids('start')).toEqual(['t.greet']);
     // Before the app's context is loaded every item is offered.
     expect(ids('end')).toEqual(['t.health', 't.jobs', 't.bell', 't.tie', 't.cond']);
@@ -381,8 +382,8 @@ describe('pd-status-bar', () => {
     observer.fire([document.createElement('div'), items[0] as HTMLElement]);
     await fixture.whenStable();
     await settle();
-    const hidden = () => [...el.querySelectorAll<HTMLElement>('[data-status-item].hidden')].map((e) => e.dataset['statusItem']);
-    expect(el.classList).toContain('compact');
+    const hidden = () => [...el.querySelectorAll<HTMLElement>('[data-status-item].pd-hidden')].map((e) => e.dataset['statusItem']);
+    expect(el.classList).toContain('pd-compact');
     expect(el.querySelector('[data-status-item="t.jobs"]')?.textContent?.trim()).toBe('A');
     // Re-measured in the compact form once rendered (60 px here too): the three lowest give way.
     expect(hidden()).toEqual(['t.greet', 't.tie', 't.cond']);
@@ -394,7 +395,7 @@ describe('pd-status-bar', () => {
     more.click();
     await fixture.whenStable();
     expect(hidden()).toEqual([]);
-    expect(el.classList).toContain('all');
+    expect(el.classList).toContain('pd-all');
     expect(more.getAttribute('aria-label')).toBe('Show fewer status items');
     more.click();
     await fixture.whenStable();
@@ -408,7 +409,7 @@ describe('pd-status-bar', () => {
     Object.defineProperty(el, 'clientWidth', { value: 600, configurable: true });
     observer.fire([el]);
     await fixture.whenStable();
-    expect(el.classList).not.toContain('compact');
+    expect(el.classList).not.toContain('pd-compact');
     expect(hidden()).toEqual([]);
     fixture.destroy();
     expect(observer.targets.size).toBe(0);
@@ -419,7 +420,7 @@ describe('pd-status-bar', () => {
     const fixture = TestBed.createComponent(PdStatusBar);
     await settle();
     await fixture.whenStable();
-    expect(fixture.nativeElement.querySelectorAll('[data-status-item].hidden')).toHaveLength(0);
+    expect(fixture.nativeElement.querySelectorAll('[data-status-item].pd-hidden')).toHaveLength(0);
     expect(fixture.nativeElement.querySelector('[data-testid="status-more"]')).toBeNull();
   });
 });

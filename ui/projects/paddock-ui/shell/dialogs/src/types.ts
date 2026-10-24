@@ -7,6 +7,12 @@ export interface DialogRef<R = unknown> {
   close(result?: R): void;
   /** Resolves when the dialog is gone, with its result (`undefined` when dismissed). Never rejects. */
   readonly closed: Promise<R | undefined>;
+  /**
+   * Sets the dialog's title (the OS window's title bar, or the in-page header, and the accessible name) to what the content
+   * knows only after it loaded: "Delete 3 runners?" for a decision about three runners. Only the dialog's own content
+   * has it (the `DIALOG_REF` it injects); the opener's ref does not. Plain text, never markup.
+   */
+  setTitle?(title: string): void;
 }
 
 export const DIALOG_REF = new InjectionToken<DialogRef>('PADDOCK_DIALOG_REF');

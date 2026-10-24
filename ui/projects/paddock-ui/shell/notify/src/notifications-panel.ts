@@ -25,19 +25,19 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [SuEmptyState, SuSegmentedControl],
   template: `
-    <div class="bar">
+    <div class="pd-bar">
       <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
-      <span class="spacer"></span>
-      <button type="button" class="btn ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
+      <span class="pd-spacer"></span>
+      <button type="button" class="pd-btn pd-ghost" [disabled]="!store.unread()" data-testid="notices-mark-all" (click)="store.markAllRead()">{{ t.markAllRead }}</button>
     </div>
     @if (store.requestError(); as e) {
-      <div class="err" role="alert">
-        <span class="grow">{{ e }}</span>
-        <button type="button" class="btn" (click)="store.load()">{{ t.retry }}</button>
+      <div class="pd-err" role="alert">
+        <span class="pd-grow">{{ e }}</span>
+        <button type="button" class="pd-btn" (click)="store.load()">{{ t.retry }}</button>
       </div>
     }
     @if (note(); as n) {
-      <p class="err" role="alert">{{ n }}</p>
+      <p class="pd-err" role="alert">{{ n }}</p>
     }
     @if (!store.notices().length) {
       <pd-empty-state data-testid="notices-empty" [heading]="t.emptyHeading" [description]="t.emptyDescription" />
@@ -46,32 +46,32 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
       <h3 [id]="headingId(g.source)">{{ sourceLabel(g.source) }}</h3>
       <ul [attr.aria-labelledby]="headingId(g.source)">
         @for (n of g.notices; track n.id) {
-          <li class="notice" [class.unread]="!n.read" [class.focus]="store.focus() === n.id" [attr.data-severity]="n.severity" [attr.data-testid]="'notice-' + n.id" [attr.data-cause]="n.cause">
-            <div class="row">
-              <span class="dot" aria-hidden="true"></span>
-              <strong class="title">{{ titleWithCount(n) }}</strong>
+          <li class="pd-notice" [class.pd-unread]="!n.read" [class.pd-focus]="store.focus() === n.id" [attr.data-severity]="n.severity" [attr.data-testid]="'notice-' + n.id" [attr.data-cause]="n.cause">
+            <div class="pd-row">
+              <span class="pd-dot" aria-hidden="true"></span>
+              <strong class="pd-title">{{ titleWithCount(n) }}</strong>
               @if (!n.read) {
-                <span class="sr-only">{{ t.unreadMark }}</span>
+                <span class="pd-sr-only">{{ t.unreadMark }}</span>
               }
-              <span class="time">{{ time(n.at) }}</span>
-              <span class="row-actions">
+              <span class="pd-time">{{ time(n.at) }}</span>
+              <span class="pd-row-actions">
                 @if (!n.read) {
-                  <button type="button" class="icon-btn" [attr.aria-label]="markReadLabel(n.title)" [attr.data-testid]="'notice-read-' + n.id" (click)="store.markRead(n.id)">
+                  <button type="button" class="pd-icon-btn" [attr.aria-label]="markReadLabel(n.title)" [attr.data-testid]="'notice-read-' + n.id" (click)="store.markRead(n.id)">
                     <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M2.5 7.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
                   </button>
                 }
-                <button type="button" class="icon-btn" [attr.aria-label]="dismissLabel(n.title)" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="store.dismiss(n.id)">
+                <button type="button" class="pd-icon-btn" [attr.aria-label]="dismissLabel(n.title)" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="store.dismiss(n.id)">
                   <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
                 </button>
               </span>
             </div>
             @if (n.body) {
-              <p class="body">{{ n.body }}</p>
+              <p class="pd-body">{{ n.body }}</p>
             }
             @if (buttons(n).length) {
-              <div class="actions">
+              <div class="pd-actions">
                 @for (a of buttons(n); track $index) {
-                  <button type="button" class="btn" [attr.data-testid]="'notice-action-' + n.id + '-' + $index" (click)="act(n, a)">{{ actions.label(a, n) }}</button>
+                  <button type="button" class="pd-btn" [attr.data-testid]="'notice-action-' + n.id + '-' + $index" (click)="act(n, a)">{{ actions.label(a, n) }}</button>
                 }
               </div>
             }
@@ -82,34 +82,34 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
   `,
   styles: `
     :host { position: relative; display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; font-size: var(--pd-text-body); }
-    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-1); }
-    .spacer, .grow { flex: 1; }
-    .err { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-danger); margin: 0; }
+    .pd-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-1); }
+    .pd-spacer, .pd-grow { flex: 1; }
+    .pd-err { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-danger); margin: 0; }
     h3 { margin: var(--pd-space-2) 0 0; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); }
     ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--pd-space-1); }
-    .notice { border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); padding: var(--pd-space-1) var(--pd-space-2); display: flex; flex-direction: column; gap: var(--pd-space-1); }
-    .notice[data-severity='error'], .notice[data-severity='critical'] { border-inline-start-color: var(--pd-danger); }
-    .notice[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
-    .notice[data-severity='success'] { border-inline-start-color: var(--pd-success); }
-    .notice.focus { outline: 2px solid var(--pd-focus-ring); }
-    .row { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; }
-    .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-    .unread .dot { background: var(--pd-accent); }
-    .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--pd-weight-medium); }
-    .notice:not(.unread) .title { font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); }
-    .time { white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
-    .body { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; user-select: text; }
-    .actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); justify-content: flex-end; }
-    .row-actions { display: flex; gap: 2px; opacity: 0; }
-    .notice:hover .row-actions, .notice:focus-within .row-actions { opacity: 1; }
-    @media (hover: none) { .row-actions { opacity: 1; } }
-    .btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .btn.ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
-    .btn:disabled { color: var(--pd-text-subtle); cursor: default; }
-    .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
-    .icon-btn:hover { background: var(--pd-hover); color: var(--pd-text); }
-    .btn:focus-visible, .icon-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .pd-notice { border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-border-strong); border-radius: var(--pd-radius-control); padding: var(--pd-space-1) var(--pd-space-2); display: flex; flex-direction: column; gap: var(--pd-space-1); }
+    .pd-notice[data-severity='error'], .pd-notice[data-severity='critical'] { border-inline-start-color: var(--pd-danger); }
+    .pd-notice[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
+    .pd-notice[data-severity='success'] { border-inline-start-color: var(--pd-success); }
+    .pd-notice.pd-focus { outline: 2px solid var(--pd-focus-ring); }
+    .pd-row { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; }
+    .pd-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+    .pd-unread .pd-dot { background: var(--pd-accent); }
+    .pd-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--pd-weight-medium); }
+    .pd-notice:not(.pd-unread) .pd-title { font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); }
+    .pd-time { white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
+    .pd-body { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; user-select: text; }
+    .pd-actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); justify-content: flex-end; }
+    .pd-row-actions { display: flex; gap: 2px; opacity: 0; }
+    .pd-notice:hover .pd-row-actions, .pd-notice:focus-within .pd-row-actions { opacity: 1; }
+    @media (hover: none) { .pd-row-actions { opacity: 1; } }
+    .pd-btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-btn.pd-ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
+    .pd-btn:disabled { color: var(--pd-text-subtle); cursor: default; }
+    .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
+    .pd-icon-btn:hover { background: var(--pd-hover); color: var(--pd-text); }
+    .pd-btn:focus-visible, .pd-icon-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   `,
 })
 export class PdNotificationsPanel {

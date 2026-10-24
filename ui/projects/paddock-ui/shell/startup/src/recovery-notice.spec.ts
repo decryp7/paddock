@@ -43,7 +43,7 @@ describe('the unclean-shutdown notice', () => {
     const { el } = await mount({ safeMode: false, unclean: UNCLEAN });
     expect(q(el, 'recovery-notice')?.getAttribute('role')).toBe('alert');
     expect(q(el, 'recovery-restore')?.textContent).toContain('Restore last session');
-    expect(q(el, 'recovery-restore')?.classList.contains('primary')).toBe(true);
+    expect(q(el, 'recovery-restore')?.classList.contains('pd-recovery__primary')).toBe(true);
     expect(q(el, 'recovery-safe-mode')?.textContent).toContain('Start in safe mode');
     expect(q(el, 'recovery-fresh')?.textContent).toContain('Start fresh');
     expect(el.textContent).toContain('Your last session can be restored');
@@ -56,7 +56,7 @@ describe('the unclean-shutdown notice', () => {
     });
     expect(q(el, 'recovery-restore')).toBeNull();
     expect(q(el, 'recovery-safe-mode')).toBeNull();
-    expect(q(el, 'recovery-fresh')?.classList.contains('primary')).toBe(true);
+    expect(q(el, 'recovery-fresh')?.classList.contains('pd-recovery__primary')).toBe(true);
     expect(q(el, 'recovery-session-problem')?.textContent).toContain('could not be read');
     expect(el.textContent).toContain('while running in safe mode');
     expect(el.textContent).toContain('There is no session to restore; start fresh');
@@ -74,7 +74,7 @@ describe('the unclean-shutdown notice', () => {
   it('says there is no session when none can be restored after an ordinary crash', async () => {
     const { el } = await mount({ safeMode: false, unclean: { ...UNCLEAN, session: { available: false, windows: 0, problem: null }, offers: { restore: false, safeMode: true, startFresh: true } } });
     expect(el.textContent).toContain('There is no session to restore.');
-    expect(q(el, 'recovery-safe-mode')?.classList.contains('primary')).toBe(true);
+    expect(q(el, 'recovery-safe-mode')?.classList.contains('pd-recovery__primary')).toBe(true);
   });
 
   it('Start fresh sends the choice and the notice goes', async () => {

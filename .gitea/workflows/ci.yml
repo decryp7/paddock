@@ -144,6 +144,10 @@ jobs:
         working-directory: crates
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
+          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
       - run: cargo fmt --all --check
       # Merged line coverage over all test binaries, adapters included (the per-binary summary counts unused generic instances).
       # Native glue files are left out (crates/README.md: never logic, reviewed by hand).
@@ -152,6 +156,8 @@ jobs:
           cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri)/native\.rs$' --lcov --output-path lcov.info
           awk -F'[:,]' '/^DA:/{t++; if($3>0)h++} END{p=100*h/t; printf "lines %d/%d = %.2f%%\n", h, t, p; if(p<99) exit 1}' lcov.info
       - run: cargo deny check
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # Each crate on Linux, Windows and macOS (platform-only bugs exist: lessons): clippy and tests with every feature, so the
   # `tauri` adapters are built too. One step per crate that runs even after another crate failed, so every failure names
@@ -193,10 +199,14 @@ jobs:
           echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        if: runner.os == 'Windows'
+      # Toolchain and sccache on every OS: the shared Redis backend (database 5) when the Gitea variables are set. The macOS
+      # leg can switch to the local disk with `sccache-backend: local` if the network proves slower than its disk.
+      - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
+          sccache-backend: auto
+          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
+          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
 
       - name: Toolchain present
         run: |
@@ -270,6 +280,9 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-window --all-targets --all-features -- -D warnings && cargo test -p paddock-window --all-features
 
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
   # Paddock Shell Demo (apps/shell-demo, plan S18): the shell plugin in a real app, in its own workspace, with the UI it
   # embeds. Inside this repo it is the first consumer: a change to a shell crate or to the UI that breaks an app fails
   # here before a tag. Its installers are built by shell-demo-release.yml (a `shell-demo-v*` tag or a manual run).
@@ -282,6 +295,11 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
+          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
 
       - uses: actions/setup-node@v4
         with:
@@ -301,3 +319,6 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test
           cargo deny check
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
