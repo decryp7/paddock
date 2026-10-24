@@ -27,6 +27,7 @@
     { "path": "./projects/paddock-ui/tsconfig.spec.json" },
     { "path": "./projects/gallery/tsconfig.app.json" },
     { "path": "./projects/shell-demo/tsconfig.app.json" },
+    { "path": "./projects/workbench-demo/tsconfig.app.json" },
     { "path": "./projects/paddock-e2e/tsconfig.json" }
   ]
 }

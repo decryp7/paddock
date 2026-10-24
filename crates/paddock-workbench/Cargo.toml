@@ -1,0 +1,25 @@
+[package]
+name = "paddock-workbench"
+version = "0.1.0"
+description = "The Paddock workbench's Rust side: the dock's layout store (versioned, bounded) and the workbench Tauri plugin that serves it with the pop-out panels and the assistant behind one command guard."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+# The Tauri adapter (`paddock_workbench::tauri`): the managed layout store and the `layout_get` / `layout_set` commands.
+tauri = ["dep:tauri", "paddock-commands/tauri"]
+
+[dependencies]
+paddock-commands = { workspace = true }
+paddock-env = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = { version = "0.4", features = ["kv"] }
+tauri = { workspace = true, optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+tempfile = "3"
+tauri = { workspace = true, features = ["test"] }
