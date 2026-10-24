@@ -3296,15 +3296,21 @@ dependencies = [
 name = "paddock-packs"
 version = "0.1.0"
 dependencies = [
- "notify",
+ "log",
+ "paddock-commands",
  "paddock-env",
+ "paddock-health",
  "paddock-jobs",
+ "paddock-watch",
  "paddock-workspace-hack",
  "regex",
  "serde",
  "serde_ignored",
+ "serde_json",
+ "tauri",
  "tempfile",
  "toml 0.9.12+spec-1.1.0",
+ "ts-rs",
 ]
 
 [[package]]
@@ -3399,6 +3405,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-menu",
+ "paddock-packs",
  "paddock-service",
  "paddock-settings",
  "paddock-startup",
@@ -3461,6 +3468,16 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "ts-rs",
+]
+
+[[package]]
+name = "paddock-watch"
+version = "0.1.0"
+dependencies = [
+ "notify",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "tempfile",
 ]
 
 [[package]]
