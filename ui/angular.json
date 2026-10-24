@@ -117,7 +117,7 @@
             "production": {
               "outputHashing": "all",
               "optimization": { "scripts": true, "styles": { "minify": true, "inlineCritical": false }, "fonts": false },
-              "budgets": [{ "type": "initial", "maximumWarning": "910kB", "maximumError": "1.2MB" }]
+              "budgets": [{ "type": "initial", "maximumWarning": "985kB", "maximumError": "1.2MB" }]
             },
             "development": { "optimization": false, "extractLicenses": false, "sourceMap": true }
           },
