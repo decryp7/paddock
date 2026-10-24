@@ -162,6 +162,8 @@ pub struct FakeState {
     pub embed_bad: u8,
     /// The pairing code Pitwall shows.
     pub pair_code: String,
+    /// Pairing requests started so far (their ids are `pr1-abc`, `pr2-abc`, ...).
+    pub pairs: usize,
     /// `select` answers this model although it is not in the list (a library that changed between two calls).
     pub select_model: Option<String>,
     /// Every request: (method, path, headers lowercased, body).
@@ -191,6 +193,7 @@ impl Default for FakeState {
             embed_short: false,
             embed_bad: 0,
             pair_code: "482913".into(),
+            pairs: 0,
             select_model: None,
             seen: vec![],
         }
@@ -466,6 +469,11 @@ fn serve(mut conn: TcpStream, shared: &Shared) {
             &json!({"ok": true, "name": "pitwall", "version": s.version, "apiVersion": s.api_version, "serving": s.serving, "offline": false, "loadedModels": 0}),
         ),
         Some("/x/v1/pair") => {
+            let started = {
+                let mut st = lock();
+                st.pairs += 1;
+                st.pairs
+            };
             let name = json_body
                 .get("name")
                 .and_then(Value::as_str)
@@ -483,7 +491,7 @@ fn serve(mut conn: TcpStream, shared: &Shared) {
                 &mut conn,
                 202,
                 &[],
-                &json!({"pairingId": "pr1-abc", "code": s.pair_code, "expiresInSecs": 300}),
+                &json!({"pairingId": format!("pr{}-abc", started), "code": s.pair_code, "expiresInSecs": 300}),
             );
         }
         Some("/x/v1/pair/{id}") => {

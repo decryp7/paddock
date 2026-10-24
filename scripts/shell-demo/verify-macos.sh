@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks the built Paddock Shell Demo.app, its DMG and the copy inside the DMG (rule 23): sealed ad-hoc (signingIdentity
 # "-"), `codesign --verify --deep --strict` passes on the .app and the DMG, sealed resources, the hardened runtime off
-# while ad-hoc, every Mach-O inside verified on its own. Never starts the app.
+# while ad-hoc, every Mach-O inside verified on its own and carrying the app's TeamIdentifier, and every sidecar started
+# from inside the bundle with `--self-test` (it loads, answers and touches nothing). Never starts the app itself.
 #   scripts/shell-demo/verify-macos.sh [path/to/App.app] [path/to/App.dmg]
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -13,7 +14,7 @@ dmg="${2:-$(find "$bundle/dmg" -maxdepth 1 -name '*.dmg' 2>/dev/null | head -1 |
 [ -f "${dmg:-}" ] || { echo "::error::no .dmg found (looked in $bundle/dmg)"; exit 1; }
 
 check_app() {
-  local app="$1" sig bin
+  local app="$1" sig bin team bin_team
   codesign --verify --deep --strict --verbose=2 "$app"
   sig=$(codesign -dvvv "$app" 2>&1)
   echo "$sig"
@@ -32,6 +33,7 @@ check_app() {
     echo "$sig" | grep -q 'Authority=' || { echo "::error::$app is neither ad-hoc nor identity signed"; return 1; }
     echo "::notice::$app is signed with a real identity"
   fi
+  team=$(echo "$sig" | sed -n 's/^TeamIdentifier=//p')
   if echo "$sig" | grep -q 'Sealed Resources=none' || ! echo "$sig" | grep -q 'Sealed Resources'; then
     echo "::error::$app has no sealed resources"
     return 1
@@ -45,8 +47,19 @@ check_app() {
       echo "::error::$bin is only linker-signed"
       return 1
     fi
+    bin_team=$(echo "$bin_sig" | sed -n 's/^TeamIdentifier=//p')
+    if [ "$bin_team" != "$team" ]; then
+      echo "::error::$bin has TeamIdentifier '$bin_team', the app '$team' (different Team IDs cannot load each other)"
+      return 1
+    fi
     echo "verified: ${bin#"$app"/}"
   done < <(find "$app/Contents" -type f \( -perm -u+x -o -name '*.dylib' \))
+  # Rule 23: every sidecar starts from the built app.
+  for sidecar in shell-demo-agent; do
+    out=$("$app/Contents/MacOS/$sidecar" --self-test) || { echo "::error::$sidecar --self-test failed"; return 1; }
+    echo "$out"
+    echo "$out" | grep -q 'self-test: ok$' || { echo "::error::$sidecar --self-test did not answer ok"; return 1; }
+  done
   echo "bundle OK: $app"
 }
 
