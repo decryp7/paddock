@@ -11,7 +11,7 @@ import { PdGlyph } from '@decryp7/paddock-ui/icons';
     <span class="pd-icon">
       <ng-content select="[slot=icon]">
         @if (icon()) {
-          <pd-glyph [name]="icon()" [size]="32" [stroke]="1.5" />
+          <pd-glyph [name]="icon()" [size]="32" />
         } @else {
         <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
           <path d="M3.5 13.5 6 5.5h12l2.5 8M3.5 13.5v5h17v-5M3.5 13.5h5l1 2h5l1-2h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />

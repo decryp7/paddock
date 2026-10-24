@@ -196,6 +196,13 @@ describe('pd-glyph', () => {
     expect(el.getAttribute('aria-hidden')).toBe('true');
     expect(el.querySelector('svg')?.getAttribute('width')).toBe('20');
     expect(el.querySelector('path')?.getAttribute('d')).toContain('M20 12a8 8');
+    expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.8');
+    f.componentRef.setInput('size', 24);
+    f.detectChanges();
+    expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('1.75');
+    f.componentRef.setInput('stroke', 3);
+    f.detectChanges();
+    expect(el.querySelector('svg')?.getAttribute('stroke-width')).toBe('3');
     f.componentRef.setInput('paths', 'M1 1h2');
     f.detectChanges();
     expect(el.querySelector('path')?.getAttribute('d')).toBe('M1 1h2');

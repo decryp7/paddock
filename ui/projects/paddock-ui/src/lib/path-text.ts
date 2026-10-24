@@ -16,7 +16,7 @@ import { copyText } from './clipboard';
   template: `<span class="pd-text" [attr.title]="whole()" data-testid="path-text"><span class="pd-head">{{ parts().head }}</span><span class="pd-tail">{{ parts().tail }}</span></span>
     @if (copy()) {
       <button class="pd-copy" type="button" [attr.aria-label]="copied() ? copiedLabel : copyLabel" [attr.title]="copied() ? copiedLabel : copyLabel" (click)="doCopy($event)">
-        <pd-glyph [name]="copied() ? 'check' : 'copy'" [size]="12" [stroke]="2.25" />
+        <pd-glyph [name]="copied() ? 'check' : 'copy'" [size]="12" />
       </button>
     }`,
   styles: `

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ICON_GRID, ICON_STROKE } from './outline';
 import { PD_ICON_PATHS, type PdIconName } from './paths';
 
 /**
@@ -10,7 +11,7 @@ import { PD_ICON_PATHS, type PdIconName } from './paths';
   selector: 'pd-glyph',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { 'aria-hidden': 'true' },
-  template: `<svg [attr.viewBox]="'0 0 24 24'" [attr.width]="size()" [attr.height]="size()" focusable="false" fill="none" stroke="currentColor" [attr.stroke-width]="stroke()" stroke-linecap="round" stroke-linejoin="round"><path [attr.d]="path()" /></svg>`,
+  template: `<svg [attr.viewBox]="'0 0 24 24'" [attr.width]="size()" [attr.height]="size()" focusable="false" fill="none" stroke="currentColor" [attr.stroke-width]="strokeWidth()" stroke-linecap="round" stroke-linejoin="round"><path [attr.d]="path()" /></svg>`,
   styles: `
     :host { display: inline-flex; flex: none; align-items: center; justify-content: center; }
     svg { display: block; }
@@ -23,8 +24,12 @@ export class PdGlyph {
   readonly paths = input<string>('');
   /** Pixels (width and height). */
   readonly size = input(16);
-  /** Stroke width on the 24 px grid. Small sizes read better a little heavier (the shell draws 16 px glyphs at 2.25). */
-  readonly stroke = input(1.75);
+  /**
+   * Stroke width on the 24 px grid. Default: the design guide's 1.5 px on the screen at any size, never lighter than the
+   * grid's 1.75 (so 16 px glyphs are drawn at 2.25 and 12 px ones at 3).
+   */
+  readonly stroke = input<number | null>(null);
+  protected readonly strokeWidth = computed(() => this.stroke() ?? Math.max(ICON_STROKE, (ICON_GRID * 1.5) / this.size()));
   protected readonly path = computed(() => {
     const p = this.paths();
     if (p) return p;
