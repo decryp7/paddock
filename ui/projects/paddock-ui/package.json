@@ -18,17 +18,28 @@
     "dark-mode"
   ],
   "sideEffects": false,
+  "bin": {
+    "paddock-check-dialog-commands": "bin/paddock-check-dialog-commands.mjs"
+  },
   "peerDependencies": {
+    "@angular/cdk": "^22.0.0",
     "@angular/common": "^22.0.0",
     "@angular/core": "^22.0.0",
     "echarts": "^6.0.0",
-    "@ngrx/signals": "^22.0.0"
+    "@ngrx/signals": "^22.0.0",
+    "typescript": ">=5.8"
   },
   "peerDependenciesMeta": {
     "echarts": {
       "optional": true
     },
+    "@angular/cdk": {
+      "optional": true
+    },
     "@ngrx/signals": {
+      "optional": true
+    },
+    "typescript": {
       "optional": true
     }
   },

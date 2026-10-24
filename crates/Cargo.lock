@@ -2156,7 +2156,12 @@ dependencies = [
 name = "paddock-menu"
 version = "0.1.0"
 dependencies = [
+ "log",
+ "paddock-commands",
+ "serde",
+ "serde_json",
  "tauri",
+ "ts-rs",
 ]
 
 [[package]]

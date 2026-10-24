@@ -7,7 +7,7 @@
 export { JOBS_EVENT, parseJobSnapshot, parseJobSnapshots, isActiveJob, isFinishedJob } from './src/wire';
 export { JobsBackend, TauriJobsBackend, MemoryJobsBackend, type JobsIpc, type Unlisten } from './src/jobs-backend';
 export { JOBS_CONFIG, JOBS_CLOCK, DEFAULT_STILL_WORKING_AFTER_MS, type JobsConfig, type JobsClock } from './src/jobs-config';
-export { type RequestStatus } from './src/request-status';
+export { type RequestStatus } from '@decryp7/paddock-ui/shell/store';
 export { JobsStore, JOB_NOTICE_KINDS, finishedNotice, type JobsStoreType, type JobFollowing } from './src/jobs.store';
 export { JobFollow } from './src/job-follow';
 export { PdJobsList } from './src/jobs-list';

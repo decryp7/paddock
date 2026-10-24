@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "base": [
+    "window_pong",
+    "window_ready"
+  ],
+  "dialogs": {
+    "sd.about": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "minSize": {
+        "width": 680,
+        "height": 560
+      },
+      "commands": []
+    },
+    "sd.choose-style": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": true,
+      "instanced": false,
+      "commands": []
+    },
+    "sd.confirm-reset": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": []
+    },
+    "sd.inspector": {
+      "kind": "tool",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "demo_status"
+      ]
+    },
+    "sd.rename": {
+      "kind": "form",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": []
+    }
+  }
+}

@@ -11,7 +11,8 @@ import {
   SHELL_PORTS,
   type ShellNotice,
 } from '@decryp7/paddock-ui/shell';
-import { DEMO_CONTRIBUTIONS } from '../../../../shell-demo/src/app/demo.contributions';
+import { provideMenus, provideSubmenus } from '@decryp7/paddock-ui/shell/menu';
+import { DEMO_CONTRIBUTIONS, DEMO_SUBMENUS } from '../../../../shell-demo/src/app/demo.contributions';
 import { demoContext } from '../../../../shell-demo/src/app/demo-context';
 import { assertContributionsValid } from './contributions-lint';
 
@@ -25,6 +26,9 @@ describe('shell-demo contributions', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideContributions(DEMO_CONTRIBUTIONS),
+        // The menus' kind and the demo's submenus, so the lint checks the menu bar as a whole (plan S13).
+        provideMenus({ appName: 'Shell demo' }),
+        provideSubmenus(...DEMO_SUBMENUS),
         provideShellContext(() => Promise.resolve(demoContext), { prefetch: 'first-use' }),
         { provide: SHELL_PORTS, useValue: { showPage: () => undefined, openDialog: () => Promise.resolve(undefined), notify: (n: ShellNotice) => void notices.push(n) } },
       ],

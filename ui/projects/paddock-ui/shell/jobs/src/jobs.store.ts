@@ -4,7 +4,7 @@ import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import { JobsBackend, type Unlisten } from './jobs-backend';
 import { JOBS_CLOCK, JOBS_CONFIG } from './jobs-config';
-import { failed, loaded, loading, withRequestStatus } from './request-status';
+import { setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { isActiveJob } from './wire';
 
 /** The notification kinds the store posts (registered by `JOBS_CONTRIBUTIONS`). */
@@ -124,19 +124,19 @@ export const JobsStore = signalStore(
 
     const applyList = (jobs: readonly SuJobSnapshot[]): void => {
       for (const job of merge(jobs)) settle(job);
-      patchState(store, loaded());
+      patchState(store, setLoaded());
     };
 
     return {
       /** Reads the list (also the Retry of a failed load). Never notifies: these jobs did not just end. */
       async load(): Promise<void> {
-        patchState(store, loading());
+        patchState(store, setLoading());
         try {
           const jobs = await backend.snapshot();
           // Merged in a sync step of its own: the state is read fresh there, not across the await (rule 29).
           applyList(jobs);
         } catch (e) {
-          patchState(store, failed(message(e)));
+          patchState(store, setError(message(e)));
         }
       },
 

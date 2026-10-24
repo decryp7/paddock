@@ -44,7 +44,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
-| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3) and `paddock-dialogs` (S5) and `paddock-startup` (S7) built, `paddock-window` (S12) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
+| `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; `paddock-commands` (S1), `paddock-health` (S3), `paddock-dialogs` (S5), `paddock-startup` (S7), `paddock-menu` (S13) and `paddock-window` (S12) built and the `paddock-jobs` adapter (S9) done, the rest scaffolds, plan S2-S17 |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
 | `paddock-ipc`, `-guard`, `-view`, `-plugin-api`, `-plugin-host`, `-plugin-package`, `-plugin-test` | the out-of-process plugin platform (ADRs 0001 to 0003) | yes (Debrief, Pacenotes, Dyno tier 3) |
 | `paddock-mcp` | MCP protocol, tool schemas, limits, paging, audit log, local transports (ADR 0007) | three (Pacenotes, Sighter, Debrief); extracted with Debrief's server, after Debrief 1.0.2 |
@@ -154,7 +154,8 @@ contracts and the contributions core type command names as `AppCommand | ShellCo
 Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_contracts.rs`, `dialog_placement.rs` and
 `dialog_windows.rs` (Debrief ADRs 0050, 0054) without Debrief's dialog ids:
 
-- `Contracts::parse(json)` reads the app's generated contract file once (version 1; `base` and per-dialog `kind`,
+- `Contracts::parse(json)` reads the app's generated contract file once (written by `dialogContractFile` in
+  `@decryp7/paddock-ui/shell/dialogs`; dialog ids are the shell's namespaced ids, `[a-z0-9.-]`) (version 1; `base` and per-dialog `kind`,
   `modality`, `requiredChoice`, `instanced`, `minSize`, `commands` with `prefix*`) and refuses one that contradicts
   itself (a modeless decision, a modal viewer or tool, a modeless required choice, bad ids or names, limits).
   `Contracts::allows(dialog, command)` covers `BASE_COMMANDS` (`dialog_take_input`, `dialog_close`, `dialog_fit_height`),
@@ -310,6 +311,38 @@ builder.setup(move |app| {
 - Tests run on Tauri's mock runtime with a fake tray backend and hooks for Quit and the process exit: no window, tray
   icon or single-instance lock reaches the desktop (rule 7). `tests/native_menu.rs` has no harness, so the native menu
   is built on the main thread (macOS builds menus there only); the builder is made, never built.
+## `paddock-menu` (plan S13)
+
+One menu model for the native menu bar and the in-app menus (ADR 0012 §3, ported from Debrief's `menu.rs`, ADR 0008).
+The UI builds the model from its contributions and draws it itself on Windows and Linux; on macOS it sends it with
+`menu_set` once the app reported ready (later changes coalesced), and this crate shows it natively:
+
+```rust
+paddock_commands::command_table! {
+    static COMMANDS, macro handler;
+    Quiet [MAIN | POPOUT] limit 1 * MIB => paddock_menu::tauri::menu_set,
+    // ... the app's commands
+}
+tauri::Builder::default()
+    .setup(|app| Ok(paddock_menu::tauri::install(app.handle())))  // manages NativeMenu (product name), routes clicks
+    .invoke_handler(Guard::new(&COMMANDS).wrap(handler!()))
+    .on_window_event(|w, e| paddock_menu::tauri::on_window_event(w, e)) // the menu bar follows the focused window
+```
+
+- `parse` refuses a model over the limits (16 menus, 1000 entries, depth 4, ids of 128 `[A-Za-z0-9._:/-]`, labels of
+  120 characters without control characters, no duplicate item id; unknown fields) and turns bindings into accelerators
+  (`accelerator("Mod+Shift+O")` is `CmdOrCtrl+Shift+O`; a binding a menu cannot show keeps working in the page).
+- `native_spec(model, app_name)` adds the standard macOS items; `outline` is its snapshot form (the crate's snapshot test
+  pins it). `diff` answers `Unchanged`, `States` (check marks and enabled states updated in place) or `Rebuild`;
+  `NativeMenu::builds` counts the builds (a start builds twice: the standard menus at `install`, then the UI's).
+- A click goes as `paddock://menu` (the item id) to the focused top-level window only (a dialog or pop-out stands for its
+  host); a model from a window that is not the target is answered `notFocused` and sent again on focus.
+- `manifest::check(json)` over the app's `paddock-manifest.json`: every menu item routes to a command, every key converts
+  to an accelerator, a command sits in one menu-bar menu. Run it in a test of the app.
+- The native menu bar is a port (`NativeBar`: `TauriBar`, a fake in tests); on macOS native menus are created on the main
+  thread only, so the Tauri menus are built in tests on Windows and Linux.
+- Generated TypeScript: `ui/projects/paddock-ui/shell/menu/generated/menu.ts`
+  (`PADDOCK_WRITE_TS=1 cargo test -p paddock-menu --lib generated`).
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
 `Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.

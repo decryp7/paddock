@@ -15,6 +15,58 @@ Conventional Commits; one semver tag for the whole repo.
   and Escape with a fade); `COMMANDS` and generated `shell/generated/window.ts` and `window-commands.ts`.
 - Window class `TRAY` in `paddock-commands` (plan S12): tray popovers are labelled `tray` and `tray-<item>`, are not
   part of `WINDOW`, and call only commands that name the class; `paddock-startup`'s default watch leaves them out.
+- Menus and keys (plan S13, ADR 0012; ported from Debrief ADR 0008 and `menu.rs`): crate `paddock-menu` 0.1.0 validates the
+  UI's menu model (`parse`: limits on menus, entries, depth, ids, labels; key bindings to native accelerators), builds the
+  macOS menu bar with the standard items (`native_spec`: app menu with Services and Hide and `pd.app.quit` last, Edit
+  with Undo..Select All, Window with Minimize and Zoom; `outline` snapshot), diffs it (`Unchanged`, states in place,
+  `Rebuild`), routes clicks to the focused top-level window (`Focus`, `route`), and checks the manifest's menus and keys
+  (`manifest::check`: every item routes, every key has an accelerator, a command in one menu-bar menu only). Tauri
+  adapter: `install`, `menu_set` (async; answers `MenuApplied`), `on_window_event`, `menu_chosen` on `paddock://menu`,
+  `NativeMenu::builds` (a start builds twice, the same model again builds nothing); generated
+  `shell/menu/generated/menu.ts`. `@decryp7/paddock-ui/shell/menu`: `defineSubmenu` / `provideSubmenus` (the `submenus`
+  kind with its lint: missing parent, cycle, depth, a command in two menus), the pure menu model (`buildMenus`,
+  `buildMenu` for context menus), `AppMenu`, `pd-menu-bar` and `pd-context-menu` on the CDK menu, `Keymap` (effective
+  bindings with user overrides persisted under `paddock.keybindings`, followed across windows, conflicts reported,
+  `bind`/`reset`, dispatch by `data-pd-key-scope` scope with the text-field rules) with `provideKeyboardShortcuts`, the
+  key helpers (`matchesKey`, `formatKey`, `ariaKeyShortcuts`, `recordKey`), and `NativeMenuBridge` (first build once the
+  app is ready, changes coalesced to the next idle moment, again on focus, shortcut echo ignored) with
+  `tauriNativeMenuPort` and `provideNativeMenu`. `@angular/cdk` (^22) is an optional peer dependency. `shell-demo` has
+  the menu bar, a submenu, a toggle, a context menu and a shortcuts editor, with Chromium e2e.
+- Notifications and service health in the app shell (plan S4, ADR 0010 and 0012; the port of Debrief ADR 0055):
+  `@decryp7/paddock-ui/shell/store` publishes the shared `withRequestStatus` SignalStore feature (rule 30: one
+  `idle | loading | loaded | { error }` union, `setLoading`/`setLoaded`/`setError`, `errorMessage`); `shell/jobs` uses it
+  instead of its local copy. `@decryp7/paddock-ui/shell/notify`: the `ServiceHealthBackend` and `NotificationsBackend`
+  ports (Tauri over the app's IPC, `MemoryServiceHealth` and `MemoryNotificationCentre`), edge parsers of every payload,
+  `ServiceHealthStore` (newest revision wins, nothing healthy until the first snapshot), `NotificationsStore` (the
+  engine's centre plus the UI's own notices from `SHELL_PORTS.notify`, merged by cause with counts), the one
+  `pd-notification-host` (one toast per cause with its count, details folded, host-owned time held on hover and focus,
+  never a `health:` cause), the centre panel and its status item, the service chip `pd-service-status` with Repair
+  served by the shell (rule 19) and Try again when the state is unknown, `pd-waiting-for` and `pd-service-error`,
+  notice action handlers, `provideShellNotify`, `notifyPort` and `NOTIFY_CONTRIBUTIONS`. The mirrored wire types are
+  checked against the generated `shell/generated/health*.ts` by a type-level drift spec. `shell-demo` replaces its notice
+  list with the host and adds a demo engine whose Repair works and a search index whose Repair fails, with Chromium e2e
+  (three identical failures are one chip and one notification with count 3 and no toast, the waiting panel loads again
+  by itself after Repair, dedupe of notices, "Show in Notifications", axe in both themes).
+- `@decryp7/paddock-ui/shell/dialogs` (plan S6, ADR 0009; ported from Debrief ADR 0054's UI): the kind policy (sizes,
+  fit and grow-only, Escape/Cmd+W/Enter, a visible Close/Cancel in every state), `DialogService` (typed by the
+  definition, one window per id or per input, `ModalGate`), `WindowDialogBackend` over the `paddock-dialogs` commands and
+  events (remembered size and offset, falls back to the page), `InPageDialogBackend` and `pd-dialog-host` (backdrop,
+  focus trap and restore, scrim while a modal window is open), `DialogShell` and `dialogWindowConfig` (each dialog window
+  its own small bootstrap with only its dialog's providers), `tauriDialogIo` over a passed-in Tauri bridge,
+  `browserDialogIo` (dialog routes opened by URL for e2e), `DeniedCommands`, and the contract file writer
+  (`dialogContractFile`, read by `Contracts::parse`).
+- `@decryp7/paddock-ui/shell/testing` (plan S6): the boot-every-dialog harness (`bootDialog`, `assertDialogBoots`,
+  `bootEveryDialog`: missing provider, failed or empty body, commands the contract does not declare, Close/Escape per
+  kind, fit per kind), `dialogTableProblems` against the generated command table, `FakeDialogIo`, `recordIpc`.
+- Package bin `paddock-check-dialog-commands` (plan S6): the static call-graph check that every dialog declares exactly
+  the commands it can reach, configured per app (`paddock-dialog-commands.json`: registry, table, base set, host-only
+  services, boundaries, reviewed exceptions); `typescript` is an optional peer dependency for it.
+- `shell-demo`: one dialog per kind (plus a modal form and a required choice), its `dialog-contracts.json`, dialog windows
+  booted from `#/dialog`, and a Chromium e2e over the contract file.
+
+### Changed
+- `paddock-dialogs`: dialog ids may contain `.`, so the shell's namespaced contribution ids (`sd.about`) are valid
+  contract keys; a test parses the shell demo's generated contract file.
 - Crate `paddock-dialogs` 0.1.0 (plan S5, ADRs 0009 and 0012): dialog contracts (`Contracts::parse`, `allows`,
   `problems` against the command table, kind size policy), `Grant` for the `paddock-commands` guard, pure placement on
   the parent's monitor (mixed DPI, negative coordinates, remembered offset, never the primary display as default),

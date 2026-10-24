@@ -71,7 +71,8 @@ const pongs = async (page: Page) =>
   (await calls(page)).filter((c) => c.cmd === 'window_pong').map((c) => ({ seq: (c.args as { seq: number }).seq, at: c.at }));
 
 const heading = (page: Page) => page.getByRole('heading', { level: 1, name: 'Paddock shell demo' });
-const notices = (page: Page) => page.getByRole('list', { name: 'Notices' });
+// Notices are the notification host's toasts (plan S4).
+const notices = (page: Page) => page.getByRole('region', { name: 'Notifications', exact: true });
 const note = (page: Page) => page.getByRole('textbox', { name: 'Note' });
 
 test.describe('start-up contract (plan S7)', () => {
