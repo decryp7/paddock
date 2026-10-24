@@ -1,6 +1,7 @@
 import { DOCUMENT } from '@angular/common';
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, Injector } from '@angular/core';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { PdCopyMenuHost } from '@decryp7/paddock-ui';
 import { cycleRegions, PdIcon, PdStatusBar, PdTitleBar, regionKey, regionTarget } from '@decryp7/paddock-ui/shell';
 import { DialogHost } from '@decryp7/paddock-ui/shell/dialogs';
 import { MENU_MODE, PdMenuBar } from '@decryp7/paddock-ui/shell/menu';
@@ -21,7 +22,7 @@ import { PdPagesSidebar } from './sidebar';
 @Component({
   selector: 'pd-shell-frame',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, PdTitleBar, PdMenuBar, PdIcon, PdPagesSidebar, PdStatusBar, PdNotificationHost, DialogHost],
+  imports: [RouterOutlet, PdTitleBar, PdMenuBar, PdIcon, PdPagesSidebar, PdStatusBar, PdNotificationHost, DialogHost, PdCopyMenuHost],
   providers: [PagesFrameStore],
   host: {
     '[attr.data-sidebar]': 'store.mode()',
@@ -59,6 +60,7 @@ import { PdPagesSidebar } from './sidebar';
     </footer>
     <pd-notification-host />
     <pd-dialog-host />
+    <pd-copy-menu />
   `,
   styles: `
     :host { --pd-titlebar-height: 40px; container: pd-frame / inline-size; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; background: var(--pd-bg); color: var(--pd-text); }

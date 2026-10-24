@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, Injectable, inject, provideZonelessChangeDetection, signal, type Type } from '@angular/core';
+import { ApplicationRef, ChangeDetectionStrategy, Component, Injectable, inject, input, provideZonelessChangeDetection, signal, type Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Title } from '@angular/platform-browser';
 import { ActivatedRouteSnapshot, provideRouter, Router, type Route } from '@angular/router';
@@ -239,6 +239,11 @@ const PAGES: PageDef<Ctx>[] = [
   definePage<Ctx>({ id: 't.about', title: msg('t.about', 'About'), icon: 'pd:info', order: 100, section: 'bottom', load: () => Promise.resolve(PageOne) }),
 ];
 
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, template: `<span data-testid="detail">{{ runnerId() }}</span>` })
+class Detail {
+  readonly runnerId = input.required<string>();
+}
+
 @Component({ imports: [PdShellFrame], changeDetection: ChangeDetectionStrategy.OnPush, template: `<pd-shell-frame><span slot="title-end">END</span><p slot="sidebar">FOOT</p></pd-shell-frame>` })
 class Root {}
 
@@ -297,6 +302,29 @@ describe('pd-shell-frame with provideShellPages', () => {
     expect(el.querySelector('pd-dialog-host')).not.toBeNull();
     expect(TestBed.inject(Title).getTitle()).toBe('One – Test app');
     expect(TestBed.inject(RESERVED_KEYS).map((k) => k.key)).toEqual(['F6', 'Shift+F6']);
+  });
+
+  it('binds route parameters to a routed component input, so a detail route needs no wrapper', async () => {
+    const { router, el } = await boot({ routes: [{ path: 'runner/:runnerId', component: Detail }] });
+    await router.navigateByUrl('/runner/r-42');
+    await settle();
+    await TestBed.inject(ApplicationRef).whenStable();
+    expect(el.querySelector('[data-testid="detail"]')?.textContent).toBe('r-42');
+  });
+
+  it('installs the native-feel guard, and leaves it out when asked; the frame draws the Copy menu host', async () => {
+    const press = () => {
+      const e = new KeyboardEvent('keydown', { key: 'F5', bubbles: true, cancelable: true });
+      document.body.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    const { el, fixture } = await boot();
+    expect(press()).toBe(true);
+    expect(el.querySelector('pd-copy-menu')).not.toBeNull();
+    fixture.destroy();
+    TestBed.resetTestingModule();
+    await boot({ nativeFeel: false });
+    expect(press()).toBe(false);
   });
 
   it('loads a page with its own providers, and badges and conditions follow the context', async () => {
