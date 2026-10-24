@@ -11,6 +11,15 @@ Conventional Commits; one semver tag for the whole repo.
   (`paddock://live/<channel>` events, `live_snapshot`). UI: `withLiveFeed` (SignalStore feature: fold, gap resync, link, request
   status), `foldFrame` / `parseFrame`, `tauriLiveTransport` / `MemoryLiveTransport`, bounded list helpers and `Debouncer`; a
   Rust-generated conversation fixture keeps the TypeScript fold equal to Rust's.
+- `paddock-packs` Tauri adapter and `@decryp7/paddock-ui/shell/packs` (plan X15/X23): `paddock_packs::tauri` (`Setup`, `install`; commands `packs_status` and
+  `packs_reload`; the `paddock://packs` event on every real change; a `paddock-health` entry that goes down with the first refused pack and whose Repair
+  (Retry) reloads), `paddock_packs::view` (`kind`, `KindView`, `PacksView`: the pack type erased for the UI), `paddock_shell::Builder::packs`, and the
+  Settings > Knowledge packs page (`PdPacksPage`: the packs in use with built-in or yours, each refused pack named with what to fix, ignored keys, Reload as the
+  primary button when a pack is refused, "Still working", an inline error with Retry; file names shortened in the middle). `PacksBackend` (Tauri and in-memory),
+  `PacksStore`, generated wire types and command names. The shell demo has the page (`?packs=problems|notes|clean`) and a sample kind with a watched
+  `packs/` folder.
+- `paddock-watch` (plan X23): `Debouncer` on the shared `Clock`, the `ChangeSource` port (`FakeSource`, `NotifySource` behind the
+  `notify` feature) with `spawn`, and Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`). `paddock-packs` now watches through it.
 - `paddock-net` (plan X16): the outbound HTTP policy. `Egress` (`send`, `stream`, `set_offline`, `download_transport`), `Policy`
   (reach, redirects, caps, timeouts, allow-list, per-host gap), `Reach`/`Class` classification, `Wire`/`Lookup` ports with `UreqWire`
   (paddock-download's TLS and proxy, the address guard on the connecting addresses, one pool per proxy and reach), `FakeWire`,

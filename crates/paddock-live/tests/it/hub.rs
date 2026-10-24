@@ -1,8 +1,6 @@
 //! The hub: numbering, merging, bounded queues, resynchronisation, closing, a panicking fold.
 
-mod common;
-
-use common::{Change, Overview, event, memory};
+use crate::common::{Change, Overview, event, memory};
 use paddock_live::{Frame, Hub, Link, MAX_QUEUE_CAP, MIN_QUEUE_CAP};
 
 type F = Frame<Overview, Change>;

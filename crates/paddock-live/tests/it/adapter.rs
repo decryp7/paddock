@@ -1,10 +1,7 @@
 //! The Tauri adapter on Tauri's mock runtime: frames emitted as events, `live_snapshot` through the guarded invoke path,
 //! the routing in front of an app's handler, and the generated TypeScript.
-#![cfg(feature = "tauri")]
 
-mod common;
-
-use common::{Change, Overview, event, memory};
+use crate::common::{Change, Overview, event, memory};
 use paddock_commands::testing::{WriteMode, assert_async, sync_generated};
 use paddock_commands::{DialogGrant, ts};
 use paddock_live::tauri::{
@@ -265,7 +262,7 @@ fn every_command_is_async_and_in_the_table() {
 }
 
 const REGENERATE: &str =
-    "PADDOCK_WRITE_TS=1 cargo test -p paddock-live --features tauri --test tauri generated";
+    "PADDOCK_WRITE_TS=1 cargo test -p paddock-live --features tauri --test it generated";
 
 fn generated_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/projects/paddock-ui/live/generated")

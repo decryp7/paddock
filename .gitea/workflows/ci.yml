@@ -214,8 +214,7 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch|paddock-build/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -360,7 +359,7 @@ jobs:
 
       - name: paddock-live
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-live --all-targets --all-features -- -D warnings && cargo test -p paddock-live --all-features
+        run: cargo clippy -p paddock-live --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-live --all-features --profile ci && cargo test -p paddock-live --all-features --doc
 
       - name: paddock-channels
         if: ${{ !cancelled() }}
@@ -381,6 +380,10 @@ jobs:
       - name: paddock-packs
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-packs --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-packs --all-features --profile ci && cargo test -p paddock-packs --all-features --doc
+
+      - name: paddock-watch
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-watch --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-watch --all-features --profile ci && cargo test -p paddock-watch --all-features --doc
 
       - name: paddock-log
         if: ${{ !cancelled() }}
