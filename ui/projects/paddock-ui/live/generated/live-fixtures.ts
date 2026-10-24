@@ -1,4 +1,4 @@
-// Generated from paddock-live's wire model by its tests (Rust round trip). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-live --features tauri --test tauri generated.
+// Generated from paddock-live's wire model by its tests (Rust round trip). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-live --features tauri --test it generated.
 
 /** A conversation as Rust sent it (snapshot, merged and plain deltas, link changes) with the state, sequence and link
  * Rust ended with. The state is the test overview `{ memory, events, count }`. */

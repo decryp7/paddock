@@ -106,6 +106,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
+| `paddock-watch` | folder watching: `Debouncer` on the shared `Clock` (quiet time plus longest wait), the `ChangeSource` port with a `notify` adapter and a watcher thread, Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`) for files that are still being written (plan X23) | yes (Debrief, Spotter, Dyno, `paddock-packs`); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
@@ -966,6 +967,32 @@ let snapshot = store.current();                                             // A
 - `user_regex`: `compile`, `compile_with`, `compile_set`; `RegexLimits::DEFAULT` (Debrief: 8 MiB) and `STRICT` (Spotter: 1 MiB);
   typed `RegexError` (`TooLong`, `TooComplex`, `Invalid`) whose messages say what to fix.
 - `Snapshot::health()` gives the one line (`Ok`, `Notes`, `Degraded`) for the `packs` health or notification entry.
+- `tauri` feature: `paddock_packs::tauri::{Setup, install}` over `view::kind(id, label, store)` (the pack type erased); `Builder::packs(|app|
+  Ok(Setup::new().kind(...).health("packs")))` in `paddock-shell`. Commands `packs_status` (every window) and `packs_reload` (main windows and the
+  Settings dialog), the `paddock://packs` event to every window on a real change, and the health entry: down with the first refused pack and `Retry`
+  as its repair (a reload, served by the shell, never by a pack: rule 19), ok when none is. The UI is `@decryp7/paddock-ui/shell/packs` (Settings >
+  Knowledge packs).
+
+## `paddock-watch` (plan X23)
+
+```rust
+use paddock_watch::{Debouncer, NotifySource, Settle, SettleConfig, scan_folder, spawn};
+
+let debouncer = Arc::new(Debouncer::new(Arc::new(SystemClock), Duration::from_millis(300), Duration::from_millis(1500)));
+let _watch = spawn(debouncer, &NotifySource, &folder, /* recursive */ true, move || rescan())?;   // feature `notify`; FakeSource in tests
+
+// Debrief's watched folders: a file is ready when its size and time stopped changing.
+let mut settle = Settle::new(SettleConfig::default());
+let ready = settle.observe(&scan_folder(&folder, &|rel| is_log(rel)).files, clock.now_ms());   // ready.new / .changed / .skipped
+settle.imported(&stamp);  settle.failed(&path, "locked", now);                                  // back-off, then given up
+```
+
+- `Debouncer`: quiet time, never later than the longest wait after the first event; `poll()` is `Idle`, `Waiting(d)` or `Now`.
+  Tests move a `FakeClock`; the thread's 50 ms wake-up only bounds how late a due action runs.
+- `Settle` ignores temporary names and empty files, forgets vanished files, retries a locked file with back-off (4 attempts), reports
+  a too-large file once, and bounds its pending list; `Batcher` groups ready files into one job. `scan_folder` skips symbolic links
+  and stops at 50 000 entries or 16 levels (`Scan::truncated`).
+- Not here yet: Dyno's keep-for times (`dyno-core/src/watch.rs`) are app policy over `Settle`'s stamps and stay in Dyno.
 
 ## `paddock-log` (plan X1)
 

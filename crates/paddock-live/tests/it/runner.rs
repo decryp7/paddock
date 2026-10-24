@@ -1,9 +1,7 @@
 //! The source runner: reconnect schedule, seeding, resetting the delay, giving up, cancelling. No sleeps: the fake clock
 //! moves only when a test moves it, and the runner waits on it.
 
-mod common;
-
-use common::{Overview, event};
+use crate::common::{Overview, event};
 use paddock_jobs::CancelToken;
 use paddock_jobs::time::{BackoffPolicy, Clock, FakeClock, GiveUp};
 use paddock_live::{Frame, Hub, Link, Publisher, RunEnd, Source, default_policy, run};

@@ -1,4 +1,4 @@
-// Generated from the command table by paddock-commands. Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-live --features tauri --test tauri generated.
+// Generated from the command table by paddock-commands. Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-live --features tauri --test it generated.
 
 /** Every command of the table: its kind, the window classes that may call it and its largest request in bytes. */
 export const LIVE_COMMANDS = {
