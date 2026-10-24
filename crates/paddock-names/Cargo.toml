@@ -1,0 +1,20 @@
+[package]
+name = "paddock-names"
+version = "0.1.0"
+description = "Identifier search for the Paddock apps (rule 20): word segmentation, name normalisation, grouping of spellings and ranked, explained matching that tolerates parts, joins, separators, case, plurals and typos."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+proptest = "1"
+serde_json = "1"
+
+[[bench]]
+name = "search"
+harness = false

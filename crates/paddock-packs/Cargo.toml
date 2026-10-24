@@ -20,6 +20,7 @@ serde = { version = "1", features = ["derive"] }
 serde_ignored = "0.1"
 toml = "0.9"
 notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"

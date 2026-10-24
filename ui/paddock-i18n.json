@@ -1,0 +1,15 @@
+{
+  "extract": { "dist": "dist/paddock-ui", "sources": "fesm2022/*.mjs", "locale": "en-US" },
+  "catalogs": [
+    { "out": "projects/paddock-ui/i18n/messages.pd.xlf", "prefix": "pd.", "src": ["projects/paddock-ui"], "extracted": true },
+    { "out": "projects/shell-demo/src/locale/messages.xlf", "prefix": "sd.", "src": ["projects/shell-demo/src"] }
+  ],
+  "locales": [
+    { "locale": "en-XA", "out": "projects/paddock-ui/i18n/messages.pd.en-XA.json", "inputs": ["projects/paddock-ui/i18n/messages.pd.xlf"] },
+    {
+      "locale": "en-XA",
+      "out": "projects/shell-demo/src/locale/messages.en-XA.json",
+      "inputs": ["projects/paddock-ui/i18n/messages.pd.en-XA.json", "projects/shell-demo/src/locale/messages.xlf"]
+    }
+  ]
+}

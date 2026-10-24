@@ -687,8 +687,16 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
         .clock(Arc::new(clock.clone()));
     let (release, stuck) = std::sync::mpsc::channel::<()>();
     let stuck = Mutex::new(stuck);
+    // The process end is announced on a channel, so the test waits for the event, not for a poll.
+    let (ended_tx, ended) = std::sync::mpsc::channel::<i32>();
+    let (q, e) = (quits.clone(), quits.clone());
     let app = app_with(
-        windows(config, &quits)
+        Windows::builder(config)
+            .exit_app(move |_, code| q.lock().unwrap().push(format!("exit {code}")))
+            .end_process(move |code| {
+                e.lock().unwrap().push(format!("end {code}"));
+                let _ = ended_tx.send(code);
+            })
             .teardown("jobs", move |_| s.lock().unwrap().push("jobs".into()))
             .teardown("stuck", move |_| {
                 let _ = stuck.lock().unwrap().recv();
@@ -708,7 +716,12 @@ fn an_exit_request_keeps_a_tray_app_running_and_a_stalled_quit_is_ended() {
     assert!(clock.wait_for_started(4, Duration::from_secs(60)));
     assert!(taken(&quits).is_empty());
     clock.advance(Duration::from_secs(3));
-    eventually(|| quits.lock().unwrap().iter().any(|c| c == "end 3"));
+    // The process end is the event; the limit only stops a hung test.
+    assert_eq!(
+        ended.recv_timeout(Duration::from_secs(60)),
+        Ok(3),
+        "the watchdog ended the exit"
+    );
     assert_eq!(taken(&steps), ["jobs"]);
     drop(release);
     arm_exit_watchdog(h, 4);

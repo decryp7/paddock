@@ -44,6 +44,9 @@ pub const DIALOG_BASE: &[&str] = &["window_ready", "window_boot_error", "window_
 pub type UnresponsiveHook<R> = dyn Fn(&AppHandle<R>, &str, bool) + Send + Sync;
 /// Restarts the app in Safe Mode for window `label` (the app's relaunch); an error is logged.
 pub type SafeModeHook<R> = dyn Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync;
+/// Restarts the whole app, keeping its session (the app's relaunch: `|app| app.restart()`, which does not return on
+/// success); an error is reported to the calling page and logged.
+pub type RelaunchHook<R> = dyn Fn(&AppHandle<R>) -> Result<(), String> + Send + Sync;
 /// Called after a window reported ready (with why the shell reloaded it): e.g. start the work the first paint did not need.
 pub type ReadyHook<R> = dyn Fn(&Webview<R>, Option<Recovery>) + Send + Sync;
 /// Whether a webview (label, its window's label) is one of the app's own pages the watchdog watches.
@@ -83,6 +86,10 @@ pub enum StartupErrorCode {
     SafeModeUnavailable,
     /// The Safe Mode restart failed; the notice stays so the user can choose again.
     SafeModeFailed,
+    /// The app has no relaunch (`StartupBuilder::relaunch`).
+    RelaunchUnavailable,
+    /// The relaunch failed; the app keeps running.
+    RelaunchFailed,
 }
 
 impl StartupError {
@@ -108,6 +115,7 @@ pub struct StartupBuilder<R: Runtime> {
     config: Config,
     watch: Box<WatchFilter>,
     safe_mode: Option<Box<SafeModeHook<R>>>,
+    relaunch: Option<Box<RelaunchHook<R>>>,
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
     asker: Option<Arc<dyn Asker<R>>>,
@@ -133,6 +141,16 @@ impl<R: Runtime> StartupBuilder<R> {
         restart: impl Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync + 'static,
     ) -> Self {
         self.safe_mode = Some(Box::new(restart));
+        self
+    }
+
+    /// The app's relaunch: `app_relaunch` (a language change, an update) saves the session, then runs it. It should not
+    /// return on success (`|app| app.restart()`); the app then starts again and restores what it checkpointed.
+    pub fn relaunch(
+        mut self,
+        restart: impl Fn(&AppHandle<R>) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        self.relaunch = Some(Box::new(restart));
         self
     }
 
@@ -181,6 +199,7 @@ impl<R: Runtime> StartupBuilder<R> {
             checkpoints: Mutex::new(Checkpoints::default()),
             watch: self.watch,
             safe_mode: self.safe_mode,
+            relaunch: self.relaunch,
             unresponsive: self.unresponsive,
             on_ready: self.on_ready,
             asker: self.asker,
@@ -198,6 +217,7 @@ pub struct Startup<R: Runtime> {
     checkpoints: Mutex<Checkpoints>,
     watch: Box<WatchFilter>,
     safe_mode: Option<Box<SafeModeHook<R>>>,
+    relaunch: Option<Box<RelaunchHook<R>>>,
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
     asker: Option<Arc<dyn Asker<R>>>,
@@ -220,6 +240,7 @@ impl<R: Runtime> Startup<R> {
             config: Config::default(),
             watch: Box::new(watched_by_default),
             safe_mode: None,
+            relaunch: None,
             unresponsive: None,
             on_ready: None,
             asker: None,
@@ -447,6 +468,28 @@ impl<R: Runtime> Startup<R> {
         life.chose_safe_mode();
         Ok(())
     }
+
+    /// The calling window asked to restart the whole app: every checkpoint so far is written to the session first, then
+    /// the app's relaunch runs. Without a relaunch, or when it fails, the app keeps running and the page is told why.
+    pub fn app_relaunch(&self, app: &AppHandle<R>, label: &str) -> Result<(), StartupError> {
+        let Some(restart) = &self.relaunch else {
+            return Err(StartupError {
+                code: StartupErrorCode::RelaunchUnavailable,
+                message: "the app has no relaunch (StartupBuilder::relaunch)".into(),
+            });
+        };
+        if let Some(life) = &self.lifecycle {
+            life.flush();
+        }
+        log::info!(Window = label; "Restarting the app on request");
+        restart(app).map_err(|message| {
+            log::error!(Window = label; "Could not restart the app: {message}");
+            StartupError {
+                code: StartupErrorCode::RelaunchFailed,
+                message,
+            }
+        })
+    }
 }
 
 /// A clean exit: stops the ticker, writes the last checkpoint and removes the running marker, so the next start does
@@ -596,7 +639,8 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync 
         recovery_status,
         recovery_restore,
         recovery_start_fresh,
-        recovery_safe_mode
+        recovery_safe_mode,
+        app_relaunch
     ]
 }
 
@@ -665,6 +709,12 @@ pub async fn recovery_start_fresh<R: Runtime>(webview: Webview<R>) -> Result<(),
 #[::tauri::command]
 pub async fn recovery_safe_mode<R: Runtime>(webview: Webview<R>) -> Result<(), StartupError> {
     state(&webview)?.recovery_safe_mode(webview.app_handle(), webview.label())
+}
+
+/// The calling window asks to restart the whole app (the session is saved first).
+#[::tauri::command]
+pub async fn app_relaunch<R: Runtime>(webview: Webview<R>) -> Result<(), StartupError> {
+    state(&webview)?.app_relaunch(webview.app_handle(), webview.label())
 }
 
 #[cfg(test)]

@@ -158,6 +158,26 @@ test('a dialog window takes its input from the plugin and answers through it', a
   expect(await app.dialogs.result()).toBeNull();
 });
 
+test('Settings > Language restarts the whole app through the shell plugin (plan X48)', async ({ app, page }) => {
+  const ipc = await installTauriFake(page, {
+    otherwise: 'null',
+    replies: {
+      dialog_take_input: { dialogId: 'pd.settings', title: 'Settings', kind: 'tool', modality: 'modeless', requiredChoice: false, input: { page: 'pd.language' } },
+      settings_overview: SETTINGS_OVERVIEW_FIXTURE,
+      dialog_close: null,
+      dialog_fit_height: null,
+      app_relaunch: null,
+    },
+  });
+  await page.addInitScript(() => localStorage.removeItem('paddock.language'));
+  await app.dialogs.openWindow('pd.settings', { page: 'pd.language' });
+  await app.dialogs.loaded();
+  const win = page.locator('pd-settings-window');
+  await win.getByRole('radio', { name: 'Pseudo-locale (for testing)' }).check();
+  await win.getByTestId('language-restart-now').click();
+  await expect.poll(async () => (await ipc.callsOf('app_relaunch')).length).toBe(1);
+});
+
 test.describe('tray popover', () => {
   const ENGINE_PROBLEM = service('sd.engine', 'the demo engine', 'down', ENGINE_DOWN, 'restart');
   const RUNNING = job(5, { state: 'running', phase: { id: 'read', label: 'Reading', unit: 'bytes', total: 8_388_608, done: 2_097_152 } });

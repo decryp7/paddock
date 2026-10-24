@@ -422,7 +422,7 @@ gets one mechanism and one check:
   `clock.rs`/`time.rs` ports (Spotter `spotter-engine`, Dyno `dyno-plugin-host`, Debrief `debrief-agent`) and back-off
   loops (Pitwall `backoff.rs`, Dyno `supervision.rs`, Debrief `debrief-ipc/supervisor.rs`, Pitcrew `restart.rs`, which
   keeps its crash-loop cooldown on top of `Backoff`).
-- Check **C30** (proposed for `@decryp7/paddock-conformance`): in Rust test code (`tests/`, `#[cfg(test)]` modules,
+- Check **C30** (built, warning level, `conformance/src/checks/C30-wall-clock.mjs`; the text below is the original proposal): in Rust test code (`tests/`, `#[cfg(test)]` modules,
   `src/**/tests.rs`) flag an assertion whose operand is `elapsed()`, `Instant::now()` arithmetic or
   `SystemTime::now()` compared with a `Duration` (`assert!(t.elapsed() < ..)`, `assert!(.. <= Duration::..)` on a measured
   value), and `thread::sleep` used to wait for another thread's effect; in TypeScript specs `performance.now()`/`Date.now()`
@@ -468,3 +468,29 @@ Gaps left:
   for its owner (the user, or Administrators). The OS accept itself still waits in 100 ms slices to see the stop flag.
 - Windows: the endpoint code type-checks here and needs the Windows runner; children use `paddock-proc` trees (taskkill)
   until X54's job object.
+
+## X25 built: adoption and exit codes (2026-10-25)
+
+`paddock-cli` 0.1.0 (crates/README.md "paddock-cli"). The shared exit codes are a decision (coordinator, 2026-10-25): 0 ok,
+1 failure, 2 usage, 3 not running, 4 refused, 5 findings, 130 interrupted. What each app deletes when it adopts it:
+
+- **Debrief:** `debrief-cli` `output.rs` (tables, error JSON), `progress.rs` (throttled lines), `time_arg.rs`, and its `Exit`
+  enum. **Findings moves from 3 to 5**: a CHANGELOG note ("`--fail-on-findings` now exits 5") and the CLI docs change with it.
+- **Pitwall:** `pitwall-cli` `exit.rs` (its 3 not running and 4 refused already match) and the size/table code in `format.rs`.
+  Pitwall has no findings code today, so nothing moves; a CHANGELOG note says the codes are now the family's.
+- **Dyno:** `dyno-cli` `render.rs` tables, the common flags in `args.rs`, and the exit handling in `lib.rs`.
+- **Agent and service programs** (`debrief-agent`, `pitcrew-service` `cli.rs`, `dyno-agent` `cli.rs`): `Verb::add_to_help`,
+  `Verb::status_exit` (3 when not running), `Verb::reject_extra`.
+
+## X24 built: adoption (2026-10-25)
+
+`paddock-archive` 0.1.0 (crates/README.md "paddock-archive"). What each app deletes when it adopts it:
+
+- **Debrief:** `debrief-ai/src/runtimes/unpack.rs` (`Layout::Flat { max_depth: 2 }`, `Links::Copy`, `Modes::AllExecutable`, filter =
+  `is_expected`) and `debrief-video/src/runtime/unpack.rs` (tar.xz, four folders deep: `Flat { max_depth: 4 }`); the `zip`, `tar`,
+  `flate2` and `lzma-rs` dependencies of those crates. **Behaviour change:** an unsafe name anywhere in the archive now refuses the whole
+  archive (it used to be skipped when unwanted).
+- **Pitwall:** the zip/tar code in `pitwall-server/src/engines.rs` and `runtimes::flat_name`.
+- **Spotter:** `spotter-render/src/install.rs` (zip with kept symlinks: `Links::Keep`, which also refuses targets with `..`).
+- **Pitcrew:** the runner archive unpacking.
+

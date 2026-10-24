@@ -20,6 +20,7 @@ import { DemoHealthEngine } from './app/demo-health';
 import { DemoJobsEngine } from './app/demo-jobs';
 import { DemoNote } from './app/demo-note';
 import { provideDemoAppearance } from './app/demo-appearance';
+import { relaunchApp } from './app/language.providers';
 import { LANGUAGE_CONFIG, LocalStorageLanguageStorage, PSEUDO_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
 import { demoSettingsBackend } from './app/demo-settings';
 import { ShellDemo } from './app/shell-demo';
@@ -44,7 +45,7 @@ export function bootMainWindow(): Promise<unknown> {
           storage: new LocalStorageLanguageStorage(),
           systemLanguages: () => navigator.languages,
           shipped: [PSEUDO_LOCALE],
-          reload: () => location.reload(),
+          reload: relaunchApp,
         },
       },
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),

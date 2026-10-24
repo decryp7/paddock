@@ -1,0 +1,16 @@
+[package]
+name = "paddock-cli"
+version = "0.1.0"
+description = "Command-line conventions for the Paddock apps: stable exit codes, errors that name the next step, a JSON mode (one object per result, errors included), tables as text, CSV or JSON, throttled progress lines on stderr, --help and --version text, times and sizes on the command line, and the Ctrl+C stop flag."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[package.metadata.paddock]
+scaffold = true
+
+[dependencies]
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }

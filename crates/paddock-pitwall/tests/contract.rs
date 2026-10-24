@@ -1656,3 +1656,17 @@ fn every_keyed_call_refuses_a_client_without_a_key_the_same_way() {
         no
     );
 }
+
+#[test]
+fn a_killed_fake_refuses_connections_at_once() {
+    // Pitwall quitting means the port is closed when `kill` returns, not shortly after: a request in between would be
+    // accepted and dropped, which reads as "stopped answering" instead of "not running".
+    for _ in 0..25 {
+        let fake = FakePitwall::start(FakeState::default());
+        fake.kill();
+        assert!(
+            std::net::TcpStream::connect(("127.0.0.1", fake.port)).is_err(),
+            "the port still accepts after kill"
+        );
+    }
+}

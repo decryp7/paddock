@@ -26,6 +26,7 @@ serde_json = "1"
 log = { version = "0.4", features = ["kv"] }
 url = "2.5"
 tauri = { workspace = true, optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [target.'cfg(windows)'.dependencies]
 # WebView2's browser keys (native feel), rounded popover corners (DWM) and the taskbar check (tray).

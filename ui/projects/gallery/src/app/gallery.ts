@@ -31,6 +31,7 @@ import {
 import { PdPathText } from '@decryp7/paddock-ui';
 import { PD_ICON_PATHS, PdGlyph, pdIconSvg, type PdIconName } from '@decryp7/paddock-ui/icons';
 import { PdSelect } from '@decryp7/paddock-ui/select';
+import { GalData } from './data-sections';
 
 echarts.use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, CanvasRenderer]);
 
@@ -46,7 +47,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 @Component({
   selector: 'gal-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, PdPathText, PdSelect],
+  imports: [SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, PdPathText, PdSelect, GalData],
   template: `
     <main class="gal-page">
       <header class="gal-bar">
@@ -308,6 +309,8 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
           @for (n of ['s1', 's2', 's3', 's4', 's5', 's6']; track n) { <span class="gal-swatch gal-swatch--{{ n }}"></span> }
         </div>
       </section>
+
+      <gal-data />
     </main>
   `,
 })
