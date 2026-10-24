@@ -13,6 +13,7 @@ tauri-build = ["dep:tauri-build"]
 
 [dependencies]
 tauri-build = { version = "2.7", optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"
