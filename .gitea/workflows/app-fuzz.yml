@@ -1,0 +1,123 @@
+# Reusable (plan X41): nightly fuzzing of an app's parsers with cargo-fuzz (libFuzzer, a dated nightly toolchain). Each shard
+# compiles the fuzz workspace once and fuzzes its targets one after another; a crash fails the shard and the reproducers are
+# uploaded. Triage: the app's docs/fuzzing.md. Every parser crate has a target or a never-panics test (conformance check C34).
+#
+#   on: { schedule: [{ cron: "17 2 * * *" }], workflow_dispatch: {} }
+#   jobs:
+#     plan: ...                                                   # .gitea/actions/plan
+#     fuzz:
+#       needs: [plan]
+#       if: needs.plan.outputs.run == 'true'
+#       uses: decryp7/paddock/.gitea/workflows/app-fuzz.yml@v0.3.0
+#       with:
+#         paddock-ref: v0.3.0
+#         shards: '[{"shard":1,"targets":"fuzz_json fuzz_csv"},{"shard":2,"targets":"fuzz_ql"}]'
+#     mark: { needs: [fuzz], if: "github.event_name == 'schedule' && success()", ... }   # .gitea/actions/nightly-mark
+
+name: app-fuzz
+
+on:
+  workflow_call:
+    inputs:
+      paddock-ref:
+        description: The Paddock tag whose actions this run uses (the same tag as in `uses:`).
+        type: string
+        required: true
+      shards:
+        description: 'JSON array of { "shard": n, "targets": "space separated target names" }.'
+        type: string
+        required: true
+      seconds:
+        description: Seconds per target.
+        type: string
+        default: "300"
+      toolchain:
+        description: A dated nightly (the build and its cache change only when the pin does).
+        type: string
+        default: nightly-2026-10-01
+      fuzz-dir:
+        description: The folder of the fuzz workspace (cargo fuzz init).
+        type: string
+        default: fuzz
+      max-len:
+        type: string
+        default: "131072"
+      image:
+        type: string
+        default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: fuzz (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: decryp7/paddock
+          ref: ${{ inputs.paddock-ref }}
+          path: .paddock
+
+      - uses: ./.paddock/.gitea/actions/setup-rust
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      # One key per shard: each shard builds the same targets, so its fuzz/target is all it needs.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-fuzz
+            ${{ inputs.fuzz-dir }}/target
+          key: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir), 'Cargo.lock') }}
+          restore-keys: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ inputs.toolchain }}-
+
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
+
+      - name: Build every fuzz target
+        working-directory: ${{ inputs.fuzz-dir }}
+        run: cargo fuzz build
+
+      # Every target of the shard runs even after one crashes; the step fails at the end if any did.
+      - name: Fuzz ${{ matrix.targets }}
+        working-directory: ${{ inputs.fuzz-dir }}
+        shell: bash
+        env:
+          TARGETS: ${{ matrix.targets }}
+          SECONDS_PER_TARGET: ${{ inputs.seconds }}
+          MAX_LEN: ${{ inputs.max-len }}
+        run: |
+          failed=()
+          for target in $TARGETS; do
+            echo "::group::$target"
+            mkdir -p "work/$target" "corpus/$target"
+            if ! cargo fuzz run "$target" "work/$target" "corpus/$target" -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 -max_len="$MAX_LEN" -timeout=20; then
+              failed+=("$target")
+            fi
+            echo "::endgroup::"
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::Crashed: ${failed[*]} (reproducers in the crashes-shard artifact)"
+            exit 1
+          fi
+
+      # One artifact per shard: the reproducers of every target that crashed, in artifacts/<target>/.
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-shard-${{ matrix.shard }}
+          path: ${{ inputs.fuzz-dir }}/artifacts/
+          if-no-files-found: ignore

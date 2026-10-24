@@ -30,6 +30,60 @@ Conventional Commits; one semver tag for the whole repo.
   palette provider by prefix), `VIEW_PANEL` and the `WORKBENCH_PORTS` the frame provides. The shell's `assertContributionsValid`
   checks every kind: a view without a layout or with `min > pref`, targets naming missing views, commands or Explorer sections,
   palette prefix conflicts, perspectives naming missing views.
+- Wall-clock limits on the injected clock everywhere (rule 40, follow-up of X20/X13): `CancelToken::on_cancel` (waits are
+  event-driven), `FakeClock::{waits_started, wait_for_started}`; `paddock-ipc` `PeerOptions::clock`, `Host::with_clock`,
+  `Authenticator`, `Client::connect_on`, per-client handshake threads, `ServerConfig::{max_connections, max_handshakes,
+  handshake_timeout, clock}`, `Subscriptions`, `Peer::id`, the Windows discovery-file owner check; `paddock-download`
+  `HostCaps::{with_clock, clock, held}`; `paddock-window` `WindowConfig::clock` and `teardown_step_on`; `paddock-health`'s
+  debounced writer on the centre's clock; `paddock-proc` `Supervised::terminate` returns `Terminated`; `JobPool::hold`.
+  UI: `FakeClock` in `@decryp7/paddock-ui/shell/testing` (wall and monotonic readings, `every`, `after`, `setWall`).
+- `paddock-live` and `@decryp7/paddock-ui/live` (plan X29): the live feed. `Hub<S: LiveState>` (state, sequence numbers, bounded
+  subscriber queues with latest-wins merging and snapshot resynchronisation of slow consumers), `Frame` (snapshot, delta, link),
+  `run` (a `Source` kept connected with `Backoff` on the shared `Clock`, announcing the `Link`), `Channel`, and the `tauri` adapter
+  (`paddock://live/<channel>` events, `live_snapshot`). UI: `withLiveFeed` (SignalStore feature: fold, gap resync, link, request
+  status), `foldFrame` / `parseFrame`, `tauriLiveTransport` / `MemoryLiveTransport`, bounded list helpers and `Debouncer`; a
+  Rust-generated conversation fixture keeps the TypeScript fold equal to Rust's.
+- `paddock-packs` Tauri adapter and `@decryp7/paddock-ui/shell/packs` (plan X15/X23): `paddock_packs::tauri` (`Setup`, `install`; commands `packs_status` and
+  `packs_reload`; the `paddock://packs` event on every real change; a `paddock-health` entry that goes down with the first refused pack and whose Repair
+  (Retry) reloads), `paddock_packs::view` (`kind`, `KindView`, `PacksView`: the pack type erased for the UI), `paddock_shell::Builder::packs`, and the
+  Settings > Knowledge packs page (`PdPacksPage`: the packs in use with built-in or yours, each refused pack named with what to fix, ignored keys, Reload as the
+  primary button when a pack is refused, "Still working", an inline error with Retry; file names shortened in the middle). `PacksBackend` (Tauri and in-memory),
+  `PacksStore`, generated wire types and command names. The shell demo has the page (`?packs=problems|notes|clean`) and a sample kind with a watched
+  `packs/` folder.
+- `paddock-watch` (plan X23): `Debouncer` on the shared `Clock`, the `ChangeSource` port (`FakeSource`, `NotifySource` behind the
+  `notify` feature) with `spawn`, and Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`). `paddock-packs` now watches through it.
+- `paddock-net` (plan X16): the outbound HTTP policy. `Egress` (`send`, `stream`, `set_offline`, `download_transport`), `Policy`
+  (reach, redirects, caps, timeouts, allow-list, per-host gap), `Reach`/`Class` classification, `Wire`/`Lookup` ports with `UreqWire`
+  (paddock-download's TLS and proxy, the address guard on the connecting addresses, one pool per proxy and reach), `FakeWire`,
+  `StaticLookup`. A redirect to 169.254.169.254, to the LAN or to this computer from a public start is refused; offline refuses
+  before any lookup or socket. `paddock_download::ureq_config` exposes the shared agent configuration.
+- `paddock-channels` now sends over `paddock-net` (`EgressPoster`, `channel_policy`; `UreqPoster` is gone), keeps one secret per
+  channel (`channel:<id>:secret`), allows plain http only to this computer, and has the settings-page engine `ChannelsControl`
+  with the `tauri` adapter (commands and the `paddock://channels` event).
+- `@decryp7/paddock-ui/shell/channels` (plan X17, UI half): Settings > Notification channels. `ChannelsBackend` (Tauri adapter and an
+  in-memory engine with the engine's validation, secrets in a map and test outcomes `succeed`, `rejected`, `unreachable`,
+  `missingSecret`, `hang`), `ChannelsStore` (the engine's refusal of a save shown as it is, a per-channel test state that is
+  never timed out, removal clears the secret), and `PdChannelsPage` in `shell/channels/page` (a table with Edit, Send test and
+  Remove on each row, one Add channel, an inline editor on Signal Forms, "Still working" and the engine's advice inline).
+  The token or password is typed in the modal `pd.channels.secret` dialog (`PdChannelSecretDialog` in `shell/channels/dialog`)
+  and goes from that window straight to the engine, never through a store, event, log or URL. The shell demo registers both.
+- `paddock-build` (plan X34): the Tauri build step in one call (the Windows manifest in every binary, sidecar placeholders, rerun
+  triggers; the manifest is shared, the shell demo gains it); `paddock_proc::self_test` (the `--self-test` of a sidecar);
+  `paddock-sidecar` in `@decryp7/paddock-conformance` (`build` and `self-test` for every app's sidecars; the shell demo's
+  `agent/sidecar.mjs` is now three lines over it, and `new-app` carries that).
+- Conformance checks C34 (sidecars declared for the bundle check and implementing `--self-test`), C34 (every `untimed` call of a
+  `withCallTimeout` policy is a declared job-starting or user-waiting command, rule 12; C35) and C36 (parser crates have a fuzz target or a
+  never-panics test; warning).
+- Reusable workflows `app-fuzz.yml`, `app-mutants.yml` and `app-never-panics.yml` (plan X41, from Debrief's fuzz.yml and mutants.yml);
+  never-panics tests with `paddock_testkit::{corpus, never_panics}` for the release manifest and the launchctl report parsers.
+- Accessibility checks (plan X49). `@decryp7/paddock-e2e`: `axeInThemes`, `axeTargets` (a list of windows by name), `axeEveryDialog`
+  (axe over the window of every dialog in the app's `dialog-contracts.json`, both themes, so a new dialog is covered the moment it is
+  declared; an empty list is an error), and the keyboard-only helpers `tabWalk`, `expectTabOrder` (no trap, no stop without a focus
+  indicator), `expectReachableByKeyboard` and `expectEscapeReturnsFocus`. `@decryp7/paddock-ui/shell`: `accentProblems`, `cssRules`,
+  `resolveTokens` and `definedAccents`, the contrast and colour-vision targets of `test:tokens` as pure functions an app runs on its
+  own accent (`test/tokens` now uses the same code; a spec holds every accent of the family to it). `paddock-conformance` C33: an
+  e2e spec runs axe, every dialog of the contract file is covered, warnings for a missing keyboard flow or accent test. The shell
+  demo's `shell-demo-a11y.spec.ts` runs it all. `ShellDialogs.loaded()` now waits for the dialog shell itself (a window still on the splash passed it).
 - `@decryp7/paddock-ui` data parts (plan X21): `/table` (`pd-table`: sortable columns with `aria-sort`, filter, column menu, optional
   group rows, CDK virtual scroll above 100 lines, one tab stop with arrow/Home/End/Page keys, Enter opens, Shift+F10 and right-click
   open the row menu, up to two hover icon actions plus a "..." button and the same list in the menu with destructive items last,
@@ -304,7 +358,16 @@ Conventional Commits; one semver tag for the whole repo.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
+### Fixed
+- The About, Updates and What's New contents were unstyled: their stylesheet still used the old class names (`.btn`, `.muted`, ...)
+  while the templates use the `pd-` ones, so the legal-text buttons failed colour contrast in the light theme (found by the new
+  axe check over every dialog window). The shell demo's dialog buttons set white text instead of `--pd-on-accent` and failed
+  contrast in the dark theme.
+
 ### Changed
+- Breaking (rule 40): `paddock_jobs::assert_nonblocking(&pool, handler)` holds the pool instead of measuring a budget
+  (`Blocked`, `BLOCKED_AFTER`; `HANDLER_BUDGET_MS` and `SlowHandler` are gone); `HostCaps::back_off(host, wait)` takes a
+  duration on the caps' clock; `shell/testing`'s `ManualClock` is now `FakeClock` (ticks fire as often as they fall due).
 - Breaking (plan X20): `paddock-jobs`, `paddock-log` and `paddock-health` share one `Clock` (`paddock_jobs::time`). The old
   `ManualClock`s are gone: use `FakeClock` (`new()`, `at_wall(..)`, `at_wall_ms(..)`, `advance(Duration)`/`advance_ms(u64)`).
   `paddock-health`'s epoch reading is `Clock::wall_ms` (was `now_ms`); `paddock-log`'s UTC reading is `paddock_log::now_utc(&clock)`

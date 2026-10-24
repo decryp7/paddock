@@ -212,13 +212,7 @@ impl Dispatcher {
             }
             let delay = match backoff.failed(self.clock.monotonic()) {
                 Retry::After(d) => d,
-                Retry::GiveUp => {
-                    return Delivery {
-                        channel: cfg.id.clone(),
-                        attempts: made,
-                        result: Err(err),
-                    };
-                }
+                Retry::GiveUp => self.policy.backoff.max,
             };
             let delay = err
                 .retry_after()
