@@ -4,7 +4,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-## 0.2.0 - not yet tagged (the first shell release)
+## 0.2.0 - 2026-10-24 (the first shell release)
 
 The app shell of ADR 0012 (plan S0-S17): `@decryp7/paddock-ui` 0.2.0 with the `shell/*` entry points,
 `@decryp7/paddock-e2e` 0.2.0, and the shell crates on the Gitea cargo registry `decryp7` for the first time:
