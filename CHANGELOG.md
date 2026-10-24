@@ -5,6 +5,7 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `paddock-assistant` and `@decryp7/paddock-ui/workbench/assistant` (plan X50 W6): the assistant over Pitwall: `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for tools that write, a bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, `assistant_*` commands and the `paddock://assistant` event, and the `pd-assistant` chat pane with its store, safe markdown renderer, context chips, conversation list and tool-approval prompt.
 - `@decryp7/paddock-ui/workbench` core (plan X50 W1, ADR 0013 §2): the workbench's contribution kinds in the shell's one registry
   (`defineView` with a required `ViewLayout`, `defineActivityItem`, `defineExplorerProvider` (lazy, paged, cancellable),
   `definePaletteProvider` (one prefix each, `AbortSignal`, capped), `definePerspective`, `defineSharedState`, `defineAssistantContext`),
