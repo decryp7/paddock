@@ -477,3 +477,50 @@ fn every_value_kind_level_and_a_later_span_record_reach_the_file() {
         ["Error", "Warning", "Information", "Debug", "Verbose"]
     );
 }
+
+/// A stream that is interrupted once, delivers a line and then breaks (a pipe whose child died badly).
+struct Breaking(u8);
+
+impl std::io::Read for Breaking {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0 += 1;
+        match self.0 {
+            1 => Err(std::io::ErrorKind::Interrupted.into()),
+            2 => {
+                buf[..5].copy_from_slice(b"one\nt");
+                Ok(5)
+            }
+            _ => Err(std::io::Error::other("pipe broke")),
+        }
+    }
+}
+
+#[test]
+fn a_child_stream_that_is_interrupted_or_breaks_keeps_what_it_delivered() {
+    let rig = Rig::new();
+    let n =
+        Logging::new(rig.config()).scoped(|_| paddock_log::pump_child_lines("runner", Breaking(0)));
+    assert_eq!(n, 2, "the whole line and the partial one before the break");
+    let got = rig.lines();
+    assert_eq!(
+        (got[0]["@m"].as_str(), got[1]["@m"].as_str()),
+        (Some("one"), Some("t"))
+    );
+}
+
+#[test]
+fn other_processes_write_their_own_file_and_the_handle_is_the_one_installed() {
+    let rig = Rig::new();
+    let app = AppId::new("demo", "Demo").unwrap();
+    let cfg = LogConfig::new(&app, "server", "1.2.3")
+        .with_log_dir(rig.dir.path())
+        .with_clock(rig.clock.clone())
+        .with_stdout(false);
+    let logging = Logging::new(cfg);
+    let handle = logging.handle();
+    logging.scoped(|log| {
+        tracing::info!("from the server");
+        assert_eq!(log.active_file(), handle.active_file());
+    });
+    assert!(rig.dir.path().join("demo-server.2026-10-20.log").is_file());
+}

@@ -762,4 +762,31 @@ mod tests {
         );
         assert_eq!(target_of("file:///x"), None);
     }
+
+    #[test]
+    fn a_proxy_without_a_login_prints_as_its_address_only() {
+        let p = ProxyServer::parse("https://h.corp:8443").unwrap();
+        assert_eq!(format!("{p:?}"), "ProxyServer(https://h.corp:8443)");
+    }
+
+    #[test]
+    fn an_oversized_bypass_list_is_cut_on_a_character_boundary() {
+        // One ASCII byte shifts every two-byte character, so the cut lands inside one.
+        let mut list = String::from("a.test,é");
+        list.push_str(&"é".repeat(MAX_PROXY_TEXT));
+        let n = NoProxy::parse(&list);
+        assert!(
+            n.matches("a.test", 80),
+            "the entries before the cut are kept"
+        );
+        assert!(!n.is_empty());
+    }
+
+    #[test]
+    fn a_range_that_is_not_an_address_is_skipped() {
+        for bad in ["1.2.3.4.5/8", "256.1/8", "10.0.0.0/33", "::1/129", "/8"] {
+            assert!(NoProxy::parse(bad).is_empty(), "{bad}");
+        }
+        assert!(NoProxy::parse("169.254/16").matches("169.254.9.9", 80));
+    }
 }
