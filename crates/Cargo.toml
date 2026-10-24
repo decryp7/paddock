@@ -4,7 +4,7 @@
 [workspace]
 resolver = "3"
 # Fuzz targets are their own workspaces (cargo-fuzz).
-exclude = ["paddock-ipc/fuzz", "paddock-testplan/fuzz"]
+exclude = ["paddock-ipc/fuzz", "paddock-plugin-package/fuzz", "paddock-testplan/fuzz"]
 members = [
     "paddock-archive",
     "paddock-assistant",
@@ -35,6 +35,7 @@ members = [
     "paddock-plugin-api",
     "paddock-plugin-host",
     "paddock-plugin-test",
+    "paddock-plugin-package",
     "paddock-proc",
     "paddock-runtime",
     "paddock-secrets",
@@ -98,6 +99,7 @@ paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "dec
 paddock-plugin-api = { path = "paddock-plugin-api", version = "0.1.0", registry = "decryp7" }
 paddock-plugin-host = { path = "paddock-plugin-host", version = "0.1.0", registry = "decryp7" }
 paddock-plugin-test = { path = "paddock-plugin-test", version = "0.1.0", registry = "decryp7" }
+paddock-plugin-package = { path = "paddock-plugin-package", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }
 paddock-runtime = { path = "paddock-runtime", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
