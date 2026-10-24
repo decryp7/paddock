@@ -2,6 +2,7 @@
 
 /** Every command of the table: its kind, the window classes that may call it and its largest request in bytes. */
 export const STARTUP_COMMANDS = {
+  app_relaunch: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   recovery_restore: { kind: 'mutation', windows: ['main'], limit: 262144 },
   recovery_safe_mode: { kind: 'mutation', windows: ['main'], limit: 262144 },
   recovery_start_fresh: { kind: 'mutation', windows: ['main'], limit: 262144 },

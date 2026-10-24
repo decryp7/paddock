@@ -491,3 +491,61 @@ fn version_zero_is_damaged_and_new_clamps_to_one() {
     let f: VersionedFile<State> = VersionedFile::new(t.path().join("state.json"), 0);
     assert!(matches!(f.load().problem, Some(Problem::Damaged { .. })));
 }
+
+#[test]
+fn every_error_says_what_to_fix_and_only_a_failed_operation_has_a_cause() {
+    use std::error::Error;
+    let io = EnvError::Io {
+        op: "write",
+        path: "/data/state.json".into(),
+        source: std::io::Error::other("disk full"),
+    };
+    assert!(io.source().is_some());
+    for (e, needle) in [
+        (
+            EnvError::InvalidApp("empty".into()),
+            "invalid app name: empty",
+        ),
+        (EnvError::NoHome("home folder"), "home folder"),
+        (io, "disk full"),
+        (EnvError::NotAnObject, "JSON object"),
+        (EnvError::Serialize("recursion".into()), "recursion"),
+    ] {
+        assert!(e.to_string().contains(needle), "{e}");
+        if !matches!(e, EnvError::Io { .. }) {
+            assert!(e.source().is_none(), "{e}");
+        }
+    }
+}
+
+#[test]
+fn a_damaged_file_that_could_not_be_kept_aside_is_described_without_a_copy_name() {
+    let none = Problem::Damaged {
+        reason: "not JSON".into(),
+        kept_as: None,
+        recovered_from_backup: false,
+    };
+    let text = none.to_string();
+    assert!(
+        text.contains("not JSON") && text.contains("Defaults are in use."),
+        "{text}"
+    );
+    assert!(!text.contains("kept as"), "{text}");
+}
+
+#[test]
+fn a_migration_that_cannot_be_written_back_still_loads_and_is_retried_by_the_next_save() {
+    let t = tempfile::tempdir().unwrap();
+    std::fs::write(t.path().join("state.json"), r#"{"name":"a","count":3}"#).unwrap();
+    // A folder where the old copy should go: the write-back fails, the value is still there.
+    std::fs::create_dir(t.path().join("state.json.v1.bak")).unwrap();
+    let f = v4(t.path());
+    let l = f.load();
+    assert_eq!(l.value.n, 30);
+    assert_eq!((l.problem, l.migrated_from), (None, Some(1)));
+    let on_disk = std::fs::read_to_string(f.path()).unwrap();
+    assert!(
+        on_disk.contains("\"count\":3"),
+        "the old file is untouched: {on_disk}"
+    );
+}

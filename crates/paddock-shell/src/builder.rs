@@ -532,3 +532,6 @@ fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
         paddock_health::tauri::flush(app);
     }
 }
+
+#[cfg(test)]
+mod tests;
