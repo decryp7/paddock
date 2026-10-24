@@ -44,7 +44,8 @@ export function dockLayoutDialogs(options: DockOptions = {}): readonly [DialogDe
     minWidth: 320,
     minHeight: 240,
     result: type<LayoutManageResult>(),
-    commands: [],
+    // It reads and writes the named layouts through the window's layout store (`IpcDockLayoutStore`: the workbench plugin).
+    commands: ['layout_get', 'layout_set'],
     providers,
     load: () => import('./layout-manage-dialog').then((m) => m.PdLayoutManageDialog),
   });

@@ -22,9 +22,9 @@ import { DemoRepo } from '../repo';
   `,
   styles: `
     :host { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; background: var(--pd-bg); }
-    .head { flex: none; padding: var(--pd-space-1) var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); min-width: 0; }
-    .code { flex: 1; margin: 0; padding: var(--pd-space-2) 0; overflow: auto; font-family: var(--pd-font-mono); font-size: var(--pd-text-label); line-height: 1.6; counter-reset: none; }
-    .code li { padding-inline-start: var(--pd-space-2); white-space: pre; color: var(--pd-text); }
+    .head { flex: none; padding: var(--pd-space-1) var(--pd-pane-inset, var(--pd-space-3)); border-bottom: 1px solid var(--pd-hairline); min-width: 0; }
+    .code { flex: 1; margin: 0; padding: var(--pd-space-2) var(--pd-pane-inset, var(--pd-space-3)); list-style: none; overflow: auto; font-family: var(--pd-font-mono); font-size: var(--pd-text-label); line-height: 1.6; counter-reset: none; }
+    .code li { padding-inline-start: 0; white-space: pre; color: var(--pd-text); }
     .code li::marker { color: var(--pd-text-subtle); }
     .none { padding: var(--pd-space-6); color: var(--pd-text-muted); }
   `,
