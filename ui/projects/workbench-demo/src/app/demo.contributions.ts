@@ -48,7 +48,8 @@ export const DEMO_VIEWS = [
     title: msg('wd.view.problems', 'Problems'),
     icon: 'pd:alert',
     category: msg('wd.category.analysis', 'Analysis'),
-    layout: { area: 'analysis', min: { width: 420, height: 160 }, pref: { width: 800, height: 240 }, priority: 55 },
+    // It folds to one column below 360 px, so its true minimum is small (ADR 0011: declare what the view needs).
+    layout: { area: 'analysis', min: { width: 240, height: 160 }, pref: { width: 800, height: 240 }, priority: 55 },
     order: 400,
     load: () => import('./views/problems-view').then((m) => m.ProblemsView),
   }),
