@@ -17,6 +17,7 @@ import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shel
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
 import { defineChannelsSecretDialog, defineChannelsSettingsPage } from '@decryp7/paddock-ui/shell/channels';
 import { defineLanguageSettingsPage } from '@decryp7/paddock-ui/shell/i18n/settings';
+import { definePacksSettingsPage } from '@decryp7/paddock-ui/shell/packs';
 import { defineServiceSettingsPage } from '@decryp7/paddock-ui/shell/service';
 import type { DemoContext } from './demo-context';
 import type { DemoStatus } from './dialogs/demo-ipc';
@@ -101,6 +102,8 @@ export const SETTINGS_DIALOG = defineDialog({
     'service_repair',
     'service_install',
     'open_login_items',
+    'packs_status',
+    'packs_reload',
     'channels_get',
     'channels_save',
     'channels_clear_secret',
@@ -117,6 +120,12 @@ export const SETTINGS_DIALOG = defineDialog({
 export const SERVICE_PAGE = defineServiceSettingsPage({
   providers: () => import('./service.providers').then((m) => m.SERVICE_PROVIDERS),
   load: () => import('@decryp7/paddock-ui/shell/service/page').then((m) => m.PdServicePage),
+});
+
+/** Settings > Knowledge packs (plan X15/X23): the packs in use, which were refused and why, Reload; its providers load with the page. */
+export const PACKS_PAGE = definePacksSettingsPage({
+  providers: () => import('./packs.providers').then((m) => m.PACKS_PROVIDERS),
+  load: () => import('@decryp7/paddock-ui/shell/packs/page').then((m) => m.PdPacksPage),
 });
 
 /** Settings > Notification channels (plan X17): a table of channels with an inline editor; its providers load with the page. */
@@ -141,6 +150,7 @@ export const DEMO_SETTINGS_PAGES = [
   LANGUAGE_PAGE,
   SERVICE_PAGE,
   CHANNELS_PAGE,
+  PACKS_PAGE,
   defineSettingsPage({ id: 'sd.general', group: 'application', title: msg('sd.settings.general', 'General'), order: 100 }),
   defineSettingsPage({ id: 'sd.storage', group: 'features', title: msg('sd.settings.storage', 'Storage'), order: 100 }),
 ] as const;
@@ -326,6 +336,14 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
       order: 200,
       when: (ctx) => ctx.developer(),
       load: () => import('./pages/dialogs-page').then((m) => m.DialogsPage),
+    }),
+    definePage<DemoContext>({
+      id: 'sd.schedule',
+      title: msg('sd.page.schedule', 'Schedules'),
+      icon: 'pd:clock',
+      order: 250,
+      when: (ctx) => ctx.developer(),
+      load: () => import('./pages/schedule-page').then((m) => m.SchedulePage),
     }),
     definePage<DemoContext>({
       id: 'sd.keys',

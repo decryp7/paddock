@@ -16,6 +16,8 @@ const MAX_URL: usize = 2048;
 
 /// How an SMTP connection is secured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "EmailSecurity"))]
 #[serde(rename_all = "camelCase")]
 pub enum Security {
     /// A plain connection upgraded with STARTTLS, which is required (usually port 587).
@@ -29,6 +31,7 @@ pub enum Security {
 
 /// Where and how a channel delivers. Secrets are never part of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -79,6 +82,7 @@ fn default_ntfy_server() -> String {
 
 /// One configured channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelConfig {
     /// Unique id within the settings (`A-Za-z0-9._-`, at most 64): also the credential store scope.
@@ -203,6 +207,8 @@ pub fn secret_name_of(id: &str) -> Option<Name> {
 
 /// All notification settings of an app. The default has no channels, so nothing is ever sent unless configured.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ChannelsSettings"))]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     /// Configured channels (at most [`MAX_CHANNELS`]).

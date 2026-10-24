@@ -1,0 +1,41 @@
+# The pinned Chromium (Chrome for Testing, Google's builds of Chrome meant for automation) every app may download. One
+# entry per platform with the archive's URL, size and SHA-256; paddock-runtime refuses anything that does not match.
+# The URLs are versioned and do not change. Chrome for Testing publishes no hashes: the SHA-256 values are computed from
+# the downloaded archives (taken from Spotter's reviewed pin), the sizes from the host's Content-Length. Review the diff
+# and the version before committing a new pin. Keys: <windows|macos|linux>-<x86_64|aarch64>.
+
+format = 1
+name = "chromium"
+version = "156.0.8078.47"
+source = "Chrome for Testing (https://googlechromelabs.github.io/chrome-for-testing/)"
+license = "BSD-3-Clause and others (Chromium)"
+
+[[platform]]
+key = "windows-x86_64"
+url = "https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.47/win64/chrome-win64.zip"
+size = 209154801
+sha256 = "a4e0d57245e167e98a9d465af1e3774d2b4ec9f04e483d19bcd97a6f63cf46dd"
+
+[[platform]]
+key = "macos-aarch64"
+url = "https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.47/mac-arm64/chrome-mac-arm64.zip"
+size = 194932023
+sha256 = "ad7f2b49a4dc679af286b1b1b386670d93ca7868079f69012d21ba0ac8293df3"
+
+[[platform]]
+key = "macos-x86_64"
+url = "https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.47/mac-x64/chrome-mac-x64.zip"
+size = 205405847
+sha256 = "5a38b8e3d621514fff0775dcae678a152ce378890188c88eef79fc97aa59fccd"
+
+[[platform]]
+key = "linux-x86_64"
+url = "https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.47/linux64/chrome-linux64.zip"
+size = 200206486
+sha256 = "e6c94490f0b6b337225aeb2d2a5034858516b7017356980ba94f5176d8774a50"
+
+[[platform]]
+key = "linux-aarch64"
+url = "https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.47/linux-arm64/chrome-linux-arm64.zip"
+size = 199726566
+sha256 = "9e37000e3ee2731e45e475a6a2eac587d3c0ee5f8aef7cab5211ecd52cf3fb7b"
