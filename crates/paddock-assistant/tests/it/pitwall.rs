@@ -1,7 +1,7 @@
 //! The Pitwall adapter against the in-process fake Pitwall of `paddock-pitwall` (loopback, an ephemeral port, no real
 //! Pitwall, no credential store, no sleeping): the whole assistant over a real `Link`.
 
-mod support;
+use crate::support;
 use paddock_assistant::pitwall::needs_ai;
 use paddock_assistant::*;
 use paddock_health::FakeClock;
