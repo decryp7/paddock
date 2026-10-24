@@ -430,10 +430,17 @@ pub async fn chat(
 
 /// Cancels a playground stream.
 #[tauri::command]
-pub fn chat_cancel(streams: State<'_, Arc<Streams>>, id: String) -> Result<(), CommandError> {
+pub async fn chat_cancel(streams: State<'_, Arc<Streams>>, id: String) -> Result<(), CommandError> {
+    cancel_chat(streams.inner().clone(), id).await
+}
+
+/// [`chat_cancel`] without Tauri state. It is async and takes the stream table on a blocking thread, so a cancel is
+/// never queued behind a chat on the main thread or a busy async worker.
+pub async fn cancel_chat(streams: Arc<Streams>, id: String) -> Result<(), CommandError> {
     id.validate("id")?;
-    streams.cancel(&id);
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || streams.cancel(&id))
+        .await
+        .map_err(|e| CommandError::new(ErrorCode::Internal, format!("cancelling the chat stopped unexpectedly: {e}")))
 }
 
 #[cfg(test)]
@@ -691,5 +698,51 @@ mod tests {
         assert_eq!(streams.running(), 1);
         streams.cancel(&id);
         assert_eq!(streams.running(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_chat_can_be_cancelled_while_its_stream_hogs_a_runtime_thread() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Hog(Arc<AtomicBool>);
+        impl crate::server_client::FrameStream for Hog {
+            fn next_frame(&mut self) -> crate::server_client::BoxFuture<'_, Result<Option<String>, CommandError>> {
+                let release = self.0.clone();
+                // Blocks its runtime thread (a chat busy in a long synchronous step) until the test lets go.
+                Box::pin(async move {
+                    while !release.load(Ordering::SeqCst) {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Ok(None)
+                })
+            }
+        }
+        struct Client(Arc<AtomicBool>);
+        impl ServerClient for Client {
+            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+                Box::pin(async { Ok(Value::Null) })
+            }
+            fn open_stream<'a>(
+                &'a self,
+                _: &'a str,
+                _: Option<Value>,
+                _: Duration,
+            ) -> crate::server_client::BoxFuture<'a, Result<Box<dyn crate::server_client::FrameStream>, CommandError>> {
+                let r = self.0.clone();
+                Box::pin(async move { Ok(Box::new(Hog(r)) as Box<dyn crate::server_client::FrameStream>) })
+            }
+        }
+        let release = Arc::new(AtomicBool::new(false));
+        let streams = Arc::new(Streams::default());
+        let (sink, _) = collector();
+        let id = start_chat(Arc::new(Client(release.clone())), streams.clone(), request(), sink)
+            .await
+            .unwrap();
+        assert_eq!(streams.running(), 1);
+        let done = tokio::time::timeout(Duration::from_secs(5), cancel_chat(streams.clone(), id)).await;
+        release.store(true, Ordering::SeqCst);
+        assert!(done.expect("the cancel was not answered while the chat hogged a thread").is_ok());
+        assert_eq!(streams.running(), 0);
+        assert!(cancel_chat(streams.clone(), "a\u{0}b".into()).await.is_err(), "ids are validated");
+        assert!(cancel_chat(streams, "chat-99".into()).await.is_ok(), "an unknown id is fine");
     }
 }

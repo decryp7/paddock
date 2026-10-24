@@ -78,35 +78,48 @@ pub async fn open_login_items() -> Result<(), CommandError> {
         .map_err(|e| internal(format!("opening Login Items stopped unexpectedly: {e}")))?
 }
 
+/// Runs blocking work (file or OS calls) off the command's thread; a panic or cancellation becomes an error.
+async fn blocking<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T, CommandError> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| internal(format!("{what} stopped unexpectedly: {e}")))
+}
+
 /// The user said no to the service; do not ask again.
 #[tauri::command]
-pub fn decline_service() {
-    mark_offered();
+pub async fn decline_service() -> Result<(), CommandError> {
+    blocking("remembering the answer", mark_offered).await
 }
 
 /// Whether Pitwall starts at log-in.
 #[tauri::command]
-pub fn get_autostart(app: AppHandle) -> Result<bool, CommandError> {
-    app.autolaunch()
-        .is_enabled()
-        .map_err(|e| internal(format!("start at log-in could not be read: {e}")))
+pub async fn get_autostart(app: AppHandle) -> Result<bool, CommandError> {
+    blocking("reading start at log-in", move || {
+        app.autolaunch()
+            .is_enabled()
+            .map_err(|e| internal(format!("start at log-in could not be read: {e}")))
+    })
+    .await?
 }
 
 /// Turns start at log-in (in the tray, without a window) on or off. Off until the user turns it on.
 #[tauri::command]
-pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, CommandError> {
-    let launch = app.autolaunch();
-    let done = if enabled { launch.enable() } else { launch.disable() };
-    done.map_err(|e| internal(format!("start at log-in could not be changed: {e}")))?;
-    launch
-        .is_enabled()
-        .map_err(|e| internal(format!("start at log-in could not be read: {e}")))
+pub async fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, CommandError> {
+    blocking("changing start at log-in", move || {
+        let launch = app.autolaunch();
+        let done = if enabled { launch.enable() } else { launch.disable() };
+        done.map_err(|e| internal(format!("start at log-in could not be changed: {e}")))?;
+        launch
+            .is_enabled()
+            .map_err(|e| internal(format!("start at log-in could not be read: {e}")))
+    })
+    .await?
 }
 
 /// Whether this build can update itself (`AppUpdateStatus` in `api.types.ts`).
 #[tauri::command]
-pub fn app_update_status(app: AppHandle) -> AppUpdateStatus {
-    updater::status(&app)
+pub async fn app_update_status(app: AppHandle) -> Result<AppUpdateStatus, CommandError> {
+    blocking("reading the update status", move || updater::status(&app)).await
 }
 
 /// Checks for a release; only when the user asks.
