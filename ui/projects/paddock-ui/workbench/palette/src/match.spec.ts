@@ -1,4 +1,4 @@
-import { didYouMean, editDistance, marksOf, matchWord, plain, rank, showsCategory, suggestionScore, titleParts, tolerance, type Rankable } from './match';
+import { queryMarks, didYouMean, editDistance, marksOf, matchWord, plain, rank, showsCategory, suggestionScore, titleParts, tolerance, type Rankable } from './match';
 
 const item = (id: string, title: string, category?: string): Rankable => ({ id, title, ...(category ? { category } : {}) });
 
@@ -89,5 +89,13 @@ describe('did you mean', () => {
     expect(didYouMean(items, 'timelnie', (x) => x)).toEqual(['Toggle timeline panel', 'Show timeline']);
     expect(didYouMean(items, 'toggel', (x) => x, 1)).toEqual(['Toggle timeline panel']);
     expect(didYouMean(items, 'qqqqqq', (x) => x)).toEqual([]);
+  });
+});
+
+describe('queryMarks', () => {
+  it('marks where the words of a query land in a label', () => {
+    expect([...queryMarks('handle req', 'handle_request')]).toEqual([0, 1, 2, 3, 4, 5, 7, 8, 9]);
+    expect(queryMarks('', 'x').size).toBe(0);
+    expect(queryMarks('zz', 'abc').size).toBe(0);
   });
 });

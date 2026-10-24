@@ -4,7 +4,7 @@ import { CommandService, ShellContextHost, SHELL_PORTS, type CommandDef } from '
 import { formatKey, Keymap } from '@decryp7/paddock-ui/shell/menu';
 import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { COMMANDS_PREFIX, WORKBENCH_PORTS, WorkbenchRegistry, type PaletteItem, type PaletteProviderDef } from '@decryp7/paddock-ui/workbench';
-import { didYouMean, marksOf, plain, rank, type Rankable, type Ranked } from './match';
+import { didYouMean, marksOf, plain, queryMarks, rank, type Rankable, type Ranked } from './match';
 import { PaletteRecent } from './recent';
 
 /** The most results a provider is asked for, and the most rows the list shows. */
@@ -218,7 +218,7 @@ export const PaletteStore = signalStore(
             ...(item.icon ? { icon: item.icon } : {}),
             ...(item.keybinding ? { keybinding: formatKey(item.keybinding, store._keymap.platform) } : {}),
             ...(item.disabled ? { disabled: item.disabled } : {}),
-            marks: marksOf(label, item.highlights),
+            marks: item.highlights ? marksOf(label, item.highlights) : queryMarks(query, label),
           };
         });
         patchState(store, { providerRows: rows, active: 0 }, setLoaded());

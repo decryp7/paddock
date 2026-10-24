@@ -46,10 +46,14 @@ import { WORKBENCH_CONFIG } from './provide-workbench';
     </header>
     <div class="pd-body">
       <pd-activity-bar role="navigation" [attr.aria-label]="t.activity" data-pd-region="activity" tabindex="-1" />
+      @if (frame.overlay()) {
+        <div class="pd-side-scrim" data-testid="sidebar-scrim" aria-hidden="true" (click)="frame.dismissOverlay()"></div>
+      }
       @if (frame.explorerShown()) {
-        <aside class="pd-side" role="complementary" [attr.aria-label]="t.sidebar" data-pd-region="sidebar" tabindex="-1" data-testid="workbench-sidebar" [style.width.px]="frame.explorerWidth()">
+        <aside class="pd-side" [class.pd-side-overlay]="frame.overlay()" role="complementary" [attr.aria-label]="t.sidebar" data-pd-region="sidebar" tabindex="-1" data-testid="workbench-sidebar" [style.width.px]="frame.explorerWidth()">
           <pd-explorer />
         </aside>
+        @if (!frame.overlay()) {
         <div
           class="pd-sash"
           role="separator"
@@ -63,6 +67,7 @@ import { WORKBENCH_CONFIG } from './provide-workbench';
           (pointerdown)="startResize($event)"
           (keydown)="resizeKey($event)"
         ></div>
+        }
       }
       <main id="pd-stage" class="pd-stage" data-pd-region="main" tabindex="-1">
         <ng-content select="[slot=stage]" />
@@ -78,10 +83,13 @@ import { WORKBENCH_CONFIG } from './provide-workbench';
     <pd-copy-menu />
   `,
   styles: `
-    :host { --pd-titlebar-height: 40px; container: pd-workbench / inline-size; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; background: var(--pd-bg); color: var(--pd-text); }
+    :host { --pd-titlebar-height: 40px; --pd-activity-width: 48px; container: pd-workbench / inline-size; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; background: var(--pd-bg); color: var(--pd-text); }
     :host(.pd-native-menu) { --pd-titlebar-inset-start: 78px; }
     .pd-title { min-width: 0; background: var(--pd-surface-1); border-bottom: 1px solid var(--pd-hairline); outline: none; }
-    .pd-body { display: flex; min-height: 0; min-width: 0; }
+    .pd-body { position: relative; display: flex; min-height: 0; min-width: 0; }
+    /* Over the dock in a narrow window (review 2 P1-B): the dock keeps its whole width. */
+    .pd-side.pd-side-overlay { position: absolute; inset-block: 0; inset-inline-start: var(--pd-activity-width); z-index: var(--pd-z-overlay); max-width: calc(100% - var(--pd-activity-width) - var(--pd-space-8)); border-inline-end: 1px solid var(--pd-border-strong); box-shadow: var(--pd-shadow-3); }
+    .pd-side-scrim { position: absolute; inset: 0; inset-inline-start: var(--pd-activity-width); z-index: calc(var(--pd-z-overlay) - 1); background: var(--pd-scrim); }
     .pd-side { flex: none; display: flex; flex-direction: column; min-height: 0; min-width: 0; max-width: 50%; background: var(--pd-surface-1); outline: none; }
     .pd-side > pd-explorer { flex: 1; }
     .pd-sash { flex: none; width: 4px; margin-inline-start: -2px; margin-inline-end: -2px; z-index: 1; cursor: col-resize; background: transparent; border-inline-start: 1px solid var(--pd-hairline); touch-action: none; }
@@ -93,7 +101,7 @@ import { WORKBENCH_CONFIG } from './provide-workbench';
     .pd-skip { position: fixed; inset-inline-start: var(--pd-space-3); top: -48px; z-index: var(--pd-z-toast); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-accent-fill); color: var(--pd-on-accent); font-weight: var(--pd-weight-medium); }
     .pd-skip:focus { top: var(--pd-space-2); text-decoration: none; }
     /* Below 480 px the activity bar narrows (rule 18: nothing scrolls sideways at 320 px). */
-    @container pd-workbench (max-width: 480px) { pd-activity-bar { width: 40px; } }
+    @container pd-workbench (max-width: 480px) { pd-activity-bar { width: 40px; } .pd-body { --pd-activity-width: 40px; } }
   `,
 })
 export class PdWorkbench {
@@ -132,6 +140,12 @@ export class PdWorkbench {
 
   protected onKey(e: KeyboardEvent): void {
     if (e.defaultPrevented) return;
+    if (e.key === 'Escape' && this.frame.overlay()) {
+      e.preventDefault();
+      this.frame.dismissOverlay();
+      this.el.querySelector<HTMLElement>('pd-activity-bar [data-activity-id]')?.focus();
+      return;
+    }
     const direction = regionKey(e);
     if (direction === null) return;
     e.preventDefault();

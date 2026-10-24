@@ -94,6 +94,12 @@ export class ActivityItems {
     return badgeText(evaluate(item.badge, this.registry.context(), null));
   }
 
+  /** The badge's tone: neutral unless the item says the count means a problem. */
+  badgeTone(item: ActivityItemDef): 'neutral' | 'info' | 'warning' | 'danger' {
+    const tone = evaluate(item.badgeTone, this.registry.context(), 'neutral');
+    return tone === 'info' || tone === 'warning' || tone === 'danger' ? tone : 'neutral';
+  }
+
   badgeLabel(item: ActivityItemDef): string | null {
     return evaluate(item.badgeLabel, this.registry.context(), null);
   }
