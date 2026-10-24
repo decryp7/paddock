@@ -315,7 +315,12 @@ pub fn classify_binary_file(name: &str, binary: &str) -> Option<EntryKind> {
     let stem = binary.trim_end_matches(".exe");
     if lower == format!("{binary}.previous") {
         Some(EntryKind::Previous)
-    } else if lower.ends_with(".download") || lower == format!("{stem}_new.exe") || lower == format!("{stem}_new") {
+    } else if lower.ends_with(".download")
+        || lower.ends_with(".download.part")
+        || lower.ends_with(".download.part.json")
+        || lower == format!("{stem}_new.exe")
+        || lower == format!("{stem}_new")
+    {
         Some(EntryKind::Download)
     } else if (lower == "act_runner.exe" || lower == "act_runner") && stem != "act_runner" {
         Some(EntryKind::OldBinary)
@@ -500,6 +505,12 @@ mod tests {
         assert_eq!(classify_binary_file("gitea-runner.exe.previous", b), Some(EntryKind::Previous));
         assert_eq!(classify_binary_file("gitea-runner.exe.download", b), Some(EntryKind::Download));
         assert_eq!(classify_binary_file("gitea-runner_new.exe", b), Some(EntryKind::Download));
+        // What an interrupted, resumable download leaves (`paddock-download`).
+        assert_eq!(classify_binary_file("gitea-runner.exe.download.part", b), Some(EntryKind::Download));
+        assert_eq!(
+            classify_binary_file("gitea-runner.exe.download.part.json", b),
+            Some(EntryKind::Download)
+        );
         assert_eq!(classify_binary_file("act_runner.exe", b), Some(EntryKind::OldBinary));
         assert_eq!(classify_binary_file("gitea-runner.exe", b), None);
         assert_eq!(classify_binary_file("config.yaml", b), None);

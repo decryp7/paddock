@@ -11,6 +11,7 @@ pub mod error;
 pub mod host;
 pub mod hygiene;
 pub mod ipc;
+pub mod jobs;
 pub mod launch;
 pub mod launcher;
 pub mod logfile;

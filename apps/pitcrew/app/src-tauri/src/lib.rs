@@ -17,6 +17,7 @@ pub mod jobs;
 pub mod ops;
 pub mod service_client;
 pub mod service_install;
+pub mod service_jobs;
 pub mod service_repair;
 pub mod tray;
 
@@ -135,6 +136,7 @@ pub fn shell<R: Runtime>(client: SharedClient, place: Place) -> Builder<R> {
             app.manage(events::Latest::default());
             app.manage(events::Actions::new(app.state::<SharedClient>().inner().clone()));
             app.manage(jobs::Work::default());
+            app.manage(service_jobs::Mirror::default());
             if let Ok(dir) = app.path().app_data_dir() {
                 health::set_data_dir(dir);
             }

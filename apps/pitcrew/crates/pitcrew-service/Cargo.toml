@@ -28,6 +28,10 @@ tokio = { version = "1.54", default-features = false, features = ["rt-multi-thre
 # Child processes, machine metrics and disk space without platform FFI.
 sysinfo = { version = "0.37", default-features = false, features = ["system", "disk"] }
 # Release discovery and downloads: HTTPS with the OS certificate store.
+# Runner downloads: segmented Range requests, per-host caps and 429 back-off, resume, one SHA-256 while writing, the
+# free-space check, Cancel in every phase, progress as a job (rules 11-15). The service's own jobs are never shown by Tauri here.
+paddock-download = { version = "0.1", registry = "decryp7" }
+paddock-jobs = { version = "0.1", registry = "decryp7" }
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 
 # The Service Control Manager integration (MIT OR Apache-2.0, maintained by Mullvad): safe wrappers around the

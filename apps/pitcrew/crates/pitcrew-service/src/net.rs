@@ -1,9 +1,7 @@
-//! HTTPS for release discovery, checksums and downloads (ADR 0002): HTTPS only, timeouts, size caps, the OS
-//! certificate store; SHA-256 computed while the download streams to disk.
+//! HTTPS for release discovery and checksum files (ADR 0002): HTTPS only, timeouts, size caps, the OS certificate store.
+//! Downloads of runner binaries are `paddock-download`'s (segmented, resumable, hashed while writing; `work::download`).
 
-use pitcrew_core::checksum::{Hasher, Sha256Digest};
-use std::io::{Read, Write};
-use std::path::Path;
+use std::io::Read;
 use std::time::Duration;
 
 /// Largest runner binary Pitcrew downloads.
@@ -46,7 +44,8 @@ impl Http {
         }
     }
 
-    fn check(&self, url: &str) -> Result<(), String> {
+    /// Whether `url` may be fetched: HTTPS only (loopback `http://` in tests).
+    pub fn check(&self, url: &str) -> Result<(), String> {
         if url.starts_with("https://") || (self.allow_loopback_http && url.starts_with("http://127.0.0.1:")) {
             Ok(())
         } else {
@@ -82,23 +81,6 @@ impl Http {
         }
         Ok(String::from_utf8_lossy(&buf).into_owned())
     }
-
-    /// Downloads `url` to `dest` (at most `max` bytes) and returns the SHA-256 of what was written.
-    pub fn download(&self, url: &str, dest: &Path, max: u64) -> Result<Sha256Digest, String> {
-        let resp = self.get(url, None)?;
-        let mut file = std::fs::File::create(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
-        let mut reader = resp.into_body().into_reader().take(max + 1);
-        let mut hashing = HashingWriter::new(&mut file);
-        let n = std::io::copy(&mut reader, &mut hashing).map_err(|e| format!("the download from {} failed: {e}", host(url)))?;
-        let digest = hashing.finish();
-        file.sync_all().map_err(|e| format!("{}: {e}", dest.display()))?;
-        if n > max {
-            drop(file);
-            let _ = std::fs::remove_file(dest);
-            return Err(format!("the download is larger than {} MB", max / (1024 * 1024)));
-        }
-        Ok(digest)
-    }
 }
 
 impl Default for Http {
@@ -115,47 +97,10 @@ fn path_of(url: &str) -> &str {
     url.split("://").nth(1).and_then(|r| r.find('/').map(|i| &r[i..])).unwrap_or("/")
 }
 
-/// Writes through and hashes what passes.
-struct HashingWriter<W: Write> {
-    inner: W,
-    hasher: Hasher,
-}
-
-impl<W: Write> HashingWriter<W> {
-    fn new(inner: W) -> Self {
-        HashingWriter {
-            inner,
-            hasher: Hasher::new(),
-        }
-    }
-
-    fn finish(self) -> Sha256Digest {
-        self.hasher.finish()
-    }
-}
-
-impl<W: Write> Write for HashingWriter<W> {
-    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        let n = self.inner.write(data)?;
-        self.hasher.update(&data[..n]);
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-/// The SHA-256 of a file on disk.
-pub fn file_digest(path: &Path) -> Result<Sha256Digest, String> {
-    let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    Sha256Digest::of_reader(f).map_err(|e| e.to_string())
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
 
     /// A tiny HTTP server for tests: `routes` maps a path to (status, body). Returns the base URL.
@@ -195,27 +140,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn downloads_and_hashes_and_refuses_plain_http() {
+    fn reads_text_within_limits_and_refuses_plain_http() {
         let base = serve(vec![
             ("/v.json".into(), 200, br#"{"latest":{"version":"5.2.0"}}"#.to_vec()),
-            ("/bin".into(), 200, vec![7u8; 5000]),
             ("/gone".into(), 500, vec![]),
         ]);
         let http = Http::for_tests();
         assert!(http.text(&format!("{base}/v.json"), 1024, Some("t")).unwrap().contains("5.2.0"));
         assert!(http.text(&format!("{base}/v.json"), 5, None).unwrap_err().contains("more than"));
         assert!(http.text(&format!("{base}/gone"), 5, None).unwrap_err().contains("HTTP 500"));
-        let dest = std::env::temp_dir().join(format!("pitcrew-dl-{}", std::process::id()));
-        let d = http.download(&format!("{base}/bin"), &dest, 10_000).unwrap();
-        assert_eq!(d, Sha256Digest::of_bytes(&[7u8; 5000]));
-        assert_eq!(file_digest(&dest).unwrap(), d);
-        assert!(http.download(&format!("{base}/bin"), &dest, 100).unwrap_err().contains("larger"));
-        assert!(!dest.exists());
         assert!(Http::new()
             .text("http://example.com", 10, None)
             .unwrap_err()
             .contains("not an HTTPS"));
-        assert!(file_digest(&dest).is_err());
         assert_eq!(host("https://a.b/c"), "a.b");
         assert_eq!(path_of("https://a.b"), "/");
     }

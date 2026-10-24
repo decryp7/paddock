@@ -139,9 +139,20 @@ The shipped rules are Gradle and Kotlin daemons 3 h, QEMU and the Android emulat
   you go back) or **Skip** one; **Check now** and **Update now**. An update waits for the job, swaps the binary and
   rolls back if the server does not accept the new one; the result stays on the page. A binary you provide
   (`binary_path`) is never updated.
-- **Pitcrew itself.** Updates ▸ Pitcrew ▸ *Check for updates*, then *Install and restart*. Checks happen only when you ask;
-  installers are signed, and a build without the signing key says updates are not available. The service and the runners
-  keep running; the service restarts itself when its program changed and nothing is running.
+- **Pitcrew itself.** Help ▸ *Check for Updates…* (or Updates ▸ Pitcrew ▸ *Check for Pitcrew updates…*) opens the Updates
+  window: check, download, then install and restart. Installers are signed, and a build without the signing key says updates are
+  not available. The service and the runners keep running; the service restarts itself when its program changed and nothing is
+  running.
+- **How things are downloaded.** Runner binaries and Pitcrew's own updates use one downloader: large files in several parallel
+  ranges where the server allows it, at most a few connections per host, a pause when a server says "slow down" (HTTP 429 or
+  503, `Retry-After`), and a download that stops (a lost connection, Cancel, a restart of the service) continues from what was
+  kept (`<name>.download.part`) instead of starting over. The publisher's checksum is read first, from two sources that must
+  agree; it is compared with the file's checksum computed while it is written, so a file that does not match is never put in
+  place and nothing is read twice. Pitcrew checks that the disk has room (the file plus a 64 MB reserve) before the first byte.
+  Every download is a **job** in the status bar's Jobs list with phases (connecting, resuming, downloading, verifying), a count
+  or size that grows from the first moment, and **Cancel** that works in every phase; the window never gives up on it ("Still
+  working" shows when nothing has been heard for a while). Disk cleanup, registering a runner, pruning the container engine and
+  trimming the Actions cache are jobs too.
 
 ## Configuration file
 

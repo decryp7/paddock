@@ -193,6 +193,12 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
                                     }
                                     emit(&a, BackendEvent::Status { status });
                                 }
+                                ServiceEvent::Job { job } => {
+                                    if let Ok(registry) = crate::jobs::registry(&a) {
+                                        a.state::<crate::service_jobs::Mirror>()
+                                            .apply(&registry, &a.state::<SharedClient>(), &job);
+                                    }
+                                }
                                 ServiceEvent::Notification { notification } => {
                                     notify(&a, &notification);
                                     emit(&a, BackendEvent::Notification { notification });
