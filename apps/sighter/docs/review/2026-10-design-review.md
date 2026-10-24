@@ -695,3 +695,8 @@ coverage), full visual-regression match levels, and the C++ client (generated la
 - Section 7.15: the VM console and snapshot pools move from "to confirm" to v1 (1.2).
 - POC plan: implement Hextile; bind the VNC server to loopback; write a per-step annotated screenshot and a
   `trace.ndjson`, the first version of the trace stream of 3.1, so the user's first try already has the debug view.
+
+
+## Decisions (user, 2026-10-24)
+
+All six recommendations in §5 accepted: v1 targets VM console, RDP and Local with a Windows-only controller and VM snapshot pools; a Lab release before the training studio; a lab-only guest helper for training labels, never at test time; IronRDP after a spike (FreeRDP out-of-process fallback) and Sighter's own VNC client; one stop hotkey Ctrl+Alt+Shift+F12, the HUD as a separate video track, the on-screen overlay only where it can be hidden from capture; models promoted for unattended suites only after per-slice gates and shadow mode.
