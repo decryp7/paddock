@@ -16,6 +16,7 @@ paddock-jobs = { workspace = true }
 paddock-proc = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 paddock-testkit = { workspace = true }
