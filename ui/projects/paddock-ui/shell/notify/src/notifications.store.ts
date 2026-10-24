@@ -75,12 +75,18 @@ export const NotificationsStore = signalStore(
         return null;
       }
     };
+    // Answers and events can cross (a list read before a post answers after its event): a window keeps the newest revision.
+    const take = (next: NoticesSnapshot): boolean => {
+      if (next.revision < store.snapshot().revision) return false;
+      patchState(store, { snapshot: { revision: next.revision, notices: next.notices, unread: next.unread } });
+      return true;
+    };
     const dismissToast = (cause: string): void => patchState(store, (s) => ({ toasts: s.toasts.filter((t) => t.cause !== cause) }));
     const isLocal = (id: number): boolean => id < 0;
     return {
-      /** A change from the engine: the new list, and a toast for the message just posted (unless already read). */
+      /** A change from the engine (an older one than the window has is ignored): the new list, and a toast for the message just posted (unless already read). */
       apply(e: NoticesEvent): void {
-        patchState(store, { snapshot: { notices: e.notices, unread: e.unread } });
+        if (!take(e)) return;
         const p = e.posted;
         if (p && !p.read) patchState(store, (s) => ({ toasts: upsertLast(s.toasts, p) }));
         // A message the engine resolved or dismissed takes its toast with it.
@@ -92,8 +98,8 @@ export const NotificationsStore = signalStore(
       async load(): Promise<void> {
         patchState(store, setLoading());
         try {
-          const s = await backend.list();
-          patchState(store, { snapshot: s }, setLoaded());
+          take(await backend.list());
+          patchState(store, setLoaded());
         } catch (e) {
           patchState(store, setError(errorMessage(e, FALLBACK)));
         }

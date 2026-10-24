@@ -43,6 +43,10 @@ pub const SAVE_DELAY: Duration = Duration::from_millis(250);
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoticesSnapshot {
+    /// Grows with every change of any list; a window keeps the newest (an answer to `notifications_list` can cross an
+    /// event). It is read before the lists, so a snapshot holds at least the changes up to it.
+    #[cfg_attr(test, ts(type = "number"))]
+    pub revision: u64,
     pub notices: Vec<Notice>,
     pub unread: usize,
 }
@@ -96,6 +100,8 @@ pub struct NotificationCentre {
     projects: Mutex<HashMap<String, Centre>>,
     caps: Caps,
     next: AtomicU64,
+    /// Counts the changes of every list (see [`NoticesSnapshot::revision`]).
+    revision: AtomicU64,
     /// Writes the app list to its file, debounced, off the centre's locks (none: in memory only).
     writer: Option<Debounced>,
     clock: Arc<dyn Clock>,
@@ -123,6 +129,7 @@ impl NotificationCentre {
         let app = Centre::with(caps.app, saved);
         NotificationCentre {
             next: AtomicU64::new(app.max_id() + 1),
+            revision: AtomicU64::new(0),
             app: Mutex::new(app),
             projects: Mutex::new(HashMap::new()),
             caps,
@@ -140,6 +147,19 @@ impl NotificationCentre {
 
     fn id(&self) -> NoticeId {
         NoticeId(self.next.fetch_add(1, Ordering::SeqCst))
+    }
+
+    /// Notes a change of a list (called while its lock is held, so a snapshot that reads the new revision sees it).
+    fn changed(&self) {
+        self.revision.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Notes a change when `changed` holds; returns it.
+    fn changed_if(&self, changed: bool) -> bool {
+        if changed {
+            self.changed();
+        }
+        changed
     }
 
     /// Queues the app list for its file (written by the debounced writer, never under the centre's locks).
@@ -165,15 +185,21 @@ impl NotificationCentre {
             new.link.window = window.map(str::to_string);
         }
         let posted = match (new.scope, window) {
-            (NoticeScope::Project, Some(w)) => lock(&self.projects)
-                .entry(w.to_string())
-                .or_insert_with(|| Centre::new(self.caps.project))
-                .post(new, id, now),
+            (NoticeScope::Project, Some(w)) => {
+                let mut projects = lock(&self.projects);
+                let p = projects
+                    .entry(w.to_string())
+                    .or_insert_with(|| Centre::new(self.caps.project))
+                    .post(new, id, now);
+                self.changed_if(!p.unchanged);
+                p
+            }
             _ => {
                 new.scope = NoticeScope::App;
                 let mut app = lock(&self.app);
                 let p = app.post(new, id, now);
                 if !p.unchanged {
+                    self.changed();
                     self.save_app(&app);
                 }
                 p
@@ -194,12 +220,17 @@ impl NotificationCentre {
 
     /// Runs `f` on the list holding the message (the window's project list, then the app list).
     fn with_list<T>(&self, window: &str, f: impl Fn(&mut Centre) -> Option<T>) -> Option<T> {
-        if let Some(t) = lock(&self.projects).get_mut(window).and_then(&f) {
-            return Some(t);
+        {
+            let mut projects = lock(&self.projects);
+            if let Some(t) = projects.get_mut(window).and_then(&f) {
+                self.changed();
+                return Some(t);
+            }
         }
         let mut app = lock(&self.app);
         let t = f(&mut app);
         if t.is_some() {
+            self.changed();
             self.save_app(&app);
         }
         t
@@ -207,13 +238,18 @@ impl NotificationCentre {
 
     /// The window's messages: its project's and the app's, newest first.
     pub fn snapshot(&self, window: &str) -> NoticesSnapshot {
+        let revision = self.revision.load(Ordering::SeqCst);
         let mut notices: Vec<Notice> = lock(&self.app).notices().to_vec();
         if let Some(p) = lock(&self.projects).get(window) {
             notices.extend(p.notices().iter().cloned());
         }
         notices.sort_by(|a, b| b.at.cmp(&a.at).then(b.id.cmp(&a.id)));
         let unread = notices.iter().filter(|n| !n.read).count();
-        NoticesSnapshot { notices, unread }
+        NoticesSnapshot {
+            revision,
+            notices,
+            unread,
+        }
     }
 
     /// Marks one message read. False when the window cannot see it.
@@ -226,11 +262,15 @@ impl NotificationCentre {
     /// when one was removed.
     pub fn resolve(&self, cause: &str) -> bool {
         let mut any = false;
-        for c in lock(&self.projects).values_mut() {
-            any |= c.resolve_cause(cause).is_some();
+        {
+            let mut projects = lock(&self.projects);
+            for c in projects.values_mut() {
+                any |= self.changed_if(c.resolve_cause(cause).is_some());
+            }
         }
         let mut app = lock(&self.app);
         if app.resolve_cause(cause).is_some() {
+            self.changed();
             self.save_app(&app);
             any = true;
         }
@@ -245,12 +285,16 @@ impl NotificationCentre {
 
     /// Marks the window's messages (its project's and the app's) read; returns how many were unread.
     pub fn mark_all_read(&self, window: &str) -> usize {
-        let project = lock(&self.projects)
-            .get_mut(window)
-            .map_or(0, Centre::mark_all_read);
+        let project = {
+            let mut projects = lock(&self.projects);
+            let n = projects.get_mut(window).map_or(0, Centre::mark_all_read);
+            self.changed_if(n > 0);
+            n
+        };
         let mut app = lock(&self.app);
         let n = app.mark_all_read();
         if n > 0 {
+            self.changed();
             self.save_app(&app);
         }
         project + n
@@ -278,16 +322,21 @@ impl NotificationCentre {
                 n
             })
             .collect();
-        lock(&self.projects).insert(
+        let mut projects = lock(&self.projects);
+        projects.insert(
             window.to_string(),
             Centre::with(self.caps.project, renumbered),
         );
+        self.changed();
         warning
     }
 
     /// A window closed: its project messages go with it.
     pub fn forget_window(&self, window: &str) {
-        lock(&self.projects).remove(window);
+        let mut projects = lock(&self.projects);
+        if projects.remove(window).is_some() {
+            self.changed();
+        }
     }
 
     /// An OS notification for `id` was shown: focusing the app soon after opens it.

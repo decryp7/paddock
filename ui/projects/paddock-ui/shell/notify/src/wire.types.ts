@@ -96,6 +96,8 @@ export interface Notice {
 }
 
 export interface NoticesSnapshot {
+  /** Grows with every change of any list; a window keeps the newest (an answer can cross an event). */
+  revision: number;
   notices: Notice[];
   unread: number;
 }
@@ -103,6 +105,7 @@ export interface NoticesSnapshot {
 export interface NoticesEvent {
   /** The message just posted or merged (the UI previews it as a toast); none for a quiet one or another change. */
   posted: Notice | null;
+  revision: number;
   notices: Notice[];
   unread: number;
 }
@@ -123,4 +126,5 @@ export function isServing(state: ServiceState): boolean {
 /** A snapshot with nothing known: nothing is claimed healthy either (see `ServiceHealthStore.isReady`). */
 export const EMPTY_HEALTH: ServiceHealthSnapshot = Object.freeze({ revision: 0, services: [] }) as ServiceHealthSnapshot;
 
-export const EMPTY_NOTICES: NoticesSnapshot = Object.freeze({ notices: [], unread: 0 }) as NoticesSnapshot;
+/** Nothing known yet: revision -1, so the first list or event (revision 0 and up) is taken. */
+export const EMPTY_NOTICES: NoticesSnapshot = Object.freeze({ revision: -1, notices: [], unread: 0 }) as NoticesSnapshot;

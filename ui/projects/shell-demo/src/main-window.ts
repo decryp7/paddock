@@ -1,4 +1,4 @@
-import { inject, provideEnvironmentInitializer } from '@angular/core';
+import { inject } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { applyPaddockAppearance } from '@decryp7/paddock-ui';
 import { provideContributions, provideShellContext } from '@decryp7/paddock-ui/shell';
@@ -13,7 +13,7 @@ import { tauriIpc } from './app/demo-ipc';
 import { DemoHealthEngine } from './app/demo-health';
 import { DemoJobsEngine } from './app/demo-jobs';
 import { DemoNote } from './app/demo-note';
-import { DemoSettingsEngine, demoSettingsBackend } from './app/demo-settings';
+import { demoSettingsBackend } from './app/demo-settings';
 import { ShellDemo } from './app/shell-demo';
 
 // Every shell entry point resolves from this app (the reference consumer, ADR 0012 §7): type-only imports, so the build
@@ -29,9 +29,6 @@ export function bootMainWindow(): Promise<unknown> {
   applyPaddockAppearance(document.documentElement, { theme: 'system', accent: 'pitwall', density: 'standard' });
   return bootstrapApplication(ShellDemo, {
     providers: [
-      // Plays paddock-settings' start-up in the browser build: the settings are read (and a damaged file reported) before
-      // any window reads its notifications, as `paddock_settings::tauri::manage` does in the app's setup.
-      ...(ipc ? [] : [provideEnvironmentInitializer(() => void inject(DemoSettingsEngine))]),
       provideContributions<DemoContext>(DEMO_CONTRIBUTIONS),
       // Settings (plan S10): Settings… (Mod+,) and the shell's Appearance page, Open Settings for notices and repairs, and
       // the window's look on the Appearance settings once the window is ready (start-up sends only the contract's calls).

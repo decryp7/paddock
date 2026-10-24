@@ -116,7 +116,7 @@ describe('ServiceHealthStore', () => {
 class FailingCentre extends NotificationsBackend {
   fail = true;
   list(): Promise<NoticesSnapshot> {
-    return this.fail ? Promise.reject(new Error('the centre is gone')) : Promise.resolve({ notices: [], unread: 0 });
+    return this.fail ? Promise.reject(new Error('the centre is gone')) : Promise.resolve({ revision: 0, notices: [], unread: 0 });
   }
   markRead(): Promise<boolean> {
     return Promise.reject('no');
@@ -156,7 +156,7 @@ describe('NotificationsStore', () => {
     const store = TestBed.inject(NotificationsStore);
     await settle();
     const n = { id: 9, source: 's', severity: 'info', title: 't', body: '', code: null, at: 1, firstAt: 1, count: 1, read: true, primary: null, secondary: null, tertiary: null, link: { window: null, jobId: null, path: null }, cause: 'c', scope: 'app' } as const;
-    store.apply({ posted: n, notices: [n], unread: 0 });
+    store.apply({ posted: n, revision: 1, notices: [n], unread: 0 });
     expect(store.toasts()).toEqual([]);
   });
 
@@ -225,7 +225,7 @@ describe('NotificationsStore', () => {
     await settle();
     expect(store.requestError()).toBe('the centre is gone');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('no events'));
-    store.apply({ posted: null, notices: [{ id: 1, source: 's', severity: 'info', title: 't', body: '', code: null, at: 1, firstAt: 1, count: 1, read: false, primary: null, secondary: null, tertiary: null, link: { window: null, jobId: null, path: null }, cause: 'c', scope: 'app' }], unread: 1 });
+    store.apply({ posted: null, revision: 1, notices: [{ id: 1, source: 's', severity: 'info', title: 't', body: '', code: null, at: 1, firstAt: 1, count: 1, read: false, primary: null, secondary: null, tertiary: null, link: { window: null, jobId: null, path: null }, cause: 'c', scope: 'app' }], unread: 1 });
     await store.markRead(1);
     expect(store.requestError()).toBe('no');
     await store.dismiss(1);
@@ -234,6 +234,31 @@ describe('NotificationsStore', () => {
     await store.load();
     expect(store.requestStatus()).toBe('loaded');
     warn.mockRestore();
+  });
+
+  it('a message posted while the first list is in flight stays in the centre: an older list never overwrites it', async () => {
+    // The list is read before the post and answered after it (the IPC reply crosses the event).
+    const centre = new MemoryNotificationCentre();
+    let answer: () => void = () => undefined;
+    vi.spyOn(centre, 'list').mockImplementation(() => {
+      const before = MemoryNotificationCentre.prototype.list.call(centre);
+      return new Promise((resolve) => (answer = () => resolve(before)));
+    });
+    notifyBed({ centre });
+    const store = TestBed.inject(NotificationsStore);
+    await settle();
+    centre.post({ cause: 'settings:file', source: 'settings', severity: 'warning', title: 'Settings were reset to defaults' });
+    expect(store.toasts().map((t) => t.cause)).toEqual(['settings:file']);
+    answer();
+    await settle();
+    expect(store.isLoaded()).toBe(true);
+    expect(store.all().map((n) => n.cause)).toEqual(['settings:file']);
+    expect(store.unread()).toBe(1);
+    // A Retry that answers with the current list is taken.
+    centre.resolve('settings:file');
+    vi.mocked(centre.list).mockRestore();
+    await store.load();
+    expect(store.all()).toEqual([]);
   });
 
   it('stops listening when destroyed, also when the listen answers late', async () => {
