@@ -4,7 +4,8 @@
   "assets": [
     { "input": "scss", "glob": "_*.scss", "output": "scss" },
     { "input": "scss", "glob": "entry-*.scss", "output": "scss" },
-    { "input": "css", "glob": "*.css", "output": "css" }
+    { "input": "css", "glob": "*.css", "output": "css" },
+    { "input": "bin", "glob": "*.mjs", "ignore": ["*.test.mjs"], "output": "bin" }
   ],
   "lib": { "entryFile": "src/public-api.ts" }
 }

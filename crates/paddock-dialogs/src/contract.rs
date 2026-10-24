@@ -232,13 +232,14 @@ pub fn valid_command(n: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
-/// A dialog id: `lower-kebab-case` letters, digits and `-`, 1 to 64 bytes.
+/// A dialog id: lower-case letters, digits, `-` and `.` (the shell's namespaced contribution ids, `pw.create-app`),
+/// 1 to 64 bytes.
 pub fn valid_dialog_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_NAME_LEN
         && id
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
 }
 
 /// All contracts of an app plus the commands every dialog window may call.
@@ -596,6 +597,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_contract_file_the_shell_writes_from_a_registry() {
+        // Written by `dialogContractFile` (shell/dialogs) from the shell demo's registry (plan S6).
+        let c = Contracts::parse(include_str!(
+            "../../../ui/projects/shell-demo/dialog-contracts.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            c.ids().collect::<Vec<_>>(),
+            [
+                "sd.about",
+                "sd.choose-style",
+                "sd.confirm-reset",
+                "sd.inspector",
+                "sd.rename"
+            ]
+        );
+        assert!(c.allows("sd.inspector", "demo_status") && !c.allows("sd.about", "demo_status"));
+        assert!(c.get("sd.choose-style").unwrap().required_choice);
+        assert_eq!(c.get("sd.about").unwrap().floor(), VIEWER_MIN);
+    }
+
+    #[test]
     fn names_and_ids_follow_the_schemes() {
         for ok in ["a", "dialog_close", "ui_*", "x1"] {
             assert!(valid_command(ok), "{ok}");
@@ -603,7 +626,13 @@ mod tests {
         for bad in ["", "*", "A", "a-b", "a b", &"a".repeat(65)] {
             assert!(!valid_command(bad), "{bad}");
         }
-        for ok in ["about", "close-prompt", "a1"] {
+        for ok in [
+            "about",
+            "close-prompt",
+            "a1",
+            "pw.create-app",
+            "sd.confirm-reset",
+        ] {
             assert!(valid_dialog_id(ok), "{ok}");
         }
         for bad in ["", "About", "a_b", "a/b", &"a".repeat(65)] {

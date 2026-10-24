@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { SuEmptyState } from '@decryp7/paddock-ui';
-import { CommandService, ContributionRegistry, ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { CommandService, ContributionRegistry, ShellContextHost, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { DialogHost, DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { PdJobsStatus } from '@decryp7/paddock-ui/shell/jobs';
 import { PdNotificationsStatus, PdServiceStatus } from '@decryp7/paddock-ui/shell/notify';
 import { EnginePanel } from './engine-panel';
@@ -34,7 +35,7 @@ const PARTS: readonly ShellPart[] = [
 @Component({
   selector: 'sd-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState, PdJobsStatus, PdServiceStatus, PdNotificationsStatus, EnginePanel],
+  imports: [SuEmptyState, PdJobsStatus, PdServiceStatus, PdNotificationsStatus, EnginePanel, DialogHost],
   template: `
     <main class="page">
       <h1>Paddock shell demo</h1>
@@ -73,6 +74,18 @@ const PARTS: readonly ShellPart[] = [
           <input #noteField type="text" data-testid="demo-note" [value]="note()" (input)="note.set(noteField.value)" />
         </label>
       </section>
+      <section class="dialogs" aria-labelledby="sd-dialogs">
+        <h2 id="sd-dialogs">Dialogs</h2>
+        <p class="context">One of each kind. In the desktop build each is an OS window; in the browser build they open in the page.</p>
+        <div class="commands" role="group" aria-label="Open a dialog">
+          @for (d of dialogs; track d.id) {
+            <button type="button" class="cmd" [attr.data-dialog-open]="d.id" (click)="openDialog(d)">
+              {{ d.title.text }} <span class="kind">({{ d.kind }}{{ d.requiredChoice ? ', required choice' : '' }})</span>
+            </button>
+          }
+        </div>
+        <p class="context" aria-live="polite" data-testid="dialog-answer">{{ answer() }}</p>
+      </section>
       <table class="parts">
         <caption>Shell parts</caption>
         <thead>
@@ -91,6 +104,7 @@ const PARTS: readonly ShellPart[] = [
       <pd-jobs-status />
       <pd-notifications-status />
     </footer>
+    <pd-dialog-host />
   `,
   styles: `
     :host { display: flex; flex-direction: column; min-height: 100vh; }
@@ -108,6 +122,9 @@ const PARTS: readonly ShellPart[] = [
     .commands { display: flex; flex-wrap: wrap; gap: var(--pd-space-2); }
     .cmd { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); }
     .cmd:disabled { color: var(--pd-text-subtle); }
+    .dialogs { display: flex; flex-direction: column; gap: var(--pd-space-3); }
+    .dialogs h2 { margin: 0; font-size: var(--pd-text-subtitle); }
+    .kind { color: var(--pd-text-muted); font-weight: var(--pd-weight-regular, 400); }
     .kinds { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); }
     .kinds caption { text-align: start; font-weight: var(--pd-weight-semibold); padding-block-end: var(--pd-space-2); }
     .kinds th, .kinds td { text-align: start; padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); }
@@ -127,6 +144,15 @@ export class ShellDemo {
   protected readonly available = this.commands.available;
   protected readonly contextLoaded = computed(() => this.host.context() !== null);
   protected readonly kinds = this.registry.kinds.map((k) => ({ name: k.name, count: this.registry.items(k.name).length }));
+
+  private readonly dialogService = inject(DialogService);
+  protected readonly dialogs = this.registry.dialogs();
+  protected readonly answer = signal('No dialog answered yet.');
+
+  protected openDialog(d: DialogDef): void {
+    const inputs = d.id === 'sd.rename' ? { current: 'Shell demo' } : {};
+    void this.dialogService.open(d.id, { inputs }).closed.then((r) => this.answer.set(`${d.title.text}: ${r === undefined ? 'dismissed' : JSON.stringify(r)}`));
+  }
 
   protected run(id: string): void {
     void this.commands.run(id);

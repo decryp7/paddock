@@ -1,0 +1,68 @@
+import { DIALOG_EVENTS, type DialogInfo, type DialogRemembered, type DialogRequest, type DialogStart } from '@decryp7/paddock-ui/shell';
+import type { DialogIo, Unlisten } from '@decryp7/paddock-ui/shell/dialogs';
+
+/** A scripted `DialogIo` for specs: records every call and plays the dialog layer's events. */
+export class FakeDialogIo implements DialogIo {
+  readonly opened: DialogRequest[] = [];
+  readonly closeRequests: string[] = [];
+  /** The results the dialog closed with, in order (`undefined`: dismissed). */
+  readonly closedWith: unknown[] = [];
+  /** The heights the dialog asked its window to fit. */
+  readonly fitted: number[] = [];
+  private readonly handlers = new Map<string, Set<(p: unknown) => void>>();
+  private readonly labels = new Map<string, string>();
+  private next = 1;
+  /** When set, `open` fails with it (the window system refused). */
+  failOpen: Error | null = null;
+  /** What `take` answers. */
+  start: DialogStart = { dialogId: 'x', title: 'X', kind: 'form', modality: 'modeless', requiredChoice: false, input: {} };
+
+  async open(request: DialogRequest): Promise<DialogInfo> {
+    this.opened.push(request);
+    if (this.failOpen) throw this.failOpen;
+    const key = request.instance ? `${request.dialogId}#${request.instance}` : request.dialogId;
+    const known = this.labels.get(key);
+    const label = known ?? `d-main-${this.next++}`;
+    this.labels.set(key, label);
+    return { label, dialogId: request.dialogId, existing: known !== undefined };
+  }
+  async take(): Promise<DialogStart> {
+    return this.start;
+  }
+  async close(result: unknown): Promise<void> {
+    this.closedWith.push(result);
+  }
+  async listen(event: string, handler: (payload: unknown) => void): Promise<Unlisten> {
+    const set = this.handlers.get(event) ?? new Set();
+    set.add(handler);
+    this.handlers.set(event, set);
+    return () => set.delete(handler);
+  }
+  async requestClose(label: string): Promise<void> {
+    this.closeRequests.push(label);
+  }
+  async fitHeight(px: number): Promise<void> {
+    this.fitted.push(px);
+  }
+
+  /** Plays an event of the dialog layer. */
+  emit(event: string, payload: unknown): void {
+    for (const h of this.handlers.get(event) ?? []) h(payload);
+  }
+  /** The dialog `label` answered `result`. */
+  result(label: string, dialogId: string, result: unknown): void {
+    this.emit(DIALOG_EVENTS.result, { label, dialogId, result });
+  }
+  /** The dialog window `label` is gone (and forgets its label, so opening it again opens a new one). */
+  closed(label: string, dialogId: string, remembered: DialogRemembered | null = null): void {
+    for (const [k, v] of this.labels) if (v === label) this.labels.delete(k);
+    this.emit(DIALOG_EVENTS.closed, { label, dialogId, remembered });
+  }
+  /** A close request reached this dialog window (the OS close, or the opener's `close`). */
+  closeRequested(): void {
+    this.emit(DIALOG_EVENTS.closeRequested, null);
+  }
+  listeners(event: string): number {
+    return this.handlers.get(event)?.size ?? 0;
+  }
+}
