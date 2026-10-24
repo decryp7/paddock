@@ -4,7 +4,11 @@ use std::fs;
 #[test]
 fn has_work_home_and_tmp_and_is_removed_on_drop() {
     let s = Scratch::new();
-    let root = s.work().parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let root = s
+        .work()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
     assert!(s.work().is_dir() && s.home().is_dir() && s.tmp().is_dir());
     assert!(root.exists());
     s.finish().expect("tmp is empty");
@@ -24,11 +28,18 @@ fn write_read_and_listing_are_sorted_and_relative() {
 fn paths_cannot_leave_the_work_folder() {
     let s = Scratch::new();
     for bad in ["", "/etc/passwd", "../x", "a/../../x"] {
-        assert!(matches!(s.try_path(bad), Err(ScratchError::Escapes(_))), "{bad:?}");
+        assert!(
+            matches!(s.try_path(bad), Err(ScratchError::Escapes(_))),
+            "{bad:?}"
+        );
         assert!(matches!(s.write(bad, "x"), Err(ScratchError::Escapes(_))));
     }
     assert!(s.try_path("./ok/file").is_ok());
-    assert_eq!(s.read("missing").map_err(|e| matches!(e, ScratchError::Io(_))), Err(true));
+    assert_eq!(
+        s.read("missing")
+            .map_err(|e| matches!(e, ScratchError::Io(_))),
+        Err(true)
+    );
 }
 
 #[test]
@@ -39,7 +50,10 @@ fn a_leftover_in_tmp_is_reported_by_finish() {
     fs::write(s.tmp().join("stray.tmp"), "x").expect("write");
     let left = s.finish().expect_err("leftovers");
     assert_eq!(left.0, ["job-1/", "job-1/log", "stray.tmp"]);
-    assert!(left.to_string().contains("3 item(s) left in the temp folder"));
+    assert!(
+        left.to_string()
+            .contains("3 item(s) left in the temp folder")
+    );
 }
 
 #[test]
@@ -101,9 +115,17 @@ fn a_failed_test_keeps_its_folder_only_when_asked() {
 #[test]
 fn errors_read_as_sentences_and_path_panics_on_a_mistake() {
     let s = Scratch::default();
-    let escapes = s.try_path("../x").err().map(|e| e.to_string()).unwrap_or_default();
+    let escapes = s
+        .try_path("../x")
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
     assert!(escapes.contains("not a plain relative path"), "{escapes}");
-    let io = s.read("missing").err().map(|e| e.to_string()).unwrap_or_default();
+    let io = s
+        .read("missing")
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
     assert!(io.starts_with("scratch folder: "), "{io}");
     let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.path("/abs")))
         .err()
