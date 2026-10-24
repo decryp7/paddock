@@ -2,6 +2,8 @@
 
 ## Layout
 
+Machine setup shared by every Paddock app (tools, build cache, worktrees, test runs): [paddock/docs/dev-setup.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/dev-setup.md). This page adds only what is specific to this app.
+
 ```
 crates/pitcrew-core      pure logic: rules, state machines, config, protocol (no I/O)
 crates/pitcrew-service   the background service: supervision, OS service integration, IPC server
