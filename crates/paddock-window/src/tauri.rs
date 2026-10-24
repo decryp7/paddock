@@ -47,7 +47,7 @@ pub use commands::{
 pub use instance::{open_from_outside, opened, queue_open, reopen, second_instance};
 pub use lifecycle::{arm_exit_watchdog, exit, exit_requested};
 pub use manager::{
-    FixedPrefs, Prefs, WindowConfig, Windows, WindowsBuilder, changed, close_requested,
+    ExitClock, FixedPrefs, Prefs, WindowConfig, Windows, WindowsBuilder, changed, close_requested,
     create_main, destroyed, list, on_window_event, open_new, quit, reveal, start, target,
 };
 pub use native::on_run_event;

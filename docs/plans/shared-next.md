@@ -429,14 +429,18 @@ gets one mechanism and one check:
   differences in `expect`. A hang guard is allowed with a waiver comment `// conformance: hang-guard` and a limit of at
   least 10 s. Severity: error for new code, warning with a waiver list for what exists. Good fixture: a `FakeClock`
   test; bad fixture: `assert!(t.elapsed() < Duration::from_millis(700))`.
-- First findings in Paddock itself (fixed or to fix through the mechanism): `paddock-jobs` `tests/parallel.rs` and
-  `tests/walk.rs` cancel latency (fixed in X20: counted in items), `paddock-jobs` `tests/model_and_cancel.rs` and
-  `reporter_and_jobs.rs` deadline sleeps (fixed: fake clock / zero limit); still open: `paddock_jobs::assert_nonblocking`
-  (measures a handler against a wall-clock budget; replace with a structural check: the handler returns while the job body
-  is held on a gate), `paddock-window` `exit.rs` (2 s) and `tauri/tests.rs` (5 s), `paddock-proc` `supervised.rs` (60 s,
-  a hang guard) and `login.rs` (30 s, a hang guard), sleeps in `paddock-jobs/tests/pool.rs`, `paddock-download` and
-  `paddock-updater` test support, and `paddock-health`'s debounced writer (`notify/writer.rs` uses `Instant`, not the
-  clock).
+- Findings in Paddock itself, all fixed through the mechanism (2026-10-25): `paddock-jobs` cancel latency and deadline
+  sleeps (counted in items, fake clock), `assert_nonblocking` (structural: the handler runs while the pool is held; a 30 s
+  hang guard only for a broken handler), the pool and pipeline tests (gates instead of sleeps), `paddock-window`'s teardown
+  steps and exit watchdog (`WindowConfig::clock`, `teardown_step_on`), `paddock-proc` (`Supervised::terminate` says how the
+  process ended; the login-shell test asserts the outcome), `paddock-download` (`HostCaps::with_clock`: back-offs, retry
+  naps, stalls and save intervals on the clock; `HostCaps::held`; the cancel and Retry-After tests drive a fake clock),
+  `paddock-updater`'s hanging transport (held until released), `paddock-health`'s debounced writer (on the centre's
+  clock), `paddock-ipc` (call timeouts, cancel grace, accept waits and every handshake on `PeerOptions::clock` /
+  `Host::with_clock`). `CancelToken::on_cancel` makes both clocks' waits event-driven (no polling). The UI's
+  `shell/testing` `FakeClock` replaces `ManualClock` and the two spec copies, with the Rust semantics (wall and monotonic
+  readings, ticks and one-shots fired as often as due, `setWall`). What stays: fake servers that pace bytes to emulate a
+  network rate (`paddock-download` test support) are an emulation, not a wait for an effect.
 
 ## X13 built: adoption and gaps (2026-10-25)
 
@@ -458,10 +462,9 @@ frame codec has a fuzz target (`crates/paddock-ipc/fuzz`, five million runs clea
 Gaps left:
 - No async adapter: Debrief's tokio callers wrap calls in `spawn_blocking` until a thin async layer is needed (ADR 0001
   open question: "sync core plus thin async").
-- Call and stream timeouts and the link server's accept slices use the OS clock (`recv_timeout`); the link client's
-  back-off and polls use the injected `Clock`. Tests assert outcomes only.
-- The accept thread runs each handshake in turn: a client that connects and stays silent holds the next accept for up to
-  `HANDSHAKE_TIMEOUT` (10 s).
-- Windows: the endpoint code type-checks here and needs the Windows runner; the discovery file's trust check is a no-op
-  there (the profile folder's ACL); children use `paddock-proc` trees (taskkill) instead of a kill-on-close job object.
-- Pitcrew's per-connection cap and push subscriptions are not in `LinkServer` yet (apps keep their own until a second user).
+- Closed 2026-10-25: call and stream timeouts, the cancel grace, accept waits and handshakes run on the injected clock;
+  each client's handshake has its own thread and limit (a silent client delays nobody); `LinkServer` has Pitcrew's cap
+  (`max_connections`, `max_handshakes`, `busy` refusals) and push `Subscriptions`; the Windows discovery file is checked
+  for its owner (the user, or Administrators). The OS accept itself still waits in 100 ms slices to see the stop flag.
+- Windows: the endpoint code type-checks here and needs the Windows runner; children use `paddock-proc` trees (taskkill)
+  until X54's job object.

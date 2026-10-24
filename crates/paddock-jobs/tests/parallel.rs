@@ -1,7 +1,7 @@
 use paddock_jobs::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn w(n: usize) -> Workers {
     Workers::new(n)
@@ -12,8 +12,10 @@ fn map_keeps_input_order_whatever_the_timing() {
     let items: Vec<u64> = (0..200).collect();
     let counter = AtomicU64::new(0);
     let out = par_map_ordered(items.clone(), w(8), &CancelToken::new(), &counter, |i| {
-        // Early items are slowest, so completion order is the reverse of input order.
-        std::thread::sleep(Duration::from_micros((200 - i) * 20));
+        // Early items do the most work, so completion order tends to be the reverse of input order.
+        for _ in 0..(200 - i) * 200 {
+            std::hint::spin_loop();
+        }
         Ok(i * 2)
     })
     .unwrap();
@@ -108,12 +110,16 @@ fn cancel_stops_promptly_and_reports_the_reason() {
         if started.fetch_add(1, Ordering::SeqCst) == 50 {
             cancel.cancel();
         }
-        std::thread::sleep(Duration::from_micros(200));
         Ok(i)
     });
     assert!(matches!(r, Err(JobError::Cancelled(CancelReason::User))));
-    // Promptness is counted in items, never in wall-clock time (lessons: tests that measure the wall clock fail under load).
-    assert!(started.load(Ordering::SeqCst) < 1000);
+    // Promptness is counted in items, never in wall-clock time (lessons: tests that measure the wall clock fail under load):
+    // each worker sees the cancel within its check interval.
+    assert!(
+        started.load(Ordering::SeqCst) <= 51 + 4 * (CANCEL_CHECK_ITEMS + 1),
+        "{}",
+        started.load(Ordering::SeqCst)
+    );
 }
 
 #[test]
@@ -149,7 +155,13 @@ fn in_flight_items_are_bounded_by_the_window() {
         &CancelToken::new(),
         |i| {
             if i == 0 {
-                std::thread::sleep(Duration::from_millis(60));
+                // Item 0 is held until the source has filled the window behind it (a hang guard bounds the spin).
+                let start = Instant::now();
+                while produced.load(Ordering::SeqCst) < 6
+                    && start.elapsed() < Duration::from_secs(60)
+                {
+                    std::thread::yield_now();
+                }
             }
             Ok(i)
         },
@@ -172,9 +184,18 @@ fn pipeline_overlaps_discovery_and_processing() {
     // The first result is delivered before the (slow) source has produced everything.
     let produced = AtomicUsize::new(0);
     let at_first = AtomicUsize::new(usize::MAX);
-    let src = (0..20u32).inspect(|_| {
+    let src = (0..20u32).inspect(|i| {
         produced.fetch_add(1, Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(5));
+        if *i == 10 {
+            // The source waits for the first delivery: only a pipeline that overlaps the two gets past this
+            // (a hang guard bounds the spin).
+            let start = Instant::now();
+            while at_first.load(Ordering::SeqCst) == usize::MAX
+                && start.elapsed() < Duration::from_secs(60)
+            {
+                std::thread::yield_now();
+            }
+        }
     });
     pipeline_ordered(src, w(2), 4, &CancelToken::new(), Ok, |x| {
         if x == 0 {

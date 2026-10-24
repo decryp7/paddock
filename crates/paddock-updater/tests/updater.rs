@@ -316,15 +316,12 @@ fn a_check_can_be_cancelled_without_waiting_for_the_server() {
     // Cancel from the UI: the updater names the job, the adapter cancels it.
     assert_eq!(r.updater.cancel().unwrap(), CancelOutcome::Job(ctx.id().0));
     r.reg.cancel(ctx.id());
-    let started = std::time::Instant::now();
+    // The request never answers until released: returning at all proves it was not waited for.
     assert!(matches!(
         ctx.run(|c| r.updater.run_check(c, ticket)),
         Err(JobError::Cancelled(_))
     ));
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(2),
-        "the hung request is not waited for"
-    );
+    r.server.release();
     assert_eq!(r.phase(), UpdatePhase::Idle);
     // A check whose job is not registered yet is cancelled at once.
     r.updater.begin_check().unwrap();

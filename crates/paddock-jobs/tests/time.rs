@@ -289,3 +289,70 @@ fn the_system_clock_reads_the_os_and_honours_cancel() {
     let as_dyn: Arc<dyn Clock> = Arc::new(SystemClock);
     assert!(as_dyn.now_ms() <= SystemClock.now_ms());
 }
+
+#[test]
+fn cancel_callbacks_fire_once_and_unregister() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let token = CancelToken::new();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let h = hits.clone();
+    let kept = token.on_cancel(move || {
+        h.fetch_add(1, Ordering::SeqCst);
+    });
+    let h = hits.clone();
+    let dropped = token.on_cancel(move || {
+        h.fetch_add(100, Ordering::SeqCst);
+    });
+    drop(dropped);
+    token.cancel();
+    token.cancel();
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    // Registering on a cancelled token calls at once.
+    let h = hits.clone();
+    let _late = token.on_cancel(move || {
+        h.fetch_add(10, Ordering::SeqCst);
+    });
+    assert_eq!(hits.load(Ordering::SeqCst), 11);
+    drop(kept);
+    assert!(format!("{token:?}").contains("CancelToken"));
+    assert_eq!(CancelToken::new().deadline_remaining(), None);
+    let c = FakeClock::new();
+    let limited = CancelToken::with_deadline_on(Arc::new(c.clone()), SECOND);
+    assert_eq!(limited.deadline_remaining(), Some(SECOND));
+}
+
+#[test]
+fn started_waits_mark_each_step() {
+    let c = FakeClock::new();
+    assert_eq!(c.waits_started(), 0);
+    let worker = {
+        let c = c.clone();
+        std::thread::spawn(move || {
+            c.sleep(SECOND);
+            c.sleep(SECOND);
+        })
+    };
+    assert!(c.wait_for_started(1, GUARD));
+    c.advance(SECOND);
+    // The second wait has begun: one more second ends it, whatever the first one's thread was doing.
+    assert!(c.wait_for_started(2, GUARD));
+    c.advance(SECOND);
+    worker.join().unwrap();
+    assert_eq!(c.waits_started(), 2);
+    assert!(!c.wait_for_started(3, Duration::ZERO));
+}
+
+#[test]
+fn a_system_clock_wait_ends_on_its_tokens_deadline() {
+    // A deadline on the system clock is not an event: the wait is bounded by it (a zero limit has already passed).
+    let t = CancelToken::with_deadline(Duration::ZERO);
+    assert_eq!(
+        SystemClock.wait(MINUTE, &t),
+        Err(Cancelled(CancelReason::Deadline))
+    );
+    let t = CancelToken::with_deadline(Duration::from_nanos(1));
+    assert!(SystemClock.wait(Duration::MAX, &t).is_err());
+    // A far deadline only bounds the wait; the shorter wait ends first.
+    let far = CancelToken::with_deadline(Duration::from_secs(3600));
+    assert_eq!(SystemClock.wait(Duration::from_millis(1), &far), Ok(()));
+}
