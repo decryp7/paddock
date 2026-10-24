@@ -19,7 +19,7 @@ pub const LABEL: &str = "net.decryptology.paddock-shell-demo.agent";
 /// The agent's executable name.
 pub const PROGRAM: &str = "shell-demo-agent";
 /// The health entry of the agent.
-pub const HEALTH_ID: &str = "agent";
+pub const HEALTH_ID: &str = "sd.agent";
 /// The variable the OS sets when it started the agent.
 pub const SUPERVISED_ENV: &str = "SHELL_DEMO_AGENT";
 /// How often the agent beats.
