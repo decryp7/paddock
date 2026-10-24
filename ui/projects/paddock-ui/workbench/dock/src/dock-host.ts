@@ -13,7 +13,8 @@ import {
   viewChild,
   ViewEncapsulation,
 } from '@angular/core';
-import { PdIcon } from '@decryp7/paddock-ui/shell';
+import { PdIcon, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { DOCK_NOTICE_ACTION } from './dock-notice';
 import { AngularContentRenderer } from './angular-panel';
 import { AutoHideItem, itemsOn } from './auto-hide';
 import { Side } from './dock-geometry';
@@ -96,15 +97,6 @@ export const HOVER_HIDE_MS = 300;
           <div class="pd-dock-ah-grip" aria-hidden="true" (pointerdown)="startResize($event, item)"></div>
         </section>
       }
-      @if (dock.notice(); as notice) {
-        <div class="pd-dock-notice" role="status" data-testid="pd-dock-notice" [attr.data-notice]="notice.key">
-          <span>{{ notice.message }}</span>
-          @if (notice.action; as action) {
-            <button type="button" class="pd-dock-btn" data-testid="pd-dock-notice-action" (click)="runNotice(action.run)">{{ action.label }}</button>
-          }
-          <button type="button" class="pd-dock-btn" (click)="dock.notice.set(null)" i18n="@@pd.wb.dock.host.dismiss">Dismiss</button>
-        </div>
-      }
     </div>
     @if (dock.switcher()) {
       <pd-dock-switcher />
@@ -170,6 +162,21 @@ export class PdDock implements OnDestroy {
 
   constructor() {
     afterNextRender(() => this.dock.attach(this.mount().nativeElement));
+    // The dock's notices go to the shell's notification surface (toast, then the bell), never over a group header
+    // (review P1-3; Debrief ADR 0056 "layout.fit", ADR 0061): posting is a side effect of a new notice.
+    const shell = inject(SHELL_PORTS);
+    effect(() => {
+      const notice = this.dock.notice();
+      if (!notice) return;
+      untracked(() =>
+        shell.notify({
+          level: notice.key === 'popout' ? 'warning' : 'info',
+          message: notice.message,
+          kind: `pd.wb.dock.${notice.key.replace(/[^a-z0-9-]/g, '-')}`,
+          ...(notice.action ? { action: { type: DOCK_NOTICE_ACTION, key: notice.key, label: notice.action.label } } : {}),
+        }),
+      );
+    });
     this.offKeys = this.keys.listen(document);
     // effect-state: moves the keyboard focus into a menu that just opened (a DOM side effect)
     effect(() => {
@@ -251,10 +258,6 @@ export class PdDock implements OnDestroy {
     if (next && !next.closest(KEEP_OPEN)) this.dock.autoHideEvent({ type: 'blur' });
   }
 
-  protected runNotice(run: () => void): void {
-    this.dock.notice.set(null);
-    run();
-  }
 
   /** Arrow keys, Home and End move through the open menu; Escape closes it and gives the focus back. */
   protected menuKey(e: KeyboardEvent, items: readonly DockMenuItem[]): void {

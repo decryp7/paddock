@@ -265,7 +265,8 @@ describe('ActivityItems', () => {
     expect(items.top().map((i) => i.id)).toEqual(['wd.act.files', 'wd.act.problems', 'wd.act.build', 'wd.act.menu']);
     expect(items.bottom().map((i) => i.id)).toEqual(['wd.act.settings']);
     const [files, prob, build, menu] = items.top() as [never, never, never, never];
-    expect([items.isActive(files), items.isActive(prob), items.isActive(build), items.isActive(menu)]).toEqual([true, true, false, true]);
+    expect([items.isActive(files), items.isActive(prob), items.isActive(build), items.isActive(menu)]).toEqual([true, false, false, true]);
+    expect([items.isOpen(prob), items.isOpen(files), items.isOpen(build)]).toEqual([true, false, false]);
     expect([items.badge(prob), items.badge(build), items.badgeLabel(build), items.pulse(prob), items.pulse(build)]).toEqual(['3', 'NEW!', 'x', true, false]);
     expect(items.menu(menu).map((e) => e.id)).toEqual(['a', 'b']);
     expect(items.menu(files)).toEqual([]);

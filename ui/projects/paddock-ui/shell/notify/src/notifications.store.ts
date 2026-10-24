@@ -89,7 +89,7 @@ export const NotificationsStore = signalStore(
       const at = clock.now();
       const known = store.local().find((l) => l.cause === cause);
       const notice: Notice = known
-        ? { ...known, count: known.count + 1, at: Math.max(at, known.at), read: false }
+        ? { ...known, count: known.count + 1, at: Math.max(at, known.at), read: false, primary: n.action ? { ...n.action } : known.primary }
         : {
             id: -++localIds,
             source: n.kind ?? LOCAL_SOURCE,
@@ -101,7 +101,7 @@ export const NotificationsStore = signalStore(
             firstAt: at,
             count: 1,
             read: false,
-            primary: null,
+            primary: n.action ? { ...n.action } : null,
             secondary: null,
             tertiary: null,
             link: { window: null, jobId: null, path: null },
@@ -112,6 +112,11 @@ export const NotificationsStore = signalStore(
       return notice;
     };
     const post = async (n: ShellNotice): Promise<void> => {
+      // A window-local action cannot run in another window or in the engine: the notice stays here.
+      if (n.action) {
+        postLocal(n);
+        return;
+      }
       try {
         await backend.postNotice({ severity: n.level, title: n.message, ...(n.kind ? { kind: n.kind } : {}) });
       } catch {
