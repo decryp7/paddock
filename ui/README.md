@@ -138,6 +138,8 @@ so a manager app never bundles the workbench:
 | `/table`, `/chart`, `/forms` | `pd-table` (sort, filter, columns, groups, virtual scroll, row keyboard and menus, hover actions); `pd-chart` over lazy ECharts with the family theme and the generic chart kinds; `pd-field` and the validation display for Signal Forms | X21 |
 | `/icons`, `/format`, `/prefs`, `/select`, `/testing`, `/shell/feel` | the `pd:` icon set and `outlineIcon`; one formatting API and the middle ellipsis; guarded localStorage; the themed `pd-select`; the DOM test kit (`installTestKit`, helpers, fake ECharts); the native-feel guard | X36, X35, X12, X38 |
 | `/ipc`, `/ipc/testing` | the app IPC kit: `CommandError` (generated from `paddock_commands::CommandError`) with `toCommandError`, `CommandFailure`; `withCallTimeout` for request/reply commands (never jobs, rule 12) and `callTimeoutProblems`; `provideBackend` (Tauri or a lazily imported mock); the mock kit `parseMockOptions` (`?mock=&latency=&fail=&hold=`), `formatMockOptions`, `withMockOptions` | X28 |
+| `/live` | the window side of the live feed: `withLiveFeed` (SignalStore feature over `paddock-live`: `live`, `liveSeq`, `liveLink`, `connectLive`, `resyncLive`), the pure `foldFrame` / `parseFrame`, `LIVE_TRANSPORT` with `tauriLiveTransport` and `MemoryLiveTransport`, the bounded lists `appendBounded`, `appendThrottled`, `upsertBy`, `prependUnique`, and `Debouncer`, `streamCall` / `tauriChannelFactory` (per-call streams) | X29 |
+| `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `ManualClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/live` | the window side of the live feed: `withLiveFeed` (SignalStore feature over `paddock-live`: `live`, `liveSeq`, `liveLink`, `connectLive`, `resyncLive`), the pure `foldFrame` / `parseFrame`, `LIVE_TRANSPORT` with `tauriLiveTransport` and `MemoryLiveTransport`, the bounded lists `appendBounded`, `appendThrottled`, `upsertBy`, `prependUnique`, and `Debouncer` | X29 |
 | `/shell/testing` | the TestBed half of the test kit: `provideShellTesting`, `RecordingShellPorts`, `ManualIdle`, `FakeClock`, `settle`, `render`, the contributions, registration and lazy-export lints, the boot-every-dialog harness | S2, S6, S16 |
 | `/shell/startup`, `/shell/dialogs`, `/shell/about` | one shell part each | S5-S11 |
@@ -621,3 +623,8 @@ export const OverviewStore = signalStore(
 - Lists a fold keeps are bounded: `appendThrottled` (Pitwall's chart tail: one point per step, at most N), `appendBounded`
   (Dyno's sparklines), `prependUnique` (events by id), `upsertBy` (downloads by id). `Debouncer` turns a burst of pushes into one
   reload (Spotter's dashboard).
+- **Per-call streams** (Debrief's search results and live tail, a query's progress): `streamCall(tauriChannelFactory(Channel), (channel) =>
+  invoke('run_query_stream', { request, onProgress: channel }), { onMessage, isLast?, signal? })`. Messages arrive in order and none after
+  the call settled; a command failure rejects at once; a throwing handler stops delivery and rejects with its error; with `isLast` the
+  call resolves only when the answer and the last message are both in (the answer can overtake the final messages); `signal` aborts
+  with an `AbortError` (cancelling the work itself stays a job). Backends take a `ChannelFactory` so specs pass a fake.

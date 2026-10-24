@@ -12,6 +12,7 @@ members = [
     "paddock-cli",
     "paddock-build",
     "paddock-channels",
+    "paddock-chromium",
     "paddock-commands",
     "paddock-dialogs",
     "paddock-diag",
@@ -21,6 +22,7 @@ members = [
     "paddock-ipc",
     "paddock-jobs",
     "paddock-log",
+    "paddock-mcp",
     "paddock-live",
     "paddock-menu",
     "paddock-metrics",
@@ -30,6 +32,7 @@ members = [
     "paddock-panels",
     "paddock-pitwall",
     "paddock-proc",
+    "paddock-runtime",
     "paddock-secrets",
     "paddock-service",
     "paddock-settings",
@@ -68,6 +71,7 @@ paddock-bench = { path = "paddock-bench", version = "0.1.0", registry = "decryp7
 paddock-cli = { path = "paddock-cli", version = "0.1.0", registry = "decryp7" }
 paddock-build = { path = "paddock-build", version = "0.1.0", registry = "decryp7" }
 paddock-channels = { path = "paddock-channels", version = "0.1.0", registry = "decryp7" }
+paddock-chromium = { path = "paddock-chromium", version = "0.1.0", registry = "decryp7" }
 paddock-commands = { path = "paddock-commands", version = "0.1.0", registry = "decryp7" }
 paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "decryp7" }
 paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
@@ -78,6 +82,7 @@ paddock-ipc = { path = "paddock-ipc", version = "0.1.0", registry = "decryp7" }
 paddock-jobs = { path = "paddock-jobs", version = "0.1.0", registry = "decryp7" }
 paddock-log = { path = "paddock-log", version = "0.1.0", registry = "decryp7" }
 paddock-names = { path = "paddock-names", version = "0.1.0", registry = "decryp7" }
+paddock-mcp = { path = "paddock-mcp", version = "0.1.0", registry = "decryp7" }
 paddock-live = { path = "paddock-live", version = "0.1.0", registry = "decryp7" }
 paddock-metrics = { path = "paddock-metrics", version = "0.1.0", registry = "decryp7" }
 paddock-menu = { path = "paddock-menu", version = "0.1.0", registry = "decryp7" }
@@ -86,6 +91,7 @@ paddock-packs = { path = "paddock-packs", version = "0.1.0", registry = "decryp7
 paddock-panels = { path = "paddock-panels", version = "0.1.0", registry = "decryp7" }
 paddock-pitwall = { path = "paddock-pitwall", version = "0.1.0", registry = "decryp7" }
 paddock-proc = { path = "paddock-proc", version = "0.1.0", registry = "decryp7" }
+paddock-runtime = { path = "paddock-runtime", version = "0.1.0", registry = "decryp7" }
 paddock-secrets = { path = "paddock-secrets", version = "0.1.0", registry = "decryp7" }
 paddock-service = { path = "paddock-service", version = "0.1.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.1.0", registry = "decryp7" }

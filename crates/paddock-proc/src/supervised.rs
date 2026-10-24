@@ -177,6 +177,9 @@ impl Watcher {
 /// A child that is killed with its whole tree when dropped.
 pub struct Supervised {
     child: Option<Child>,
+    /// Windows: the kill-on-close job the child runs in (`None` when Windows refused one; the tree kill still applies).
+    #[cfg(windows)]
+    job: Option<crate::job::Job>,
     pid: u32,
     registry: Registry,
     watcher: Option<Watcher>,
@@ -203,16 +206,33 @@ impl Supervised {
         crate::sys::own_group(&mut cmd);
         let child = cmd.spawn()?;
         let pid = child.id();
+        #[cfg(windows)]
+        let job = crate::job::Job::assign(&child).ok();
         registry.add(pid);
         let shared = Arc::new(Shared::default());
         let watcher = cap.map(|c| Watcher::start(pid, c, shared.clone()));
         Ok(Supervised {
             child: Some(child),
+            #[cfg(windows)]
+            job,
             pid,
             registry: registry.clone(),
             watcher,
             shared,
         })
+    }
+
+    /// Whether the child runs in a kill-on-close job object (Windows; always false elsewhere, where the process group
+    /// plays that part).
+    pub fn in_job(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.job.is_some()
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
     }
 
     /// The process id while the child has not been killed or waited for.
@@ -298,6 +318,9 @@ impl Supervised {
     }
 
     fn release(&mut self) {
+        // Windows: closing the job ends whatever of the tree is left (helpers that left it included).
+        #[cfg(windows)]
+        drop(self.job.take());
         self.registry.remove(self.pid);
         if let Some(w) = self.watcher.take() {
             w.finish();
@@ -337,6 +360,30 @@ mod tests {
                 return p.trim().parse().unwrap();
             }
         }
+    }
+
+    #[test]
+    fn a_windows_child_runs_in_a_kill_on_close_job() {
+        let mut s = Supervised::spawn_in(&Registry::new(), piped(Mode::Sleep), None).unwrap();
+        assert_eq!(s.in_job(), cfg!(windows));
+        s.kill();
+        assert!(!s.in_job(), "the job closed with the tree");
+    }
+
+    /// The child starts a helper and exits: the helper is an orphan no tree walk finds, but the job still holds it.
+    #[cfg(windows)]
+    #[test]
+    fn closing_the_job_ends_an_orphaned_helper() {
+        let mut s = Supervised::spawn_in(&Registry::new(), piped(Mode::Leave), None).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        let grand = pid_line(&mut r);
+        assert!(s.wait().is_some());
+        let mut rest = Vec::new();
+        r.read_to_end(&mut rest).unwrap();
+        assert!(
+            crate::testchild::is_gone(grand),
+            "the orphaned helper leaked"
+        );
     }
 
     #[test]
