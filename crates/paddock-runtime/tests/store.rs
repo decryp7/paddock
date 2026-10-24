@@ -599,10 +599,10 @@ fn sweep_removes_leftovers_but_keeps_a_resumable_download() {
 #[test]
 fn stores_live_in_the_app_data_folder_and_need_a_folder_name() {
     let d = tempfile::tempdir().unwrap();
-    let vars = paddock_env::MapVars::new().with("HOME", d.path().as_os_str());
+    let vars = paddock_env::MapVars::new().with("DEMO_HOME", d.path().as_os_str());
     let app = paddock_env::AppId::new("demo", "Demo").unwrap();
     let dirs =
-        paddock_env::AppDirs::resolve(&app, paddock_env::Os::Linux, &vars, None, false).unwrap();
+        paddock_env::AppDirs::resolve(&app, paddock_env::Os::current(), &vars, None, true).unwrap();
     let s = RuntimeStore::in_app_data(&dirs, "chromium").unwrap();
     assert_eq!(s.root(), dirs.data().join("runtimes").join("chromium"));
     assert!(format!("{s:?}").contains("chromium"));
