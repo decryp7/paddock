@@ -1,0 +1,83 @@
+# Reusable (plan X41): the never-panics tests of an app's parsers (proptest properties and `paddock_testkit::never_panics` over
+# `corpus`), run harder than the everyday suite: many more cases, in release mode, so a rare input still turns up. The everyday
+# suite runs the same tests with the default case count. Each failure prints the minimal input; commit proptest-regressions/.
+#
+#   jobs:
+#     never-panics:
+#       uses: decryp7/paddock/.gitea/workflows/app-never-panics.yml@v0.3.0
+#       with: { paddock-ref: v0.3.0, packages: "my-core my-plugins", test-filter: "properties" }
+
+name: app-never-panics
+
+on:
+  workflow_call:
+    inputs:
+      paddock-ref:
+        description: The Paddock tag whose actions this run uses (the same tag as in `uses:`).
+        type: string
+        required: true
+      packages:
+        description: Space-separated crates whose never-panics tests run.
+        type: string
+        required: true
+      test-filter:
+        description: Passed to cargo test as the test name filter (default every test of the packages).
+        type: string
+        default: ""
+      cases:
+        description: PROPTEST_CASES for the run.
+        type: string
+        default: "10000"
+      image:
+        type: string
+        default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  never-panics:
+    name: never-panics (${{ inputs.packages }})
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.image }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: decryp7/paddock
+          ref: ${{ inputs.paddock-ref }}
+          path: .paddock
+
+      - uses: ./.paddock/.gitea/actions/setup-rust
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/release/incremental
+          key: never-panics-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: never-panics-${{ runner.os }}-
+
+      - name: Never-panics tests, many cases
+        shell: bash
+        env:
+          PROPTEST_CASES: ${{ inputs.cases }}
+          PACKAGES: ${{ inputs.packages }}
+          FILTER: ${{ inputs.test-filter }}
+        run: |
+          args=()
+          for p in $PACKAGES; do args+=(-p "$p"); done
+          cargo test --release "${args[@]}" $FILTER
+
+      - name: Upload regressions
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: proptest-regressions
+          path: "**/proptest-regressions/"
+          if-no-files-found: ignore
