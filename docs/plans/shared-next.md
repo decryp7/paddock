@@ -441,3 +441,147 @@ filled by the survey).
 | X24 | Safe archive unpacking (zip/tar, size and count limits, path traversal guard) | new `paddock-archive` | Debrief imports, Pitwall engines, Spotter assets |
 | X25 | CLI conventions: JSON output, exit codes, progress on stderr | new `paddock-cli` | Pitwall, Dyno, Sighter CLIs |
 | X26 | Benchmark harness with stored budgets (rule 16) | new `paddock-bench` + nightly workflow | each app's own benchmarks |
+
+## Full survey (2026-10-24 night): X27 and later
+
+Method: `origin/main` checkouts of Debrief `ce263cb3`, Pitcrew `cddd3f5`, Pitwall `37c6111`, Spotter `c9e9faa`, Dyno
+`f8de282`, Sighter `daa0863`, Pacenotes `e484acb` compared area by area against Paddock `df3efa6` (hashes and `diff` line
+counts of same-named files, greps for the same functions, types, constants and dependencies). Read-only; nothing built.
+"Diff N" is the number of changed lines; "identical" means the same hash. Items already in X1 to X26, §15/§16, ADR 0001,
+0005, 0007, 0012 and 0013 are not repeated; where they miss something it is listed under "Gaps in planned items".
+
+| Id | Candidate | Home | Who has it today | Effort (agent-days) |
+|---|---|---|---|---|
+| X27 | Repo baseline: synced config files, Renovate preset, tsconfig base, Cargo profiles, and a drift check | `paddock/templates/repo/`, Renovate preset `local>decryp7/paddock//renovate/app`, new `@decryp7/paddock-tsconfig`, conformance check C28 `sync` | all 7 repos: `renovate.json` (6 identical, Pitwall +1 rule), `rustfmt.toml` (7 identical), `LICENSE-*` (8 identical), `.editorconfig` (7 identical, Debrief own), `deny.toml` and `cliff.toml` (identical but the app name; Debrief's `deny.toml` 101 lines), `lefthook.yml` (4 identical, Pitwall + privacy + pre-push), `app/tsconfig.json` (4 identical), `app/.nvmrc` (5 identical), `[profile.dev]`/`[profile.dist]` in 5 `Cargo.toml` (identical), `scripts/export-diagrams.sh` (6 identical copies of Paddock's, Dyno other) | 1.5 |
+| X28 | App IPC kit: one error envelope, generated wire types, backend selection, call timeouts, mock kit | `paddock-commands` (`CommandError`, ts-rs export via `testing::sync_generated`) + `@decryp7/paddock-ui/ipc` and `/ipc/testing` | `CommandError` in Pitcrew/Spotter/Dyno `app/src-tauri/src/dto.rs`, Pitwall `crates/pitwall-core/src/mgmt.rs`, Debrief `app/src-tauri/src/error.rs` (`CmdError`), `paddock-jobs` `tauri.rs`; TS `core/command-error.ts` (Pitcrew 26, Pitwall 28, Spotter 21, Dyno 50; diff 24 to 46) and Debrief `core/cmd-error.ts` (82); `core/call-timeout.ts` (Pitcrew 47, Spotter 53, diff 36), Pitwall `core/timeout-backend.ts` (Proxy); hand-written `core/api.types.ts` of 527 to 1,793 lines in the four manager apps (Debrief generates with ts-rs); mock switches `?fail=`/`?mock=`/`latency` in Dyno `core/mock-backend.ts` and Debrief `core/mock/mock-options.ts` + `e2e/mock-url.ts`, `MockOptions` in Pitcrew | 3 |
+| X29 | Live feed: Rust pushes state to windows, UI folds it (sequence, coalescing, bounded tails, reconnect) | new `paddock-live` (tauri feature) + `@decryp7/paddock-ui/live` | Pitwall `app/src-tauri/src/live.rs` + `core/live.store.ts` + `core/live-reducer.ts`; Dyno `app/src-tauri/src/link.rs` → `state/live.store.ts`; Pitcrew `events.rs` + `state/status.store.ts` (`watch()`); Spotter `state/dashboard.store.ts` (push coalescing); Debrief `core/tauri-channel.ts` and live tail | 2 |
+| X30 | Tiered metrics store and machine sampler (CPU, memory, free disk of a path's volume, folder size) | new `paddock-metrics` | Pitcrew `crates/pitcrew-core/src/metrics.rs` (509, generic `TieredStore<P: Series>`), Pitwall `crates/pitwall-core/src/metrics.rs` (515, four tiers), Dyno `crates/dyno-core/src/metrics.rs` + `dyno-agent/src/store.rs` (SQLite tiers); free space: `debrief-agent/src/disk.rs`, `pitcrew-service/src/probe.rs`, `pitwall-server/src/system.rs`, `dyno-platform/src/sensors.rs` | 2.5 |
+| X31 | User files: path grants (only paths the user chose), open/save pickers, recent files, reveal, open with, open URL | new `paddock-files` (tauri feature) + `shell/files` | Debrief `app/src-tauri/src/paths.rs` (801), `recent.rs` (400), `opener.rs` (417), `core/recent/*`; Pitcrew `commands.rs` (`open_url`, `reveal_logs`); Spotter and Dyno call `tauri-plugin-dialog`/`-opener` straight from `commands.rs`; Pacenotes and Sighter will open projects and plans | 2.5 |
+| X32 | Storage page and safe delete: what the app keeps, bounded size walk, clean with preview and a re-check before each delete | new `paddock-storage` + a `shell/settings` "Storage" section | Debrief `app/src-tauri/src/storage.rs` + `storage/{model,plan,stores,walk}.rs`; Pitwall `pitwall-server/src/leftovers.rs` + cache page (`e2e/cache.e2e.ts`); Pitcrew `cache_report`/`cache_clean` + `shared/policy/disk-guard-editor.ts`; Dyno `dyno-agent/src/cleanup/usage.rs` (bounded tree) and `cleanup/guard.rs` (re-check before delete) | 2.5 |
+| X33 | Schedules and pause windows: every N, times of day, cron, catch-up after sleep, DST; editor component | `paddock-jobs::schedule` (next to X20 `time`) + `pd-schedule-editor` | Spotter `crates/spotter-core/src/schedule.rs` (719) + `shared/schedule.ts`, `shared/cadence.ts`; Debrief `crates/debrief-agent/src/schedule.rs` (208) and `debrief-ai/src/updates/policy.rs`; Pitcrew `crates/pitcrew-core/src/pause.rs` (236) + `shared/policy/pause-editor.ts` | 2 |
+| X34 | Tauri build and sidecar kit: `build.rs` helper, Windows manifest for test binaries, sidecar build script, `--self-test` | new `paddock-build` (build-dependency), `windows-app-manifest.xml` in it, `paddock-sidecar` bin in conformance, `paddock_proc::self_test` | `app/src-tauri/build.rs` in all 5 (21 to 35 lines, same three jobs), `windows-app-manifest.xml` (5 identical; Shell Demo has none), `scripts/sidecar.mjs` Pitcrew 24 / Pitwall 25 ("adapted", diff 11) / Dyno `app/src-tauri/scripts/sidecar.mjs` 28, Debrief `app/scripts/build-sidecars.mjs` 121; `--self-test` only in `debrief-store-worker` | 1.5 |
+| X35 | UI utilities: number, size, duration and relative-time formatting, a visibility-aware clock signal, safe local preferences, copy menu | `@decryp7/paddock-ui/format`, `/prefs`, root `pd-copy-menu` | `shared/format.ts` Pitcrew 125, Pitwall 124, Spotter 108, Dyno 194, Debrief `core/format.ts` + `shared/format/units.ts` (six APIs for `formatBytes`/duration/relative, diff 175 to 247); clock: Pitcrew/Spotter `core/clock.service.ts`, Pitwall/Dyno `shared/now.ts`; `core/storage.ts` (Pitcrew = Spotter), Pitcrew `preferences.service.ts`, Dyno `core/view-prefs.ts`, Debrief `ui-prefs.store.ts`; copy menu Pitcrew/Spotter `shared/ui/copy-menu.ts` (diff 6), Dyno `shared/copy-menu.ts` (diff 36), Spotter `shared/clipboard.ts` | 1.5 |
+| X36 | Generic icon set (`pd:` namespace): the ~50 glyphs every app redraws | `@decryp7/paddock-ui` icons + outline helper | `shared/icons.ts` Pitcrew `pc:` 111, Pitwall 100, Spotter 86, Dyno 115, Debrief `shared/material/debrief-icons.ts`: refresh, play, pause, stop, trash, search, copy, plus, close, check, more, sun, moon, globe, alert, info, lock, shield, clock, settings, download, folder, edit, bell, external, pin, chevrons drawn up to five times with different paths | 1 |
+| X37 | Control styles and the Angular Material bridge (buttons, fields, selects, chips, segmented, tabs, kbd; Material themed through `--pd-*`) | `paddock-ui/scss/_controls.scss` + `_material.scss` | Pitcrew `src/styles/_controls.scss`, Spotter `src/styles/_controls.scss`, Pitwall `styles.scss` (996), Dyno (1,191), Debrief (755); distinct Material selectors/tokens overridden: Debrief 53, Dyno 52, Pitcrew 42, Pitwall 33; `paddock-ui` 0 | 1.5 |
+| X38 | Component test kit: jsdom setup, DOM helpers, fake chart | `@decryp7/paddock-ui/testing` (setup file + helpers) | `src/test-setup.ts` (Pitcrew = Spotter = Dyno, 14 lines; Debrief 57 with ResizeObserver, pointer capture, Tauri stub clean-up); helpers Pitcrew/Spotter `testing/test-helpers.ts` (diff 21), Pitwall `testing/render.ts`, Debrief `testing/helpers.ts` + `must.ts`; fake charts Pitwall `FakeChart`, Pitcrew `fakeChart()`, Debrief `testing/fake-echarts.ts` | 1 |
+| X39 | E2E config preset and documentation screenshot runner | `@decryp7/paddock-e2e` (`paddockConfig()`, `captureDocScreens()`) | `app/playwright.config.ts` in 5 (31 to 71 lines, all different); screenshot specs Pitcrew `e2e/screenshots.spec.ts` (214), Spotter (256), Dyno (457), Pitwall `e2e/screenshots/capture.shot.ts`, Debrief `app/scripts/screenshots/capture.ts` + `visual-qa/` | 1.5 |
+| X40 | Rust test kit: scratch folders with a leftover check, env lock and in-process hermetic env, golden files, fake OS runner, never-panics helper | new `paddock-testkit` (dev-dependency) | 39 `std::env::temp_dir()` uses in the manager apps' crates; env locks in Debrief (3) and Spotter (`serial()`); golden files via `paddock_commands::testing::sync_generated` only; fake `Runner` seam in Dyno | 1.5 |
+| X41 | Hardening workflows: cargo-fuzz targets, mutants, proptest never-panics, corpus | reusable `paddock/.gitea/workflows/{fuzz,mutants}.yml` + X40 helper | Debrief `.gitea/workflows/{fuzz,mutants,corpus}.yml`, `fuzz/`, `docs/fuzzing.md`; proptest in Pitcrew, Pitwall, Dyno only; Debrief's, Pitcrew's and Pitwall's AGENTS.md promise fuzz targets for every parser | 1.5 |
+| X42 | Third-party notices (cargo-about + npm licences → `THIRD_PARTY_NOTICES.md`, shown by About) | `@decryp7/paddock-conformance` bin `paddock-notices` + shared `about.toml` | Debrief `scripts/notices/{about.toml,generate.mjs,generate.sh}`; the shell's About already serves legal texts (`about_legal`), but no other app produces the notices | 1 |
+| X43 | Shared doc blocks: AGENTS.md common sections, suite lessons, releasing and first launch, macOS/Linux notes, README skeleton | `paddock/docs/blocks/*.md`, synced by C23's marker mechanism; new-app template | AGENTS.md sections "Design principles", "Where logic lives", "Working in parallel", "Style", "Working practices" in all 7 (diff 5 to 47 per section between manager apps); `docs/suite-lessons.md` in 6 (4 to 65 lines, all different); `docs/releasing.md` in 5; `docs/macos.md`, `linux.md` in Pitcrew, Pitwall, Dyno | 1 |
+| X44 | Undo and an activity journal (README principle "changes have an undo") | `shell/undo` (stack, Edit ▸ Undo/Redo, toast with Undo) + `paddock-jobs::journal` | Debrief `app/src/app/undo/` (undo stack, snapshot/query/range undo); Dyno `crates/dyno-core/src/activity.rs` + `dyno-agent/src/handlers.rs` (reversible system changes) + `state/activity.store.ts`; Pitcrew, Pitwall, Spotter none | 2 |
+| X45 | Sibling apps: find an installed family app and hand it files or a view | new `paddock-siblings` | Pitcrew `crates/pitcrew-core/src/debrief_link.rs` + `app/src-tauri/src/handoff.rs`; ecosystem.md plans Dyno → Debrief, Spotter, Pitcrew | 1 |
+| X46 | Window weight budget (rule 35: initial chunk per window, tightened each release) | conformance check C29 | Debrief `app/scripts/window-weight.mjs` (`check:window-weight`, `check:dialog-weight`); none elsewhere | 0.5 |
+| X47 | Dev and host tooling: per-app build bootstrap, installed-app verify, Linux container runner, build-folder pruning | `paddock/tools/` (scripts with app parameters) + an X10 `host-cleanup` action | Pitcrew/Pitwall `scripts/linux-bootstrap.sh` (63/61), Pitcrew `macos-bootstrap.sh`, `linux-verify.sh`/`macos-verify.sh` (Pitcrew 62/56, Pitwall 57/106, "adapted"), Pitwall `linux-container-verify.sh`, Dyno `linux-container.sh` + `linux-verify.sh`, Dyno `ci-prune.sh`, Pitwall `scripts/ci/macos-cleanup.sh`, Debrief `clean-build-dirs.ps1` | 1.5 |
+
+Total: about 34 agent-days (X27 to X47), plus about 3 for the gaps below.
+
+### Notes per item
+
+- **X27.** Base: Pitcrew's files (the plain template the others copied), Pitwall's `lefthook.yml` (adds the pre-push gates)
+  and Pitwall's Renovate Node rule. Renovate supports a shared preset from a repo, so each app's `renovate.json` becomes
+  `extends` plus app rules; the preset also groups the `decryp7` registry crates and npm packages into one PR per Paddock
+  release (ADR 0012 §8 asks for that; no app config does it today). Templated files keep one app-name placeholder.
+  `new-app.mjs` copies only `app/` today; it should also write the repo root from the template. The check fails on drift
+  and `--write` repairs it.
+- **X28.** Base: Pitcrew's `CommandError` (code enum + message, `bad`/`internal` constructors) in Rust; Debrief's ts-rs
+  export and the shell's `sync_generated` stale check for TypeScript. Pitwall's Proxy wrapper is the best timeout shape
+  (no per-command tables to forget), but it must skip job-starting commands (rule 12; reuse `uiTimeoutProblems`). Mock kit
+  from Dyno's URL switches plus Debrief's lazy mock registry (mocks stay out of the release bundle). App DTOs stay in
+  each app; only the envelope, the export mechanism and the TS plumbing are shared.
+- **X29.** Same purpose, different designs. Base: Pitwall's pure `live-reducer.ts` (fold, bounded tail, one point per
+  step) and its reconnecting Rust task; add a sequence number so a window that reloads asks for a snapshot. Depends on
+  X20 (back-off) and X13 for a companion source.
+- **X30.** Base: Pitcrew's generic `TieredStore<P: Series>` with `Retention`; Pitwall's tier table as the default. Dyno's
+  SQLite history stays (domain) but takes the tier maths. The sampler reads process memory through X6 (PSS, threads
+  skipped) and persists through X7.
+- **X31.** Base: Debrief's `paths.rs` (grants filled only by native dialogs, drag and drop and the command line,
+  canonicalised; family security rule "open only paths the user chose"), `recent.rs` (recorded only after a granted open,
+  re-granted on use) and `opener.rs` (command lines as pure functions per OS). workbench.md row 57 deferred `paths.rs`
+  "until a second app needs it": Pacenotes and Sighter do from their first commit, and three apps call the dialog and
+  opener plugins without a grant today.
+- **X32.** workbench.md keeps Debrief's storage page in Debrief; the mechanism is not Debrief's: three more apps list and
+  clean their own folders. Base: Debrief's categories and plan, Dyno's bounded walk (depth, entries, time, no links, same
+  volume) and re-check guard, Pitwall's "never deletes by itself". Categories come from X7's `AppDirs`.
+- **X33.** Base: Spotter's `schedule.rs` (pure, tested for catch-up after sleep and DST); Pitcrew's pause windows as a
+  second schedule kind; quiet hours for X8 reuse the same type.
+- **X34.** The three `build.rs` jobs (embed the Windows manifest into every binary so test binaries load, write an empty
+  sidecar placeholder for `cargo check`, rerun on `TAURI_UPDATER_PUBKEY`) become one call. Base: Pitcrew's `build.rs`
+  and `sidecar.mjs`. Rule 23 requires CI to start every sidecar with `--self-test`; only Debrief's store worker has it.
+- **X35.** Formatting is presentation (engine values in, text out) and uses `Intl` with the active locale. Base: Debrief's
+  `units.ts` (most complete), Pitcrew's `ClockService` (pauses while hidden), Pitcrew/Spotter `storage.ts`, Pitcrew's
+  copy menu. Domain wording (Pitwall `tokensText`, Dyno `formatGhz`) stays in the apps.
+- **X36.** One outline helper (24 px, `currentColor`, stroke 1.75 as Pitcrew) and one drawing of each common glyph;
+  apps keep only domain glyphs in their namespace. Needs the independent drawing review (rule 22).
+- **X37.** `paddock-ui/scss/_base.scss` covers the page but no controls; each app styles buttons and Material by hand.
+  Base: Pitcrew's `_controls.scss` (split already) and Debrief's Material overrides (the most complete).
+- **X38.** Base: Debrief's `test-setup.ts` (superset) and helpers; `provideShellTesting` and `ManualClock` already exist
+  in `shell/testing`, so this adds the DOM side. The fake chart ships with X21's chart wrapper.
+- **X39.** All five screenshot runners do the same thing: a screens table × both themes at 1440×900 @2x, a frozen clock,
+  long pages framed, output to `docs/screenshots/<theme>/`. Base: Dyno's (the most complete) on `captureStable`; it
+  writes the hashes C24 checks.
+- **X40.** Base: the leftover check ADR 0012 §7 names (not built yet) and Dyno's `Runner` seam; this is the in-process
+  half of C14.
+- **X41.** Base: Debrief's workflows and `docs/fuzzing.md`. Apps with parsers of untrusted input first: Spotter
+  (feeds, pages), Pitwall (API bodies, GGUF headers), Dyno (OS command output), Pacenotes (source files).
+- **X42.** Base: Debrief's generator (deterministic, checked in CI); its licence list must match the shared `deny.toml`
+  of X27.
+- **X43.** Only the rules block is synced today (C23). The common sections drifted (same purpose, different words); the
+  Paddock copy becomes the source and each app keeps its own sections (Pitwall "Privacy", Dyno "Safety").
+  `suite-lessons.md` becomes a link to `paddock/docs/lessons.md`.
+- **X44.** Same purpose, different design: Debrief undoes UI state, Dyno undoes system changes. Shared: the stack, the
+  Edit menu items and the toast; each app contributes undoable actions. Dyno's reversible actions stay in Dyno.
+- **X45.** Base: Pitcrew's `debrief_link.rs` (CLI per OS, legacy name, a running instance takes the files over, "not
+  installed" is a plain answer). §7 says there is nothing to share for deep links until one app registers a scheme. The
+  CLI hand-off already exists, and ecosystem.md plans three more links.
+- **X47.** The verify scripts read what X4 registers (unit, launchd state, discovery file), so they follow X4. Docker
+  and OrbStack use only containers the script created (rule 7).
+
+### Gaps in planned items
+
+- **Native feel (shell gap from Pitwall's move):** it is not only Pitwall. All five apps have `core/native-feel.ts`
+  (234 to 253 lines, diff 39 to 66 against Debrief's) and `src-tauri/src/native_feel.rs` (94 to 123 lines; Pitcrew,
+  Spotter and Dyno differ only in the app name), although `paddock-window/src/feel.rs` exists. The shell package should
+  ship the UI guard and every app should drop both copies at its move (about 1 day).
+- **X4:** add the Windows NSIS hooks (`src-tauri/windows/installer-hooks.nsh` in Pitcrew, Pitwall and Dyno, diff 18 to
+  27) and the launchd plist templates (`src-tauri/macos/*.plist` in the same three) to `ServiceSpec` rendering.
+- **X9:** the release notes' "First launch" block is a heredoc in five workflows (Debrief, Pitcrew, Spotter, Dyno
+  `build.yml`, Pitwall `release.yml`) plus `docs/releasing.md`: ship it as one template. C03 checks only
+  `src-tauri/icons`; it should also check the tray sets (`paddock/icons/<app>/tray/` against Spotter's 24 and Dyno's 16
+  files, Pitwall's own `scripts/gen-tray-icons.mjs`). `paddock-updater`'s About reads the build commit and date from
+  `option_env!`, but no CI sets them (Debrief does it in the UI with `app/scripts/build-info.mjs`).
+- **X10:** add Debrief's `plan` job (skip a nightly when main is unchanged since a green run, skip a main push that is
+  tagged) and `nightly-mark`, the restore/save-always cache pattern, the `licences` job (cargo deny + npm audit) that all
+  five have, and the e2e job with Chrome for Testing. Pitwall still runs on `catthehacker/ubuntu:act-latest`, not the
+  `garage` image the others pin.
+- **X12:** the empty state is not Debrief-only: Pitcrew and Pitwall have `shared/ui/empty-state.ts` (44 and 60 lines).
+- **X21:** add row keyboard navigation and row menus (Pitwall `shared/ui/row-nav.ts`, `row-menu.ts`; Spotter the same
+  two, diff 141), the chart options per kind (`shared/charts/chart-options.ts` in Pitcrew 339, Pitwall 406, Spotter 149),
+  the token readers for charts (Pitwall `shared/theme-tokens.ts`, Dyno `shared/tokens.ts` + `color.ts`) and the fake
+  chart for tests (X38).
+- **X23:** also Dyno's watched folders with keep-for times (`dyno-core/src/watch.rs`, `dyno-agent/src/watch.rs`) and
+  Debrief's "file has settled" rule (`debrief-core/src/watch.rs`).
+- **X24:** also the runtime unpackers (`debrief-ai/src/runtimes/unpack.rs`, `debrief-video/src/runtime/unpack.rs`) and
+  Pitcrew's runner archives.
+- **X25:** also Debrief's `debrief-cli` (`output.rs`, `progress.rs`, `time_arg.rs`), the agent and service CLIs
+  (`debrief-agent`, `pitcrew-service` `cli.rs`, `dyno-agent` `cli.rs`).
+- **X14 and §16:** the pinned-runtime pattern (catalogue JSON with per-platform URL, size and SHA-256; store with
+  versions; self-test; macOS quarantine) exists three times: Debrief `debrief-video/src/runtime/` (FFmpeg) and
+  `debrief-ai/src/runtimes/`, Pitwall `pitwall-core/src/runtimes/` (catalogue diff 56 against Debrief's), and Spotter's
+  `chromium-manifest.toml`. Pacenotes (language servers) and Sighter (training runtime) need it. X14 should build its
+  install on a generic `paddock-download` "runtime" module rather than its own manifest.
+- **X16:** Debrief's two hand-written loopback HTTP/1.1 clients (`debrief-ai-worker/src/http.rs`,
+  `debrief-ai/src/engine/pitwall/http.rs`) go with `paddock-pitwall` (§15), not `paddock-net`; say so in X16.
+- **Adoption, not new code:** the manager apps' toasts (`layout/toasts.ts`, `state/toast.store.ts`), connection banners,
+  confirm dialogs, `state/loadable.ts` (Pitcrew = Spotter) and Dyno's `async-state.ts`, sidebars, theme services and
+  window chrome are covered by `shell/notify`, `shell/dialogs`, `shell/store` (`withRequestStatus`), `shell/pages` and
+  the theme; the §5 adoption table should list them for deletion.
+
+### Skipped as app-specific
+
+Domain catalogues and stores (`catalog.rs`/`store.rs` in Spotter sources, Dyno counters and cleanup categories, Debrief
+dumps and profiling), per-app usage and limits (Pitwall `usage.rs`/`limits.rs`, Pitcrew runner `usage.rs`), Pitwall's
+request scheduler (`scheduler.rs`, LLM priorities), Pitcrew's Gitea API client (`gitea.rs`), Spotter's HTTP source
+logic and SSRF guard (in X16 already), the app's own mock data and `api.types.ts` DTOs (only the plumbing is X28), and
+hardware, elevation and domain redaction (§7). Sighter and Pacenotes have no code yet; their needs are counted where
+their plans name them.
