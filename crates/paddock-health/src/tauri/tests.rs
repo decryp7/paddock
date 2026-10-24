@@ -123,6 +123,21 @@ fn take(heard: &Heard) -> Vec<Value> {
     std::mem::take(&mut *heard.lock().unwrap())
 }
 
+/// Takes what a window heard once it has heard at least `n` events. Listeners of one event may run on different threads (on
+/// Windows they do), so another listener having seen an event does not mean this one has.
+fn take_n(heard: &Heard, n: usize) -> Vec<Value> {
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    while heard.lock().unwrap().len() < n {
+        // conformance: hang-guard — a listener that never hears must fail the test, not hang it
+        assert!(
+            std::time::Instant::now() < end,
+            "the window heard fewer than {n} events"
+        );
+        std::thread::yield_now();
+    }
+    take(heard)
+}
+
 #[test]
 fn one_failure_is_one_chip_and_one_notification_in_two_windows() {
     crate::tests::capture_logs();
@@ -153,14 +168,14 @@ fn one_failure_is_one_chip_and_one_notification_in_two_windows() {
     }
 
     for (chip, list) in chips.iter().zip(&lists) {
-        let chip = take(chip);
+        let chip = take_n(chip, 1);
         assert_eq!(chip.len(), 1, "one chip update per window: {chip:?}");
         assert_eq!(chip[0]["services"][0]["state"], "down");
         assert_eq!(
             chip[0]["services"][0]["cause"]["message"],
             "The engine stopped."
         );
-        let list = take(list);
+        let list = take_n(list, 1);
         assert_eq!(list.len(), 1, "one notification event per window: {list:?}");
         assert_eq!(list[0]["posted"]["count"], 1);
         assert_eq!(list[0]["unread"], 1);
@@ -195,12 +210,12 @@ fn one_failure_is_one_chip_and_one_notification_in_two_windows() {
     assert!(service.running.load(Ordering::SeqCst));
     assert_eq!(service.repairs.load(Ordering::SeqCst), 1);
     for (chip, list) in chips.iter().zip(&lists) {
-        let states: Vec<Value> = take(chip)
+        let states: Vec<Value> = take_n(chip, 2)
             .iter()
             .map(|s| s["services"][0]["state"].clone())
             .collect();
         assert_eq!(states, [json!("repairing"), json!("ok")]);
-        let list = take(list);
+        let list = take_n(list, 1);
         assert_eq!(list.len(), 1, "the resolution, once: {list:?}");
         assert_eq!(
             (list[0]["unread"].as_u64(), &list[0]["posted"]),
