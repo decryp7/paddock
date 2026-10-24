@@ -89,7 +89,7 @@ test('table: row actions show on hover, the "..." button is always there, destru
   await more.click();
   const items = page.getByRole('menuitem');
   await expect(items.last()).toContainText('Remove');
-  await expect(items.last()).toHaveClass(/pd-danger/);
+  await expect(items.last()).toHaveClass(/pd-popmenu__item--danger/);
   await items.nth(1).click();
   await expect(page.getByTestId('table-status')).toContainText('Chose: copy Syslog');
 });
@@ -108,6 +108,8 @@ test('table: 5,000 rows are drawn by the virtual viewport, a few at a time', asy
 
 test('table: no horizontal scroll at 320 px, columns drop out instead', async ({ page }) => {
   await open(page, 'dark', 320);
+  // The table follows its own width: the name and the "..." column are what is left.
+  await expect(small(page).getByRole('columnheader')).toHaveCount(2);
   const scrolls = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   expect(scrolls).toBe(false);
   const headers = await small(page).getByRole('columnheader').allInnerTexts();
@@ -115,17 +117,86 @@ test('table: no horizontal scroll at 320 px, columns drop out instead', async ({
   expect(headers.map((h) => h.trim())).toContain('Name');
   const overflow = await small(page).locator('.pd-grid').evaluate((e) => e.scrollWidth > e.clientWidth);
   expect(overflow).toBe(false);
+  // The primary column keeps its floor: the first name is readable whole, not cut to a letter.
+  const name = small(page).locator('[role=row][data-index] .pd-first .pd-text').first();
+  expect((await small(page).locator('[role=row][data-index] .pd-first').first().boundingBox())!.width).toBeGreaterThanOrEqual(100);
+  expect(await name.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+  await expect(name).toHaveText('Syslog');
+  // The toolbar is compact: the filter keeps 8rem, Columns is icon-only, and the row actions are the "..." button alone.
+  expect((await small(page).locator('.pd-filter').boundingBox())!.width).toBeGreaterThanOrEqual(128);
+  await expect(small(page).getByTestId('table-columns')).toHaveAccessibleName('Columns');
+  expect(await small(page).locator('.pd-tool-text').isVisible()).toBe(false);
+  await expect(small(page).locator('[role=row][data-index]').first().locator('.pd-inline')).toHaveCount(0);
+  for (const id of ['table-small', 'box-selected', 'box-empty', 'box-loading', 'box-error', 'table-virtual']) {
+    const box = page.locator(`[data-testid="${id}"] .pd-grid`);
+    expect(await box.evaluate((e) => e.scrollWidth <= e.clientWidth), id).toBe(true);
+  }
 });
 
-test('chart: four named charts are drawn on canvases, each with a text twin', async ({ page }) => {
+test('table: rows are 32 px with a 28 px header, and a sortable header shows its chevron on hover and focus', async ({ page }) => {
+  await open(page);
+  const row = small(page).locator('[role=row][data-index]').first();
+  expect((await row.boundingBox())!.height).toBeCloseTo(32, 0);
+  expect((await small(page).locator('.pd-header').boundingBox())!.height).toBeCloseTo(28, 0);
+  const icon = small(page).locator('.pd-sort').first().locator('.pd-sort-icon');
+  await expect(icon).toHaveCSS('opacity', '0');
+  await small(page).locator('.pd-sort').first().hover();
+  await expect(icon).toHaveCSS('opacity', '1');
+});
+
+test('table: the keyboard focus in a menu is a 2 px ring with 3:1 contrast, and the icon slot lines the labels up', async ({ page }) => {
+  await open(page);
+  const rows = small(page).locator('[role=row][data-index]');
+  await rows.first().focus();
+  await page.keyboard.press('Shift+F10');
+  const items = page.getByRole('menuitem');
+  await expect(items.first()).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  const focused = page.locator('.pd-popmenu__item:focus-visible');
+  await expect(focused).toHaveCount(1);
+  const ring = await focused.evaluate((e) => {
+    const cs = getComputedStyle(e);
+    const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const lin = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    const lum = (c: number[]) => 0.2126 * lin(c[0]!) + 0.7152 * lin(c[1]!) + 0.0722 * lin(c[2]!);
+    const menuBg = getComputedStyle(e.parentElement!).backgroundColor;
+    const [a, b] = [lum(rgb(cs.outlineColor)), lum(rgb(menuBg))];
+    return { width: cs.outlineWidth, style: cs.outlineStyle, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
+  });
+  expect(ring.width).toBe('2px');
+  expect(ring.style).toBe('solid');
+  expect(ring.ratio).toBeGreaterThanOrEqual(3);
+  const lefts = await page.locator('.pd-popmenu__item > span:last-child').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
+  expect(new Set(lefts).size).toBe(1);
+  await expect(page.locator('.pd-popmenu__sep')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+});
+
+test('table: selected row, descending sort, empty, loading and error states are drawn', async ({ page }) => {
+  await open(page);
+  const selected = page.locator('[data-testid="box-selected"]');
+  await expect(selected.locator('[role=row][aria-selected=true]')).toHaveCount(1);
+  await expect(selected.getByRole('columnheader', { name: 'Size (KiB)' })).toHaveAttribute('aria-sort', 'descending');
+  await expect(page.locator('[data-testid="box-empty"]').getByRole('button', { name: 'Install a plugin' })).toBeVisible();
+  await expect(page.locator('[data-testid="box-loading"] .pd-skel').first()).toBeVisible();
+  await expect(page.locator('[data-testid="box-error"]').getByRole('alert')).toContainText('could not be read');
+  await page.locator('[data-testid="table-virtual"] .pd-group').first().click();
+  await expect(page.locator('[data-testid="table-virtual"] .pd-group-toggle').first()).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('chart: four named charts, a loading and an error one, are drawn on canvases, each with a text twin', async ({ page }) => {
   await open(page);
   const charts = page.locator('section[data-testid="chart"] pd-chart');
-  await expect(charts).toHaveCount(4);
-  await expect(charts.locator('canvas')).toHaveCount(4);
+  await expect(charts).toHaveCount(6);
+  await expect(charts.locator('canvas')).toHaveCount(6);
   const donut = page.getByRole('img', { name: 'Disk use by kind' });
   await expect(donut).toBeVisible();
   const twin = await page.locator(`#${await donut.getAttribute('aria-describedby')}`).innerText();
-  expect(twin).toContain('Logs: 42 GB');
+  expect(twin).toContain('Logs: 42 GB (48%)');
+  // Every chart has a visible title: metric, unit and window.
+  await expect(charts.first().getByTestId('chart-title')).toHaveText('Requests per hour, req');
+  await expect(page.getByTestId('chart-loading')).toBeVisible();
+  await expect(page.getByTestId('chart-error')).toContainText('could not be loaded');
 });
 
 test('chart: switching the theme draws the charts again with the new colours', async ({ page }) => {

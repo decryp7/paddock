@@ -13,5 +13,6 @@ mod properties;
 mod reporter_and_jobs;
 mod schedule;
 mod tauri;
+mod tauri_activity;
 mod time;
 mod walk;
