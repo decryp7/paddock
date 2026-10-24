@@ -9,6 +9,14 @@ Conventional Commits; one semver tag for the whole repo.
   die-on-unhandled-exception), so the child and every helper it started end when the value is dropped or the app exits or
   crashes, also helpers that left its process tree; `Supervised::in_job`. `paddock-ipc`'s launcher gets it through
   `Supervised` (`Child::in_job`). Windows refusing a job degrades to the tree kill.
+- The shared CI image (plan X53, `ci-image/`): `paddock-ci` on top of garage with cargo-hakari, cargo-machete, libduckdb, a pinned Chrome for
+  Testing and sccache 0.18.0, every download checksum-verified, a verifying last build step and manifest, a manual `ci-image` workflow that
+  pushes it from CI. `ci.yml` runs its Linux jobs in it and no longer installs Node, browsers or hakari/machete per job; `setup-rust` skips the
+  toolchain install inside it.
+- `paddock-testplan` (ADR 0005, plan X52): `.sighterplan` / `.sighterresult` as TOML. `parse_plan` / `parse_result` (4 MiB, 5,000 cases, 200 steps, 4 KiB
+  strings, unknown keys named by line, newer majors refused), typed ids and the closed `Step` enum, `Plan::to_toml` (canonical) and `Plan::hash`,
+  secrets by reference (`SecretRef`, `Resolver`, `Redactor`, `SecretRedactor`, `lint`), `RunResult::to_toml` with redaction, `Coverage::from`,
+  `diff`, `junit::write`; property tests and a fuzz target.
 - `@decryp7/paddock-ui/workbench/dock` (plan X50 W2a, W2b): the workbench dock over dockview (optional peer, loaded on first use): `<pd-dock />`,
   `WorkbenchDock` from `provideWorkbenchDock` (`showView`, `closeView`, `openPanels`, `activePanel`, perspectives, named layouts, `verdict`/`onWindowPlan`
   for the Explorer column, checkpoint), `planLayout` adapter with grow-back and a "layout adjusted" notice with Undo, auto-hide edges, floating groups,
