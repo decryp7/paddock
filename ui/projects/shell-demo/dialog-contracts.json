@@ -35,6 +35,22 @@
         "channels_set_secret"
       ]
     },
+    "pd.mcp.key": {
+      "kind": "form",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "mcp_issue_key"
+      ]
+    },
+    "pd.mcp.revoke": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": true,
+      "commands": []
+    },
     "pd.report-problem": {
       "kind": "decision",
       "modality": "modal",
@@ -59,6 +75,11 @@
         "channels_save",
         "channels_test",
         "dialog_open",
+        "mcp_audit",
+        "mcp_audit_clear",
+        "mcp_get",
+        "mcp_revoke_key",
+        "mcp_save",
         "open_login_items",
         "packs_reload",
         "packs_status",
@@ -67,8 +88,38 @@
         "service_status",
         "settings_overview",
         "settings_reset",
-        "settings_set"
+        "settings_set",
+        "setup_act",
+        "setup_finish",
+        "setup_repair",
+        "setup_skip",
+        "setup_state",
+        "storage_cancel",
+        "storage_clear",
+        "storage_last",
+        "storage_reveal",
+        "storage_scan"
       ]
+    },
+    "pd.setup": {
+      "kind": "tool",
+      "modality": "modeless",
+      "requiredChoice": false,
+      "instanced": false,
+      "commands": [
+        "setup_act",
+        "setup_finish",
+        "setup_repair",
+        "setup_skip",
+        "setup_state"
+      ]
+    },
+    "pd.storage.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "requiredChoice": false,
+      "instanced": true,
+      "commands": []
     },
     "pd.updates": {
       "kind": "tool",

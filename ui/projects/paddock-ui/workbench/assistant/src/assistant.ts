@@ -1,11 +1,14 @@
 import { NgComponentOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, output, viewChild } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
+import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore } from './assistant.store';
-import type { TurnPart } from './chat-model';
+import type { TurnPart, TurnView } from './chat-model';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
+
+/** How close to the bottom (px) the user must be for the log to follow the streaming text. */
+const SCROLL_STICK_PX = 24;
 
 /**
  * The assistant pane (plan W6; Debrief's `chat-panel` and `chat-composer`): the conversation with streamed answers drawn as
@@ -22,10 +25,10 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
   imports: [NgComponentOutlet, PdGlyph, PdAssistantRichText, PdAssistantToolCard, PdNeedsAi],
   template: `
     <header class="bar">
-      <span class="title">{{ t.title }}</span>
+      <h2 class="title" data-testid="assistant-title" [attr.title]="store.title()">{{ store.title() }}</h2>
       <span class="spacer"></span>
-      <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" data-testid="assistant-list-toggle" [attr.aria-expanded]="store.listOpen()" [attr.aria-label]="t.conversations" (click)="store.toggleListOpen()">
-        <pd-glyph name="menu" [size]="14" />
+      <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" data-testid="assistant-list-toggle" [attr.aria-expanded]="store.listOpen()" [attr.aria-label]="t.conversations" [attr.title]="t.conversations" (click)="store.toggleListOpen()">
+        <pd-glyph name="history" [size]="14" />
       </button>
       <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" data-testid="assistant-new" [disabled]="store.busy()" [attr.aria-label]="t.newChat" [attr.title]="t.newChat" (click)="store.newConversation()">
         <pd-glyph name="plus" [size]="14" />
@@ -34,10 +37,10 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
 
     @if (store.listOpen()) {
       <ul class="list" data-testid="assistant-list" [attr.aria-label]="t.conversations">
-        @for (c of store.conversations(); track c.id) {
+        @for (c of store.visibleConversations(); track c.id) {
           <li class="row" [class.active]="c.id === store.activeId()">
             <button type="button" class="open" data-testid="assistant-open" [disabled]="store.busy()" [attr.title]="c.title" (click)="store.open(c.id)">{{ c.title }}</button>
-            <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" data-testid="assistant-delete" [attr.aria-label]="t.deleteChat + ': ' + c.title" (click)="store.remove(c.id)">
+            <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm del" data-testid="assistant-delete" [attr.aria-label]="t.deleteChat + ': ' + c.title" [attr.title]="t.deleteChat" (click)="store.removeLater(c.id)">
               <pd-glyph name="trash" [size]="14" />
             </button>
           </li>
@@ -47,11 +50,18 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
       </ul>
     }
 
+    @if (store.undoable(); as gone) {
+      <div class="undo" role="status" data-testid="assistant-undo">
+        <span class="undo-text">{{ deleted(gone.title) }}</span>
+        <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" data-testid="assistant-undo-button" (click)="store.undoRemove(gone.id)">{{ t.undo }}</button>
+      </div>
+    }
+
     @if (pitwall) {
       <pd-needs-ai class="needs" [feature]="t.feature" [settingsLink]="settingsLink()" (step)="step.emit($event)" (openSettings)="openSettings.emit()" />
     }
 
-    <div class="log" role="log" aria-live="polite" [attr.aria-busy]="store.busy()" data-testid="assistant-log" #log>
+    <div class="log" role="log" aria-live="off" [attr.aria-busy]="store.busy()" data-testid="assistant-log" #log (scroll)="scrolled()">
       @if (store.isLoading() && !store.turns().length) {
         <p class="hint" data-testid="assistant-loading">{{ t.loading }}</p>
       }
@@ -105,12 +115,28 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
       }
     </div>
 
+    @if (unseen()) {
+      <button type="button" class="pd-btn pd-btn--sm jump" data-testid="assistant-jump" (click)="jumpToLatest()">
+        <pd-glyph name="chevron-down" [size]="14" /> {{ t.jump }}
+      </button>
+    }
+    <p class="sr-only" role="status" aria-live="polite" data-testid="assistant-announce">{{ announcement() }}</p>
+
     @if (store.approval(); as ask) {
       <section class="approval" role="alertdialog" aria-labelledby="pd-assistant-approval" data-testid="assistant-approval">
         <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong> {{ ask.summary }}</p>
+        <details class="details" data-testid="assistant-approval-details">
+          <summary>{{ t.details }}</summary>
+          <dl>
+            <dt>{{ t.tool }}</dt>
+            <dd data-testid="assistant-approval-tool">{{ ask.name }}</dd>
+            <dt>{{ t.arguments }}</dt>
+            <dd><pre data-testid="assistant-approval-args">{{ args(ask.input) }}</pre></dd>
+          </dl>
+        </details>
         <div class="actions">
-          <button type="button" class="pd-btn pd-btn--primary pd-btn--sm" data-testid="assistant-allow" (click)="store.approve(ask.callId, true)">{{ t.allow }}</button>
-          <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-decline" (click)="store.approve(ask.callId, false)">{{ t.decline }}</button>
+          <button type="button" class="pd-btn pd-btn--primary" data-testid="assistant-allow" (click)="store.approve(ask.callId, true)">{{ t.allow }}</button>
+          <button type="button" class="pd-btn" data-testid="assistant-decline" (click)="store.approve(ask.callId, false)">{{ t.decline }}</button>
         </div>
       </section>
     }
@@ -124,8 +150,8 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
         <ul class="chips" [attr.aria-label]="t.context" data-testid="assistant-chips">
           @for (chip of store.chips(); track chip.id) {
             <li>
-              <button type="button" class="chip" data-testid="assistant-chip" [class.off]="!chip.on" [attr.aria-pressed]="chip.on" [attr.title]="chip.on ? t.removeChip : t.addChip" (click)="store.toggleChip(chip.id)">
-                @if (chip.icon) {
+              <button type="button" class="chip" data-testid="assistant-chip" [class.off]="!chip.on" [attr.aria-pressed]="chip.on" [disabled]="blocked()" [attr.title]="chip.on ? t.removeChip : t.addChip" (click)="store.toggleChip(chip.id)">
+                @if (chip.icon && hasGlyph(chip.icon)) {
                   <pd-glyph [name]="chip.icon" [size]="14" />
                 }
                 <span class="chip-label">{{ chip.label }}</span>
@@ -144,7 +170,8 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
         rows="3"
         data-testid="assistant-input"
         [attr.aria-label]="t.question"
-        [attr.placeholder]="t.placeholder"
+        [disabled]="blocked()"
+        [attr.placeholder]="placeholder()"
         [attr.maxlength]="store.limit()"
         [value]="store.draft()"
         (input)="store.setDraft($any($event.target).value)"
@@ -153,7 +180,7 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
       <div class="send-row">
         @if (store.hasWriteTools()) {
           <label class="allow" [attr.title]="t.allowHint">
-            <input type="checkbox" data-testid="assistant-allow-actions" [checked]="store.allowWrite()" [disabled]="store.busy()" (change)="store.setAllowWrite($any($event.target).checked)" />
+            <input type="checkbox" data-testid="assistant-allow-actions" [checked]="store.allowWrite()" [disabled]="store.busy() || blocked()" (change)="store.setAllowWrite($any($event.target).checked)" />
             <span>{{ t.allowActions }}</span>
           </label>
         }
@@ -163,7 +190,7 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
             <pd-glyph name="stop" [size]="14" /> {{ t.stop }}
           </button>
         } @else {
-          <button type="submit" class="pd-btn pd-btn--primary" data-testid="assistant-send" [disabled]="!store.canSend() || blocked()">
+          <button type="submit" class="pd-btn" [class.pd-btn--primary]="!blocked()" data-testid="assistant-send" [disabled]="!store.canSend() || blocked()">
             <pd-glyph name="play" [size]="14" /> {{ t.send }}
           </button>
         }
@@ -173,12 +200,25 @@ import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, renderer
   styles: `
     :host { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; container-type: inline-size; background: var(--pd-surface-1); color: var(--pd-text); font-size: var(--pd-text-body); }
     .bar { display: flex; align-items: center; gap: var(--pd-space-1); padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); min-height: var(--pd-toolbar-height); }
-    .title { font-weight: var(--pd-weight-semibold); }
+    .title { margin: 0; font-size: inherit; font-weight: var(--pd-weight-semibold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .spacer { flex: 1; }
     .list { list-style: none; margin: 0; padding: var(--pd-space-1); max-height: 40%; overflow-y: auto; border-bottom: 1px solid var(--pd-hairline); }
     .row { display: flex; align-items: center; gap: var(--pd-space-1); border-radius: var(--pd-radius-control); }
     .row.active { background: var(--pd-accent-tint); }
     .row:hover { background: var(--pd-hover); }
+    .del { color: var(--pd-danger); opacity: 0; }
+    .row:hover .del, .row:focus-within .del, .del:focus-visible { opacity: 1; }
+    @media (hover: none) { .del { opacity: 1; } }
+    .undo { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); }
+    .undo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .jump { align-self: center; margin-top: calc(-1 * var(--pd-space-8, 32px)); box-shadow: var(--pd-shadow-1, none); }
+    .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+    .details { margin: 0 0 var(--pd-space-2); font-size: var(--pd-text-label); }
+    .details summary { cursor: pointer; color: var(--pd-text-muted); }
+    .details dl { margin: var(--pd-space-1) 0 0; display: grid; grid-template-columns: auto 1fr; gap: var(--pd-space-1) var(--pd-space-2); }
+    .details dt { color: var(--pd-text-muted); }
+    .details dd { margin: 0; min-width: 0; }
+    .details pre { margin: 0; max-height: 120px; overflow: auto; font-family: var(--pd-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
     .open { all: unset; flex: 1; min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .open:focus-visible { outline: 2px solid var(--pd-focus-ring); border-radius: var(--pd-radius-control); }
     .empty, .hint { color: var(--pd-text-muted); padding: var(--pd-space-2); margin: 0; }
@@ -227,7 +267,6 @@ export class PdAssistant {
   readonly citation = output<CitationOpened>();
 
   protected readonly t = {
-    title: $localize`:@@pd.wb.assistant.title:Assistant`,
     conversations: $localize`:@@pd.wb.assistant.conversations:Conversations`,
     newChat: $localize`:@@pd.wb.assistant.new:New conversation`,
     deleteChat: $localize`:@@pd.wb.assistant.delete:Delete conversation`,
@@ -252,15 +291,99 @@ export class PdAssistant {
     allowHint: $localize`:@@pd.wb.assistant.allow-hint:Lets the assistant propose changes. Each one still asks for your approval.`,
     stop: $localize`:@@pd.wb.assistant.stop:Stop`,
     send: $localize`:@@pd.wb.assistant.send:Send`,
+    undo: $localize`:@@pd.wb.assistant.undo:Undo`,
+    jump: $localize`:@@pd.wb.assistant.jump:Jump to latest`,
+    details: $localize`:@@pd.wb.assistant.approve.details:Details`,
+    tool: $localize`:@@pd.wb.assistant.approve.tool:Tool`,
+    arguments: $localize`:@@pd.wb.assistant.approve.arguments:Arguments`,
+    noArguments: $localize`:@@pd.wb.assistant.approve.no-arguments:None`,
+    answerReady: $localize`:@@pd.wb.assistant.answer-ready:Answer ready`,
+    failed: $localize`:@@pd.wb.assistant.answer-failed:The answer failed.`,
   };
 
+  /** The user is at (within 24 px of) the bottom of the log: new text keeps it there. */
+  private pinned = true;
+  /** New text arrived while the user reads further up (the "Jump to latest" pill). */
+  protected readonly unseen = signal(false);
+  /** One polite announcement when a turn ends; the streaming answer itself is not announced token by token. */
+  protected readonly announcement = linkedSignal<{ running: boolean; turn: TurnView | null }, string>({
+    source: () => {
+      const turn = this.store.lastTurn();
+      return { running: turn?.running === true, turn };
+    },
+    computation: (now, prev) => {
+      if (prev?.source.running && !now.running) return this.finishedNote(now.turn);
+      return prev && prev.source.running === now.running ? prev.value : '';
+    },
+  });
+
   constructor() {
-    // Keeps the newest text in view while an answer streams in (DOM only).
+    // Keeps the newest text in view while an answer streams in, but only for a user who is at the bottom (DOM only).
     effect(() => {
       this.store.turns();
       const el = this.log()?.nativeElement;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (!el) return;
+      if (this.pinned) el.scrollTop = el.scrollHeight;
+      // The pill is state of this effect's scroll decision (the user's position is not a signal): set only, never read.
+      else this.unseen.set(true);
     });
+  }
+
+  protected scrolled(): void {
+    const el = this.log()?.nativeElement;
+    if (!el) return;
+    this.pinned = el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_STICK_PX;
+    if (this.pinned) this.unseen.set(false);
+  }
+
+  protected jumpToLatest(): void {
+    const el = this.log()?.nativeElement;
+    if (el) el.scrollTop = el.scrollHeight;
+    this.pinned = true;
+    this.unseen.set(false);
+  }
+
+  private finishedNote(turn: TurnView | null): string {
+    if (!turn) return '';
+    if (turn.error) return turn.error.needsAi ? this.t.failed : turn.error.message;
+    return turn.end === 'cancelled' ? this.t.stopped : this.t.answerReady;
+  }
+
+  protected deleted(title: string): string {
+    return $localize`:@@pd.wb.assistant.deleted:Deleted "${title}:title:"`;
+  }
+
+  protected hasGlyph(name: string): boolean {
+    return name.replace(/^pd:/, '') in PD_ICON_PATHS;
+  }
+
+  /** The call's arguments as the prompt's details show them (bounded). */
+  protected args(input: unknown): string {
+    if (input === undefined || input === null || (typeof input === 'object' && Object.keys(input).length === 0)) return this.t.noArguments;
+    const text = JSON.stringify(input, null, 2) ?? '';
+    return text.length <= 2000 ? text : `${text.slice(0, 1999)}…`;
+  }
+
+  /** The composer's hint: the question, or what to do about Pitwall in the state's own words. */
+  protected placeholder(): string {
+    switch (this.pitwall?.kind()) {
+      case 'notRunning':
+        return $localize`:@@pd.wb.assistant.hint.not-running:Start Pitwall to ask questions`;
+      case 'notInstalled':
+        return $localize`:@@pd.wb.assistant.hint.not-installed:Install Pitwall to ask questions`;
+      case 'needsPairing':
+        return $localize`:@@pd.wb.assistant.hint.pairing:Connect Pitwall to ask questions`;
+      case 'paused':
+        return $localize`:@@pd.wb.assistant.hint.paused:Resume Pitwall to ask questions`;
+      case 'noSuitableModel':
+        return $localize`:@@pd.wb.assistant.hint.model:Download a model in Pitwall to ask questions`;
+      case 'incompatible':
+        return $localize`:@@pd.wb.assistant.hint.incompatible:Update to ask questions`;
+      case 'unavailable':
+        return $localize`:@@pd.wb.assistant.hint.unavailable:Pitwall is not available right now`;
+      default:
+        return this.t.placeholder;
+    }
   }
 
   /** Pitwall is missing, not paired or has no model: the shared state shows the fix, the composer waits. */

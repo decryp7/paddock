@@ -164,10 +164,6 @@ export class DockPlacement {
     return g.api.location.type === 'grid' && g.panels.some((p) => this.ctx.views.find(p.id)?.fullHeight === true);
   }
 
-  private isDocument(id: string): boolean {
-    return this.ctx.kindOf(id) === 'document' && viewArea(this.ctx.views.find(id)) === 'document';
-  }
-
   /** A docked tool window already open at that edge, to tab a new one with. */
   toolGroupFor(api: DockviewApi, edge: ToolEdge): string | null {
     const root = this.ctx.rootRect();

@@ -16,7 +16,7 @@ type App = ::tauri::App<MockRuntime>;
 fn app(managed: bool) -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
     let app = mock_builder()
-        .invoke_handler(Guard::new(&crate::COMMANDS).wrap(invoke_handler()))
+        .invoke_handler(Guard::new(&crate::LAYOUT).wrap(invoke_handler()))
         .build(mock_context(noop_assets()))
         .unwrap();
     if managed {

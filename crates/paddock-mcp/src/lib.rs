@@ -21,6 +21,7 @@
 
 pub mod audit;
 pub mod client;
+mod control;
 pub mod jsonrpc;
 mod keys;
 mod lines;
@@ -32,6 +33,10 @@ mod server;
 pub mod types;
 
 pub use audit::{AuditEntry, AuditLog, AuditSink, Outcome, redact_arguments};
+pub use control::{
+    AuditRow, Emit, ErrorCode, FileSettings, IssuedKey, KeyInfo, MAX_KEYS, McpControl, McpError,
+    McpEvent, McpSettings, McpView, MemorySettings, SettingsStore, ToolInfo,
+};
 pub use keys::{KEY_PREFIX, KeyEntry, KeyStore, KeyVerifier};
 pub use lines::{serve_lines, serve_stdio};
 pub use loopback::{Serving, serve_loopback};
@@ -39,3 +44,31 @@ pub use registry::{
     Access, CallCtx, Handler, Policy, RegisterError, ResourceDef, ToolDef, ToolError, ToolOutput,
 };
 pub use server::{Limits, Server, Session};
+
+/// The event the adapter sends every change of the audit log or the keys on, to every window (a [`McpEvent`]).
+pub const EVENT_NAME: &str = "paddock://mcp";
+
+paddock_commands::command_table! {
+    /// The commands of the MCP adapter (`paddock_mcp::tauri::invoke_handler` serves them; the shell plugin folds them into its
+    /// table). Every window may look; main windows and the Settings dialog change settings and keys; only the key dialog's window
+    /// (a DIALOG, credential kind) issues a key, because the key is shown there once.
+    pub static COMMANDS;
+    /// The settings, the tools, the clients' keys (without the keys themselves).
+    Query [WINDOW] => tauri::mcp_get,
+    /// Validates and saves the settings.
+    Mutation [MAIN | DIALOG] => tauri::mcp_save,
+    /// Issues a client key; the reply holds the key, which is never shown again.
+    Mutation [DIALOG] => tauri::mcp_issue_key,
+    /// Revokes a client key.
+    Mutation [MAIN | DIALOG] => tauri::mcp_revoke_key,
+    /// The recent calls, newest first.
+    Query [WINDOW] => tauri::mcp_audit,
+    /// Clears the audit log.
+    Mutation [MAIN | DIALOG] => tauri::mcp_audit_clear,
+}
+
+#[cfg(feature = "tauri")]
+pub mod tauri;
+
+#[cfg(test)]
+mod generated;

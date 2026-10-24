@@ -103,8 +103,9 @@ export function chartSummary(spec: PdChartSpec): string {
   const fmt = (v: number): string => withUnit((spec.format ?? defaultFormat)(v), spec.unit);
   if (spec.kind === 'donut') {
     const parts = ringParts(spec);
+    const pct = shares(parts.map((p) => p.value));
     const total = parts.reduce((a, p) => a + p.value, 0);
-    return parts.map((p) => `${p.name}: ${fmt(p.value)}${total ? ` (${Math.round((p.value / total) * 100)}%)` : ''}`).join('; ');
+    return parts.map((p, i) => `${p.name}: ${fmt(p.value)}${total ? ` (${pct[i]}%)` : ''}`).join('; ');
   }
   return spec.series
     .map((s) => {
@@ -116,9 +117,39 @@ export function chartSummary(spec: PdChartSpec): string {
     .join('; ');
 }
 
-/** How the option is drawn: `animate` false for reduced motion. */
+/** How the option is drawn: `animate` false for reduced motion; `narrow` (a box under 400 px) puts a donut's list under the ring; `height` is the canvas height. */
 export interface PdChartDrawing {
   readonly animate: boolean;
+  readonly narrow?: boolean;
+  readonly width?: number;
+  readonly height?: number;
+}
+
+/** The ring's radius in px (the same in the wide and the narrow layout's maths). */
+const RING_RADIUS_NARROW = 58;
+
+/** The canvas height a donut with `rows` slices needs when it is narrow (ring on top, list under it). */
+export function donutNarrowHeight(rows: number): number {
+  return 12 + RING_RADIUS_NARROW * 2 + 14 + rows * 20 + 8;
+}
+
+/**
+ * Whole-number shares that add up to exactly 100 (largest-remainder rounding): 48.3, 30.9, 16.1 and 4.7 read 48, 31, 16, 5, never 101.
+ * All zeros when the total is 0.
+ */
+export function shares(values: readonly number[]): number[] {
+  const total = values.reduce((a, v) => a + v, 0);
+  if (total <= 0) return values.map(() => 0);
+  const exact = values.map((v) => (v / total) * 100);
+  const floor = exact.map(Math.floor);
+  let left = 100 - floor.reduce((a, v) => a + v, 0);
+  const order = exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => b.r - a.r || a.i - b.i);
+  for (const { i } of order) {
+    if (left <= 0) break;
+    floor[i] = (floor[i] ?? 0) + 1;
+    left -= 1;
+  }
+  return floor;
 }
 
 /**
@@ -132,45 +163,54 @@ export function chartOption(spec: PdChartSpec, t: PaddockChartTokens, drawing: P
   const formatX = spec.formatX ?? ((x: string | number) => defaultFormatX(x, spec.time));
   const legend = spec.legend ?? (spec.kind === 'donut' || spec.series.length > 1);
   const animation = { animation: drawing.animate, ...(drawing.animate ? {} : { animationDuration: 0, animationDurationUpdate: 0 }) };
-  const legendOption = { legend: { show: legend, data: spec.kind === 'donut' ? spec.x.map(String) : spec.series.map((s) => s.name) } };
+  const legendOption = { legend: { show: legend, left: 12, data: spec.kind === 'donut' ? spec.x.map(String) : spec.series.map((s) => s.name) } };
 
   if (spec.kind === 'donut') {
     const parts = ringParts(spec);
     const total = parts.reduce((a, p) => a + p.value, 0);
+    const pct = shares(parts.map((p) => p.value));
     const order = ringOrder(t.palette, Math.min(parts.length, RING_MAX_SLICES));
     const colorOf = (i: number): string => (i < RING_MAX_SLICES ? t.palette[order[i] ?? i] ?? t.accent : t.neutralBar);
     const data = parts.map((p, i) => ({ name: p.name, value: p.value, itemStyle: { color: p.other ? t.neutralBar : colorOf(i) } }));
-    const percent = (v: number): string => `${total ? Math.round((v / total) * 100) : 0}%`;
+    // One source for the ring and the total in its middle: the centre in pixels. Narrow boxes put the list under the ring.
+    const narrow = drawing.narrow === true;
+    const height = drawing.height ?? 200;
+    const radius = narrow ? RING_RADIUS_NARROW : Math.max(40, Math.min(Math.floor(height / 2) - 10, 90));
+    // The total reads as one value on one line, smaller when it is long, so it stays inside the hole of the ring.
+    const totalText = withUnit(format(total), spec.unit);
+    const cx = narrow ? Math.floor((drawing.width ?? 320) / 2) : radius + 16;
+    const cy = narrow ? radius + 12 : Math.floor(height / 2);
     return {
       ...animation,
-      // Direct labels: every slice is named in the list beside the ring with its value and share, so colour is never the only key.
+      // Direct labels: every slice is named in the list beside (or under) the ring with its value and share, so colour is never the only key.
       legend: {
         show: true,
         orient: 'vertical',
-        right: 4,
-        top: 'middle',
         icon: 'roundRect',
-        itemGap: 10,
+        itemGap: 8,
+        ...(narrow ? { left: 'center', bottom: 4 } : { left: cx + radius + 24, top: 'middle' }),
         formatter: (name: string) => {
-          const p = parts.find((x) => x.name === name);
-          return p ? `${name}  ${withUnit(format(p.value), spec.unit)}  ${percent(p.value)}` : name;
+          const i = parts.findIndex((x) => x.name === name);
+          return i < 0 ? name : `${name}  ${withUnit(format(parts[i]?.value ?? 0), spec.unit)}  ${pct[i]}%`;
         },
         data: parts.map((p) => p.name),
       },
       graphic: [
         {
           type: 'text',
-          left: '24%',
-          top: 'middle',
-          style: { text: `${format(total)}${spec.unit ? `\n${spec.unit}` : ''}`, textAlign: 'center', textVerticalAlign: 'middle', fill: t.text, font: `600 18px ${t.fontFamily}`, lineHeight: 22 },
+          x: cx,
+          y: cy,
+          style: { text: totalText, textAlign: 'center', textVerticalAlign: 'middle', fill: t.text, font: `600 ${totalText.length > 7 ? 13 : 16}px ${t.fontFamily}` },
         },
       ],
       tooltip: {
         trigger: 'item',
-        formatter: (p: { name: string; value: number; color: string; percent: number }) =>
-          tooltipHtml(p.name, [{ color: p.color, name: withUnit(format(p.value), spec.unit), value: `${Math.round(p.percent)}%` }]),
+        formatter: (p: { name: string; value: number; color: string }) => {
+          const i = parts.findIndex((x) => x.name === p.name);
+          return tooltipHtml(p.name, [{ color: p.color, name: withUnit(format(p.value), spec.unit), value: `${pct[i] ?? 0}%` }]);
+        },
       },
-      series: [{ type: 'pie', radius: ['56%', '80%'], center: ['28%', '50%'], label: { show: false }, itemStyle: { borderColor: t.surface1, borderWidth: 2 }, data }],
+      series: [{ type: 'pie', radius: [Math.round(radius * 0.68), radius], center: [cx, cy], label: { show: false }, itemStyle: { borderColor: t.surface1, borderWidth: 2 }, data }],
     };
   }
 
@@ -187,7 +227,9 @@ export function chartOption(spec: PdChartSpec, t: PaddockChartTokens, drawing: P
   });
   const series = spec.series.map((s, i) => {
     const color = seriesColor(t, s.color, i, only);
-    const common = { name: s.name, color, itemStyle: { color } };
+    // Four or more series are not told apart by colour alone: hovering one isolates it, and the tooltip names it.
+    const isolate = spec.series.length >= 4 ? { emphasis: { focus: 'series' } } : {};
+    const common = { name: s.name, color, itemStyle: { color }, ...isolate };
     switch (spec.kind) {
       case 'line':
       case 'area': {
@@ -221,7 +263,7 @@ export function chartOption(spec: PdChartSpec, t: PaddockChartTokens, drawing: P
         );
       },
     },
-    grid: { top: legend ? 36 : 12, left: 8, right: 12, bottom: spec.zoom ? 28 : 8, containLabel: true },
+    grid: { top: legend ? 36 : 12, left: 12, right: 12, bottom: spec.zoom ? 28 : 8, containLabel: true },
     xAxis: spec.time ? { type: 'time', axisLabel: { hideOverlap: true } } : { type: 'category', data: spec.x.map(String), boundaryGap: bars, axisLabel: { hideOverlap: true, formatter: (v: string) => formatX(v) } },
     yAxis: { type: 'value', min: bars || spec.kind === 'area' ? 0 : undefined, max: spec.max, axisLabel: { formatter: (v: number) => format(v) } },
     series,

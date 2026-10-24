@@ -1,6 +1,6 @@
 import type { PaddockChartTokens } from '@decryp7/paddock-ui';
 import { describe, expect, it } from 'vitest';
-import { chartOption, chartSummary, escapeHtml, seriesColor, tooltipHtml, type PdChartSpec } from './options';
+import { chartOption, chartSummary, donutNarrowHeight, escapeHtml, seriesColor, shares, tooltipHtml, type PdChartSpec } from './options';
 
 const tokens: PaddockChartTokens = {
   scheme: 'dark',
@@ -93,6 +93,12 @@ describe('chart options', () => {
     expect(o['series'][0].showSymbol).toBe(true);
   });
 
+  it('isolates a series on hover from four series on, because colour alone does not tell four lines apart', () => {
+    const many = (n: number) => opt({ kind: 'line', x: ['a', 'b'], series: Array.from({ length: n }, (_, i) => ({ name: `S${i}`, values: [1, 2] })) });
+    expect(many(3)['series'][0].emphasis).toBeUndefined();
+    expect(many(4)['series'].every((s: any) => s.emphasis?.focus === 'series')).toBe(true);
+  });
+
   it('uses the accent for a lone series (the same blue in every chart) and the palette for several', () => {
     expect(opt(base)['series'][0].color).toBe('#5b9bff');
     const two = opt({ ...base, series: [{ name: 'A', values: [1, 2, 3] }, { name: 'B', values: [1, 2, 3] }] });
@@ -135,10 +141,32 @@ describe('chart options', () => {
     expect(o['legend']).toMatchObject({ show: true, orient: 'vertical', data: ['Disk', 'Memory', 'Cache'] });
     expect(o['legend'].formatter('Disk')).toBe('Disk  60 GB  60%');
     expect(o['legend'].formatter('Nope')).toBe('Nope');
-    expect(o['graphic'][0].style.text).toBe('100\nGB');
+    expect(o['graphic'][0].style.text).toBe('100 GB');
+    // One line, smaller when the total is long, so it stays inside the hole of the ring.
+    expect(o['graphic'][0].style.font).toContain('16px');
+    expect(opt({ kind: 'donut', x: ['A'], series: [{ name: 'S', values: [1234567] }], unit: 'req' })['graphic'][0].style.font).toContain('13px');
     expect(o['series'][0]).toMatchObject({ type: 'pie' });
     expect(o['series'][0].data.map((d: any) => [d.name, d.value])).toEqual([['Disk', 60], ['Memory', 30], ['Cache', 10]]);
-    expect(o['tooltip'].formatter({ name: 'Disk', value: 60, color: '#60aeeb', percent: 60.4 })).toContain('60%');
+    expect(o['tooltip'].formatter({ name: 'Disk', value: 60, color: '#60aeeb' })).toContain('60%');
+    // The ring and the total are drawn around ONE centre, in pixels.
+    expect(o['series'][0].center).toEqual([o['graphic'][0].x, o['graphic'][0].y]);
+    // Wide: the list starts right of the ring; narrow: the list is under the ring, centred, and the ring is centred in the box.
+    const [cx, radius] = [o['series'][0].center[0], o['series'][0].radius[1]];
+    expect(o['legend'].left).toBeGreaterThan(cx + radius);
+    const narrow = opt({ kind: 'donut', x: ['A', 'B'], series: [{ name: 'S', values: [1, 1] }] }, true) as Record<string, any>;
+    const n = chartOption({ kind: 'donut', x: ['A', 'B'], series: [{ name: 'S', values: [1, 1] }] }, tokens, { animate: true, narrow: true, width: 320 }) as Record<string, any>;
+    expect(n['legend']).toMatchObject({ left: 'center', bottom: 4 });
+    expect(n['series'][0].center[0]).toBe(160);
+    expect(n['series'][0].center[0] - n['series'][0].radius[1]).toBeGreaterThanOrEqual(0);
+    expect(n['series'][0].center[1] + n['series'][0].radius[1]).toBeLessThan(donutNarrowHeight(2));
+    expect(narrow['legend'].top).toBe('middle');
+  });
+
+  it('rounds shares so they add up to 100, and shows nothing for an empty ring', () => {
+    expect(shares([42, 27, 14, 5])).toEqual([48, 31, 16, 5]);
+    expect(shares([1, 1, 1])).toEqual([34, 33, 33]);
+    expect(shares([0, 0])).toEqual([0, 0]);
+    expect(shares([50, 50]).reduce((a, b) => a + b, 0)).toBe(100);
   });
 
   it('colours slices in an order that keeps neighbours apart, and merges more than five slices into one neutral "Other"', () => {
@@ -158,6 +186,7 @@ describe('chart options', () => {
     expect(chartSummary({ ...base, series: [{ name: 'None', values: [null, null, null] }] })).toBe('None: no data');
     expect(chartSummary({ ...base, series: [], kind: 'bar' })).toBe('');
     expect(chartSummary({ kind: 'donut', x: ['Disk', 'Memory'], series: [{ name: 'Use', values: [75, 25] }] })).toBe('Disk: 75 (75%); Memory: 25 (25%)');
+    expect(chartSummary({ kind: 'donut', x: ['A', 'B', 'C'], series: [{ name: 'S', values: [1, 1, 1] }] })).toBe('A: 1 (34%); B: 1 (33%); C: 1 (33%)');
     expect(chartSummary({ kind: 'donut', x: ['Disk'], series: [{ name: 'Use', values: [0] }] })).toBe('Disk: 0');
     expect(chartSummary({ kind: 'donut', x: ['A', 'B', 'C', 'D', 'E', 'F'], series: [{ name: 'S', values: [1, 1, 1, 1, 1, 1] }] })).toContain('Other: 2 (33%)');
     expect(chartSummary({ kind: 'donut', x: ['A'], series: [] })).toBe('A: 0');

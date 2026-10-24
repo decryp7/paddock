@@ -23,6 +23,10 @@ export interface PaletteRow {
   readonly marks: ReadonlySet<number>;
   /** Shown but inert with this reason. */
   readonly disabled?: string;
+  /** The heading drawn before this row (the empty commands list: "Recently used", "Frequently used", "Other commands"). */
+  readonly heading?: string;
+  /** `detail` is a path: drawn shortened in the middle (rule 18). */
+  readonly detailIsPath?: boolean;
 }
 
 /** Where the list's rows come from: the palette's own commands and views, or a contributed provider. */
@@ -130,22 +134,46 @@ export const PaletteStore = signalStore(
         ? []
         : didYouMean(entries(), commandQuery(), (e) => (e.category ? `${e.category} ${e.title}` : e.title)).map(plain),
     );
-    const commandRows = computed<PaletteRow[]>(() =>
-      (ranked().length ? ranked() : suggestions()).map((r) => ({
-        key: r.item.id,
-        label: r.item.title,
-        ...(r.showCategory && r.item.category ? { category: r.item.category } : {}),
-        ...(r.item.keybinding ? { keybinding: r.item.keybinding } : {}),
-        ...(r.item.disabled ? { disabled: r.item.disabled } : {}),
-        marks: r.marks,
-      })),
-    );
+    /** The group of a row of the empty list, so it reads as recent, frequent, then the rest (review P3-1). */
+    const groupOf = (id: string): string | null =>
+      commandQuery().trim()
+        ? null
+        : store._recent.ids().includes(id)
+          ? $localize`:@@pd.wb.palette.group.recent:Recently used`
+          : store._common.includes(id)
+            ? $localize`:@@pd.wb.palette.group.common:Frequently used`
+            : $localize`:@@pd.wb.palette.group.other:Other commands`;
+    const commandRows = computed<PaletteRow[]>(() => {
+      let last: string | null = null;
+      return (ranked().length ? ranked() : suggestions()).map((r) => {
+        const group = groupOf(r.item.id);
+        const heading = group !== null && group !== last ? group : undefined;
+        last = group;
+        return {
+          key: r.item.id,
+          label: r.item.title,
+          ...(r.showCategory && r.item.category ? { category: r.item.category } : {}),
+          ...(r.item.keybinding ? { keybinding: r.item.keybinding } : {}),
+          ...(r.item.disabled ? { disabled: r.item.disabled } : {}),
+          ...(heading ? { heading } : {}),
+          marks: r.marks,
+        };
+      });
+    });
     const provider = computed<PaletteProviderDef | null>(() => {
       const s = store.source();
       return s.kind === 'provider' ? (store._registry.paletteProviders.find((p) => p.id === s.id) ?? null) : null;
     });
     return {
       _entries: entries,
+      /** What the user searched for, without a prefix (for "Nothing matches “…”", review P2-9). */
+      searched: computed(() => {
+        const s = store.source();
+        if (s.kind === 'commands') return commandQuery().trim();
+        const q = store.query();
+        const prefix = provider()?.prefix ?? '';
+        return (prefix && q.startsWith(prefix) ? q.slice(prefix.length) : q).trim();
+      }),
       suggesting: computed(() => suggestions().length > 0),
       rows: computed<readonly PaletteRow[]>(() => (store.source().kind === 'commands' ? commandRows() : store.providerRows())),
       provider,
@@ -186,7 +214,7 @@ export const PaletteStore = signalStore(
           return {
             key,
             label,
-            ...(item.detail ? { detail: String(item.detail) } : {}),
+            ...(item.detail ? { detail: String(item.detail), ...(/[\\/]/.test(String(item.detail)) ? { detailIsPath: true } : {}) } : {}),
             ...(item.icon ? { icon: item.icon } : {}),
             ...(item.keybinding ? { keybinding: formatKey(item.keybinding, store._keymap.platform) } : {}),
             ...(item.disabled ? { disabled: item.disabled } : {}),
