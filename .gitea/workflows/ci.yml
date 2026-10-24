@@ -511,7 +511,7 @@ jobs:
     name: workbench demo app (fmt, clippy, tests, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -521,10 +521,6 @@ jobs:
         with:
           sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
       - name: The UI the app embeds
