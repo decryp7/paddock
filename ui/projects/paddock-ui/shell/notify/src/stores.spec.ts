@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { MemoryNotificationCentre, NotificationsBackend, ServiceHealthBackend, type Unlisten } from './backends';
 import { NotificationsStore, localCause } from './notifications.store';
 import { ServiceHealthStore } from './service-health.store';
+import { OPEN_SETTINGS } from './notify-config';
 import { cause, notifyBed, settle } from './spec-helpers';
 import type { Notice, NoticesEvent, NoticesSnapshot, ServiceHealthSnapshot } from './wire.types';
 
@@ -136,6 +137,9 @@ class FailingCentre extends NotificationsBackend {
   onOpen(): Promise<Unlisten> {
     return Promise.resolve(() => undefined);
   }
+  onAction(): Promise<Unlisten> {
+    return Promise.resolve(() => undefined);
+  }
 }
 
 describe('NotificationsStore', () => {
@@ -152,6 +156,27 @@ describe('NotificationsStore', () => {
     expect(store.groups().map((g) => [g.source, g.notices.length])).toEqual([['job', 2]]);
     centre.resolve('job:1');
     expect(store.toasts()).toEqual([]);
+  });
+
+  it('runs the button of an OS notification the engine left to this window, and says when it cannot', async () => {
+    const opened: string[] = [];
+    const { centre } = notifyBed({ extra: [{ provide: OPEN_SETTINGS, useValue: (s: string) => void opened.push(s) }] });
+    const store = TestBed.inject(NotificationsStore);
+    await settle();
+    const n = centre.post({ cause: 'job:1', source: 'job', severity: 'error', title: 'Export failed' });
+    centre.runAction({ id: n.id, action: { type: 'openSettings', section: 'general' } });
+    await settle();
+    expect(opened).toEqual(['general']);
+    expect(store.all().filter((m) => m.source === 'notification-action')).toEqual([]);
+    // An action this window cannot do is a notice, not a silent click.
+    centre.runAction({ id: n.id, action: { type: 'viewJob' } });
+    await settle();
+    expect(store.all().map((m) => m.title)).toContain('This window cannot do “viewJob”.');
+    // The message went before the click was heard.
+    centre.runAction({ id: 9999, action: { type: 'openSettings', section: 'x' } });
+    await settle();
+    expect(opened).toEqual(['general']);
+    expect(store.all().map((m) => m.title)).toContain('That notification is no longer listed.');
   });
 
   it('a read posted message is not toasted', async () => {

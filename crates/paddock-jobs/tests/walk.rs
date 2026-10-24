@@ -2,7 +2,6 @@ use paddock_jobs::*;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
 
 fn tree(root: &Path) {
     for d in ["a", "a/b", "a/b/c", "z", ".git", "node_modules/x"] {
@@ -297,10 +296,9 @@ fn cancel_stops_a_big_walk_promptly() {
         }
     }
     let c = CancelAt(&cancel, AtomicU64::new(0));
-    let t0 = Instant::now();
     let r = par_walk(t.path(), &WalkOptions::default(), &cancel, &c);
     assert!(matches!(r, Err(JobError::Cancelled(CancelReason::User))));
-    assert!(t0.elapsed() < Duration::from_millis(CANCEL_LATENCY_TARGET_MS * 4));
+    // Promptness is counted in entries, never in wall-clock time.
     assert!(
         c.1.load(Ordering::SeqCst) < 12_000,
         "did not finish the tree"

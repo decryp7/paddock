@@ -88,7 +88,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
-| `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
+| `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008); `time`: the family's clock port, fake clock, deadlines, restart back-off (plan X20) | yes (all five apps); built |
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
@@ -132,6 +132,30 @@ tauri::Builder::default()
 - Generated TypeScript in `ui/projects/paddock-ui/shell/jobs/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs
   --features tauri --test tauri generated`): `jobs-commands.ts` (`JOBS_COMMANDS`, `JobsCommand`) and `jobs-fixtures.ts`
   (one snapshot of every shape, written by the real reporter, decoded by the UI's specs).
+
+## `paddock_jobs::time` (plan X20)
+
+One clock for the family (Rule 40 fix for tests that asserted wall-clock limits, lessons "Tests that measure the wall
+clock fail under load"). `paddock-log` and `paddock-health` re-export these types; apps delete their `clock.rs`/`time.rs`
+ports and back-off loops (see the plan's X20 row).
+
+```rust
+use paddock_jobs::time::{Backoff, BackoffPolicy, Clock, Deadline, FakeClock, Retry, SystemClock};
+let clock: Arc<dyn Clock> = Arc::new(SystemClock);              // FakeClock in tests
+let token = CancelToken::with_deadline_on(clock.clone(), limit); // or JobRegistry::register_with_deadline (registry's clock)
+clock.wait(Duration::from_secs(1), &token)?;                     // Err(Cancelled) at once on cancel or deadline
+let mut b = Backoff::new(BackoffPolicy::default());               // 1 s doubling to 60 s, reset after 5 healthy min, give up >5 in 10 min
+match b.failed(clock.monotonic()) { Retry::After(d) => clock.wait(d, &token)?, Retry::GiveUp => report() }
+```
+
+- `Clock`: `monotonic()` (never backwards; the only reading for durations, deadlines and back-off), `wall()` (calendar
+  time for stamps and file names; may jump), `wait(d, &CancelToken)`; provided `now_ms`, `wall_ms`, `sleep`.
+- `FakeClock`: both readings move only with `advance`/`advance_ms` (`set_wall` moves the wall alone); waits block until
+  the clock reaches their end. A test starts the work, `wait_for_waiters(n, guard)` until it is blocked on the clock,
+  advances and asserts the outcome; the guard is a hang guard, never a timing assertion.
+- `Deadline::after(clock, limit)`: `passed()`, `remaining()`; a limit too large to represent never passes.
+- `Backoff` is a pure state machine over monotonic readings (`healthy(now)`, `failed(now) -> Retry`, `reset()`);
+  `BackoffPolicy::retry_forever` for a reconnecting client.
 
 ## `paddock-commands` (plan S1)
 
@@ -199,7 +223,7 @@ The shell's files live in `ui/projects/paddock-ui/shell/generated/` and in the e
 | `commands.ts` | the wire types (ts-rs): `CommandKind`, `WindowClass`, `CommandInfo`, `RefusalCode`, `CommandRefusal` | `paddock-commands` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated`) |
 | `shell-commands.ts` | `SHELL_COMMANDS` and `ShellCommand`, every command of the shell plugin | `paddock-shell` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-shell --lib generated`) |
 | `shell.ts` | `SHELL_PLUGIN`, `SHELL_VERSION` and the `shell_version` reply (`VersionReply`, `AppIdentity`) | `paddock-shell` (same test) |
-| `notify/generated/health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications, window notices and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
+| `notify/generated/health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`, `NOTIFICATIONS_ACTION_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications, window notices and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
 | `notify/generated/health-commands.ts` | `HEALTH_COMMANDS` and `HealthCommand`, the health and notification commands | `paddock-health` (same test) |
 
 An app writes its own file the same way into its UI (for example `src/app/core/generated/app-commands.ts`); dialog
@@ -286,6 +310,42 @@ health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.
   the shell's own are `health`, `repairService` and `openSettings`. App messages are saved debounced and atomically in a
   versioned file (missing, damaged or newer: empty, logged); a window's project messages are saved by the app with its
   project (`notifications_record` / `notifications_restore`). A dialog or pop-out sees its host window's list.
+- OS notifications (plan X8, `notify::os`; the Tauri side in `tauri::os`, the plugin adapter in `tauri::native` behind
+  feature `os-notify`): one policy for every app, merged from Debrief's `notify.rs` (level, "only when the user cannot see
+  it", rate limiter), Spotter's `toast.rs` (buttons, click-through, a validated payload) and `QuietHours`; Pitcrew's and
+  Dyno's plain toasts had nothing to add (Dyno's sustain and cool-down decide whether an alarm *exists* and stay in
+  `dyno-core`).
+
+  ```rust
+  let settings = SharedOsSettings::default();              // the user's level, quiet hours, limits (Settings: pd.notifications)
+  let notifier = OsNotifier::new(settings.clone(), Arc::new(PluginToaster::new(app.clone())))
+      .with_labels(ActionLabels::default().label("viewJob", "View job"));
+  paddock_shell::Builder::new(identity)
+      .os_notifications(settings)                          // the "Notifications" settings page over the same handle
+      .health_setup(move |_, s| s.os_notifier(Arc::new(notifier)).on_notice_action("viewJob", |app, notice, action| open_job(app, action)))
+  ```
+
+  - Policy (`screen`, pure): the level (`off`, `alerts` = warning and above, `all`), then "the window the message belongs
+    to is in front" (`user_sees` over focused and visible windows; an app-wide message is seen in any), then quiet hours
+    (local time, across midnight; a critical failure still notifies unless the user turns that off), then the limits.
+    A held-back message is still in the centre; only the toast waits.
+  - Limits (`RateLimiter`, epoch ms from the injected `Clock`): one toast per cause key per cool-down (30 s) and a burst
+    (5 in 5 minutes) over all causes, both clamped to ranges; bounded to 512 causes; a clock that goes backwards forgets
+    instead of muting; a toast the OS refused is taken back (`Reservation`), so a failure costs no quota.
+  - Buttons: a toast has up to three, one per labelled action of the message (`ActionLabels`; the shell's `repairService`
+    and `openSettings` are built in). A click reports the message id and the slot; the action is read from the centre's
+    message again, never from the OS payload (`route`): the toast opens the message (and marks it read), Repair runs
+    `Health::repair` in the shell (rule 19), an app handler (`on_notice_action`) runs on the OS callback thread, anything
+    else goes to the window as `paddock://notifications-action` (`NoticeActionEvent`; the UI runs it like the centre's own
+    button). Where an OS reports no clicks the old fallback stays: the app gaining the focus within 2 minutes opens the
+    last toast's message; a reported click supersedes it.
+  - Quiet-hours digest: causes held back by quiet hours are counted (distinct, at most 512); when quiet hours are over
+    `OsNotifier::pending_digest` says how many and `tauri::poll_digest` posts one quiet message ("N notifications held
+    during quiet hours", cause `os:quiet-digest`, merged across nights) and one toast, rate-limited like any other cause. A
+    user who is looking at the window gets the message in the centre only. `Setup::os_digest_every(d)` polls on a thread that
+    ends with the app (quiet hours end by the clock, not an event); a window gaining the focus polls too.
+  - Tests never post a notification: `FakeToaster` records toasts, plays clicks and permission answers (public, for the
+    apps' wiring tests); `FixedOffset` stands for the user's zone, `ManualClock` for time.
 
 ## `paddock-startup` (plan S7 and §11)
 
@@ -669,7 +729,7 @@ paddock_log::log_from_webview(window, level, message);               // the webv
 - Panics: the hook writes a Fatal entry (thread, location, bounded backtrace, span fields) and `crash-<process>.json`
   (`CrashMarker`, in `AppDirs::data()`); the next start reads it (plan X3) and clears it.
 - `spawn_child_capture(name, stderr)` logs a child's output line by line (4 KiB per line, `Child` + `child:<name>`).
-- Tests use `Logging::scoped`, a temp folder and `ManualClock`; no sleeps.
+- Tests use `Logging::scoped`, a temp folder and `FakeClock` (`paddock_jobs::time`, re-exported; `now_utc` reads it as UTC); no sleeps.
 
 ## `paddock-proc` (plan X6)
 

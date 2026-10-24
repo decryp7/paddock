@@ -4,7 +4,7 @@
 //! JSON file the next start reads to offer Restore or Safe Mode (plan X3), and runs the previous hook afterwards (so stderr
 //! still gets the message in a terminal).
 
-use crate::clock::Clock;
+use crate::clock::{Clock, now_utc};
 use paddock_env::write_atomic;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -151,10 +151,7 @@ impl PanicReport {
                 version: CrashMarker::VERSION,
                 process: self.process.clone(),
                 pid: std::process::id(),
-                time: self
-                    .clock
-                    .now()
-                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                time: now_utc(&*self.clock).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                 thread: facts.thread.clone(),
                 message: crate::redact::cap(&facts.message, MAX_MARKER_MESSAGE),
                 location: facts.location.clone(),
@@ -179,7 +176,7 @@ pub(crate) fn install_hook(report: PanicReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clock::ManualClock;
+    use crate::clock::FakeClock;
     use chrono::{TimeZone, Utc};
 
     #[test]
@@ -236,8 +233,8 @@ mod tests {
             process: "app".into(),
             marker: Some(path.clone()),
             log_file: Some(t.path().join("app.log")),
-            clock: Arc::new(ManualClock::new(
-                Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap(),
+            clock: Arc::new(FakeClock::at_wall(
+                Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap().into(),
             )),
         };
         report.record(&PanicFacts {
