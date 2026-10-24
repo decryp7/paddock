@@ -2,7 +2,7 @@
 
 use paddock_testplan::*;
 
-const PLAN: &str = include_str!("../../../fixtures/settings.sighterplan");
+const PLAN: &str = include_str!("../../fixtures/settings.sighterplan");
 
 fn parse(text: &str) -> Result<Plan, PlanError> {
     parse_plan(text.as_bytes())

@@ -3136,7 +3136,6 @@ dependencies = [
 name = "paddock-assistant"
 version = "0.1.0"
 dependencies = [
- "log",
  "paddock-commands",
  "paddock-env",
  "paddock-health",
