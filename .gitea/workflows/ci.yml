@@ -59,7 +59,7 @@ jobs:
         run: npm run build:e2e
 
       - name: Build the shell demo
-        run: npx ng build shell-demo
+        run: npm run shell-demo:build
 
       - name: Reference app checks (gallery and shell demo; axe, keyboard, CSP, 320 px)
         # CI names its ports (@decryp7/paddock-e2e refuses a default there: another job could hold it).
@@ -211,7 +211,7 @@ jobs:
         working-directory: ui
         run: |
           npm ci
-          npx ng build shell-demo
+          npm run shell-demo:build
 
       - name: App (fmt, clippy, tests on the mock runtime, deny)
         working-directory: apps/shell-demo/src-tauri
