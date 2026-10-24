@@ -466,8 +466,8 @@ Gaps left:
   each client's handshake has its own thread and limit (a silent client delays nobody); `LinkServer` has Pitcrew's cap
   (`max_connections`, `max_handshakes`, `busy` refusals) and push `Subscriptions`; the Windows discovery file is checked
   for its owner (the user, or Administrators). The OS accept itself still waits in 100 ms slices to see the stop flag.
-- Windows: the endpoint code type-checks here and needs the Windows runner; children use `paddock-proc` trees (taskkill)
-  until X54's job object.
+- Windows: the endpoint code type-checks here and needs the Windows runner. Children run in `paddock-proc`'s kill-on-close
+  job object (X54, 2026-10-25; type-checked here, its orphan test runs on the Windows runner).
 
 ## X25 built: adoption and exit codes (2026-10-25)
 
