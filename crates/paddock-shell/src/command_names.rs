@@ -5,6 +5,7 @@ pub const COMMAND_NAMES: &[&str] = &[
     "about_whats_new",
     "about_whats_new_start",
     "app_quit",
+    "app_relaunch",
     "diagnostics_cancel",
     "diagnostics_preview",
     "diagnostics_save",

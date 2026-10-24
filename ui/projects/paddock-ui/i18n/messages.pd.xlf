@@ -443,6 +443,27 @@
       <trans-unit id="pd.jobs.still-working" datatype="html">
         <source>still working, this step is taking longer than usual</source>
       </trans-unit>
+      <trans-unit id="pd.language.english" datatype="html">
+        <source>English</source>
+      </trans-unit>
+      <trans-unit id="pd.language.lede" datatype="html">
+        <source>The language of the app’s menus, dialogs and messages. Names of files, logs and other data are never translated.</source>
+      </trans-unit>
+      <trans-unit id="pd.language.pseudo" datatype="html">
+        <source>Pseudo-locale (for testing)</source>
+      </trans-unit>
+      <trans-unit id="pd.language.restart-needed" datatype="html">
+        <source>The new language applies after the window restarts.</source>
+      </trans-unit>
+      <trans-unit id="pd.language.restart-now" datatype="html">
+        <source>Restart now</source>
+      </trans-unit>
+      <trans-unit id="pd.language.system" datatype="html">
+        <source>System default</source>
+      </trans-unit>
+      <trans-unit id="pd.language.title" datatype="html">
+        <source>Language</source>
+      </trans-unit>
       <trans-unit id="pd.menu.bar" datatype="html">
         <source>Application menu</source>
       </trans-unit>
@@ -865,6 +886,9 @@
       </trans-unit>
       <trans-unit id="pd.settings.hint.text" datatype="html">
         <source>up to <x id="count"/> characters</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.language" datatype="html">
+        <source>Language</source>
       </trans-unit>
       <trans-unit id="pd.settings.load-failed" datatype="html">
         <source>The settings could not be loaded: <x id="cause"/></source>

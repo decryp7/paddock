@@ -87,3 +87,17 @@ pub fn taskkill(pid: u32, force: bool) -> bool {
 /// Makes the child lead its own process group (Unix); Windows trees are ended by `taskkill /T`.
 #[cfg(not(unix))]
 pub fn own_group(_cmd: &mut std::process::Command) {}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_that_could_hit_the_caller_or_everything_are_refused() {
+        // 0 and 1 would signal our own group or init; ids beyond pid_t are not processes at all.
+        for id in [0, 1, u32::MAX, u32::MAX / 2 + 2] {
+            assert!(!signal_group(id, SIGTERM), "group {id}");
+            assert!(!signal_pid(id, SIGTERM), "pid {id}");
+        }
+    }
+}

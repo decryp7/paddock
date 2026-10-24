@@ -7,6 +7,7 @@ export const SHELL_COMMANDS = {
   about_whats_new: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   about_whats_new_start: { kind: 'mutation', windows: ['main'], limit: 262144 },
   app_quit: { kind: 'mutation', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },
+  app_relaunch: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   diagnostics_cancel: { kind: 'mutation', windows: ['dialog'], limit: 262144 },
   diagnostics_preview: { kind: 'mutation', windows: ['dialog'], limit: 262144 },
   diagnostics_save: { kind: 'mutation', windows: ['dialog'], limit: 262144 },

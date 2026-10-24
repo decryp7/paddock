@@ -634,10 +634,14 @@ mod tests {
             .local_addr()
             .unwrap()
             .port();
-        assert!(matches!(
-            send(free, &Request::get("/"), Timeouts::QUICK, None),
-            Err(HttpError::Refused(_))
-        ));
+        let closed = send(free, &Request::get("/"), Timeouts::QUICK, None);
+        // Windows retries a connection to a closed port for about two seconds, so a short connect timeout ends first.
+        assert!(
+            matches!(closed, Err(HttpError::Refused(_)))
+                || (cfg!(windows) && matches!(closed, Err(HttpError::Timeout("connecting")))),
+            "{:?}",
+            closed.as_ref().err()
+        );
         let (port, _q, _r) = serve(vec![b"SSH-2.0-nope\r\n\r\n".to_vec()], false);
         assert!(matches!(
             send(port, &Request::get("/"), Timeouts::QUICK, None),

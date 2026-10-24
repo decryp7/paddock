@@ -396,6 +396,13 @@ fn a_part_that_fails_to_set_up_stops_the_start_with_its_name() {
     };
     let bad_contracts = built(Builder::new(identity()).dialog_contracts("{"));
     assert!(bad_contracts.is_err());
+    let no_service =
+        built(Builder::new(identity()).service(|_| Err("the agent is missing".into())));
+    let e = no_service.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(
+        e.contains("background service") && e.contains("agent is missing"),
+        "{e}"
+    );
     let failing =
         built(Builder::new(identity()).setup(|_| Err("the app's store is locked".into())));
     let e = failing.err().map(|e| e.to_string()).unwrap_or_default();
@@ -602,6 +609,79 @@ fn the_background_service_brings_its_commands_health_entry_and_start_at_login_sw
     // A tray popover may look but not change it.
     let tray = window(&app, "tray");
     assert!(text(&invoke(&tray, "service_repair", json!({})).unwrap_err()).contains("not allowed"));
+}
+
+/// The app's own login item, recording what the switch asks of it.
+struct RecordingAutostart(Arc<Mutex<Vec<bool>>>);
+
+impl paddock_service::login::Autostart for RecordingAutostart {
+    fn set(&mut self, on: bool) -> Result<(), String> {
+        self.0.lock().unwrap().push(on);
+        Ok(())
+    }
+}
+
+#[test]
+fn the_start_at_login_switch_also_switches_the_apps_own_login_item() {
+    use paddock_service::backend::{Target, WindowsRun};
+    use paddock_service::testing::FakeSystem;
+    use paddock_service::{Manager, Output, ServiceSpec as Svc};
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    let sys = FakeSystem::new();
+    sys.put_program("C:\\Demo\\demo-agent.exe");
+    sys.answer("reg query", Output::code(1));
+    let os = sys.clone();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let item = asked.clone();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .health(vec![paddock_health::ServiceSpec::new(
+            "agent",
+            "the demo agent",
+        )])
+        .service(move |_| {
+            let spec = Svc::builder(
+                "net.decryptology.shell-demo.agent",
+                "ShellDemo",
+                "demo-agent",
+            )
+            .build()?;
+            let backend =
+                WindowsRun::new(spec, Target::exe("C:\\Demo\\demo-agent.exe"), Box::new(os));
+            let manager = Manager::new(
+                "Shell Demo",
+                Box::new(backend),
+                &data,
+                "net.decryptology.shell-demo.agent",
+                "1.0.0",
+                || false,
+            );
+            Ok(paddock_shell::ServicePart::new(
+                paddock_service::tauri::Setup::new(manager)
+                    .health("agent")
+                    .checks(std::time::Duration::ZERO, std::time::Duration::ZERO, 0),
+            )
+            .autostart(Box::new(RecordingAutostart(item))))
+        }));
+    let main = window(&app, "main");
+    let set = invoke(
+        &main,
+        "settings_set",
+        json!({ "section": "pd.login", "values": { "launchAtLogin": true } }),
+    )
+    .unwrap();
+    assert_eq!(set["applied"], true, "{set}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while asked.lock().unwrap().is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the login item was never asked"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(*asked.lock().unwrap(), [true]);
 }
 
 #[test]
