@@ -1,0 +1,22 @@
+# paddock/tools
+
+Dev and host scripts the apps copied five times, with the app as a parameter (plan X47). Run them from the app repository
+(`bash paddock/tools/<script> ...`, with Paddock checked out beside it or fetched by the CI action); each one fails fast on
+a bad option and never touches anything outside what it names.
+
+| Script | What | Replaces |
+|---|---|---|
+| `bootstrap.sh --name Pitcrew [--check]` | check the prerequisites (macOS or Linux), `npm ci`, build the installers, print where they are and the next steps | Pitcrew `macos-bootstrap.sh`, `linux-bootstrap.sh`; Pitwall `linux-bootstrap.sh` |
+| `verify-installed.sh --name Pitcrew --label ... --unit ... --service ...` | read-only check of an installed app: bundle, launchd agent or systemd user unit, socket, service answer, log tail | Pitcrew/Pitwall `macos-verify.sh`, `linux-verify.sh`; Dyno `linux-verify.sh` |
+| `linux-container.sh --id dyno --packages dyno-platform` | cargo test and clippy in a Linux container; labelled containers and volumes only; `--clean` | Dyno `linux-container.sh`; Pitwall `linux-container-verify.sh` |
+| `prune-build-folders.sh <folder> <max-gb>` | keep a persistent CI build folder under a cap (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
+| `prune-build-folders.ps1 -App debrief [-Remove -Keep 6c]` | list and remove build folders of finished worktrees (Windows) | Debrief `clean-build-dirs.ps1` |
+| `host-cleanup.sh --id pitwall --process pitwall-server` | stray test processes and temp folders on a host runner; used by the `host-cleanup` CI action | Pitwall `ci/macos-cleanup.sh` |
+
+Parameters carry what differed between the copies: the product name, the launchd label, the systemd unit, the service
+program, the data folder and socket name (defaults follow `paddock-env`), the launch-agent minimum macOS. What the verify
+scripts read (unit, launchd state, discovery file) is what `paddock-service` (X4) registers; pass its names.
+
+Tests: `node --test tools/test/*.test.mjs`. They run every script in a scratch folder with a PATH of shims
+(`PADDOCK_TOOLS_OS` pretends to be macOS or Linux), so no launchd, systemd, Docker or installed app is touched. The PowerShell
+script is not run on the Mac; it is a parameterised port of Debrief's, reviewed by reading, and runs on the Windows runner.

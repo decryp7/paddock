@@ -5,8 +5,8 @@
 mod support;
 
 use paddock_download::{
-    Config, DownloadError, Downloader, HostCaps, HttpConfig, Integrity, Request, Sha256Digest,
-    phases,
+    Config, DownloadError, Downloader, HostCaps, HttpConfig, Integrity, ProxyMode, Request,
+    Sha256Digest, phases,
 };
 use paddock_jobs::{CANCEL_LATENCY_TARGET_MS, CancelReason};
 use std::sync::Arc;
@@ -32,10 +32,16 @@ fn fast() -> Config {
     }
 }
 
+/// No proxy, whatever the machine running the tests is set up with.
+fn direct() -> HttpConfig {
+    HttpConfig {
+        proxy: ProxyMode::Direct,
+        ..HttpConfig::default()
+    }
+}
+
 fn downloader(config: Config) -> Downloader {
-    Downloader::http(HttpConfig::default())
-        .unwrap()
-        .with_config(config)
+    Downloader::http(direct()).unwrap().with_config(config)
 }
 
 fn pinned(data: &[u8]) -> Integrity {
@@ -814,12 +820,15 @@ fn an_unreachable_host_is_a_network_error_after_the_attempts() {
 }
 
 #[test]
-fn an_invalid_proxy_is_refused() {
-    let r = Downloader::http(HttpConfig {
-        proxy: Some("http://[::1".into()),
-        ..HttpConfig::default()
-    });
-    assert!(matches!(r, Err(DownloadError::InvalidRequest(_))));
+fn an_invalid_proxy_is_refused_when_the_mode_is_built() {
+    assert!(matches!(
+        ProxyMode::explicit("http://[::1"),
+        Err(DownloadError::InvalidRequest(_))
+    ));
+    assert!(matches!(
+        ProxyMode::explicit("socks5://h:1080"),
+        Err(DownloadError::InvalidRequest(_))
+    ));
 }
 
 // ---- cancel within 250 ms in every phase ----
@@ -996,7 +1005,7 @@ fn transport_failures_are_classified() {
     let slow = Server::start(|r, _| partial(r, b"x").delay(Duration::from_secs(3)));
     let d = Downloader::http(HttpConfig {
         response_timeout: Duration::from_millis(100),
-        ..HttpConfig::default()
+        ..direct()
     })
     .unwrap()
     .with_config(fast());
@@ -1042,7 +1051,7 @@ fn transport_failures_are_classified() {
         .unwrap()
         .port();
     let d = Downloader::http(HttpConfig {
-        proxy: Some(format!("http://127.0.0.1:{closed}")),
+        proxy: ProxyMode::explicit(&format!("http://127.0.0.1:{closed}")).unwrap(),
         ..HttpConfig::default()
     })
     .unwrap()
@@ -1052,7 +1061,7 @@ fn transport_failures_are_classified() {
     // A proxy that refuses to tunnel to an HTTPS host (the host itself is never contacted).
     let refusing = Server::start(|_, _| Resp::new(407, ""));
     let d = Downloader::http(HttpConfig {
-        proxy: Some(refusing.url("")),
+        proxy: ProxyMode::explicit(&refusing.url("")).unwrap(),
         ..HttpConfig::default()
     })
     .unwrap()

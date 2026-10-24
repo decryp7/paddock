@@ -1,0 +1,169 @@
+# Reusable (plan X10): an app's release from a v* tag, and only from one (rule 9). Installers are built on all three
+# platforms (macOS DMG sealed ad-hoc and verified with codesign --verify --deep --strict, rule 23; Windows NSIS; Linux deb
+# and AppImage), the updater keys are stripped of whitespace (rule 25), the About page gets its commit and date, and the
+# Gitea release is published with notes (changelog plus the First launch block), latest.json and the installers.
+#
+#   jobs:
+#     gates: { ... the app's own test jobs ... }
+#     release:
+#       needs: [gates]
+#       uses: decryp7/paddock/.gitea/workflows/app-release.yml@v0.3.0
+#       with: { paddock-ref: v0.3.0, app-id: pitcrew, app-name: Pitcrew, sidecars: "pitcrew-service" }
+#       secrets: inherit
+#
+# Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, TAURI_UPDATER_PUBKEY (the updater; without them the
+# build is unsigned and cannot update itself), RELEASE_TOKEN (a Gitea token with write:repository). Run it by hand
+# (workflow_dispatch in the caller) to build and verify the bundles without releasing: the "one CI build with bundles" of
+# rule 25. Cross-repository `uses:` of a workflow needs the Gitea to resolve it (plan D7); where it does not, copy these jobs.
+
+name: app-release
+
+on:
+  workflow_call:
+    inputs:
+      paddock-ref:
+        description: The Paddock tag whose actions and scripts this run uses (the same tag as in `uses:`).
+        type: string
+        required: true
+      app-id:
+        type: string
+        required: true
+      app-name:
+        type: string
+        required: true
+      app-dir:
+        type: string
+        default: app
+      sidecars:
+        description: Sidecar programs started from the built macOS app with --self-test, space separated.
+        type: string
+        default: ""
+      image:
+        type: string
+        default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
+      TAURI_UPDATER_PUBKEY:
+        required: false
+      RELEASE_TOKEN:
+        required: false
+
+jobs:
+  bundle:
+    name: bundle (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bundles: deb,appimage
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: app,dmg
+    runs-on: ${{ matrix.os }}
+    # Linux runs in the garage image (Tauri's libraries pre-installed); Windows and macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && inputs.image || '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: decryp7/paddock
+          ref: ${{ inputs.paddock-ref }}
+          path: .paddock
+
+      - name: Persistent build folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target-${{ inputs.app-id }}" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: ./.paddock/.gitea/actions/setup-node
+        with:
+          app-dir: ${{ inputs.app-dir }}
+
+      - uses: ./.paddock/.gitea/actions/setup-rust
+        if: runner.os != 'Linux'
+
+      - uses: ./.paddock/.gitea/actions/build-env
+
+      - uses: ./.paddock/.gitea/actions/tauri-bundle
+        with:
+          bundles: ${{ matrix.bundles }}
+          app-dir: ${{ inputs.app-dir }}
+          signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          signing-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          updater-pubkey: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+
+      # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and the app inside the
+      # DMG, every sidecar started with its self-test; the app is never started here.
+      - uses: ./.paddock/.gitea/actions/macos-verify
+        if: runner.os == 'macOS'
+        with:
+          sidecars: ${{ inputs.sidecars }}
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        with:
+          name: ${{ inputs.app-id }}-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+      - uses: ./.paddock/.gitea/actions/host-cleanup
+        if: always() && runner.os != 'Linux'
+        with:
+          app-id: ${{ inputs.app-id }}
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: ${{ inputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: decryp7/paddock
+          ref: ${{ inputs.paddock-ref }}
+          path: .paddock
+
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
+        with:
+          path: artifacts
+
+      - name: Every platform's installers are present
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          for pattern in '*.dmg' '*-setup.exe' '*.deb' '*.AppImage'; do
+            ls release/$pattern >/dev/null 2>&1 || { echo "::error::no $pattern was built: nothing is released"; exit 1; }
+          done
+
+      - uses: ./.paddock/.gitea/actions/setup-rust
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: Changelog of this release
+        run: git cliff --latest --strip header -o release/CHANGELOG-latest.md
+
+      - uses: ./.paddock/.gitea/actions/publish-release
+        with:
+          app-name: ${{ inputs.app-name }}
+          changelog: release/CHANGELOG-latest.md
+          artifacts-dir: release
+          token: ${{ secrets.RELEASE_TOKEN }}

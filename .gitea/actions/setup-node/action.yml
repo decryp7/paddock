@@ -1,0 +1,14 @@
+name: setup-node
+description: Node from the app's .nvmrc with the npm cache.
+inputs:
+  app-dir:
+    description: The folder with .nvmrc and package-lock.json.
+    default: app
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: ${{ inputs.app-dir }}/.nvmrc
+        cache: npm
+        cache-dependency-path: ${{ inputs.app-dir }}/package-lock.json

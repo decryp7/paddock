@@ -1,0 +1,24 @@
+name: macos-verify
+description: "Rule 23: verifies the built .app and the app inside the DMG with codesign --verify --deep --strict, checks the ad-hoc seal and one Team ID, and starts every sidecar with its self-test. The app itself is never started."
+inputs:
+  bundle-dir:
+    description: "The folder holding macos/ and dmg/ (default: $CARGO_TARGET_DIR/dist/bundle)."
+    default: ""
+  sidecars:
+    description: "Sidecars to start from the built app, one per line: name or name:args (default argument --self-test)."
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        BUNDLE_DIR: ${{ inputs.bundle-dir }}
+        SIDECARS: ${{ inputs.sidecars }}
+      run: |
+        set -euo pipefail
+        args=()
+        if [ -n "$BUNDLE_DIR" ]; then args+=(--bundle-dir "$BUNDLE_DIR"); fi
+        while IFS= read -r s; do
+          if [ -n "$s" ]; then args+=(--sidecar "$s"); fi
+        done <<< "$SIDECARS"
+        bash "${{ github.action_path }}/../../../conformance/release/macos-verify-bundle.sh" ${args[@]+"${args[@]}"}

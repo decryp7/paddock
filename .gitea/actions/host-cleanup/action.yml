@@ -1,0 +1,25 @@
+name: host-cleanup
+description: "Leaves nothing behind on a host runner: stray test processes, temp folders and optionally build outputs. Run it with if: always() at the end of the job. Never fails the job."
+inputs:
+  app-id:
+    description: The app id; temp folders named <id>-* are removed.
+    required: true
+  processes:
+    description: Exact process names to kill, space separated (pitwall-server llama-server).
+    default: ""
+  build-outputs:
+    description: "'true' also removes dist, the target folder's dist and debug, and the app's dist and coverage."
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        APP_ID: ${{ inputs.app-id }}
+        PROCESSES: ${{ inputs.processes }}
+        BUILD_OUTPUTS: ${{ inputs.build-outputs }}
+      run: |
+        args=(--id "$APP_ID")
+        for p in $PROCESSES; do args+=(--process "$p"); done
+        if [ "$BUILD_OUTPUTS" = true ]; then args+=(--build-outputs); fi
+        bash "${{ github.action_path }}/../../../tools/host-cleanup.sh" "${args[@]}" || true

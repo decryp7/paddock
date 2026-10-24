@@ -33,12 +33,21 @@ pub mod ask;
 pub mod boot_error;
 pub mod checkpoint;
 pub mod config;
+pub mod lifecycle;
+pub mod safe_mode;
+pub mod session;
 pub mod watchdog;
 
 pub use ask::{Choice, Prompt, Question};
 pub use boot_error::{BootErrorKind, clean_error};
 pub use checkpoint::{Checkpoints, ReadyReply, ready_reply};
 pub use config::{Config, ConfigError};
+pub use lifecycle::{
+    CrashInfo, Decision, InstanceScope, Lifecycle, Offers, PreviousRun, RestorePlan, Start,
+    StartReport, UncleanShutdown,
+};
+pub use safe_mode::{Feature, Mode, SAFE_MODE_FLAG};
+pub use session::{Autosaver, SessionError, SessionInfo, SessionStore};
 pub use watchdog::{Action, Pong, Recovery, Watchdog};
 
 /// The event a ready window gets as a liveness ping; the page answers with `window_pong` and the same `seq`.
@@ -54,6 +63,14 @@ paddock_commands::command_table! {
     Quiet [WINDOW] limit 16 * paddock_commands::KIB => tauri::window_boot_error,
     /// The window's UI state, kept in memory for a recovery reload (the main window's state can be large).
     Quiet [MAIN] limit 16 * paddock_commands::MIB => tauri::ui_checkpoint,
+    /// How this run started: safe mode, and after an unclean shutdown what the notice offers until the user decides.
+    Query [MAIN] => tauri::recovery_status,
+    /// Restore: the previous session, with the calling window's own UI state.
+    Mutation [MAIN] => tauri::recovery_restore,
+    /// Start fresh: forget the previous session.
+    Mutation [MAIN] => tauri::recovery_start_fresh,
+    /// Safe mode: the app restarts with extensions, plugins and the last session off.
+    Mutation [MAIN] => tauri::recovery_safe_mode,
     /// The answer to a liveness ping.
     Quiet [WINDOW] => tauri::window_pong,
 }

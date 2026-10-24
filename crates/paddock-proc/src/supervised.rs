@@ -1,0 +1,523 @@
+//! A supervised child: its whole process tree is ended on drop, on [`Supervised::terminate`] and when it exceeds a
+//! memory cap, so nothing leaks. A [`Registry`] knows every supervised tree, so [`end_all`] can end them at shutdown or
+//! in a panic hook even when the owners never get to drop them.
+
+use crate::tree::{self, kill_tree};
+use crate::usage;
+use crate::watch::{MemoryEvent, MemoryListener, MemoryWatch, Verdict};
+use std::collections::BTreeSet;
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The process ids of the trees that are being supervised. Cheap to clone; clones share the list.
+#[derive(Debug, Clone, Default)]
+pub struct Registry(Arc<Mutex<BTreeSet<u32>>>);
+
+impl Registry {
+    /// An empty registry.
+    pub fn new() -> Registry {
+        Registry::default()
+    }
+
+    fn add(&self, pid: u32) {
+        lock(&self.0).insert(pid);
+    }
+
+    fn remove(&self, pid: u32) {
+        lock(&self.0).remove(&pid);
+    }
+
+    /// The roots of the trees still supervised.
+    pub fn pids(&self) -> Vec<u32> {
+        lock(&self.0).iter().copied().collect()
+    }
+
+    /// Ends every registered tree now and forgets them; returns how many were registered. The owning [`Supervised`]
+    /// values still reap their children when they are dropped or waited for.
+    pub fn end_all(&self) -> usize {
+        let pids = std::mem::take(&mut *lock(&self.0));
+        for pid in &pids {
+            kill_tree(*pid);
+        }
+        pids.len()
+    }
+}
+
+/// The registry [`Supervised::spawn`] uses.
+pub fn global_registry() -> &'static Registry {
+    static GLOBAL: OnceLock<Registry> = OnceLock::new();
+    GLOBAL.get_or_init(Registry::new)
+}
+
+/// Ends every tree supervised through [`Supervised::spawn`]: call it from the app's exit and panic paths.
+pub fn end_all() -> usize {
+    global_registry().end_all()
+}
+
+/// How memory is measured for a cap: bytes used by the tree rooted at the pid. Defaults to proportional memory
+/// ([`usage::tree_memory`]); tests and hosts with a better figure pass their own.
+pub type Sampler = Arc<dyn Fn(u32) -> u64 + Send + Sync>;
+
+/// A memory cap for a supervised child: the whole tree's memory (PSS on Linux, so shared pages count once) may not
+/// exceed `limit`; it is warned at 80% and ended over the cap (rule 26: a 17 GB idle browser).
+#[derive(Clone)]
+pub struct MemoryCap {
+    /// Bytes.
+    pub limit: u64,
+    /// Names the child in events: "the browser", `plugin "x"`.
+    pub label: String,
+    /// Hears the warning, the stop and the peak at the end.
+    pub listener: Option<MemoryListener>,
+    /// How often the memory is looked at.
+    pub every: Duration,
+    /// Another way to measure; `None` uses [`usage::tree_memory`].
+    pub sampler: Option<Sampler>,
+}
+
+impl MemoryCap {
+    /// A cap of `limit` bytes, looked at every 200 ms.
+    pub fn new(limit: u64, label: impl Into<String>) -> MemoryCap {
+        MemoryCap {
+            limit,
+            label: label.into(),
+            listener: None,
+            every: Duration::from_millis(200),
+            sampler: None,
+        }
+    }
+
+    /// Tells `listener` what the watcher sees.
+    pub fn listener(mut self, listener: MemoryListener) -> MemoryCap {
+        self.listener = Some(listener);
+        self
+    }
+}
+
+impl std::fmt::Debug for MemoryCap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryCap")
+            .field("limit", &self.limit)
+            .field("label", &self.label)
+            .finish_non_exhaustive()
+    }
+}
+
+/// What the memory watcher shares with its [`Supervised`].
+#[derive(Default)]
+struct Shared {
+    /// The cap the tree was ended over, once it was (0 = not).
+    over: AtomicU64,
+    /// The most memory the watcher saw.
+    peak: AtomicU64,
+}
+
+struct Watcher {
+    stop: mpsc::Sender<()>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Watcher {
+    fn start(pid: u32, cap: MemoryCap, shared: Arc<Shared>) -> Watcher {
+        let (stop, stopped) = mpsc::channel::<()>();
+        let thread = std::thread::Builder::new()
+            .name("paddock-proc-memory".into())
+            .spawn(move || {
+                let sample = cap
+                    .sampler
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(usage::tree_memory));
+                let tell = |e: MemoryEvent| {
+                    if let Some(l) = &cap.listener {
+                        l.tell(&cap.label, e);
+                    }
+                };
+                let mut watch = MemoryWatch::new(cap.limit);
+                let mut last = 0;
+                loop {
+                    match stopped.recv_timeout(cap.every) {
+                        Err(RecvTimeoutError::Timeout) => {}
+                        // Told to stop, or the Supervised is gone.
+                        Ok(()) | Err(RecvTimeoutError::Disconnected) => {
+                            return tell(MemoryEvent::Ended(watch.ended(last)));
+                        }
+                    }
+                    last = sample(pid);
+                    let verdict = watch.observe(last);
+                    shared.peak.store(watch.peak(), Ordering::Relaxed);
+                    match verdict {
+                        Verdict::Fine => {}
+                        Verdict::Warn(u) => tell(MemoryEvent::Warning(u)),
+                        Verdict::Stop(u) => {
+                            shared.over.store(cap.limit.max(1), Ordering::Relaxed);
+                            kill_tree(pid);
+                            return tell(MemoryEvent::Stopped(u));
+                        }
+                    }
+                }
+            })
+            .ok();
+        Watcher { stop, thread }
+    }
+
+    fn finish(mut self) {
+        let _ = self.stop.send(());
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// A child that is killed with its whole tree when dropped.
+pub struct Supervised {
+    child: Option<Child>,
+    pid: u32,
+    registry: Registry,
+    watcher: Option<Watcher>,
+    shared: Arc<Shared>,
+}
+
+impl Supervised {
+    /// Starts `cmd` in its own process group (Unix), registered in the [`global_registry`].
+    pub fn spawn(cmd: Command) -> std::io::Result<Supervised> {
+        Supervised::spawn_in(global_registry(), cmd, None)
+    }
+
+    /// Like [`Supervised::spawn`] with a memory cap.
+    pub fn spawn_capped(cmd: Command, cap: MemoryCap) -> std::io::Result<Supervised> {
+        Supervised::spawn_in(global_registry(), cmd, Some(cap))
+    }
+
+    /// Starts `cmd` registered in `registry`, optionally under a memory cap.
+    pub fn spawn_in(
+        registry: &Registry,
+        mut cmd: Command,
+        cap: Option<MemoryCap>,
+    ) -> std::io::Result<Supervised> {
+        crate::sys::own_group(&mut cmd);
+        let child = cmd.spawn()?;
+        let pid = child.id();
+        registry.add(pid);
+        let shared = Arc::new(Shared::default());
+        let watcher = cap.map(|c| Watcher::start(pid, c, shared.clone()));
+        Ok(Supervised {
+            child: Some(child),
+            pid,
+            registry: registry.clone(),
+            watcher,
+            shared,
+        })
+    }
+
+    /// The process id while the child has not been killed or waited for.
+    pub fn id(&self) -> Option<u32> {
+        self.child.as_ref().map(Child::id)
+    }
+
+    /// The child's piped standard input, once.
+    pub fn take_stdin(&mut self) -> Option<ChildStdin> {
+        self.child.as_mut()?.stdin.take()
+    }
+
+    /// The child's piped standard output, once.
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.child.as_mut()?.stdout.take()
+    }
+
+    /// The child's piped standard error, once.
+    pub fn take_stderr(&mut self) -> Option<ChildStderr> {
+        self.child.as_mut()?.stderr.take()
+    }
+
+    /// Whether the process still runs.
+    pub fn is_running(&mut self) -> bool {
+        self.child
+            .as_mut()
+            .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+    }
+
+    /// The most memory the watcher has seen (0 without a cap).
+    pub fn memory_peak(&self) -> u64 {
+        self.shared.peak.load(Ordering::Relaxed)
+    }
+
+    /// The cap the tree was ended over, if it was.
+    pub fn stopped_over_memory(&self) -> Option<u64> {
+        match self.shared.over.load(Ordering::Relaxed) {
+            0 => None,
+            cap => Some(cap),
+        }
+    }
+
+    /// Waits for the child to end (a memory stop or [`Supervised::kill`] from elsewhere ends it too), reaps it and
+    /// forgets the tree. `None` if it was already reaped.
+    pub fn wait(&mut self) -> Option<ExitStatus> {
+        let mut c = self.child.take()?;
+        let status = c.wait().ok();
+        self.release();
+        status
+    }
+
+    /// Asks the process to quit (SIGTERM; Windows has no polite equivalent without a window), waits up to `grace` for it,
+    /// then ends the tree. For browsers, where an abrupt kill during start-up can leave a copy of the app behind on
+    /// macOS. Idempotent.
+    pub fn terminate(&mut self, grace: Duration) {
+        if self.is_running() && tree::ask(self.pid) {
+            let end = Instant::now() + grace;
+            while self.is_running() && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+        }
+        self.kill();
+    }
+
+    /// Ends the whole process tree now and reaps it. Idempotent.
+    pub fn kill(&mut self) {
+        if let Some(mut c) = self.child.take() {
+            kill_tree(c.id());
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        self.release();
+    }
+
+    fn release(&mut self) {
+        self.registry.remove(self.pid);
+        if let Some(w) = self.watcher.take() {
+            w.finish();
+        }
+    }
+}
+
+impl Drop for Supervised {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testchild::{Mode, child, lines};
+    use std::io::{BufRead, BufReader, Read};
+    use std::process::Stdio;
+    use std::sync::Mutex;
+
+    fn piped(mode: Mode) -> Command {
+        let mut c = child(mode);
+        c.stdout(Stdio::piped());
+        c
+    }
+
+    fn pid_line(r: &mut impl BufRead) -> u32 {
+        let mut l = String::new();
+        loop {
+            l.clear();
+            assert!(
+                r.read_line(&mut l).unwrap() > 0,
+                "the child ended before telling its grandchild"
+            );
+            if let Some(p) = lines(&l).first().and_then(|p| p.strip_prefix("pid ")) {
+                return p.trim().parse().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn drop_ends_the_child_and_its_grandchild() {
+        let reg = Registry::new();
+        let mut s = Supervised::spawn_in(&reg, piped(Mode::Tree), None).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        let grand = pid_line(&mut r);
+        let pid = s.id().unwrap();
+        assert!(s.is_running() && crate::is_alive(grand));
+        assert_eq!(reg.pids(), vec![pid]);
+        drop(s);
+        // The pipe is shared with the grandchild: EOF means every holder is dead.
+        let mut rest = Vec::new();
+        r.read_to_end(&mut rest).unwrap();
+        assert!(!crate::is_alive(pid), "the child leaked");
+        assert!(!crate::is_alive(grand), "the grandchild leaked");
+        assert!(reg.pids().is_empty(), "a dropped child leaves the registry");
+    }
+
+    #[test]
+    fn end_all_ends_every_registered_tree() {
+        let reg = Registry::new();
+        let mut a = Supervised::spawn_in(&reg, piped(Mode::Tree), None).unwrap();
+        let mut b = Supervised::spawn_in(&reg, piped(Mode::Sleep), None).unwrap();
+        let mut r = BufReader::new(a.take_stdout().unwrap());
+        let grand = pid_line(&mut r);
+        assert_eq!(reg.pids().len(), 2);
+        assert_eq!(reg.end_all(), 2);
+        assert!(reg.pids().is_empty());
+        assert!(a.wait().is_some_and(|s| !s.success()));
+        assert!(b.wait().is_some_and(|s| !s.success()));
+        let mut rest = Vec::new();
+        r.read_to_end(&mut rest).unwrap();
+        assert!(!crate::is_alive(grand));
+        assert_eq!(reg.end_all(), 0);
+    }
+
+    #[test]
+    fn the_global_registry_is_used_by_spawn() {
+        let mut s = Supervised::spawn(child(Mode::Sleep)).unwrap();
+        let pid = s.id().unwrap();
+        assert!(global_registry().pids().contains(&pid));
+        s.kill();
+        assert!(!global_registry().pids().contains(&pid));
+    }
+
+    #[test]
+    fn kill_and_wait_are_idempotent() {
+        let mut s = Supervised::spawn_in(&Registry::new(), child(Mode::Sleep), None).unwrap();
+        assert!(s.is_running());
+        s.kill();
+        s.kill();
+        assert!(!s.is_running());
+        assert_eq!(s.id(), None);
+        assert_eq!(s.wait(), None);
+        assert!(s.take_stdout().is_none() && s.take_stdin().is_none() && s.take_stderr().is_none());
+    }
+
+    #[test]
+    fn a_missing_program_is_an_error_not_a_registered_child() {
+        let reg = Registry::new();
+        assert!(
+            Supervised::spawn_in(
+                &reg,
+                crate::command("/nonexistent/paddock-no-such-program"),
+                None
+            )
+            .is_err()
+        );
+        assert!(reg.pids().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_ends_a_polite_process_without_waiting_for_the_grace_period() {
+        let mut s = Supervised::spawn_in(&Registry::new(), piped(Mode::Polite), None).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        let mut l = String::new();
+        while lines(&l) != ["ready"] {
+            l.clear();
+            assert!(r.read_line(&mut l).unwrap() > 0);
+        }
+        let t = Instant::now();
+        s.terminate(Duration::from_secs(100));
+        assert!(
+            t.elapsed() < Duration::from_secs(60),
+            "waited out the grace period"
+        );
+        assert!(!s.is_running());
+        s.terminate(Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_kills_a_process_that_ignores_sigterm_after_the_grace_period() {
+        let mut s = Supervised::spawn_in(&Registry::new(), piped(Mode::IgnoreTerm), None).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        let mut l = String::new();
+        while lines(&l) != ["ready"] {
+            l.clear();
+            assert!(r.read_line(&mut l).unwrap() > 0);
+        }
+        s.terminate(Duration::ZERO);
+        assert!(!s.is_running());
+    }
+
+    fn capped(
+        limit: u64,
+        sampler: impl Fn(u32) -> u64 + Send + Sync + 'static,
+    ) -> (MemoryCap, Arc<Mutex<Vec<MemoryEvent>>>) {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let h = heard.clone();
+        let mut cap =
+            MemoryCap::new(limit, "the engine").listener(MemoryListener::new(move |label, e| {
+                assert_eq!(label, "the engine");
+                h.lock().unwrap().push(e);
+            }));
+        cap.every = Duration::from_millis(1);
+        cap.sampler = Some(Arc::new(sampler));
+        (cap, heard)
+    }
+
+    #[test]
+    fn a_child_over_its_memory_cap_is_ended_with_its_tree() {
+        let (cap, heard) = capped(1000, |_| 5000);
+        let mut s = Supervised::spawn_in(&Registry::new(), piped(Mode::Tree), Some(cap)).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        // The watcher may end the tree before the child tells its grandchild: EOF then is the signal.
+        let mut rest = Vec::new();
+        r.read_to_end(&mut rest).unwrap();
+        let status = s.wait().expect("reaped");
+        assert!(!status.success());
+        assert_eq!(s.stopped_over_memory(), Some(1000));
+        assert_eq!(s.memory_peak(), 5000);
+        let events = heard.lock().unwrap().clone();
+        assert!(
+            matches!(events.last(), Some(MemoryEvent::Stopped(u)) if u.used == 5000 && u.limit == 1000),
+            "{events:?}"
+        );
+        if let Some(g) = lines(&String::from_utf8_lossy(&rest))
+            .iter()
+            .find_map(|l| l.strip_prefix("pid "))
+        {
+            assert!(
+                !crate::is_alive(g.parse().unwrap()),
+                "the grandchild survived the memory stop"
+            );
+        }
+    }
+
+    #[test]
+    fn a_child_under_its_cap_is_warned_once_and_the_peak_is_reported_at_the_end() {
+        // 850 of 1000: a warning; the sampler then stays there, so nothing more is said until the end.
+        let samples = Arc::new(AtomicU64::new(0));
+        let n = samples.clone();
+        let (cap, heard) = capped(1000, move |_| {
+            n.fetch_add(1, Ordering::SeqCst);
+            850
+        });
+        let mut s = Supervised::spawn_in(&Registry::new(), child(Mode::Sleep), Some(cap)).unwrap();
+        // Block until the watcher has sampled three times (it runs every millisecond), without sleeping.
+        while samples.load(Ordering::SeqCst) < 3 {
+            std::thread::yield_now();
+        }
+        s.kill();
+        let events = heard.lock().unwrap().clone();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, MemoryEvent::Warning(_)))
+                .count(),
+            1,
+            "{events:?}"
+        );
+        assert!(
+            matches!(events.last(), Some(MemoryEvent::Ended(u)) if u.peak == 850),
+            "{events:?}"
+        );
+        assert_eq!(s.stopped_over_memory(), None);
+        assert!(s.memory_peak() >= 850);
+    }
+
+    #[test]
+    fn the_real_sampler_reads_the_tree_memory() {
+        let mut cap = MemoryCap::new(u64::MAX, "x");
+        cap.every = Duration::from_millis(1);
+        let s = Supervised::spawn_in(&Registry::new(), child(Mode::Sleep), Some(cap)).unwrap();
+        while s.memory_peak() == 0 {
+            std::thread::yield_now();
+        }
+        drop(s);
+    }
+}

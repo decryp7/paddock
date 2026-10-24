@@ -1,0 +1,19 @@
+{
+  "$comment": "The repo baseline (plan X27). Modes: exact (file equals the template), sections (only the named TOML tables equal the template's), extends (JSON whose `extends` holds the template's first entry). Paths under app/ follow appDir. Checked by C28, repaired by `paddock-conformance sync --write`.",
+  "files": [
+    { "path": ".editorconfig" },
+    { "path": ".gitattributes" },
+    { "path": "rustfmt.toml" },
+    { "path": "LICENSE-MIT" },
+    { "path": "LICENSE-APACHE" },
+    { "path": "cliff.toml" },
+    { "path": "lefthook.yml" },
+    { "path": "about.toml" },
+    { "path": "deny.toml", "mode": "sections", "sections": ["graph", "advisories", "licenses", "sources"] },
+    { "path": "Cargo.toml", "source": "Cargo.profiles.toml", "mode": "sections", "sections": ["profile.dev.package.\"*\"", "profile.dev", "profile.dist"] },
+    { "path": "renovate.json", "mode": "extends" },
+    { "path": "scripts/export-diagrams.sh" },
+    { "path": "app/.nvmrc" },
+    { "path": "app/tsconfig.json" }
+  ]
+}

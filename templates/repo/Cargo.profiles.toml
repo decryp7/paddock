@@ -1,0 +1,13 @@
+# The Cargo profiles every app workspace carries (plan X27). C28 keeps these tables equal; the rest of Cargo.toml is the app's.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+debug = "line-tables-only"
+
+# Shipped builds (`cargo build --profile dist`, `tauri build -- --profile dist`).
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+strip = true

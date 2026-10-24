@@ -94,6 +94,46 @@ jobs:
       - name: Tests
         run: npm test
 
+  # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
+  # PATH of shims, so no launchd, systemd, Docker or installed app is touched. New-app templates are covered by scripts/.
+  tools:
+    name: tools and shared scripts
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Tools
+        run: node --test tools/test/*.test.mjs
+
+      - name: new-app templates
+        run: node --test scripts/new-app.test.mjs
+
+  # @decryp7/paddock-eslint (eslint/, plan X11): RuleTester cases per rule and the preset run through ESLint on temp files.
+  eslint-preset:
+    name: eslint preset (rules 27 to 39)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: eslint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: npm ci
+
+      - run: npm test
+
   crates:
     name: crates (fmt, coverage, deny)
     runs-on: ubuntu-latest
@@ -209,6 +249,18 @@ jobs:
       - name: paddock-updater
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-updater --all-targets --all-features -- -D warnings && cargo test -p paddock-updater --all-features && cargo test -p paddock-updater
+
+      - name: paddock-proc
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-proc --all-targets --all-features -- -D warnings && cargo test -p paddock-proc --all-features
+
+      - name: paddock-env
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo test -p paddock-env --all-features
+
+      - name: paddock-log
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-log --all-targets --all-features -- -D warnings && cargo test -p paddock-log --all-features
 
       - name: paddock-secrets
         if: ${{ !cancelled() }}

@@ -19,6 +19,13 @@ fn generated_files() -> Vec<(&'static str, String)> {
     let decls = [
         crate::Recovery::decl(),
         crate::ReadyReply::decl(),
+        crate::Mode::decl(),
+        crate::SessionInfo::decl(),
+        crate::CrashInfo::decl(),
+        crate::Offers::decl(),
+        crate::UncleanShutdown::decl(),
+        crate::StartReport::decl(),
+        crate::RestorePlan::decl(),
         crate::BootErrorKind::decl(),
         PingEvent::decl(),
     ];
@@ -76,6 +83,10 @@ fn the_table_has_the_contract_commands() {
             "window_ready",
             "window_boot_error",
             "ui_checkpoint",
+            "recovery_status",
+            "recovery_restore",
+            "recovery_start_fresh",
+            "recovery_safe_mode",
             "window_pong"
         ]
     );
@@ -88,4 +99,15 @@ fn the_table_has_the_contract_commands() {
         "a dialog has no UI state to recover"
     );
     assert!(crate::COMMANDS.opens_to_dialogs("window_ready"));
+    for c in [
+        "recovery_status",
+        "recovery_restore",
+        "recovery_start_fresh",
+        "recovery_safe_mode",
+    ] {
+        assert!(
+            !crate::COMMANDS.opens_to_dialogs(c),
+            "{c}: the notice belongs to the app's own windows"
+        );
+    }
 }

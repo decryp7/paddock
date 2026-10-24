@@ -958,12 +958,15 @@ fn a_pinned_size_that_does_not_fit_the_disk_is_refused_before_connecting() {
             e @ DownloadError::NotEnoughSpace {
                 needed: 1_050,
                 free: 1_000,
+                ..
             },
         ) => {
             assert!(e.keeps_partial());
-            assert_eq!(
-                e.to_string(),
-                "the download needs 1.1 KB of free disk space, 1 KB is free; free some space and run it again"
+            let text = e.to_string();
+            assert!(
+                text.starts_with("the download needs 1.1 KB of free space in ")
+                    && text.ends_with(", 1 KB is free; free some space there or choose another folder, then run it again"),
+                "{text}"
             );
         }
         other => panic!("{other:?}"),
@@ -992,7 +995,7 @@ fn the_announced_size_is_checked_once_known_and_a_kept_prefix_counts_as_written(
     let req = req_in(&dir, Integrity::Unpinned);
     assert!(matches!(
         tight.download(&ctx, &req),
-        Err(DownloadError::NotEnoughSpace { needed, free }) if needed == 200 * 1024 && free == 100 * 1024
+        Err(DownloadError::NotEnoughSpace { needed, free, .. }) if needed == 200 * 1024 && free == 100 * 1024
     ));
     assert!(!req.dest().exists());
     // A partial file of 150 KiB leaves 50 KiB to write, which fits (without its resume state it is then fetched again).
@@ -1031,11 +1034,15 @@ fn the_platform_free_space_is_read_and_sizes_read_well() {
         (1_234_000_000_000, "1234 GB"),
     ] {
         assert_eq!(
-            DownloadError::NotEnoughSpace { needed: n, free: 0 }
-                .to_string()
-                .split(" of free")
-                .next()
-                .unwrap(),
+            DownloadError::NotEnoughSpace {
+                needed: n,
+                free: 0,
+                path: std::path::PathBuf::new()
+            }
+            .to_string()
+            .split(" of free")
+            .next()
+            .unwrap(),
             format!("the download needs {text}")
         );
     }
