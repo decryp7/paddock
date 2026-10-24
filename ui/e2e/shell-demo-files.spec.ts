@@ -23,7 +23,9 @@ test.describe('user files (plan X31)', () => {
     // A glyph of the pd: set draws each entry's kind, 16 px (a log is a text page; the second path has no known extension).
     const icon = entries.first().getByTestId('recent-icon').locator('svg');
     await expect(icon).toHaveAttribute('width', '16');
-    expect(await entries.first().getByTestId('recent-icon').locator('path').getAttribute('d')).toContain('M9 12.5h6');
+    expect(await entries.first().getByTestId('recent-icon').locator('path').getAttribute('d')).toContain('M8.75 12.5h6.5');
+    // The file name leads; the folder is the muted second line, with its separator kept.
+    await expect(entries.first().locator('.pd-entry > .pd-text > .pd-name')).toHaveText('session-2026-10-24.log');
     await entries.first().locator('.pd-entry').click();
     await expect(page.getByTestId('files-last')).toHaveText('Opened /demo/logs/session-2026-10-24.log');
     expect(pageErrors).toEqual([]);

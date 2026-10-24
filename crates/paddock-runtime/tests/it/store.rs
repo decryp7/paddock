@@ -611,3 +611,16 @@ fn stores_live_in_the_app_data_folder_and_need_a_folder_name() {
     assert!(format!("{s:?}").contains("chromium"));
     assert!(RuntimeStore::new(d.path(), "Bad Name").is_err());
 }
+
+/// Rule 40 (C36): no catalogue text, however broken, makes the parser panic.
+#[test]
+fn the_catalogue_parser_never_panics() {
+    let seed = format!(
+        "format = 1\nname = \"tool\"\nversion = \"1.0\"\n[[platform]]\nkey = \"linux-x86_64\"\nurl = \"https://dl.test/a.zip\"\nsize = 9\nsha256 = \"{}\"\n",
+        "a".repeat(64)
+    );
+    let parse = |b: &[u8]| Catalogue::parse(&String::from_utf8_lossy(b)).is_ok();
+    assert!(
+        paddock_testkit::never_panics(&paddock_testkit::corpus(seed.as_bytes()), parse).is_empty()
+    );
+}

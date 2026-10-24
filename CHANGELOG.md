@@ -4,6 +4,22 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Added
+- X51 `@decryp7/paddock-ui/view`: `<pd-view>`, the renderer of the declarative views plugins return (ADR 0002, `paddock-view`). Every
+  node kind (stack, text, table with sort and paging, lazy tree, graph, diagram, form, review list, matrix, chart, badge, progress,
+  empty, needs-AI, link); an unknown kind says "Update the app to view this" for that node only. Documents are validated on receipt by a
+  TypeScript mirror of the engine limits (`validateViewDoc`), patches (`applyViewPatch`: replace by id with the base etag checked, or a
+  whole document) are applied by `ViewStore` (stale or invalid: inline error with Retry, the last good view stays), actions leave as
+  `ViewAction` with the host keys `row`, `page`, `node`, `finding`, `reason`, `values`, `column`, `descending` (matrix cells add `row`,
+  `col`, `rowId`, `colId`). Confirmations, the OS browser and the path and secret pickers are the host's (`VIEW_HOST`, refused by default).
+  Gallery section, Playwright spec (axe, 320 px) and the review sheet `ui/docs/review/x51-view/`.
+- `cargo-paddock-plugin` (X51, ADR 0001): the plugin author's tool, `cargo paddock-plugin new | build | pack | keygen | sign | verify
+  | run | test` on `paddock-cli` conventions (ported from Debrief's `cargo-debrief-plugin`). `new` makes a project that depends on
+  `paddock-plugin-api` alone; `pack` writes a deterministic `.paddockplugin` (optionally Ed25519-signed); `verify` checks checksums,
+  signature and trusted keys (exit 4 on failure); `test` starts the built program against a fake host, compares it with its
+  manifest and runs the conformance checks (exit 5 on findings). `paddock-plugin-test` gains `FakeHost::launch(program, args)`, which
+  starts a plugin program through the same launcher as the app.
+
 ### Fixed
 - UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
   injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell
@@ -46,6 +62,19 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- Review fixes for the files and storage UI (independent review, 2 P1, 11 P2, 9 P3). Settings > Storage is the shared `pd-table`: one
+  line per row, rows grouped by cache or the user's data with the aggregate size on the group row, hover icon buttons (What is inside,
+  Show in the file manager) and a "…" menu ending in Clear in danger text; the cache button is a normal button. The size tree no
+  longer counts a folder twice (its size is on the group row, its items are the rows, with `pd:` glyphs and a title and Close);
+  lower bounds read "at least 3.9 GB", rounded down. `pd-table` gains `groupSummary`, `groupMono` and `countLabel`. Recent files lead
+  with the file name and show the folder as a muted second line; `pd-path-text` keeps the separator beside the ellipsis. Glyphs: the
+  page fold fixed, bigger `file-code` brackets, a lighter `archive` lid, a `reveal` glyph for the action. The contact sheet is
+  1440 x 900 at 2x with 320 px, hover, menu and confirmation shots.
+- `conformance/ci/pin-runtime.mjs`: pins any `paddock-runtime` catalogue (size and SHA-256 measured while downloading, `--version`,
+  `--chrome-for-testing`); `install-test-browser.mjs --catalogue` and the action's `catalogue:` input install the build a catalogue
+  pins. `paddock-chromium`'s waits (`start_page`, start-up, `wait_ready`) run on the injected clock; its real-browser test runs
+  in the Linux CI job. The `paddock-ci` image (v2) carries Chrome for Testing 156.0.8078.47, the build `chromium.toml` pins
+  (was 156.0.8078.4); `scripts/ci-image.test.mjs` keeps them equal.
 - Files and storage follow-ups (plan X31/X32). `paddock-storage`: the size tree (`Storage::tree`, `storage_tree`, `StorageEvent::Tree`:
   depth 3, 12 items per folder with the rest folded, bounded in entries and time, no links, one volume) and, in `shell/storage`, a
   Folders button on the Storage page that shows it as a `pd-table` grouped by top-level folder. `paddock-files`: `Files::open_at_line` and

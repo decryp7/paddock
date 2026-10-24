@@ -191,14 +191,24 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
 
     <ng-template #line let-item let-i="index">
       @if (item.kind === 'group') {
-        <div role="row" class="pd-row pd-group" [attr.aria-rowindex]="i + 2" [attr.data-index]="i" [attr.tabindex]="i === active() ? 0 : -1" (click)="toggleGroup(item.key)">
+        <div role="row" class="pd-row pd-group" [class.pd-group-grid]="!!item.cells" [attr.aria-rowindex]="i + 2" [attr.data-index]="i" [attr.tabindex]="i === active() ? 0 : -1" (click)="toggleGroup(item.key)">
           <div role="gridcell" class="pd-group-cell">
             <button type="button" class="pd-group-toggle" tabindex="-1" [attr.aria-expanded]="!item.collapsed" [attr.aria-label]="item.label || t.none">
               <pd-glyph [name]="item.collapsed ? 'chevron-right' : 'chevron-down'" [size]="14" />
             </button>
-            <span class="pd-group-name">{{ item.label || t.none }}</span>
+            <span class="pd-group-name" [class.pd-mono]="groupMono()">{{ item.label || t.none }}</span>
             <span class="pd-group-count">{{ formatCount(item.count) }}</span>
           </div>
+          @if (item.cells) {
+            @for (c of columns2(); track c.key; let k = $index) {
+              @if (k > 0) {
+                <div role="gridcell" class="pd-cell pd-group-summary" [class.pd-end]="c.align === 'end'">{{ item.cells[c.key] ?? '' }}</div>
+              }
+            }
+            @if (actionWidth()) {
+              <div role="gridcell" class="pd-cell"></div>
+            }
+          }
         </div>
       } @else {
         @let row = item.row;
@@ -315,6 +325,9 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-cell.pd-end { font-variant-numeric: tabular-nums; }
     .pd-cell.pd-first { font-weight: var(--pd-weight-medium); }
     .pd-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-group.pd-group-grid { display: grid; }
+    .pd-group-summary { color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    .pd-group-name.pd-mono { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
     .pd-group { display: block; background: var(--pd-surface-2); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-group-cell { display: flex; align-items: center; gap: var(--pd-space-2); height: 100%; }
     .pd-group-toggle { display: inline-flex; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
@@ -375,6 +388,12 @@ export class PdTable<T> {
   readonly virtual = input<boolean | 'auto'>('auto');
   /** The column rows are grouped by (its text), or null. */
   readonly groupBy = input<string | null>(null);
+  /** The group row's own cells by column key (the aggregate of the group's rows), or null for a heading only. */
+  readonly groupSummary = input<((rows: readonly T[]) => Readonly<Record<string, string>>) | null>(null);
+  /** Group names are paths or other literal names: set them in the mono face. */
+  readonly groupMono = input(false);
+  /** Words the "N rows" count (the app's noun: "7 items"); null keeps "rows". */
+  readonly countLabel = input<((shown: number, total: number) => string) | null>(null);
   /** What an empty table says. */
   readonly emptyText = input($localize`:@@pd.table.empty:Nothing to show yet.`);
   /** The sort (two-way). */
@@ -445,7 +464,7 @@ export class PdTable<T> {
   /** The lines: rows, with group headings when grouped. */
   protected readonly items = computed<readonly PdTableItem<T>[]>(() => {
     const key = this.groupBy();
-    return groupItems(this.ordered(), key ? this.columns().find((c) => c.key === key) : undefined, this.collapsed());
+    return groupItems(this.ordered(), key ? this.columns().find((c) => c.key === key) : undefined, this.collapsed(), this.groupSummary());
   });
   protected readonly isVirtual = computed(() => (this.virtual() === 'auto' ? this.items().length > PD_TABLE_VIRTUAL_FROM : this.virtual()));
   protected readonly bodyHeight = computed(() => Math.min(this.items().length * this.rowPx(), this.maxHeight()));
@@ -453,6 +472,8 @@ export class PdTable<T> {
   protected readonly countText = computed(() => {
     if (this.state() !== 'ready' || !this.rows().length) return '';
     const n = new Intl.NumberFormat();
+    const custom = this.countLabel();
+    if (custom) return custom(this.ordered().length, this.rows().length);
     const [shown, total] = [n.format(this.ordered().length), n.format(this.rows().length)];
     return this.ordered().length === this.rows().length ? $localize`:@@pd.table.count:${total} rows` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
   });
