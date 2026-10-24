@@ -82,3 +82,8 @@ export {
   type Item as LayoutFitItem,
   type Fit as LayoutFit,
 } from './lib/layout-plan';
+// Small parts and utilities (plan X12, X35).
+export { PdPathText } from './lib/path-text';
+export { PdCopyMenu, PdCopyMenuHost, type PdCopyMenuState } from './lib/copy-menu';
+export { copyText } from './lib/clipboard';
+export { PdClock, PD_CLOCK_INTERVAL, PD_CLOCK_SOURCE } from './lib/clock';

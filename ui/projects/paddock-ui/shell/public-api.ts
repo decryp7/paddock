@@ -127,7 +127,7 @@ export { PdTitleBar } from './src/frame/title-bar';
 export { PdStatusBar, PdStatusMeasure, STATUS_COMPACT } from './src/frame/status-bar';
 export { planStatusBar, statusWidth, type StatusSlot, type StatusPlan } from './src/frame/status-layout';
 export { PdPartOutlet, type PartStatus } from './src/frame/part-outlet';
-export { PdIcon, PdShellIcon, SHELL_ICON, SHELL_ICON_PATHS, provideShellIcon, iconLetter } from './src/frame/icon';
+export { PdIcon, PdShellIcon, SHELL_ICON, provideShellIcon, iconLetter } from './src/frame/icon';
 export { REGION_ATTR, REGION_KEYS, regionsOf, regionIndex, regionTarget, cycleRegions, regionKey, shown as regionShown } from './src/frame/regions';
 // Theme (plan S15): theme packs as contributions, the window's appearance (system/dark/light, contrast, motion) synced
 // across windows, and the colour maths of the token tests.

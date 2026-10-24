@@ -94,7 +94,7 @@ export class ShellStatusBar {
   }
   /** The items on one side, in order. */
   items(side: 'start' | 'end'): Locator {
-    return this.bar.locator(`.${side} [data-status-item]`);
+    return this.bar.locator(`.pd-${side} [data-status-item]`);
   }
   /** The ids of the items on one side, in order. */
   ids(side: 'start' | 'end'): Promise<string[]> {
@@ -300,6 +300,15 @@ export class ShellSettings {
   /** A setting's field by its key, in `scope` (default the page). */
   field(key: string, scope: Page | Locator = this.page): Locator {
     return scope.locator(`pd-setting-field[data-key="${key}"]`);
+  }
+  /** A choice field's trigger (the themed select, a `combobox` button showing the chosen label). */
+  select(key: string, scope: Page | Locator = this.page): Locator {
+    return this.field(key, scope).getByRole('combobox');
+  }
+  /** Picks `label` in a choice field: opens the themed list and clicks the option (the list lives in the page's overlay). */
+  async choose(key: string, label: string, scope: Page | Locator = this.page): Promise<void> {
+    await this.select(key, scope).click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
   }
   /** A saved-change announcement (`Theme saved.`). */
   saved(text: string, scope: Page | Locator = this.page): Locator {

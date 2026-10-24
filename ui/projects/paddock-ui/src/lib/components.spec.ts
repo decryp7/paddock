@@ -75,21 +75,21 @@ describe('SuMetric', () => {
 
   it('renders value and unit as siblings, tabular', () => {
     const el = make({ value: 17.1, unit: 'GB', decimals: 1, locale: 'en-US' });
-    expect(el.querySelector('.value')?.textContent).toBe('17.1');
-    expect(el.querySelector('.unit')?.textContent).toBe('GB');
+    expect(el.querySelector('.pd-value')?.textContent).toBe('17.1');
+    expect(el.querySelector('.pd-unit')?.textContent).toBe('GB');
     expect(el.className).toContain('pd-metric--display');
-    expect(el.querySelector('.delta')).toBeNull();
+    expect(el.querySelector('.pd-delta')).toBeNull();
   });
 
   it('shows a dash for null and passes strings through', () => {
-    expect(make({ value: null }).querySelector('.value')?.textContent).toBe('—');
-    expect(make({ value: 'n/a' }).querySelector('.value')?.textContent).toBe('n/a');
+    expect(make({ value: null }).querySelector('.pd-value')?.textContent).toBe('—');
+    expect(make({ value: 'n/a' }).querySelector('.pd-value')?.textContent).toBe('n/a');
   });
 
   it('renders a positive delta with arrow, sign, label and a spoken description', () => {
     const el = make({ value: 3, delta: 1.5, deltaUnit: '%', deltaLabel: 'vs last week', goodDirection: 'up', locale: 'en-US' });
-    const delta = el.querySelector('.delta') as HTMLElement;
-    expect(delta.className).toContain('delta--good');
+    const delta = el.querySelector('.pd-delta') as HTMLElement;
+    expect(delta.className).toContain('pd-delta--good');
     expect(text(delta)).toContain('+1.5%');
     expect(text(delta)).toContain('vs last week');
     expect(el.querySelector('.pd-visually-hidden')?.textContent).toBe('Up 1.5% vs last week');
@@ -97,15 +97,15 @@ describe('SuMetric', () => {
 
   it('renders a negative delta with a minus sign and a bad tone when down is not good', () => {
     const el = make({ value: 3, delta: -2, goodDirection: 'up', locale: 'en-US' });
-    expect(el.querySelector('.delta')?.className).toContain('delta--bad');
-    expect(text(el.querySelector('.delta') as Element)).toContain('−2');
+    expect(el.querySelector('.pd-delta')?.className).toContain('pd-delta--bad');
+    expect(text(el.querySelector('.pd-delta') as Element)).toContain('−2');
     expect(el.querySelector('.pd-visually-hidden')?.textContent).toBe('Down 2');
   });
 
   it('renders no change without a sign', () => {
     const el = make({ value: 3, delta: 0, locale: 'en-US' });
     expect(el.querySelector('.pd-visually-hidden')?.textContent).toBe('No change');
-    expect(el.querySelector('.delta')?.className).toContain('delta--neutral');
+    expect(el.querySelector('.pd-delta')?.className).toContain('pd-delta--neutral');
   });
 });
 
@@ -148,17 +148,17 @@ describe('SuSparkline', () => {
     const el = make({ values: [1, 9, 4], label: 'CPU' });
     expect(el.querySelector('svg')?.getAttribute('aria-label')).toBe('CPU: latest 4, peak 9');
     expect(el.querySelector('svg')?.getAttribute('role')).toBe('img');
-    expect(el.querySelector('.dot')).not.toBeNull();
-    expect(el.querySelector('.area')).toBeNull();
+    expect(el.querySelector('.pd-dot')).not.toBeNull();
+    expect(el.querySelector('.pd-area')).toBeNull();
   });
   it('draws the area when asked', () => {
-    expect(make({ values: [1, 2], area: true }).querySelector('.area')).not.toBeNull();
+    expect(make({ values: [1, 2], area: true }).querySelector('.pd-area')).not.toBeNull();
   });
   it('says there is no data for an empty series', () => {
     const el = make({ values: [], label: 'CPU' });
     expect(el.querySelector('svg')?.getAttribute('aria-label')).toBe('CPU: no data');
-    expect(el.querySelector('.dot')).toBeNull();
-    expect(el.querySelector('.area')).toBeNull();
+    expect(el.querySelector('.pd-dot')).toBeNull();
+    expect(el.querySelector('.pd-area')).toBeNull();
   });
 });
 
@@ -191,11 +191,11 @@ describe('SuCard', () => {
     const title = card.querySelector('h3') as HTMLElement;
     expect(card.getAttribute('aria-labelledby')).toBe(title.id);
     expect(title.textContent).toBe('CPU');
-    expect(card.querySelector('.hero')?.textContent).toBe('45');
-    expect(card.querySelector('.caption')?.textContent).toContain('peak 61%');
-    expect(card.querySelector('.status')?.textContent).toContain('ok');
+    expect(card.querySelector('.pd-hero')?.textContent).toBe('45');
+    expect(card.querySelector('.pd-caption')?.textContent).toContain('peak 61%');
+    expect(card.querySelector('.pd-status')?.textContent).toContain('ok');
     expect(card.getAttribute('tabindex')).toBeNull();
-    expect(card.querySelector('.chevron')).toBeNull();
+    expect(card.querySelector('.pd-chevron')).toBeNull();
   });
 
   it('does not emit when it is not interactive', () => {
@@ -211,7 +211,7 @@ describe('SuCard', () => {
     expect(card.getAttribute('role')).toBe('button');
     expect(card.getAttribute('tabindex')).toBe('0');
     expect(card.getAttribute('aria-label')).toBe('CPU');
-    expect(card.querySelector('.chevron')).not.toBeNull();
+    expect(card.querySelector('.pd-chevron')).not.toBeNull();
     card.click();
     card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     card.dispatchEvent(new KeyboardEvent('keydown', { key: ' ' }));
@@ -241,14 +241,14 @@ describe('SuEmptyState', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.getAttribute('role')).toBe('status');
     expect(el.querySelector('h3')?.textContent).toBe('No runners yet');
-    expect(el.querySelector('.description')?.textContent).toBe('Register one.');
+    expect(el.querySelector('.pd-description')?.textContent).toBe('Register one.');
     expect(el.querySelector('svg')).not.toBeNull();
   });
   it('omits the description when empty', () => {
     const f = TestBed.createComponent(SuEmptyState);
     f.componentRef.setInput('heading', 'Nothing');
     f.detectChanges();
-    expect((f.nativeElement as HTMLElement).querySelector('.description')).toBeNull();
+    expect((f.nativeElement as HTMLElement).querySelector('.pd-description')).toBeNull();
   });
 });
 
@@ -264,9 +264,9 @@ describe('SuErrorState', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.getAttribute('role')).toBe('alert');
     expect(el.querySelector('h3')?.textContent).toBe("Can't reach the server");
-    expect(el.querySelector('.cause')?.textContent).toBe('Check the URL.');
-    expect(el.querySelector('.retry')?.textContent).toBe('Retry');
-    expect(el.querySelector('.secondary')).toBeNull();
+    expect(el.querySelector('.pd-cause')?.textContent).toBe('Check the URL.');
+    expect(el.querySelector('.pd-retry')?.textContent).toBe('Retry');
+    expect(el.querySelector('.pd-secondary')).toBeNull();
   });
   it('emits retry and secondary, and disables Retry while busy', () => {
     const f = make({ heading: 'x', secondaryLabel: 'Open logs' });
@@ -275,18 +275,18 @@ describe('SuErrorState', () => {
     let secondaries = 0;
     f.componentInstance.retry.subscribe(() => retries++);
     f.componentInstance.secondary.subscribe(() => secondaries++);
-    (el.querySelector('.retry') as HTMLButtonElement).click();
-    (el.querySelector('.secondary') as HTMLButtonElement).click();
+    (el.querySelector('.pd-retry') as HTMLButtonElement).click();
+    (el.querySelector('.pd-secondary') as HTMLButtonElement).click();
     expect([retries, secondaries]).toEqual([1, 1]);
     f.componentRef.setInput('busy', true);
     f.detectChanges();
-    expect((el.querySelector('.retry') as HTMLButtonElement).disabled).toBe(true);
+    expect((el.querySelector('.pd-retry') as HTMLButtonElement).disabled).toBe(true);
   });
   it('omits the cause when empty and honours a custom retry label', () => {
     const f = make({ heading: 'x', retryLabel: 'Try again' });
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.cause')).toBeNull();
-    expect(el.querySelector('.retry')?.textContent).toBe('Try again');
+    expect(el.querySelector('.pd-cause')).toBeNull();
+    expect(el.querySelector('.pd-retry')?.textContent).toBe('Try again');
   });
 });
 
@@ -414,9 +414,9 @@ describe('SuTrayPopover', () => {
     expect(el.getAttribute('aria-label')).toBe('Dyno');
     expect(el.classList).toContain('pd-tray--windows');
     expect(el.classList).toContain('pd-tray--translucent');
-    expect(el.querySelector('.header')).not.toBeNull();
-    expect(el.querySelector('.content')).not.toBeNull();
-    expect(el.querySelector('.footer')).not.toBeNull();
+    expect(el.querySelector('.pd-header')).not.toBeNull();
+    expect(el.querySelector('.pd-content')).not.toBeNull();
+    expect(el.querySelector('.pd-footer')).not.toBeNull();
   });
   it('defaults to macOS and solid', () => {
     const el = make({ label: 'x' }).nativeElement as HTMLElement;

@@ -1,6 +1,6 @@
 import { EnvironmentProviders, inject, Injectable, Injector, makeEnvironmentProviders, type Provider, type Type } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import { provideRouter, ROUTES, TitleStrategy, withHashLocation, type RouterStateSnapshot, type Route, type Routes } from '@angular/router';
+import { provideRouter, ROUTES, TitleStrategy, withComponentInputBinding, withHashLocation, type RouterStateSnapshot, type Route, type Routes } from '@angular/router';
 import {
   ContributionRegistry,
   evaluate,
@@ -12,6 +12,7 @@ import {
   type PageDef,
   type ShellPorts,
 } from '@decryp7/paddock-ui/shell';
+import { provideNativeFeel } from '@decryp7/paddock-ui/shell/feel';
 import { openDialogPort, provideDialogs, type DialogsOptions } from '@decryp7/paddock-ui/shell/dialogs';
 import { JOBS_CONTRIBUTIONS, provideShellJobs, type ShellJobsOptions } from '@decryp7/paddock-ui/shell/jobs';
 import { provideKeyboardShortcuts, provideMenus, provideNativeMenu, RESERVED_KEYS, type NativeMenuPort, type ReservedKey } from '@decryp7/paddock-ui/shell/menu';
@@ -52,6 +53,8 @@ export interface ShellPagesOptions {
   readonly icon?: Type<unknown>;
   /** Keys the app handles itself, reserved besides the frame's F6 and Shift+F6. */
   readonly reservedKeys?: readonly ReservedKey[];
+  /** The UI native-feel guard (browser keys, context menu, drags; `shell/feel`); on by default, false only where an app installs its own. */
+  readonly nativeFeel?: boolean;
 }
 
 /** Window titles: "Models – Pitwall"; the app's name alone on a route without a title. */
@@ -119,7 +122,8 @@ export function provideShellPages(options: ShellPagesOptions): EnvironmentProvid
   const providers: (Provider | EnvironmentProviders)[] = [
     { provide: PAGES_CONFIG, useValue: config },
     { provide: PAGES_SIDEBAR_SIZES, useValue: sidebarSizes(options.sidebar) },
-    provideRouter([], ...(options.location === 'path' ? [] : [withHashLocation()])),
+    // Route params, query and data bind to a routed component's inputs, so a detail route needs no wrapper component.
+    provideRouter([], withComponentInputBinding(), ...(options.location === 'path' ? [] : [withHashLocation()])),
     { provide: ROUTES, multi: true, useFactory: () => pagesRoutes(inject(ContributionRegistry).pages(), config.paths, options.routes) },
     { provide: TitleStrategy, useClass: PagesTitleStrategy },
     ...(options.icon ? [provideShellIcon(options.icon)] : []),
@@ -136,6 +140,7 @@ export function provideShellPages(options: ShellPagesOptions): EnvironmentProvid
     provideStartupContract(options.startup.retry ? { retry: options.startup.retry } : {}),
     ...(options.startup.checkpoint ? [provideUiCheckpoint(options.startup.checkpoint)] : []),
     provideDialogs(options.dialogs ?? {}),
+    ...(options.nativeFeel === false ? [] : [provideNativeFeel()]),
     {
       provide: SHELL_PORTS,
       useFactory: (): ShellPorts => {

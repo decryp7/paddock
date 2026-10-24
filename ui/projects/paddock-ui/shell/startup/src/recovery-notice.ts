@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { RecoveryStore } from './recovery.store';
 
 /**
@@ -10,13 +11,12 @@ import { RecoveryStore } from './recovery.store';
 @Component({
   selector: 'pd-recovery-notice',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdGlyph],
   template: `
     @if (store.unclean(); as u) {
-      <section class="notice" role="alert" data-testid="recovery-notice" aria-labelledby="pd-recovery-title">
-        <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
-          <path d="M8 2 14.5 13.5h-13L8 2ZM8 6.5v3.25M8 11.5h.01" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <div class="text">
+      <section class="pd-recovery" role="alert" data-testid="recovery-notice" aria-labelledby="pd-recovery-title">
+        <pd-glyph class="pd-recovery__icon" name="alert" [size]="16" />
+        <div class="pd-recovery__text">
           <strong id="pd-recovery-title">{{ t.title }}</strong>
           @if (store.restarting()) {
             <span data-testid="recovery-restarting">{{ t.restarting }}</span>
@@ -24,21 +24,21 @@ import { RecoveryStore } from './recovery.store';
             <span>{{ detail() }}</span>
           }
           @if (u.session.problem; as problem) {
-            <span class="problem" data-testid="recovery-session-problem">{{ problem }}</span>
+            <span class="pd-recovery__problem" data-testid="recovery-session-problem">{{ problem }}</span>
           }
           @if (store.requestError(); as e) {
-            <span class="problem" role="status" data-testid="recovery-error">{{ e }}</span>
+            <span class="pd-recovery__problem" role="status" data-testid="recovery-error">{{ e }}</span>
           }
         </div>
-        <div class="actions">
+        <div class="pd-recovery__actions">
           @if (u.offers.restore) {
-            <button type="button" class="primary" data-testid="recovery-restore" [disabled]="busy()" (click)="store.restore()">{{ t.restore }}</button>
+            <button type="button" class="pd-recovery__primary" data-testid="recovery-restore" [disabled]="busy()" (click)="store.restore()">{{ t.restore }}</button>
           }
           @if (u.offers.safeMode) {
-            <button type="button" [class.primary]="!u.offers.restore" data-testid="recovery-safe-mode" [disabled]="busy()" (click)="store.safeModeRestart()">{{ t.safeMode }}</button>
+            <button type="button" [class.pd-recovery__primary]="!u.offers.restore" data-testid="recovery-safe-mode" [disabled]="busy()" (click)="store.safeModeRestart()">{{ t.safeMode }}</button>
           }
           @if (u.offers.startFresh) {
-            <button type="button" [class.primary]="!u.offers.restore && !u.offers.safeMode" data-testid="recovery-fresh" [disabled]="busy()" (click)="store.startFresh()">{{ t.fresh }}</button>
+            <button type="button" [class.pd-recovery__primary]="!u.offers.restore && !u.offers.safeMode" data-testid="recovery-fresh" [disabled]="busy()" (click)="store.startFresh()">{{ t.fresh }}</button>
           }
         </div>
       </section>
@@ -46,15 +46,15 @@ import { RecoveryStore } from './recovery.store';
   `,
   styles: `
     :host { display: block; min-width: 0; }
-    .notice { display: flex; align-items: center; gap: var(--pd-space-3); flex-wrap: wrap; box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-warning); background: var(--pd-surface-2); color: var(--pd-text); font-size: var(--pd-text-body); }
-    .icon { flex: none; color: var(--pd-warning); }
-    .text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 24ch; min-width: 0; overflow-wrap: anywhere; }
-    .problem { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
-    .actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-2); }
+    .pd-recovery { display: flex; align-items: center; gap: var(--pd-space-3); flex-wrap: wrap; box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-warning); background: var(--pd-surface-2); color: var(--pd-text); font-size: var(--pd-text-body); }
+    .pd-recovery__icon { flex: none; color: var(--pd-warning); }
+    .pd-recovery__text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 24ch; min-width: 0; overflow-wrap: anywhere; }
+    .pd-recovery__problem { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .pd-recovery__actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-2); }
     button { min-height: 28px; padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; cursor: pointer; }
-    button.primary { border-color: transparent; background: var(--pd-accent-fill); color: var(--pd-on-accent); font-weight: var(--pd-weight-medium); }
+    button.pd-recovery__primary { border-color: transparent; background: var(--pd-accent-fill); color: var(--pd-on-accent); font-weight: var(--pd-weight-medium); }
     button:hover:not(:disabled) { background: var(--pd-hover); }
-    button.primary:hover:not(:disabled) { background: var(--pd-accent-fill); filter: brightness(1.08); }
+    button.pd-recovery__primary:hover:not(:disabled) { background: var(--pd-accent-fill); filter: brightness(1.08); }
     button:disabled { opacity: 0.55; cursor: default; }
     button:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
   `,

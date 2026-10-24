@@ -30,13 +30,13 @@ export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded
   selector: 'pd-part-outlet',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [SuErrorState, SuSkeleton],
-  host: { '[attr.data-part-status]': 'status().kind', '[class.page]': 'variant() === "page"' },
+  host: { '[attr.data-part-status]': 'status().kind', '[class.pd-page]': 'variant() === "page"' },
   template: `
     <ng-container #slot />
     @switch (status().kind) {
       @case ('loading') {
         @if (variant() === 'page') {
-          <div class="loading" role="status" [attr.aria-label]="loadingLabel()" data-testid="part-loading">
+          <div class="pd-loading" role="status" [attr.aria-label]="loadingLabel()" data-testid="part-loading">
             <pd-skeleton [height]="26" width="40%" />
             <pd-skeleton [height]="14" width="70%" />
             <pd-skeleton shape="block" [height]="160" />
@@ -47,7 +47,7 @@ export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded
         @if (variant() === 'page') {
           <pd-error-state [heading]="openFailed()" [cause]="reason()" [retryLabel]="t.tryAgain" (retry)="load()" data-testid="part-error" />
         } @else {
-          <button type="button" class="retry" [attr.aria-label]="retryLabel()" [title]="failedTitle()" data-testid="part-error" (click)="load()">
+          <button type="button" class="pd-retry" [attr.aria-label]="retryLabel()" [title]="failedTitle()" data-testid="part-error" (click)="load()">
             <span aria-hidden="true">!</span>
           </button>
         }
@@ -56,10 +56,10 @@ export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded
   `,
   styles: `
     :host { display: contents; }
-    :host(.page) { display: block; min-width: 0; }
-    .loading { display: flex; flex-direction: column; gap: var(--pd-space-3); padding: var(--pd-space-6); max-width: var(--pd-content-max); }
-    .retry { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--pd-danger); border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-danger); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); cursor: pointer; }
-    .retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    :host(.pd-page) { display: block; min-width: 0; }
+    .pd-loading { display: flex; flex-direction: column; gap: var(--pd-space-3); padding: var(--pd-space-6); max-width: var(--pd-content-max); }
+    .pd-retry { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--pd-danger); border-radius: var(--pd-radius-pill); background: transparent; color: var(--pd-danger); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); cursor: pointer; }
+    .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
   `,
 })
 export class PdPartOutlet {

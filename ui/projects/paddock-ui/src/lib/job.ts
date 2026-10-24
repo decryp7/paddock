@@ -12,25 +12,25 @@ import { jobView, type SuJobSnapshot } from './job-view';
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[class]': '"pd-job pd-job--" + view().tone', '[attr.data-state]': 'job().state' },
   template: `
-    <div class="head">
-      <span class="title">{{ view().title }}</span>
+    <div class="pd-head">
+      <span class="pd-title">{{ view().title }}</span>
       @if (view().subject) {
-        <span class="subject">{{ view().subject }}</span>
+        <span class="pd-subject">{{ view().subject }}</span>
       }
     </div>
-    <div class="line">
-      <span class="headline">{{ view().headline }}</span>
+    <div class="pd-line">
+      <span class="pd-headline">{{ view().headline }}</span>
       @if (view().count) {
-        <span class="count">{{ view().count }}</span>
+        <span class="pd-count">{{ view().count }}</span>
       }
       @if (view().eta) {
-        <span class="eta">{{ view().eta }}</span>
+        <span class="pd-eta">{{ view().eta }}</span>
       }
     </div>
     @if (view().showBar) {
       <div
-        class="bar"
-        [class.indeterminate]="view().percent === null"
+        class="pd-bar"
+        [class.pd-indeterminate]="view().percent === null"
         role="progressbar"
         aria-valuemin="0"
         aria-valuemax="100"
@@ -38,22 +38,22 @@ import { jobView, type SuJobSnapshot } from './job-view';
         [attr.aria-valuetext]="view().percent === null ? view().count || inProgress : null"
         [attr.aria-label]="view().title + ': ' + view().headline"
       >
-        <span class="fill" [style.width.%]="view().percent === null ? null : view().percent"></span>
+        <span class="pd-fill" [style.width.%]="view().percent === null ? null : view().percent"></span>
       </div>
     }
     @if (view().detail) {
-      <p class="detail">
+      <p class="pd-detail">
         @if (stalled() && job().state === 'running') {
-          <svg class="warn" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M8 2.5 14 13H2L8 2.5ZM8 6.5v3M8 11.25h.01" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          <svg class="pd-warn" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M8 2.5 14 13H2L8 2.5ZM8 6.5v3M8 11.25h.01" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         }
         <span>{{ view().detail }}</span>
       </p>
     }
     @if (view().canCancel) {
-      <div class="actions">
-        <button type="button" class="cancel" [disabled]="view().cancelDisabled" (click)="cancel.emit(job().id)">{{ t.jobCancel }}</button>
+      <div class="pd-actions">
+        <button type="button" class="pd-cancel" [disabled]="view().cancelDisabled" (click)="cancel.emit(job().id)">{{ t.jobCancel }}</button>
         @if (view().cancelHint) {
-          <span class="hint">{{ view().cancelHint }}</span>
+          <span class="pd-hint">{{ view().cancelHint }}</span>
         }
       </div>
     }
@@ -61,36 +61,36 @@ import { jobView, type SuJobSnapshot } from './job-view';
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
-    .head { display: flex; align-items: baseline; gap: var(--pd-space-2); min-width: 0; }
-    .title { font-weight: var(--pd-weight-semibold); }
-    .subject { color: var(--pd-text-muted); font-size: var(--pd-text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .line { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--pd-space-1) var(--pd-space-3); }
+    .pd-head { display: flex; align-items: baseline; gap: var(--pd-space-2); min-width: 0; }
+    .pd-title { font-weight: var(--pd-weight-semibold); }
+    .pd-subject { color: var(--pd-text-muted); font-size: var(--pd-text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--pd-space-1) var(--pd-space-3); }
     /* The phase is calm: muted while running (a stalled step says so in its detail line, with an icon and a word). */
-    .headline { color: var(--pd-text-muted); }
-    .count, .eta { color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
-    :host(.pd-job--success) .headline { color: var(--pd-success); }
-    :host(.pd-job--danger) .headline { color: var(--pd-danger); }
-    :host(.pd-job--warning) .detail { color: var(--pd-warning); }
+    .pd-headline { color: var(--pd-text-muted); }
+    .pd-count, .pd-eta { color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
+    :host(.pd-job--success) .pd-headline { color: var(--pd-success); }
+    :host(.pd-job--danger) .pd-headline { color: var(--pd-danger); }
+    :host(.pd-job--warning) .pd-detail { color: var(--pd-warning); }
     /* Track surface-2, fill the accent text colour: at least 3:1 in both themes (WCAG 1.4.11). */
-    .bar { position: relative; height: 6px; overflow: hidden; background: var(--pd-surface-2); box-shadow: inset 0 0 0 1px var(--pd-hairline); border-radius: var(--pd-radius-pill); }
-    .fill { display: block; height: 100%; background: var(--pd-accent); border-radius: inherit; transition: width var(--pd-duration) var(--pd-ease-move); }
-    .bar.indeterminate .fill { position: absolute; width: 35%; animation: pd-job-slide 1.4s var(--pd-ease-move) infinite; }
-    .detail { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); line-height: var(--pd-lh-body); }
+    .pd-bar { position: relative; height: 6px; overflow: hidden; background: var(--pd-surface-2); box-shadow: inset 0 0 0 1px var(--pd-hairline); border-radius: var(--pd-radius-pill); }
+    .pd-fill { display: block; height: 100%; background: var(--pd-accent); border-radius: inherit; transition: width var(--pd-duration) var(--pd-ease-move); }
+    .pd-bar.pd-indeterminate .pd-fill { position: absolute; width: 35%; animation: pd-job-slide 1.4s var(--pd-ease-move) infinite; }
+    .pd-detail { display: flex; align-items: flex-start; gap: var(--pd-space-1); margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-caption); line-height: var(--pd-lh-body); }
     /* On the first line when the text wraps: centred in that line's box. */
-    .warn { flex: none; margin-top: calc((1lh - 14px) / 2); }
-    :host(.pd-job--danger) .detail { color: var(--pd-danger); }
-    .actions { display: flex; align-items: center; gap: var(--pd-space-2); }
-    .cancel { min-height: var(--pd-button-height); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font-weight: var(--pd-weight-medium); }
-    .cancel:hover:not(:disabled) { background: var(--pd-hover); }
-    .cancel:disabled { opacity: 0.5; }
-    .hint { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .pd-warn { flex: none; margin-top: calc((1lh - 14px) / 2); }
+    :host(.pd-job--danger) .pd-detail { color: var(--pd-danger); }
+    .pd-actions { display: flex; align-items: center; gap: var(--pd-space-2); }
+    .pd-cancel { min-height: var(--pd-button-height); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font-weight: var(--pd-weight-medium); }
+    .pd-cancel:hover:not(:disabled) { background: var(--pd-hover); }
+    .pd-cancel:disabled { opacity: 0.5; }
+    .pd-hint { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
     .pd-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     @keyframes pd-job-slide { from { left: -35%; } to { left: 100%; } }
     @media (prefers-reduced-motion: reduce) {
       /* Unknown total without motion: a static striped track, never a full bar that reads as done. */
-      .bar.indeterminate { background: repeating-linear-gradient(135deg, var(--pd-accent) 0 4px, var(--pd-surface-2) 4px 10px); }
-      .bar.indeterminate .fill { display: none; }
-      .fill { transition: none; }
+      .pd-bar.pd-indeterminate { background: repeating-linear-gradient(135deg, var(--pd-accent) 0 4px, var(--pd-surface-2) 4px 10px); }
+      .pd-bar.pd-indeterminate .pd-fill { display: none; }
+      .pd-fill { transition: none; }
     }
   `,
 })

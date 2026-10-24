@@ -16,7 +16,7 @@ import { JobsStore } from './jobs.store';
       <pd-error-state [heading]="t.readFailed" [cause]="cause" [busy]="store.isLoading()" (retry)="store.load()" />
     }
     @if (store.list().length) {
-      <ul class="jobs" [attr.aria-label]="label()">
+      <ul class="pd-jobs" [attr.aria-label]="label()">
         @for (job of store.list(); track job.id) {
           <li>
             <pd-job [job]="job" [stalled]="store.stalledIds().has(job.id)" [elapsedMs]="elapsed(job)" (cancel)="store.cancel($event)" />
@@ -24,7 +24,7 @@ import { JobsStore } from './jobs.store';
         }
       </ul>
     } @else if (store.isLoading()) {
-      <div class="loading" aria-busy="true" [attr.aria-label]="label()">
+      <div class="pd-loading" aria-busy="true" [attr.aria-label]="label()">
         <pd-skeleton shape="block" />
       </div>
     } @else if (!store.requestError()) {
@@ -33,9 +33,9 @@ import { JobsStore } from './jobs.store';
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
-    .jobs { display: flex; flex-direction: column; gap: var(--pd-space-2); margin: 0; padding: 0; list-style: none; }
-    .jobs li { min-width: 0; }
-    .loading { padding: var(--pd-space-2) 0; }
+    .pd-jobs { display: flex; flex-direction: column; gap: var(--pd-space-2); margin: 0; padding: 0; list-style: none; }
+    .pd-jobs li { min-width: 0; }
+    .pd-loading { padding: var(--pd-space-2) 0; }
   `,
 })
 export class PdJobsList {

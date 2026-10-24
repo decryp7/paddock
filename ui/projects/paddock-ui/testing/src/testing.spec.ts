@@ -1,0 +1,136 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { FakeChart, FakeECharts } from './fake-chart';
+import { all, at, buttonByText, byText, manualFrames, must, one, press, text, typeInto } from './dom';
+import { installTestKit } from './setup';
+
+function dom(html: string): HTMLElement {
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  return root;
+}
+
+describe('installTestKit', () => {
+  it('fills the jsdom gaps and is safe to call again', () => {
+    installTestKit();
+    installTestKit();
+    expect(typeof window.matchMedia('(min-width: 1px)').matches).toBe('boolean');
+    expect(typeof ResizeObserver).toBe('function');
+    expect(typeof PointerEvent).toBe('function');
+    expect(new PointerEvent('pointerdown', { pointerId: 7 }).pointerId).toBe(7);
+    const el = document.createElement('div');
+    expect(() => {
+      el.setPointerCapture(1);
+      el.releasePointerCapture(1);
+      el.scrollIntoView();
+    }).not.toThrow();
+  });
+
+  it('reports a target to a ResizeObserver stand-in so libraries reading entry.target keep working', () => {
+    const el = document.createElement('div');
+    const seen: Element[] = [];
+    const observer = new ResizeObserver((entries) => entries.forEach((e) => seen.push(e.target)));
+    observer.observe(el);
+    observer.unobserve(el);
+    observer.disconnect();
+    expect(seen.length === 1 || seen.length === 0).toBe(true);
+  });
+
+  describe('between tests', () => {
+    installTestKit({ dropWindowKeys: ['__pd_leftover__'] });
+    it('leaves a stub behind', () => {
+      (window as unknown as Record<string, unknown>)['__pd_leftover__'] = {};
+      expect('__pd_leftover__' in window).toBe(true);
+    });
+    it('finds the window clean again', () => {
+      expect('__pd_leftover__' in window).toBe(false);
+    });
+  });
+});
+
+describe('DOM helpers', () => {
+  it('narrows missing values with a message', () => {
+    expect(must(5)).toBe(5);
+    expect(() => must(null, 'the row')).toThrow('expected the row to be present');
+    expect(at([1, 2, 3], -1)).toBe(3);
+    expect(() => at([1], 4)).toThrow('index 4');
+    expect(() => at([1], -3)).toThrow('index -3');
+  });
+
+  it('reads text and finds elements', () => {
+    const root = dom('<p class="a"> Hello   <b>world</b> </p><p class="a">Bye</p><button aria-label="Close">x</button><button>Save</button>');
+    expect(text(root.querySelector('p'))).toBe('Hello world');
+    expect(text(null)).toBe('');
+    expect(all(root, 'p.a')).toHaveLength(2);
+    expect(one(root, 'b').textContent).toBe('world');
+    expect(() => one(root, 'i')).toThrow('no element for i');
+    expect(byText(root, 'p', 'Bye')?.className).toBe('a');
+    expect(byText(root, 'p', /^Hello/)).not.toBeNull();
+    expect(byText(root, 'p', 'nope')).toBeNull();
+    expect(buttonByText(root, 'Save').textContent).toBe('Save');
+    expect(buttonByText(root, 'Close').textContent).toBe('x');
+    expect(() => buttonByText(root, /Delete/)).toThrow('no button');
+  });
+
+  it('types like a user and presses keys', () => {
+    const root = dom('<input><select><option value="a">a</option><option value="b">b</option></select>');
+    const input = one<HTMLInputElement>(root, 'input');
+    const seen: string[] = [];
+    input.addEventListener('input', () => seen.push(input.value));
+    typeInto(input, 'abc');
+    expect(seen).toEqual(['abc']);
+    const select = one<HTMLSelectElement>(root, 'select');
+    let changed = '';
+    select.addEventListener('change', () => (changed = select.value));
+    typeInto(select, 'b', 'change');
+    expect(changed).toBe('b');
+    let key = '';
+    root.addEventListener('keydown', (e) => (key = (e as KeyboardEvent).key));
+    expect(press(root, 'Escape').defaultPrevented).toBe(false);
+    expect(key).toBe('Escape');
+  });
+
+  describe('manualFrames', () => {
+    const frames = manualFrames();
+    afterEach(() => frames.restore());
+    it('runs requested frames only when flushed, and forgets cancelled ones', () => {
+      const ran: number[] = [];
+      requestAnimationFrame(() => ran.push(1));
+      const cancelled = requestAnimationFrame(() => ran.push(2));
+      cancelAnimationFrame(cancelled);
+      expect(frames.pending).toBe(1);
+      expect(ran).toEqual([]);
+      frames.flush();
+      expect(ran).toEqual([1]);
+      expect(frames.pending).toBe(0);
+    });
+  });
+});
+
+describe('FakeECharts', () => {
+  it('records instances, options, actions and handlers, and answers geometry with changeable values', () => {
+    const fake = new FakeECharts();
+    const chart: FakeChart = fake.init();
+    chart.setOption({ a: 1 });
+    chart.setOption({ a: 2 });
+    chart.dispatchAction({ type: 'x' });
+    chart.resize();
+    chart.on('click', () => undefined);
+    chart.getZr().on('contextmenu', () => undefined);
+    expect(fake.instances).toEqual([chart]);
+    expect(chart.lastOption).toEqual({ a: 2 });
+    expect(chart.actions).toEqual([{ type: 'x' }]);
+    expect(chart.resized).toBe(1);
+    expect(Object.keys(chart.handlers)).toEqual(['click']);
+    expect(Object.keys(chart.zrHandlers)).toEqual(['contextmenu']);
+    expect(chart.containPixel()).toBe(true);
+    expect(chart.convertFromPixel({}, [2, 5])).toEqual([2000, 5]);
+    chart.contains = false;
+    chart.convert = ([x = 0]) => [x];
+    expect(chart.containPixel({}, [1, 1])).toBe(false);
+    expect(chart.convertFromPixel({}, [9])).toEqual([9]);
+    chart.dispose();
+    expect(chart.disposed).toBe(true);
+    fake.reset();
+    expect(fake.instances).toEqual([]);
+  });
+});

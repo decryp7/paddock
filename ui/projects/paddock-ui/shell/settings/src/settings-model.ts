@@ -192,10 +192,19 @@ export interface SettingsNavItem {
   readonly section: SectionView | null;
 }
 
+/** Pages of one group that share a sub-group heading (`title` null: the pages without one, listed first). */
+export interface SettingsNavSubgroup {
+  readonly title: string | null;
+  readonly items: readonly SettingsNavItem[];
+}
+
 export interface SettingsNavGroup {
   readonly id: SettingsGroup;
   readonly title: string;
+  /** Every page of the group in order (the sub-groups flattened). */
   readonly items: readonly SettingsNavItem[];
+  /** The same pages under their sub-group headings: unheaded pages first, then each sub-group in order of its first page. */
+  readonly subgroups: readonly SettingsNavSubgroup[];
 }
 
 /** The group headings, read when shown (so they are in the window's language). */
@@ -211,6 +220,17 @@ export const SETTINGS_GROUP_TITLES: Readonly<Record<SettingsGroup, string>> = {
   },
 };
 
+/** Splits a group's items under their sub-group headings: unheaded first, then each heading in order of its first page. */
+function subgroupsOf(items: readonly SettingsNavItem[]): SettingsNavSubgroup[] {
+  const plain: SettingsNavItem[] = items.filter((i) => !i.page?.subgroup);
+  const named = new Map<string, SettingsNavItem[]>();
+  for (const i of items) {
+    const title = i.page?.subgroup?.text;
+    if (title) named.set(title, [...(named.get(title) ?? []), i]);
+  }
+  return [...(plain.length ? [{ title: null, items: plain }] : []), ...[...named].map(([title, list]) => ({ title, items: list }))];
+}
+
 /**
  * The navigation: the contributed pages by group and order, then every section no page shows under Advanced (by its
  * title). Empty groups are left out.
@@ -224,6 +244,9 @@ export function settingsNav(pages: readonly SettingsPageDef[], sections: readonl
     ...(group === 'advanced' ? sections.filter((s) => !shown.has(s.id)).map((s) => ({ id: s.id, title: s.title, page: null, section: s })) : []),
   ];
   return (['application', 'features', 'advanced'] as const)
-    .map((id) => ({ id, title: SETTINGS_GROUP_TITLES[id], items: items(id) }))
+    .map((id) => {
+      const subgroups = subgroupsOf(items(id));
+      return { id, title: SETTINGS_GROUP_TITLES[id], items: subgroups.flatMap((s) => s.items), subgroups };
+    })
     .filter((g) => g.items.length > 0);
 }

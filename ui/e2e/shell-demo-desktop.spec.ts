@@ -83,7 +83,7 @@ test('a service failure comes from the engine, and Repair asks the shell plugin'
   await expect(panel).toHaveAttribute('data-kind', 'offline');
   await expect(panel.getByTestId('waiting-for-repair')).toHaveText('Restart demo engine');
   await expect(panel).toContainText('Engine data is unavailable until the demo engine restarts.');
-  await expect(panel.locator('svg.icon')).toHaveAttribute('data-status', 'danger');
+  await expect(panel.locator('svg.pd-icon')).toHaveAttribute('data-status', 'danger');
 
   await chip.click();
   await app.notifications.services.getByRole('button', { name: 'Restart' }).click();

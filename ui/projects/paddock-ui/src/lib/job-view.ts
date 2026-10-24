@@ -1,3 +1,5 @@
+import { formatBytes as formatBytesOf, formatCount as formatCountOf } from '@decryp7/paddock-ui/format';
+
 /** Wire model of `paddock-jobs` (Rust, ADR 0008): one snapshot is the whole job as of `seq`. */
 export type SuJobUnit = 'items' | 'bytes';
 
@@ -56,24 +58,14 @@ export interface SuJobView {
   announcement: string;
 }
 
-const NF = new Intl.NumberFormat('en-US');
-
+/** A count with the active locale's grouping; anything unusable counts as 0 (a job never shows a dash for a count). */
 export function formatCount(n: number): string {
-  return Number.isFinite(n) ? NF.format(Math.max(0, Math.round(n))) : '0';
+  return formatCountOf(Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0);
 }
 
-const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
-
-/** Binary sizes with one decimal under 10: 512 B, 4.2 MB, 118 MB. */
+/** A size for a job's counters ("4.2 MB", "512 bytes"): the one formatter of `@decryp7/paddock-ui/format`, 0 when unusable. */
 export function formatBytes(n: number): string {
-  let v = Number.isFinite(n) ? Math.max(0, n) : 0;
-  let i = 0;
-  while (v >= 1024 && i < UNITS.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  const text = i > 0 && v < 10 ? v.toFixed(1) : Math.round(v).toString();
-  return `${text} ${UNITS[i]}`;
+  return formatBytesOf(Number.isFinite(n) ? Math.max(0, n) : 0);
 }
 
 /** "12 s left", "about 3 min left", "about 1 h 5 min left"; empty for null or non-finite. */

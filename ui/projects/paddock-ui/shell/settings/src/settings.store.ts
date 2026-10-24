@@ -94,6 +94,11 @@ export const SettingsStore = signalStore(
       setQuery: (query: string) => patchState(store, { query }),
       setShowAdvanced: (showAdvanced: boolean) => patchState(store, { showAdvanced }),
       dismissNotice: () => patchState(store, { notice: null, actionError: null }),
+      /**
+       * The text in the window's footer (null clears it): the store's own "Saved" and "Reset" go there, and a page with its
+       * own content says what it did the same way ("Folder moved"), so there is one place to look.
+       */
+      setNotice: (notice: string | null) => patchState(store, { notice }),
       /** The engine's refusal of `key` while the control still holds the refused value, else null. */
       refusalOf(id: string, key: string, value: SettingValue | undefined): string | null {
         const r = (store.refusals()[id] ?? []).find((x) => x.key === key);

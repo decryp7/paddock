@@ -1,0 +1,1 @@
+Contact sheet of the pd: icon set and the changed components (light and dark), for the independent drawing review. Rewritten by `CONTACT_SHEET=1 npx playwright test --project=review`. Not self-approved: see the report.

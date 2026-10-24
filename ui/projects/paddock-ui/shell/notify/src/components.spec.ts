@@ -27,6 +27,19 @@ describe('chip text', () => {
     expect(chipCompactText([{ label: 'a', state: 'down' }, { label: 'b', state: 'degraded' }])).toBe('2 services');
     expect(chipCompactText([])).toBe('Unknown');
   });
+
+  it("keeps the app's casing: only a label with the article is capitalised, and only when its first word has no capital of its own", () => {
+    expect(shortName('the S3 bucket')).toBe('S3 bucket');
+    expect(shortName('the iPhone link')).toBe('iPhone link');
+    expect(shortName('llama.cpp server')).toBe('llama.cpp server');
+    expect(shortName('Pitwall server')).toBe('Pitwall server');
+    expect(shortName('The log store')).toBe('Log store');
+    expect(chipText([{ label: 'iPhone link', state: 'degraded' }])).toBe('iPhone link: limited');
+    expect(chipText([{ label: 'llama.cpp', state: 'down' }])).toBe('llama.cpp: stopped');
+    // The compact word starts the text: a plain lower-case one takes a capital, a name keeps its own.
+    expect(chipCompactText([{ label: 'the iPhone link', state: 'down' }])).toBe('link stopped'.replace('link', 'Link'));
+    expect(chipCompactText([{ label: 'the sync iPhone', state: 'down' }])).toBe('iPhone stopped');
+  });
 });
 
 describe('pd-service-status', () => {
@@ -55,7 +68,7 @@ describe('pd-service-status', () => {
     await f.whenStable();
     expect(health.repairs).toEqual(['store']);
     expect(el.textContent).toContain('Repairing…');
-    expect(one(el, '[data-testid=service-health-chip]').classList).toContain('repairing');
+    expect(one(el, '[data-testid=service-health-chip]').classList).toContain('pd-repairing');
     health.settle('store');
     await f.whenStable();
     expect(el.querySelector('[data-testid=service-health-chip]')).toBeNull();
@@ -154,7 +167,7 @@ describe('pd-service-status', () => {
     const el: HTMLElement = f.nativeElement;
     document.body.append(el);
     await open(f);
-    expect(el.classList).toContain('below');
+    expect(el.classList).toContain('pd-below');
     one(el, '[data-testid=service-health-details]').dispatchEvent(new Event('pointerdown', { bubbles: true }));
     await f.whenStable();
     expect(el.querySelector('[data-testid=service-health-details]')).not.toBeNull();
@@ -245,8 +258,8 @@ describe('pd-service-error and pd-waiting-for', () => {
     expect(panel.dataset['kind']).toBe('offline');
     expect(panel.textContent).toContain('Log store stopped');
     expect(panel.textContent).toContain('Log store is unavailable until it restarts.');
-    expect(panel.querySelector('svg.icon')?.getAttribute('data-status')).toBe('danger');
-    expect(panel.querySelector('.spinner')).toBeNull();
+    expect(panel.querySelector('svg.pd-icon')?.getAttribute('data-status')).toBe('danger');
+    expect(panel.querySelector('.pd-spinner')).toBeNull();
     expect(el.textContent).not.toContain('Could not load events.');
     const store = TestBed.inject(ServiceHealthStore);
     const repair = vi.spyOn(store, 'repair').mockResolvedValue(undefined);
@@ -259,7 +272,7 @@ describe('pd-service-error and pd-waiting-for', () => {
     await f.whenStable();
     expect(one(el, '[data-testid=waiting-for-store]').dataset['kind']).toBe('repairing');
     expect(one(el, '[data-testid=waiting-for-store]').textContent).toContain('Repairing the log store…');
-    expect(one(el, '[data-testid=waiting-for-store] .spinner')).not.toBeNull();
+    expect(one(el, '[data-testid=waiting-for-store] .pd-spinner')).not.toBeNull();
     one(el, '[data-testid=waiting-for-store] [data-testid=waiting-for-details]').click();
     expect(TestBed.inject(ServiceHealthStore).detailsRequested()).toBe(1);
     health.ok('store');
@@ -310,13 +323,13 @@ describe('the notification centre', () => {
     const outage = one(el, '[data-cause="health:store"]');
     expect(outage.textContent).toContain('The log store stopped. (×2)');
     expect(outage.textContent).toContain('Choose Restart.');
-    expect(outage.querySelector('button.btn')?.textContent).toContain('Restart');
-    (outage.querySelector('button.btn') as HTMLButtonElement).click();
+    expect(outage.querySelector('button.pd-btn')?.textContent).toContain('Restart');
+    (outage.querySelector('button.pd-btn') as HTMLButtonElement).click();
     await settle();
     expect(health.repairs).toEqual(['store']);
     const row = one(el, `[data-testid=notice-${update.id}]`);
-    expect(all(row, '.actions button').map((b) => b.textContent?.trim())).toEqual(['Install']);
-    (row.querySelector('.actions button') as HTMLButtonElement).click();
+    expect(all(row, '.pd-actions button').map((b) => b.textContent?.trim())).toEqual(['Install']);
+    (row.querySelector('.pd-actions button') as HTMLButtonElement).click();
     await settle();
     expect(installs).toEqual([{ type: 'install', version: '2' }]);
     one(el, `[data-testid=notice-read-${update.id}]`).click();
@@ -342,10 +355,10 @@ describe('the notification centre', () => {
     const read = centre.post({ cause: 'y', source: 'job', severity: 'success', title: 'Done already' });
     await centre.markRead(read.id);
     await f.whenStable();
-    one(el, `[data-testid=notice-${broken.id}] .actions button`).click();
+    one(el, `[data-testid=notice-${broken.id}] .pd-actions button`).click();
     await settle();
     await f.whenStable();
-    expect(one(el, 'p.err').textContent).toContain('it broke');
+    expect(one(el, 'p.pd-err').textContent).toContain('it broke');
     expect(all(el, 'h3').map((h) => h.textContent)).toEqual(['Jobs']);
     (all(el, '[role=radio]')[1] as HTMLButtonElement).click();
     await f.whenStable();
@@ -354,11 +367,11 @@ describe('the notification centre', () => {
     vi.spyOn(centre, 'list').mockRejectedValueOnce(new Error('The centre is starting.'));
     await store.load();
     await f.whenStable();
-    expect(one(el, 'div.err').textContent).toContain('The centre is starting.');
-    one(el, 'div.err button').click();
+    expect(one(el, 'div.pd-err').textContent).toContain('The centre is starting.');
+    one(el, 'div.pd-err button').click();
     await settle();
     await f.whenStable();
-    expect(el.querySelector('div.err')).toBeNull();
+    expect(el.querySelector('div.pd-err')).toBeNull();
   });
 
   it('reveals a focused message; works without a registry', async () => {
@@ -372,7 +385,7 @@ describe('the notification centre', () => {
     await f.whenStable();
     await Promise.resolve();
     const row = one(f.nativeElement, `[data-testid=notice-${n.id}]`);
-    expect(row.classList).toContain('focus');
+    expect(row.classList).toContain('pd-focus');
     expect(document.activeElement === row.querySelector('button') || !row.isConnected).toBe(true);
     expect(one(f.nativeElement, 'h3').textContent).toBe('custom');
     TestBed.inject(NotificationsStore).setFocus(9999);
@@ -382,6 +395,25 @@ describe('the notification centre', () => {
 });
 
 describe('pd-notifications-status', () => {
+  it('draws the count in the danger colour while an error is unread, and neutral otherwise', async () => {
+    const { centre } = notifyBed();
+    const f = TestBed.createComponent(PdNotificationsStatus);
+    await settle();
+    const el: HTMLElement = f.nativeElement;
+    document.body.append(el);
+    centre.post({ cause: 'a', source: 'job', severity: 'info', title: 'A' });
+    await f.whenStable();
+    expect(one(el, '.pd-count').classList.contains('pd-error')).toBe(false);
+    const bad = centre.post({ cause: 'b', source: 'job', severity: 'error', title: 'B' });
+    await f.whenStable();
+    expect(one(el, '.pd-count').classList.contains('pd-error')).toBe(true);
+    expect(one(el, '.pd-count').textContent).toBe('2');
+    await centre.markRead(bad.id);
+    await f.whenStable();
+    expect(one(el, '.pd-count').classList.contains('pd-error')).toBe(false);
+    el.remove();
+  });
+
   it('shows the unread count, toggles the centre and opens by itself for a focused message', async () => {
     const { centre } = notifyBed();
     const f = TestBed.createComponent(PdNotificationsStatus);
@@ -395,7 +427,7 @@ describe('pd-notifications-status', () => {
     const n = centre.post({ cause: 'a', source: 'job', severity: 'info', title: 'A' });
     await f.whenStable();
     expect(pill.getAttribute('aria-label')).toBe('1 unread');
-    expect(one(el, '.count').textContent).toBe('1');
+    expect(one(el, '.pd-count').textContent).toBe('1');
     pill.click();
     await f.whenStable();
     expect(el.querySelector('pd-notifications-panel')).not.toBeNull();

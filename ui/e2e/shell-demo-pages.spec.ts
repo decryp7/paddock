@@ -142,8 +142,8 @@ test.describe('pages frame (plan S14)', () => {
     const gaps = await page.evaluate(() => {
       const r = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
       const chip = r('[data-testid="service-health-chip"]');
-      const dot = r('[data-status-item="pd.jobs"] .dot');
-      const text = r('[data-status-item="pd.jobs"] .text');
+      const dot = r('[data-status-item="pd.jobs"] .pd-dot');
+      const text = r('[data-status-item="pd.jobs"] .pd-text');
       const bell = r('[data-testid="notifications-status"] svg');
       return [dot.left - chip.right, bell.left - text.right];
     });
