@@ -28,7 +28,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// How the background process is registered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mechanism {
     /// A launch agent or daemon inside the app bundle, registered through `SMAppService`.

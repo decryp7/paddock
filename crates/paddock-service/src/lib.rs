@@ -22,6 +22,8 @@
 //! - [`login`]: the launch-at-login settings section and switch (the app's login item and the service together).
 //! - [`watch`] and [`supervised`]: the program's side: restart itself when its executable changed and it is idle, and
 //!   take the login shell's `PATH` (`paddock_proc::login_path`) when the OS started it.
+//! - [`scm_host`]: the Windows service host (`--service`): runs the program in the logged-on user's session, restarts
+//!   it, moves it with the session and stops it gracefully (`native::run_as_service` is the dispatcher).
 //! - [`verbs`]: the words every background program understands (`install`, `uninstall`, `status`, `stop`,
 //!   `print-unit`, `print-plist`, `--service`).
 //!
@@ -54,6 +56,7 @@
 //! ```
 
 pub mod backend;
+pub mod control;
 mod error;
 pub mod login;
 pub mod manager;
@@ -65,6 +68,7 @@ pub mod port;
 pub mod record;
 pub mod render;
 pub mod repair;
+pub mod scm_host;
 pub mod spec;
 pub mod status;
 pub mod supervised;
@@ -74,15 +78,38 @@ pub mod tracker;
 pub mod verbs;
 pub mod watch;
 
+/// The event every service update is sent on, to every window (a [`ServiceUpdate`]).
+pub const EVENT_NAME: &str = "paddock://service";
+
+paddock_commands::command_table! {
+    /// The commands of the service adapter (`paddock_service::tauri::invoke_handler` serves them; the shell plugin folds
+    /// them into its table). Every window may look; main windows and the Settings dialog change it.
+    pub static COMMANDS;
+    /// The background service now.
+    Query [WINDOW] => tauri::service_status,
+    /// Repairs the registration (returns at once; the outcome is an event).
+    Mutation [MAIN | DIALOG] => tauri::service_repair,
+    /// Registers the service with the user's consent (returns at once; the outcome is an event).
+    Mutation [MAIN | DIALOG] => tauri::service_install,
+    /// Opens macOS Login Items, where the user switches the background item.
+    Mutation [MAIN | DIALOG] => tauri::open_login_items,
+}
+
+#[cfg(feature = "tauri")]
+pub mod tauri;
+
+#[cfg(test)]
+mod generated;
 #[cfg(test)]
 mod golden;
 #[cfg(test)]
 mod scenarios;
 
 pub use backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+pub use control::{Request, ServiceCommandError, ServiceControl, ServiceErrorCode, ServiceUpdate};
 pub use error::{ServiceError, SpecError};
 pub use manager::{Manager, Started};
-pub use plan::{Hold, Plan, Reason};
+pub use plan::{Hold, Plan, Reason, Refusal};
 pub use port::{AppService, AppServiceStatus, Elevator, Output, RegisterError, RunError, System};
 pub use repair::{RepairOutcome, Step, Timings};
 pub use spec::{Kind, ProcessType, Restart, ServiceSpec, SpecBuilder};

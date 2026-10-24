@@ -229,7 +229,7 @@ pub fn replace(
         }
         b.pause(t.settle);
         let job = b.inspect().job;
-        if job == Job::Refused || (last_error.is_some() && job == Job::Absent) {
+        if job == Job::Refused || (last_error.is_some() && (job == Job::Absent || !answers())) {
             continue;
         }
         return wait_for_answer(b, answers, cancel, t, say);

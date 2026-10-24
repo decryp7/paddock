@@ -85,8 +85,6 @@ pub struct Facts<'a> {
     pub recorded_version: Option<&'a str>,
     /// This app's version.
     pub current_version: &'a str,
-    /// The user pressed Repair.
-    pub requested: bool,
     /// What the backend allows.
     pub caps: Capabilities,
 }
@@ -120,17 +118,44 @@ pub fn compare_versions(a: &str, b: &str) -> Option<Ordering> {
     }))
 }
 
-/// Decides; see the module documentation for the rules.
+/// Why a request to repair or install is refused: only the user's switch or the OS stop one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// The user switched it off.
+    SwitchedOff,
+    /// Waiting for the user's approval in Login Items.
+    NeedsApproval,
+    /// It cannot be registered from here.
+    Unavailable(String),
+}
+
+impl From<Refusal> for Hold {
+    fn from(r: Refusal) -> Hold {
+        match r {
+            Refusal::SwitchedOff => Hold::SwitchedOff,
+            Refusal::NeedsApproval => Hold::NeedsApproval,
+            Refusal::Unavailable(why) => Hold::Unavailable(why),
+        }
+    }
+}
+
+/// What a request (Repair, Install, launch at login switched on) does: replace the registration ([`Reason::Requested`]),
+/// whatever else holds (a newer copy's registration, a healthy one, nothing installed: pressing it is consent), unless
+/// the user's switch or the OS refuses.
+pub fn request(i: &Inspection) -> Result<Reason, Refusal> {
+    match &i.registration {
+        Registration::SwitchedOff => Err(Refusal::SwitchedOff),
+        Registration::NeedsApproval => Err(Refusal::NeedsApproval),
+        Registration::Unavailable(why) => Err(Refusal::Unavailable(why.clone())),
+        Registration::Absent | Registration::Registered => Ok(Reason::Requested),
+    }
+}
+
+/// Decides what happens without the user asking (at start); see the module documentation for the rules.
 pub fn plan(f: &Facts<'_>) -> Plan {
     let i = f.inspection;
-    match &i.registration {
-        Registration::SwitchedOff => return Plan::Leave(Hold::SwitchedOff),
-        Registration::NeedsApproval => return Plan::Leave(Hold::NeedsApproval),
-        Registration::Unavailable(why) => return Plan::Leave(Hold::Unavailable(why.clone())),
-        Registration::Absent | Registration::Registered => {}
-    }
-    if f.requested {
-        return Plan::Replace(Reason::Requested);
+    if let Err(r) = request(i) {
+        return Plan::Leave(r.into());
     }
     if !i.present() {
         return Plan::Leave(Hold::NotInstalled);
@@ -202,7 +227,6 @@ mod tests {
             answers: false,
             recorded_version: recorded,
             current_version: "1.0.4",
-            requested: false,
             caps,
         }
     }
@@ -232,7 +256,7 @@ mod tests {
 
     #[test]
     fn the_users_switch_wins_over_everything_including_repair() {
-        for requested in [false, true] {
+        {
             for (reg, hold) in [
                 (Registration::SwitchedOff, Hold::SwitchedOff),
                 (Registration::NeedsApproval, Hold::NeedsApproval),
@@ -246,9 +270,8 @@ mod tests {
                     job: Job::Refused,
                     ..Inspection::absent()
                 };
-                let mut f = facts(&i, MAC, None);
-                f.requested = requested;
-                assert_eq!(plan(&f), Plan::Leave(hold));
+                assert_eq!(plan(&facts(&i, MAC, None)), Plan::Leave(hold.clone()));
+                assert_eq!(request(&i).map_err(Hold::from), Err(hold));
             }
         }
     }
@@ -260,11 +283,9 @@ mod tests {
             plan(&facts(&i, MAC, Some("0.9.0"))),
             Plan::Leave(Hold::NotInstalled)
         );
-        let mut f = facts(&i, UAC, None);
-        f.requested = true;
         assert_eq!(
-            plan(&f),
-            Plan::Replace(Reason::Requested),
+            request(&i),
+            Ok(Reason::Requested),
             "pressing Repair is consent, also with a prompt"
         );
     }
@@ -384,9 +405,7 @@ mod tests {
             Plan::Replace(Reason::Moved)
         );
         // Pressing Repair in the older copy is the user's call.
-        let mut f = facts(&i, LINUX, Some("1.1.0"));
-        f.requested = true;
-        assert_eq!(plan(&f), Plan::Replace(Reason::Requested));
+        assert_eq!(request(&i), Ok(Reason::Requested));
         // A recorded version that is not a version does not block.
         assert_eq!(
             plan(&facts(&i, LINUX, Some("dev"))),

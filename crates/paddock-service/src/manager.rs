@@ -5,7 +5,7 @@
 
 use crate::backend::{Backend, Inspection, Mechanism};
 use crate::error::ServiceError;
-use crate::plan::{Facts, Hold, Plan, Reason, plan};
+use crate::plan::{Facts, Hold, Plan, Reason, Refusal, plan};
 use crate::record::{RecordFile, Recorded};
 use crate::repair::{RepairOutcome, Timings, replace};
 use crate::status::{Seen, ServiceStatus, compose};
@@ -117,7 +117,7 @@ impl Manager {
         self.record.load()
     }
 
-    fn decide(&mut self, requested: bool) -> (Inspection, bool, Plan) {
+    fn decide(&mut self) -> (Inspection, bool, Plan) {
         let answers = (self.answers)();
         let inspection = self.backend.inspect();
         let recorded = self.record.load();
@@ -126,7 +126,6 @@ impl Manager {
             answers,
             recorded_version: recorded.registered_version.as_deref(),
             current_version: &self.version,
-            requested,
             caps: self.backend.capabilities(),
         });
         (inspection, answers, p)
@@ -134,7 +133,7 @@ impl Manager {
 
     /// How the service is doing, for the UI and [`ServiceStatus::health`].
     pub fn status(&mut self) -> ServiceStatus {
-        let (inspection, answers, p) = self.decide(false);
+        let (inspection, answers, p) = self.decide();
         compose(Seen {
             mechanism: self.backend.mechanism(),
             caps: self.backend.capabilities(),
@@ -148,7 +147,7 @@ impl Manager {
 
     /// What [`Manager::on_start`] would do now, without doing it.
     pub fn check(&mut self) -> Plan {
-        self.decide(false).2
+        self.decide().2
     }
 
     fn remember(&self) {
@@ -189,7 +188,7 @@ impl Manager {
     /// touches what the user switched off, never prompts. Call it on a background thread soon after start (and again
     /// later: the service may only fail when it restarts itself onto the new binary).
     pub fn on_start(&mut self, cancel: &AtomicBool) -> Started {
-        match self.decide(false).2 {
+        match self.decide().2 {
             Plan::Leave(h) => Started::Left(h),
             Plan::MarkCurrent => {
                 self.remember();
@@ -206,11 +205,10 @@ impl Manager {
     /// The user pressed Repair (or Install): replaces the registration now. What the user switched off is not touched;
     /// Login Items is opened for them instead where there is one.
     pub fn repair(&mut self, cancel: &AtomicBool) -> Result<RepairOutcome, ServiceError> {
-        let reason = match self.decide(true).2 {
-            Plan::Replace(r) => r,
-            // A request is always a replacement unless the user's switch or the OS stops it.
-            Plan::Leave(hold) => return Err(self.opened(refusal(hold))),
-            Plan::MarkCurrent | Plan::Offer(_) => Reason::Requested,
+        let inspection = self.backend.inspect();
+        let reason = match crate::plan::request(&inspection) {
+            Ok(r) => r,
+            Err(refused) => return Err(self.opened(refusal(refused))),
         };
         match self.run_replace(reason, cancel) {
             None => Err(ServiceError::Busy),
@@ -257,6 +255,12 @@ impl Manager {
         self.record.forget()
     }
 
+    /// Opens the OS page where the user switches the service (macOS Login Items); `false` where there is none. The
+    /// switch stays the user's.
+    pub fn open_login_items(&mut self) -> bool {
+        self.backend.open_login_items()
+    }
+
     /// The definition this copy registers (`print-unit`, `print-plist`), when the mechanism has a file.
     pub fn definition(&self) -> Option<String> {
         self.backend.definition()
@@ -264,15 +268,11 @@ impl Manager {
 }
 
 /// Why a requested repair is not done.
-fn refusal(hold: Hold) -> ServiceError {
-    match hold {
-        Hold::SwitchedOff => ServiceError::SwitchedOff,
-        Hold::NeedsApproval => ServiceError::NeedsApproval,
-        Hold::Unavailable(why) => ServiceError::Unavailable(why),
-        Hold::NewerOwner(v) => ServiceError::NewerOwner(v),
-        Hold::Healthy | Hold::NotInstalled => {
-            ServiceError::Failed("Nothing to repair.".to_string())
-        }
+fn refusal(r: Refusal) -> ServiceError {
+    match r {
+        Refusal::SwitchedOff => ServiceError::SwitchedOff,
+        Refusal::NeedsApproval => ServiceError::NeedsApproval,
+        Refusal::Unavailable(why) => ServiceError::Unavailable(why),
     }
 }
 
@@ -297,24 +297,16 @@ mod tests {
     #[test]
     fn every_hold_and_outcome_maps_to_what_the_user_is_told() {
         assert!(matches!(
-            refusal(Hold::SwitchedOff),
+            refusal(Refusal::SwitchedOff),
             ServiceError::SwitchedOff
         ));
         assert!(matches!(
-            refusal(Hold::NeedsApproval),
+            refusal(Refusal::NeedsApproval),
             ServiceError::NeedsApproval
         ));
         assert!(
-            matches!(refusal(Hold::Unavailable("w".into())), ServiceError::Unavailable(w) if w == "w")
+            matches!(refusal(Refusal::Unavailable("w".into())), ServiceError::Unavailable(w) if w == "w")
         );
-        assert!(
-            matches!(refusal(Hold::NewerOwner("2".into())), ServiceError::NewerOwner(v) if v == "2")
-        );
-        assert!(matches!(refusal(Hold::Healthy), ServiceError::Failed(_)));
-        assert!(matches!(
-            refusal(Hold::NotInstalled),
-            ServiceError::Failed(_)
-        ));
         assert!(matches!(
             outcome_result(RepairOutcome::NeedsApproval),
             Err(ServiceError::NeedsApproval)
