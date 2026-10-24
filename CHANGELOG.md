@@ -40,6 +40,13 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- The shell demo desktop app serves Settings > AI access (MCP): `Builder::mcp` with a sample server (two read-only tools, one action), the settings in its config folder and the client keys in the OS credential store.
+- `paddock-storage` and `@decryp7/paddock-ui/shell/storage` (plan X32): what an app keeps on disk and clearing it safely. Declared
+  `Category`s (cache or the user's data, a confined folder, items with the reason they stay, an optional removal through the app),
+  a bounded size walk, a scan that is the preview, `clear` that needs it, confirms data per category, re-checks every item before
+  deleting it and never leaves the app's own folders (`Storage::within`), as jobs with progress and Cancel (`storage_*` commands and
+  `paddock://storage` in the shell plugin, `Builder::storage`). `paddock_files::Files::show_folder`. UI: `StorageBackend`,
+  `StorageStore`, the Settings > Storage page and its confirmation window; the shell demo's old generic page is now "Demo data".
 - `paddock-mcp` follow-ups (plan X22): `notifications/cancelled` stops the running call (its token is cancelled, it gets no answer);
   the tool calls of one connection run concurrently up to `Limits::max_concurrent_calls` (default 4) and are answered in any order,
   while everything else stays in order; `McpControl` and the Tauri adapter (feature `tauri`: `mcp_get`, `mcp_save`, `mcp_issue_key`
@@ -489,6 +496,12 @@ Conventional Commits; one semver tag for the whole repo.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
+### Changed
+- This repository's own documentation screenshots (the gallery and the shell demo, `ui/docs/screenshots`) are taken by the kit's
+  `captureDocScreens` (`ui/e2e/screenshots.spec.ts`, `npm run screenshots`): 1440 x 900 at twice the density, a fake clock at one
+  fixed time, UTC and en-GB, both themes, with a `hashes.json`. `captureDocScreens` accepts `folder/name` screens and an `element`
+  to photograph. Conformance C24 takes its screenshot folders from `screenshotDirs` in `paddock.conformance.json` (this repository:
+  `ui/docs/screenshots`). The images are regenerated and wait for a fresh review (no `REVIEWED.md` rows yet, so C24 reports them).
 - `@decryp7/paddock-ui/shell/mcp` (plan X22, ADR 0007): Settings > AI access (MCP). `McpBackend` (Tauri over `mcp_get`, `mcp_save`, `mcp_issue_key`,
   `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear` and the `paddock://mcp` event; in-memory with the engine's refusals), the per-window `McpStore`,
   `defineMcpSettingsPage`/`defineMcpKeyDialog`/`defineMcpRevokeDialog`, `provideShellMcp`/`provideMcpBackend`. The page `PdMcpPage` (`/shell/mcp/page`): the

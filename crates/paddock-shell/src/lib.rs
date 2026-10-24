@@ -65,6 +65,7 @@ paddock_commands::command_table! {
         paddock_dialogs::COMMANDS,
         paddock_diag::COMMANDS,
         paddock_files::COMMANDS,
+        paddock_storage::COMMANDS,
         paddock_service::COMMANDS,
         setup::COMMANDS,
         paddock_packs::COMMANDS,
