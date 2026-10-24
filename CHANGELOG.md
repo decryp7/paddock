@@ -287,6 +287,13 @@ Conventional Commits; one semver tag for the whole repo.
 - The jobs status item shows the lead job's phase and value beside its name ("Reading 40%", "Finding files 1,240 so
   far"; rule 11), a ring filled to its share on a known scale, and the jobs glyph when idle (`jobsStatusProgress`).
 
+### Changed
+- This repository's own documentation screenshots (the gallery and the shell demo, `ui/docs/screenshots`) are taken by the kit's
+  `captureDocScreens` (`ui/e2e/screenshots.spec.ts`, `npm run screenshots`): 1440 x 900 at twice the density, a fake clock at one
+  fixed time, UTC and en-GB, both themes, with a `hashes.json`. `captureDocScreens` accepts `folder/name` screens and an `element`
+  to photograph. Conformance C24 takes its screenshot folders from `screenshotDirs` in `paddock.conformance.json` (this repository:
+  `ui/docs/screenshots`). The images are regenerated and wait for a fresh review (no `REVIEWED.md` rows yet, so C24 reports them).
+
 ### Fixed
 - The About, Updates and What's New contents were unstyled: their stylesheet still used the old class names (`.btn`, `.muted`, ...)
   while the templates use the `pd-` ones, so the legal-text buttons failed colour contrast in the light theme (found by the new

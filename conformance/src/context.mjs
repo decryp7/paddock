@@ -9,6 +9,7 @@ export const DEFAULT_CONFIG = {
   docBlocks: null,
   baselineSkip: [],
   windowWeight: null,
+  screenshotDirs: ['docs/screenshots'],
   i18n: null,
   a11y: null,
   appDir: 'app',
