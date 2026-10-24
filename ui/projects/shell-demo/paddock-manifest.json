@@ -286,6 +286,7 @@
     "pd.activity",
     "sd.about",
     "sd.dialogs",
+    "sd.files",
     "sd.home",
     "sd.keys",
     "sd.lab",
@@ -328,6 +329,14 @@
         "about_info",
         "about_legal"
       ]
+    },
+    "pd.channels.remove": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "minSize": null,
+      "commands": []
     },
     "pd.channels.secret": {
       "kind": "form",
@@ -475,6 +484,7 @@
     "pd.activity.page": "Activity",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
+    "pd.channels.remove.title": "Remove channel",
     "pd.channels.secret.title": "Channel secret",
     "pd.diag.open": "Report a problem…",
     "pd.diag.title": "Report a problem",
@@ -521,6 +531,7 @@
     "sd.notify.three": "Notify three times",
     "sd.page.about": "About",
     "sd.page.dialogs": "Dialogs",
+    "sd.page.files": "Files",
     "sd.page.home": "Overview",
     "sd.page.keys": "Keyboard",
     "sd.page.lab": "Lab",

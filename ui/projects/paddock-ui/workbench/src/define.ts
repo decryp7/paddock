@@ -186,6 +186,11 @@ export interface ExplorerProviderDef<T extends object = object, N extends Explor
   readonly run?: (action: string, node: N, ctx: ShellContext<T>) => void | Promise<void>;
   /** What dragging a node carries; without it nodes are not draggable. */
   readonly drag?: (node: N) => ExplorerDragData | null;
+  /**
+   * What the tree depends on besides the engine's own events (the selected file of an outline): when its value changes,
+   * the section reloads from its roots. Read through signals, so it is tracked.
+   */
+  readonly changes?: Live<T, unknown>;
   /** A text for the empty tree ("Open a folder to start"); a command button may follow. */
   readonly empty?: { readonly text: Message; readonly command?: string };
 }

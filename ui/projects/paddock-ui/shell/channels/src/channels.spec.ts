@@ -11,7 +11,9 @@ import {
   CHANNELS_SECRET_DIALOG_ID,
   CHANNELS_SETTINGS_COMMANDS,
   CHANNELS_SETTINGS_PAGE,
+  CHANNELS_REMOVE_DIALOG_ID,
   channelsContributions,
+  defineChannelsRemoveDialog,
   defineChannelsSecretDialog,
   defineChannelsSettingsPage,
 } from './channels.contributions';
@@ -103,6 +105,12 @@ describe('the wire', () => {
     for (const b of [null, { ...ev, kind: 'other' }, { ...ev, testId: 'x' }, { ...ev, channelId: 1 }, { ...ev, ok: 'y' }, { ...ev, attempts: -1 }, { ...ev, attempts: 1.5 }, { ...ev, message: 4 }]) {
       expect(parseChannelsEvent(b)).toBeNull();
     }
+    const progress = { kind: 'testProgress', testId: 4, channelId: 'slack', attempt: 2, of: 3, phase: 'waiting', waitSecs: 4 };
+    expect(parseChannelsEvent({ ...progress, extra: 1 })).toEqual(progress);
+    expect(parseChannelsEvent({ ...progress, phase: 'sending', waitSecs: undefined })).toMatchObject({ phase: 'sending', waitSecs: null });
+    for (const b of [{ ...progress, phase: 'idle' }, { ...progress, attempt: 0 }, { ...progress, attempt: 4 }, { ...progress, of: 'x' }, { ...progress, waitSecs: -1 }, { ...progress, waitSecs: 'x' }, { ...progress, testId: 'x' }]) {
+      expect(parseChannelsEvent(b)).toBeNull();
+    }
     expect(parseTestStarted({ testId: 7 })).toBe(7);
     expect(parseTestStarted({ testId: 'x' })).toBeNull();
     expect(asChannelsError({ code: 'invalid', message: 'No.' })).toEqual({ code: 'invalid', message: 'No.', retryable: false });
@@ -163,7 +171,7 @@ describe('the in-memory engine', () => {
       [{ to: Array.from({ length: 11 }, (_, i) => `a${i}@b.co`) }, 'at most'],
       [{ to: ['nobody'] }, 'recipient'],
     ] as const) {
-      expect((await rejection([{ ...EMAIL, transport: { ...email, ...patch } }])).message).toContain(word);
+      expect((await rejection([{ ...EMAIL, transport: { ...email, ...patch } as ChannelConfig['transport'] }])).message).toContain(word);
     }
     expect(settingsProblem({ channels: [EMAIL, WEBHOOK, NTFY, { ...NTFY, id: 'local', transport: { type: 'webhook', url: 'http://localhost:8080/x', auth: false } }] })).toBeNull();
 
@@ -179,20 +187,21 @@ describe('the in-memory engine', () => {
   });
 
   it('plays each test outcome, with a missing secret and a rejected channel', async () => {
-    const run = async (outcome: MemoryChannelsOptions['outcome'], channel = WEBHOOK, secrets: string[] = ['slack'], retry = false): Promise<ChannelsEvent> => {
-      const m = new MemoryChannelsBackend({ outcome, secrets, retry });
+    const run = async (outcome: MemoryChannelsOptions['outcome'], channel = WEBHOOK, secrets: string[] = ['slack']): Promise<Extract<ChannelsEvent, { kind: 'test' }>> => {
+      const m = new MemoryChannelsBackend({ outcome, secrets });
       const seen: ChannelsEvent[] = [];
       await m.listen((e) => seen.push(e));
       const id = await m.test(channel);
       await settle();
-      expect(seen).toHaveLength(1);
-      expect(seen[0]?.testId).toBe(id);
-      return seen[0] as ChannelsEvent;
+      const finals = seen.filter((e): e is Extract<ChannelsEvent, { kind: 'test' }> => e.kind === 'test');
+      expect(finals).toHaveLength(1);
+      expect(finals[0]?.testId).toBe(id);
+      return finals[0]!;
     };
     expect(await run('succeed')).toMatchObject({ ok: true, attempts: 1, message: null });
-    expect(await run('succeed', WEBHOOK, ['slack'], true)).toMatchObject({ ok: true, attempts: 2 });
+    expect(await run('retry')).toMatchObject({ ok: true, attempts: 2 });
     expect((await run('rejected')).message).toContain('401');
-    expect((await run('unreachable')).attempts).toBe(2);
+    expect((await run('unreachable')).attempts).toBe(3);
     expect((await run('missingSecret')).message).toContain('none is stored');
     expect(await run(undefined, WEBHOOK, [])).toMatchObject({ ok: false, attempts: 0 });
     expect(await run((c) => (c.id === 'phone' ? 'rejected' : 'succeed'), NTFY, [])).toMatchObject({ ok: false });
@@ -200,6 +209,21 @@ describe('the in-memory engine', () => {
     await expect(m.test({ ...WEBHOOK, name: '' })).rejects.toMatchObject({ code: 'invalid' });
     expect(await m.test(WEBHOOK)).toBe(1);
     expect(await m.test(WEBHOOK)).toBe(2);
+  });
+
+  it('plays the progress of a retry and of a hang as phase-labelled events', async () => {
+    const seen: ChannelsEvent[] = [];
+    const retry = new MemoryChannelsBackend({ outcome: 'retry', secrets: ['slack'] });
+    await retry.listen((e) => seen.push(e));
+    await retry.test(WEBHOOK);
+    await settle();
+    expect(seen.map((e) => (e.kind === 'testProgress' ? `${e.attempt}/${e.of} ${e.phase} ${e.waitSecs}` : 'done'))).toEqual(['1/3 sending null', '1/3 waiting 4', '2/3 sending null', 'done']);
+    seen.length = 0;
+    const hang = new MemoryChannelsBackend({ outcome: 'hang', secrets: ['slack'] });
+    await hang.listen((e) => seen.push(e));
+    await hang.test(WEBHOOK);
+    await settle();
+    expect(seen).toMatchObject([{ kind: 'testProgress', attempt: 1, phase: 'sending' }]);
   });
 
   it('fails a get on request and refuses a save with a given error', async () => {
@@ -349,9 +373,9 @@ describe('the store', () => {
     const store = storeBed(h.memory);
     await settle();
     const started = store.test(WEBHOOK);
-    expect(store.tests()['slack']).toEqual({ state: 'running', testId: null });
+    expect(store.tests()['slack']).toEqual({ state: 'running', testId: null, progress: null });
     await started;
-    expect(store.tests()['slack']).toEqual({ state: 'running', testId: 1 });
+    expect(store.tests()['slack']).toEqual({ state: 'running', testId: 1, progress: null });
     // A second press while it runs does nothing.
     await store.test(WEBHOOK);
     expect(h.pending()).toBe(1);
@@ -402,6 +426,30 @@ describe('the store', () => {
     expect(store.tests()['slack']).toEqual({ state: 'delivered', attempts: 1 });
   });
 
+  it('shows the phase of a running test and never lets the attempt go backwards', async () => {
+    const h = held({ channels: [WEBHOOK], secrets: ['slack'], outcome: 'retry' });
+    const store = storeBed(h.memory);
+    await settle();
+    await store.test(WEBHOOK);
+    const progress = () => (store.tests()['slack'] as { progress: unknown }).progress;
+    h.memory.emit({ kind: 'testProgress', testId: 1, channelId: 'slack', attempt: 2, of: 3, phase: 'waiting', waitSecs: 4 });
+    expect(progress()).toEqual({ attempt: 2, of: 3, phase: 'waiting', waitSecs: 4 });
+    // A late event of attempt 1 changes nothing; the same attempt in another phase does.
+    h.memory.emit({ kind: 'testProgress', testId: 1, channelId: 'slack', attempt: 1, of: 3, phase: 'sending', waitSecs: null });
+    expect(progress()).toMatchObject({ attempt: 2, phase: 'waiting' });
+    h.memory.emit({ kind: 'testProgress', testId: 1, channelId: 'slack', attempt: 2, of: 3, phase: 'sending', waitSecs: null });
+    expect(progress()).toMatchObject({ attempt: 2, phase: 'sending' });
+    // Progress of another test or channel is ignored.
+    h.memory.emit({ kind: 'testProgress', testId: 9, channelId: 'slack', attempt: 3, of: 3, phase: 'sending', waitSecs: null });
+    h.memory.emit({ kind: 'testProgress', testId: 1, channelId: 'other', attempt: 3, of: 3, phase: 'sending', waitSecs: null });
+    expect(progress()).toMatchObject({ attempt: 2 });
+    await h.all();
+    expect(store.tests()['slack']).toEqual({ state: 'delivered', attempts: 2 });
+    // Progress after the outcome changes nothing.
+    h.memory.emit({ kind: 'testProgress', testId: 1, channelId: 'slack', attempt: 3, of: 3, phase: 'sending', waitSecs: null });
+    expect(store.tests()['slack']?.state).toBe('delivered');
+  });
+
   it('never times out a test that hangs', async () => {
     vi.useFakeTimers();
     try {
@@ -410,8 +458,11 @@ describe('the store', () => {
       await settle();
       await store.test(WEBHOOK);
       await vi.advanceTimersByTimeAsync(10 * 60_000);
-      expect(store.tests()['slack']).toEqual({ state: 'running', testId: 1 });
+      await h.all();
+      expect(store.tests()['slack']).toMatchObject({ state: 'running', testId: 1, progress: { attempt: 1, phase: 'sending' } });
       expect(h.pending()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(store.tests()['slack']?.state).toBe('running');
     } finally {
       vi.useRealTimers();
     }
@@ -476,6 +527,7 @@ describe('the store', () => {
 describe('the contributions', () => {
   const page = defineChannelsSettingsPage({ providers: () => Promise.resolve([]), load: () => Promise.resolve(class {}) });
   const dialog = defineChannelsSecretDialog({ providers: () => Promise.resolve([]), load: () => Promise.resolve(class {}) });
+  const remove = defineChannelsRemoveDialog({ load: () => Promise.resolve(class {}) });
 
   it('declares the page, a modal form dialog for the secret and the commands each window may call', () => {
     expect(page.id).toBe(CHANNELS_SETTINGS_PAGE);
@@ -486,10 +538,13 @@ describe('the contributions', () => {
     expect(CHANNELS_SETTINGS_COMMANDS).not.toContain('channels_set_secret');
     for (const c of [...CHANNELS_SETTINGS_COMMANDS, ...CHANNELS_SECRET_DIALOG_COMMANDS]) expect(CHANNELS_COMMANDS[c]).toBeDefined();
     expect(CHANNELS_COMMANDS.channels_set_secret.windows).toEqual(['dialog']);
+    // The remove confirmation is a modal decision, one window per channel, and calls nothing.
+    expect(remove).toMatchObject({ id: CHANNELS_REMOVE_DIALOG_ID, kind: 'decision', modality: 'modal', instanced: true });
+    expect(remove.commands).toEqual([]);
   });
 
   it('passes the shell’s contribution checks', () => {
-    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideContributions(channelsContributions(page, dialog))] });
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideContributions(channelsContributions(page, [dialog, remove]))] });
     expect(() => assertContributionsValid(TestBed.inject(Injector))).not.toThrow();
   });
 
