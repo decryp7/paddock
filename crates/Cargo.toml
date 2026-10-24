@@ -18,6 +18,7 @@ members = [
     "paddock-diag",
     "paddock-download",
     "paddock-env",
+    "paddock-files",
     "paddock-health",
     "paddock-ipc",
     "paddock-jobs",
@@ -78,6 +79,7 @@ paddock-dialogs = { path = "paddock-dialogs", version = "0.1.0", registry = "dec
 paddock-diag = { path = "paddock-diag", version = "0.1.0", registry = "decryp7" }
 paddock-download = { path = "paddock-download", version = "0.1.0", registry = "decryp7" }
 paddock-env = { path = "paddock-env", version = "0.1.0", registry = "decryp7" }
+paddock-files = { path = "paddock-files", version = "0.1.0", registry = "decryp7" }
 paddock-health = { path = "paddock-health", version = "0.1.0", registry = "decryp7" }
 paddock-ipc = { path = "paddock-ipc", version = "0.1.0", registry = "decryp7" }
 paddock-jobs = { path = "paddock-jobs", version = "0.1.0", registry = "decryp7" }

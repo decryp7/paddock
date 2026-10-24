@@ -1,3 +1,4 @@
+import { panelTitle } from '@decryp7/paddock-ui/workbench';
 import { afterNextRender, ApplicationRef, computed, createComponent, DestroyRef, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
 import { panelId as makePanelId, parsePanelId, WorkbenchRegistry, type PerspectiveDef, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
@@ -461,7 +462,7 @@ export class WorkbenchDock {
       return;
     }
     if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
-    api.addPanel({ id, component: view.id, title: view.title.text, position: { referencePanel, direction } });
+    api.addPanel({ id, component: view.id, title: panelTitle(view, id), position: { referencePanel, direction } });
   }
 
   close(id: string): void {

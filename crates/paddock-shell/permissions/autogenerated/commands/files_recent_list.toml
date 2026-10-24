@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-files-recent-list"
+description = "Enables the files_recent_list command without any pre-configured scope."
+commands.allow = ["files_recent_list"]
+
+[[permission]]
+identifier = "deny-files-recent-list"
+description = "Denies the files_recent_list command without any pre-configured scope."
+commands.deny = ["files_recent_list"]
