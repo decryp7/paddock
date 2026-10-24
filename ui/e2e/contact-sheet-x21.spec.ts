@@ -26,6 +26,8 @@ test.describe('contact sheet: data parts', () => {
   async function shoot(page: Page, theme: string, title: string, name: string, target: ReturnType<Page['locator']>): Promise<void> {
     mkdirSync(OUT, { recursive: true });
     const file = join(OUT, `${theme}-${name}.png`);
+    // No stray hover or focus in a frame: the pointer rests in a corner unless the frame is about it.
+    if (!/hover|menu/.test(name)) await page.mouse.move(0, 0);
     await target.screenshot({ path: file });
     shots.push({ theme, title, file });
   }
@@ -58,7 +60,7 @@ test.describe('contact sheet: data parts', () => {
       // Keyboard focus: the row ring and a focused sortable header.
       await small.locator('[role=row][data-index]').first().focus();
       await page.keyboard.press('ArrowDown');
-      await shoot(page, theme, 'Focused row (2 px ring) and a hovered header showing the sort chevron', 'table-focus-row', small.locator('.pd-grid'));
+      await shoot(page, theme, 'Focused row (2 px ring)', 'table-focus-row', small.locator('.pd-grid'));
       await small.locator('.pd-sort').nth(1).focus();
       await page.keyboard.press('Tab');
       await page.keyboard.press('Shift+Tab');
@@ -87,8 +89,11 @@ test.describe('contact sheet: data parts', () => {
     test(`table at 320 px ${theme}`, async ({ page }) => {
       await open(page, theme, 320);
       await shoot(page, theme, 'Table at 320 px: the name keeps its room, other columns drop out, compact toolbar, nothing scrolls sideways', 'table-320', page.locator('[data-testid="table-small"]'));
-      await page.locator('section[data-testid="chart"] canvas').first().waitFor();
-      await shoot(page, theme, 'Charts at 320 px (titles, unit, donut with labels)', 'charts-320', page.locator('section[data-testid="chart"]'));
+      // Every chart and state in one frame: a tall viewport, so nothing is scrolled or cut, and the canvases settled.
+      await page.setViewportSize({ width: 320, height: 2600 });
+      await page.getByRole('img', { name: 'Disk use by kind' }).locator('canvas').waitFor();
+      await page.waitForTimeout(900);
+      await shoot(page, theme, 'Charts at 320 px: titles, the donut with its list under the ring, loading and error', 'charts-320', page.locator('section[data-testid="chart"]'));
     });
 
     test(`chart ${theme}`, async ({ page }) => {

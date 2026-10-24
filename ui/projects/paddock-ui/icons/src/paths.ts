@@ -48,6 +48,7 @@ export const PD_ICON_PATHS = {
   window: 'M3.5 5h17v14h-17zM3.5 9h17',
   keyboard: 'M2.5 6.5h19v11h-19zM7.5 14h9',
   columns: 'M4 5h16v14H4zM9.3 5v14M14.7 5v14',
+  sort: 'M8 9l4-4 4 4M8 15l4 4 4-4',
   activity: 'M2.5 12h4l3-7.5 4 15 3-7.5h5',
   // Workbench (plan X50, review 1): the assistant, its history, a window kept on top, a panel docked back.
   chat: 'M4.5 5.5h15v10h-8l-4.5 3.5v-3.5h-2.5z',

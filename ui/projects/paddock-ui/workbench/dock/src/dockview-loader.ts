@@ -16,3 +16,9 @@ export function loadDockview(): Promise<Dockview> {
 export function dockview(): Dockview | null {
   return loaded;
 }
+
+/** Forgets the loaded module, so a spec can start from "dockview is not loaded" whatever ran before it in the same worker. */
+export function forgetDockviewForTest(): void {
+  loaded = null;
+  loading = null;
+}

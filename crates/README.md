@@ -776,7 +776,10 @@ a size only), arguments validated against the tool's schema (a wrong call is a t
 tool's byte limit with a cursor for more, a call that passes its time limit is cancelled and abandoned (at most 8 still running),
 a panicking tool is contained, actions (`ToolDef::action`) are hidden and refused until `Policy::allow_action(name)`. Sighter's own
 rules sit on top and are not relaxed. `client` has the request builders and typed results for a host (Pitwall); the wire types are
-shared. The contract test pins the message shapes against the specification's JSON Schema. Not built: `prompts`, subscriptions,
+shared. The contract test pins the message shapes against the specification's JSON Schema. `notifications/cancelled` stops a running call; a
+connection runs up to 4 tool calls at once and answers them as they finish. With the `tauri` feature, `McpControl` + `paddock_mcp::tauri`
+are the settings page's engine (`Builder::mcp` in the shell): the on/off switch, tools shown, actions allowed by name, client keys (issued
+once, only the hash kept, the list persisted through `paddock-secrets`), the audit log and its `paddock://mcp` event. Not built: `prompts`, subscriptions,
 sampling, HTTP transport (stdio and loopback only, as ADR 0007 decides).
 ## `paddock-archive` (plan X24)
 

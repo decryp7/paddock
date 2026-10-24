@@ -2,11 +2,13 @@ import { TestBed } from '@angular/core/testing';
 import { settle } from '@decryp7/paddock-ui/shell/testing';
 import { DockContext } from './dock-context';
 import { GUIDE } from './dock-geometry';
-import { dockview } from './dockview-loader';
+import { dockview, forgetDockviewForTest } from './dockview-loader';
 import { mountDock, probeView } from './harness.spec-helper';
 
-// Spec files run in their own module registry: dockview is not loaded when the first test of this file starts.
+// Spec files usually run in their own module registry, but a worker can be reused: the test starts from "not loaded" itself.
 describe('attaching before dockview has loaded', () => {
+  beforeEach(() => forgetDockviewForTest());
+
   it('attaches as soon as dockview is there, and only to the container asked for last', async () => {
     expect(dockview()).toBeNull();
     const { dock, rendered } = await mountDock({ views: [probeView('a.one')], preload: false });

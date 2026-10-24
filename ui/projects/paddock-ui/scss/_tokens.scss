@@ -92,6 +92,9 @@
   --pd-control-height: 28px;
   --pd-button-height: 32px;
   --pd-hit-min: 24px;
+  // The resting colour of a row's "..." button: subtle text mixed 75 % into the surface, 3:1 or better (SC 1.4.11); hover, focus and
+  // open use the text colour.
+  --pd-row-action-rest: color-mix(in srgb, var(--pd-text-subtle) 75%, var(--pd-surface-1));
 }
 
 :root[data-density='comfortable'] {
@@ -147,7 +150,7 @@
   --pd-chart-3: #3dd39d;
   --pd-chart-4: #d68cc2;
   --pd-chart-5: #f07d3a;
-  --pd-chart-6: #8fa3ff;
+  --pd-chart-6: #7a70ff;
   --pd-chart-7: #e8dc5a;
   --pd-chart-8: #a2acb1;
   --pd-diverging-neg: var(--pd-chart-1);
