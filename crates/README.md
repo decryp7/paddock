@@ -199,7 +199,7 @@ The shell's files live in `ui/projects/paddock-ui/shell/generated/` and in the e
 | `commands.ts` | the wire types (ts-rs): `CommandKind`, `WindowClass`, `CommandInfo`, `RefusalCode`, `CommandRefusal` | `paddock-commands` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated`) |
 | `shell-commands.ts` | `SHELL_COMMANDS` and `ShellCommand`, every command of the shell plugin | `paddock-shell` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-shell --lib generated`) |
 | `shell.ts` | `SHELL_PLUGIN`, `SHELL_VERSION` and the `shell_version` reply (`VersionReply`, `AppIdentity`) | `paddock-shell` (same test) |
-| `notify/generated/health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications, window notices and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
+| `notify/generated/health.ts` | the events (`SERVICE_HEALTH_EVENT`, `NOTIFICATIONS_EVENT`, `NOTIFICATIONS_OPEN_EVENT`, `NOTIFICATIONS_ACTION_EVENT`), `healthCause`, and the wire types (ts-rs) of service health, notifications, window notices and `HealthError` | `paddock-health` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-health --all-features --lib generated`) |
 | `notify/generated/health-commands.ts` | `HEALTH_COMMANDS` and `HealthCommand`, the health and notification commands | `paddock-health` (same test) |
 
 An app writes its own file the same way into its UI (for example `src/app/core/generated/app-commands.ts`); dialog
@@ -286,6 +286,37 @@ health.down("llm", Cause::new("The model server stopped.").hint("Choose Restart.
   the shell's own are `health`, `repairService` and `openSettings`. App messages are saved debounced and atomically in a
   versioned file (missing, damaged or newer: empty, logged); a window's project messages are saved by the app with its
   project (`notifications_record` / `notifications_restore`). A dialog or pop-out sees its host window's list.
+- OS notifications (plan X8, `notify::os`; the Tauri side in `tauri::os`, the plugin adapter in `tauri::native` behind
+  feature `os-notify`): one policy for every app, merged from Debrief's `notify.rs` (level, "only when the user cannot see
+  it", rate limiter), Spotter's `toast.rs` (buttons, click-through, a validated payload) and `QuietHours`; Pitcrew's and
+  Dyno's plain toasts had nothing to add (Dyno's sustain and cool-down decide whether an alarm *exists* and stay in
+  `dyno-core`).
+
+  ```rust
+  let settings = SharedOsSettings::default();              // the user's level, quiet hours, limits (Settings: pd.notifications)
+  let notifier = OsNotifier::new(settings.clone(), Arc::new(PluginToaster::new(app.clone())))
+      .with_labels(ActionLabels::default().label("viewJob", "View job"));
+  paddock_shell::Builder::new(identity)
+      .os_notifications(settings)                          // the "Notifications" settings page over the same handle
+      .health_setup(move |_, s| s.os_notifier(Arc::new(notifier)).on_notice_action("viewJob", |app, notice, action| open_job(app, action)))
+  ```
+
+  - Policy (`screen`, pure): the level (`off`, `alerts` = warning and above, `all`), then "the window the message belongs
+    to is in front" (`user_sees` over focused and visible windows; an app-wide message is seen in any), then quiet hours
+    (local time, across midnight; a critical failure still notifies unless the user turns that off), then the limits.
+    A held-back message is still in the centre; only the toast waits.
+  - Limits (`RateLimiter`, epoch ms from the injected `Clock`): one toast per cause key per cool-down (30 s) and a burst
+    (5 in 5 minutes) over all causes, both clamped to ranges; bounded to 512 causes; a clock that goes backwards forgets
+    instead of muting; a toast the OS refused is taken back (`Reservation`), so a failure costs no quota.
+  - Buttons: a toast has up to three, one per labelled action of the message (`ActionLabels`; the shell's `repairService`
+    and `openSettings` are built in). A click reports the message id and the slot; the action is read from the centre's
+    message again, never from the OS payload (`route`): the toast opens the message (and marks it read), Repair runs
+    `Health::repair` in the shell (rule 19), an app handler (`on_notice_action`) runs on the OS callback thread, anything
+    else goes to the window as `paddock://notifications-action` (`NoticeActionEvent`; the UI runs it like the centre's own
+    button). Where an OS reports no clicks the old fallback stays: the app gaining the focus within 2 minutes opens the
+    last toast's message; a reported click supersedes it.
+  - Tests never post a notification: `FakeToaster` records toasts, plays clicks and permission answers (public, for the
+    apps' wiring tests); `FixedOffset` stands for the user's zone, `ManualClock` for time.
 
 ## `paddock-startup` (plan S7 and §11)
 
