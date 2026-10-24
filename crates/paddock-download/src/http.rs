@@ -125,6 +125,17 @@ impl HttpTransport {
     }
 }
 
+/// A ureq agent configured like [`HttpTransport`]'s (certificates from the operating system's store, `proxy` or direct, the
+/// config's timeouts, user agent and redirect limit), for other Paddock crates that make requests of their own (a POST for a
+/// notification channel) and must not duplicate the TLS and proxy set-up. The proxy's login is applied here and never appears
+/// in the error.
+pub fn ureq_agent(
+    config: &HttpConfig,
+    proxy: Option<&ProxyServer>,
+) -> Result<ureq::Agent, DownloadError> {
+    build_agent(config, proxy)
+}
+
 fn build_agent(
     config: &HttpConfig,
     proxy: Option<&ProxyServer>,
