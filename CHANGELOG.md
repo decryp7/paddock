@@ -10,6 +10,10 @@ Conventional Commits; one semver tag for the whole repo.
   containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers
   only, bounded lines, connection cap), `client` request builders and the shared MCP types for Pitwall; a contract test of the
   2025-06-18 message shapes.
+- `paddock-proc` (plan X54): every `Supervised` child on Windows runs in a job object of its own with kill-on-close (and
+  die-on-unhandled-exception), so the child and every helper it started end when the value is dropped or the app exits or
+  crashes, also helpers that left its process tree; `Supervised::in_job`. `paddock-ipc`'s launcher gets it through
+  `Supervised` (`Child::in_job`). Windows refusing a job degrades to the tree kill.
 - `paddock_jobs::schedule` and the shared schedule editors (plan X33). `Schedule` (every N seconds, days at times of day, cron with five or
   six fields) in the computer's or a chosen IANA zone with daylight saving (a time inside the spring gap runs once, shifted; a repeated
   time runs once), `next_check` (jitter, back-off after failures, a per-source minimum interval), `preview` (the words, the next runs and
