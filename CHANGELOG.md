@@ -5,6 +5,9 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- `tools/macos-vm-smoke.sh` and the `service-smoke` workflow (C21): the service-after-update smoke runs in a fresh Tart VM (pinned
+  macOS base image; `--guest linux` for a systemd --user session with `scripts/shell-demo/smoke-service-update-linux.sh`), always
+  deleted, one at a time, with disk and load checks (rule 7).
 - `@decryp7/paddock-ui/shell/service` (plan X4): Settings > Background service. `ServiceBackend` (Tauri adapter and an in-memory
   one that plays install, a repair's phases, failure, busy, switched-off and needs-approval), `ServiceStore` (status, the
   `paddock://service` updates folded in, "Still working" while a repair runs and never timed out, an inline error with
