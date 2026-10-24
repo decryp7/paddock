@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-panel-focus"
+description = "Enables the panel_focus command without any pre-configured scope."
+commands.allow = ["panel_focus"]
+
+[[permission]]
+identifier = "deny-panel-focus"
+description = "Denies the panel_focus command without any pre-configured scope."
+commands.deny = ["panel_focus"]

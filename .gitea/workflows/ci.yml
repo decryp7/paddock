@@ -2,7 +2,7 @@
 # Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.
 #
-# Runner labels: ubuntu-latest (jobs in the garage image), windows-latest and macos-latest (host runners, tools used as
+# Runner labels: ubuntu-latest (jobs in the shared paddock-ci image, ci-image/), windows-latest and macos-latest (host runners, tools used as
 # installed), as in Debrief and Pitwall.
 
 name: ci
@@ -23,16 +23,12 @@ jobs:
     name: ui (tokens, contrast, components, entry points, publish dry run)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: ui
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Install
         run: npm ci
@@ -61,6 +57,9 @@ jobs:
       - name: Build the shell demo
         run: npm run shell-demo:build
 
+      - name: Build the workbench demo
+        run: npm run workbench-demo:build
+
       # Lists every npm package, entry point and crate with what a tag would publish; publishes nothing.
       - name: Publish dry run
         run: node ../scripts/publish.mjs --skip-build
@@ -72,7 +71,7 @@ jobs:
     name: reference apps (shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     strategy:
       fail-fast: false
       matrix:
@@ -83,20 +82,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
+      # Playwright's browsers and Chrome for Testing are baked into the image (ci-image/): nothing is downloaded per job.
       - name: Install
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+        run: npm ci
 
       - name: Reference app checks
         # CI names its ports (@decryp7/paddock-e2e refuses a default there: another job could hold it), one pair per shard.
         env:
           PW_PORT: ${{ matrix.shard == 1 && '4300' || '4310' }}
           SHELL_DEMO_PORT: ${{ matrix.shard == 1 && '4301' || '4311' }}
+          WORKBENCH_DEMO_PORT: ${{ matrix.shard == 1 && '4302' || '4312' }}
         run: npx playwright test --shard=${{ matrix.shard }}/2
 
   # @decryp7/paddock-conformance (conformance/, plan X9): every check has a good and a bad fixture, the release scripts are
@@ -105,16 +100,12 @@ jobs:
     name: conformance (checks, release scripts)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: conformance
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Tests
         run: npm test
@@ -127,10 +118,13 @@ jobs:
       #   C07 release preflight and C08 release artifacts: Paddock releases through publish.yml, not an app release job;
       #   C23 commit lint and doc blocks: Paddock's AGENTS.md is the source of the blocks, and its history predates the
       #     100-character subject rule.
-      # C24 needs every docs/images file reviewed (docs/images/REVIEWED.md). C14 (hermetic wrapper), C29 and C30 (wall clock) report warnings; C15 has a dated waiver (paddock.waivers.toml).
+      # C24 needs every docs/images file reviewed (docs/images/REVIEWED.md). C37 needs one test binary per crate and every
+      # crate tested here and on the workspace hack (paddock.conformance.json). C14 (hermetic wrapper), C29 and C30 (wall clock)
+      # report warnings; C36 (parser hardening) is strict here (a new parser needs its never-panics test); C15 has a dated
+      # waiver (paddock.waivers.toml).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37 --strict C36
 
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
@@ -139,13 +133,9 @@ jobs:
     name: tools and shared scripts
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Tools
         run: node --test tools/test/*.test.mjs
@@ -158,16 +148,12 @@ jobs:
     name: eslint preset (rules 27 to 39)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: eslint
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - run: npm ci
 
@@ -177,7 +163,7 @@ jobs:
     name: crates (fmt, workspace hack, unused deps, coverage, deny)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
     defaults:
       run:
         working-directory: crates
@@ -189,10 +175,7 @@ jobs:
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
       - run: cargo fmt --all --check
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-hakari,cargo-machete
-
+      # cargo-hakari and cargo-machete come with the image (ci-image/).
       # One feature set per dependency (docs/dev-setup.md): the workspace-hack crate is current and every member uses it.
       - name: Workspace hack up to date
         run: cargo hakari generate --diff && cargo hakari manage-deps --dry-run && cargo hakari verify
@@ -205,12 +188,13 @@ jobs:
       # Merged line coverage over all test binaries, adapters included (the per-binary summary counts unused generic instances).
       # Native glue files are left out (crates/README.md: never logic, reviewed by hand), and so are paddock-proc's test child (a
       # re-executed test binary that its parent ends with SIGKILL, so its coverage data is never written) and paddock-ipc's (the same); paddock-ipc's endpoint/{unix,windows}.rs are
-      # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered).
+      # its native glue (OS error paths; the portable surface in endpoint/mod.rs is covered). paddock-chromium's fake browser
+      # runs in re-executed test binaries that are often ended by force (no coverage data), like paddock-proc's test child.
       # The gate (scripts/coverage-gate.mjs) leaves out only the `#[tauri::command]` attribute lines: llvm-cov charges every
       # region of the macro's generated wrapper to that line, which no test can all reach.
       - name: Coverage (>= 99 % lines)
         run: |
-          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-service/src|paddock-packs/src/watch|paddock-metrics/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
+          cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$' --lcov --output-path lcov.info
           node ../scripts/coverage-gate.mjs lcov.info 99
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -226,8 +210,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # Linux runs in the garage image (Tauri's libraries pre-installed); Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    # Linux runs in the paddock-ci image (Rust, Tauri's libraries, Node, Playwright, Chrome for Testing, cargo-nextest baked in); Windows and
+    # macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v1' || '' }}
     defaults:
       run:
         working-directory: crates
@@ -270,7 +255,7 @@ jobs:
           rustc --version && cargo --version
           cargo clippy --version || { echo "::error::clippy is missing on this runner (rustup component add clippy)"; exit 1; }
 
-      # The garage image has cargo-nextest; the host runners get the prebuilt binary.
+      # The paddock-ci image has cargo-nextest; the host runners get the prebuilt binary.
       - uses: taiki-e/install-action@v2
         if: runner.os != 'Linux'
         with:
@@ -327,9 +312,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-proc --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-proc --all-features --profile ci && cargo test -p paddock-proc --all-features --doc
 
+      - name: paddock-runtime
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-runtime --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-runtime --all-features --profile ci && cargo test -p paddock-runtime --all-features --doc
+
+      # The driver against its fake browser (Unix); the real-browser test runs only where CHROMIUM_TEST_PATH names a
+      # Chrome for Testing build, never an installed browser (rule 7).
+      - name: paddock-chromium
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-chromium --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-chromium --all-features --profile ci && cargo test -p paddock-chromium --all-features --doc
+
+      - name: paddock-mcp
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-mcp --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-mcp --all-features --profile ci && cargo test -p paddock-mcp --all-features --doc
       - name: paddock-archive
         if: ${{ !cancelled() }}
-        run: cargo clippy -p paddock-archive --all-targets --all-features -- -D warnings && cargo test -p paddock-archive --all-features
+        run: cargo clippy -p paddock-archive --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-archive --all-features --profile ci && cargo test -p paddock-archive --all-features --doc
       - name: paddock-bench
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-bench --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-bench --all-features --profile ci && cargo test -p paddock-bench --all-features --doc
@@ -344,14 +342,30 @@ jobs:
       - name: paddock-env
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-env --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-env --all-features --profile ci && cargo test -p paddock-env --all-features --doc
+      - name: paddock-files
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-files --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-files --all-features --profile ci && cargo test -p paddock-files --all-features --doc
+      - name: paddock-storage
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-storage --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-storage --all-features --profile ci && cargo test -p paddock-storage --all-features --doc
 
       - name: paddock-testkit
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-testkit --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-testkit --all-features --profile ci && cargo test -p paddock-testkit --all-features --doc
 
+      # The test-plan formats: properties (parse after write, no panics on any bytes) run with the tests; the fuzz target in
+      # paddock-testplan/fuzz is built by the nightly fuzz job.
+      - name: paddock-testplan
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-testplan --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-testplan --all-features --profile ci && cargo test -p paddock-testplan --all-features --doc
+
       - name: paddock-metrics
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-metrics --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-metrics --all-features --profile ci && cargo test -p paddock-metrics --all-features --doc
+
+      - name: paddock-live
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-live --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-live --all-features --profile ci && cargo test -p paddock-live --all-features --doc
 
       - name: paddock-channels
         if: ${{ !cancelled() }}
@@ -361,9 +375,29 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-names --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-names --all-features --profile ci && cargo test -p paddock-names --all-features --doc
 
+      - name: paddock-archive
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-archive --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-archive --all-features --profile ci && cargo test -p paddock-archive --all-features --doc
+
+      - name: paddock-net
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-net --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-net --all-features --profile ci && cargo test -p paddock-net --all-features --doc
+
+      - name: paddock-siblings
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-siblings --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-siblings --all-features --profile ci && cargo nextest run -p paddock-siblings --profile ci && cargo test -p paddock-siblings --all-features --doc
+
+      - name: paddock-build
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-build --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-build --all-features --profile ci && cargo test -p paddock-build --all-features --doc
+
       - name: paddock-packs
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-packs --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-packs --all-features --profile ci && cargo test -p paddock-packs --all-features --doc
+
+      - name: paddock-watch
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-watch --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-watch --all-features --profile ci && cargo test -p paddock-watch --all-features --doc
 
       - name: paddock-log
         if: ${{ !cancelled() }}
@@ -373,6 +407,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-service --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-service --all-features --profile ci && cargo test -p paddock-service --all-features --doc
 
+      - name: paddock-assistant
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-assistant --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-assistant --all-features --profile ci && cargo test -p paddock-assistant --all-features --doc
+
       - name: paddock-pitwall
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-pitwall --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-pitwall --all-features --profile ci && cargo test -p paddock-pitwall --all-features --doc
@@ -381,9 +419,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-secrets --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-secrets --all-features --profile ci && cargo nextest run -p paddock-secrets --profile ci && cargo test -p paddock-secrets --all-features --doc
 
+      - name: paddock-panels
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-panels --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-panels --all-features --profile ci && cargo test -p paddock-panels --all-features --doc
+
       - name: paddock-window
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-window --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-window --all-features --profile ci && cargo test -p paddock-window --all-features --doc
+
+      - name: paddock-workbench
+        if: ${{ !cancelled() }}
+        run: cargo clippy -p paddock-workbench --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-workbench --all-features --profile ci && cargo test -p paddock-workbench --all-features --doc
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -393,6 +439,43 @@ jobs:
   # here before a tag. Its installers are built by shell-demo-release.yml (a `shell-demo-v*` tag or a manual run).
   shell-demo-app:
     name: shell demo app (fmt, clippy, tests, deny)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v1
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
+          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
+
+      # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
+      - name: The UI the app embeds
+        working-directory: ui
+        run: |
+          npm ci
+          npm run shell-demo:build
+
+      - name: App (fmt, clippy, tests on the mock runtime, deny)
+        working-directory: apps/shell-demo/src-tauri
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo nextest run --workspace --config-file ../../../crates/.config/nextest.toml --profile ci
+          cargo test --workspace --doc
+          cargo deny check
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+  # Paddock Workbench Demo (apps/workbench-demo, plan X50 W8): the shell and workbench plugins in a real app, in its own workspace, with the UI it
+  # embeds. Inside this repo it is the first consumer: a change to a shell or workbench crate or to the UI that breaks an app fails
+  # here before a tag. Its installers are built by workbench-demo-release.yml (a `workbench-demo-v*` tag or a manual run).
+  workbench-demo-app:
+    name: workbench demo app (fmt, clippy, tests, deny)
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -415,10 +498,10 @@ jobs:
         working-directory: ui
         run: |
           npm ci
-          npm run shell-demo:build
+          npm run workbench-demo:build
 
       - name: App (fmt, clippy, tests on the mock runtime, deny)
-        working-directory: apps/shell-demo/src-tauri
+        working-directory: apps/workbench-demo/src-tauri
         run: |
           cargo fmt --all --check
           cargo clippy --workspace --all-targets -- -D warnings

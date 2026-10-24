@@ -6,6 +6,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  contentChild,
   contentChildren,
   DestroyRef,
   Directive,
@@ -20,10 +21,13 @@ import {
   viewChild,
 } from '@angular/core';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
-import { PdPathText } from '@decryp7/paddock-ui';
+import { PdMiddleText } from './middle-text';
 import {
+  actionColumnWidth,
   cellText,
+  columnTrack,
   filterRows,
+  fitColumns,
   fromControl,
   groupItems,
   inlineActions,
@@ -31,6 +35,8 @@ import {
   menuActions,
   nextIndex,
   nextSort,
+  PD_HEADER_HEIGHT,
+  rowHeightFor,
   shownColumns,
   sortRows,
   type PdColumn,
@@ -47,11 +53,23 @@ export class PdCell {
   readonly template = inject<TemplateRef<{ $implicit: unknown; column: PdColumn<unknown> }>>(TemplateRef);
 }
 
+/** Marks the content shown when the table has no rows at all: `<div pdTableEmpty>No plugins yet <button>Install one</button></div>` (a next step). */
+@Directive({ selector: '[pdTableEmpty]' })
+export class PdTableEmpty {}
+
 /** The row of an action. */
 export interface PdRowActionEvent<T> {
   readonly id: string;
   readonly row: T;
 }
+
+/** The row height of the page's density, from the `--pd-row-height` token (Standard when it is not set, as in tests). */
+function readDensity(): number {
+  if (typeof document === 'undefined') return 32;
+  return Number.parseInt(getComputedStyle(document.documentElement).getPropertyValue('--pd-row-height'), 10) || 32;
+}
+
+const NO_ACTIONS = (): readonly PdRowAction[] => [];
 
 /** Above this many lines the rows are drawn by a virtual scroll viewport (`virtual="auto"`). */
 export const PD_TABLE_VIRTUAL_FROM = 100;
@@ -77,58 +95,97 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
 @Component({
   selector: 'pd-table',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, CdkContextMenuTrigger, PdGlyph, PdPathText],
-  host: { '[style.--pd-table-row]': 'rowHeight() + "px"' },
+  imports: [NgTemplateOutlet, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, CdkContextMenuTrigger, PdGlyph, PdMiddleText],
+  host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"' },
   template: `
     <div class="pd-toolbar">
       @if (filterable()) {
         <label class="pd-filter">
           <pd-glyph name="search" [size]="14" />
-          <input class="pd-filter-input" type="search" autocomplete="off" [attr.aria-label]="t.filter" [placeholder]="t.filter" [value]="query()" (input)="query.set($any($event.target).value)" />
+          <input class="pd-filter-input" type="search" autocomplete="off" [attr.aria-label]="t.filter" [placeholder]="t.filter" [value]="query()" [disabled]="state() !== 'ready' || !rows().length" (input)="query.set($any($event.target).value)" />
         </label>
       }
-      <span class="pd-count" aria-live="polite" data-testid="table-count">{{ countText() }}</span>
+      @if (countText(); as count) {
+        <span class="pd-count" aria-live="polite" data-testid="table-count">{{ count }}</span>
+      }
+      @if (state() === 'loading') {
+        <span class="pd-sr" role="status">{{ t.loading }}</span>
+      }
       <span class="pd-spacer"></span>
       <ng-content select="[pdTableToolbar]" />
       @if (choosable().length) {
-        <button type="button" class="pd-tool" [cdkMenuTriggerFor]="columnsMenu" [attr.aria-label]="t.columns" data-testid="table-columns">
-          <pd-glyph name="settings" [size]="14" /><span>{{ t.columns }}</span>
+        <button type="button" class="pd-tool" [cdkMenuTriggerFor]="columnsMenu" [attr.aria-label]="t.columns" [attr.title]="t.columns" data-testid="table-columns">
+          <pd-glyph name="columns" [size]="14" /><span class="pd-tool-text">{{ t.columns }}</span>
         </button>
       }
     </div>
-    <div #grid class="pd-grid" role="grid" [attr.aria-label]="label()" [attr.aria-rowcount]="items().length + 1" [style.--pd-cols]="gridTemplate()" (keydown)="onKeydown($event)">
+    <div #grid class="pd-grid" role="grid" [attr.aria-label]="label()" [attr.aria-busy]="state() === 'loading'" [attr.aria-rowcount]="items().length + 1" [style.--pd-cols]="gridTemplate()" (keydown)="onKeydown($event)">
       <div class="pd-header" role="row" aria-rowindex="1">
         @for (c of columns2(); track c.key) {
           <div role="columnheader" class="pd-th" [class.pd-end]="c.align === 'end'" [attr.aria-sort]="ariaSort(c)">
             @if (c.sortable !== false) {
-              <button type="button" class="pd-sort" (click)="sortBy(c.key)" [attr.aria-label]="sortLabel(c)">
+              <button type="button" class="pd-sort" [class.pd-sorted]="sort()?.key === c.key" (click)="sortBy(c.key)" [attr.aria-label]="sortLabel(c)">
                 <span class="pd-th-text">{{ c.header }}</span>
-                @if (sort()?.key === c.key) {
-                  <pd-glyph [name]="sort()?.direction === 'asc' ? 'chevron-up' : 'chevron-down'" [size]="14" />
-                }
+                <pd-glyph class="pd-sort-icon" [name]="sort()?.key !== c.key ? 'sort' : sort()?.direction === 'asc' ? 'chevron-up' : 'chevron-down'" [size]="14" />
               </button>
             } @else {
               <span class="pd-th-text">{{ c.header }}</span>
             }
           </div>
         }
-        <div role="columnheader" class="pd-th pd-actions-th"><span class="pd-sr">{{ t.actions }}</span></div>
+        @if (actionWidth()) {
+          <div role="columnheader" class="pd-th pd-actions-th"><span class="pd-sr">{{ t.actions }}</span></div>
+        }
       </div>
-      @if (isVirtual()) {
-        <cdk-virtual-scroll-viewport class="pd-body" role="rowgroup" [itemSize]="rowHeight()" [style.height.px]="bodyHeight()">
-          <ng-container *cdkVirtualFor="let item of items(); let i = index; trackBy: trackItem">
-            <ng-container *ngTemplateOutlet="line; context: { $implicit: item, index: i }" />
-          </ng-container>
-        </cdk-virtual-scroll-viewport>
-      } @else {
-        <div class="pd-body" role="rowgroup" [style.max-height.px]="maxHeight()">
-          @for (item of items(); track trackItem($index, item)) {
-            <ng-container *ngTemplateOutlet="line; context: { $implicit: item, index: $index }" />
+      @switch (state()) {
+        @case ('loading') {
+          <div class="pd-body" role="rowgroup" data-testid="table-loading">
+            @for (n of [0, 1, 2, 3, 4]; track n) {
+              <div role="row" class="pd-row pd-skeleton">
+                @for (c of columns2(); track c.key) {
+                  <div role="gridcell" class="pd-cell"><span class="pd-skel" [class.pd-skel-end]="c.align === 'end'" [style.width.%]="40 + ((n * 17 + c.key.length * 11) % 50)"></span></div>
+                }
+                @if (actionWidth()) { <div role="gridcell" class="pd-cell"></div> }
+              </div>
+            }
+          </div>
+        }
+        @case ('error') {
+          <div class="pd-body" role="rowgroup">
+            <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty pd-error" data-testid="table-error">
+              <pd-glyph name="alert" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
+              <button type="button" class="pd-retry" (click)="retry.emit()">{{ t.retry }}</button>
+            </div></div>
+          </div>
+        }
+        @default {
+          @if (isVirtual()) {
+            <cdk-virtual-scroll-viewport class="pd-body" role="rowgroup" [itemSize]="rowPx()" [style.height.px]="bodyHeight()">
+              <ng-container *cdkVirtualFor="let item of items(); let i = index; trackBy: trackItem">
+                <ng-container *ngTemplateOutlet="line; context: { $implicit: item, index: i }" />
+              </ng-container>
+            </cdk-virtual-scroll-viewport>
+          } @else {
+            <div class="pd-body" role="rowgroup" [style.max-height.px]="maxHeight()">
+              @for (item of items(); track trackItem($index, item)) {
+                <ng-container *ngTemplateOutlet="line; context: { $implicit: item, index: $index }" />
+              }
+            </div>
           }
-        </div>
-      }
-      @if (!items().length) {
-        <p class="pd-empty" role="status">{{ rows().length ? t.noMatch : emptyText() }}</p>
+          @if (!items().length) {
+            <div class="pd-body" role="rowgroup">
+              <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty">
+                @if (rows().length) {
+                  <p role="status">{{ t.noMatch }}</p>
+                } @else if (emptySlot()) {
+                  <ng-content select="[pdTableEmpty]" />
+                } @else {
+                  <p role="status">{{ emptyText() }}</p>
+                }
+              </div></div>
+            </div>
+          }
+        }
       }
     </div>
 
@@ -140,7 +197,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
               <pd-glyph [name]="item.collapsed ? 'chevron-right' : 'chevron-down'" [size]="14" />
             </button>
             <span class="pd-group-name">{{ item.label || t.none }}</span>
-            <span class="pd-group-count">{{ item.count }}</span>
+            <span class="pd-group-count">{{ formatCount(item.count) }}</span>
           </div>
         </div>
       } @else {
@@ -161,38 +218,49 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
           (click)="onRowClick(row, $event, i)"
         >
           @for (c of columns2(); track c.key) {
-            <div role="gridcell" class="pd-cell" [class.pd-end]="c.align === 'end'">
+            <div role="gridcell" class="pd-cell" [class.pd-end]="c.align === 'end'" [class.pd-first]="$first">
               @let custom = customCells().get(c.key);
               @if (custom) {
                 <ng-container *ngTemplateOutlet="custom; context: { $implicit: row, column: c }" />
               } @else if (c.truncate === 'middle') {
-                <pd-path-text [value]="text(c, row)" [plain]="true" />
+                <pd-middle-text [value]="text(c, row)" />
               } @else {
                 <span class="pd-text" [attr.title]="text(c, row)">{{ text(c, row) }}</span>
               }
             </div>
           }
-          <div role="gridcell" class="pd-cell pd-actions">
-            @if (actions.length) {
-              @for (a of inline(actions); track a.id) {
-                <button type="button" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [attr.title]="a.label" [disabled]="a.disabled" (click)="act(a, row, $event)">
-                  <pd-glyph [name]="a.icon ?? ''" [size]="14" />
+          @if (actionWidth()) {
+            <div role="gridcell" class="pd-cell pd-actions">
+              @if (actions.length) {
+                @if (!narrow()) {
+                  @for (a of inline(actions); track a.id) {
+                    <button type="button" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [attr.title]="a.label" [disabled]="a.disabled" (click)="act(a, row, $event)">
+                      <pd-glyph [name]="a.icon ?? ''" [size]="14" />
+                    </button>
+                  }
+                }
+                <button type="button" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [attr.title]="t.more" aria-haspopup="menu" [cdkMenuTriggerFor]="rowMenu" [cdkMenuTriggerData]="{ row }" (click)="$event.stopPropagation()">
+                  <pd-glyph name="more" [size]="16" />
                 </button>
               }
-              <button type="button" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [attr.title]="t.more" aria-haspopup="menu" [cdkMenuTriggerFor]="rowMenu" [cdkMenuTriggerData]="{ row }" (click)="$event.stopPropagation()">
-                <pd-glyph name="more" [size]="16" />
-              </button>
-            }
-          </div>
+            </div>
+          }
         </div>
       }
     </ng-template>
 
     <ng-template #rowMenu let-row="row">
-      <div cdkMenu class="pd-menu" [attr.aria-label]="t.actions">
-        @for (a of menuOf(row); track a.id) {
-          <button type="button" cdkMenuItem class="pd-menu-item" [class.pd-danger]="a.danger" [disabled]="a.disabled" (cdkMenuItemTriggered)="emit(a, row)">
-            @if (a.icon) { <pd-glyph [name]="a.icon" [size]="14" /> }
+      <div cdkMenu class="pd-popmenu" [attr.aria-label]="t.actions">
+        @let items = menuOf(row);
+        @let icons = hasIcon(items);
+        @for (a of items; track a.id; let k = $index) {
+          @if (a.danger && k > 0 && !items[k - 1]?.danger) {
+            <div class="pd-popmenu__sep" role="separator"></div>
+          }
+          <button type="button" cdkMenuItem class="pd-popmenu__item" [class.pd-popmenu__item--danger]="a.danger" [disabled]="a.disabled" (cdkMenuItemTriggered)="emit(a, row)">
+            @if (icons) {
+              <span class="pd-popmenu__icon">@if (a.icon) { <pd-glyph [name]="a.icon" [size]="14" /> }</span>
+            }
             <span>{{ a.label }}</span>
           </button>
         }
@@ -200,10 +268,10 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     </ng-template>
 
     <ng-template #columnsMenu>
-      <div cdkMenu class="pd-menu" [attr.aria-label]="t.columns">
+      <div cdkMenu class="pd-popmenu" [attr.aria-label]="t.columns">
         @for (c of choosable(); track c.key) {
-          <button type="button" cdkMenuItemCheckbox class="pd-menu-item" [cdkMenuItemChecked]="isShown(c)" (cdkMenuItemTriggered)="toggleColumn(c.key)">
-            <pd-glyph [name]="isShown(c) ? 'check' : ''" [size]="14" />
+          <button type="button" cdkMenuItemCheckbox class="pd-popmenu__item" [cdkMenuItemChecked]="isShown(c)" (cdkMenuItemTriggered)="toggleColumn(c.key)">
+            <span class="pd-popmenu__icon">@if (isShown(c)) { <pd-glyph name="check" [size]="14" /> }</span>
             <span>{{ c.header }}</span>
           </button>
         }
@@ -213,51 +281,71 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; container-type: inline-size; }
     .pd-toolbar { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 44px; min-width: 0; }
-    .pd-filter { display: flex; align-items: center; gap: var(--pd-space-2); flex: 1 1 12rem; max-width: 24rem; min-width: 0; height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-input); background: var(--pd-surface-1); color: var(--pd-text-muted); }
-    .pd-filter:focus-within { border-color: var(--pd-focus-ring); outline: 1px solid var(--pd-focus-ring); }
+    .pd-filter { display: flex; align-items: center; gap: var(--pd-space-2); flex: 1 1 8rem; max-width: 24rem; min-width: 8rem; height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-input); background: var(--pd-surface-1); color: var(--pd-text-muted); }
+    .pd-filter:focus-within { border-color: var(--pd-focus-ring); outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-filter-input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-body); }
     .pd-count { color: var(--pd-text-muted); font-size: var(--pd-text-label); white-space: nowrap; font-variant-numeric: tabular-nums; }
     .pd-spacer { flex: 1; }
     .pd-tool { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
     .pd-tool:hover { background: var(--pd-hover); color: var(--pd-text); }
+    .pd-tool:focus-visible, .pd-sort:focus-visible, .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    /* A narrow table keeps the filter and an icon-only Columns button; the count goes (the grid says how many rows it has). */
+    @container (max-width: 400px) { .pd-tool-text, .pd-count { display: none; } .pd-tool { padding: 0 var(--pd-space-2); } }
     .pd-grid { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
     .pd-header, .pd-row { display: grid; grid-template-columns: var(--pd-cols); align-items: center; column-gap: var(--pd-space-3); padding: 0 var(--pd-space-3); min-width: 0; }
-    .pd-header { position: sticky; top: 0; z-index: var(--pd-z-sticky); height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
+    .pd-header { position: sticky; top: 0; z-index: var(--pd-z-sticky); height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
     .pd-th { display: flex; min-width: 0; }
     .pd-th.pd-end, .pd-cell.pd-end { justify-content: flex-end; text-align: end; }
-    .pd-sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: var(--pd-radius-tag); }
+    .pd-sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; padding: 0 4px; margin-inline: -4px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: var(--pd-radius-tag); }
+    .pd-th.pd-end .pd-sort { flex-direction: row-reverse; }
     .pd-sort:hover { color: var(--pd-text); }
+    /* The sort affordance: a quiet chevron on hover and focus, solid once the column is the sort. */
+    .pd-sort-icon { color: var(--pd-text-subtle); opacity: 0; }
+    .pd-sort:hover .pd-sort-icon, .pd-sort:focus-visible .pd-sort-icon { opacity: 1; }
+    .pd-sorted .pd-sort-icon { opacity: 1; color: var(--pd-text); }
     .pd-th-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-body { display: block; overflow-y: auto; overflow-x: hidden; min-width: 0; }
     .pd-row { height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); cursor: default; }
     .pd-row:last-child { border-bottom: 0; }
     .pd-row:hover { background: var(--pd-hover); }
     .pd-row:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
-    .pd-row.pd-selected { background: var(--pd-selected, var(--pd-hover)); }
+    /* Selected: the accent tint with a 2 px accent bar on the left (the guide). */
+    .pd-row.pd-selected { background: var(--pd-accent-tint, var(--pd-hover)); box-shadow: inset 2px 0 0 var(--pd-accent); }
     .pd-cell { display: flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
     .pd-cell.pd-end { font-variant-numeric: tabular-nums; }
+    .pd-cell.pd-first { font-weight: var(--pd-weight-medium); }
     .pd-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-group { display: block; background: var(--pd-surface-2); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-group-cell { display: flex; align-items: center; gap: var(--pd-space-2); height: 100%; }
     .pd-group-toggle { display: inline-flex; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
     .pd-group-count { color: var(--pd-text-subtle); font-variant-numeric: tabular-nums; }
-    .pd-actions { justify-content: flex-end; gap: var(--pd-space-1); overflow: visible; }
+    .pd-actions { justify-content: flex-end; gap: 4px; overflow: visible; }
     .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
     .pd-icon-btn:hover:not(:disabled) { background: var(--pd-hover); color: var(--pd-text); }
     .pd-icon-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); }
     .pd-icon-btn:disabled { opacity: 0.4; cursor: default; }
     .pd-inline { opacity: 0; }
-    .pd-more { opacity: 0.4; }
-    .pd-row:hover .pd-inline, .pd-row:focus-within .pd-inline, .pd-row:hover .pd-more, .pd-row:focus-within .pd-more, .pd-more[aria-expanded='true'] { opacity: 1; }
+    /* Always visible in its own resting colour (3:1, SC 1.4.11), so touch and keyboard users can find it (UI patterns, rule 2). */
+    .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
+    .pd-row:hover .pd-inline, .pd-row:focus-within .pd-inline { opacity: 1; }
+    .pd-row:hover .pd-more, .pd-row:focus-within .pd-more, .pd-more[aria-expanded='true'] { color: var(--pd-text); }
+    /* On the selected row's tint the rest colour (mixed against the plain surface) is not 3:1: use the full subtle text there. */
+    .pd-row.pd-selected .pd-more { color: var(--pd-text-subtle); }
+    .pd-row.pd-selected:hover .pd-more, .pd-row.pd-selected:focus-within .pd-more, .pd-row.pd-selected .pd-more[aria-expanded='true'] { color: var(--pd-text); }
     @media (hover: none) { .pd-inline { opacity: 0.6; } }
-    .pd-empty { margin: 0; padding: var(--pd-space-5) var(--pd-space-3); color: var(--pd-text-muted); text-align: center; font-size: var(--pd-text-body); }
+    .pd-empty { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); margin: 0; padding: var(--pd-space-6, 32px) var(--pd-space-3); color: var(--pd-text-muted); text-align: center; font-size: var(--pd-text-body); }
+    .pd-msg-row { display: block; }
+    .pd-empty p { margin: 0; }
+    .pd-empty.pd-error { flex-direction: row; justify-content: center; }
+    .pd-empty.pd-error pd-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
+    .pd-retry { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
+    .pd-retry:hover { background: var(--pd-hover); }
+    .pd-skeleton { pointer-events: none; }
+    .pd-skel-end { margin-inline-start: auto; }
+    .pd-skel { display: block; height: 10px; border-radius: 3px; background: var(--pd-hover); animation: pd-pulse 1.4s ease-in-out infinite; }
+    @keyframes pd-pulse { 50% { opacity: 0.5; } }
+    :root[data-motion='reduce'] .pd-skel { animation: none; }
     .pd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    .pd-menu { display: flex; flex-direction: column; min-width: 160px; padding: var(--pd-space-1); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-popover); background: var(--pd-surface-2); box-shadow: var(--pd-shadow-2); }
-    .pd-menu-item { display: flex; align-items: center; gap: var(--pd-space-2); width: 100%; min-height: 28px; padding: 0 var(--pd-space-3); border: 0; border-radius: var(--pd-radius-tag); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-body); text-align: start; cursor: pointer; }
-    .pd-menu-item pd-glyph { color: var(--pd-text-muted); }
-    .pd-menu-item:hover:not(:disabled), .pd-menu-item:focus-visible { background: var(--pd-hover); outline: none; }
-    .pd-menu-item:disabled { opacity: 0.4; cursor: default; }
-    .pd-menu-item.pd-danger, .pd-menu-item.pd-danger pd-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
   `,
 })
 export class PdTable<T> {
@@ -270,11 +358,17 @@ export class PdTable<T> {
   /** The grid's accessible name. */
   readonly label = input.required<string>();
   /** Actions of a row; none means a row without a menu. */
-  readonly rowActions = input<(row: T) => readonly PdRowAction[]>(() => []);
+  readonly rowActions = input<(row: T) => readonly PdRowAction[]>(NO_ACTIONS);
   /** Shows the filter field. */
   readonly filterable = input(true);
-  /** Row height in pixels: 32, 40 or 48 (rule 5). */
-  readonly rowHeight = input(40);
+  /** Row height in pixels: 24, 32 or 36, the family's densities (UI guide §3); default: the density the page is in (Standard 32). */
+  readonly rowHeight = input<number | null>(null);
+  /** `loading` shows skeleton rows, `error` the message with Retry (UI guide §7); rows are drawn when `ready`. */
+  readonly state = input<'ready' | 'loading' | 'error'>('ready');
+  /** What the error says (default: a plain sentence). */
+  readonly errorText = input('');
+  /** Retry was pressed in the error state. */
+  readonly retry = output<void>();
   /** The tallest the table body grows before it scrolls. */
   readonly maxHeight = input(480);
   /** Draw rows with the virtual scroll viewport: `auto` from {@link PD_TABLE_VIRTUAL_FROM} lines. */
@@ -303,22 +397,47 @@ export class PdTable<T> {
     more: $localize`:@@pd.table.more:More actions`,
     noMatch: $localize`:@@pd.table.noMatch:No rows match the filter.`,
     none: $localize`:@@pd.table.none:None`,
+    loading: $localize`:@@pd.table.loading:Loading rows`,
+    error: $localize`:@@pd.table.error:The rows could not be loaded.`,
+    retry: $localize`:@@pd.table.retry:Retry`,
   };
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly injector = inject(Injector);
   private readonly viewport = viewChild(CdkVirtualScrollViewport);
   private readonly cells = contentChildren(PdCell);
+  protected readonly emptySlot = contentChild(PdTableEmpty);
   protected readonly customCells = computed(() => new Map(this.cells().map((c) => [c.key(), c.template] as const)));
 
   private readonly width = signal(1024);
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
   protected readonly active = signal(0);
 
-  protected readonly columns2 = computed(() => shownColumns(this.columns(), this.hiddenColumns(), this.width()));
+  /** The density's row height, read from `--pd-row-height` and read again when the page's density changes. */
+  private readonly density = signal(readDensity());
+  protected readonly headerPx = PD_HEADER_HEIGHT;
+  protected readonly rowPx = computed(() => rowHeightFor(this.rowHeight() ?? this.density()));
+  protected readonly narrow = computed(() => this.width() < 480);
+  private readonly rowActionLists = computed(() => {
+    const actions = this.rowActions();
+    // No rows to ask (loading, empty, error): an app that declares row actions keeps the track, so the columns do not jump when data arrives.
+    if (actions !== NO_ACTIONS && (this.state() !== 'ready' || !this.rows().length)) return { any: true, inline: 2 };
+    let any = false;
+    let inline = 0;
+    for (const row of this.rows()) {
+      const list = actions(row);
+      any ||= list.length > 0;
+      inline = Math.max(inline, inlineActions(list).length);
+      if (inline === 2) break;
+    }
+    return { any, inline };
+  });
+  /** The action column's width: none without actions, just the "..." button when narrow. */
+  protected readonly actionWidth = computed(() => actionColumnWidth(this.rowActionLists().any, this.rowActionLists().inline, this.narrow()));
+  protected readonly columns2 = computed(() => fitColumns(shownColumns(this.columns(), this.hiddenColumns(), this.width()), this.width(), this.actionWidth()));
   /** The columns the user may switch (all but the required ones). */
   protected readonly choosable = computed(() => this.columns().filter((c) => !c.required));
-  protected readonly gridTemplate = computed(() => `${this.columns2().map((c) => c.width ?? 'minmax(0, 1fr)').join(' ')} 72px`);
+  protected readonly gridTemplate = computed(() => [...this.columns2().map(columnTrack), ...(this.actionWidth() ? [`${this.actionWidth()}px`] : [])].join(' '));
 
   private readonly filtered = computed(() => filterRows(this.rows(), this.columns(), this.query()));
   /** The rows after filtering and sorting. */
@@ -329,10 +448,13 @@ export class PdTable<T> {
     return groupItems(this.ordered(), key ? this.columns().find((c) => c.key === key) : undefined, this.collapsed());
   });
   protected readonly isVirtual = computed(() => (this.virtual() === 'auto' ? this.items().length > PD_TABLE_VIRTUAL_FROM : this.virtual()));
-  protected readonly bodyHeight = computed(() => Math.min(this.items().length * this.rowHeight(), this.maxHeight()));
+  protected readonly bodyHeight = computed(() => Math.min(this.items().length * this.rowPx(), this.maxHeight()));
+  /** "N rows" (thousands separated by the locale), "M of N rows" when filtered; empty while loading or when there are no rows (nothing to count). */
   protected readonly countText = computed(() => {
-    const [shown, total] = [this.ordered().length, this.rows().length];
-    return shown === total ? $localize`:@@pd.table.count:${total} rows` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
+    if (this.state() !== 'ready' || !this.rows().length) return '';
+    const n = new Intl.NumberFormat();
+    const [shown, total] = [n.format(this.ordered().length), n.format(this.rows().length)];
+    return this.ordered().length === this.rows().length ? $localize`:@@pd.table.count:${total} rows` : $localize`:@@pd.table.countOf:${shown} of ${total} rows`;
   });
 
   constructor() {
@@ -342,7 +464,12 @@ export class PdTable<T> {
           if (w > 0) this.width.set(w);
         });
     observer?.observe(this.host);
-    inject(DestroyRef).onDestroy(() => observer?.disconnect());
+    const mutation = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => this.density.set(readDensity()));
+    mutation?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
+    inject(DestroyRef).onDestroy(() => {
+      observer?.disconnect();
+      mutation?.disconnect();
+    });
   }
 
   protected trackItem = (_: number, item: PdTableItem<T>): string => (item.kind === 'group' ? `g:${item.key}` : this.rowKey()(item.row));
@@ -357,6 +484,12 @@ export class PdTable<T> {
   }
   protected menuOf(row: T): readonly PdRowAction[] {
     return menuActions(this.actionsOf(row));
+  }
+  protected formatCount(n: number): string {
+    return new Intl.NumberFormat().format(n);
+  }
+  protected hasIcon(items: readonly PdRowAction[]): boolean {
+    return items.some((a) => !!a.icon);
   }
   protected isShown(c: PdColumn<T>): boolean {
     return this.columns2().some((s) => s.key === c.key);
@@ -421,7 +554,7 @@ export class PdTable<T> {
       else if (item) this.open(item.row);
       return;
     }
-    const page = Math.max(1, Math.floor((this.bodyHeight() || this.maxHeight()) / this.rowHeight()) - 1);
+    const page = Math.max(1, Math.floor((this.bodyHeight() || this.maxHeight()) / this.rowPx()) - 1);
     const to = nextIndex(this.items().length, index, e.key, page);
     if (to === null) return;
     e.preventDefault();
