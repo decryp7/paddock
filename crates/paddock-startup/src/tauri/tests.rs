@@ -648,3 +648,5 @@ fn the_native_asker_without_the_dialog_plugin_waits() {
     assert!(native::message(with_plugin.handle(), w.label(), &prompt).is_some());
     assert!(native::message(with_plugin.handle(), "w-none", &prompt).is_some());
 }
+
+mod recovery;

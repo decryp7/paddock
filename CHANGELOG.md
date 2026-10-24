@@ -25,6 +25,22 @@ Conventional Commits; one semver tag for the whole repo.
   (`commit-lint`: Conventional Commits, no Co-Authored-By or AI attribution). The apps' release scripts are unified under
   `conformance/release/` (`publish`, `latest-json`, `strip-keys`, `macos-verify-bundle.sh`, which captures output before it
   matches); `latest.json` is byte-equal to the apps' copies. CI job `conformance` runs its tests.
+- `paddock-startup` lifecycle (plan X3, from Debrief's `lifecycle.rs`): unclean-shutdown detection, safe mode and the autosaved
+  UI session. `Lifecycle::begin` writes a running marker (a `paddock-env` `VersionedFile`: pid, start time, safe mode) and
+  `end` removes it on a clean exit; the next start calls the run a crash when the marker's process is gone (PID reuse is
+  caught by the start time; a still-running predecessor is taken over; a damaged or newer marker counts as a crash) or when
+  `paddock-log`'s `CrashMarker` is there (thread and place are told to the UI, the panic message never is). A separate
+  instance (`--new-instance`, always safe mode) keeps its state in `instances/<pid>/`, so it never disturbs the main
+  instance's marker or session; dead ones are pruned. `Mode`/`Feature` make safe mode one answer every part reads
+  (extensions, plugins, last session off). `SessionStore` + `Autosaver` keep each window's `ui_checkpoint` in a versioned
+  session file on a background thread (atomic with backup; torn, damaged or newer files start clean with a notice; bounded
+  labels, sizes and windows); the previous run's session is kept as the recovered one until the user decides. Commands
+  `recovery_status`, `recovery_restore`, `recovery_start_fresh`, `recovery_safe_mode` (main windows), builder option
+  `lifecycle(..)`, `tauri::end_run` (the shell calls it at exit), feature `os-probe` for the process table.
+- `@decryp7/paddock-ui/shell/startup`: `RecoveryStore`, `PdRecoveryNotice` (the unclean-shutdown notice: Restore / Start in
+  safe mode / Start fresh; only what Rust offers; a failed choice stays visible) and `PdSafeModeBadge` (title bar), both placed
+  by `PdShellFrame`; `UiCheckpoint.restoreWindows`; the backend's `recovery*` calls with browser mocks
+  (`paddock.mock.unclean`, `paddock.mock.safeMode`).
 - Paddock Shell Demo (`apps/shell-demo`, plan S18): the shell demo as an installable Tauri app on the `paddock-shell`
   plugin, with a sample engine (a service whose Repair works and one whose Repair fails, jobs with phases and Cancel,
   settings sections, the tray popover), its own neutral icon from the icon pipeline (`icons/shell-demo`), ad-hoc macOS
