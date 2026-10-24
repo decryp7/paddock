@@ -437,3 +437,31 @@ gets one mechanism and one check:
   a hang guard) and `login.rs` (30 s, a hang guard), sleeps in `paddock-jobs/tests/pool.rs`, `paddock-download` and
   `paddock-updater` test support, and `paddock-health`'s debounced writer (`notify/writer.rs` uses `Instant`, not the
   clock).
+
+## X13 built: adoption and gaps (2026-10-25)
+
+`paddock-ipc` 0.1.0 (crates/README.md "paddock-ipc"). What each app deletes when it adopts it:
+
+| App | Replaced by `paddock-ipc` | Stays in the app (or moves later) | API changes to make |
+|---|---|---|---|
+| Debrief | `crates/debrief-ipc/src/{frame,wire,error,endpoint,link,peer,launch,child,runtime}.rs` and `peer/tests.rs`; the tokio dependency of the IPC | `sandbox.rs`, `contain.rs`, `elevation.rs` (ADR 0001 later steps, `Bootstrap::extra` carries the sandbox meanwhile), `supervisor.rs` (its back-off → `paddock_jobs::time::Backoff`; restart/quarantine → `paddock-plugin-host`), `child_log.rs` + `stderr_pipe.rs` (→ `paddock-log` child capture), `process.rs` + `memory_watch.rs` + `job.rs` (→ `paddock-proc`) | `RemoteError.code` is a string (map the `-326xx` codes to `codes::*`); `IpcError::Died` is `Closed`; `Peer::start(conn, handler, opts)` on threads (no runtime handle); `Bootstrap.address` is `endpoint`; `ProtocolVersion::mismatch` takes the host's name |
+| Dyno | the whole `crates/dyno-ipc` (frame, wire, error, token, endpoint, host, peer, queue, child); `crates/dyno-agent/src/discovery.rs` (→ `link::Discovery`); the connect/replace/back-off loop of `app/src-tauri/src/link.rs` (→ `LinkClient` with `Replace::Ask` sending its `Shutdown`); `dyno-plugin-host/src/supervision.rs` back-off (→ X20) | the agent protocol, `DetailVotes`, `stop_agent_on_quit`, request timeouts, `Sink` (now `PeerOptions::on_push`); `job.rs` memory cap (→ `paddock-proc` `MemoryCap`) | `Frame<B>` bodies become bytes: `request`/`typed`/`push_value`; `Discovery.version` is `build`, `protocol` a `ProtocolVersion` |
+| Pitcrew | `crates/pitcrew-service/src/ipc.rs` (pipe with `PIPE_SDDL`, Unix socket 0600, hello) → `LinkServer` with `ServerConfig::fixed` and `Access::service_for_interactive_users()`; the app's `service_client.rs` → `LinkClient` | `pitcrew_core::protocol` messages (as postcard bodies), connection cap | JSON frames become postcard; the service writes a discovery file with its token |
+
+Acceptance, as built: the `debrief-ipc` and `dyno-ipc` cases are ported to `crates/paddock-ipc/tests` (frame, wire, error,
+token, endpoint, handshake, peer, launch/child; the sandbox, elevation and supervisor cases stay with Debrief until their
+step) and made deterministic (gates and channels instead of sleeps, outcomes instead of durations); a stale discovery file
+(a real dead pid) is ignored and removed; a second build replaces the first with real processes (terminate, and asked
+through the app's protocol); a frame over the limit fails its call in both directions while the link keeps working; the
+frame codec has a fuzz target (`crates/paddock-ipc/fuzz`, five million runs clean after the `float_roundtrip` fix).
+
+Gaps left:
+- No async adapter: Debrief's tokio callers wrap calls in `spawn_blocking` until a thin async layer is needed (ADR 0001
+  open question: "sync core plus thin async").
+- Call and stream timeouts and the link server's accept slices use the OS clock (`recv_timeout`); the link client's
+  back-off and polls use the injected `Clock`. Tests assert outcomes only.
+- The accept thread runs each handshake in turn: a client that connects and stays silent holds the next accept for up to
+  `HANDSHAKE_TIMEOUT` (10 s).
+- Windows: the endpoint code type-checks here and needs the Windows runner; the discovery file's trust check is a no-op
+  there (the profile folder's ACL); children use `paddock-proc` trees (taskkill) instead of a kill-on-close job object.
+- Pitcrew's per-connection cap and push subscriptions are not in `LinkServer` yet (apps keep their own until a second user).

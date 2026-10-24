@@ -360,4 +360,25 @@ mod tests {
         assert!(parse_day("app", "app.2026-10-20.log.gz").is_none());
         StdoutSink.write_line(log::Level::Info, "{}");
     }
+
+    #[test]
+    fn a_write_that_fails_drops_the_line_says_why_and_reopens_on_the_next_one() {
+        let t = tempfile::tempdir().unwrap();
+        let c = clock();
+        let f = files(t.path(), 3, 1 << 20, &c);
+        f.write_line(log::Level::Info, "first");
+        // The open file stops accepting writes (a full disk or a vanished share): a read-only handle fails the same way.
+        lock(&f.state).file = Some(File::open(f.active_file()).unwrap());
+        f.write_line(log::Level::Info, "lost");
+        assert_eq!(f.dropped(), 1);
+        assert!(f.problem().unwrap().contains("check free space"));
+        // The failure is retried after the back-off, and the file is reopened.
+        c.advance(Duration::seconds(31).to_std().unwrap());
+        f.write_line(log::Level::Info, "again");
+        assert_eq!(f.problem(), None);
+        assert_eq!(
+            std::fs::read_to_string(f.active_file()).unwrap(),
+            "first\nagain\n"
+        );
+    }
 }

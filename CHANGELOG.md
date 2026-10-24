@@ -10,6 +10,23 @@ Conventional Commits; one semver tag for the whole repo.
   only through `CHROMIUM_TEST_PATH`, `retries: 0`, traces on failure, blob reports for shards. The runner takes the five apps'
   screenshot tables: both themes at 1440 x 900 @2x, frozen clock, long pages framed, `docs/screenshots/<theme>/<name>.png` and a
   `hashes.json` for the review gate (`clock: 'paused'` stops the fake clock at exactly the frozen time). Node tests for the pure parts and a Playwright self-test on `data:` pages.
+- `paddock-ipc` (plan X13, ADR 0001 step 1): the family's one IPC from `debrief-ipc` and `dyno-ipc` (with Pitcrew's service
+  pipe SDDL). Postcard frames with a skip of oversized frames (one call fails, not the link), private endpoints, the token +
+  pid + protocol-version handshake, a thread-based peer (calls both ways, streams with credits, cancel, pushes, busy, typed
+  errors), the launcher on `paddock-proc` and the child loop, and the companion `link`: an owner-only discovery file
+  (stale and untrusted files ignored), `LinkServer`, and `LinkClient` with reconnect back-off on `paddock_jobs::time` and
+  replacing a companion of another build. A frame-codec fuzz target (`crates/paddock-ipc/fuzz`); JSON numbers in `Json`
+  now cross unchanged (`float_roundtrip`, found by the fuzzer).
+- `paddock-packs` (plan X15, decision D11): knowledge packs for all apps. `PackKind` (serde type, format number, the app's own
+  rules), `parse_pack` with `Limits` (file size, entries, string length, nesting, values, files), unknown keys as named warnings,
+  a bad pack refused whole with a reason while the rest load (last good version kept), `PackLoader`/`PackStore` (build new, then
+  swap, observers told once per real change), `Reloader` (debounced hot reload on the fake-able `Clock`), the `ChangeSource` port
+  with a `notify` adapter (feature `watch`; X23 takes it over), `Snapshot::health()` and `user_regex` (length and size caps, typed
+  errors; merges Debrief's and Spotter's copies).
+- Shell demo: the sample agent is its own crate, bundled as `externalBin` on every OS (`agent/sidecar.mjs` in
+  `beforeBuildCommand`), ad-hoc sealed with the app; `shell-demo-agent --self-test` runs from the built bundle in the macOS
+  verification (which also checks every Mach-O's TeamIdentifier) and from the .deb / the bundled .exe in the release
+  workflow. `scripts/new-app.mjs` carries the agent into new apps, renamed.
 - `@decryp7/paddock-ui/shell/pitwall` and `paddock-pitwall`'s `AiSnapshot` (ADR 0004): the family's one `<pd-needs-ai>` component.
   It shows the engine's sentence for a missing, stopped, unpaired, paused, incompatible or model-less Pitwall and only the
   actions the engine offers: Connect (the six-digit code to compare, Cancel), Use the built-in engine for this session (the
