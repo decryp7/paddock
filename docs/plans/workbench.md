@@ -299,3 +299,15 @@ command, view and menu stubs plus a loader; its stores and services load on firs
 contribution's registration file from importing store or command classes; and each view declares the providers it needs,
 so pop-outs and dialog windows compose only those. Acceptance for S2/W1 and Debrief's M1: the main window's first-paint
 JavaScript drops well below today's 1233 kB, measured by Debrief's `scripts/window-weight.mjs`.
+
+## 10. Demo apps as releases (user, 2026-10-24)
+
+The user wants installable demo apps to check the shared UI, which also serve as the starter template for new apps
+(Pacenotes, Sighter):
+- **S18 `shell-demo` release** (after S0–S17, when the shell is complete): pages layout with sample pages, a sample
+  health service with a working Repair, sample dialogs of every kind, a sample job with phases and Cancel, Settings,
+  About, Updates, What's New, tray popover; own icon; released through CI from a tag like the apps (ad-hoc DMG,
+  Windows and Linux installers); doubles as the consumer canary. About 1.5 days.
+- **W8 `workbench-demo` release** (after W0–W7): the workbench with sample Explorer, panes with layout constraints,
+  palette, Jobs pane and the assistant pane on Pitwall (with a calm "Pitwall not running" state). About 1.5 days.
+- **Starter:** a documented "new app from the demo" path (copy or generator) that Pacenotes and Sighter start from.
