@@ -21,6 +21,8 @@ pub enum Outcome {
     TimedOut,
     /// The tool panicked (contained).
     Panicked,
+    /// The client cancelled the call (`notifications/cancelled`); it got no answer.
+    Cancelled,
 }
 
 /// One call.
