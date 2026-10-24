@@ -1,6 +1,7 @@
 use paddock_jobs::*;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn w(n: usize) -> Workers {
     Workers::new(n)
@@ -103,7 +104,6 @@ fn sink_error_stops_the_run() {
 fn cancel_stops_promptly_and_reports_the_reason() {
     let cancel = CancelToken::new();
     let started = AtomicUsize::new(0);
-    let t = Instant::now();
     let r = par_map_ordered((0..1_000_000u32).collect(), w(4), &cancel, &(), |i| {
         if started.fetch_add(1, Ordering::SeqCst) == 50 {
             cancel.cancel();
@@ -112,18 +112,21 @@ fn cancel_stops_promptly_and_reports_the_reason() {
         Ok(i)
     });
     assert!(matches!(r, Err(JobError::Cancelled(CancelReason::User))));
-    assert!(
-        t.elapsed() < Duration::from_millis(CANCEL_LATENCY_TARGET_MS * 4),
-        "took {:?}",
-        t.elapsed()
-    );
+    // Promptness is counted in items, never in wall-clock time (lessons: tests that measure the wall clock fail under load).
     assert!(started.load(Ordering::SeqCst) < 1000);
 }
 
 #[test]
 fn deadline_cancels_a_pipeline() {
-    let cancel = CancelToken::with_deadline(Duration::from_millis(30));
-    let r = pipeline_ordered(0u64.., w(2), 4, &cancel, Ok, |_| Ok(()));
+    // The fake clock runs the limit out once the pipeline has delivered some items: no sleep, no wall-clock race.
+    let clock = FakeClock::new();
+    let cancel = CancelToken::with_deadline_on(Arc::new(clock.clone()), Duration::from_secs(30));
+    let r = pipeline_ordered(0u64.., w(2), 4, &cancel, Ok, |i| {
+        if i == 100 {
+            clock.advance(Duration::from_secs(30));
+        }
+        Ok(())
+    });
     assert!(matches!(
         r,
         Err(JobError::Cancelled(CancelReason::Deadline))

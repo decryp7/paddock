@@ -34,20 +34,20 @@
 //!
 //! The core is pure Rust with no Tauri dependency; the adapter lives in `tauri` behind the `tauri` feature.
 
-pub mod clock;
 pub mod error;
 pub mod health;
 pub mod model;
 pub mod notify;
 pub mod registry;
 
-pub use clock::{Clock, ManualClock, SystemClock};
 pub use error::{HealthError, HealthErrorCode};
 pub use health::{Health, RepairRefused};
 pub use model::{
     Cause, Change, RaiseCap, RepairAction, SERVICE_HEALTH_EVENT, ServiceHealth, ServiceState,
     Snapshot, cause_key,
 };
+/// The family's clock port (`paddock_jobs::time`): the notification centre reads [`Clock::wall_ms`].
+pub use paddock_jobs::time::{Clock, FakeClock, SystemClock};
 pub use registry::{Registry, Repair, ServiceSpec, Sink, SpecError};
 
 #[cfg(feature = "tauri")]

@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use paddock_jobs::{
-    CancelToken, EventSink, JobContext, JobRegistry, JobSnapshot, JobState, ManualClock,
+    CancelToken, EventSink, FakeClock, JobContext, JobRegistry, JobSnapshot, JobState,
 };
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -406,10 +406,10 @@ impl EventSink for Recorder {
     }
 }
 
-/// A job whose every update is recorded (the manual clock never advances, so nothing is throttled away: min interval 0).
+/// A job whose every update is recorded (the fake clock never advances, so nothing is throttled away: min interval 0).
 pub fn job() -> (JobContext, Arc<Recorder>) {
     let rec = Arc::new(Recorder::default());
-    let jobs = JobRegistry::with_clock(rec.clone(), Arc::new(ManualClock::new()), 0);
+    let jobs = JobRegistry::with_clock(rec.clone(), Arc::new(FakeClock::new()), 0);
     let ctx = jobs.register("download", "Downloading", Some("file"));
     let _ = rec.token.set(ctx.cancel_token().clone());
     (ctx, rec)

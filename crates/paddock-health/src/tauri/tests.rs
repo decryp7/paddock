@@ -2,7 +2,7 @@
 //! fake service and several windows.
 
 use super::*;
-use crate::clock::ManualClock;
+use crate::FakeClock;
 use crate::model::{Cause, RepairAction, ServiceState};
 use crate::notify::centre::{NoticeAction, NoticeSeverity};
 use ::tauri::ipc::{CallbackFn, InvokeBody};
@@ -259,7 +259,7 @@ fn a_degraded_service_updates_its_one_message_in_place() {
 
 #[test]
 fn commands_list_mark_dismiss_and_restore_through_ipc_and_dialogs_see_their_host() {
-    let (app, _) = app_with(Setup::new(vec![]).clock(Arc::new(ManualClock::at(1_000))));
+    let (app, _) = app_with(Setup::new(vec![]).clock(Arc::new(FakeClock::at_wall_ms(1_000))));
     let main = window(&app, "main");
     let dialog = window(&app, "d-main-1");
     let popout = window(&app, "p-main-1");

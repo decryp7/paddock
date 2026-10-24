@@ -1,26 +1,24 @@
 //! The log end to end without touching process-wide state: each test runs its own subscriber on its own thread
-//! (`Logging::scoped`), a temporary folder and a manual clock.
+//! (`Logging::scoped`), a temporary folder and a fake clock.
 
 use chrono::{Duration, TimeZone, Utc};
 use log::Log;
 use paddock_env::AppId;
-use paddock_log::{
-    LogConfig, LogLevel, LogSettings, Logging, ManualClock, Redactor, TracingBridge,
-};
+use paddock_log::{FakeClock, LogConfig, LogLevel, LogSettings, Logging, Redactor, TracingBridge};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
 struct Rig {
     dir: tempfile::TempDir,
-    clock: Arc<ManualClock>,
+    clock: Arc<FakeClock>,
 }
 
 impl Rig {
     fn new() -> Rig {
         Rig {
             dir: tempfile::tempdir().unwrap(),
-            clock: Arc::new(ManualClock::new(
-                Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap(),
+            clock: Arc::new(FakeClock::at_wall(
+                Utc.with_ymd_and_hms(2026, 10, 20, 9, 0, 0).unwrap().into(),
             )),
         }
     }
@@ -231,14 +229,14 @@ fn an_error_carries_breadcrumbs_and_repeats_are_summarised() {
         let _e = span.enter();
         tracing::info!(Operation = "OpenFile", Rows = 2u64, "Opened");
         tracing::error!("disk exploded");
-        rig.clock.advance(Duration::seconds(5));
+        rig.clock.advance(Duration::seconds(5).to_std().unwrap());
         tracing::error!("disk exploded");
         tracing::error!("disk exploded");
-        rig.clock.advance(Duration::seconds(60));
+        rig.clock.advance(Duration::seconds(60).to_std().unwrap());
         tracing::error!("disk exploded");
         tracing::error!("other trouble");
         // Pending repeats are written on request (at exit).
-        rig.clock.advance(Duration::seconds(1));
+        rig.clock.advance(Duration::seconds(1).to_std().unwrap());
         tracing::error!("other trouble");
         log.flush_repeats();
         assert_eq!(log.breadcrumbs(Some("main"), 10).len(), 1);
@@ -314,7 +312,7 @@ fn after_the_daily_budget_only_errors_are_written_and_old_files_go() {
     .scoped(|_| {
         for _ in 0..5 {
             tracing::info!("day");
-            rig.clock.advance(Duration::days(1));
+            rig.clock.advance(Duration::days(1).to_std().unwrap());
         }
         tracing::info!("today");
     });

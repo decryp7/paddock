@@ -9,7 +9,7 @@ use paddock_download::{
     Sha256Digest, phases,
 };
 use paddock_jobs::{
-    CancelReason, CancelToken, EventSink, JobRegistry, JobSnapshot, JobState, ManualClock,
+    CancelReason, CancelToken, EventSink, FakeClock, JobRegistry, JobSnapshot, JobState,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -449,7 +449,7 @@ fn a_panicking_event_sink_does_not_stop_the_download_and_is_reported() {
     let dir = tempfile::tempdir().unwrap();
     let req = Request::new(&server.url("/f"), dir.path().join("f.bin"), pinned(&data)).unwrap();
     let sink = Arc::new(Panicky(AtomicU64::new(0)));
-    let jobs = JobRegistry::with_clock(sink.clone(), Arc::new(ManualClock::new()), 0);
+    let jobs = JobRegistry::with_clock(sink.clone(), Arc::new(FakeClock::new()), 0);
     let ctx = jobs.register("download", "Downloading", None);
     let got = downloader().download(&ctx, &req).unwrap();
     assert_eq!(std::fs::read(&got.path).unwrap(), data);

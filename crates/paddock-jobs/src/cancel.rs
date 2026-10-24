@@ -1,8 +1,9 @@
+use crate::time::{Clock, Deadline, SystemClock};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const LIVE: u8 = 0;
 const USER: u8 = 1;
@@ -42,7 +43,7 @@ impl std::error::Error for Cancelled {}
 #[derive(Debug, Default)]
 struct Inner {
     state: AtomicU8,
-    deadline: Option<Instant>,
+    deadline: Option<Deadline>,
 }
 
 /// A cooperative cancel flag shared by clones. Workers call [`check`](Self::check) between small units of work.
@@ -55,11 +56,17 @@ impl CancelToken {
         Self::default()
     }
 
-    /// A token that cancels itself `limit` from now.
+    /// A token that cancels itself `limit` from now on the system clock.
     pub fn with_deadline(limit: Duration) -> Self {
+        Self::with_deadline_on(Arc::new(SystemClock), limit)
+    }
+
+    /// A token that cancels itself `limit` from now on `clock` (tests pass a [`FakeClock`](crate::time::FakeClock) and
+    /// run the limit out with `advance`).
+    pub fn with_deadline_on(clock: Arc<dyn Clock>, limit: Duration) -> Self {
         CancelToken(Arc::new(Inner {
             state: AtomicU8::new(LIVE),
-            deadline: Instant::now().checked_add(limit),
+            deadline: Some(Deadline::after(clock, limit)),
         }))
     }
 
@@ -87,7 +94,7 @@ impl CancelToken {
     /// The reason, once cancelled (or once the deadline passed).
     pub fn reason(&self) -> Option<CancelReason> {
         if self.0.state.load(Ordering::Relaxed) == LIVE
-            && self.0.deadline.is_some_and(|d| Instant::now() >= d)
+            && self.0.deadline.as_ref().is_some_and(Deadline::passed)
         {
             self.cancel_with(CancelReason::Deadline);
         }

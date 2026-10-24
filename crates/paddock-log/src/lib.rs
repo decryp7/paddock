@@ -26,7 +26,7 @@
 //! - [`spawn_child_capture`] puts a child's standard error into the log, bounded.
 //!
 //! The crate has no Tauri dependency: services and sidecars use it as is; the app's shell forwards the webview's log
-//! command to [`log_from_webview`]. Tests use temporary folders and [`ManualClock`], never the real log folder.
+//! command to [`log_from_webview`]. Tests use temporary folders and [`FakeClock`], never the real log folder.
 
 mod breadcrumbs;
 mod bridge;
@@ -48,7 +48,7 @@ pub use breadcrumbs::{
 pub use bridge::TracingBridge;
 pub use child::{MAX_CHILD_LINE, pump_child_lines, spawn_child_capture};
 pub use clef::{Enrichment, format_event, key_values};
-pub use clock::{Clock, ManualClock, SystemClock};
+pub use clock::{Clock, FakeClock, SystemClock, now_utc};
 pub use error::{LogError, Result};
 pub use files::{DailyFiles, LineSink, StdoutSink};
 pub use install::{LogConfig, LogHandle, Logging};

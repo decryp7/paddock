@@ -6,7 +6,7 @@ use crate::breadcrumbs::{
     BREADCRUMBS_PER_ERROR, Breadcrumb, Breadcrumbs, DEDUP_WINDOW, Dedup, ErrorDedup, bounded_json,
 };
 use crate::clef::{Enrichment, format_event};
-use crate::clock::Clock;
+use crate::clock::{Clock, now_utc};
 use crate::error::lock;
 use crate::files::LineSink;
 use crate::redact::Redact;
@@ -34,7 +34,7 @@ pub(crate) struct Core {
 impl Core {
     fn write(&self, level: log::Level, target: &str, message: &str, props: Map<String, Value>) {
         let line = format_event(
-            self.clock.now(),
+            now_utc(&*self.clock),
             level,
             target,
             message,
@@ -54,7 +54,7 @@ impl Core {
         message: &str,
         props: Map<String, Value>,
     ) {
-        let now = self.clock.now();
+        let now = now_utc(&*self.clock);
         let fatal = props.get("Severity").and_then(Value::as_str) == Some("Fatal");
         let mut props: Map<String, Value> = props
             .into_iter()

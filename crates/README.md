@@ -88,7 +88,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 
 | Crate(s) | Purpose | Three users today? |
 |---|---|---|
-| `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008) | yes (all five apps); built |
+| `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008); `time`: the family's clock port, fake clock, deadlines, restart back-off (plan X20) | yes (all five apps); built |
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
 | `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built first |
@@ -132,6 +132,30 @@ tauri::Builder::default()
 - Generated TypeScript in `ui/projects/paddock-ui/shell/jobs/generated/` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs
   --features tauri --test tauri generated`): `jobs-commands.ts` (`JOBS_COMMANDS`, `JobsCommand`) and `jobs-fixtures.ts`
   (one snapshot of every shape, written by the real reporter, decoded by the UI's specs).
+
+## `paddock_jobs::time` (plan X20)
+
+One clock for the family (Rule 40 fix for tests that asserted wall-clock limits, lessons "Tests that measure the wall
+clock fail under load"). `paddock-log` and `paddock-health` re-export these types; apps delete their `clock.rs`/`time.rs`
+ports and back-off loops (see the plan's X20 row).
+
+```rust
+use paddock_jobs::time::{Backoff, BackoffPolicy, Clock, Deadline, FakeClock, Retry, SystemClock};
+let clock: Arc<dyn Clock> = Arc::new(SystemClock);              // FakeClock in tests
+let token = CancelToken::with_deadline_on(clock.clone(), limit); // or JobRegistry::register_with_deadline (registry's clock)
+clock.wait(Duration::from_secs(1), &token)?;                     // Err(Cancelled) at once on cancel or deadline
+let mut b = Backoff::new(BackoffPolicy::default());               // 1 s doubling to 60 s, reset after 5 healthy min, give up >5 in 10 min
+match b.failed(clock.monotonic()) { Retry::After(d) => clock.wait(d, &token)?, Retry::GiveUp => report() }
+```
+
+- `Clock`: `monotonic()` (never backwards; the only reading for durations, deadlines and back-off), `wall()` (calendar
+  time for stamps and file names; may jump), `wait(d, &CancelToken)`; provided `now_ms`, `wall_ms`, `sleep`.
+- `FakeClock`: both readings move only with `advance`/`advance_ms` (`set_wall` moves the wall alone); waits block until
+  the clock reaches their end. A test starts the work, `wait_for_waiters(n, guard)` until it is blocked on the clock,
+  advances and asserts the outcome; the guard is a hang guard, never a timing assertion.
+- `Deadline::after(clock, limit)`: `passed()`, `remaining()`; a limit too large to represent never passes.
+- `Backoff` is a pure state machine over monotonic readings (`healthy(now)`, `failed(now) -> Retry`, `reset()`);
+  `BackoffPolicy::retry_forever` for a reconnecting client.
 
 ## `paddock-commands` (plan S1)
 
@@ -669,7 +693,7 @@ paddock_log::log_from_webview(window, level, message);               // the webv
 - Panics: the hook writes a Fatal entry (thread, location, bounded backtrace, span fields) and `crash-<process>.json`
   (`CrashMarker`, in `AppDirs::data()`); the next start reads it (plan X3) and clears it.
 - `spawn_child_capture(name, stderr)` logs a child's output line by line (4 KiB per line, `Child` + `child:<name>`).
-- Tests use `Logging::scoped`, a temp folder and `ManualClock`; no sleeps.
+- Tests use `Logging::scoped`, a temp folder and `FakeClock` (`paddock_jobs::time`, re-exported; `now_utc` reads it as UTC); no sleeps.
 
 ## `paddock-proc` (plan X6)
 

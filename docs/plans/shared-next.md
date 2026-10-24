@@ -409,3 +409,31 @@ in the branch). "Owned" is in the Paddock repo.
 - Tray model: checked/toggle items.
 - `uiTimeoutProblems`: false positive on identifiers that merely contain "setTimeout" (e.g. `setTimeoutSecs`).
 - Health `Cause` hints should use the repair button's real label.
+
+## Wall-clock assertions in tests (rule 40, 2026-10-25)
+
+Debrief's 1.1.1 release run failed on three tests asserting wall-clock limits under load (a cancel within 578 ms, a chat
+cancel under 700 ms, a grandchild-gone check); see lessons "Tests that measure the wall clock fail under load". The class
+gets one mechanism and one check:
+
+- Mechanism (X20, built): `paddock_jobs::time` (`Clock`, `SystemClock`, `FakeClock`, `Deadline`, `Backoff`) is the only
+  clock; `paddock-log` and `paddock-health` re-export it; `CancelToken::with_deadline_on` and
+  `JobRegistry::register_with_deadline` measure limits on the injected clock. Apps adopt it with X20 and delete their
+  `clock.rs`/`time.rs` ports (Spotter `spotter-engine`, Dyno `dyno-plugin-host`, Debrief `debrief-agent`) and back-off
+  loops (Pitwall `backoff.rs`, Dyno `supervision.rs`, Debrief `debrief-ipc/supervisor.rs`, Pitcrew `restart.rs`, which
+  keeps its crash-loop cooldown on top of `Backoff`).
+- Check **C30** (proposed for `@decryp7/paddock-conformance`): in Rust test code (`tests/`, `#[cfg(test)]` modules,
+  `src/**/tests.rs`) flag an assertion whose operand is `elapsed()`, `Instant::now()` arithmetic or
+  `SystemTime::now()` compared with a `Duration` (`assert!(t.elapsed() < ..)`, `assert!(.. <= Duration::..)` on a measured
+  value), and `thread::sleep` used to wait for another thread's effect; in TypeScript specs `performance.now()`/`Date.now()`
+  differences in `expect`. A hang guard is allowed with a waiver comment `// conformance: hang-guard` and a limit of at
+  least 10 s. Severity: error for new code, warning with a waiver list for what exists. Good fixture: a `FakeClock`
+  test; bad fixture: `assert!(t.elapsed() < Duration::from_millis(700))`.
+- First findings in Paddock itself (fixed or to fix through the mechanism): `paddock-jobs` `tests/parallel.rs` and
+  `tests/walk.rs` cancel latency (fixed in X20: counted in items), `paddock-jobs` `tests/model_and_cancel.rs` and
+  `reporter_and_jobs.rs` deadline sleeps (fixed: fake clock / zero limit); still open: `paddock_jobs::assert_nonblocking`
+  (measures a handler against a wall-clock budget; replace with a structural check: the handler returns while the job body
+  is held on a gate), `paddock-window` `exit.rs` (2 s) and `tauri/tests.rs` (5 s), `paddock-proc` `supervised.rs` (60 s,
+  a hang guard) and `login.rs` (30 s, a hang guard), sleeps in `paddock-jobs/tests/pool.rs`, `paddock-download` and
+  `paddock-updater` test support, and `paddock-health`'s debounced writer (`notify/writer.rs` uses `Instant`, not the
+  clock).

@@ -2792,6 +2792,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-jobs",
  "serde",
  "serde_json",
  "tauri",
@@ -2819,6 +2820,7 @@ dependencies = [
  "chrono",
  "log",
  "paddock-env",
+ "paddock-jobs",
  "serde",
  "serde_json",
  "tempfile",
