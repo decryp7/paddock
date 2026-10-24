@@ -364,3 +364,10 @@ connection back to blocking, and its test sends the request only after the fake 
 
 "Four connections are faster than one" failed 30 of 30 times under load. **Rule:** a test asserts the mechanism (four
 requests held open at once), and the speed comparison lives in a benchmark with a budget (rule 16, `paddock-bench`).
+
+## Many agents waiting on "load below N" start together (2026-10-25)
+
+With a dozen agents each told to build only while the 1-minute load was under 20, they all waited, saw the load drop,
+and started at once — load swung between 10 and 70 all night. **Rule:** heavy steps take a slot from one machine-wide
+semaphore (a few mkdir-lock slots under the shared build volume, stale slots reclaimed by pid) instead of each watching
+the load; the slot count is the rule-41 cap. Load watching stays for deciding how many agents to run, not when to build.
