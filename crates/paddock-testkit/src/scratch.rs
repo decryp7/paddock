@@ -65,10 +65,7 @@ impl Scratch {
     /// # Panics
     /// When the operating system cannot make a temporary folder (the test cannot run).
     pub fn new() -> Scratch {
-        match Scratch::try_new() {
-            Ok(s) => s,
-            Err(e) => panic!("cannot make the scratch folder: {e}"),
-        }
+        Scratch::try_new().expect("cannot make the scratch folder")
     }
 
     /// A new scratch folder, or why it could not be made.
@@ -126,9 +123,7 @@ impl Scratch {
     /// Writes a file inside [`work`](Scratch::work), making its folders, and returns its path.
     pub fn write(&self, rel: &str, contents: impl AsRef<[u8]>) -> Result<PathBuf, ScratchError> {
         let p = self.try_path(rel)?;
-        if let Some(parent) = p.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        fs::create_dir_all(p.parent().unwrap_or(&self.root))?;
         fs::write(&p, contents)?;
         Ok(p)
     }
