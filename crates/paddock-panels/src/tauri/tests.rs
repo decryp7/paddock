@@ -92,7 +92,7 @@ fn request(panel: &str) -> PopOutRequest {
             height: 300.0,
             scale: Some(1.0),
         }),
-        keep_on_top: false,
+        keep_on_top: None,
     }
 }
 
@@ -432,7 +432,7 @@ fn keeping_on_top_rebuilds_the_pop_out_without_docking_it_back() {
     assert_eq!(list(&h, "main")[0].label, listed[0].label);
     // Opened owned from the start; only a pop-out may ask; a gone one cannot.
     let mut owned = request("pn.log");
-    owned.keep_on_top = true;
+    owned.keep_on_top = Some(true);
     assert!(open(&h, "main", owned).unwrap().keep_on_top);
     assert_eq!(
         set_keep_on_top(&h, "main", true).unwrap_err().code,
@@ -758,7 +758,7 @@ fn ghost_request() -> GhostRequest {
         title: "Inspector".into(),
         icon: None,
         snapshot: None,
-        dark: false,
+        dark: None,
         width: 400.0,
         height: 300.0,
         grab_x: 100.0,
