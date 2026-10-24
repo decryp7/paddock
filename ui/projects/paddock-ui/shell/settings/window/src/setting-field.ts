@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
 import type { FormValueControl, ValidationError } from '@angular/forms/signals';
+import { PdSelect } from '@decryp7/paddock-ui/select';
 import { type SettingField, type SettingValue, displayValue, editUnit, parseList, parseNumber, rangeHint, sameValue } from '@decryp7/paddock-ui/shell/settings';
 
 let nextId = 0;
@@ -13,6 +14,7 @@ let nextId = 0;
 @Component({
   selector: 'pd-setting-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdSelect],
   host: { class: 'pd-setting', '[class.pd-invalid]': '!!message()', '[class.pd-edited]': 'dirty()', '[attr.data-key]': 'setting().key' },
   template: `
     @let f = setting();
@@ -37,11 +39,7 @@ let nextId = 0;
       <div class="pd-control">
         @switch (k.type) {
           @case ('enum') {
-            <select class="pd-input" [id]="id" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (change)="choose($any($event.target).value)" (blur)="touch.emit()">
-              @for (o of k.options; track o.value) {
-                <option [value]="o.value" [selected]="o.value === value()">{{ o.label }}</option>
-              }
-            </select>
+            <pd-select [inputId]="id" [options]="k.options" [value]="text()" [disabled]="disabled()" [describedBy]="describedBy() ?? ''" [invalid]="!!message()" (valueChange)="choose($event)" />
           }
           @case ('stringList') {
             <textarea class="pd-input pd-wide" rows="3" [id]="id" [value]="listText()" [disabled]="disabled()" [attr.aria-describedby]="describedBy()" [attr.aria-invalid]="!!message()" (input)="value.set(list($any($event.target).value))" (blur)="leave()"></textarea>
@@ -81,7 +79,7 @@ let nextId = 0;
     .pd-reset:hover { border-color: var(--pd-border-control); color: var(--pd-text); }
     .pd-control { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; min-width: 0; }
     .pd-input { min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; min-width: 0; max-width: 100%; box-sizing: border-box; }
-    select.pd-input { padding-inline-end: var(--pd-space-1); }
+    pd-select { min-width: 10rem; max-width: 100%; }
     .pd-input.pd-num { width: 9rem; }
     .pd-input.pd-wide { width: min(32rem, 100%); }
     textarea.pd-input { padding: var(--pd-space-1) var(--pd-space-2); font-family: var(--pd-font-mono, ui-monospace, monospace); }

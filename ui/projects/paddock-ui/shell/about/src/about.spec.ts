@@ -444,11 +444,11 @@ describe('the dialogs', () => {
     el.querySelector<HTMLInputElement>('label.pd-check input[type="checkbox"]')?.click();
     await settle();
     expect((await updates.status()).autoCheck).toBe(true);
-    const select = el.querySelector<HTMLSelectElement>('select');
-    if (select) {
-      select.value = 'beta';
-      select.dispatchEvent(new Event('change'));
-    }
+    expect(el.querySelector('select')).toBeNull();
+    el.querySelector<HTMLButtonElement>('pd-select button')!.click();
+    await settle();
+    await fixture.whenStable();
+    [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')].find((o) => o.textContent?.includes('Beta'))!.click();
     await settle();
     await fixture.whenStable();
     expect((await updates.status()).channel).toBe('beta');

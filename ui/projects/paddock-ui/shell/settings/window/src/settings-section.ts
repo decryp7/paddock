@@ -43,9 +43,9 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
         </div>
       }
       @if (hiddenAdvanced(); as n) {
-        <p class="pd-muted">
+        <p class="pd-hidden" data-testid="settings-hidden-advanced">
           {{ hiddenText(n) }}
-          <button type="button" class="pd-link" (click)="store.setShowAdvanced(true)">{{ t.showAdvanced }}</button>
+          <button type="button" class="pd-link" (click)="store.setShowAdvanced(true)">{{ t.showThem }}</button>
         </p>
       }
       @if (!s.fields.length) {
@@ -66,6 +66,8 @@ export const SETTINGS_PAGE = new InjectionToken<SettingsPageDef>('PADDOCK_SETTIN
     .pd-btn:focus-visible, .pd-link:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-muted { color: var(--pd-text-muted); }
     .pd-error { margin: var(--pd-space-1) 0; color: var(--pd-danger-text, var(--pd-text)); }
+    /* The line may wrap and is never clipped: it sits below the fields at its full height. */
+    .pd-hidden { flex: none; margin: var(--pd-space-3) 0 0; padding-block: var(--pd-space-1); color: var(--pd-text-muted); line-height: var(--pd-lh-body); overflow-wrap: anywhere; }
     .pd-link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }
   `,
 })
@@ -73,7 +75,7 @@ export class PdSettingsSection {
   /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
   protected readonly t = {
     resetSection: $localize`:@@pd.settings.section.reset:Reset section`,
-    showAdvanced: $localize`:@@pd.settings.show-advanced:Show advanced`,
+    showThem: $localize`:@@pd.settings.section.show-them:Show them`,
     empty: $localize`:@@pd.settings.section.empty:This section has no settings.`,
     unavailable: $localize`:@@pd.settings.section.unavailable:These settings are not available in this app.`,
   };

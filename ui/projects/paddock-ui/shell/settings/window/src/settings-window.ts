@@ -100,18 +100,23 @@ interface LoadedPage {
       <nav class="pd-nav" [attr.aria-label]="t.pages" (keydown)="navKey($event)">
         @for (g of nav(); track g.id) {
           <h2 class="pd-group" [id]="'pd-settings-group-' + g.id">{{ g.title }}</h2>
-          <ul class="pd-items" [attr.aria-labelledby]="'pd-settings-group-' + g.id">
-            @for (item of g.items; track item.id) {
-              <li>
-                <button type="button" class="pd-item" [attr.aria-current]="current()?.id === item.id && !searching() ? 'page' : null" [attr.data-page]="item.id" (click)="select(item.id)">
-                  <span class="pd-name">{{ item.title }}</span>
-                  @if (unsaved().includes(item.id)) {
-                    <span class="pd-dot" role="img" [attr.aria-label]="t.unsaved" [title]="t.unsaved"></span>
-                  }
-                </button>
-              </li>
+          @for (sub of g.subgroups; track $index) {
+            @if (sub.title) {
+              <h3 class="pd-subgroup" [id]="'pd-settings-group-' + g.id + '-' + $index">{{ sub.title }}</h3>
             }
-          </ul>
+            <ul class="pd-items" [attr.aria-labelledby]="'pd-settings-group-' + g.id + (sub.title ? '-' + $index : '')">
+              @for (item of sub.items; track item.id) {
+                <li>
+                  <button type="button" class="pd-item" [attr.aria-current]="current()?.id === item.id && !searching() ? 'page' : null" [attr.data-page]="item.id" (click)="select(item.id)">
+                    <span class="pd-name">{{ item.title }}</span>
+                    @if (unsaved().includes(item.id)) {
+                      <span class="pd-dot" role="img" [attr.aria-label]="t.unsaved" [title]="t.unsaved"></span>
+                    }
+                  </button>
+                </li>
+              }
+            </ul>
+          }
         }
       </nav>
 
@@ -167,6 +172,7 @@ interface LoadedPage {
     .pd-nav { flex: none; width: 13rem; overflow: auto; border-inline-end: 1px solid var(--pd-hairline); padding-inline-end: var(--pd-space-2); }
     .pd-group { margin: var(--pd-space-3) 0 var(--pd-space-1); padding: 0 var(--pd-space-2); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); color: var(--pd-text-muted); }
     .pd-group:first-child { margin-top: 0; }
+    .pd-subgroup { margin: var(--pd-space-2) 0 var(--pd-space-1); padding: 0 var(--pd-space-2); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); color: var(--pd-text-subtle); }
     .pd-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
     .pd-item { display: flex; align-items: center; gap: var(--pd-space-1); width: 100%; min-height: 30px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; text-align: start; cursor: pointer; }
     .pd-item:hover { background: var(--pd-surface-2); }
@@ -175,6 +181,7 @@ interface LoadedPage {
     .pd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-accent); }
     .pd-content { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--pd-space-4); padding-inline-end: var(--pd-space-1); }
+    .pd-content > * { flex: none; }
     .pd-muted { color: var(--pd-text-muted); }
     .pd-page-hit { margin: 0; }
     .pd-link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }

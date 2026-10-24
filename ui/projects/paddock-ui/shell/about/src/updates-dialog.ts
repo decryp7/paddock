@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { PdSelect } from '@decryp7/paddock-ui/select';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import type { SuJobPhase } from '@decryp7/paddock-ui';
 import { UpdatesStore } from './updates.store';
@@ -14,6 +15,7 @@ import { formatBytes } from './format';
 @Component({
   selector: 'pd-updates-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdSelect],
   template: `
     @if (store.status(); as s) {
       <p class="pd-muted" data-testid="updates-current">{{ current(s.currentVersion) }}</p>
@@ -77,11 +79,7 @@ import { formatBytes } from './format';
           @if (s.channels.length > 1) {
             <label class="pd-check">
               {{ t.channel }}
-              <select [value]="s.channel" (change)="setChannel($any($event.target).value)">
-                @for (c of s.channels; track c.id) {
-                  <option [value]="c.id" [selected]="c.id === s.channel">{{ c.label }}</option>
-                }
-              </select>
+              <pd-select [options]="channelOptions()" [value]="s.channel" [ariaLabel]="t.channel" (valueChange)="setChannel($event)" />
             </label>
           }
         </div>
@@ -209,6 +207,8 @@ export class PdUpdatesDialog {
     const s = this.store.status();
     if (s) void this.store.setPreferences({ autoCheck, channel: s.channel });
   }
+
+  protected readonly channelOptions = computed(() => (this.store.status()?.channels ?? []).map((c) => ({ value: c.id, label: c.label })));
 
   protected setChannel(channel: string): void {
     const s = this.store.status();

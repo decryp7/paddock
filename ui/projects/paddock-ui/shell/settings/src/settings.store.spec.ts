@@ -49,6 +49,16 @@ describe('SettingsStore', () => {
     expect(store.notice()).toBeNull();
   });
 
+  it('shows a page’s own footer notice through setNotice, and clears it again', async () => {
+    settingsBed();
+    const store = TestBed.inject(SettingsStore);
+    await settle();
+    store.setNotice('Folder moved.');
+    expect(store.notice()).toBe('Folder moved.');
+    store.setNotice(null);
+    expect(store.notice()).toBeNull();
+  });
+
   it('keeps the engine’s refusal with the value it refused', async () => {
     settingsBed();
     const store = TestBed.inject(SettingsStore);

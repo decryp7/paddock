@@ -82,7 +82,8 @@ describe('pd-settings-window', () => {
     const { el } = bed;
     expect($(el, '.pd-item[aria-current="page"]').dataset['page']).toBe('sd.general');
     expect($<HTMLInputElement>(field(el, 'notify'), 'input[role="switch"]').checked).toBe(true);
-    expect($<HTMLSelectElement>(field(el, 'style'), 'select').value).toBe('casual');
+    expect($(field(el, 'style'), 'pd-select button').textContent?.trim()).toBe('Casual');
+    expect(field(el, 'style').querySelector('select')).toBeNull();
     expect($<HTMLInputElement>(field(el, 'greeting'), 'input[type="text"]').value).toBe('Hello');
     expect($<HTMLInputElement>(field(el, 'repeat'), 'input[type="number"]').value).toBe('1');
     expect(field(el, 'repeat').textContent).toContain('times');
@@ -112,9 +113,9 @@ describe('pd-settings-window', () => {
     await settle();
     expect(backend.values('sd.general')?.['notify']).toBe(false);
     expect($(el, '.pd-foot .pd-status').textContent).toBe('Show a notification saved.');
-    const style = $<HTMLSelectElement>(field(el, 'style'), 'select');
-    style.value = 'formal';
-    style.dispatchEvent(new Event('change'));
+    $(field(el, 'style'), 'pd-select button').click();
+    await settle();
+    [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=option]')].find((o) => o.textContent?.includes('Formal'))!.click();
     await settle();
     expect(backend.values('sd.general')?.['style']).toBe('formal');
     await type(bed, $<HTMLInputElement>(field(el, 'greeting'), 'input'), 'Hi there', false);
