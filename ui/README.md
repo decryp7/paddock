@@ -454,7 +454,7 @@ provideThemes(CONSOLE_THEME),                                                   
   ```sh
   npx paddock-i18n build               # regenerate; after the app build when a catalog takes the built $localize messages
   npx paddock-i18n build --check       # CI: writes nothing, fails on drift
-  npx paddock-i18n build --check --no-extract   # no build needed: the committed catalogs against their sources (conformance C30)
+  npx paddock-i18n build --check --no-extract   # no build needed: the committed catalogs against their sources (conformance C32)
   ```
 
   See `paddock-i18n.json` here (the package and the shell demo) and `projects/paddock-ui/bin/i18n-build.mjs` for the format.

@@ -1,4 +1,4 @@
-// C30: the translation catalogs are current (plan X48, decision D10). The app declares its build in `paddock-i18n.json`
+// C32: the translation catalogs are current (plan X48, decision D10). The app declares its build in `paddock-i18n.json`
 // (see @decryp7/paddock-ui bin/i18n-build.mjs); this check runs `paddock-i18n build --check --no-extract` against the committed
 // files: every catalog still equals what its sources produce, every runtime JSON equals its catalog, nothing was
 // hand-merged. The catalog of the built `$localize` messages is read as committed (no build in the conformance step); the
@@ -20,21 +20,21 @@ export function runPaddockI18n({ root, configFile, appDir }) {
 }
 
 export default {
-  id: 'C30',
+  id: 'C32',
   title: 'The translation catalogs are current',
   rule: 40,
   async run(ctx) {
     const rel = ctx.config.i18n?.config ?? `${ctx.config.appDir}/paddock-i18n.json`;
     if (!ctx.exists(rel)) {
-      return [warn('C30', 40, rel, 1, 'no paddock-i18n.json: the app does not declare its translation build, so nothing keeps its catalogs current', 'Add paddock-i18n.json (see @decryp7/paddock-ui, paddock-i18n build) and run `paddock-i18n build`.')];
+      return [warn('C32', 40, rel, 1, 'no paddock-i18n.json: the app does not declare its translation build, so nothing keeps its catalogs current', 'Add paddock-i18n.json (see @decryp7/paddock-ui, paddock-i18n build) and run `paddock-i18n build`.')];
     }
     const run = ctx.options.i18n ?? runPaddockI18n;
     const r = await run({ root: ctx.root, configFile: join(ctx.root, rel), appDir: ctx.config.appDir });
     if (r.missing) {
-      return [warn('C30', 40, rel, 1, '@decryp7/paddock-ui is not installed, so the catalogs were not checked', 'Run `npm ci` before the conformance step.')];
+      return [warn('C32', 40, rel, 1, '@decryp7/paddock-ui is not installed, so the catalogs were not checked', 'Run `npm ci` before the conformance step.')];
     }
     if (r.status === 0) return [];
     const why = (r.output.split('\n').find((l) => l.trim()) ?? 'the build check failed').replace(/^paddock-i18n:\s*/, '');
-    return [error('C30', 40, rel, 1, `the translation files are not current: ${why}`, 'Run `paddock-i18n build` (npm run i18n) and commit the result; never edit the catalogs by hand.')];
+    return [error('C32', 40, rel, 1, `the translation files are not current: ${why}`, 'Run `paddock-i18n build` (npm run i18n) and commit the result; never edit the catalogs by hand.')];
   },
 };
