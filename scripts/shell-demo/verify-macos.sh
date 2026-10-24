@@ -37,9 +37,11 @@ check_app() {
     return 1
   fi
   while IFS= read -r bin; do
-    file -b "$bin" | grep -q 'Mach-O' || continue
+    kind=$(file -b "$bin")
+    [[ "$kind" == *Mach-O* ]] || continue
     codesign --verify --strict "$bin" || { echo "::error::$bin does not verify"; return 1; }
-    if codesign -dv "$bin" 2>&1 | grep -q 'flags=.*linker-signed'; then
+    bin_sig=$(codesign -dv "$bin" 2>&1)
+    if echo "$bin_sig" | grep -q 'flags=.*linker-signed'; then
       echo "::error::$bin is only linker-signed"
       return 1
     fi
@@ -53,7 +55,9 @@ check_app "$app"
 # The DMG itself (sealed ad-hoc by bundle.sh, and intact), then the app as a user gets it from the DMG (mounted
 # read-only, never opened).
 codesign --verify --deep --strict --verbose=2 "$dmg"
-codesign -dv "$dmg" 2>&1 | grep -Eq 'flags=0x[0-9a-f]+\(.*adhoc|Authority=' || { echo "::error::$dmg is not signed"; exit 1; }
+# Read into a variable first: under pipefail, `grep -q` closing the pipe early fails codesign with SIGPIPE.
+dmg_sig=$(codesign -dv "$dmg" 2>&1)
+echo "$dmg_sig" | grep -Eq 'flags=0x[0-9a-f]+\(.*adhoc|Authority=' || { echo "::error::$dmg is not signed"; exit 1; }
 hdiutil verify -quiet "$dmg"
 mnt=$(mktemp -d)
 trap 'hdiutil detach "$mnt" -quiet || true; rmdir "$mnt" 2>/dev/null || true' EXIT
