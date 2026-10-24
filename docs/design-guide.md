@@ -204,9 +204,11 @@ palette validator and a Machado CVD simulation before freezing; adjacent pairs d
 ## 6. Borders and icons
 
 - 1 px hairline; dividers inside cards are hairline not full-contrast; table rows separated by hairline OR zebra, not
-  both. Inputs use border-strong, 1 px, focus = accent border + 2 px accent ring at 35% alpha.
-- Icons: Paddock's own SVG set, 16 px default (20 for nav, 14 inline with 12 px text), 1.5 px stroke, round caps and
-  joins, 24 px design grid scaled, `currentColor` only, optical alignment to cap height. Same metaphor = same icon across
+  both. Inputs use the control border (3:1), 1 px; focus = accent border plus the family focus ring (a solid 2 px accent outline, 2 px offset, 3:1 or better on every surface: the same ring as every other control, SC 2.4.13). Hover on an input or select moves the border to muted text; hover on a secondary button mixes 7% text colour into its fill, so it changes on every surface. Icons are never smaller than 14 px (a 1.5 px stroke at 12 px merges the "!" and "i" with their frames); the lint in `ui/test/tokens/icon-size.spec.ts` enforces it. Pitwall and the other app accents in dark use a lighter violet (`--pd-accent-control`) for switches and checks beside the deeper primary fill: two tones of one hue is accepted, not a second accent.
+  A translucent halo (accent at 35% alpha) measured 1.7 to 2.0:1 and does not count as the focus indicator; use it only as decoration beside the solid ring.
+  A selected segmented-control segment is an accent tint with a 1 px accent ring and a 600 label, in both schemes (a raised surface inverts in dark). The fill of an on toggle, checked box or radio is `--pd-accent-control` (3:1 on every surface; in dark it is the accent colour with dark ink, in light the accent fill with white ink).
+- Icons: Paddock's own SVG set, 16 px default (20 for nav, 14 inline with 12 px text), 1.5 px stroke on the screen at every size (`vector-effect: non-scaling-stroke`, the same through `<pd-glyph>` and `<mat-icon svgIcon>`), round caps and
+  joins, 24 px design grid scaled, dots drawn as filled circles never as strokes, `currentColor` only, optical alignment to cap height. Same metaphor = same icon across
   apps (settings, logs, update, runner, model, process). Filled variant only for the active nav item. Every icon-only
   button has `aria-label` and tooltip (500 ms delay). App icon: rounded square 22% radius with a single-hue gradient
   (accent 400 to 600) and a white glyph; in tray, template mono.

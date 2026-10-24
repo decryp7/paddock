@@ -129,3 +129,16 @@ fn helper_main() {
         _ => {}
     }
 }
+
+/// Whether `pid` ends within a few seconds. A shared pipe reaches EOF when the last holder closes its files, which happens a
+/// moment before the process shows as a zombie, so a check made right after EOF has to wait for that state (a deadline, not a sleep).
+pub(crate) fn is_gone(pid: u32) -> bool {
+    let end_at = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while crate::is_alive(pid) {
+        if std::time::Instant::now() >= end_at {
+            return false;
+        }
+        std::thread::yield_now();
+    }
+    true
+}

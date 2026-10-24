@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, ElementRef, afterNextRender, effect, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, afterNextRender, effect, inject, signal, viewChild } from '@angular/core';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import * as echarts from 'echarts/core';
 import { LineChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from 'echarts/components';
@@ -28,7 +29,7 @@ import {
   type SuTheme,
 } from '@decryp7/paddock-ui';
 import { PdPathText } from '@decryp7/paddock-ui';
-import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PD_ICON_PATHS, PdGlyph, pdIconSvg, type PdIconName } from '@decryp7/paddock-ui/icons';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 
 echarts.use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, CanvasRenderer]);
@@ -192,11 +193,12 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 
       <section class="gal-section" data-testid="icons" aria-labelledby="h-icons">
         <h2 id="h-icons">Icons (pd:)</h2>
-        <p>One 24 px grid, round caps and joins, currentColor. Shown at 16 px (the UI size, 1.5 px on screen) and 24 px.</p>
+        <p>One 24 px grid, round caps and joins, currentColor. First row: pd-glyph at 16 px (the UI size, 1.5 px on screen) and 24 px. Second row: the registered literal, exactly what mat-icon svgIcon="pd:name" draws, at 16 and 24 px.</p>
         <ul class="gal-icons">
           @for (n of iconNames; track n) {
             <li class="gal-icon">
-              <span class="gal-icon-pair"><pd-glyph [name]="n" [size]="16" /><pd-glyph [name]="n" [size]="24" /></span>
+              <span class="gal-icon-pair" data-row="glyph"><pd-glyph [name]="n" [size]="16" /><pd-glyph [name]="n" [size]="24" /></span>
+              <span class="gal-icon-pair" data-row="literal"><span class="mat-icon gal-mat gal-mat--16" [innerHTML]="literal(n)"></span><span class="mat-icon gal-mat gal-mat--24" [innerHTML]="literal(n)"></span></span>
               <span class="gal-icon-name">{{ n }}</span>
             </li>
           }
@@ -205,7 +207,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 
       <section class="gal-section" data-testid="controls" aria-labelledby="h-controls">
         <h2 id="h-controls">Controls</h2>
-        <div class="gal-row">
+        <div class="gal-row gal-row--center">
           <button type="button" class="pd-btn pd-btn--primary"><pd-glyph name="plus" /> Add runner</button>
           <button type="button" class="pd-btn"><pd-glyph name="refresh" /> Refresh</button>
           <button type="button" class="pd-btn pd-btn--ghost">Cancel</button>
@@ -216,17 +218,74 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         </div>
         <div class="gal-row">
           <div class="pd-field"><label for="g-name">Name</label><input id="g-name" class="pd-input" value="builder-01" /><span class="pd-field__hint">Shown in the sidebar.</span></div>
-          <div class="pd-field"><label for="g-bad">Port</label><input id="g-bad" class="pd-input" value="99999" aria-invalid="true" /><span class="pd-field__error">Use a port from 1 to 65535.</span></div>
+          <div class="pd-field"><label for="g-bad">Port</label><input id="g-bad" class="pd-input" value="99999" aria-invalid="true" aria-describedby="g-bad-error" /><span id="g-bad-error" class="pd-field__error"><pd-glyph name="alert" [size]="14" /> Use a port from 1 to 65535.</span></div>
           <div class="pd-field"><label for="g-native">Native select</label><select id="g-native" class="pd-select"><option>Standard</option><option>Compact</option></select></div>
           <div class="pd-field"><label for="g-themed">Themed select</label><pd-select inputId="g-themed" [options]="selectOptions" [value]="selected()" (valueChange)="selected.set($event)" /></div>
-          <label class="pd-check"><input type="checkbox" checked /> Start with the system</label>
+          <div class="pd-field pd-field--check"><span class="pd-field__label" aria-hidden="true">&nbsp;</span><label class="pd-check"><input type="checkbox" checked /> Start with the system</label></div>
         </div>
-        <div class="gal-row">
-          <div class="pd-chips"><span class="pd-chip">linux <button type="button" aria-label="Remove linux"><pd-glyph name="close" [size]="12" /></button></span><span class="pd-chip">x64</span></div>
+        <div class="gal-row gal-row--center">
+          <div class="pd-chips"><span class="pd-chip">linux <button type="button" aria-label="Remove linux"><pd-glyph name="close" [size]="14" /></button></span><span class="pd-chip">x64</span></div>
           <div class="pd-segmented" role="group" aria-label="View"><button type="button" aria-pressed="true">List</button><button type="button" aria-pressed="false">Grid</button></div>
           <div class="pd-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">General</button><button type="button" role="tab" aria-selected="false">Network</button></div>
-          <span>Press <kbd class="pd-kbd">Ctrl</kbd> <kbd class="pd-kbd">K</kbd></span>
+          <span>Press <kbd class="pd-kbd">Ctrl</kbd><kbd class="pd-kbd">K</kbd></span>
         </div>
+      </section>
+
+
+      <section class="gal-section" data-testid="states" aria-labelledby="h-states">
+        <h2 id="h-states">Control states</h2>
+        <p>Each control at rest, hover, focus and disabled (forced by the review sheet), on the page, on a card (surface-1 with a hairline) and on an inset (surface-2).</p>
+        @for (surface of ['page', 'card', 'inset']; track surface) {
+          <div class="gal-states" [class.gal-states--card]="surface === 'card'" [class.gal-states--inset]="surface === 'inset'" [attr.data-surface]="surface">
+            <div class="gal-states-row" data-group="buttons">
+              <button type="button" class="pd-btn pd-btn--primary" data-state="rest">Primary</button>
+              <button type="button" class="pd-btn pd-btn--primary" data-state="hover">Hover</button>
+              <button type="button" class="pd-btn pd-btn--primary" data-state="focus">Focus</button>
+              <button type="button" class="pd-btn pd-btn--primary" disabled>Disabled</button>
+              <button type="button" class="pd-btn" data-state="rest">Secondary</button>
+              <button type="button" class="pd-btn" data-state="hover">Hover</button>
+              <button type="button" class="pd-btn" data-state="focus">Focus</button>
+              <button type="button" class="pd-btn" disabled>Disabled</button>
+            </div>
+            <div class="gal-states-row" data-group="fields">
+              <input class="pd-input" value="rest" aria-label="States: input rest" data-state="rest" />
+              <input class="pd-input" value="hover" aria-label="States: input hover" data-state="hover" />
+              <input class="pd-input" value="focus" aria-label="States: input focus" data-state="focus" />
+              <input class="pd-input" value="disabled" aria-label="States: input disabled" disabled />
+              <select class="pd-select" aria-label="States: native rest" data-state="rest"><option>Standard</option></select>
+              <select class="pd-select" aria-label="States: native focus" data-state="focus"><option>Focus</option></select>
+              <select class="pd-select" aria-label="States: native disabled" disabled><option>Disabled</option></select>
+            </div>
+            <div class="gal-states-row" data-group="themed-select">
+              <pd-select ariaLabel="States: themed rest" [options]="selectOptions" value="standard" data-state="rest" />
+              <pd-select ariaLabel="States: themed focus" [options]="selectOptions" value="compact" data-state="focus" />
+              <pd-select ariaLabel="States: themed disabled" [options]="selectOptions" value="standard" [disabled]="true" />
+              <input class="pd-input" value="Same height" aria-label="States: input beside" />
+            </div>
+            <div class="gal-states-row" data-group="toggles">
+              <label class="pd-check"><input class="pd-switch" type="checkbox" role="switch" /> Off</label>
+              <label class="pd-check"><input class="pd-switch" type="checkbox" role="switch" checked /> On</label>
+              <label class="pd-check"><input class="pd-switch" type="checkbox" role="switch" checked disabled /> On, disabled</label>
+              <label class="pd-check"><input type="checkbox" /> Unchecked</label>
+              <label class="pd-check"><input type="checkbox" checked /> Checked</label>
+              <label class="pd-check"><input type="checkbox" data-state="focus" /> Focus</label>
+              <label class="pd-check"><input type="checkbox" checked disabled /> Disabled</label>
+              <label class="pd-check"><input type="radio" name="g-r-{{ surface }}" /> Radio</label>
+              <label class="pd-check"><input type="radio" name="g-r-{{ surface }}" checked /> Selected</label>
+            </div>
+            <div class="gal-states-row" data-group="small-icons">
+              @for (n of ['alert', 'info', 'check', 'close', 'more', 'keyboard']; track n) {
+                <span class="gal-icon-pair"><pd-glyph [name]="n" [size]="14" /><pd-glyph [name]="n" [size]="16" /><pd-glyph [name]="n" [size]="24" /></span>
+              }
+            </div>
+            <div class="gal-states-row" data-group="choice">
+              <div class="pd-segmented" role="group" aria-label="States: view"><button type="button" aria-pressed="true">List</button><button type="button" aria-pressed="false">Grid</button><button type="button" aria-pressed="false">Map</button></div>
+              <pd-segmented-control label="States: level" [options]="levels" value="all" />
+              <div class="pd-tabs" role="tablist"><button type="button" role="tab" aria-selected="true">General</button><button type="button" role="tab" aria-selected="false">Network</button></div>
+              <span>Press <kbd class="pd-kbd">Ctrl</kbd><kbd class="pd-kbd">K</kbd></span>
+            </div>
+          </div>
+        }
       </section>
 
       <section class="gal-section" data-testid="path-text" aria-labelledby="h-path">
@@ -234,6 +293,8 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         <div class="gal-row">
           <div class="gal-box gal-path"><pd-path-text value="/Users/lin/Library/Application Support/Builder/logs/builder.service.log" [copy]="true" /></div>
           <div class="gal-box gal-path gal-path--narrow"><pd-path-text value="C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log" /></div>
+          <div class="gal-path gal-path--plain240" data-testid="path-win-240"><pd-path-text value="C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log" /></div>
+          <div class="gal-box gal-path gal-path--240" data-testid="path-240"><pd-path-text value="/Users/lin/Library/Application Support/Builder/logs/builder.service.log" /></div>
         </div>
       </section>
 
@@ -288,6 +349,12 @@ export class Gallery {
     { value: 'err', label: 'Errors', count: 6 },
     { value: 'off', label: 'Off', disabled: true },
   ];
+
+  private readonly sanitizer = inject(DomSanitizer);
+  /** The registered `pd:` literal of a glyph, as `<mat-icon svgIcon>` inserts it (fixed content from the package). */
+  protected literal(name: string): SafeHtml {
+    return this.sanitizer.bypassSecurityTrustHtml(pdIconSvg(name as PdIconName));
+  }
 
   protected readonly theme = signal<string>(param<SuTheme>('theme', SU_THEMES, 'system'));
   protected readonly accent = signal<string>(param<SuAccent>('accent', SU_ACCENTS, 'debrief'));
