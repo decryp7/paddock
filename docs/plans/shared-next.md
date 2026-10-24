@@ -638,5 +638,5 @@ The items kept back above also go into 0.3.0:
 - X3: wire `Lifecycle::begin` into the Shell Demo app for a real-Tauri smoke of the recovery flow; place the
   unclean-shutdown notice and safe-mode badge in the workbench frame (X50); a real killed-child test.
 - X6: Windows job object (X54).
-- Tooling (user asked, coordinator proposal pending): `cargo-hakari`, lighter dev debuginfo, `cargo-machete` check;
+- Tooling (user approved all, 2026-10-24): `cargo-hakari`, lighter dev debuginfo, `cargo-machete` check;
   measure bun/pnpm vs npm in X53.
