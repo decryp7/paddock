@@ -1,157 +1,157 @@
-# Family icon style guide (3D, Big Sur style)
+# Family icon style guide (isometric motorsport objects)
 
-How every Paddock family icon is drawn: one rendered object with real light and material on the family tile. The Paddock pit
-building (`tools/paddock-iso.mjs`, `pitBuilding()`; sheet `alternative/paddock-pit-sheet.png`) is the worked example; the numbers
-below are its numbers unless a rule says otherwise. Every app keeps its own tile colour (`PALETTE` in `tools/design.mjs`) and its
-own symbol; only the rendering changes.
+Every family icon is one isometric motorsport object, rendered with real light and material on the family tile. Each app keeps its
+own tile colour (`PALETTE` in `tools/design.mjs`); the object is its symbol:
 
-**Two forms.** Paddock alone is drawn in isometric (sections 1 to 10), as the umbrella mark: a place, seen from above. The seven apps
-are front-facing symbols drawn as reliefs (section 11): the symbol faces the viewer, extruded to a shallow depth. Both share the
-light, the value steps, the material, the shadows, the detail budget and the checks.
+| App | Object | Tile |
+|---|---|---|
+| Paddock (the umbrella mark) | the pit building | graphite `#2B3038` |
+| Pitwall | team radio (walkie-talkie) | violet |
+| Debrief | engineer's laptop with a telemetry trace | blue |
+| Pitcrew | pneumatic wheel gun | orange |
+| Dyno | tachometer pod | magenta |
+| Spotter | binoculars | amber (light: dark ink) |
+| Pacenotes | tablet with a route line | olive |
+| Sighter | camera on a small tripod | lavender (light: dark ink) |
+
+The Paddock pit building is the worked example (`pitBuilding()` in `tools/paddock-iso.mjs`, sheet `alternative/paddock-pit-sheet.png`).
+Draw every object with the shared helpers in `tools/iso.mjs`, so projection, light, values, shadows, placement and the small-frame
+grid are identical across the family.
+
+## 0. Acceptance criterion
+
+The user's bar, verbatim: **"make them really professional and really beautiful".** In practice: top-tier macOS app icon quality.
+
+- **Strong silhouette first:** the object is recognisable as a black shape at 60 px before any shading.
+- **Precise geometry:** one projection, parallel edges stay parallel, parts meet exactly, no stray pixels or hairline seams.
+- **Believable materials:** gradients on every face, speculars where the light catches (a thin highlight on lit edges, one sheen
+  on glass or gloss); metal, plastic, rubber and glass read as such.
+- **Clean bevels:** slab edges and rounded corners drawn as their own faces (section 2), not outlines.
+- **Soft occlusion:** where parts meet or overhang, a soft dark band (section 4); grounded by a contact shadow and a long shadow.
+- An independent review judges every icon "professional vs amateur" at 512, 112 and 60 and names what looks amateur; an icon is
+  done when that review finds no P1.
 
 ## 1. Projection and light
 
-- **Masters (1024 down to 64), Paddock only:** true isometric, 30 degrees: a point (s along the long axis, d into depth, t up) lands at
-  `x = (s + d) cos 30, y = (s - d) / 2 - t`. One projection per icon; no mixed angles, no perspective.
-- **Frames at 32 and 24:** 2:1 pixel isometric (one pixel up or down per two across), `x = s + d, y = (s - d) / 2 - t`, with
-  `shape-rendering="crispEdges"`, so the diagonals are clean pixel stairs.
-- **One key light from the top left** (azimuth about 315 degrees, elevation about 45 degrees). There is no second light and no
-  rim light on the object. The consequence for the three visible face orientations:
-  - **tops** (facing up): lightest;
-  - **lit faces** (facing the lower left, towards the light): mid;
-  - **shade faces** (facing the lower right): darkest of the solid faces.
+- **Masters (1024 down to 64):** true isometric, 30 degrees. In iso units, s runs along the object's long axis (to the lower right),
+  d into depth (to the upper right), t up: `P(s, d, t) = [(s + d) cos 30, (s - d) / 2 - t]` (`P` in `tools/iso.mjs`). One
+  projection per icon; no perspective, no mixed angles. Orient each object so its most telling face is the `front` (d = const)
+  face, toward the lower left.
+- **Frames at 32 and 24:** 2:1 pixel isometric, `x = s + d, y = (s - d) / 2 - t` (`pixelIso`), crisp edges, so the diagonals are
+  clean pixel stairs.
+- **One key light from the top left** (azimuth about 315 degrees, elevation about 45). No second light, no rim light. Faces:
+  **tops** lightest, **fronts** (toward the lower left) mid, **ends** (toward the lower right) darkest.
 
-## 2. Value steps
+## 2. Values
 
-Values are OKLab lightness x 100 (`L`). Adjacent faces of one solid differ by at least 8 L, so the edges read without outlines.
+OKLab lightness x 100 (L). Adjacent faces of one solid differ by at least 8 L, so edges read without outlines. `VALUES` in
+`tools/iso.mjs`:
 
-| Role | Paddock colours (gradient start to end) | L |
+| Role | Colours (gradient start to end) | L |
 |---|---|---|
-| Top (the topmost slab only) | `#FFFFFF` to `#E9EDF2` | 100 to 94 |
-| Lower tops (canopy; the pit-wall top `#DCE1E7`) | `#D5DBE2` to `#C3CAD3` | 88 to 82 |
-| Lit face | `#C9D0D8` to `#A9B2BD` | 86 to 76 |
-| Slab edge (the thin front of a roof or canopy) | `#AEB7C2` to `#959FAB` | 78 to 70 |
-| Shade face | `#7E8895` to `#626C78` | 62 to 53 |
-| Recess, glass, openings | `#3A4656`, `#1C2531`, `#10151B` | 39, 26, 19 |
-| Tile base (graphite) | `#2B3038` | 31 |
+| `top`: the topmost surface only | `#FFFFFF` to `#E9EDF2` | 100 to 94 |
+| `lower`: lower tops (ledges, steps) | `#D5DBE2` to `#C3CAD3` | 88 to 82 |
+| `litLight`: light fronts of thin parts in front | `#E4E8ED` to `#C8CFD8` | 92 to 84 |
+| `lit`: fronts | `#C9D0D8` to `#A9B2BD` | 86 to 76 |
+| `edge`: slab edges and bevels | `#AEB7C2` to `#959FAB` | 78 to 70 |
+| `shade`: ends | `#7E8895` to `#626C78` | 62 to 53 |
+| recesses, glass, openings | `#56606C`, `#2B323B`, `#1C2531`, `#10151B` | 45 to 19 |
 
-- Every face has a gentle gradient (6 to 10 L) along its long side, lighter towards the light.
-- The darks (openings, glass) sit below the tile's L, so they read as holes in the object, not as the tile.
-- Only the topmost surface is pure white. Lower tops step down a value, or stacked layers read as the treads of a grandstand.
-- Interiors may glow, but stay below the lit face: `#0E1318`, `#2E3A48` at 55 %, `#8FA3B8` at the floor (one gradient per
-  opening, since openings step down the screen). The glow gives the object life; it is neutral, not an accent.
+- Every face has a gradient (6 to 10 L) along its long side, lighter toward the light.
+- **Only the topmost surface is pure white**; lower tops step down, or stacked layers read as stairs.
+- Darks (openings, screens, glass) sit below the tile's L, so they read as holes or glass, not as the tile.
+- Interiors and screens may glow, but stay below the lit face.
 
-## 3. Material
+## 3. Material per tile type
 
-- **The object is white or near-white with greys**, so it stays the family's light glyph on any tile.
-- **On mid-light tiles (Pitcrew orange, Dyno magenta and the like) the lit faces are near-white** (L 90 or more), not grey: a grey
-  face cannot reach 3:1 on orange. Only the shade faces and recesses go darker.
-- **Dark ink on light tiles:** where white cannot reach 3:1 on the tile (Spotter amber, Sighter lavender), the object is the tile's
-  dark ink colour (`INK[app]`) with the same value ladder inverted in range (front lightest of the darks, about L 44 to 39; faces
-  that point down L 36 to 30; faces that point right L 21 to 18), and its holes glow in the app's light hue.
-- **On a coloured tile, tint the greys towards the tile:** mix the lit and shade faces 10 to 15 % towards the tile's `deep` colour,
-  and use `deep` (not black) for openings and glass. Paddock's graphite tile is neutral, so its greys are cool neutral.
-- Glass: a dark vertical gradient with one diagonal sheen (white, 28 % falling to 0 over the first half) and thin mullions.
-- No textures, no noise, no bevels, no outlines. Edges are defined by value steps alone, plus one 2.5 px white highlight along the
-  topmost front edge.
+- **Dark and mid tiles (graphite, violet, blue, olive):** the object is white or near-white with greys (the ladder above).
+- **Coloured tiles:** tint the greys toward the tile with `tintedValues(PALETTE[app].deep, 0.12)` (10 to 15 %), and use `deep`, not
+  black, in openings and glass. The `top` stays white.
+- **Mid-light tiles (Pitcrew orange, Dyno magenta):** the fronts must be near-white (L 90 or more, use `litLight`), because a grey
+  front cannot reach 3:1 on orange. Only ends and recesses go darker.
+- **Light tiles (Spotter amber, Sighter lavender): dark ink.** The object is the app's ink colour (`INK[app]`) with the same ladder
+  inverted in range: tops L 44 to 39, fronts L 36 to 30, ends L 21 to 18, recesses down to L 12; highlights in a lighter ink (L 56).
+- **Glass and screens:** a dark vertical gradient (`VALUES.glass`), one diagonal sheen (white 28 % falling to 0 over the first
+  half), thin mullions or bezels.
+- **Metal:** a narrow bright specular band along the lit edge. **Rubber:** matte, darkest values, no specular.
+- No textures, no noise, no outlines. One 2.5 px white highlight along the topmost front edge.
 
-## 4. Shadows and ambient occlusion (1024 grid)
+## 4. Shadows and occlusion (1024 grid, `SHADOW` in `tools/iso.mjs`)
 
-All shadows are black, blurred in sRGB (`color-interpolation-filters="sRGB"`), and drawn under the object.
+All black, blurred in sRGB, under the object. Use the helpers with a `defsKit(uid + letter)`, and add `shadowFilters(kit)` to the
+defs.
 
-| Layer | Shape | Blur sigma | Opacity |
-|---|---|---|---|
-| Long shadow | the footprint swept away from the light by (+110, +66) | 18 | about 0.6 effective (0.8 x 0.75) |
-| Contact occlusion | the footprint, 3 to 4 px wider on the shade side | 2.5 | 0.8 |
-| Overhang occlusion | a band 16 units deep under every roof, canopy or overhang, clipped to the faces below it | 6 | 0.6 |
-| Cast shadow of an overhang | a band about 30 units down the face below it; the ground strip under it, flat | 6; none | 0.35; 0.3 |
-| Recess occlusion | the head and the inner jamb of every opening as flat darker faces (`#2B323B`, `#56606C`) | none | 1 |
-
-The family glyph shadow (`feDropShadow` in the tile's `deep` colour) is replaced by these layers for rendered objects.
+| Layer | Helper | Shape | Blur | Opacity |
+|---|---|---|---|---|
+| Long shadow | `longShadow(kit, foot)` | the footprint swept (+110, +66) away from the light | 18 | 0.75 x 0.8 |
+| Contact | `contactShadow(kit, d)` | the footprint, 3 to 4 units wider on the shade side | 2.5 | 0.8 |
+| Occlusion | `occlusion(kit, clip, d)` | a band about 16 deep under every overhang or where parts meet, clipped to the faces below | 6 | 0.6 |
+| Cast shadow | `occlusion(kit, clip, d, SHADOW.castOpacity)` | the shadow of a large overhang on the face below, about 30 deep | 6 | 0.35 |
+| Recesses | flat faces | the head and the inner jamb of every opening in `recessHead` and `recessJamb` | none | 1 |
 
 ## 5. Size and placement
 
-- **Visible mass:** 70 to 75 % of the tile width at 1024 (Paddock: about 72 %, x 215 to 808). Fit the object's outline (including
-  overhangs and the ground details) into a 690 x 560 box (the `box` parameter); the shadows may extend past it.
-- **Optical centring:** isometric masses are heavy at the upper right. Shift the art about 4 left and 10 down from the box centre
-  (`dx`, `dy`) and check it against Pitwall and Dyno at 128.
-- **Flat symbols** (16 px and the tray) keep the old keyline: glyph box 270 to 754 at 1024, x 3 to 12 at 16.
+- **Fit box:** `fitBox(outlinePoints, { box: [690, 560], dx, dy })` scales the object's outline (all outer corners, including
+  ground details) into 690 x 560 on the 1024 grid, so the visible mass is 70 to 75 % of the tile width. Shadows may reach past it.
+- **Optical centring:** isometric masses lean to the upper right. Shift with `dx` and `dy` (Paddock: -4, +10) and check the icon
+  beside the others at 128.
+- `masterSvg(app, { art })` takes the art as `uid => ({ defs, body })`, with the body wrapped in `fit.transform`.
 
 ## 6. Detail budget per size
 
 | Size | Content |
 |---|---|
-| 1024, 512, 256 | everything: fine repeats (door slats, mullions, lane line), the fine chequer (step 14, two rows), the accent at 8 units |
-| 128 and below to 60 (`simple: true`) | no fine repeats (no slats, mullions or lane lines); fewer, wider repeated parts (three bays, pillars 22); openings fully dark (no lit floor) with doors only 40 % down; the cue that carries the meaning stays, coarser (chequer step 24 on a 40-high wall); the accent 10; door rails 8. README size 112 and diagram size 60 are rendered from this frame |
-| 32, 24 | hand-drawn pixel isometric (`PIT_SMALL`): one pixel per part, whole-pixel widths for repeated parts (three bays of whole pixels), flat tones (no gradients), the same parts as the master in order: ground detail, main face with openings, upper band, roof. Keep the defining bands even at 24 (Paddock keeps a 1-row glass band, taking the row from the ground floor) and end faces at least 3 px |
-| 60 (Paddock) | the 128 frame without the chequer (it greys into a bar) and fitted 8 % larger, so its mass matches Pitwall and Dyno |
-| 16 | the flat symbol (Paddock: the slatted door, with a 1 px band of the seven hues above it on the tile, one pixel each), whole pixels; coverage 18 to 26 % for line glyphs, up to 30 % for filled silhouettes |
-| Tray | the flat symbol as a template (alpha only, one tone), x 2 to 14; light and dark variants from it. Whole pixels only: no partial alpha anywhere, except a deliberate dim of the whole glyph for a state (for example idle) |
+| 1024, 512, 256 | everything: fine repeats (slats, mullions, grille lines, scale ticks), and the accent at its master size |
+| 128 down to 112 (the simple frame, an option of the art function) | no fine repeats; fewer, wider repeated parts; openings fully dark; the cue that carries the meaning stays, coarser; the accent a little thicker |
+| 60 | the simple frame without any texture that turns grey (Paddock drops the chequer), fitted about 8 % larger so the mass matches the others |
+| 48 | the simple frame scaled onto the small tile |
+| 32, 24 | 2:1 pixel isometric with `pixelIso` and `pixelLayer` (flat colours, crisp, one pixel per part, whole-pixel widths for repeats), or a simplified object if the isometric one cannot be read; keep the defining parts even at 24, and end faces at least 3 px |
+| 16 | the flat symbol: one tone, whole pixels; coverage 18 to 26 % for line glyphs, up to 30 % for filled silhouettes. Paddock: the slatted door with a 1 px band of the seven hues above it |
+| Tray | the flat symbol as a template, x 2 to 14, with light and dark variants made from it. Whole pixels only: no partial alpha anywhere, except a deliberate dim of the whole glyph for a state |
 
-Rule: if a part cannot be drawn on whole pixels at a size, it is dropped at that size, never blurred.
+Rule: a part that cannot be drawn on whole pixels at a size is dropped at that size, never blurred.
 
 ## 7. Accents
 
-- **At most one accent per icon**, small and saturated, on the object (never on the tile).
-- An app's accent comes from its own hue (`PALETTE[app].light` or `.top`), for example a status light or a lit edge.
-- Paddock's accent is the family pinstripe: a thin band of the seven app hues with hard stops (`STRIPE` order) along the canopy's
-  front edge. It is the only multicolour element in the family and belongs to the umbrella mark alone.
-- An accent must still be visible at 112 without becoming the loudest part at 60 (Paddock: 8 units on the master, 10 in the
-  128 frame). If it cannot, drop it at that size.
+- **One accent per app**, small and saturated, on the object (never on the tile), from the app's own hue (`PALETTE[app].light` or
+  `.top`): a status LED on the radio, the trace on the laptop screen, the redline on the tacho, the route on the tablet, a lens
+  glint, and so on.
+- **Paddock's seven-hue stripe is on Paddock only** (the canopy-edge pinstripe and the 16 px band). It is the umbrella mark's link to
+  the family and the only multicolour element. No app uses more than its own hue.
+- An accent must be visible at 112 without becoming the loudest part at 60. Thicken it in the simple frame or drop it there.
 
 ## 8. Tile and gloss (unchanged)
 
-- Tile gradient top, base and bottom from `PALETTE`; the radial sheen from the top left; the inner edge (light at the top, dark at
-  the bottom); the livery sweep (two diagonal white bands at 8 %, 16 % on light tiles).
-- macOS: an 824 squircle at (100, 100) with the drop shadow (y 10, blur 12, black 28 %, sRGB filter). Windows: a 944 rounded square
-  at (40, 40), radius 200, no outer shadow.
-- Dark tiles get a light rim (Paddock: 20 % on the master, a full-pixel 40 % rim at 16, 45 % at 24 to 48) so they hold on dark docks.
+- Tile gradient top, base and bottom from `PALETTE`; the radial sheen from the top left; the inner edge; the livery sweep (two
+  diagonal white bands at 8 %, 16 % on light tiles).
+- macOS: an 824 squircle at (100, 100) with the drop shadow (y 10, blur 12, black 28 %, sRGB filter). Windows: a 944 rounded square at
+  (40, 40), radius 200, no outer shadow.
+- Dark tiles get a light rim (Paddock: 20 % on the master, a full-pixel 40 % rim at 16, 45 % at 24 to 48).
 
 ## 9. Checks (all must pass)
 
 | Check | Rule | Tool |
 |---|---|---|
-| Tile CVD distance | every tile at least 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan (OKLab dE x 100) from every other tile | `node tools/cvd.mjs` |
-| Ink contrast | the object's lit face against the tile base at least 3:1 (Paddock `#C9D0D8` on `#2B3038`: 9.6:1); on mid-light tiles this needs near-white lit faces, on light tiles dark ink | `contrast()` in `tools/cvd.mjs` |
-| Face steps | adjacent faces at least 8 L apart (section 2) | OKLab |
+| Acceptance | independent review: professional at 512, 112 and 60, reads as its object, no P1 left | rule 22 |
+| Tile CVD distance | every tile at least 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan from every other | `node tools/cvd.mjs` |
+| Contrast | the object's front against the tile base at least 3:1 (Paddock `#C9D0D8` on `#2B3038`: 9.6:1) | `contrast()` in `tools/cvd.mjs` |
+| Face steps | adjacent faces at least 8 L apart | OKLab |
 | Size | visible mass 70 to 75 % of the tile width at 1024 | measure the render |
-| Coverage at 16 | 18 to 26 % ink for line glyphs, up to 30 % for filled silhouettes | `coverage()` in `tools/paddock-symbols.mjs` |
-| Tray alpha | every tray pixel fully opaque or fully transparent (except a whole-glyph state dim) | magnify the template |
-| Seams | the tile background has no step over 3 levels | `npm test`, `tools/scan.mjs` |
-| Whole pixels | 32, 24 and 16 frames have no half-tone edges on repeated parts | magnify the frame (sheet close-ups) |
-| Review | every new or changed icon gets an independent review: professional vs amateur at 512, 112 and 60, and meaning | rule 22 |
+| Coverage at 16 | 18 to 26 % (line glyphs), up to 30 % (filled silhouettes) | `coverage()` in `tools/paddock-symbols.mjs` |
+| Tray alpha | every pixel fully opaque or fully transparent (except a whole-glyph state dim) | magnify the template |
+| Whole pixels | 32, 24 and 16 frames have no half-tone edges on repeated parts | sheet close-ups |
+| Seams | the tile background has no step over 3 levels | `npm test` |
 
 ## 10. Worked example: Paddock
 
-`pitBuilding()` parameters (iso units): long side L 380, depth D 90; ground floor H1 120 with four bays (margin 16, pillar 14,
-doors 62 % down, set 14 deep, lit inside; three bays with pillars 22 in the 128 frame); a canopy 16 thick cantilevered 46 over the
-pit lane, carrying the pinstripe, with its cast shadow; an upper hospitality floor H2 64 with a glass band; a roof slab 16 thick
-with a 6 overhang; in front, the apron (80 deep, `#6A7380` to `#545D69`) with a lane line and the pit wall (12 deep, 30 high,
-chequered top). Fit box 690 x 560, shift (-4, +10).
+`pitBuilding()` (iso units): long side L 380, depth D 90; ground floor H1 120 with four bays (margin 16, pillar 14, doors 62 % down,
+set 14 deep, lit inside); a canopy 16 thick cantilevered 46 over the pit lane, carrying the pinstripe, with its cast shadow; an upper
+hospitality floor H2 64 with a glass band; a roof slab 16 thick with a 6 overhang; in front the apron (80 deep) with a lane line and
+the pit wall (12 deep, 30 high, chequered top). Fit box 690 x 560, shift (-4, +10).
+
+- The simple frame: three bays with pillars 22, dark openings, doors 40 % down, a coarser chequer on a 40-high wall, stripe 10.
+- The 60 frame: the simple frame without the chequer, 8 % larger.
+- The 32 and 24 frames: `PIT_SMALL`.
+- 16 and the tray: the flat slatted door.
+
 `node tools/paddock-pit-sheet.mjs` renders the set and the sheet.
-
-## 11. Relief: the front-facing app symbols
-
-The apps' symbols face the viewer and are extruded into a shallow relief (`tools/relief.mjs`, first used for Debrief, Pitwall and
-Sighter in `tools/icons-a.mjs`). One recipe for every app:
-
-- **Extrusion:** one depth for the family, about 24 units at 1024 (plus or minus 4), along the direction away from the light,
-  about 7 right and 23 down. The walls are swept along it: walls that face down take the lit tone, walls that face right the shade
-  tone (section 2). No app uses a different depth or direction.
-- **Front face:** the top role (lightest) with a gentle gradient; the one highlight runs along the top or top-left edge of the front
-  face, where the light catches it (white, about 0.9), never along the bottom or right.
-- **Recesses are cut-outs:** a hole through the symbol shows the tile colour at its floor (or the app's light hue where the hole is
-  the accent, a glow), with its inner walls in the recess tones (`head` darkest, `jamb` lighter). This is the standard way to draw
-  any opening, slot or bar inside a symbol; do not paint a darker patch instead.
-- **Shadows (one recipe, the light neutral shadow of Debrief and Pitwall):** black, blurred in sRGB.
-
-  | Layer | 1024 masters | 48 px frame | 32, 24, 16 frames |
-  |---|---|---|---|
-  | Long shadow | the solid swept a further (56, 42) beyond the extrusion, blur 18, opacity 0.45 | sweep (36, 28), blur 14, opacity 0.4 | none |
-  | Contact occlusion | the solid grown by 3 (and half that down), blur 2.5, opacity 0.8 | blur 6, opacity 0.6, grow 3 | a hard 1 px shadow straight down at 0.22 |
-
-- **Size:** the symbol's visible mass is 70 to 75 % of the tile width, as for Paddock (section 5); fit by a scale about the centre
-  when strokes with round caps reach past the box.
-- **Small frames:** 48 is the simple master scaled onto the small tile with the softer shadows; 32, 24 and 16 are flat (no
-  gradients), extruded one pixel along (1, 1) in half-pixel steps, on whole pixels.
-
