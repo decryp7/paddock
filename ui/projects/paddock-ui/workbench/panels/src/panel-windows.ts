@@ -114,6 +114,7 @@ export class PanelWindows implements PanelWindowsPort {
     await this.start();
     const view = this.registry.findView(panel);
     if (!view || !this.registry.isViewOffered(panel)) return false;
+    // after-await: `start()` loads the list of open windows; this must see it.
     if (this.popped().has(panel)) {
       this.focus(panel);
       return true;

@@ -56,7 +56,7 @@ import { ShellPages } from './pages';
     :host(.pd-rail) .pd-item { justify-content: center; padding: 0; }
     :host(.pd-rail) .pd-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     /* In the rail the count sits off the icon's top-right corner, ringed in the sidebar's colour so it never covers a stroke. */
-    :host(.pd-rail) .pd-badge { position: absolute; top: 0; left: calc(50% + 6px); min-width: 16px; height: 16px; padding: 0 4px; border: 0; box-shadow: 0 0 0 2px var(--pd-surface-1), inset 0 0 0 1px var(--pd-border-strong); font-size: 10px; line-height: 16px; }
+    :host(.pd-rail) .pd-badge { position: absolute; top: 0; left: calc(50% + 6px); min-width: 16px; height: 16px; padding: 0 4px; border: 0; box-shadow: 0 0 0 2px var(--pd-surface-1), inset 0 0 0 1px var(--pd-border-strong); font-size: var(--pd-text-caption); line-height: 16px; }
     @media (prefers-reduced-motion: reduce) { .pd-item { transition: none; } }
   `,
 })

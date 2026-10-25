@@ -85,7 +85,7 @@ const EDGES: readonly { dir: ResizeDirection; cls: string }[] = [
     @container (min-width: 480px) { .pd-wide { display: inline; } }
     .pd-controls { display: flex; height: 100%; margin-inline-start: var(--pd-space-1); }
     .pd-ctl { width: 40px; height: 100%; border-radius: 0; color: inherit; }
-    .pd-close:hover { background: var(--pd-danger); color: var(--pd-on-danger, #fff); }
+    .pd-close:hover { background: var(--pd-danger); color: var(--pd-on-danger); }
     .pd-edge { position: fixed; z-index: 1000; }
     .pd-n { top: 0; left: 6px; right: 6px; height: 4px; cursor: ns-resize; }
     .pd-s { bottom: 0; left: 6px; right: 6px; height: 4px; cursor: ns-resize; }

@@ -5,23 +5,6 @@ import { PD_ICON_DOTS } from '../projects/paddock-ui/icons/src/paths';
 const DOTS = Object.fromEntries(Object.entries(PD_ICON_DOTS).map(([k, v]) => [k, (v ?? []).map((d) => [d[0], d[1]])]));
 
 const THEMES = ['dark', 'light'] as const;
-const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter'] as const;
-const SECTIONS = [
-  'card',
-  'status-pill',
-  'metric',
-  'sparkline',
-  'empty-state',
-  'error-state',
-  'skeleton',
-  'job',
-  'segmented-control',
-  'icons',
-  'controls',
-  'path-text',
-  'tray-popover',
-  'chart-theme',
-] as const;
 
 async function open(page: Page, theme: string, accent: string, density = 'standard'): Promise<void> {
   await page.goto(`/?theme=${theme}&accent=${accent}&density=${density}`);
