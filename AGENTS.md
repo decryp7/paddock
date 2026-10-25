@@ -1,61 +1,167 @@
-# paddock: engineering rules for coding agents and contributors
+# Paddock: rules for coding agents and contributors
 
-The shared repo of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter): the Angular UI package `@decryp7/paddock-ui`
-(`ui/`), shared Rust crates (`crates/`), the design guide and lessons (`docs/`). See README.md.
+The Paddock app family in one repository (ADR [0014](docs/adr/0014-monorepo-under-paddock.md)): the shared Rust crates
+(`crates/`), the shared UI packages `@decryp7/paddock-ui` and `@decryp7/paddock-e2e` (`ui/`), the conformance, ESLint and
+TypeScript presets, the family docs (`docs/`) and the apps under `apps/<app>/`. See README.md.
 
-## Design principles
-- One reason to change per module. Tokens name raw colours, sizes and durations; components use `var(--pd-...)` only.
-- Pure core, thin edges: geometry, formatting, theme building and colour maths are pure functions with their own specs.
-- Make illegal states unrepresentable: statuses, accents, densities are string-literal unions; status is never colour alone.
-- Extend by adding: a new app is a new accent entry plus a migration note; a new component is a new file and an export.
-- Composition over inheritance; KISS; DRY with the rule of three; fail fast with a message that tells the user what to fix.
+Read this file and the nearest `apps/<app>/AGENTS.md` (an app's own part: its architecture, where its logic lives, its
+own checks). Where they disagree, the rules win, then this file, then the app's.
 
-## Security and robustness
-- Nothing remote: no web fonts, no CDN, no icon URLs. Icons are inline SVG. The CSP forbids `unsafe-eval` and inline
-  style attributes: bind styles with Angular style bindings only, never static `style=""` in templates or `index.html`.
-- Never bind untrusted text with `[innerHTML]`.
-- Components never throw on odd input (empty series, NaN, null): they render a defined state.
+## Paddock rules (binding)
 
-## Languages
-- UI: Angular 22 (standalone, signals, OnPush, CDK where behaviour is needed). Shared Rust only in `crates/`. No other runtimes
-  in what ships; Node scripts are build tooling only.
+The family's binding rules are [docs/rules.md](docs/rules.md), the one source (ADR 0014 §9: included here by link, not
+copied). Read them before any change; their reasons are in [docs/lessons.md](docs/lessons.md).
 
-## Where logic lives
-- Tokens in `ui/projects/paddock-ui/scss/_tokens.scss` are the single source of truth; the design guide documents them and the
-  token test measures them. Angular components present; domain rules belong to each app's Rust engine.
+## Layout
 
-## Robustness
-- Every state is designed (skeleton, empty, error with Retry). Reduced motion is respected. Anchor every ignore rule
-  (`/ui/dist/`, not `dist/`).
+```
+crates/          shared Rust crates, one Cargo workspace (crates/Cargo.toml)
+ui/              @decryp7/paddock-ui, @decryp7/paddock-e2e, the gallery and the demo UIs (one Angular workspace)
+apps/<app>/      one app each, its tree unchanged below its folder, its own Cargo workspace and Cargo.lock, and
+                 paddock.ci.json (its CI leg); apps/shell-demo and apps/workbench-demo are the demos
+conformance/ eslint/ tsconfig/ lint/ icons/ templates/    shared checks, presets, the icon pipeline, new-app templates
+docs/            family docs: rules, lessons, ADRs, plans, research; an app's docs stay in apps/<app>/docs
+scripts/         family scripts: affected.mjs (CI's plan), publish.mjs, new-app.mjs, demo-release.mjs
+.gitea/          ci.yml (plan and affected jobs), nightly.yml, <app>-release.yml, the shared actions
+package.json     the one npm workspace and package-lock.json (ui, eslint, icons, the demos, apps/*/app)
+```
 
-## Working in parallel
-- Each task owns an explicit set of files. Shared integration points (`public-api.ts`, `_tokens.scss`, `crates/Cargo.toml`)
-  are changed by one agent at a time or by adding a single line. Don't edit the apps from here.
+## Working in the monorepo
 
-## Contracts
+- **Worktrees (rule 2).** Every agent works in its own worktree of `paddock`; for app work a sparse one:
+  `git sparse-checkout set --cone crates ui scripts docs apps/<app>`. Never work in the main checkout; never `git stash`.
+- **Build folders.** One `CARGO_TARGET_DIR` per app per worktree, kept between tasks for the same app (reusing it is
+  what makes rebuilds fast; sccache gives almost nothing across worktrees, ADR 0014 §1).
+- **Cargo.** There is no root Cargo workspace: `crates/` and each app are their own workspaces, so each app builds with
+  its own features and lockfile. Shared crates are path dependencies (`../../../../crates/<crate>` from
+  `apps/<app>/app/src-tauri`). Run cargo inside the repo: it reads the root `.cargo/config.toml` (the `decryp7` registry,
+  the Windows linker) from the current folder upwards.
+- **npm.** One workspace and one `package-lock.json` at the root: `npm ci` there, never in a package folder; add a
+  dependency with `npm install <pkg> -w <workspace>`. Apps use `@decryp7/paddock-ui` from `ui/dist` (built with
+  `npm run build -w ui`). Name styles and assets in `angular.json` by package path, never `node_modules/...`.
+- **Affected tests (rule 3).** `node scripts/affected.mjs origin/main --explain` lists the projects a change reaches (the
+  Cargo and npm graphs, Tauri `frontendDist`, `tsconfig`/`angular.json`/ESLint config paths, declared doc inputs). Run
+  those, plus the touched specs. CI runs the same plan; nightly.yml runs everything.
+- **Ownership.** [CODEOWNERS](CODEOWNERS) (Go regular expressions, Gitea's syntax) says who owns which paths; a brief
+  names the paths its task owns. Shared integration points (`crates/*/src/lib.rs`, `crates/Cargo.toml`, `public-api.ts`,
+  `_tokens.scss`, the root `package.json`, `.gitea/`, `renovate.json`, `CODEOWNERS`) are changed by the integrating agent
+  only, or by adding a single declared line.
+- **Shared code (rules 39, 42, 43).** A shared change and its adoption by the apps land in one change; there is no
+  publish-and-consume step. A breaking change to a shared crate or package updates every app in the same change.
+- **A new app** gets `apps/<app>/paddock.ci.json` (its CI leg: Cargo workspace, prepare, checks, UI commands), a line in
+  CODEOWNERS and, for releases, `.gitea/workflows/<app>-release.yml`. `scripts/affected.test.mjs` checks the first two.
+
+## Shared code: `crates/` and `ui/`
+
+- Tokens in `ui/projects/paddock-ui/scss/_tokens.scss` are the single source of truth; components use `var(--pd-...)`
+  only. The design guide documents them and the token test measures them; read `docs/design-guide.md` before touching
+  either.
+- Statuses, accents and densities are string-literal unions; status is never colour alone. Components never throw on odd
+  input (empty series, NaN, null): they render a defined state. Every state is designed (skeleton, empty, error with
+  Retry). Reduced motion is respected.
+- Nothing remote: no web fonts, no CDN, no icon URLs. The CSP forbids `unsafe-eval` and inline style attributes: bind
+  styles with Angular style bindings only. Never bind untrusted text with `[innerHTML]`.
 - The public API is `ui/projects/paddock-ui/src/public-api.ts` and the CSS custom properties `--pd-*`, `data-theme`,
-  `data-accent`, `data-density`. Any change is a CHANGELOG entry; a breaking change bumps the minor version before 1.0.
-  No backward-compatibility shims before Paddock's v1.
+  `data-accent`, `data-density`. Any change is a CHANGELOG entry; no backward-compatibility shims before Paddock's v1.
+- Shared Rust crates have a pure core and a `tauri` feature for the adapter; typed errors, doc comments on public items,
+  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 99% lines (CI's llvm-cov gate), components 100%.
+- Anchor every ignore rule (`/ui/dist/`, not `dist/`); `node_modules/` is the one unanchored rule.
 
 ## Testing and quality gates
-- Every change ships with tests; every bug fix starts with a failing test. Components >= 100% lines.
-- A colour change must keep `npm run test:tokens` green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
-- Screenshots of every component in both themes and each accent are regenerated and looked at before a release.
-- Before committing:
+
+- Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
+  green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
+- Before committing, the gates of the affected projects, for example:
 
   ```sh
-  cd ui
-  npm run test:tokens && npm test && npm run build && npx playwright test
+  npm ci
+  node scripts/affected.mjs origin/main
+  (cd ui && npm run test:tokens && npm run lint && npm test && npm run build && npx playwright test --project=gallery)
+  (cd crates && cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings)
   ```
 
 ## Dependencies and releases
-- Prefer permissive, well-maintained dependencies; commit `package-lock.json`; CI uses `npm ci`.
-- Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`). No Co-Authored-By or AI attribution.
-- One semver tag per release (`v0.1.0`); CI publishes `@decryp7/paddock-ui` to the Gitea npm registry and creates the release (never publish from a workstation). ADRs in `docs/adr/`.
+
+- Prefer permissive, well-maintained dependencies; commit `package-lock.json` and each workspace's `Cargo.lock`; CI uses
+  `npm ci`. Renovate (the root `renovate.json`) groups Angular and Tauri across workspaces and keeps one lock PR per
+  lockfile.
+- Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`). No Co-Authored-By or AI
+  attribution.
+- Tags: `v*` for the shared packages (publish.yml), `<app>-vX.Y.Z` per app (its `<app>-release.yml`), never from a
+  workstation. ADRs: family ones in `docs/adr/`, an app's in `apps/<app>/docs/adr/` (numbered per app).
+
+<!-- The sections below are docs/blocks (the engineering rules common to every app), copied verbatim;
+     scripts/affected.test.mjs fails when they drift. Change them in docs/blocks first. -->
+
+## Design principles
+
+Apply these deliberately. They are not decoration:
+
+- **Single responsibility.** One reason to change per module, type and component. Split a file when it starts doing
+  several jobs; keep request/response DTOs apart from the logic that produces them.
+- **Open/closed.** Extend by adding, not editing: a new kind of thing is a new implementation of an existing trait or a
+  new configuration entry, not a special case in shared code.
+- **Liskov.** Every implementation of a trait or interface honours its documented contract: same error semantics, no
+  surprising panics.
+- **Interface segregation.** Keep traits and TypeScript interfaces small and purpose-built.
+- **Dependency inversion / code against abstractions.** Tauri commands depend on traits (ports), never on a concrete
+  store, pipe or OS API. Angular components never call Tauri `invoke` directly: they go through the backend injected by
+  DI token (the real Tauri backend, or the mock for browser development and tests), and state lives in SignalStores.
+- **Pure core, thin edges.** Parsing, rules, formatting, geometry and state machines are pure functions with time and
+  I/O passed in; processes, files, network and the OS stay thin.
+- **Ports and adapters.** The core never depends on an adapter (Tauri, a database, an OS API).
+- **Parse, don't validate.** Convert untrusted input (file bytes, IPC JSON, config files, network replies) into typed
+  values once, at the edge, and work with the types afterwards.
+- **Make illegal states unrepresentable.** Prefer enums and newtypes over strings, flags and `Option` combinations that
+  can disagree.
+- **Command-query separation.** Queries have no side effects; only explicit commands mutate.
+- Also: separation of concerns, high cohesion and low coupling, KISS, YAGNI, DRY with the rule of three before
+  abstracting, composition over inheritance, Law of Demeter, least astonishment (sensible defaults, per-item overrides),
+  fail fast with a message that tells the user what to fix, and leave touched code better than you found it.
+
+## Where logic lives
+
+- **The Rust core is the single source of truth** for data and behaviour: parsing, rules, state machines, configuration,
+  analysis and exports. Results are computed in Rust and returned through ports and Tauri commands.
+- **Angular is the presentation layer**: layout, interaction state (selection, zoom, open panels, unsaved form edits),
+  rendering and formatting of what the engine returns. It must not re-implement domain rules. If the UI needs a
+  computation (a preview, a validation, a count), add an engine operation and a command for it instead of writing it in
+  TypeScript. Small purely visual transforms are fine.
+- **The mock backend** exists for browser development and UI tests only. It mimics the contract with plausible data; it
+  is never the reference for behaviour, and a feature is not "done" until it works against the real engine.
+- Validation that matters is done in Rust; the UI may validate early for convenience, but the engine re-validates.
+
+## Working in parallel (agents)
+
+- Each task owns an explicit set of files; don't edit outside it. Shared integration points (`lib.rs` files, the
+  workspace `Cargo.toml`, the wire types and DTOs) are changed by the integrating agent only, or by adding a single
+  declared line.
+- Don't run `cargo fmt --all` / `cargo clippy --fix` across the workspace while others are editing; format your own
+  files (`rustfmt <files>`). Use a private `CARGO_TARGET_DIR`.
+- Commit only complete, owned work. Never commit a workspace `Cargo.toml` listing crates whose sources aren't
+  committed. After committing, verify the committed tree in isolation (`git archive HEAD`, then build and test) before
+  pushing larger changes.
+- Windows-only and macOS-only code is checked and tested on its own CI runner; code that needs no platform SDK must at
+  least type-check for the other targets (`cargo check --target x86_64-pc-windows-msvc`).
 
 ## Style
-- Match surrounding code. Comments only where intent isn't obvious; doc comments on exported items. Sentence-case copy,
-  verb + object on buttons. Never run `prettier --write`.
+
+- Match the surrounding code: naming, comment density (doc comments on public items, comments only where intent isn't
+  obvious), idioms. Rust uses `rustfmt.toml` (max_width 140). Never run `prettier --write` on TypeScript.
+- UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light), accessible markup
+  (real buttons, labels, aria-labels on icon buttons), sentence-case copy, verb plus object on buttons.
+- UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, dialogs, listbox, scrolling)
+  instead of hand-rolling them, and **Angular Material** selectively for complex inputs, themed through the `--pd-*`
+  tokens. Icons are inline SVG registered with `MatIconRegistry`; no icon fonts and no icon URLs fetched at run time (the
+  CSP forbids it).
+- Status colours always come with words; validate colours for contrast and colour-vision deficiency.
 
 ## Working practices
-- Read `docs/design-guide.md` before touching tokens or components. Use Serena symbol tools when available.
+
+- Research official sources before choosing libraries or relying on another program's behaviour, and record what you
+  found and when in the ADR or doc comment. Prefer well-maintained, permissively licensed dependencies.
+- Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of
+  reading whole files; it saves context and cost.
+- Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper models.
+  Keep architecture and review on the main model.
+- Share first (rule 42): check Paddock's crates and packages before writing anything an app copy would duplicate.

@@ -108,3 +108,19 @@ changes here, every app's copy is updated in the same change.
     (`paddock-e2e`, `paddock-testkit`, conformance), its own domain logic, and one real-app smoke per release. When an app
     adopts a shared package it deletes its own copy and the tests that duplicated it, and records test count and time
     before and after.
+
+## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
+Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
+- **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
+  `git sparse-checkout set --cone crates ui scripts docs apps/<app>`), with its own `CARGO_TARGET_DIR` per app and its own
+  e2e port; the main checkout stays on `main` for the coordinator.
+- **Rule 3:** the affected tests are what `scripts/affected.mjs` selects, plus the touched specs; otherwise unchanged
+  (Playwright in Chromium only in a branch; the full suite, Chromium and WebKit, once on the combined result before a
+  local build or release, plus CI).
+- **Rule 8:** rules live once, in this file and the root `AGENTS.md`; no per-app copies. Every lesson still goes into
+  [lessons.md](lessons.md); no `Co-Authored-By` or AI attribution anywhere.
+- **Rule 9:** releases only from a `<app>-vX.Y.Z` tag in CI, never from a local machine; a local build for the user to
+  try is fine but is never published. Never tag a `[skip ci]` commit.
+- **Rules 39 and 42:** shared code is moved to `crates/` or `ui/` and adopted by the app **in the same change**; there is
+  no publish-and-consume step. "Consume the published version" becomes "use the in-tree version".
+- Rule 1 is unchanged: one app at a time is about attention and load, not repos.

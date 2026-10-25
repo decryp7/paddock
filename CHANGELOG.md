@@ -4,6 +4,21 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Monorepo frame (ADR 0014 §11 steps 1 and 2)
+- One npm workspace at the root (`package.json`, one `package-lock.json` for `ui`, `eslint`, `icons`, the two demos and
+  `apps/*/app`); the five package locks are gone, with every resolved version of `ui/`'s lock kept. `npm ci` runs at the
+  root; `ui/angular.json` names dockview's styles by package path; the icon pipeline resolves the Tauri CLI.
+- The `decryp7` registry is defined once, in the root `.cargo/config.toml` (crates/ and the demos had their own copies).
+- `scripts/affected.mjs` (with tests): the projects a change reaches, from the Cargo and npm graphs, Tauri `frontendDist`,
+  config paths and declared doc inputs, with the rust/ui halves and a nextest filter per app. `ci.yml` starts with a plan
+  job and runs only the affected jobs, plus one matrix leg per app (`apps/<app>/paddock.ci.json`, the new `app-gates`
+  action; the shell and workbench demo jobs are its first legs). `nightly.yml` runs everything with WebKit every night.
+- Root `renovate.json`, `CODEOWNERS` (Gitea's Go regular expressions) and a root `AGENTS.md` for the monorepo; the rule
+  changes of ADR 0014 §10 in `docs/rules.md`, effective per app from its import. Branch inventory:
+  `docs/plans/monorepo-handoff.md`; `pre-monorepo` tags the 0.3.0 head.
+- `scripts/publish.mjs` links every package it publishes to the `paddock` repository in Gitea (a failed link is a
+  warning; the dry run prints "would link").
+
 ## 0.3.0 - 2026-10-25 (the plugin platform and workbench release)
 
 The family release. Highlights: the survey work packages X21 to X54 (shared crates and packages the apps copied until now), the workbench
