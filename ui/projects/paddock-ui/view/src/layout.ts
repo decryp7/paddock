@@ -1,4 +1,5 @@
 import type { ActionRef, Tone } from '../generated/view';
+import { flattenPath, inflate, pathCrosses, roundedPath, type Pt, type Rect } from './route';
 
 /** A box of a drawn graph or diagram. */
 export interface SceneNode {
@@ -92,7 +93,8 @@ function sized(n: LayoutNode): Pick<SceneNode, 'w' | 'h' | 'detail'> {
   // A box with a status carries its mark (a glyph) before the label, so it is wider by the mark.
   const mark = n.tone && n.tone !== 'neutral' ? MARK_W : 0;
   const w = Math.min(MAX_W, Math.max(MIN_W, Math.ceil(longest * CHAR_W + 28 + mark)));
-  const h = 36 + (n.caption ? 12 : 0) + detail.length * LINE_H + (detail.length ? 6 : 0);
+  // A class: the name above a rule, then the members with the same room (8 units) above the first and under the last.
+  const h = n.compartment && detail.length ? (n.caption ? 38 : 30) + 12 + detail.length * LINE_H : 36 + (n.caption ? 12 : 0) + detail.length * LINE_H + (detail.length ? 6 : 0);
   return { w, h, detail };
 }
 
@@ -173,6 +175,38 @@ function boxEdge(n: { x: number; y: number; w: number; h: number }, tx: number, 
 }
 
 const r1 = (n: number): number => Math.round(n * 10) / 10;
+
+type Box = Rect;
+
+/**
+ * A route from one box to another along an arc outside every box of a radial drawing (centred on the middle of the boxes), going the
+ * short way round first and the long way second; the short way when neither is clear. Steps of 30 degrees with rounded corners read as an arc.
+ */
+function arcAround(boxes: readonly Box[], s: Box, t: Box, blockers: readonly Box[], lane: number): { path: string; mid: Pt; dir: Pt } {
+  const minX = Math.min(...boxes.map((b) => b.x));
+  const maxX = Math.max(...boxes.map((b) => b.x + b.w));
+  const minY = Math.min(...boxes.map((b) => b.y));
+  const maxY = Math.max(...boxes.map((b) => b.y + b.h));
+  const c: Pt = [(minX + maxX) / 2, (minY + maxY) / 2];
+  const rOut = Math.hypot((maxX - minX) / 2, (maxY - minY) / 2) + 18 + (lane % 3) * 10;
+  const angle = (b: Box): number => Math.atan2(b.y + b.h / 2 - c[1], b.x + b.w / 2 - c[0]);
+  const [as, at] = [angle(s), angle(t)];
+  const short = Math.atan2(Math.sin(at - as), Math.cos(at - as));
+  const long = short > 0 ? short - 2 * Math.PI : short + 2 * Math.PI;
+  let shortWay: { path: string; mid: Pt; dir: Pt } | null = null;
+  for (const sweep of [short, long]) {
+    const steps = Math.max(2, Math.ceil(Math.abs(sweep) / (Math.PI / 6)));
+    const via: Pt[] = Array.from({ length: steps + 1 }, (_, i) => [c[0] + rOut * Math.cos(as + (sweep * i) / steps), c[1] + rOut * Math.sin(as + (sweep * i) / steps)]);
+    const [x1, y1] = boxEdge(s, via[0]![0], via[0]![1]);
+    const [x2, y2] = boxEdge(t, via[steps]![0], via[steps]![1]);
+    const path = roundedPath([[x1, y1], ...via, [x2, y2]], 24);
+    const m = via[Math.floor(steps / 2)] as Pt;
+    const route = { path, mid: m, dir: [Math.cos(as + sweep / 2 + Math.PI / 2) * Math.sign(sweep), Math.sin(as + sweep / 2 + Math.PI / 2) * Math.sign(sweep)] as Pt };
+    shortWay ??= route;
+    if (!pathCrosses(path, blockers)) return route;
+  }
+  return shortWay as { path: string; mid: Pt; dir: Pt };
+}
 
 /** The hub of a radial graph: the node with the most connections (either direction), the first one in the input on a tie. */
 export function hubOf(count: number, pairs: readonly (readonly [number, number])[]): number {
@@ -279,6 +313,15 @@ function radialPlace(
  * `force` layout of the wire type is drawn as `layered`, because a force simulation is not reproducible.
  */
 export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[], radial = false): Scene {
+  const first = layoutGraphAt(nodes, edges, radial, 0);
+  if (!radial) return first;
+  // A line that had to bow around a box can swing past the left or top of the canvas: draw again with room for it.
+  let low = 0;
+  for (const edge of first.edges) for (const p of flattenPath(edge.path)) low = Math.min(low, p[0] - 4, p[1] - 4);
+  return low < 0 ? layoutGraphAt(nodes, edges, radial, Math.ceil(-low)) : first;
+}
+
+function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[], radial: boolean, extra: number): Scene {
   const index = new Map(nodes.map((n, i) => [n.id, i]));
   const pairs: [number, number][] = [];
   for (const e of edges) {
@@ -299,11 +342,11 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
     const placed = radialPlace(boxes, pairs);
     boxes.forEach((box, i) => {
       const p = placed.at[i];
-      box.x = r1((p?.x ?? 0) - box.w / 2 + placed.shiftX);
-      box.y = r1((p?.y ?? 0) - box.h / 2 + placed.shiftY);
+      box.x = r1((p?.x ?? 0) - box.w / 2 + placed.shiftX + extra);
+      box.y = r1((p?.y ?? 0) - box.h / 2 + placed.shiftY + extra);
     });
-    width = placed.width;
-    height = placed.height;
+    width = placed.width + extra;
+    height = placed.height + extra;
   } else {
     const widths = rows.map((row) => row.reduce((sum, n) => sum + (boxes[n]?.w ?? 0), 0) + Math.max(0, row.length - 1) * NODE_GAP);
     width = Math.max(MIN_W, ...widths) + PAD * 2;
@@ -322,12 +365,15 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
     });
     height = Math.max(y - LAYER_GAP + PAD, PAD * 2 + 36);
   }
+  const rowTop = rows.map((row) => Math.min(...row.map((n) => boxes[n]?.y ?? 0)));
+  const rowBottom = rows.map((row) => Math.max(...row.map((n) => (boxes[n]?.y ?? 0) + (boxes[n]?.h ?? 0))));
   const sceneNodes: SceneNode[] = nodes.map((n, i) => {
     const b = boxes[i] as { x: number; y: number; w: number; h: number };
     return { id: n.id, label: n.label, detail: dims[i]?.detail ?? [], caption: n.caption ?? '', tone: n.tone ?? 'neutral', action: n.action ?? null, compartment: n.compartment === true && (dims[i]?.detail.length ?? 0) > 0, ...b };
   });
   let backs = 0;
   let reach = 0;
+  let reachY = 0;
   const sceneEdges: SceneEdge[] = edges.flatMap((e) => {
     const a = index.get(e.from);
     const b = index.get(e.to);
@@ -341,35 +387,73 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
       reach = Math.max(reach, x + 44 + e.label.length * CHAR_W);
       return [edge(`M ${r1(x)} ${r1(y - 8)} C ${r1(x + 36)} ${r1(y - 24)}, ${r1(x + 36)} ${r1(y + 24)}, ${r1(x)} ${r1(y + 8)}`, x + 44, y + 4, 'start')];
     }
+    const blockers = boxes.filter((b) => b !== s && b !== t).map((b) => inflate(b, 3));
     if (radial) {
-      const [x1, y1] = boxEdge(s, t.x + t.w / 2, t.y + t.h / 2);
-      const [x2, y2] = boxEdge(t, s.x + s.w / 2, s.y + s.h / 2);
+      const sc: Pt = [s.x + s.w / 2, s.y + s.h / 2];
+      const tc: Pt = [t.x + t.w / 2, t.y + t.h / 2];
+      const [px, py] = [tc[0] - sc[0], tc[1] - sc[1]];
+      const plen = Math.hypot(px, py) || 1;
+      // A straight line unless it would cross another box: then the line bows to one side, then the other, a little more each time.
+      const bows = [0, 0.25, -0.25, 0.5, -0.5, 0.8, -0.8, 1.2, -1.2, 1.7, -1.7, 2.4, -2.4];
+      let chosen: { path: string; mid: Pt; dir: Pt } | null = null;
+      for (const bow of bows) {
+        const ctl: Pt = [(sc[0] + tc[0]) / 2 + -py * bow, (sc[1] + tc[1]) / 2 + px * bow];
+        const [x1, y1] = boxEdge(s, ctl[0], ctl[1]);
+        const [x2, y2] = boxEdge(t, ctl[0], ctl[1]);
+        const path = bow === 0 ? `M ${r1(x1)} ${r1(y1)} L ${r1(x2)} ${r1(y2)}` : `M ${r1(x1)} ${r1(y1)} Q ${r1(ctl[0])} ${r1(ctl[1])} ${r1(x2)} ${r1(y2)}`;
+        const mid: Pt = bow === 0 ? [(x1 + x2) / 2, (y1 + y2) / 2] : [(x1 + 2 * ctl[0] + x2) / 4, (y1 + 2 * ctl[1] + y2) / 4];
+        chosen = { path, mid, dir: [x2 - x1, y2 - y1] };
+        if (!pathCrosses(path, blockers)) break;
+        chosen = null;
+      }
+      // No bow clears the boxes (a ring packed tight around the hub): go round the outside of everything, the short way, then the long way.
+      if (!chosen) {
+        chosen = arcAround(boxes, s, t, blockers, backs++);
+      }
+      const c = chosen as { path: string; mid: Pt; dir: Pt };
       // The label sits beside the line, not on it: 10 units to the side that points up.
-      const [dx, dy] = [x2 - x1, y2 - y1];
-      const len = Math.hypot(dx, dy) || 1;
-      const side = dx >= 0 ? -1 : 1;
-      return [edge(`M ${r1(x1)} ${r1(y1)} L ${r1(x2)} ${r1(y2)}`, (x1 + x2) / 2 + (side * -dy * 10) / len, (y1 + y2) / 2 + (side * dx * 10) / len, 'middle')];
+      const len = Math.hypot(c.dir[0], c.dir[1]) || 1;
+      const side = c.dir[0] >= 0 ? -1 : 1;
+      return [edge(c.path, c.mid[0] + (side * -c.dir[1] * 10) / len, c.mid[1] + (side * c.dir[0] * 10) / len, 'middle')];
     }
     const down = (layer[b] ?? 0) > (layer[a] ?? 0);
-    if (!down) {
-      // An edge that goes back up (or sideways) runs outside the boxes, on the right, as a curve like the others.
-      const bx = Math.max(...boxes.map((x) => x.x + x.w)) + 24 + (backs++ % 4) * 10;
-      const ys = s.y + s.h / 2;
-      const yt = t.y + t.h / 2;
-      reach = Math.max(reach, bx + 8 + e.label.length * CHAR_W);
-      const xs = s.x + s.w;
-      const xt = t.x + t.w;
-      return [edge(`M ${r1(xs)} ${r1(ys)} C ${r1(bx + 12)} ${r1(ys)}, ${r1(bx + 12)} ${r1(yt)}, ${r1(xt)} ${r1(yt)}`, (xs + xt) / 8 + (3 * (bx + 12)) / 4 + 6, (ys + yt) / 2, 'start')];
-    }
     const x1 = s.x + s.w / 2;
     const y1 = s.y + s.h;
     const x2 = t.x + t.w / 2;
     const y2 = t.y;
     const ym = (y1 + y2) / 2;
-    // Beside the middle of the curve, not on it.
-    return [edge(`M ${r1(x1)} ${r1(y1)} C ${r1(x1)} ${r1(ym)}, ${r1(x2)} ${r1(ym)}, ${r1(x2)} ${r1(y2)}`, (x1 + x2) / 2 + 8, ym, 'start')];
+    const direct = `M ${r1(x1)} ${r1(y1)} C ${r1(x1)} ${r1(ym)}, ${r1(x2)} ${r1(ym)}, ${r1(x2)} ${r1(y2)}`;
+    if (down && !pathCrosses(direct, blockers)) {
+      // Beside the middle of the curve, not on it.
+      return [edge(direct, (x1 + x2) / 2 + 8, ym, 'start')];
+    }
+    // An edge that goes back up (or sideways), or one that would cross a box on the way down, runs outside every box in a lane on the
+    // right and through the free space between the rows, so it never crosses a box.
+    const k = backs++;
+    const bx = Math.max(...boxes.map((x) => x.x + x.w)) + 24 + (k % 4) * 10;
+    const below = (rowBottom[layer[a] ?? 0] ?? s.y + s.h) + 12 + (k % 3) * 4;
+    const above = (rowTop[layer[b] ?? 0] ?? t.y) - 8 - (k % 3) * 3;
+    const exits: Pt[][] = [[[s.x + s.w, s.y + s.h / 2], [bx, s.y + s.h / 2]], [[x1, s.y + s.h], [x1, below], [bx, below]]];
+    const enters: Pt[][] = [[[bx, t.y + t.h / 2], [t.x + t.w, t.y + t.h / 2]], [[bx, above], [x2, above], [x2, t.y]]];
+    const tries: [number, number][] = down ? [[1, 1]] : [[0, 0], [1, 0], [0, 1], [1, 1]];
+    let route: Pt[] = [];
+    for (const [ex, en] of tries) {
+      route = [...(exits[ex] as Pt[]), ...(enters[en] as Pt[])];
+      if (!pathCrosses(roundedPath(route), blockers)) break;
+    }
+    const outer = route.filter((p) => p[0] === bx);
+    reach = Math.max(reach, bx + 8 + e.label.length * CHAR_W);
+    reachY = Math.max(reachY, below + PAD / 2);
+    return [edge(roundedPath(route), bx + 8, ((outer[0] as Pt)[1] + (outer[outer.length - 1] as Pt)[1]) / 2, 'start')];
   });
-  return { kind: radial ? 'radial' : 'layered', width: r1(Math.max(width, reach + PAD + 24)), height: r1(height), nodes: sceneNodes, edges: sceneEdges, lifelines: [] };
+  // A line that bows around a box may swing past the right or bottom of the boxes: the canvas holds it.
+  for (const edge of sceneEdges) {
+    for (const p of flattenPath(edge.path)) {
+      reach = Math.max(reach, p[0] + 4 - PAD - 24);
+      reachY = Math.max(reachY, p[1] + 4);
+    }
+  }
+  return { kind: radial ? 'radial' : 'layered', width: r1(Math.max(width, reach + PAD + 24)), height: r1(Math.max(height, reachY)), nodes: sceneNodes, edges: sceneEdges, lifelines: [] };
 }
 
 /**

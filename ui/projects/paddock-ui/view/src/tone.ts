@@ -12,6 +12,11 @@ export const TONE_CSS = `
   .pd-view-tone-neutral { --pd-view-tone: var(--pd-text-muted); --pd-view-tint: var(--pd-neutral-tint); }
 `;
 
+/** The fill of a hovered row: a visible step over any surface (the family `--pd-hover` is only 5%, too faint on these small rows). */
+export const VIEW_HOVER = 'color-mix(in srgb, var(--pd-text) 9%, transparent)';
+/** The same step as an opaque fill for a drawn box (an SVG rect must hide the line behind it). */
+export const VIEW_HOVER_FILL = 'color-mix(in srgb, var(--pd-surface-2) 86%, var(--pd-text))';
+
 /** The class of a tone, for `[class]`. */
 export const toneClass = (tone: unknown): string => `pd-view-tone-${toneOf(tone)}`;
 

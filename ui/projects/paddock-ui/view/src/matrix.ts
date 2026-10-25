@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import type { Matrix, MatrixCell } from '../generated/view';
 import { toneOf } from './model';
 import { ViewRuntime } from './runtime';
-import { PdViewScroll } from './scroll';
+import { PdViewScroll, SCROLL_CSS } from './scroll';
 import { PdViewTone, TONE_CSS, toneClass } from './tone';
 
 /** The cell at (row, col), by place: a lookup of a sparse list. */
@@ -58,11 +58,11 @@ export function matrixIndex(m: Matrix): ReadonlyMap<string, MatrixCell> {
     :host { display: block; min-width: 0; }
     .pd-view-matrix__frame { display: block; width: max-content; max-width: 100%; }
     .pd-view-matrix__scroll { overflow: auto; max-width: 100%; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
-    .pd-view-matrix__scroll:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    ${SCROLL_CSS}
     .pd-view-matrix__table { border-collapse: collapse; font-size: var(--pd-text-body); }
     th, td { padding: var(--pd-space-1) var(--pd-space-3); border: 1px solid var(--pd-hairline); text-align: center; min-width: 64px; min-height: var(--pd-row-height); }
-    thead th { background: var(--pd-surface-2); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
-    tbody th { text-align: start; background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); position: sticky; inset-inline-start: 0; max-width: 240px; overflow-wrap: break-word; }
+    thead th { min-width: 6rem; background: var(--pd-surface-2); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
+    tbody th { text-align: start; background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); position: sticky; inset-inline-start: 0; min-width: min(8rem, 40vw); max-width: 240px; overflow-wrap: break-word; }
     .pd-view-matrix__corner { background: var(--pd-surface-2); }
     td[class*='pd-view-tone-'] { background: var(--pd-view-tint); color: var(--pd-text); }
     td.pd-view-tone-neutral { background: transparent; }
