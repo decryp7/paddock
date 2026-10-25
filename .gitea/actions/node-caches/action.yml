@@ -1,0 +1,39 @@
+name: node-caches
+description: "Keeps npm's download cache and the Angular build cache between runs: on a host runner under ~/.paddock-ci, in a Linux container on the runner's /sccache mount (its npm/ and angular/ subfolders); a container without the mount keeps both in the job (a notice says so)."
+inputs:
+  angular-dir:
+    description: "The Angular workspace whose .angular/cache is kept (relative to the checkout); empty keeps only the npm cache."
+    default: ui
+  name:
+    description: "The Angular cache's folder: one per job (and per matrix shard), because two builds must not write one cache at once."
+    default: ${{ github.job }}
+runs:
+  using: composite
+  steps:
+    - name: npm and Angular caches
+      shell: bash
+      env:
+        ANGULAR_DIR: ${{ inputs.angular-dir }}
+        NAME: ${{ inputs.name }}
+      run: |
+        set -euo pipefail
+        if [ "$RUNNER_OS" = Linux ]; then
+          mount="${PADDOCK_CI_MOUNT:-/sccache}"
+          if [ -d "$mount" ] && [ -w "$mount" ]; then base="$mount"
+          else echo "::notice::no /sccache mount in this container; the npm and Angular caches live and die with the job."; exit 0; fi
+        else
+          base="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}"
+        fi
+        npm_cache="$base/npm"
+        mkdir -p "$npm_cache"
+        if [ "$RUNNER_OS" = Windows ]; then echo "npm_config_cache=$(cygpath -w "$npm_cache")" >> "$GITHUB_ENV"; else echo "npm_config_cache=$npm_cache" >> "$GITHUB_ENV"; fi
+        echo "node-caches: npm $npm_cache"
+        [ -n "$ANGULAR_DIR" ] || exit 0
+        folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
+        ng_cache="$base/angular/$folder"
+        mkdir -p "$ng_cache" "$GITHUB_WORKSPACE/$ANGULAR_DIR/.angular"
+        # angular.json turns the cache on in CI too (cli.cache.environment "all"); its folder is a link to the kept one.
+        link="$GITHUB_WORKSPACE/$ANGULAR_DIR/.angular/cache"
+        rm -rf "$link"
+        if [ "$RUNNER_OS" = Windows ]; then cmd //c mklink //J "$(cygpath -w "$link")" "$(cygpath -w "$ng_cache")" >/dev/null; else ln -s "$ng_cache" "$link"; fi
+        echo "node-caches: Angular $link -> $ng_cache"
