@@ -42,7 +42,6 @@ import { LANGUAGE_CONFIG, languageOptions, LanguageStore, type LanguageChoice } 
     .pd-option { display: flex; align-items: center; gap: var(--pd-space-2); min-height: var(--pd-hit-min); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); cursor: pointer; }
     .pd-option:hover { background: var(--pd-hover); }
     .pd-option.pd-on { background: var(--pd-accent-tint); font-weight: var(--pd-weight-semibold); }
-    .pd-option input { accent-color: var(--pd-accent-fill); }
     .pd-option:focus-within { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-restart { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); }
     .pd-restart span { flex: 1 1 14rem; min-width: 0; }
