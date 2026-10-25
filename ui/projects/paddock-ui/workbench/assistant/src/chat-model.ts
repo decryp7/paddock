@@ -106,7 +106,14 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
       return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input, destructive: e.destructive }));
     case 'toolFinished': {
       const cites = citationsOf(e.data);
-      const next = setCard(t, e.callId, (c) => ({ ...c, state: e.ok ? 'ok' : 'failed', result: e.summary, data: e.data }));
+      const next = setCard(t, e.callId, (c) => ({
+        ...c,
+        state: e.ok ? 'ok' : 'failed',
+        result: e.summary,
+        data: e.data,
+        ...(e.outcome === 'declined' ? { declined: true } : {}),
+        ...(e.outcome === 'stopped' ? { stopped: true } : {}),
+      }));
       return cites.length ? { ...next, citations: [...next.citations, ...cites.filter((c) => !next.citations.some((k) => k.text === c.text && k.target === c.target))] } : next;
     }
     case 'notice':
@@ -122,14 +129,23 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
   }
 }
 
-/** The turns of a stored conversation. */
+/** Adds citations a turn does not show yet (the same phrase and target is shown once). */
+function withCitations(t: TurnView, cites: readonly AssistantCitation[]): TurnView {
+  const fresh = cites.filter((c, i) => !t.citations.some((k) => k.text === c.text && k.target === c.target) && cites.findIndex((k) => k.text === c.text && k.target === c.target) === i);
+  return fresh.length ? { ...t, citations: [...t.citations, ...fresh] } : t;
+}
+
+/** The turns of a stored conversation: the same views the running turns had (tool cards, citations, how each ended). */
 export function turnsOf(c: Conversation): TurnView[] {
   const turns: TurnView[] = [];
   const open = (): TurnView | undefined => turns.at(-1);
   const put = (t: TurnView): void => void (turns[turns.length - 1] = t);
+  /** The input of each call, for the details of a write. */
+  const inputs = new Map<string, unknown>();
   for (const m of c.messages) {
     if (m.role === 'user') {
       turns.push({ ...startTurn(m.text, m.context ?? []), running: false });
+      inputs.clear();
       continue;
     }
     const t = open();
@@ -138,19 +154,33 @@ export function turnsOf(c: Conversation): TurnView[] {
       const parts: TurnPart[] = [...t.parts];
       if (m.text) parts.push({ kind: 'text', text: m.text });
       for (const call of m.toolCalls ?? []) {
+        inputs.set(call.id, call.input);
         parts.push({ kind: 'tool', card: { callId: call.id, name: call.name, summary: '', write: false, destructive: false, state: 'failed', result: null, data: undefined } });
       }
-      put({ ...t, parts, end: m.end ?? t.end });
+      put({
+        ...t,
+        parts,
+        end: m.end ?? t.end,
+        message: m.endMessage ?? t.message,
+        error: m.error ? { message: m.error.message, needsAi: m.error.needsAi ?? null } : t.error,
+      });
     } else {
-      const done = setCard(t, m.toolCallId ?? '', (card) => ({ ...card, summary: card.summary || (m.summary ?? ''), state: m.ok === false ? 'failed' : 'ok', result: m.summary ?? null, data: m.data }));
-      const cites = citationsOf(m.data);
-      put(cites.length ? { ...done, citations: [...done.citations, ...cites] } : done);
+      const write = m.write === true;
+      const done = setCard(t, m.toolCallId ?? '', (card) => ({
+        ...card,
+        summary: m.callSummary ?? m.summary ?? '',
+        write,
+        destructive: m.destructive === true,
+        state: m.ok === false ? 'failed' : 'ok',
+        result: m.summary ?? null,
+        data: m.data,
+        ...(write ? { input: inputs.get(card.callId) } : {}),
+        ...(m.outcome === 'declined' ? { declined: true } : {}),
+        ...(m.outcome === 'stopped' ? { stopped: true } : {}),
+      }));
+      put(withCitations(done, citationsOf(m.data)));
     }
   }
-  // A call that never got a result in a turn the user stopped was stopped, not failed.
-  return turns.map((t) =>
-    t.end === 'cancelled'
-      ? { ...t, parts: t.parts.map((p) => (p.kind === 'tool' && p.card.state === 'failed' && p.card.result === null ? { kind: 'tool' as const, card: { ...p.card, stopped: true } } : p)) }
-      : t,
-  );
+  // A call that never got a result was never started (the turn ended first): the live view had no card for it either.
+  return turns.map((t) => ({ ...t, parts: t.parts.filter((p) => p.kind !== 'tool' || p.card.state !== 'failed' || p.card.result !== null) }));
 }

@@ -133,12 +133,17 @@ test.describe('dock (plan W2a, W2b)', () => {
     await wb.palette.run('Show jobs');
     await expect(page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"], [data-testid="pd-dock-tab"][data-panel-id="pd.jobs"]').first()).toBeVisible();
     // Review 3 P3-3: with the Assistant column open, the bottom slide-out stays over its own column, clear of the composer.
+    // The column opens first: a click outside an open slide-out hides it, as it should (review 4 follow-up: the test clicked
+    // the activity bar while the slide-out was open and raced its hiding).
+    await page.keyboard.press('Escape');
     await wb.activity.item('pd.wb.assistant.activity').click();
-    const flyout = page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"]');
-    if (!(await flyout.isVisible())) await page.locator('[data-testid="pd-dock-ah-bar-bottom"] [data-ah-id="pd.jobs"]').click();
-    await expect(flyout).toBeVisible();
     const composer = page.getByTestId('assistant-input');
     await expect(composer).toBeVisible();
+    await wb.palette.open();
+    await wb.palette.search('>show jobs');
+    await wb.palette.run('Show jobs');
+    const flyout = page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"]');
+    await expect(flyout).toBeVisible();
     await expect.poll(async () => {
       const [f, c] = await Promise.all([flyout.boundingBox(), composer.boundingBox()]);
       return !!f && !!c && f.x + f.width <= c.x + 1;

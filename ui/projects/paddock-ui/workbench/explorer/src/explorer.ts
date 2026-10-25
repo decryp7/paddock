@@ -47,6 +47,7 @@ const INDENT = 12;
               }
             </div>
           } @else {
+            <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the tree only receives keydown bubbling from its rows, which are the focus stops (roving tabindex) -->
             <div
               role="tree"
               class="pd-ex-tree"
@@ -59,6 +60,7 @@ const INDENT = 12;
               @for (row of rowsOf(section.id); track row.key) {
                 @switch (row.kind) {
                   @case ('node') {
+                    <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -- rows are activated from the keyboard by the tree keydown handler (Enter, arrows) -->
                     <div
                       role="treeitem"
                       class="pd-ex-row"
@@ -208,6 +210,7 @@ export class PdExplorer {
     const seen = new Map<string, unknown>();
     // Reloading a section is a side effect (a provider call, usually IPC) of a tracked `changes` value; the first value
     // of each section is only remembered (its roots are loading already).
+    // effect-state: writes only the plain `seen` map and calls the store untracked; the reload is the side effect.
     effect(() => {
       const ctx = host.context();
       for (const section of this.store.sections()) {
@@ -221,6 +224,7 @@ export class PdExplorer {
     });
     // Following the active item (review P3-14): expanding and selecting is a side effect (provider loads) of the path.
     const revealed = new Map<string, string>();
+    // effect-state: writes only the plain `revealed` map and calls the store untracked; the reveal is the side effect.
     effect(() => {
       const ctx = host.context();
       for (const section of this.store.sections()) {

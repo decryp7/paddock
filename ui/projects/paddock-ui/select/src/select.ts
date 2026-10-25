@@ -1,6 +1,6 @@
 import { CdkConnectedOverlay, CdkOverlayOrigin, type ConnectedPosition } from '@angular/cdk/overlay';
 import { CdkListbox, CdkOption, type ListboxValueChangeEvent } from '@angular/cdk/listbox';
-import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injector, input, output, signal, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injector, input, model, signal, viewChild } from '@angular/core';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 /** One choice of a `pd-select`. */
@@ -65,6 +65,7 @@ const POSITIONS: ConnectedPosition[] = [
       (overlayOutsideClick)="closed()"
       (attach)="focusList()"
     >
+      <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the cdkListbox directive makes the list focusable (roving tabindex) -->
       <ul #list cdkListbox class="pd-list" [id]="id + '-list'" [attr.aria-label]="ariaLabel() || null" [cdkListboxValue]="chosen() ? [value()] : []" (cdkListboxValueChange)="pick($event)" (keydown.escape)="escape($event)">
         @for (o of options(); track o.value) {
           <li cdkOption class="pd-option" [cdkOption]="o.value" [cdkOptionDisabled]="o.disabled === true" [cdkOptionTypeaheadLabel]="o.label">
@@ -100,7 +101,7 @@ export class PdSelect {
   /** The choices, in order. */
   readonly options = input.required<readonly PdSelectOption[]>();
   /** The chosen value; none of the options (or '') shows the placeholder. */
-  readonly value = input<string>('');
+  readonly value = model<string>('');
   /** Text for no choice. */
   readonly placeholder = input<string>('');
   readonly disabled = input(false);
@@ -111,8 +112,6 @@ export class PdSelect {
   readonly describedBy = input<string>('');
   /** The trigger's id, so a `<label for>` names it. */
   readonly inputId = input<string>('');
-  /** A choice was made. */
-  readonly valueChange = output<string>();
 
   protected readonly id = `pd-select-${++nextId}`;
   protected readonly positions = POSITIONS;
@@ -153,7 +152,7 @@ export class PdSelect {
     const next = e.value[0];
     if (next === undefined) return;
     this.close(true);
-    if (next !== this.value()) this.valueChange.emit(next);
+    if (next !== this.value()) this.value.set(next);
   }
 
   /** Escape closes the list and nothing else (the window's own Escape must not also close the dialog). */

@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Changed
+- The shared UI has a lint step: `npm run lint` in `ui/` runs `@decryp7/paddock-eslint` (rules 27 to 39 plus the angular-eslint template and
+  accessibility rules) over every project, and the `ui` CI job runs it before the specs. All 155 findings are fixed (explicit OnPush in test
+  hosts, no `any`, `pd-` font sizes and shadows from tokens, signal reads before the first await, labelled a11y exceptions with reasons).
+  `pd-select` takes its value as a `model`; the glyph's `dots` input is no longer aliased; `pd-job`'s `(cancel)` output keeps its name with a
+  reasoned exception. `@decryp7/paddock-eslint` resolves its peer dependencies from the linted app first (a linked preset works); the style
+  rule accepts any `var(--token)` font family; rule 29 does not flag a read inside the operand of the first `await`; a spec may build a probe store.
+
 ### Fixed
 - sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
   to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
@@ -95,6 +103,15 @@ Conventional Commits; one semver tag for the whole repo.
   `toolStarted`/`approvalNeeded` events (generated TS). The approval of such a tool is a danger choice: danger-tinted card,
   "This cannot be undone.", Allow as a danger button (never the primary) and Decline the focused default. New shared glyphs
   `pd:symbol-function`, `pd:symbol-type`, `pd:symbol-module`; `namesPaletteProvider({ icon })` also takes a function per match.
+- Status glyphs (review 4 follow-up, rule 40): `PdNeedsAiCard`'s `icon` is a status (`'info' | 'warning'`, was `'alert'`), the
+  pitwall needs-AI state, the assistant's tool cards and the Knowledge packs page draw their status through
+  `<pd-status-glyph>`, and `assertStatusGlyphs`/`statusGlyphRenderProblems` (`@decryp7/paddock-ui/testing`) check the drawn
+  shapes in each shared component's status states, so a status glyph bound by `[name]` cannot bypass the map.
+- X50 review 4: icon tiles have no seams (the macOS drop shadow blends in sRGB) and `icons/tools/scan.mjs` fails a build
+  on a step above 3 levels in any tile column; a reopened assistant conversation shows its tool cards, citations, declined or
+  stopped calls and failed turn as they were live (`StoredMessage` tool `outcome`, `callSummary`, `write`, `destructive`,
+  `error`, `endMessage`, all optional; `ToolFinished.outcome`); the assistant log keeps the latest item in view when it gets
+  shorter; the status-glyph lint also refuses status → glyph maps in TypeScript.
 - X50 review 3: one status → glyph map (`PD_STATUS_GLYPHS`, `statusGlyph`, `<pd-status-glyph>` in
   `@decryp7/paddock-ui/icons`) with a lint over every template, so errors draw the circle-×, never the warning triangle;
   `pd-popmenu` reveals by opacity, so keyboard-opened menus take the focus (Shift+F10 in the Explorer focuses the first

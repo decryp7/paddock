@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PITWALL_COMMANDS, PITWALL_EVENT, type AiSnapshot, type AiState, type NextStep } from '../generated/pitwall';
 import { MemoryPitwallBackend, PitwallBackend, TauriPitwallBackend, type PitwallIpc } from './backend';
@@ -6,6 +6,7 @@ import { PdNeedsAi, stepLabel } from './needs-ai';
 import { PitwallStore } from './pitwall.store';
 import { providePitwall } from './provide-pitwall';
 import { groupCode, parseSnapshot, pitwallMessage } from './wire';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 async function settle(rounds = 8): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
@@ -171,7 +172,7 @@ describe('the memory backend plays the engine', () => {
   });
 });
 
-@Component({ selector: 'pd-test-host', imports: [PdNeedsAi], template: `<pd-needs-ai feature="Ask about this log" [settingsLink]="settings" (step)="steps.push($event)" (openSettings)="opened = opened + 1" />` })
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, selector: 'pd-test-host', imports: [PdNeedsAi], template: `<pd-needs-ai feature="Ask about this log" [settingsLink]="settings" (step)="steps.push($event)" (openSettings)="opened = opened + 1" />` })
 class Host {
   settings = true;
   steps: NextStep[] = [];
@@ -330,6 +331,9 @@ describe('<pd-needs-ai>', () => {
     memory.setState({ kind: 'unavailable', message: 'Odd.' });
     f.detectChanges();
     expect(q(f, 'needs-ai')!.getAttribute('data-kind')).toBe('unavailable');
+    // A blocking state draws the warning shape from the suite's map (review 4 follow-up).
+    assertStatusGlyphs(q(f, 'needs-ai')!);
+    expect(q(f, 'needs-ai')!.querySelector('pd-status-glyph')?.getAttribute('data-status')).toBe('warning');
     const spy = vi.spyOn(memory, 'snapshot');
     (q(f, 'needs-ai-wait') as HTMLButtonElement).click();
     await settle();
