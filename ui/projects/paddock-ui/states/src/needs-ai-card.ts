@@ -1,8 +1,11 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 
-/** The glyph of the card: `info` for a state the user can move on from, `alert` for one that blocks (incompatible, unavailable). */
-export type NeedsAiIcon = 'info' | 'alert';
+/**
+ * The status of the card, drawn from the suite's one status map: `info` for a state the user can move on from, `warning` for one
+ * that blocks (incompatible, unavailable).
+ */
+export type NeedsAiIcon = 'info' | 'warning';
 
 let nextId = 0;
 
@@ -22,10 +25,10 @@ let nextId = 0;
 @Component({
   selector: 'pd-needs-ai-card',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph],
+  imports: [PdStatusGlyph],
   template: `
     <section class="pd-needs-ai" [attr.aria-labelledby]="title() ? titleId : null" [attr.aria-label]="title() ? null : (name() || null)" [attr.data-testid]="testid()" [attr.data-kind]="kind() || null">
-      <pd-glyph class="pd-needs-ai__icon" [class.pd-needs-ai__icon--blocked]="icon() === 'alert'" [name]="icon()" [size]="20" />
+      <pd-status-glyph class="pd-needs-ai__icon" [class.pd-needs-ai__icon--blocked]="icon() === 'warning'" [status]="icon()" [size]="20" />
       <div class="pd-needs-ai__body">
         @if (title()) {
           <p class="pd-needs-ai__title" [id]="titleId">{{ title() }}</p>

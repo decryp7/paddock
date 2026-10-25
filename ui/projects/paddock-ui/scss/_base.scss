@@ -39,6 +39,12 @@ p {
   margin: 0;
 }
 
+// Native checks and radios fill with the control accent (design guide §6), never the browser's own blue (X50 review 3 P2-2).
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--pd-accent-control);
+}
+
 h1 {
   font-size: var(--pd-text-title);
   line-height: var(--pd-lh-title);

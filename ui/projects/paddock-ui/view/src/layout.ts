@@ -1,5 +1,5 @@
 import type { ActionRef, Tone } from '../generated/view';
-import { flattenPath, inflate, pathCrosses, roundedPath, type Pt, type Rect } from './route';
+import { crossNearArrow, flattenPath, inflate, pathCrosses, pointAt, roundedPath, type Pt, type Rect } from './route';
 
 /** A box of a drawn graph or diagram. */
 export interface SceneNode {
@@ -174,9 +174,17 @@ function boxEdge(n: { x: number; y: number; w: number; h: number }, tx: number, 
   return [cx + dx * s, cy + dy * s];
 }
 
+/** The rectangle an edge label covers (12-unit text, 7 units a character, the baseline at `ly`): what the placer keeps clear of boxes and lines. */
+export function labelRect(lx: number, ly: number, anchor: 'start' | 'middle', label: string): Rect {
+  const w = label.length * CHAR_W;
+  return { x: anchor === 'middle' ? lx - w / 2 : lx, y: ly - 11, w, h: 14 };
+}
+
 const r1 = (n: number): number => Math.round(n * 10) / 10;
 
 type Box = Rect;
+
+const overlap = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 /**
  * A route from one box to another along an arc outside every box of a radial drawing (centred on the middle of the boxes), going the
@@ -313,15 +321,121 @@ function radialPlace(
  * `force` layout of the wire type is drawn as `layered`, because a force simulation is not reproducible.
  */
 export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[], radial = false): Scene {
-  const first = layoutGraphAt(nodes, edges, radial, 0);
+  const first = layoutGraphAt(nodes, edges, radial, 0, 0);
   if (!radial) return first;
-  // A line that had to bow around a box can swing past the left or top of the canvas: draw again with room for it.
-  let low = 0;
-  for (const edge of first.edges) for (const p of flattenPath(edge.path)) low = Math.min(low, p[0] - 4, p[1] - 4);
-  return low < 0 ? layoutGraphAt(nodes, edges, radial, Math.ceil(-low)) : first;
+  // A line that bows around a box can swing past any side of the boxes, and so can a label: the canvas is the bounds of everything drawn
+  // plus the padding, so draw again shifted to put the top left of the drawing at the padding.
+  const [minX, minY] = drawnMin(first);
+  const [dx, dy] = [PAD - minX, PAD - minY];
+  return Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05 ? first : layoutGraphAt(nodes, edges, radial, dx, dy);
 }
 
-function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[], radial: boolean, extra: number): Scene {
+/** The top left corner of everything a graph scene draws: boxes, edge paths (curves flattened) and labels. */
+function drawnMin(s: Scene): Pt {
+  let [x, y] = [Infinity, Infinity];
+  for (const b of s.nodes) [x, y] = [Math.min(x, b.x), Math.min(y, b.y)];
+  for (const edge of s.edges) {
+    for (const p of flattenPath(edge.path)) [x, y] = [Math.min(x, p[0]), Math.min(y, p[1])];
+    if (edge.label) {
+      const r = labelRect(edge.lx, edge.ly, edge.anchor, edge.label);
+      [x, y] = [Math.min(x, r.x), Math.min(y, r.y)];
+    }
+  }
+  return [x, y];
+}
+
+/** The least free space between a label's rectangle and a box or an edge path. */
+const LABEL_GAP = 4;
+
+/** A place for a label: the text anchor point and how it is anchored. */
+export interface LabelSlot {
+  readonly lx: number;
+  readonly ly: number;
+  readonly anchor: 'start' | 'middle';
+}
+
+/**
+ * The slot among `slots` whose rectangle is nearest `mid` (centre to point), the earlier slot on a tie so the result is deterministic;
+ * `null` when there are no slots.
+ */
+export function nearestSlot(slots: readonly LabelSlot[], label: string, mid: Pt): LabelSlot | null {
+  let best: LabelSlot | null = null;
+  let bestD = Infinity;
+  for (const slot of slots) {
+    const r = labelRect(slot.lx, slot.ly, slot.anchor, label);
+    const d = Math.hypot(r.x + r.w / 2 - mid[0], r.y + r.h / 2 - mid[1]);
+    if (d < bestD - 1e-9) {
+      best = slot;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * The slot to use: the nearest to `mid` among those with no hits at the full gap, else among those with none at 1 unit, else the one
+ * with the fewest hits at 1 unit (the first on a tie). `slots` is never empty.
+ */
+export function chooseSlot(slots: readonly LabelSlot[], label: string, mid: Pt, hits: (slot: LabelSlot, gap: number) => number): LabelSlot {
+  return (
+    nearestSlot(slots.filter((s) => hits(s, LABEL_GAP) === 0), label, mid) ??
+    nearestSlot(slots.filter((s) => hits(s, 1) === 0), label, mid) ??
+    slots.reduce((a, s) => (hits(s, 1) < hits(a, 1) ? s : a))
+  );
+}
+
+/**
+ * Puts each edge label where its rectangle keeps 4 units from every box, every edge (its own included) and every label placed before
+ * it. The candidates are the position the router gave (beside the middle of the line) and a walk along the line: distance (2, 8, 16, 24, 32, 44
+ * units further out), the place along the line (middle, then 40/60, 30/70, 20/80 percent) and the side (outward, then the other; outward
+ * is away from the middle of the drawing for a radial one, to the right for a layered one). Of the candidates that are clear the one
+ * nearest the middle of the edge wins (the earlier on a tie). With none clear at 4 units, the nearest one clear at 1 unit, then the one
+ * with the fewest hits.
+ */
+function placeLabels(edges: readonly SceneEdge[], boxes: readonly Rect[], radial: boolean): SceneEdge[] {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const b of boxes) {
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w);
+    maxY = Math.max(maxY, b.y + b.h);
+  }
+  const centre: Pt = [(minX + maxX) / 2, (minY + maxY) / 2];
+  const taken: Rect[] = [];
+  return edges.map((edge) => {
+    if (!edge.label) return edge;
+    const label = edge.label;
+    const pts = flattenPath(edge.path);
+    const hits = (slot: LabelSlot, gap: number): number => {
+      const r = inflate(labelRect(slot.lx, slot.ly, slot.anchor, label), gap);
+      return boxes.filter((b) => overlap(r, b)).length + edges.filter((o) => pathCrosses(o.path, [r])).length + taken.filter((t) => overlap(r, t)).length;
+    };
+    const w = label.length * CHAR_W;
+    const slots: LabelSlot[] = [{ lx: edge.lx, ly: edge.ly, anchor: edge.anchor }];
+    for (const extra of [2, 8, 16, 24, 32, 44]) {
+      for (const f of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) {
+        const { at, dir } = pointAt(pts, f);
+        const normal: Pt = [-dir[1], dir[0]];
+        const out = radial ? normal[0] * (at[0] - centre[0]) + normal[1] * (at[1] - centre[1]) : normal[0] || -normal[1];
+        for (const sign of out >= 0 ? [1, -1] : [-1, 1]) {
+          const [nx, ny] = [normal[0] * sign, normal[1] * sign];
+          // The rectangle spans y - 11 .. y + 3 around the anchor, so its middle is 4 above ly: ly is lowered by 4 to centre it on the line.
+          const gap = (w / 2) * Math.abs(nx) + 7 * Math.abs(ny) + LABEL_GAP + extra;
+          slots.push({ lx: at[0] + nx * gap, ly: at[1] + ny * gap + 4, anchor: 'middle' });
+        }
+      }
+    }
+    const mid = pointAt(pts, 0.5).at;
+    const best = chooseSlot(slots, label, mid, hits);
+    taken.push(labelRect(best.lx, best.ly, best.anchor, label));
+    return { ...edge, lx: r1(best.lx), ly: r1(best.ly), anchor: best.anchor };
+  });
+}
+
+function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[], radial: boolean, dx: number, dy: number): Scene {
   const index = new Map(nodes.map((n, i) => [n.id, i]));
   const pairs: [number, number][] = [];
   for (const e of edges) {
@@ -337,16 +451,16 @@ function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[
   const dims = nodes.map(sized);
   const boxes: { x: number; y: number; w: number; h: number }[] = nodes.map((_, i) => ({ x: 0, y: 0, w: dims[i]?.w ?? MIN_W, h: dims[i]?.h ?? 36 }));
   let width = 0;
-  let height = 0;
+  let height: number;
   if (radial) {
     const placed = radialPlace(boxes, pairs);
     boxes.forEach((box, i) => {
       const p = placed.at[i];
-      box.x = r1((p?.x ?? 0) - box.w / 2 + placed.shiftX + extra);
-      box.y = r1((p?.y ?? 0) - box.h / 2 + placed.shiftY + extra);
+      box.x = r1((p?.x ?? 0) - box.w / 2 + placed.shiftX + dx);
+      box.y = r1((p?.y ?? 0) - box.h / 2 + placed.shiftY + dy);
     });
-    width = placed.width + extra;
-    height = placed.height + extra;
+    width = placed.width;
+    height = placed.height;
   } else {
     const widths = rows.map((row) => row.reduce((sum, n) => sum + (boxes[n]?.w ?? 0), 0) + Math.max(0, row.length - 1) * NODE_GAP);
     width = Math.max(MIN_W, ...widths) + PAD * 2;
@@ -372,6 +486,7 @@ function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[
     return { id: n.id, label: n.label, detail: dims[i]?.detail ?? [], caption: n.caption ?? '', tone: n.tone ?? 'neutral', action: n.action ?? null, compartment: n.compartment === true && (dims[i]?.detail.length ?? 0) > 0, ...b };
   });
   let backs = 0;
+  const routed: { path: string }[] = [];
   let reach = 0;
   let reachY = 0;
   const sceneEdges: SceneEdge[] = edges.flatMap((e) => {
@@ -392,26 +507,33 @@ function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[
       const sc: Pt = [s.x + s.w / 2, s.y + s.h / 2];
       const tc: Pt = [t.x + t.w / 2, t.y + t.h / 2];
       const [px, py] = [tc[0] - sc[0], tc[1] - sc[1]];
-      const plen = Math.hypot(px, py) || 1;
       // A straight line unless it would cross another box: then the line bows to one side, then the other, a little more each time.
       const bows = [0, 0.25, -0.25, 0.5, -0.5, 0.8, -0.8, 1.2, -1.2, 1.7, -1.7, 2.4, -2.4];
+      // A bow that also crosses no earlier edge near its arrowhead is preferred; the first one that only clears the boxes is the fallback.
+      const earlier = routed.map((r) => r.path);
       let chosen: { path: string; mid: Pt; dir: Pt } | null = null;
+      let clear: { path: string; mid: Pt; dir: Pt } | null = null;
       for (const bow of bows) {
         const ctl: Pt = [(sc[0] + tc[0]) / 2 + -py * bow, (sc[1] + tc[1]) / 2 + px * bow];
         const [x1, y1] = boxEdge(s, ctl[0], ctl[1]);
         const [x2, y2] = boxEdge(t, ctl[0], ctl[1]);
         const path = bow === 0 ? `M ${r1(x1)} ${r1(y1)} L ${r1(x2)} ${r1(y2)}` : `M ${r1(x1)} ${r1(y1)} Q ${r1(ctl[0])} ${r1(ctl[1])} ${r1(x2)} ${r1(y2)}`;
         const mid: Pt = bow === 0 ? [(x1 + x2) / 2, (y1 + y2) / 2] : [(x1 + 2 * ctl[0] + x2) / 4, (y1 + 2 * ctl[1] + y2) / 4];
-        chosen = { path, mid, dir: [x2 - x1, y2 - y1] };
-        if (!pathCrosses(path, blockers)) break;
-        chosen = null;
+        if (pathCrosses(path, blockers)) continue;
+        clear ??= { path, mid, dir: [x2 - x1, y2 - y1] };
+        if (!earlier.some((o) => crossNearArrow(path, o))) {
+          chosen = { path, mid, dir: [x2 - x1, y2 - y1] };
+          break;
+        }
       }
+      chosen ??= clear;
       // No bow clears the boxes (a ring packed tight around the hub): go round the outside of everything, the short way, then the long way.
       if (!chosen) {
         chosen = arcAround(boxes, s, t, blockers, backs++);
       }
       const c = chosen as { path: string; mid: Pt; dir: Pt };
-      // The label sits beside the line, not on it: 10 units to the side that points up.
+      routed.push(c);
+      // The label starts beside the line, not on it: 10 units to the side that points up (placeLabels moves it where it touches anything).
       const len = Math.hypot(c.dir[0], c.dir[1]) || 1;
       const side = c.dir[0] >= 0 ? -1 : 1;
       return [edge(c.path, c.mid[0] + (side * -c.dir[1] * 10) / len, c.mid[1] + (side * c.dir[0] * 10) / len, 'middle')];
@@ -446,14 +568,33 @@ function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[
     reachY = Math.max(reachY, below + PAD / 2);
     return [edge(roundedPath(route), bx + 8, ((outer[0] as Pt)[1] + (outer[outer.length - 1] as Pt)[1]) / 2, 'start')];
   });
-  // A line that bows around a box may swing past the right or bottom of the boxes: the canvas holds it.
-  for (const edge of sceneEdges) {
+  const placed = placeLabels(sceneEdges, boxes, radial);
+  // A line that bows around a box may swing past the right or bottom of the boxes, and a label may sit past them: the canvas holds them.
+  for (const edge of placed) {
     for (const p of flattenPath(edge.path)) {
       reach = Math.max(reach, p[0] + 4 - PAD - 24);
       reachY = Math.max(reachY, p[1] + 4);
     }
+    if (edge.label) {
+      const r = labelRect(edge.lx, edge.ly, edge.anchor, edge.label);
+      reach = Math.max(reach, r.x + r.w + 4 - PAD - 24);
+      reachY = Math.max(reachY, r.y + r.h + 4);
+    }
   }
-  return { kind: radial ? 'radial' : 'layered', width: r1(Math.max(width, reach + PAD + 24)), height: r1(Math.max(height, reachY)), nodes: sceneNodes, edges: sceneEdges, lifelines: [] };
+  if (radial) {
+    // The canvas ends PAD after the last thing drawn (the shift put the first at PAD): no empty margin.
+    let [maxX, maxY] = [-Infinity, -Infinity];
+    for (const b of sceneNodes) [maxX, maxY] = [Math.max(maxX, b.x + b.w), Math.max(maxY, b.y + b.h)];
+    for (const edge of placed) {
+      for (const p of flattenPath(edge.path)) [maxX, maxY] = [Math.max(maxX, p[0]), Math.max(maxY, p[1])];
+      if (edge.label) {
+        const r = labelRect(edge.lx, edge.ly, edge.anchor, edge.label);
+        [maxX, maxY] = [Math.max(maxX, r.x + r.w), Math.max(maxY, r.y + r.h)];
+      }
+    }
+    return { kind: 'radial', width: r1(maxX + PAD), height: r1(maxY + PAD), nodes: sceneNodes, edges: placed, lifelines: [] };
+  }
+  return { kind: 'layered', width: r1(Math.max(width, reach + PAD + 24)), height: r1(Math.max(height, reachY)), nodes: sceneNodes, edges: placed, lifelines: [] };
 }
 
 /**

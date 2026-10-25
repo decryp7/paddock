@@ -1,5 +1,5 @@
 import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
-import { Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideShellTesting, render, settle } from '@decryp7/paddock-ui/shell/testing';
 import { WINDOW_CHROME } from './chrome';
@@ -10,7 +10,7 @@ import { PdPopoutTitleBar } from './popout-title-bar';
 import { FakeChrome, FakeSyncTimers } from './testing';
 import { SYNC_TIMERS, UiSync } from './ui-sync';
 
-@Component({ imports: [PdPopoutTitleBar], template: `<pd-popout-title-bar title="Inspector" [path]="path()" host="Incident" [onTop]="onTop()" (dockBack)="docked = docked + 1" (toggleOnTop)="onTop.set(!onTop())" />` })
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, imports: [PdPopoutTitleBar], template: `<pd-popout-title-bar title="Inspector" [path]="path()" host="Incident" [onTop]="onTop()" (dockBack)="docked = docked + 1" (toggleOnTop)="onTop.set(!onTop())" />` })
 class Host {
   readonly onTop = signal(false);
   readonly path = signal('src/main.rs');

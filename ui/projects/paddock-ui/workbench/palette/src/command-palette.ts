@@ -53,6 +53,7 @@ let nextId = 0;
             @if (row.heading) {
               <li class="pd-pal-group" role="presentation" aria-hidden="true">{{ row.heading }}</li>
             }
+            <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -- options are chosen with the keyboard from the input (aria-activedescendant); the click is the pointer path -->
             <li
               role="option"
               class="pd-pal-opt"
@@ -92,7 +93,7 @@ let nextId = 0;
         </ul>
         <div class="pd-pal-hints" aria-hidden="true">
           @for (p of store.prefixes(); track p.prefix) {
-            <span class="pd-pal-hint"><kbd>{{ p.prefix }}</kbd> {{ p.title }}</span>
+            <span class="pd-pal-hint" [class.pd-active]="p.active" data-testid="palette-hint"><kbd>{{ p.prefix }}</kbd> {{ p.title }}</span>
           }
         </div>
       </div>
@@ -120,6 +121,7 @@ let nextId = 0;
     .pd-pal-group { padding: var(--pd-space-2) var(--pd-space-3) var(--pd-space-1); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-semibold); }
     .pd-pal-kbd, .pd-pal-hint kbd { flex: none; font-family: var(--pd-font-sans); font-variant-numeric: tabular-nums; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-pal-none { padding: var(--pd-space-3); color: var(--pd-text-muted); }
+    .pd-pal-hint.pd-active, .pd-pal-hint.pd-active kbd { color: var(--pd-text); font-weight: var(--pd-weight-semibold); }
     .pd-pal-hints { display: flex; flex-wrap: wrap; gap: var(--pd-space-3); padding: var(--pd-space-1) var(--pd-space-2) 0; border-top: 1px solid var(--pd-hairline); color: var(--pd-text-muted); font-size: var(--pd-text-label); }
   `,
 })

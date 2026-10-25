@@ -10,7 +10,7 @@ const RULES = [
   { id: 'colour function', re: /\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/ },
   { id: 'named colour', re: new RegExp(`:\\s*[^;{}]*\\b(${NAMED})\\b`, 'i') },
   { id: 'font size', re: /font-size\s*:\s*-?[\d.]+(px|pt|rem)\b/ },
-  { id: 'font family', re: /font-family\s*:\s*(?!\s*(var\(--font-|inherit\b))/ },
+  { id: 'font family', re: /font-family\s*:\s*(?!\s*(var\(--|inherit\b))/ },
   { id: 'font shorthand', re: /(^|[\s;{])font\s*:[^;]*(?<![/\d.])[\d.]+(px|pt|rem)\b/ },
 ];
 

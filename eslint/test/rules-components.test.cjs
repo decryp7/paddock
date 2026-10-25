@@ -41,9 +41,11 @@ ts().run('signal-read-before-await (rule 29)', rules['signal-read-before-await']
     'class A { n = signal(0); go() { this.n(); } }',
     'class A { n = signal(0); async go(d) { await load(); /* after-await: race guard */ if (this.n() === d) done(); } }'.replace('/* after-await: race guard */', '\n// after-await: race guard\n'),
     'class A { n = signal(0); async go() { await load(); this.reload(); } }',
+    'class A { n = signal(0); async go(p) { const g = await this.store.reopen(this.n(), p); return g; } }', // read in the operand of the first await
     'class A { n = signal(0); c = effect(async () => { const v = this.n(); await save(v); }); }',
   ],
   invalid: [
+    { code: 'class A { n = signal(0); async go() { const v = (await load()) + this.n(); return v; } }', errors: [{ messageId: 'late' }] },
     { code: 'class A { n = signal(0); async go() { await load(); return this.n(); } }', errors: [{ messageId: 'late', data: { name: 'n' } }] },
     { code: 'class A { n = input.required(); go = async () => { await load(); this.n(); } }', errors: [{ messageId: 'late' }] },
     { code: 'class A { n = computed(() => 1); c = effect(async () => { await save(); this.n(); }); }', errors: [{ messageId: 'late' }] },

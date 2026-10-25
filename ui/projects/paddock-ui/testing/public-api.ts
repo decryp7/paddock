@@ -7,3 +7,4 @@
 export { installTestKit, type TestKitOptions } from './src/setup';
 export { all, at, buttonByText, byText, manualFrames, must, one, press, text, typeInto } from './src/dom';
 export { FakeChart, FakeECharts } from './src/fake-chart';
+export { assertStatusGlyphs, statusGlyphRenderProblems } from './src/status-glyphs';

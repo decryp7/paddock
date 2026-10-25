@@ -132,6 +132,22 @@ test.describe('dock (plan W2a, W2b)', () => {
     await wb.palette.search('>show jobs');
     await wb.palette.run('Show jobs');
     await expect(page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"], [data-testid="pd-dock-tab"][data-panel-id="pd.jobs"]').first()).toBeVisible();
+    // Review 3 P3-3: with the Assistant column open, the bottom slide-out stays over its own column, clear of the composer.
+    // The column opens first: a click outside an open slide-out hides it, as it should (review 4 follow-up: the test clicked
+    // the activity bar while the slide-out was open and raced its hiding).
+    await page.keyboard.press('Escape');
+    await wb.activity.item('pd.wb.assistant.activity').click();
+    const composer = page.getByTestId('assistant-input');
+    await expect(composer).toBeVisible();
+    await wb.palette.open();
+    await wb.palette.search('>show jobs');
+    await wb.palette.run('Show jobs');
+    const flyout = page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"]');
+    await expect(flyout).toBeVisible();
+    await expect.poll(async () => {
+      const [f, c] = await Promise.all([flyout.boundingBox(), composer.boundingBox()]);
+      return !!f && !!c && f.x + f.width <= c.x + 1;
+    }).toBe(true);
   });
 
   for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
@@ -214,6 +230,29 @@ test.describe('review 1 (X50)', () => {
     }).toBe(true);
   });
 
+  test('review 3 P1-1: Shift+F10 puts the focus in the Explorer menu, arrows move it, Escape gives it back to the row', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    const row = wb.explorer.node('wd.files', 'README.md');
+    // The mouse-opened menu, for its items and icons.
+    const box = (await row.boundingBox())!;
+    await page.mouse.click(box.x + 60, box.y + box.height / 2, { button: 'right' });
+    const items = wb.explorer.menu.getByRole('menuitem');
+    await expect(items.first()).toBeVisible();
+    const byMouse = await items.evaluateAll((els) => els.map((e) => `${e.textContent?.trim()}|${e.querySelector('.pd-popmenu__icon pd-icon') ? 'icon' : 'none'}`));
+    await page.keyboard.press('Escape');
+    await row.click();
+    await page.keyboard.press('Shift+F10');
+    await expect(items.first()).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(1)).toBeFocused();
+    const byKeys = await items.evaluateAll((els) => els.map((e) => `${e.textContent?.trim()}|${e.querySelector('.pd-popmenu__icon pd-icon') ? 'icon' : 'none'}`));
+    expect(byKeys).toEqual(byMouse);
+    await page.keyboard.press('Escape');
+    await expect(wb.explorer.menu).toBeHidden();
+    await expect(row).toBeFocused();
+  });
+
   test('P1-2: at 320 px the Problem column takes most of the table, with the file folded under it', async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     const wb = new WorkbenchApp(page);
@@ -240,6 +279,10 @@ test.describe('review 1 (X50)', () => {
       }),
     );
     expect(overflow).toEqual([]);
+    // Review 3 P3-7: the severity glyph sits about 12 px from the problem text.
+    const gap = await table.locator('[role=row].pd-row').first().evaluate((r) => r.querySelector('.text')!.getBoundingClientRect().left - r.querySelector('.sev')!.getBoundingClientRect().right);
+    expect(gap).toBeGreaterThanOrEqual(8);
+    expect(gap).toBeLessThanOrEqual(14);
     await expectNoHorizontalScroll(page);
   });
 
@@ -269,21 +312,22 @@ test.describe('review 1 (X50)', () => {
     const wb = new WorkbenchApp(page);
     await wb.frame.open();
     await page.evaluate(() => {
-      const w = window as unknown as { firstMenuFrame?: { x: number; y: number; visibility: string } };
+      const w = window as unknown as { firstMenuFrame?: { x: number; y: number; opacity: string } };
       new MutationObserver((_, obs) => {
         const m = document.querySelector('[data-testid="explorer-menu"]');
         if (!m) return;
         obs.disconnect();
         requestAnimationFrame(() => {
           const r = m.getBoundingClientRect();
-          w.firstMenuFrame = { x: r.x, y: r.y, visibility: getComputedStyle(m).visibility };
+          w.firstMenuFrame = { x: r.x, y: r.y, opacity: getComputedStyle(m).opacity };
         });
       }).observe(document.body, { childList: true, subtree: true });
     });
     const box = (await wb.explorer.node('wd.files', 'README.md').boundingBox())!;
     await page.mouse.click(box.x + 60, box.y + 6, { button: 'right' });
-    const first = await page.waitForFunction(() => (window as unknown as { firstMenuFrame?: unknown }).firstMenuFrame).then((h) => h.jsonValue() as Promise<{ x: number; y: number; visibility: string }>);
-    expect(first.visibility === 'hidden' || (Math.abs(first.x - (box.x + 60)) <= 8 && first.y >= box.y + box.height)).toBe(true);
+    const first = await page.waitForFunction(() => (window as unknown as { firstMenuFrame?: unknown }).firstMenuFrame).then((h) => h.jsonValue() as Promise<{ x: number; y: number; opacity: string }>);
+    // Transparent until placed (opacity, so a keyboard-opened menu can take the focus at once: review 3 P1-1).
+    expect(first.opacity === '0' || (Math.abs(first.x - (box.x + 60)) <= 8 && first.y >= box.y + box.height)).toBe(true);
     // Settled: at the pointer's x, below the row (never over its label: review 2 P3-1).
     await expect.poll(async () => {
       const m = (await wb.explorer.menu.boundingBox())!;

@@ -1,14 +1,20 @@
-import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { FakeECharts } from '@decryp7/paddock-ui/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_ECHARTS, PdChart, fakeEchartsLoader, reducedMotion } from './chart';
 import { donutNarrowHeight } from './options';
 import type { PdChartSpec } from './options';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
+
+/** An ECharts option tree, inspected structurally by these specs. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the option tree is untyped JSON the specs walk by key
+type LooseOption = any;
 
 const SPEC: PdChartSpec = { kind: 'bar', x: ['A', 'B'], series: [{ name: 'Jobs', values: [2, 5] }], unit: 'jobs' };
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdChart],
   template: `<pd-chart label="Jobs per day" [spec]="spec()" [option]="option()" [summary]="summary()" [height]="180" [showTitle]="title()" [state]="state()" errorText="Could not reach the engine." (retry)="retried = retried + 1" (chartClick)="clicks.push($event)" />`,
 })
@@ -82,11 +88,11 @@ describe('pd-chart', () => {
     const { f, fake } = await setup();
     f.componentInstance.spec.set({ kind: 'donut', x: ['A', 'B', 'C', 'D'], series: [{ name: 'S', values: [4, 3, 2, 1] }], unit: 'GB' });
     await settle(f);
-    const wide = fake.instances[0]!.lastOption as Record<string, any>;
+    const wide = fake.instances[0]!.lastOption as LooseOption;
     expect(wide['legend'].top).toBe('middle');
     resizes.forEach((r) => r([{ contentRect: { width: 320 } }]));
     await settle(f);
-    const narrow = fake.instances[0]!.lastOption as Record<string, any>;
+    const narrow = fake.instances[0]!.lastOption as LooseOption;
     expect(narrow['legend']).toMatchObject({ left: 'center', bottom: 4 });
     // The ring and the total share one centre, and the ring sits inside the card.
     expect(narrow['series'][0].center).toEqual([narrow['graphic'][0].x, narrow['graphic'][0].y]);
@@ -104,6 +110,7 @@ describe('pd-chart', () => {
     f.componentInstance.state.set('error');
     await settle(f);
     expect(f.nativeElement.querySelector('[data-testid=chart-error]')?.textContent).toContain('Could not reach the engine.');
+    assertStatusGlyphs(f.nativeElement.querySelector('[data-testid=chart-error]'));
     f.nativeElement.querySelector('.pd-retry').click();
     expect(f.componentInstance.retried).toBe(1);
     const before = fake.instances[0]!.resized;
@@ -116,11 +123,11 @@ describe('pd-chart', () => {
   it('creates the chart once ECharts is loaded and draws the spec as an option', async () => {
     const { f, fake } = await setup();
     expect(fake.instances).toHaveLength(1);
-    const option = fake.instances[0]!.lastOption as Record<string, any>;
+    const option = fake.instances[0]!.lastOption as LooseOption;
     expect(option['series'][0]).toMatchObject({ type: 'bar', data: [2, 5] });
     f.componentInstance.spec.set({ ...SPEC, series: [{ name: 'Jobs', values: [9, 1] }] });
     await settle(f);
-    expect((fake.instances[0]!.lastOption as Record<string, any>)['series'][0].data).toEqual([9, 1]);
+    expect((fake.instances[0]!.lastOption as LooseOption)['series'][0].data).toEqual([9, 1]);
   });
 
   it('prefers a ready option over the spec', async () => {
@@ -144,7 +151,7 @@ describe('pd-chart', () => {
     expect(fake.instances.length).toBeGreaterThan(1);
     expect(fake.instances[0]!.disposed).toBe(true);
     const latest = fake.instances.at(-1)!;
-    expect((latest.lastOption as Record<string, any>)['animation']).toBe(false);
+    expect((latest.lastOption as LooseOption)['animation']).toBe(false);
   });
 
   it('resizes with its box and disposes with the component', async () => {

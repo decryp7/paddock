@@ -104,6 +104,8 @@ struct FakeState {
     monotonic: Duration,
     wall: SystemTime,
     waiting: usize,
+    /// The waits in progress: their id, their end on the monotonic reading and their token.
+    active: Vec<(u64, Duration, CancelToken)>,
     /// Waits started since the clock was made: a test's step boundary ("the second wait has begun").
     started: u64,
     /// Bumped on every move and every cancel of a token a wait is on, so no wake-up is lost.
@@ -144,6 +146,7 @@ impl FakeClock {
                 monotonic: Duration::ZERO,
                 wall,
                 waiting: 0,
+                active: Vec::new(),
                 started: 0,
                 generation: 0,
             }),
@@ -185,6 +188,40 @@ impl FakeClock {
     /// How many threads are blocked in [`Clock::wait`] on this clock now.
     pub fn waiters(&self) -> usize {
         self.state().waiting
+    }
+
+    /// How many waits are blocked on this clock with time still to run: not yet at their end and not cancelled. A wait
+    /// that the last [`advance`](Self::advance) ended, or whose token was cancelled, no longer counts even before its
+    /// thread has left, so this is the step boundary that cannot race (unlike [`waiters`](Self::waiters), and unlike
+    /// [`waits_started`](Self::waits_started) when other threads start and end short waits meanwhile).
+    pub fn pending(&self) -> usize {
+        let s = self.state();
+        s.active
+            .iter()
+            .filter(|(_, end, t)| *end > s.monotonic && !t.cancel_requested())
+            .count()
+    }
+
+    /// Blocks until at least `n` waits are [`pending`](Self::pending), so the next [`advance`](Self::advance) reaches
+    /// exactly those. False if that did not happen within `guard` of real time (a hang guard).
+    pub fn wait_for_pending(&self, n: usize, guard: Duration) -> bool {
+        let s = self.state();
+        let (s, _) = self
+            .0
+            .moved
+            .wait_timeout_while(s, guard, |s| {
+                s.active
+                    .iter()
+                    .filter(|(_, end, t)| *end > s.monotonic && !t.cancel_requested())
+                    .count()
+                    < n
+            })
+            .unwrap_or_else(|p| p.into_inner());
+        s.active
+            .iter()
+            .filter(|(_, end, t)| *end > s.monotonic && !t.cancel_requested())
+            .count()
+            >= n
     }
 
     /// How many waits have started on this clock so far (finished ones included).
@@ -236,12 +273,15 @@ impl Clock for FakeClock {
     }
 
     fn wait(&self, d: Duration, cancel: &CancelToken) -> Result<(), Cancelled> {
-        let end = {
+        let (end, id) = {
             let mut s = self.state();
             s.waiting += 1;
             s.started += 1;
+            let end = s.monotonic.saturating_add(d);
+            let id = s.started;
+            s.active.push((id, end, cancel.clone()));
             self.0.moved.notify_all();
-            s.monotonic.saturating_add(d)
+            (end, id)
         };
         let me = self.clone();
         let registered = cancel.on_cancel(move || {
@@ -266,6 +306,7 @@ impl Clock for FakeClock {
         drop(registered);
         let mut s = self.state();
         s.waiting -= 1;
+        s.active.retain(|(i, _, _)| *i != id);
         self.0.moved.notify_all();
         outcome
     }

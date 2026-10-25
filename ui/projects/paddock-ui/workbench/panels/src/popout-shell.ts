@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, Injector, signal, untracked } from '@angular/core';
 import { PdPartOutlet } from '@decryp7/paddock-ui/shell';
-import { panelTitle, VIEW_PANEL, WorkbenchRegistry, type ViewDef } from '@decryp7/paddock-ui/workbench';
+import { panelTitle, WorkbenchRegistry, type ViewDef } from '@decryp7/paddock-ui/workbench';
 import { WINDOW_CHROME } from './chrome';
 import { PANELS_IO } from './io';
 import { HOST_TITLE_KEY, hostTitleValue } from './panel-windows';

@@ -1,3 +1,4 @@
+import { NotificationsSource } from './notifications-source';
 import { TestBed } from '@angular/core/testing';
 import { MemoryNotificationCentre, NotificationsBackend, ServiceHealthBackend, type Unlisten } from './backends';
 import { NotificationsStore, localCause } from './notifications.store';
@@ -224,6 +225,19 @@ describe('NotificationsStore', () => {
     expect((await centre.list()).notices).toEqual([]);
     store.postLocal({ level: 'info', message: 'Layout adjusted', kind: 'pd.wb.dock.layout-fit' });
     expect(store.local()[0]?.primary).toEqual({ type: 'pd.wb.dock.notice', n: 2 });
+  });
+
+  it('keeps the short form of a notice for a small window\'s one-line toast, and its full text for Notifications (review 3 P3-8)', async () => {
+    notifyBed();
+    const store = TestBed.inject(NotificationsStore);
+    const source = TestBed.inject(NotificationsSource);
+    await settle();
+    await store.post({ level: 'info', message: 'Layout adjusted to fit this window', short: 'Layout fitted', kind: 'k', action: { type: 'a' } });
+    store.postLocal({ level: 'info', message: 'Saved' });
+    expect(source.items().map((t) => [t.title, t.short])).toEqual([
+      ['Layout adjusted to fit this window', 'Layout fitted'],
+      ['Saved', null],
+    ]);
   });
 
   it('merges the notices it keeps by kind and text, with a count, and lists them', async () => {

@@ -21,7 +21,7 @@ import {
   TemplateRef,
   viewChild,
 } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdMiddleText } from './middle-text';
 import {
   actionColumnWidth,
@@ -100,7 +100,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
 @Component({
   selector: 'pd-table',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, CdkContextMenuTrigger, PdGlyph, PdMiddleText],
+  imports: [PdStatusGlyph, NgTemplateOutlet, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, CdkContextMenuTrigger, PdGlyph, PdMiddleText],
   host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"' },
   template: `
     <div class="pd-toolbar">
@@ -124,6 +124,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
         </button>
       }
     </div>
+    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the grid only receives keydown bubbling from its rows and cells, which are the focus stops (roving tabindex) -->
     <div #grid class="pd-grid" role="grid" [attr.aria-label]="label()" [attr.aria-busy]="state() === 'loading'" [attr.aria-rowcount]="items().length + 1" [style.--pd-cols]="gridTemplate()" [style.--pd-gutter.px]="gutter()" (keydown)="onKeydown($event)">
       <div class="pd-header" role="row" aria-rowindex="1">
         @for (c of columns2(); track c.key) {
@@ -158,7 +159,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
         @case ('error') {
           <div class="pd-body" role="rowgroup">
             <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty pd-error" data-testid="table-error">
-              <pd-glyph name="alert" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
+              <pd-status-glyph status="error" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
               <button type="button" class="pd-retry" (click)="retry.emit()">{{ t.retry }}</button>
             </div></div>
           </div>
@@ -196,6 +197,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
 
     <ng-template #line let-item let-i="index">
       @if (item.kind === 'group') {
+        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -- a group row is toggled from the keyboard by the grid keydown handler (Enter and arrows), and its tabindex is bound -->
         <div role="row" class="pd-row pd-group" [class.pd-group-grid]="!!item.cells" [attr.aria-rowindex]="i + 2" [attr.data-index]="i" [attr.tabindex]="i === active() ? 0 : -1" (click)="toggleGroup(item.key)">
           <div role="gridcell" class="pd-group-cell">
             <button type="button" class="pd-group-toggle" tabindex="-1" [attr.aria-expanded]="!item.collapsed" [attr.aria-label]="item.label || t.none">
@@ -218,6 +220,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
       } @else {
         @let row = item.row;
         @let actions = actionsOf(row);
+        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -- a row is activated from the keyboard by the grid keydown handler (Enter), and its tabindex is bound -->
         <div
           role="row"
           class="pd-row"

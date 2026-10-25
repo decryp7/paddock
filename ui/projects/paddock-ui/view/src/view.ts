@@ -1,5 +1,5 @@
 import { booleanAttribute, ChangeDetectionStrategy, Component, computed, effect, inject, input, output, untracked } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import type { ViewAction } from '../generated/view';
 import { PdViewNode } from './node';
 import type { PatchResult } from './patch';
@@ -22,13 +22,13 @@ import { ViewStore } from './view.store';
 @Component({
   selector: 'pd-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph, PdViewNode],
+  imports: [PdStatusGlyph, PdViewNode],
   providers: [ViewStore, ViewRuntime],
   host: { '[attr.aria-busy]': 'busy() || store.isLoading() ? "true" : null' },
   template: `
     @if (store.requestError(); as message) {
       <div class="pd-view-error" [class.pd-view-error--stale]="store.isStale()" role="alert" data-testid="view-error" [attr.data-kind]="store.isStale() ? 'stale' : 'failed'">
-        <pd-glyph class="pd-view-error__icon" name="alert" [size]="16" />
+        <pd-status-glyph class="pd-view-error__icon" status="error" [size]="16" />
         <div class="pd-view-error__body">
           <p class="pd-view-error__title">{{ store.isStale() ? staleTitle : failedTitle() }}</p>
           <p class="pd-view-error__message">{{ message }}</p>
@@ -42,7 +42,7 @@ import { ViewStore } from './view.store';
       </div>
     }
     @if (runtime.error(); as problem) {
-      <p class="pd-view-notice" role="alert" data-testid="view-notice"><pd-glyph name="alert" [size]="14" />{{ problem }}</p>
+      <p class="pd-view-notice" role="alert" data-testid="view-notice"><pd-status-glyph status="error" [size]="14" />{{ problem }}</p>
     }
     @if (busy()) {
       <div class="pd-view-busy" role="status" data-testid="view-busy">

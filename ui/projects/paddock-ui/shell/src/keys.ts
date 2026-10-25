@@ -12,7 +12,7 @@ const NAMED_KEYS = [
   'Left', 'Right', 'Up', 'Down', 'Plus', 'Minus',
 ] as const;
 const FUNCTION_KEY = /^F([1-9]|1[0-9]|2[0-4])$/;
-const PRINTABLE = /^[A-Za-z0-9`\-=[\]\;',./]$/;
+const PRINTABLE = /^[A-Za-z0-9`\-=[\];',./]$/;
 
 /** A parsed binding: its modifiers (canonical order, no duplicates) and its key (upper case for letters). */
 export interface ParsedKey {

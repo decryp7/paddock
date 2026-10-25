@@ -1,8 +1,9 @@
-import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './table';
 import { PD_FOLD_EXTRA, type PdColumn, type PdRowAction, type PdSort } from './model';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 interface Plugin {
   id: string;
@@ -30,6 +31,7 @@ const ACTIONS: PdRowAction[] = [
 ];
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdTable, PdCell, PdTableEmpty],
   template: `
     <pd-table
@@ -439,6 +441,7 @@ describe('pd-table', () => {
     f.componentInstance.state.set('error');
     await settle(f);
     expect(el(f).querySelector('[data-testid=table-error]')?.textContent).toContain('could not be loaded');
+    assertStatusGlyphs(el(f).querySelector('[data-testid=table-error]')!);
     el(f).querySelector<HTMLButtonElement>('[data-testid=table-error] .pd-retry')!.click();
     expect(f.componentInstance.retried).toBe(1);
     f.componentInstance.state.set('ready');

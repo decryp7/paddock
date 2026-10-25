@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Paddock Workbench Demo 16px</title>
   <defs>
-    <linearGradient id="w2bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E7E3DA"/><stop offset="1" stop-color="#C4BDB0"/></linearGradient>
+    <linearGradient id="w4bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1C1C1C"/><stop offset="1" stop-color="#000000"/></linearGradient>
     
   </defs>
-  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#w2bg)"/>
-  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#58534A" stroke-opacity="0.45" stroke-width="0.5"/>
-  <path d="M4.5 3H11.5A2 2 0 0 1 13.5 5V11A2 2 0 0 1 11.5 13H4.5A2 2 0 0 1 2.5 11V5A2 2 0 0 1 4.5 3Z" fill="none" stroke="#26231E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 3.5V12.5" fill="none" stroke="#26231E" stroke-width="1.5" stroke-linecap="butt" stroke-linejoin="round"/><path d="M7.5 8H13" fill="none" stroke="#26231E" stroke-width="1.5" stroke-linecap="butt" stroke-linejoin="round"/>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#w4bg)"/>
+  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="0.5"/>
+  <g opacity="0.6"><path d="M2 4H3V5H2ZM2 8H3V9H2ZM2 12H3V13H2Z" fill="#FFFFFF"/></g><path d="M4.5 3H7.5A0.5 0.5 0 0 1 8 3.5V12.5A0.5 0.5 0 0 1 7.5 13H4.5A0.5 0.5 0 0 1 4 12.5V3.5A0.5 0.5 0 0 1 4.5 3Z" fill="#FFFFFF"/><path d="M9 3H11V4H9Z" fill="#FFFFFF"/><g opacity="0.6"><path d="M12 3H14V4H12Z" fill="#FFFFFF"/></g><path d="M9 5H14V8H9Z" fill="#FFFFFF"/><g opacity="0.6"><path d="M9 9H14V13H9Z" fill="#FFFFFF"/></g>
 </svg>

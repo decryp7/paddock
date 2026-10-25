@@ -45,6 +45,12 @@ describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
     expect(v['--pd-row-action-rest'] ?? '').toContain('75%');
   });
 
+  it('the code surface differs from the pane and keeps text at 4.5:1 or better', () => {
+    expect(col(v, '--pd-surface-code')).not.toEqual(col(v, '--pd-surface-1'));
+    expect(contrast(col(v, '--pd-text'), col(v, '--pd-surface-code'))).toBeGreaterThanOrEqual(7);
+    expect(contrast(col(v, '--pd-text-muted'), col(v, '--pd-surface-code'))).toBeGreaterThanOrEqual(4.5);
+  });
+
   it.each(SURFACES)('text on %s is AAA (7:1)', (s) => {
     expect(contrast(col(v, '--pd-text'), col(v, s))).toBeGreaterThanOrEqual(7);
   });

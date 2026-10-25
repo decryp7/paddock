@@ -1,5 +1,15 @@
 import type { AssistantCommand } from '../generated/assistant-commands';
-import { ASSISTANT_EVENT, type AssistantEvent, type AssistantInfo, type Conversation, type ConversationSummary, type Envelope, type SendAck, type SendRequest } from '../generated/assistant';
+import {
+  ASSISTANT_EVENT,
+  type AssistantEvent,
+  type AssistantInfo,
+  type Conversation,
+  type ConversationSummary,
+  type Envelope,
+  type SendAck,
+  type SendRequest,
+  type StoredMessage,
+} from '../generated/assistant';
 import { parseConversation, parseEnvelope, parseInfo, parseSummaries } from './wire';
 
 /** Stops listening. */
@@ -113,7 +123,7 @@ export const DEMO_ANSWER =
  *
  * - `/tool [what]`: a read-only tool call (`find`) that finishes with a citation (`item 7`), then the answer.
  * - `/tool-slow`: a `find` call that stays running until `stop()`; the turn then ends as cancelled, with no answer.
- * - `/tool-fail`: a `find` call that fails with a reason ("The index is locked by another process."), then the answer.
+ * - `/tool-fail`: a `find` call that fails with a reason ("The index is locked by another process."), then a short answer about it.
  * - `/write`: asks for the user's approval of a writing tool (`erase`) and waits for it (needs "Allow actions").
  * - `/fail`: streams a few words and then ends the turn with an error event of kind `failed`.
  * - `/slow`: streams its first words and then waits until `stop()` (a running turn with Stop visible).
@@ -233,37 +243,72 @@ export class MemoryAssistantBackend extends AssistantBackend {
     this.emit(id, { type: 'started', title: c.title });
     if (this.gate) await this.gate;
     let said = '';
+    let outcome = '';
+    // Like the engine, the turn's messages are kept in order and saved when it ends.
+    const kept: StoredMessage[] = [];
+    const at = (): number => c.updatedMs + kept.length + 1;
+    let call: { id: string; summary: string; write: boolean; destructive: boolean } | null = null;
+    const keep = (last: StoredMessage): void => {
+      const now = this.store.get(id);
+      if (now) this.store.set(id, { ...now, messages: [...now.messages, ...kept, last] });
+    };
+    const startCall = (id_: string, name: string, summary: string, write: boolean, destructive: boolean): void => {
+      call = { id: id_, summary, write, destructive };
+      this.emit(id, { type: 'toolStarted', callId: id_, name, summary, write, destructive });
+      kept.push({ role: 'assistant', text: '', toolCalls: [{ id: id_, name, input: {} }], atMs: at() });
+    };
+    const finishCall = (name: string, ok: boolean, summary: string, data?: unknown, how?: 'declined' | 'stopped'): void => {
+      const started = call as NonNullable<typeof call>;
+      this.emit(id, { type: 'toolFinished', callId: started.id, name, ok, summary, ...(data === undefined ? {} : { data }), ...(how ? { outcome: how } : {}) });
+      kept.push({
+        role: 'tool',
+        text: summary,
+        toolCallId: started.id,
+        toolName: name,
+        ok,
+        summary,
+        callSummary: started.summary,
+        ...(started.write ? { write: true } : {}),
+        ...(started.destructive ? { destructive: true } : {}),
+        ...(how ? { outcome: how } : {}),
+        ...(data === undefined ? {} : { data }),
+        atMs: at(),
+      });
+    };
     const command = text.split(/\s/, 1)[0] ?? '';
     if (command === '/tool' || command === '/tool-fail' || command === '/tool-slow') {
       const what = text.slice(command.length).trim() || 'everything';
-      this.emit(id, { type: 'toolStarted', callId: 'call_1', name: 'find', summary: what, write: false, destructive: false });
+      startCall('call_1', 'find', what, false, false);
       if (command === '/tool-slow') {
         // The card stays "running" until the user presses Stop.
         await new Promise<void>((resolve) => (run.halt = resolve));
         run.halt = null;
+        // As the engine: the call that was running reports that it was stopped.
+        finishCall('find', false, 'Stopped by the user', undefined, 'stopped');
       } else if (command === '/tool-fail') {
-        this.emit(id, { type: 'toolFinished', callId: 'call_1', name: 'find', ok: false, summary: 'The index is locked by another process.' });
+        finishCall('find', false, 'The index is locked by another process.');
+        outcome = 'I could not look that up: the index is locked by another process. Try again in a moment.';
       } else {
-        this.emit(id, {
-          type: 'toolFinished',
-          callId: 'call_1',
-          name: 'find',
-          ok: true,
-          summary: '2 things found',
-          data: { citations: [{ text: 'item 7', target: 'record:7', title: 'Item 7' }] },
-        });
+        finishCall('find', true, '2 things found', { citations: [{ text: 'item 7', target: 'record:7', title: 'Item 7' }] });
       }
     } else if (command === '/write' && allowWrite) {
       run.call = 'call_2';
-      this.emit(id, { type: 'toolStarted', callId: 'call_2', name: 'erase', summary: 'Erase everything', write: true, destructive: true });
+      startCall('call_2', 'erase', 'Erase everything', true, true);
       this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, input: {} });
       const approved = await new Promise<boolean>((resolve) => (run.decision = resolve));
       run.decision = null;
       run.call = null;
       if (approved) this.erased++;
-      this.emit(id, { type: 'toolFinished', callId: 'call_2', name: 'erase', ok: approved, summary: approved ? 'Erased' : 'Declined by the user' });
+      finishCall('erase', approved, approved ? 'Erased' : 'Declined by the user', undefined, approved ? undefined : run.stopped ? 'stopped' : 'declined');
+      outcome = approved ? 'Done. I erased everything.' : 'I did not erase anything.';
     }
-    const answer = this.options.reply ? this.options.reply(text) : command === '/tool' ? 'Found item 7 for you.' : DEMO_ANSWER;
+    const answer = this.options.reply
+      ? this.options.reply(text)
+      : command === '/tool'
+        ? 'Found item 7 for you.'
+        : command === '/fail'
+          ? 'Let me explain how the request is handled, starting with the router and'
+          : outcome || DEMO_ANSWER;
     const words = answer.split(/(?<=\s)/);
     for (const word of words) {
       if (run.stopped) break;
@@ -273,6 +318,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
     }
     if (command === '/fail' && !run.stopped) {
       this.running.delete(id);
+      keep({ role: 'assistant', text: said, end: 'failed', error: { message: 'The model stopped answering.' }, atMs: at() });
       this.emit(id, { type: 'error', kind: 'failed', message: 'The model stopped answering.' });
       return;
     }
@@ -281,12 +327,8 @@ export class MemoryAssistantBackend extends AssistantBackend {
       await new Promise<void>((resolve) => (run.halt = resolve));
       run.halt = null;
     }
-    const done = this.store.get(id);
     this.running.delete(id);
-    if (done) {
-      const end = run.stopped ? ('cancelled' as const) : ('answered' as const);
-      this.store.set(id, { ...done, messages: [...done.messages, { role: 'assistant', text: said, end, atMs: done.updatedMs + 1 }] });
-    }
+    keep({ role: 'assistant', text: said, end: run.stopped ? 'cancelled' : 'answered', atMs: at() });
     this.emit(id, { type: 'done', text: said, usage: { inputTokens: 10, outputTokens: said.length }, end: run.stopped ? 'cancelled' : 'answered' });
   }
 }

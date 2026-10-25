@@ -126,7 +126,17 @@ describe('MemoryAssistantBackend', () => {
     await b.approve(write.ack.conversationId, 'call_2', true);
     await settle();
     expect(b.erased).toBe(1);
-    expect(b.approvals).toEqual([['call_2', true]]);
+    expect(write.events.at(-1)).toMatchObject({ type: 'done', text: 'Done. I erased everything.' });
+    const declined = await ask(b, '/write', true);
+    await settle(5);
+    await b.approve(declined.ack.conversationId, 'call_2', false);
+    await settle();
+    expect(b.erased).toBe(1);
+    expect(declined.events.at(-1)).toMatchObject({ type: 'done', text: 'I did not erase anything.' });
+    expect(b.approvals).toEqual([
+      ['call_2', true],
+      ['call_2', false],
+    ]);
     // Without "allow actions" the write is not offered at all.
     const plain = await ask(new MemoryAssistantBackend(), '/write');
     await settle();
@@ -156,6 +166,7 @@ describe('MemoryAssistantBackend', () => {
     const failed = await ask(b, '/fail now');
     await settle(300);
     expect(failed.events.some((e) => e.type === 'delta')).toBe(true);
+    expect(failed.events.filter((e) => e.type === 'delta').map((e) => (e as { text: string }).text).join('')).not.toBe(DEMO_ANSWER);
     expect(failed.events.at(-1)).toMatchObject({ type: 'error', kind: 'failed', message: 'The model stopped answering.' });
     expect(await b.stop(failed.ack.conversationId)).toBe(false);
 
@@ -176,14 +187,16 @@ describe('MemoryAssistantBackend', () => {
     expect(slow.events[1]).toMatchObject({ summary: 'lookup', write: false, destructive: false });
     expect(await b.stop(slow.ack.conversationId)).toBe(true);
     await settle(30);
-    expect(slow.events.some((e) => e.type === 'toolFinished' || e.type === 'delta')).toBe(false);
+    // As the engine does: the stopped call reports itself as stopped by the user (not as a failure of the tool), and nothing is said.
+    expect(slow.events.some((e) => e.type === 'delta')).toBe(false);
+    expect(slow.events.find((e) => e.type === 'toolFinished')).toMatchObject({ ok: false, outcome: 'stopped' });
     expect(slow.events.at(-1)).toMatchObject({ type: 'done', end: 'cancelled' });
 
     const fail = await ask(b, '/tool-fail');
     await settle(300);
     expect(fail.events.slice(0, 3).map((e) => e.type)).toEqual(['started', 'toolStarted', 'toolFinished']);
     expect(fail.events[2]).toMatchObject({ ok: false, summary: 'The index is locked by another process.' });
-    expect(fail.events.at(-1)).toMatchObject({ type: 'done', end: 'answered' });
+    expect(fail.events.at(-1)).toMatchObject({ type: 'done', end: 'answered', text: expect.stringContaining('index is locked') });
   });
 
   it('keeps /tool giving a citation and only the first word selects the behaviour', async () => {

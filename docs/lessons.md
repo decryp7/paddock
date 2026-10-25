@@ -417,3 +417,7 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
 - Build Linux test binaries in the guest's own release (ubuntu:24.04 arm64 container for the Ubuntu 24.04 guest), so
   glibc and WebKitGTK match; `cargo build --features tauri/custom-protocol` embeds the UI, without it a release binary
   loads `devUrl`.
+- Step a fake clock on waits that are pending (blocked, not yet due, not cancelled), not on a count of waits started:
+  another thread's short wait (a finished call's timer, its token already cancelled) bumps the count, the test advances
+  before the wait it meant exists, and that wait never ends (plugin-host hang, CI run 6319; reproduced 1 in 192 under
+  CPU stress, 0 in 384 with `FakeClock::wait_for_pending`).

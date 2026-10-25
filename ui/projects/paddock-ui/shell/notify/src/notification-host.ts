@@ -40,7 +40,7 @@ interface Timer {
         >
           <div class="pd-head">
             <span class="pd-mark" aria-hidden="true"></span>
-            <strong class="pd-title">{{ n.title }}@if ((n.count ?? 1) > 1) {<span class="pd-count" data-testid="notification-count"> (×{{ n.count }})</span>}</strong>
+            <strong class="pd-title" [class.pd-has-short]="!!n.short"><span class="pd-full">{{ n.title }}</span>@if (n.short) {<span class="pd-short" data-testid="notification-short">{{ n.short }}</span>}@if ((n.count ?? 1) > 1) {<span class="pd-count" data-testid="notification-count"> (×{{ n.count }})</span>}</strong>
           </div>
           @if (n.body) {
             <div class="pd-body">{{ n.body }}</div>
@@ -95,7 +95,10 @@ interface Timer {
     /* A small window (review 2, P3-14): one line above the status bar, full width, never wider than 360 px: the message, the
        first action and the close. The body, details and further actions stay in the notification centre; the two newest
        toasts show, so the stack never covers a fifth of the window. */
+    .pd-short { display: none; }
     @media (max-width: 480px) {
+      .pd-has-short .pd-full { display: none; }
+      .pd-has-short .pd-short { display: inline; }
       :host { left: var(--pd-space-2); right: var(--pd-space-2); }
       .pd-stack { align-items: stretch; }
       .pd-toast { width: auto; max-width: 360px; align-self: flex-end; flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-1) var(--pd-space-1) var(--pd-space-2); }

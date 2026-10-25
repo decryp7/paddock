@@ -77,6 +77,7 @@ import { formatBytes } from './format';
             {{ t.autoCheck }}
           </label>
           @if (s.channels.length > 1) {
+            <!-- eslint-disable-next-line @angular-eslint/template/label-has-associated-control -- the label wraps a pd-select, whose trigger button is the labelled control (ariaLabel is set) -->
             <label class="pd-check">
               {{ t.channel }}
               <pd-select [options]="channelOptions()" [value]="s.channel" [ariaLabel]="t.channel" (valueChange)="setChannel($event)" />
