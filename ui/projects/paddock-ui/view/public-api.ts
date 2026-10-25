@@ -33,7 +33,7 @@ export { NO_VIEW_HOST, VIEW_HOST, VIEW_NEEDS_AI, VIEW_OPEN_AI_SETTINGS, type Vie
 export { applyViewPatch, type PatchProblem, type PatchResult } from './src/patch';
 export { VIEW_EXTRA_LIMITS, isWebUrl, validateViewAction, validateViewDoc, type ViewIssue } from './src/limits';
 export { sampleViewDoc } from './src/sample';
-export { ICON_GLYPH, KNOWN_KINDS, TONE_GLYPH, glyphFor, mergeArgs, primaryNode, shapeOf, toneOf, toneWord, unknownKindName, type KnownKind, type NodeShape } from './src/model';
+export { ICON_GLYPH, KNOWN_KINDS, TONE_STATUS, glyphFor, mergeArgs, primaryNode, shapeOf, toneGlyph, toneOf, toneWord, unknownKindName, type KnownKind, type NodeShape } from './src/model';
 export { MARK_W, detailLines, hubOf, layers, layoutGraph, layoutSequence, ringsFrom, type Lifeline, type LayoutEdge, type LayoutNode, type Scene, type SceneEdge, type SceneNode } from './src/layout';
 // The wire types, generated from the Rust model by `PADDOCK_WRITE_TS=1 cargo test -p paddock-view --lib generated`.
 export * from './generated/view';
