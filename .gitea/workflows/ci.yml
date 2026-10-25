@@ -311,6 +311,7 @@ jobs:
       - name: DIAG dump wrapper log
         if: runner.os == 'macOS' && !cancelled()
         run: |
+          grep -E '^(EXT|SRC|ARGHASH)' "$HOME/.paddock-ci/diag-wrapper.log" | sort | head -300
           grep -E 'compiler\] \[.*(Cache miss in|Cache hit in)' "$HOME/.paddock-ci/sccache-server.log" | sed -E 's/.*\] \[([a-z_0-9]+)\]: (Cache [a-z]+) in.*/\2 \1/' | sort | uniq -c | sort -k2,3 | awk '{printf "%s:%s%s ", $2$3,$4,"x"$1}'; echo
 
       - name: paddock-menu
