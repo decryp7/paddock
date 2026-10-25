@@ -353,6 +353,17 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
   assert.equal(ci.split('uses: ./.gitea/actions/stable-workspace').length - 1, 1);
 });
 
+test('the test browser of a host job lives in a kept folder of the runner user, outside the checkout that stable-workspace moves', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
+  assert.equal(dirs.length, 2, 'one per host OS');
+  for (const d of dirs) {
+    assert.doesNotMatch(d, /GITHUB_WORKSPACE|\.\./, `${d}: a path relative to the checkout dies when the checkout moves`);
+    assert.match(d, /\.paddock-ci[\\/]test-browser/, d);
+  }
+  assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
+});
+
 test('the WebKit job runs on the Mac runner for pushes to main and v* tags only, and runs the three WebKit projects', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const on = ci.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
