@@ -1,0 +1,3 @@
+{
+  "$comment": "No CI yet: this app is docs only. Its changes mark only the link check (scripts/affected.mjs); when it gets code, give it a Cargo workspace and commands here (a ci.yml leg) or a workflow of its own."
+}

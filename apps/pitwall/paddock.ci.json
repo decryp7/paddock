@@ -1,0 +1,5 @@
+{
+  "$comment": "Pitwall's CI contract (scripts/affected.mjs, ADR 0014 §6). Pitwall is not a leg of ci.yml: its gates (Rust on several OS, licences, frontend, e2e, installers, the release from a pitwall-v* tag) are its own workflow, .gitea/workflows/pitwall.yml, whose plan job asks `node scripts/affected.mjs --ci --app pitwall`.",
+  "workflow": "pitwall.yml",
+  "cargo": "."
+}

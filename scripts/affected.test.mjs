@@ -12,7 +12,7 @@ const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readAp
 const run = (...files) => affected(files, graph);
 const APPS = [...graph.apps.keys()].sort();
 /** The apps that are legs of ci.yml (not those with a workflow of their own, such as Debrief). */
-const LEGS = APPS.filter((a) => !graph.apps.get(a).workflow);
+const LEGS = APPS.filter((a) => !graph.apps.get(a).workflow && graph.apps.get(a).cargo);
 
 describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
@@ -42,7 +42,9 @@ describe('the graph of this tree', () => {
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
-    assert.deepEqual(r.apps, ['shell-demo', 'workbench-demo']);
+    // Spotter maps @decryp7/paddock-ui to ui/dist in its tsconfig (a path edge, no npm edge).
+    assert.deepEqual(r.apps, ['shell-demo', 'spotter', 'workbench-demo']);
+    assert.deepEqual(r.kinds.spotter, ['ui']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
   });
 
@@ -322,6 +324,15 @@ describe('contracts', () => {
     assert.ok(!run('crates/paddock-jobs/src/lib.rs').apps.includes('debrief'), 'Debrief uses no shared crate by path today');
     assert.deepEqual(run('apps/debrief/docs/ai/sql-views.md').apps, ['debrief']);
     assert.deepEqual(run('apps/debrief/docs/adr/0001-x.md').apps, []);
+  });
+
+  test('a docs-only app (Pacenotes, Sighter) is no leg, and its docs mark only the link check', () => {
+    for (const a of ['pacenotes', 'sighter']) {
+      assert.ok(graph.apps.has(a), `${a} has its paddock.ci.json`);
+      assert.ok(!matrix(affected([], graph, { all: true }), graph).some((l) => l.app === a));
+      const d = run(`apps/${a}/docs/x.md`);
+      assert.deepEqual([d.apps, d.docs], [[], true]);
+    }
   });
 });
 

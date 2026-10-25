@@ -1,3 +1,8 @@
+# Spotter's CI and release in the Paddock monorepo (ADR 0014; moved from decryp7/spotter's build.yml): every step runs in
+# apps/spotter. The plan job runs the rest only when the change reaches Spotter (scripts/affected.mjs --ci --app spotter).
+# Installers are built for spotter-v* tags (which publish the Gitea release here, the moving spotter-latest release the app's
+# updater reads and the bridge latest.json in the old repo), the nightly run and manual runs.
+#
 # Checks Spotter on every push and pull request. Installers are built only for v* tags (which also publish a Gitea
 # release with them attached), the nightly run and manual runs (see the bundle job).
 #
@@ -13,12 +18,12 @@
 # `npm ci`; no such secret is assumed here.
 # Actions are referenced by tag; Renovate (renovate.json, helpers:pinGitHubActionDigests) pins them to digests.
 
-name: build
+name: spotter
 
 on:
   push:
-    branches: [main, 'wip/**']
-    tags: ["v*"]
+    branches: [main]
+    tags: ["spotter-v*"]
   pull_request:
   schedule:
     - cron: "45 0 * * *"
@@ -34,9 +39,47 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
+# Every step runs in the app's folder unless it says otherwise.
+defaults:
+  run:
+    working-directory: apps/spotter
+
 jobs:
+  # Runs the rest only when the change reaches Spotter (the same plan as ci.yml); a push to main whose commit carries a
+  # spotter-v* tag is covered by the tag run.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: .
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide
+        id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          PLAN_TOKEN: ${{ github.token }}
+        run: |
+          run=$(node scripts/affected.mjs --ci --app spotter)
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+            tag=$(git ls-remote --tags origin 'refs/tags/spotter-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
+            if [ -n "$tag" ]; then run=false; echo "::notice::commit is tagged $tag; the tag run is the gate."; fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
   rust-lint:
     name: rust format + clippy
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -64,9 +107,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-            !target/debug/incremental
-          key: clippy-garage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            apps/spotter/target
+            !apps/spotter/target/debug/incremental
+          key: clippy-garage-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
           restore-keys: clippy-garage-${{ runner.os }}-
 
       - name: Clippy
@@ -78,12 +121,14 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-            !target/debug/incremental
-          key: clippy-garage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            apps/spotter/target
+            !apps/spotter/target/debug/incremental
+          key: clippy-garage-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
 
   rust-test:
     name: rust tests (${{ matrix.os }})
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
     strategy:
       fail-fast: false
       matrix:
@@ -129,7 +174,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/spotter/**/Cargo.lock') }}
           restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
 
       - uses: actions/cache/restore@v4
@@ -139,7 +184,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
           restore-keys: test-registry-${{ runner.os }}-
 
       # Inside the job's own temp folder, never the user's ~/.cache (the runner context is not available in job env).
@@ -150,14 +195,14 @@ jobs:
       # The pinned Chrome for Testing (never an installed browser), cached by the manifest that pins it.
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: .nvmrc
 
       - name: Restore the test browser
         id: test-browser
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.SPOTTER_TEST_BROWSER_DIR }}
-          key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/spotter-render/src/chromium-manifest.toml') }}
+          key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/spotter/crates/spotter-render/src/chromium-manifest.toml') }}
 
       - name: Install the test browser
         if: steps.test-browser.outputs.cache-hit != 'true'
@@ -167,7 +212,7 @@ jobs:
         if: steps.test-browser.outputs.cache-hit != 'true'
         with:
           path: ${{ env.SPOTTER_TEST_BROWSER_DIR }}
-          key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('crates/spotter-render/src/chromium-manifest.toml') }}
+          key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/spotter/crates/spotter-render/src/chromium-manifest.toml') }}
 
       # The renderer's default window is a real (off-screen) one, which needs a display: a virtual one in the container.
       - name: Tests
@@ -187,7 +232,7 @@ jobs:
         if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
         with:
           path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/spotter/**/Cargo.lock') }}
 
       - uses: actions/cache/save@v4
         if: always() && runner.os == 'Linux' && steps.cargo-cache.outputs.cache-hit != 'true'
@@ -195,12 +240,14 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
 
   # The macOS code for real (the launch agent, Unix socket, SIGTERM stops, Keychain, SMAppService): clippy and the
   # tests on the Mac host runner. Host toolchains are used as they are (Rust and Node are installed there).
   macos:
     name: macOS clippy + tests
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
     runs-on: macos-latest
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/../.spotter-ci-target
@@ -225,7 +272,7 @@ jobs:
       # Downloaded fresh each run on the host Mac (no cache): the browser lives only in runner.temp and is deleted below.
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: .nvmrc
 
       - name: Install the test browser (macOS)
         run: node scripts/install-test-browser.mjs
@@ -244,6 +291,8 @@ jobs:
 
   licences:
     name: licences, scripts + commits
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -265,12 +314,12 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: licences-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
           restore-keys: licences-${{ runner.os }}-
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: .nvmrc
 
       - name: Commit messages follow Conventional Commits
         if: github.event_name == 'pull_request'
@@ -292,28 +341,30 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+          key: licences-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}-${{ github.run_id }}
 
   frontend:
     name: frontend build, lint + unit tests
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     defaults:
       run:
-        working-directory: app
+        working-directory: apps/spotter/app
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install
         run: |
-          npm ci
+          (cd ../../.. && npm ci && npm run build -w ui)
           npm audit --omit=dev --audit-level=high
 
       - name: Lint
@@ -328,12 +379,14 @@ jobs:
   # Browser flows against `ng serve` with the mock backend. Port 4370 (Spotter's, not the default) and one worker.
   e2e:
     name: e2e (playwright, mock backend)
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     defaults:
       run:
-        working-directory: app
+        working-directory: apps/spotter/app
     env:
       PW_PORT: "4370"
     steps:
@@ -341,12 +394,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install
-        run: npm ci
+        run: (cd ../../.. && npm ci && npm run build -w ui)
 
       - name: Playwright browsers (Chromium + WebKit)
         run: npx playwright install --with-deps chromium webkit
@@ -358,13 +411,13 @@ jobs:
         if: failure()
         with:
           name: playwright-results
-          path: app/.angular/playwright-results
+          path: apps/spotter/app/.angular/playwright-results
           if-no-files-found: ignore
 
   bundle:
     name: bundle (${{ matrix.os }})
-    needs: [rust-lint]
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: [plan, rust-lint]
+    if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
       matrix:
@@ -400,13 +453,13 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/spotter/**/Cargo.lock') }}
           restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
 
       - uses: actions/setup-node@v4
         if: runner.os == 'Linux'
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: .nvmrc
 
       - name: Git bash on PATH and a persistent build folder (Windows)
         if: runner.os == 'Windows'
@@ -421,24 +474,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: runner.os != 'macOS'
 
-      # Host runners keep their own Node; fail fast when it is missing or not the major version app/.nvmrc asks for.
+      # Host runners keep their own Node; fail fast when it is missing or not the major version the repo root .nvmrc asks for.
       - name: Host Node matches app/.nvmrc
         if: runner.os != 'Linux'
         shell: bash
         run: |
-          want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+          want=$(tr -d ' v\r\n' < ../../.nvmrc | cut -d. -f1)
           if ! command -v node >/dev/null; then
             if [ -x "/c/Program Files/nodejs/node.exe" ]; then
               echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
               export PATH="/c/Program Files/nodejs:$PATH"
             else
-              echo "::error::Node.js is not installed on this runner: install Node $want (app/.nvmrc)."
+              echo "::error::Node.js is not installed on this runner: install Node $want (.nvmrc at the repo root)."
               exit 1
             fi
           fi
           have=$(node -p 'process.versions.node.split(".")[0]')
           if [ "$have" != "$want" ]; then
-            echo "::error::The runner has Node $(node --version) but app/.nvmrc asks for Node $want."
+            echo "::error::The runner has Node $(node --version) but the repo root .nvmrc asks for Node $want."
             exit 1
           fi
 
@@ -446,19 +499,22 @@ jobs:
       # installer and the public key is built into the app. Without them (forks, pull requests) the app reports
       # "Updates are not available in this build".
       - name: Build installers
-        working-directory: app
+        working-directory: apps/spotter/app
         shell: bash
         env:
           # Tauri's DMG step skips Finder window scripting on CI (no Automation permission prompt on the host).
           CI: "true"
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # One updater key for the family (ADR 0014, amendment): built with the shared public key; the first monorepo
+          # release is the transition release, signed with the app's old key (SPOTTER_TRANSITION_SIGNING_KEY, copied from the
+          # old repo's secrets; delete it after that release), every later one with the shared key.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.SPOTTER_TRANSITION_SIGNING_KEY || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.SPOTTER_TRANSITION_SIGNING_KEY && secrets.SPOTTER_TRANSITION_SIGNING_KEY_PASSWORD || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
           # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           BUNDLES: ${{ matrix.bundles }}
         run: |
-          npm ci
+          (cd ../../.. && npm ci && npm run build -w ui)
           # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's
           # (signed) installer can never be collected into this release.
           target="${CARGO_TARGET_DIR:-target}"
@@ -498,7 +554,7 @@ jobs:
         if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
         with:
           path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/spotter/**/Cargo.lock') }}
 
       # signingIdentity "-" must leave an ad-hoc sealed .app and DMG with the hardened runtime off, one TeamIdentifier on
       # every bundled Mach-O, and sidecars that start from the built app (Paddock rule 23).
@@ -524,13 +580,13 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: spotter-${{ runner.os }}
-          path: dist/*
+          path: apps/spotter/dist/*
           if-no-files-found: error
 
   release:
     name: release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [bundle, rust-lint, rust-test, macos, licences, frontend, e2e]
+    if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/spotter-v'))
+    needs: [plan, bundle, rust-lint, rust-test, macos, licences, frontend, e2e]
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -541,18 +597,18 @@ jobs:
 
       - uses: actions/download-artifact@v3
         with:
-          path: artifacts
+          path: apps/spotter/artifacts
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: .nvmrc
 
       - name: Release notes (git-cliff)
         run: |
           cargo install git-cliff --locked
-          git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+          git cliff -r ../.. --config cliff.toml --tag-pattern 'spotter-v.*' --include-path 'apps/spotter/**' --include-path 'crates/**' --include-path 'ui/**' --latest --strip header -o artifacts/RELEASE_NOTES.md
           # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
           cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
 
@@ -579,7 +635,7 @@ jobs:
             echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
             exit 0
           fi
-          node scripts/release/latest-json.mjs --dir artifacts --version "$TAG" --notes artifacts/RELEASE_NOTES.md \
+          node scripts/release/latest-json.mjs --dir artifacts --version "${TAG#spotter-}" --notes artifacts/RELEASE_NOTES.md \
             --base-url "$BASE_URL" --out artifacts/latest.json
           find artifacts -name '*.sig' -delete
           cat artifacts/latest.json
@@ -589,7 +645,15 @@ jobs:
         shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          OLD_REPO: decryp7/spotter
         run: |
           node --test scripts/release/publish.test.mjs
-          node scripts/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" \
-            --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
+          publish=../../conformance/release/publish.mjs
+          api="${{ github.server_url }}/api/v1"
+          node "$publish" --api "$api" --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
+          if [ ! -f artifacts/latest.json ]; then exit 0; fi
+          # The updater's two endpoints (ADR 0014 §4): the moving spotter-latest release here, and the bridge, the old repo's newest
+          # release (its releases/download/latest/ resolves there), for copies installed before the move.
+          mkdir -p "$RUNNER_TEMP/latest" && cp artifacts/latest.json "$RUNNER_TEMP/latest/"
+          node "$publish" --api "$api" --repo "${{ github.repository }}" --tag spotter-latest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace
+          node "$publish" --api "$api" --repo "$OLD_REPO" --newest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace

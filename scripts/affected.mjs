@@ -65,7 +65,7 @@ export function appOfWorkflow(path, appNames) {
 }
 
 /** Editor and VCS metadata: marks nothing. */
-export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/];
+export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];
 
 /** Documentation: marks only the link check... */
 export const DOCS = [/\.md$/, /^docs\//, /^apps\/[^/]+\/docs\//, /^diagrams\//, /(^|\/)LICENSE[^/]*$/];
@@ -380,8 +380,10 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
  * filter (only when `narrow`: a pull request whose change reaches part of the app's Cargo workspace; '' runs it all).
  */
 export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
-  // An app with a workflow of its own (paddock.ci.json `workflow`) is not a leg: its workflow asks `--ci --app`.
-  return plan.apps.filter((name) => !apps.get(name).workflow).map((name) => {
+  // An app with a workflow of its own (paddock.ci.json `workflow`) is not a leg: its workflow asks `--ci --app`. An app
+  // with nothing to run (docs only: no Cargo workspace, no commands) is no leg either.
+  const runs = (a) => !a.workflow && (a.cargo || a.prepare?.length || a.checks?.length || a.ui?.length);
+  return plan.apps.filter((name) => runs(apps.get(name))).map((name) => {
     const app = apps.get(name);
     const cargoDir = app.cargo ? `${app.dir}/${app.cargo}` : '';
     const members = [...cargo.values()].filter((c) => c.workspace === cargoDir).map((c) => c.name);
