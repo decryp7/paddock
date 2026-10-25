@@ -19,7 +19,7 @@ body {
   height: 100%;
   overflow: hidden;
   background: transparent;
-  user-select: none;
+  -webkit-user-select: none; user-select: none;
   cursor: default;
 }
 .ghost {
