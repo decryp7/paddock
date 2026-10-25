@@ -7,7 +7,7 @@ copied unchanged.
 
 ## Pitcrew's colours
 
-Applied with `node diagrams/tools/apply-accent.mjs pitcrew <template>` from a Paddock checkout. Light / dark, stroke on fill.
+Applied with `node diagrams/tools/apply-accent.mjs pitcrew <template>` from the monorepo root. Light / dark, stroke on fill.
 
 | Role | Colours | Use here |
 |---|---|---|
