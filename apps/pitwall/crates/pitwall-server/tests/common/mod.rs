@@ -32,6 +32,9 @@ pub struct FakeEngine {
     pub attempts: Arc<AtomicUsize>,
     /// How many of the next starts fail as if another program had taken the port (a race `free_port` cannot rule out).
     pub port_taken: Arc<AtomicUsize>,
+    /// How many of the next starts find their port taken by another listener at the real bind (the race with a parallel
+    /// test that `port_taken` does not cover: the fake gets past its own check, then the bind fails).
+    pub bind_stolen: Arc<AtomicUsize>,
     /// `POST /slots/{n}?action=erase` calls received (the context release).
     pub erases: Arc<AtomicUsize>,
     pub fail: bool,
@@ -86,12 +89,12 @@ impl Engine for FakeEngine {
             if taken {
                 return Err(EngineError::Start("bind: Address already in use (os error 98)".into()));
             }
-            self.starts.fetch_add(1, Ordering::SeqCst);
             self.contexts.lock().unwrap().push(l.context);
             self.parallels.lock().unwrap().push(l.parallel);
             let (delay, live, peak) = (self.delay_ms.clone(), self.live.clone(), self.peak.clone());
             let bodies = self.bodies.clone();
             if self.fail {
+                self.starts.fetch_add(1, Ordering::SeqCst);
                 return Err(EngineError::Start("the fake engine refuses to start".into()));
             }
             let erases = self.erases.clone();
@@ -168,9 +171,17 @@ impl Engine for FakeEngine {
                         }
                     }),
                 );
+            // Another listener on the port at the real bind (bind_stolen): held across the bind, so it fails as the race does.
+            let thief = (self.bind_stolen.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok())
+                .then(|| std::net::TcpListener::bind(("127.0.0.1", l.port)))
+                .transpose()
+                .map_err(|e| EngineError::Start(e.to_string()))?;
             let listener = tokio::net::TcpListener::bind(("127.0.0.1", l.port))
                 .await
                 .map_err(|e| EngineError::Start(e.to_string()))?;
+            drop(thief);
+            // A start is a model load: counted once the engine serves, never for a bind that lost the port.
+            self.starts.fetch_add(1, Ordering::SeqCst);
             let h = tokio::spawn(async move {
                 let _ = axum::serve(listener, app).await;
             });
@@ -196,6 +207,7 @@ pub struct Harness {
     pub starts: Arc<AtomicUsize>,
     pub attempts: Arc<AtomicUsize>,
     pub port_taken: Arc<AtomicUsize>,
+    pub bind_stolen: Arc<AtomicUsize>,
     pub erases: Arc<AtomicUsize>,
     pub bodies: Arc<std::sync::Mutex<Vec<Value>>>,
     pub contexts: Arc<std::sync::Mutex<Vec<u32>>>,
@@ -241,6 +253,7 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
     let starts = Arc::new(AtomicUsize::new(0));
     let attempts = Arc::new(AtomicUsize::new(0));
     let port_taken = Arc::new(AtomicUsize::new(0));
+    let bind_stolen = Arc::new(AtomicUsize::new(0));
     let erases = Arc::new(AtomicUsize::new(0));
     let bodies = Arc::new(std::sync::Mutex::new(vec![]));
     let contexts = Arc::new(std::sync::Mutex::new(vec![]));
@@ -255,6 +268,7 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
             starts: starts.clone(),
             attempts: attempts.clone(),
             port_taken: port_taken.clone(),
+            bind_stolen: bind_stolen.clone(),
             erases: erases.clone(),
             fail,
             bodies: bodies.clone(),
@@ -284,6 +298,7 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
         starts,
         attempts,
         port_taken,
+        bind_stolen,
         erases,
         bodies,
         contexts,
@@ -373,6 +388,7 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
         starts: Arc::new(AtomicUsize::new(0)),
         attempts: Arc::new(AtomicUsize::new(0)),
         port_taken: Arc::new(AtomicUsize::new(0)),
+        bind_stolen: Arc::new(AtomicUsize::new(0)),
         erases: Arc::new(AtomicUsize::new(0)),
         bodies: Arc::new(std::sync::Mutex::new(vec![])),
         contexts: Arc::new(std::sync::Mutex::new(vec![])),

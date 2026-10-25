@@ -551,6 +551,22 @@ async fn a_start_retried_after_a_taken_port_is_still_one_model_load() {
     assert_eq!(h.starts.load(Ordering::SeqCst), 1, "one load");
 }
 
+/// Regression (a_dead_engine_is_forgotten_and_reloaded counted 3 loads in 2 of 6 runs, 2026-10-25): a parallel test can
+/// take the probed port between the fake's own check and its real bind; the bind fails, serving retries on a fresh
+/// port, and that retry is still one model load.
+#[tokio::test]
+async fn a_start_whose_port_is_taken_at_the_real_bind_is_still_one_model_load() {
+    let h = harness(false).await;
+    h.bind_stolen.store(1, Ordering::SeqCst);
+    let key = h.make_key("Racer").await;
+    let r = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(h.attempts.load(Ordering::SeqCst), 2, "the first bind lost the port, the retry won it");
+    assert_eq!(h.starts.load(Ordering::SeqCst), 1, "one load");
+}
+
 #[tokio::test]
 async fn a_dead_engine_is_forgotten_and_reloaded_despite_a_port_race() {
     let h = harness(false).await;
