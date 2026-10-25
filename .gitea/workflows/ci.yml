@@ -232,12 +232,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates never
-      # hit. Run from the same physical path every time (the old path stays as a link). Linux: containers, nothing to do.
-      - uses: ./.gitea/actions/stable-workspace
-        with:
-          name: paddock-${{ github.job }}-${{ runner.os }}
-
       # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it), a build folder that outlives the job, and
       # eight build jobs (the runner runs two jobs at once).
       - name: Git bash on PATH and a persistent build folder (Windows)
@@ -259,6 +253,15 @@ jobs:
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
           echo "PADDOCK_TEST_BROWSER_DIR=$GITHUB_WORKSPACE/../.paddock-ci-test-browser" >> "$GITHUB_ENV"
 
+      # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
+      # on every run. Run from the same physical path every time (the old path stays as a link). macOS only: on Windows the
+      # step would run before Git's bash is on PATH (`shell: bash` then finds WSL's bash.exe) and the runner keeps handles open
+      # in its work folder; the Windows build folder already outlives the job.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os == 'macOS'
+        with:
+          name: paddock-${{ github.job }}-${{ runner.os }}
+
       # Toolchain and sccache on every OS: the shared Redis backend (database 5) when the Gitea variables are set. The macOS
       # leg can switch to the local disk with `sccache-backend: local` if the network proves slower than its disk.
       - uses: ./.gitea/actions/setup-rust
@@ -267,10 +270,6 @@ jobs:
           sccache-backend: auto
           sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
-
-      - name: DIAG reset wrapper log
-        if: runner.os == 'macOS'
-        run: mkdir -p "$HOME/.paddock-ci" && rm -f "$HOME/.paddock-ci/diag-wrapper.log"
 
       - name: Toolchain present
         run: |
@@ -307,12 +306,6 @@ jobs:
       - name: paddock-jobs
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-jobs --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-jobs --all-features --profile ci && cargo test -p paddock-jobs --all-features --doc
-
-      - name: DIAG dump wrapper log
-        if: runner.os == 'macOS' && !cancelled()
-        run: |
-          grep -E '^(EXT|SRC|ARGHASH)' "$HOME/.paddock-ci/diag-wrapper.log" | sort | head -300
-          grep -E 'compiler\] \[.*(Cache miss in|Cache hit in)' "$HOME/.paddock-ci/sccache-server.log" | sed -E 's/.*\] \[([a-z_0-9]+)\]: (Cache [a-z]+) in.*/\2 \1/' | sort | uniq -c | sort -k2,3 | awk '{printf "%s:%s%s ", $2$3,$4,"x"$1}'; echo
 
       - name: paddock-menu
         if: ${{ !cancelled() }}

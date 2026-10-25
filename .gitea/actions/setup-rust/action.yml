@@ -137,7 +137,6 @@ runs:
         sccache --version
         # A server left on this port by an earlier job would keep that job's backend: start it fresh with this job's settings.
         sccache --stop-server >/dev/null 2>&1 || true
-        rm -f "$HOME/.paddock-ci/sccache-server.log"; mkdir -p "$HOME/.paddock-ci"; export SCCACHE_LOG=debug SCCACHE_ERROR_LOG="$HOME/.paddock-ci/sccache-server.log" # DIAG-TEMP
         sccache --start-server || echo "::warning::the sccache server did not start; the build runs without the shared cache."
     - name: Linux dependencies for Tauri
       if: runner.os == 'Linux' && inputs.tauri-linux-deps == 'true'
