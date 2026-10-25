@@ -1,0 +1,500 @@
+# Checks Pitwall on every push and pull request on all three platforms; installers are built for main pushes, tags,
+# the nightly run and manual runs. A v* tag runs the same checks and the release job publishes only if all of them
+# (and the installer builds) passed: one workflow, one gate (docs/releasing.md).
+#
+# Runner labels: ubuntu-latest (container jobs in catthehacker/ubuntu:act-latest), windows-latest (host runner, Git
+# for Windows on PATH), macos-latest (host runner on the owner's Apple Silicon Mac: one job at a time, so the macOS
+# jobs stay lean, install nothing system-wide and leave nothing behind).
+# The Tauri shell (app/src-tauri) is built by another change; its steps are skipped while the folder is missing.
+# Actions are pinned to commit digests (Renovate keeps them current); Gitea Actions needs v3 of the artifact actions.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    - cron: "45 1 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  rust-lint:
+    name: rust format + clippy
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Linux dependencies for Tauri
+        if: hashFiles('app/src-tauri/Cargo.toml') != ''
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/debug/incremental
+          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: clippy-${{ runner.os }}-
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/debug/incremental
+          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+  rust-test:
+    name: rust tests + core coverage (linux)
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Linux dependencies for Tauri
+        if: hashFiles('app/src-tauri/Cargo.toml') != ''
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
+        with:
+          tool: cargo-llvm-cov
+
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: test-registry-${{ runner.os }}-
+
+      # Includes crates/pitwall-server/tests/privacy.rs (ADR 0001: only egress.rs may use reqwest) and the API
+      # contract tests against the fake engine.
+      # The Tauri shell is tested last: tauri-build copies its (empty, placeholder) sidecar over target/debug/pitwall-server,
+      # which the server's end-to-end tests start as a child process, so they must run before the shell is built.
+      - name: Tests
+        run: cargo test --workspace --exclude pitwall-app
+
+      # AGENTS.md: pitwall-core >= 99% lines.
+      - name: Core coverage guard (>= 99% lines)
+        run: cargo llvm-cov -p pitwall-core --summary-only --fail-under-lines 99
+
+      # Tests are timezone-independent (docs/suite-lessons.md).
+      - name: Tests in another time zone
+        env:
+          TZ: Pacific/Auckland
+        run: cargo test -p pitwall-core -p pitwall-server
+
+      - name: Tauri shell tests
+        if: hashFiles('app/src-tauri/Cargo.toml') != ''
+        run: cargo test -p pitwall-app
+
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+  # Windows: the crates that build there, and the Windows service code of pitwall-server type-checked and linted.
+  windows:
+    name: windows tests + clippy
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Host-mode runner: Git's bash on PATH (actions and `shell: bash` need it) and a build folder that outlives the
+      # job so the next run builds incrementally.
+      - name: Git bash on PATH and a persistent build folder
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.pitwall-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: clippy
+
+      - name: Clippy (core, loopback, server incl. Windows service code)
+        shell: bash
+        run: cargo clippy -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli --all-targets -- -D warnings
+
+      - name: Tests (core, loopback, server)
+        shell: bash
+        run: cargo test -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli
+
+  # The macOS code for real: clippy and the tests of the engine and the server on the Mac host runner. Host toolchains
+  # are used as they are (Rust and Node are installed there); nothing is installed.
+  macos:
+    name: macOS clippy + tests
+    runs-on: macos-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../.pitwall-ci-target
+      CARGO_BUILD_JOBS: "4"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Toolchain present
+        run: |
+          rustc --version && cargo --version
+          cargo clippy --version || { echo "::error::clippy is missing on the Mac runner (rustup component add clippy)"; exit 1; }
+
+      - name: Clippy (macOS)
+        run: cargo clippy -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli --all-targets -- -D warnings
+
+      - name: Tests (macOS)
+        run: cargo test -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli
+
+      - name: Clean up test processes and temp dirs
+        if: always()
+        run: bash scripts/ci/macos-cleanup.sh
+
+  licences:
+    name: licences, privacy, scripts + commits
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Full history so pull requests can check every commit message.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
+        with:
+          tool: cargo-deny
+
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: licences-${{ runner.os }}-
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Commit messages follow Conventional Commits
+        if: github.event_name == 'pull_request'
+        run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
+
+      - name: Script tests
+        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/ci/*.test.mjs
+
+      - name: App icons fill the canvas
+        run: node scripts/ci/check-icons.mjs
+
+      # ADR 0001: reqwest is referenced only in crates/pitwall-server/src/egress.rs.
+      - name: Privacy (outbound HTTP only through egress.rs)
+        run: |
+          bash scripts/ci/privacy-check.sh
+          cargo test -p pitwall-server --test privacy
+
+      - name: Licences, advisories and sources
+        run: cargo deny --workspace check
+
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always()
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+
+  frontend:
+    name: frontend build, lint + unit tests
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install and audit
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npx ng lint
+
+      - name: Build
+        run: npx ng build
+
+      # Tauri adds a CSP nonce for inline <style>/<script>, which blocks Angular's runtime styles (suite lessons).
+      - name: index.html has no inline elements
+        working-directory: .
+        run: node scripts/ci/check-index.mjs app/dist/app/browser/index.html
+
+      - name: Unit tests
+        run: npx ng test --watch=false --coverage
+
+      - name: UI coverage guard (>= 80% lines)
+        working-directory: .
+        run: node scripts/ci/ui-coverage-guard.mjs --min 80 --dir app/coverage
+
+  e2e:
+    name: playwright e2e (mock backend)
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    env:
+      PW_E2E_PORT: "4350"
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - run: npm ci
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+
+      - name: Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      # One worker: the dev server and two browsers on a shared runner are flaky with more.
+      - name: End-to-end tests
+        run: npx playwright test --workers=1
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure()
+        with:
+          name: playwright-report
+          path: app/playwright-report
+          if-no-files-found: ignore
+
+  # Installers (unsigned unless the signing secrets are set). Main pushes, tags, the nightly run and manual runs.
+  # Every step skips while app/src-tauri does not exist.
+  bundle:
+    name: bundle (${{ matrix.os }})
+    needs: [rust-lint]
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bundles: deb,appimage
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: app,dmg
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'catthehacker/ubuntu:act-latest' || '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Linux dependencies for Tauri and the bundles
+        if: runner.os == 'Linux' && hashFiles('app/src-tauri/Cargo.toml') != ''
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf file xdg-utils
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: runner.os == 'Linux'
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.pitwall-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      # The Mac host runner keeps its own toolchain; keep its build folder outside the checkout.
+      - name: Build folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_TARGET_DIR=${{ github.workspace }}/../.pitwall-ci-target-bundle" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: runner.os != 'macOS'
+
+      - name: Host Node matches app/.nvmrc
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+          if ! command -v node >/dev/null; then
+            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/nodejs:$PATH"
+            else
+              echo "::error::Node.js is not installed on this runner: install Node $want (app/.nvmrc)."
+              exit 1
+            fi
+          fi
+          have=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$have" != "$want" ]; then
+            echo "::error::The runner has Node $(node --version) but app/.nvmrc asks for Node $want."
+            exit 1
+          fi
+
+      - name: Build installers
+        shell: bash
+        env:
+          # Tauri's DMG step skips Finder window scripting on CI (no Automation prompt on the host).
+          CI: "true"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: bash scripts/ci/tauri-bundle.sh "${{ matrix.bundles }}"
+
+      # signingIdentity "-" must leave an ad-hoc sealed bundle; native libraries resolve by run path.
+      - name: Verify the .app and the DMG (seal, no hardened runtime while ad hoc, Team IDs, sidecars start, run path)
+        if: runner.os == 'macOS' && hashFiles('app/src-tauri/Cargo.toml') != ''
+        run: bash scripts/ci/macos-verify-bundle.sh
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: hashFiles('app/src-tauri/Cargo.toml') != ''
+        with:
+          name: pitwall-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Clean up (macOS)
+        if: always() && runner.os == 'macOS'
+        run: bash scripts/ci/macos-cleanup.sh --build-outputs
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    # Gated: a tag publishes only when every check job and every installer build passed (a skipped or failed need blocks it).
+    needs: [rust-lint, rust-test, windows, macos, licences, frontend, e2e, bundle]
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
+        with:
+          path: artifacts
+
+      - name: Installers are present
+        run: |
+          if ! find artifacts -type f | grep -q .; then
+            echo "::error::No installers were built (app/src-tauri missing?): nothing to release."
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Release notes (git-cliff)
+        run: |
+          cargo install git-cliff --locked
+          git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+          # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
+          cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
+
+          ### First launch
+
+          Pitwall is not code-signed yet, so your system may warn the first time you open it.
+
+          - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Pitwall > **Open Anyway**.
+          - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
+          FIRST_LAUNCH
+
+      # latest.json: version, notes, pub_date and, per platform, the installer's URL, signature and size. Installed
+      # apps fetch releases/download/latest/latest.json (the latest non-pre-release).
+      - name: Updater manifest (latest.json)
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          # Not github.server_url: inside the runners that is Gitea's internal http://172.16.1.220:7400, which latest-json
+          # refuses (the updater needs an https base URL), failing the release job after every installer is built.
+          BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          node --test scripts/release/latest-json.test.mjs
+          if ! find artifacts -name '*.sig' | grep -q .; then
+            echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
+            exit 0
+          fi
+          node scripts/release/latest-json.mjs --dir artifacts --version "$TAG" --notes artifacts/RELEASE_NOTES.md \
+            --base-url "$BASE_URL" --out artifacts/latest.json
+          find artifacts -name '*.sig' -delete
+          cat artifacts/latest.json
+
+      # Plain API calls instead of gitea.com/actions/release-action, which is a Go action and the runner image has no Go.
+      - name: Publish the release
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          node --test scripts/release/publish.test.mjs
+          node scripts/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" \
+            --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts

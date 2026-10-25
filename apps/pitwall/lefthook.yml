@@ -1,0 +1,32 @@
+# Git hooks (https://lefthook.dev). Install once with `npx lefthook install`
+# (or `lefthook install` if it is on PATH). Hooks check only what is staged,
+# so they stay fast; CI runs the full gates from AGENTS.md.
+pre-commit:
+  parallel: true
+  commands:
+    rustfmt:
+      glob: "*.rs"
+      run: rustfmt --edition 2021 --check {staged_files}
+    clippy:
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets --quiet -- -D warnings
+    privacy:
+      glob: "*.{rs,toml}"
+      run: bash scripts/ci/privacy-check.sh
+    eslint:
+      root: "app/"
+      glob: "*.{ts,html}"
+      run: npx eslint --max-warnings 0 {staged_files}
+
+commit-msg:
+  commands:
+    conventional:
+      run: node scripts/commit-lint.mjs --file {1}
+
+# The slower gates from AGENTS.md run before a push.
+pre-push:
+  commands:
+    scripts:
+      run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/ci/
+    deny:
+      run: cargo deny --workspace check

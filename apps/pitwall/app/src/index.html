@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pitwall</title>
+  <base href="/">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <!-- Local only: nothing is ever loaded from another origin. The Tauri CSP (tauri.conf.json) is the enforced one;
+       this mirrors it for the browser build. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' ws://localhost:* ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+</head>
+<body>
+  <pw-root>
+    <div class="pw-splash" role="status">
+      <img class="pw-splash-logo" src="favicon.svg" alt="" width="48" height="48">
+      <p>Starting Pitwall&hellip;</p>
+    </div>
+  </pw-root>
+</body>
+</html>

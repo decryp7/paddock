@@ -1,0 +1,36 @@
+[package]
+name = "pitwall-cli"
+description = "The `pitwall` command-line tool: status, models, load, unload, pull, keys, presets, chat and bench over the local APIs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[lib]
+name = "pitwall_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pitwall"
+path = "src/main.rs"
+
+[dependencies]
+pitwall-core.workspace = true
+# The only way the CLI reaches the server: a client that cannot hold an address other than 127.0.0.1 (ADR 0001).
+pitwall-loopback = { path = "../pitwall-loopback" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "time", "io-util", "io-std"] }
+# The OS credential store holds the app's copy of the admin key (the same entry the Pitwall window uses).
+keyring = "4.2"
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "time", "io-util", "macros"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,122 @@
+<div class="page">
+  <header class="page-head">
+    <div>
+      <h1>Playground</h1>
+      <p class="sub">Try local models. Nothing you type here leaves this computer.</p>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" [attr.aria-pressed]="store.compare()" [class.on]="store.compare()" (click)="store.setCompare(!store.compare())">
+        <mat-icon svgIcon="pw:compare" aria-hidden="true" />Compare
+      </button>
+      <button type="button" class="btn ghost" [disabled]="store.empty()" (click)="store.clear()"><mat-icon svgIcon="pw:trash" aria-hidden="true" />Clear</button>
+    </div>
+  </header>
+
+  @if (store.error()) {
+    <pw-panel heading="Models" icon="models" [error]="store.error()" [ready]="false" (retry)="store.load()" />
+  }
+
+  <div class="layout">
+    <div class="chat">
+      <div class="panes" [class.two]="store.compare()">
+        @for (i of store.activePanes(); track i) {
+          @let pane = store.panes()[i];
+          <section class="pane" [attr.aria-label]="store.compare() ? 'Conversation ' + (i + 1) : 'Conversation'">
+            <header class="pane-head">
+              <label class="sr-only" [for]="'pg-model-' + i">Model{{ store.compare() ? ' ' + (i + 1) : '' }}</label>
+              <pw-select class="model" [inputId]="'pg-model-' + i" [label]="'Model' + (store.compare() ? ' ' + (i + 1) : '')" [options]="modelOptions()" [value]="pane.modelId ?? ''" [disabled]="store.streaming()" (changed)="store.setModel(i, $event)" />
+              @if (model(pane.modelId); as m) {
+                <span class="status" [attr.data-tone]="m.loaded ? 'ok' : 'muted'" [matTooltip]="m.loaded ? 'Loaded: answers start at once' : 'Not loaded: the first answer includes a cold start'">{{ m.loaded ? 'Hot' : 'Cold' }}</span>
+                <span class="faint meta">{{ size(m.sizeBytes) }}{{ m.paramsB ? ' · ' + m.paramsB + 'B' : '' }}</span>
+              }
+            </header>
+
+            <div class="msgs" #msgs aria-live="polite" [attr.aria-busy]="store.streaming()">
+              @if (pane.turns.length === 0) {
+                <div class="empty">
+                  <mat-icon svgIcon="pw:sparkles" aria-hidden="true" />
+                  <p class="title">{{ model(pane.modelId)?.name ?? 'No chat model' }}</p>
+                  <p class="faint">{{ store.chatModels().length ? 'Ask anything, or start with one of these:' : 'Download a chat model in Models first.' }}</p>
+                  @if (i === 0 && store.chatModels().length) {
+                    <div class="sugg">
+                      @for (s of suggestions; track s) {
+                        <button type="button" class="chip" (click)="send(s)">{{ s }}</button>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+              @for (t of pane.turns; track $index) {
+                @if (t.role === 'user') {
+                  <div class="turn user"><p class="text pitwall-selectable">{{ t.content }}</p></div>
+                } @else {
+                  <div class="turn bot">
+                    <span class="avatar" aria-hidden="true"><mat-icon svgIcon="pw:sparkles" /></span>
+                    <div class="body">
+                      @if (t.content || !t.streaming) {
+                        <p class="text pitwall-selectable">{{ t.content }}@if (t.streaming) {<span class="caret" aria-hidden="true"></span>}</p>
+                      } @else {
+                        <p class="thinking" aria-label="Waiting for the first token"><span></span><span></span><span></span></p>
+                      }
+                      @if (t.error; as e) {
+                        <p class="err" role="alert"><mat-icon svgIcon="pw:error" aria-hidden="true" />{{ e.message }}</p>
+                      }
+                      @if (t.stats; as s) {
+                        <p class="stats num">{{ stats(s) }}</p>
+                      } @else if (t.stopped) {
+                        <p class="stats">Stopped</p>
+                      }
+                    </div>
+                  </div>
+                }
+              }
+            </div>
+          </section>
+        }
+      </div>
+
+      <form class="composer" (submit)="$event.preventDefault(); send()">
+        <label class="sr-only" for="pg-prompt">Message</label>
+        <textarea
+          id="pg-prompt"
+          class="input"
+          rows="2"
+          [placeholder]="store.compare() ? 'Message both models…' : 'Message the model…'"
+          [value]="prompt()"
+          (input)="prompt.set(value($event))"
+          (keydown)="onKey($event)"
+        ></textarea>
+        <div class="composer-row">
+          <span class="faint hint"><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</span>
+          @if (store.streaming()) {
+            <button type="button" class="btn" (click)="store.stop()"><mat-icon svgIcon="pw:stop" aria-hidden="true" />Stop</button>
+          } @else {
+            <button type="submit" class="btn primary" [disabled]="!prompt().trim() || !store.chatModels().length"><mat-icon svgIcon="pw:send" aria-hidden="true" />Send</button>
+          }
+        </div>
+      </form>
+    </div>
+
+    <aside class="params" aria-label="Parameters">
+      <pw-panel heading="Parameters" icon="sliders" [loading]="store.loading()" [ready]="!store.loading() || store.models().length > 0">
+        <div class="field">
+          <label for="pg-system">System prompt</label>
+          <textarea id="pg-system" class="input" rows="5" placeholder="You are a helpful assistant." [value]="store.system()" (input)="store.setSystem(value($event))"></textarea>
+        </div>
+        <div class="field">
+          <div class="field-head">
+            <label for="pg-temp">Temperature</label>
+            <output class="num" for="pg-temp">{{ store.temperature().toFixed(2) }}</output>
+          </div>
+          <input id="pg-temp" class="range" type="range" min="0" max="2" step="0.05" [value]="store.temperature()" (input)="store.setTemperature(+value($event))" />
+          <div class="scale faint"><span>Precise</span><span>Creative</span></div>
+        </div>
+        <div class="field">
+          <label for="pg-max">Max tokens</label>
+          <input id="pg-max" class="input num" type="number" min="1" max="32768" [value]="store.maxTokens()" (change)="store.setMaxTokens(+value($event))" />
+        </div>
+        <p class="faint note">Requests run as <b>Pitwall</b> at interactive priority and show up in Requests.</p>
+      </pw-panel>
+    </aside>
+  </div>
+</div>
