@@ -866,6 +866,9 @@
       <trans-unit id="pd.jobs.status.running" datatype="html">
         <source><x id="count"/> running</source>
       </trans-unit>
+      <trans-unit id="pd.jobs.status.timed" datatype="html">
+        <source><x id="phase"/> · <x id="time"/></source>
+      </trans-unit>
       <trans-unit id="pd.jobs.still-working" datatype="html">
         <source>still working, this step is taking longer than usual</source>
       </trans-unit>

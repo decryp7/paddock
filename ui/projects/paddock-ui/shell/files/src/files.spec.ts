@@ -386,11 +386,10 @@ describe('recent entries lead with the name', () => {
     // A file name shortens in the middle (rule 18), so the extension survives; the full path is its tooltip.
     expect(rows[0]?.querySelector('.pd-name [data-testid="path-text"]')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
     const name = rows[0]?.querySelector('.pd-name') as HTMLElement;
-    expect(name.querySelector('.pd-tail')?.textContent).toMatch(/\.log$/);
+    expect(name.querySelector('.pd-shown')?.textContent).toMatch(/\.log$/);
     // A long name keeps its end whole (the part the layout never cuts) and shortens in front of it, not at its end.
     const long = rows[2]?.querySelector('.pd-name') as HTMLElement;
-    expect(long.querySelector('.pd-tail')?.textContent).toMatch(/11-30\.log$/);
-    expect(long.querySelector('.pd-name')).not.toBeNull();
+    expect(long.querySelector('.pd-shown')?.textContent).toMatch(/11-30\.log$/);
     expect(rows[0]?.querySelector('pd-path-text.pd-dir')?.textContent?.replace(/\s+/g, '')).toContain('/logs/app');
     expect(rows[0]?.querySelector('pd-path-text.pd-dir [data-testid="path-text"]')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
     // Reveal has its own glyph, so a folder entry's kind and the action never look the same.

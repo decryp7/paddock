@@ -301,6 +301,35 @@ test.describe('pages frame (plan S14)', () => {
     await expect(app.statusBar.bar).not.toHaveAttribute('inert', '');
   });
 
+  for (const width of [640, 320]) {
+    test(`the scrim dims every status bar item and the drawer's edge shows no cut text at ${width} px (re-review P3)`, async ({ app, page }) => {
+      await page.setViewportSize({ width, height: width === 640 ? 800 : 640 });
+      await app.frame.open('#/runners');
+      await expect(page.locator('sd-runners-page .name').first()).toBeVisible();
+      await app.frame.toggle.click();
+      await expect(app.frame.scrim).toBeVisible();
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
+      const covered = await page.evaluate(() => {
+        const nav = document.querySelector('#pd-pages-nav')!.getBoundingClientRect();
+        return Array.from(document.querySelectorAll('pd-status-bar [data-status-item]')).flatMap((e) => {
+          const b = e.getBoundingClientRect();
+          if (b.width === 0 || b.left < nav.right) return [];
+          const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+          return top?.getAttribute('data-testid') === 'sidebar-scrim' ? [] : [`${e.getAttribute('data-status-item')} is above the scrim`];
+        });
+      });
+      expect(covered).toEqual([]);
+      // An ellipsis of the dimmed page ("nuc-…") must not peek out at the drawer's edge: no shortened text reaches it.
+      const peeking = await page.evaluate(() => {
+        const nav = document.querySelector('#pd-pages-nav')!.getBoundingClientRect();
+        return Array.from(document.querySelectorAll<HTMLElement>('#pd-main *'))
+          .filter((e) => e.children.length === 0 && e.scrollWidth > e.clientWidth && getComputedStyle(e).textOverflow === 'ellipsis' && e.getBoundingClientRect().right > nav.right && e.getBoundingClientRect().left < nav.right + 40)
+          .map((e) => e.textContent);
+      });
+      expect(peeking, 'shortened text at the drawer edge').toEqual([]);
+    });
+  }
+
   test('a skip link leads to the page', async ({ app, page }) => {
     await app.frame.open();
     await page.keyboard.press('Tab');
