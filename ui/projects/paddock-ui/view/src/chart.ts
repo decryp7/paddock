@@ -24,7 +24,8 @@ export function scatterOption(c: ChartSpec, colors: readonly string[] = []): Rec
     legend: { show: c.series.length > 1, left: 12 },
     tooltip: { trigger: 'item' },
     xAxis: { type: 'category', data: c.categories, boundaryGap: true },
-    yAxis: { type: 'value', axisLabel: c.unit ? { formatter: `{value} ${c.unit}` } : {} },
+    // The unit is in the chart's title ("Latency (ms)"), once, like the line chart; the ticks stay plain numbers.
+    yAxis: { type: 'value' },
     series: c.series.map((s, i) => ({ name: s.name, type: 'scatter', symbolSize: 8, data: s.values, ...(colors[i] ? { itemStyle: { color: colors[i] } } : {}) })),
   };
 }
@@ -61,7 +62,12 @@ export class PdViewChart {
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   /** Counts appearance changes (theme, accent, contrast are attributes of the root), so the scatter colours are read again. */
   private readonly appearance = signal(0);
-  protected readonly name = computed(() => this.chart().title || $localize`:@@pd.view.chart.name:Chart`);
+  /** The title; a scatter has no generic spec to carry its unit, so the unit joins the title here (once, like the other charts). */
+  protected readonly name = computed(() => {
+    const c = this.chart();
+    const title = c.title || $localize`:@@pd.view.chart.name:Chart`;
+    return c.kind === 'scatter' && c.unit && !title.includes(`(${c.unit})`) ? `${title} (${c.unit})` : title;
+  });
   protected readonly spec = computed(() => chartSpecOf(this.chart()));
   protected readonly option = computed(() => {
     const c = this.chart();

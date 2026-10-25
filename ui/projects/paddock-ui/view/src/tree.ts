@@ -3,7 +3,7 @@ import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { Tree, TreeNode } from '../generated/view';
 import { glyphFor, toneOf, toneWord } from './model';
 import { ViewRuntime } from './runtime';
-import { PdViewTone, TONE_CSS, toneClass } from './tone';
+import { PdViewTone, TONE_CSS, toneClass, VIEW_HOVER } from './tone';
 
 /** One line of the shown tree. */
 export interface TreeRow {
@@ -107,7 +107,7 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
     .pd-view-tree__row { display: flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-row-height); padding-inline-start: calc(var(--pd-view-depth, 0) * var(--pd-space-4)); color: var(--pd-text); border-radius: var(--pd-radius-control); }
     /* Calm by default: only the mark of a tone is coloured; the label stays in text colour and the word is the row's tooltip. */
     .pd-view-tree__row pd-view-tone { color: var(--pd-view-tone); }
-    .pd-view-tree__row:hover { background: var(--pd-hover); }
+    .pd-view-tree__row:hover { background: ${VIEW_HOVER}; }
     .pd-view-tree__row:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     .pd-view-tree__twisty { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; background: none; color: var(--pd-text-muted); cursor: pointer; border-radius: var(--pd-radius-control); }
     .pd-view-tree__twisty:focus-visible { outline: 2px solid var(--pd-focus-ring); }

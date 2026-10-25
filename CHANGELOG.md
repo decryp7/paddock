@@ -10,6 +10,15 @@ Conventional Commits; one semver tag for the whole repo.
   variables, then sccache) whenever a build folder variable is set.
 
 ### Added
+- X51 review 2 fixes for `<pd-view>` (0 P1, 6 P2, 9 P3; `ui/docs/review/x51-view/FIXES.md`). Edges never cross a box: back, sideways and
+  long edges run in a lane outside the boxes and between the rows, radial edges bow or go round the outside (`route.ts`, a test over
+  every layout and the sample, and over the real SVG paths); matrix headings keep a minimum width at 320 px; focus rings of sort headers,
+  "Show as a list", scroll regions and the review filter are drawn inside their container (an e2e check over every focusable element);
+  hover is a visible fill on rows and drawing boxes; a region that scrolls fades the side that continues; a drawing opens at its middle;
+  the narrow "Changes data" badge is "Edits"; the review filter scrolls on one row; class members are padded evenly; the scatter shows
+  its unit in the title only. Rule 19: `pd-view` reports (dev mode) a `needsAi` node drawn by a host that provides neither
+  `VIEW_NEEDS_AI` nor `VIEW_OPEN_AI_SETTINGS`, and the hint reads "Set up local AI in this app's settings.". The contact sheet is
+  `ui/docs/review/x51-view/review-3/`, every section from one commit.
 - X51 review 1 fixes for `<pd-view>` (3 P1, 13 P2, 12 P3; `ui/docs/review/x51-view/FIXES.md`). The radial graph puts its hub in the middle
   and the rest on rings that cannot touch, in a canvas fitted to the boxes (a test over every layout: no two boxes overlap); graph
   boxes carry a status glyph and the status word in their name and in "Show as a list", which also lists captions and members;

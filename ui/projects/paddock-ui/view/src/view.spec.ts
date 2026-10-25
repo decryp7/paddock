@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ActionRef, GrantRef, Node, NodeKind, SecretRef, ViewAction, ViewDoc } from '../generated/view';
 import { VIEW_EXTRA_LIMITS } from './limits';
 import { KNOWN_KINDS, shapeOf } from './model';
-import { NO_VIEW_HOST, VIEW_HOST, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from './host';
+import { NO_VIEW_HOST, VIEW_HOST, VIEW_OPEN_AI_SETTINGS, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from './host';
 import { sampleViewDoc } from './sample';
 import { fieldProblem, initialValues } from './form';
 import { PdView } from './view';
@@ -82,7 +82,7 @@ describe('pd-view', () => {
     host = new FakeHost();
     fake = new FakeECharts();
     TestBed.configureTestingModule({
-      providers: [provideZonelessChangeDetection(), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(fake.init) }, ...(provideHost ? [{ provide: VIEW_HOST, useValue: host }] : [])],
+      providers: [provideZonelessChangeDetection(), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(fake.init) }, { provide: VIEW_OPEN_AI_SETTINGS, useValue: () => undefined }, ...(provideHost ? [{ provide: VIEW_HOST, useValue: host }] : [])],
     });
     const f = TestBed.createComponent(Host);
     f.componentInstance.doc.set(doc);
@@ -390,7 +390,8 @@ describe('pd-view', () => {
       const ai = one(el(f), '[data-testid=view-needs-ai]');
       expect(text(ai)).toContain('Explain the failing check');
       expect(text(ai)).toContain('Pitwall is not running.');
-      expect(ai.querySelector('button')).toBeNull();
+      // The only button is the app's own "Open AI settings" (the host of this test provides one); the plugin's setup is not drawn.
+      expect(all(ai, 'button').map((b) => text(b))).toEqual(['Open AI settings']);
       expect(f.componentInstance.actions.map((a) => a.action)).not.toContain('setup-ai');
     });
 
