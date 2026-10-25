@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="500" viewBox="0 0 1600 500" role="img" aria-labelledby="t d">
+<title id="t">How Pacenotes works</title><desc id="d">Index, then Understand, then Review and trace, then Serve over MCP. Pitwall calls it over MCP, Debrief checks log lines against it and Pitcrew runs it in CI.</desc>
+<style>
+:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#F1F3F7;--bar:#ECEEF2;--link:#8A93A3;--codebg:#F7F8FA;--acc:#576D07;--acct:#576D07;--accf:#657C1F;--glow:.20;--shadow:.22;--wbg:#FFFFFF}
+@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#1B1E24;--bar:#20242C;--link:#667085;--codebg:#12151A;--acc:#8DA74E;--acct:#8DA74E;--glow:.26;--shadow:.55;--wbg:#0E0F12}}
+text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;fill:var(--ink)}
+.lt{display:inline}.dk{display:none}
+@media (prefers-color-scheme: dark){.lt{display:none}.dk{display:inline}}
+.eyebrow{font-size:15px;font-weight:600;letter-spacing:.14em;fill:var(--acct)}
+.h1{font-size:56px;font-weight:600;letter-spacing:-.025em}
+.h2{font-size:42px;font-weight:600;letter-spacing:-.02em}
+.sub{font-size:22px;fill:var(--muted)}
+.small{font-size:20px;fill:var(--muted)}
+.pilltxt{font-size:17px;font-weight:600;fill:var(--acct)}
+.name{font-size:26px;font-weight:600;letter-spacing:-.01em}
+.card{fill:var(--card);stroke:var(--line)}
+.ph{fill:var(--soft);stroke:var(--link);stroke-width:1.5;stroke-dasharray:5 4}
+.mono{font-weight:600;fill:var(--muted)}
+.track{fill:none;stroke:var(--line);stroke-width:1.25;opacity:.8}
+.gl{fill:none;stroke:var(--acct);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.accfill{fill:var(--acc);fill-opacity:.13}.accline{fill:var(--acc)}
+.ptitle{font-size:29px;font-weight:600;letter-spacing:-.01em}
+.pbody{font-size:21px;fill:var(--muted)}
+.stepn{font-size:16px;font-weight:600;letter-spacing:.1em;fill:var(--muted)}
+.stept{font-size:26px;font-weight:600}
+.steps{font-size:21px;fill:var(--muted)}
+.conn{fill:none;stroke:var(--link);stroke-width:1.5;stroke-linecap:round;stroke-dasharray:1 7}
+.chev{fill:none;stroke:var(--link);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.wtit{font-size:17px;font-weight:600;letter-spacing:.14em;fill:var(--muted)}
+.wname{font-size:22px;font-weight:600}.wnote{font-size:20px;fill:var(--muted)}
+.wbar{fill:var(--bar)}.wedge{fill:none;stroke:var(--line)}
+.mbg{fill:var(--soft)}.mc{fill:var(--card);stroke:var(--line)}.mside{fill:var(--bar)}.mrule{fill:var(--line)}.ms{fill:var(--line)}
+.mfield{fill:var(--soft);stroke:var(--line)}.mact{fill:var(--acc);fill-opacity:.14}.maccf{fill:var(--accf)}.mbox{fill:var(--acc);fill-opacity:.12;stroke:var(--acc);stroke-width:2}
+.mt{font-size:14px;font-weight:500;fill:var(--ink)}.mm{font-size:13px;fill:var(--muted)}.mta{font-size:13px;font-weight:600;fill:var(--acct)}.mtw{font-size:12.5px;font-weight:600;fill:#fff}.mh{font-size:20px;font-weight:600;fill:var(--ink)}
+.medge{fill:none;stroke:var(--link);stroke-width:1.5}.mcode{fill:var(--codebg);stroke:var(--line)}.mmono{font:13px ui-monospace,"SF Mono",Menlo,Consolas,monospace;fill:var(--ink)}.mmonoa{font:600 13px ui-monospace,"SF Mono",Menlo,Consolas,monospace;fill:var(--acct)}
+.madd{fill:#2EA043;fill-opacity:.18}.mdel{fill:#F85149;fill-opacity:.16}.mrec{fill:#E5484D}.mcon{fill:var(--card);stroke:var(--acc);stroke-width:2}
+</style><svg x="80" y="40" width="40" height="40" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="p0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9A8228"/><stop offset="0.55" stop-color="#6D590F"/><stop offset="1" stop-color="#6A5500"/>
+    </linearGradient>
+    <radialGradient id="p0sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="p0edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="p0clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="p0gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#302501" flood-opacity="0.32"/></filter>
+    <filter id="p0ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="p0m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M374 246H674A40 40 0 0 1 714 286V702A40 40 0 0 1 674 742H374A40 40 0 0 1 334 702V286A40 40 0 0 1 374 246Z" fill="#000"/></mask><mask id="p0m1" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M367 330a21 21 0 1 1 42 0a21 21 0 1 1 -42 0Z" fill="#000"/><path d="M367 494a21 21 0 1 1 42 0a21 21 0 1 1 -42 0Z" fill="#000"/><path d="M367 658a21 21 0 1 1 42 0a21 21 0 1 1 -42 0Z" fill="#000"/><path d="M452 346H664M452 406H600M486 462L456 508L486 554M536 456L516 560M566 462L596 508L566 554M456 700C530 700 520 636 592 636C630 636 650 650 662 676" fill="none" stroke="#000" stroke-width="26" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p0bg)" filter="url(#p0ts)"/>
+  <g clip-path="url(#p0clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#p0sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p0edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#p0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M406 276H706A40 40 0 0 1 746 316V732A40 40 0 0 1 706 772H406A40 40 0 0 1 366 732V316A40 40 0 0 1 406 276Z" fill="#FFFFFF" mask="url(#p0m0)"/></g><path d="M374 246H674A40 40 0 0 1 714 286V702A40 40 0 0 1 674 742H374A40 40 0 0 1 334 702V286A40 40 0 0 1 374 246Z" fill="#FFFFFF" mask="url(#p0m1)"/><path d="M300 330H388M300 494H388M300 658H388" fill="none" stroke="#FFFFFF" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/></g>
+</svg><text class="name" x="132" y="68" style="font-size:28px">How Pacenotes works</text>
+<circle class="accfill" cx="260" cy="188" r="44"/><g class="gl" transform="translate(242 170) scale(1.5)"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12.5l9 5 9-5M3 17l9 5 9-5"/></g><path class="conn" d="M318 188 L554 188"/><path class="chev" d="M548 182 l7 6 -7 6"/><text class="stepn" x="260" y="272" text-anchor="middle">STEP 1</text><text class="stept" x="260" y="302" text-anchor="middle">Index</text><text class="steps" x="260" y="330" text-anchor="middle">Reads the repository</text><text class="steps" x="260" y="358" text-anchor="middle">without running it.</text>
+<circle class="accfill" cx="620" cy="188" r="44"/><g class="gl" transform="translate(602 170) scale(1.5)"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="12" r="2.4"/><path d="M8 7l8 4M8 17l8-4"/></g><path class="conn" d="M678 188 L914 188"/><path class="chev" d="M908 182 l7 6 -7 6"/><text class="stepn" x="620" y="272" text-anchor="middle">STEP 2</text><text class="stept" x="620" y="302" text-anchor="middle">Understand</text><text class="steps" x="620" y="330" text-anchor="middle">Symbols, references and</text><text class="steps" x="620" y="358" text-anchor="middle">call graphs.</text>
+<circle class="accfill" cx="980" cy="188" r="44"/><g class="gl" transform="translate(962 170) scale(1.5)"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-8 2-12 6"/></g><path class="conn" d="M1038 188 L1274 188"/><path class="chev" d="M1268 182 l7 6 -7 6"/><text class="stepn" x="980" y="272" text-anchor="middle">STEP 3</text><text class="stept" x="980" y="302" text-anchor="middle">Review and trace</text><text class="steps" x="980" y="330" text-anchor="middle">Diffs, diagrams and</text><text class="steps" x="980" y="358" text-anchor="middle">requirements.</text>
+<circle class="accfill" cx="1340" cy="188" r="44"/><g class="gl" transform="translate(1322 170) scale(1.5)"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></g><text class="stepn" x="1340" y="272" text-anchor="middle">STEP 4</text><text class="stept" x="1340" y="302" text-anchor="middle">Serve over MCP</text><text class="steps" x="1340" y="330" text-anchor="middle">Local AI gets the same</text><text class="steps" x="1340" y="358" text-anchor="middle">view.</text>
+<line x1="80" x2="1520" y1="434" y2="434" stroke="var(--line)"/>
+<text class="small" x="80" y="472">Pitwall calls it over MCP, Debrief checks log lines against it and Pitcrew runs it in CI.</text>
+</svg>
