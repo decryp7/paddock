@@ -2903,6 +2903,9 @@
       <trans-unit id="pd.wb.assistant.tool.running" datatype="html">
         <source>Working…</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.stopped" datatype="html">
+        <source>Stopped</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
         <source>(unreadable call)</source>
       </trans-unit>
