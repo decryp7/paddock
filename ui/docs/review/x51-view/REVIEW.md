@@ -253,3 +253,58 @@ rule-19 change. Review 3 can be short: the P2 fixes plus a fresh recapture of ev
 The radial and layered graphs now read as professional drawings. The banners, skeleton, busy bar, one-accent discipline,
 shared writes badge, aligned numbers with units, and the shared needs-AI card make `<pd-view>` look like the rest of the family
 in both themes.
+
+---
+
+# Review 3 (2026-10-25, `origin/shell/integrate` 73bab20; sheet captured from 016cc575d7)
+
+Material: `review-3/` (all sheets and single shots, both themes, the 320 px slices) and `FIXES.md` "Review 2 to fixes". I read
+the code only to check two points: the fallback copy and the sort header CSS.
+
+## Verdict: NOT APPROVED, by one small P2 (0 P1, 1 P2, 4 P3)
+
+Everything from review 2 is fixed. The one remaining P2 is a side effect of the inset focus-ring fix: a one-line CSS change. I
+will approve on a recaptured `*-focus-sort.png` that shows the ring clear of the label. No further full review is needed.
+
+## Review 2 findings, checked in the pixels
+
+| Id | Result |
+|---|---|
+| P2-1 edges clear of boxes | Fixed. The retry edge runs in a lane right of every box, with rounded corners, from Publish to Build, and touches no box in either theme or in any shot (graph, focus, hover, stale, 320 px). The label "retry" sits beside the lane. Radial bows: there is nothing to see, because the sample's radial edges are all straight. The layout tests cover bows (see P3-2). |
+| P2-2 matrix at 320 px | Fixed. "REQ-1 Open a / file" now takes two lines, "REQ-2" stays whole, and the cells scroll with an edge fade. |
+| P2-3 clipped focus rings | Fixed: the "Show as a list" ring is complete on four sides, and the sort header ring is complete. The sort header ring now covers its text (new P2-1 below). The tree, field, primary and filter rings are good. |
+| P2-4 hover | Fixed. Hover is visible in both themes without focus: the table row (Integration tests), the tree row (ui), and the drawing box. In dark, "Unit tests" gets a clear lighter fill and keeps its green status stroke. |
+| P2-5 one consistent capture | Fixed. One run, commit in the README. The full-view and 320 px shots show the needs-AI card with Open AI settings. The invalid and loading shots show only the view. |
+| P2-6 rule 19 | Fixed. A dev-mode `NEEDS_AI_WITHOUT_REPAIR` report goes to the `ErrorHandler`, and the fallback hint is "Set up local AI in this app's settings." (`node.ts`, tested). The gallery provides the opener, so the sheet shows the button and not the hint. That is correct. |
+| P3-1 class padding | Fixed. Members are evenly padded under the rule. |
+| P3-2 units | Fixed. The scatter title is "Size against time (ms)" with plain ticks; the line chart puts the unit in its title too. |
+| P3-3 secret gap | Fixed. The lock and "release-publish-token" sit 4 units apart (`dark-form-chosen.png`), the same as the other glyph-to-text gaps. |
+| P3-4 status cell gap | Fixed. "✓ Passing" has a 4-unit gap. |
+| P3-5 filter at 320 px | Fixed. It is one row that scrolls ("All (3) Open (1) Suppress…" with a fade). |
+| P3-6 compact badge | Fixed. Under 360 px the badge reads pencil plus "Edits" on Publish and on every review action, and the buttons stay on one line. |
+| P3-7 drawings open at the middle | Fixed. At 320 px the radial opens on the hub and the sequence opens on Host, with fades on both sides. |
+| P3-8 scroll cue | Fixed. Tables, the matrix, the filter and the drawings fade on the side that continues. |
+| P3-9 tree hover | Fixed. The shot is pointer-only. |
+
+## P2
+
+1. **The sortable header's focus ring is drawn over its label.** `.pd-view-table__sort` has `padding: 0`, so the `-2px` inset
+   ring from the P2-3 fix crosses the first and last letters ("State" in `*-focus-sort.png`, both themes). Give the sort
+   button a little inline and block padding (for example `0 var(--pd-space-1)`, with a matching negative margin so header
+   text stays aligned with the cells), or keep the outward offset here, since a header button has room inside its cell. The
+   existing e2e ring-box check should also assert that the ring box does not intersect the label's text box.
+
+## P3
+
+1. The drawings sheet caption still says "cycle edge as a curve". The back edge is now an orthogonal lane, which reads better
+   because the forward edges are curves and the lane is clearly a different kind. Update the caption.
+2. Radial bows cannot be judged from the images, because the sample has no edge that bows. Add a second radial sample with a
+   cross-ring edge (spoke to spoke) to the drawings sheet, so the bow and the canvas growth are reviewed in pixels.
+3. Capture hygiene: the full-view stale shot (`sheet-states.png`, part 1) and `*-focus-sort.png` carry a leftover row hover on
+   "Integration tests" from the previous hover shot. Move the pointer off the view before non-hover shots.
+4. Still open, as planned: the Signal Forms spike for dynamic fields before Pacenotes.
+
+## Overall
+Across three rounds `<pd-view>` has become a renderer that looks like the family in both themes and at 320 px. Status always
+has glyph and word, there is one primary per view, the writes badge is shared, the empty, error, stale, loading and busy
+states are all drawn, the needs-AI state is the family's own, and the drawings read cleanly. Fix P2-1 and it is approved.
