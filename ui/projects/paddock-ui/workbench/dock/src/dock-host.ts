@@ -17,7 +17,7 @@ import { PdIcon, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { DOCK_NOTICE_ACTION } from './dock-notice';
 import { AngularContentRenderer } from './angular-panel';
 import { AutoHideItem, itemsOn } from './auto-hide';
-import { Side } from './dock-geometry';
+import { bottomFlyoutInsets, Side } from './dock-geometry';
 import { DockKeys } from './dock-keys';
 import { DockMenu, type DockMenuItem } from './dock-menu';
 import { placeMenu } from './menu-placement';
@@ -200,6 +200,48 @@ export class PdDock implements OnDestroy {
         },
         { injector: this.injector },
       );
+    });
+    // effect-state: places a bottom slide-out over the column it belongs to, not over a full-height side column such as the
+    // Assistant's (review 3 P3-3): measures the docked groups and sets the slide-out's insets (DOM side effect). Dockview sizes
+    // its groups after the change that opened the slide-out (and again when a column opens or a splitter moves), so the
+    // groups are watched while it is open.
+    effect((onCleanup) => {
+      const item = this.open();
+      this.dock.layoutChanged();
+      if (item?.side !== 'bottom') return;
+      let frame = 0;
+      const place = (): void => {
+        const center = this.host.nativeElement.querySelector<HTMLElement>('.pd-dock-center');
+        const flyout = this.host.nativeElement.querySelector<HTMLElement>('.pd-dock-ah-flyout-bottom');
+        if (!center || !flyout) return;
+        // The groups' edges are the dockview mount's (the centre also holds the auto-hide bar's room); the insets are the
+        // same for both, which share their left and right edges.
+        const box = (center.querySelector<HTMLElement>('.pd-dock-mount') ?? center).getBoundingClientRect();
+        const groups = [...center.querySelectorAll<HTMLElement>('.dv-groupview')]
+          .filter((g) => !g.closest('.dv-resize-container'))
+          .map((g) => {
+            const r = g.getBoundingClientRect();
+            return { x: r.left, y: r.top, width: r.width, height: r.height };
+          });
+        const insets = bottomFlyoutInsets(groups, { x: box.left, y: box.top, width: box.width, height: box.height });
+        flyout.style.left = `${insets?.left ?? 0}px`;
+        flyout.style.right = `${insets?.right ?? 0}px`;
+      };
+      const soon = (): void => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(place);
+      };
+      const center = this.host.nativeElement.querySelector<HTMLElement>('.pd-dock-center');
+      const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(soon);
+      if (center && watch) {
+        watch.observe(center);
+        center.querySelectorAll<HTMLElement>('.dv-groupview').forEach((g) => watch.observe(g));
+      }
+      soon();
+      onCleanup(() => {
+        cancelAnimationFrame(frame);
+        watch?.disconnect();
+      });
     });
     // Mount the slid-out view's component into the flyout body.
     // effect-state: mounts and disposes view renderers in the DOM flyout (side effect, not derived state)

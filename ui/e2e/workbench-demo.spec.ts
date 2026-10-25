@@ -132,6 +132,17 @@ test.describe('dock (plan W2a, W2b)', () => {
     await wb.palette.search('>show jobs');
     await wb.palette.run('Show jobs');
     await expect(page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"], [data-testid="pd-dock-tab"][data-panel-id="pd.jobs"]').first()).toBeVisible();
+    // Review 3 P3-3: with the Assistant column open, the bottom slide-out stays over its own column, clear of the composer.
+    await wb.activity.item('pd.wb.assistant.activity').click();
+    const flyout = page.locator('[data-testid="pd-dock-flyout"][data-panel-id="pd.jobs"]');
+    if (!(await flyout.isVisible())) await page.locator('[data-testid="pd-dock-ah-bar-bottom"] [data-ah-id="pd.jobs"]').click();
+    await expect(flyout).toBeVisible();
+    const composer = page.getByTestId('assistant-input');
+    await expect(composer).toBeVisible();
+    await expect.poll(async () => {
+      const [f, c] = await Promise.all([flyout.boundingBox(), composer.boundingBox()]);
+      return !!f && !!c && f.x + f.width <= c.x + 1;
+    }).toBe(true);
   });
 
   for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
