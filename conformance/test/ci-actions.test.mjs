@@ -3,7 +3,7 @@
 // (The scripts themselves are tested in ci-scripts.test.mjs, tools/test and the release tests.)
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -277,4 +277,56 @@ test('the rustc wrapper hands sccache the compile without the build folder varia
   const cmd = read(join(ACTIONS, 'setup-rust', 'rustc-wrapper.cmd'));
   assert.match(cmd, /set "CARGO_TARGET_DIR="/);
   assert.match(cmd, /sccache\.exe %\*\r?\nexit \/b %ERRORLEVEL%/);
+});
+
+function runStableWorkspace(os, root, over = {}) {
+  const text = read(join(ACTIONS, 'stable-workspace', 'action.yml'));
+  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+  const script = join(root, 'step.sh');
+  writeFileSync(script, body);
+  return spawnSync('bash', ['-e', '-o', 'pipefail', script], {
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), NAME: 'decryp7/paddock-crate', ...over },
+    encoding: 'utf8',
+    cwd: join(root, 'work', 'abc', 'hostexecutor'),
+  });
+}
+
+function stableFixture() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-stable-')));
+  mkdirSync(join(root, 'home'));
+  mkdirSync(join(root, 'work', 'abc', 'hostexecutor'), { recursive: true });
+  writeFileSync(join(root, 'work', 'abc', 'hostexecutor', 'Cargo.toml'), 'x');
+  return root;
+}
+
+test('stable-workspace gives every run of a host job the same physical checkout path, however the runner named the work folder', () => {
+  const root = stableFixture();
+  const r = runStableWorkspace('macOS', root);
+  assert.equal(r.status, 0, r.stderr);
+  const link = join(root, 'work', 'abc', 'hostexecutor');
+  const stable = join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate');
+  assert.ok(lstatSync(link).isSymbolicLink());
+  assert.equal(realpathSync(link), stable, 'the old path resolves to the stable folder (what cargo and rustc see as their working folder)');
+  assert.equal(readFileSync(join(link, 'Cargo.toml'), 'utf8'), 'x');
+  assert.equal(runStableWorkspace('macOS', root).status, 0, 'a second run on the linked workspace is a no-op');
+  // The next job: a new hashed work folder with a fresh checkout replaces the previous stable folder.
+  mkdirSync(join(root, 'work', 'def', 'hostexecutor'), { recursive: true });
+  writeFileSync(join(root, 'work', 'def', 'hostexecutor', 'Cargo.toml'), 'y');
+  const again = runStableWorkspace('macOS', root, { GITHUB_WORKSPACE: join(root, 'work', 'def', 'hostexecutor') });
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(realpathSync(join(root, 'work', 'def', 'hostexecutor')), stable, 'same physical path as the job before');
+  assert.equal(readFileSync(join(stable, 'Cargo.toml'), 'utf8'), 'y');
+});
+
+test('stable-workspace leaves Linux containers alone and never fails a job it cannot help', () => {
+  const root = stableFixture();
+  assert.equal(runStableWorkspace('Linux', root).status, 0);
+  assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink());
+  // The stable root cannot be created (a file is in the way): warn and build in place.
+  writeFileSync(join(root, 'blocked'), '');
+  const r = runStableWorkspace('macOS', root, { PADDOCK_CI_HOME: join(root, 'blocked') });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /::warning::stable-workspace: could not move/);
+  assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink(), 'the checkout stays where it was');
+  assert.equal(readFileSync(join(root, 'work', 'abc', 'hostexecutor', 'Cargo.toml'), 'utf8'), 'x');
 });

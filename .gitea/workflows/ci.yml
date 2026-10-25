@@ -228,6 +228,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates never
+      # hit. Run from the same physical path every time (the old path stays as a link). Linux: containers, nothing to do.
+      - uses: ./.gitea/actions/stable-workspace
+        with:
+          name: paddock-${{ github.job }}-${{ runner.os }}
+
       # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it), a build folder that outlives the job, and
       # eight build jobs (the runner runs two jobs at once).
       - name: Git bash on PATH and a persistent build folder (Windows)
@@ -240,11 +246,11 @@ jobs:
           echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      # The Mac host runner: a build folder next to the checkout that outlives the job; the host toolchain as installed.
+      # The Mac host runner: a build folder that outlives the job (the work folder does not: it is hashed per job); the host toolchain as installed.
       - name: Persistent build folder (macOS)
         if: runner.os == 'macOS'
         run: |
-          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$HOME/.paddock-ci/target-$GITHUB_JOB" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
       # Toolchain and sccache on every OS: the shared Redis backend (database 5) when the Gitea variables are set. The macOS

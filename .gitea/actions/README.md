@@ -15,6 +15,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `nightly-mark` | record a fully green nightly (the marker `plan` looks up) | Debrief's `nightly-mark` job |
 | `cache-restore`, `cache-save` | the restore, then save-always cache pattern: a failing run still warms the cache; saved only when the key had no exact hit | the `actions/cache` blocks in every job |
 | `setup-rust` | toolchain with components and targets, sccache when the runner has it (shared Redis backend on every OS, `vars.SCCACHE_REDIS_ENDPOINT`/`_DB`; a wrapper keeps `CARGO_TARGET_DIR` out of the cache key), the Tauri Linux libraries | `dtolnay/rust-toolchain` + apt lines |
+| `stable-workspace` | host runners: moves the checkout to a fixed folder under `~/.paddock-ci/src` and links the old path to it, so sccache sees the same working folder every run (the work folder is hashed per job) | new |
 | `sccache-stats` | `sccache --show-stats` in the job log (last step, `if: always()`; composite actions have no post step) | new |
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
