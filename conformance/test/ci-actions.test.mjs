@@ -140,8 +140,13 @@ test('the sccache step uses the local disk: the runner home on a host, /sccache 
   assert.match(host, /^SCCACHE_IGNORE_SERVER_IO_ERROR=1$/m);
   assert.match(host, /^CARGO_INCREMENTAL=0$/m);
   assert.doesNotMatch(host, /REDIS/);
-  const linux = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: join(tmpdir(), 'paddock-nomount') });
-  assert.match(linux, /^SCCACHE_DIR=.*paddock-nomount\/sccache$/m, 'no /sccache mount: a folder of the container');
+  // The mount path is injected: the test never looks at the runner's real /sccache.
+  const nomount = join(tmpdir(), 'paddock-nomount');
+  const linux = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: nomount, PADDOCK_SCCACHE_MOUNT: join(nomount, 'absent-mount') });
+  assert.match(linux, /^SCCACHE_DIR=.*paddock-nomount\/sccache$/m, 'no mount: a folder of the container');
+  const mount = mkdtempSync(join(tmpdir(), 'paddock-mount-'));
+  const mounted = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: nomount, PADDOCK_SCCACHE_MOUNT: mount });
+  assert.match(mounted, new RegExp(`^SCCACHE_DIR=${mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), 'a writable mount is used');
   const redis = runSccacheStep({ BACKEND: 'auto', REDIS_ENDPOINT: 'redis://h:6379', REDIS_DB: '' });
   assert.match(redis, /^SCCACHE_REDIS_ENDPOINT=redis:\/\/h:6379$/m);
   assert.match(redis, /^SCCACHE_REDIS_DB=5$/m);
@@ -381,6 +386,17 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
   const gitBash = ci.indexOf('Git bash on PATH');
   assert.ok(gitBash > 0 && gitBash < at, 'Git bash is on PATH before any later step needs bash');
   assert.equal(ci.split('uses: ./.gitea/actions/stable-workspace').length - 1, 1);
+});
+
+test('the test browser of a host job lives in a kept folder of the runner user, outside the checkout that stable-workspace moves', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
+  assert.equal(dirs.length, 2, 'one per host OS');
+  for (const d of dirs) {
+    assert.doesNotMatch(d, /GITHUB_WORKSPACE|\.\./, `${d}: a path relative to the checkout dies when the checkout moves`);
+    assert.match(d, /\.paddock-ci[\\/]test-browser/, d);
+  }
+  assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
 
 test('the WebKit job runs on the Mac runner for pushes to main and v* tags only, and runs the three WebKit projects', () => {
