@@ -10,6 +10,17 @@ Conventional Commits; one semver tag for the whole repo.
   demo's menu bar test expects Edit (undo, X44); the channels retry test steps the demo engine by hand (`?channels-step=manual`)
   instead of racing its 400 ms timer; the dock's "attach before dockview has loaded" spec forgets the module itself instead of
   relying on a fresh worker.
+- Order-dependent UI specs (X50, rule 5): the Angular builder runs Vitest with `isolate: false`, so spec files share a window per
+  worker. `installTestKit` now puts back real timers, restores spies, undoes stubbed globals and empties the page and both
+  storages before and after every test; the dock's attach spec holds the dockview import (`forgetDockviewForTest(load)`)
+  instead of polling, and `DockPersistence.flush()` replaces sleeps in the dock's persistence specs.
+- X50 workbench review 2: folded table rows grow (`PdColumn.foldBelow`, additive; `headerHidden` for glyph columns), the
+  Explorer slides over the dock below 480 px, severity glyphs by shape (new `pd:error`), an open fly-out is not drawn as
+  selected, neutral or status-toned activity badges, the menu opens below its row and is never painted before it is placed,
+  marks on provider results, the active tab stays visible in an overflowed strip, pop-out titles use the panel's title,
+  the Outline and Files follow the active document after a restore, the assistant's declined/failed/approval states, the
+  composer clears on send, a streaming cue and the log following the user's own question; save and manage layout dialogs
+  are real dialog windows with declared contracts, and pop-outs are saved with the layout.
 
 ### Changed
 - X21 review 3: the resting "..." button shows the full subtle text on a selected row (the rest mix was 2.71:1 on the tint; the
