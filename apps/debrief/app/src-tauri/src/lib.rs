@@ -881,6 +881,39 @@ pub(crate) mod test_support {
         }
     }
 
+    thread_local! {
+        static SCRATCH: std::cell::RefCell<Vec<tempfile::TempDir>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// A fresh empty folder named `debrief-<prefix>-...` in the OS temp folder, removed when the calling (test) thread
+    /// ends, also after a panic: for folders a helper hands out without a guard the test could keep (a test app's
+    /// scratch stores). CI fails on `debrief-*` folders left behind (docs/testing/temp-leaks.md).
+    pub fn scratch_dir(prefix: &str) -> PathBuf {
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("debrief-{prefix}-"))
+            .tempdir()
+            .expect("create a scratch folder");
+        let path = dir.path().to_path_buf();
+        SCRATCH.with(|k| k.borrow_mut().push(dir));
+        path
+    }
+
+    #[test]
+    fn scratch_folders_are_removed_when_the_test_thread_ends_even_after_a_panic() {
+        let kept = std::thread::spawn(|| scratch_dir("probe")).join().unwrap();
+        assert!(!kept.exists());
+        let panicked = std::thread::spawn(|| {
+            let p = scratch_dir("probe-panic");
+            std::fs::write(p.join("f"), b"x").unwrap();
+            std::panic::resume_unwind(Box::new(p));
+        })
+        .join()
+        .unwrap_err()
+        .downcast::<PathBuf>()
+        .unwrap();
+        assert!(!panicked.exists());
+    }
+
     pub fn block<F: std::future::Future>(f: F) -> F::Output {
         tauri::async_runtime::block_on(f)
     }
@@ -1055,8 +1088,6 @@ pub(crate) mod test_support {
     /// The clock of the test app's jobs and notification centre.
     pub struct TestClock(pub std::sync::Arc<jobs::ManualClock>);
 
-    static NEXT_TEST_APP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
     /// Builds the bundled plugins binary once when it is not next to the test executable (`cargo test -p debrief-app`
     /// builds only this crate; `cargo nextest run --workspace` in CI builds every binary), so the tests that need
     /// the plugins run instead of failing on their absence. `DEBRIEF_PLUGINS` names one built elsewhere.
@@ -1112,12 +1143,9 @@ pub(crate) mod test_support {
             ensure_plugins_binary();
             debrief_plugin_host::Builtins::load(&debrief_plugin_host::builtins::default_binary())
         });
-        // The store in process, scratch stores under the system temp folder (one folder per test app).
-        let root = std::env::temp_dir().join(format!(
-            "debrief-test-stores-{}-{}",
-            std::process::id(),
-            NEXT_TEST_APP.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        ));
+        // The store in process, scratch stores under the system temp folder (one folder per test app, removed when
+        // the test ends).
+        let root = scratch_dir("test-stores");
         PluginsStopWithTheTest::register(&plugins);
         let stores = engine::local::with_plugins(plugins.clone(), safe_mode);
         let shared = AppState::with(profile_dir, safe_mode, plugins, stores, root);

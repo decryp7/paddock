@@ -10,11 +10,7 @@ use debrief_core::{Profile, Workspace};
 use serde_json::{json, Value};
 
 fn store() -> WorkspaceStore {
-    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("debrief-ai-find-{}-{n}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::scratch::scratch_dir("ai-find");
     let rows = [
         ("Started CompanyA.Graphic.Builder.exe pid 4242", "agent.exe"),
         ("Render queue drained", "CompanyA.Graphic.Builder.exe"),

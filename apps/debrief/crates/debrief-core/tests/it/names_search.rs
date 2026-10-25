@@ -6,17 +6,9 @@ use debrief_core::names::Names;
 use debrief_core::ports::Store;
 use debrief_core::workspace::WorkspaceStore;
 use debrief_core::{Profile, Workspace};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn store(rows: &[&str]) -> WorkspaceStore {
-    static N: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "debrief-core-names-search-{}-{}",
-        std::process::id(),
-        N.fetch_add(1, Ordering::SeqCst)
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::scratch::scratch_dir("core-names-search");
     let text: String = rows
         .iter()
         .enumerate()

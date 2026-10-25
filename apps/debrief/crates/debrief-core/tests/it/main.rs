@@ -2,6 +2,7 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`.
 
 mod common;
+mod scratch;
 
 mod analysis;
 mod archives_projects;

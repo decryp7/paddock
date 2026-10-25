@@ -4,6 +4,7 @@
 mod common;
 #[path = "support/duck_store.rs"]
 mod duck_store;
+mod scratch;
 
 mod assistant_usecases;
 mod browser;

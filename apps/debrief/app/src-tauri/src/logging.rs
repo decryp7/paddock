@@ -477,6 +477,14 @@ mod tests {
         let _g = crate::activity::test_capture();
         crate::activity::set_config(crate::activity::ActivitySettings::default());
         let log_dir = global_log_dir();
+        // The subscriber is the process's for good, but its folder goes with this test (its only user), panic or not.
+        struct RemoveAtEnd(&'static Path);
+        impl Drop for RemoveAtEnd {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(self.0);
+            }
+        }
+        let _remove = RemoveAtEnd(log_dir);
         let log_file = active_log_file(log_dir);
         let before = std::fs::metadata(&log_file).map(|m| m.len()).unwrap_or(0) as usize;
 
