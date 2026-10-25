@@ -49,8 +49,10 @@ export interface SuJobView {
   terminal: boolean;
   /** Cancel button shown at all. */
   canCancel: boolean;
-  /** Cancel shown but disabled; `cancelHint` says why. */
+  /** Always false: Cancel works in every phase (rule 11); a step that cannot be interrupted stops when it ends, and `cancelHint` says so. */
   cancelDisabled: boolean;
+  /** The job failed: a Retry is offered (by the host, which owns the retry). */
+  canRetry: boolean;
   cancelHint: string;
   /** Detail line for failed and cancelled jobs. */
   detail: string;
@@ -93,6 +95,13 @@ export function formatElapsed(ms: number): string {
   return rest === 0 ? $localize`:@@pd.ui.elapsed.hours:${h}:hours: h` : $localize`:@@pd.ui.elapsed.hours-minutes:${h}:hours: h ${rest}:minutes: min`;
 }
 
+/** What a step that cannot be interrupted says next to Cancel: the reason, and that Cancel acts when the step ends. */
+function stopsAfter(reason: string | null | undefined): string {
+  return reason
+    ? $localize`:@@pd.ui.job.stops-after:${reason}:reason:: Cancel takes effect when this step ends.`
+    : $localize`:@@pd.ui.job.not-cancellable:This step cannot be stopped; Cancel takes effect when it ends.`;
+}
+
 function countText(p: SuJobPhase): string {
   const fmt = p.unit === 'bytes' ? formatBytes : formatCount;
   const total = p.total ?? null;
@@ -115,6 +124,7 @@ export function jobView(job: SuJobSnapshot, stalled = false, elapsedMs: number =
     terminal: false,
     canCancel: false,
     cancelDisabled: false,
+    canRetry: false,
     cancelHint: '',
     detail: '',
   };
@@ -141,8 +151,7 @@ export function jobView(job: SuJobSnapshot, stalled = false, elapsedMs: number =
         eta: determinate ? formatEta(job.etaMs) : '',
         tone: stalled ? 'warning' : 'info',
         canCancel: true,
-        cancelDisabled: !job.cancellable,
-        cancelHint: job.cancellable ? '' : (job.notCancellableReason ?? $localize`:@@pd.ui.job.not-cancellable:This step cannot be stopped`),
+        cancelHint: job.cancellable ? '' : stopsAfter(job.notCancellableReason),
         detail: stalled ? $localize`:@@pd.ui.job.stalled:Still working. This step is taking longer than usual.` : '',
         announcement: $localize`:@@pd.ui.job.announce.running:${job.title}:title:: ${headline}:phase:`,
       };
@@ -161,6 +170,7 @@ export function jobView(job: SuJobSnapshot, stalled = false, elapsedMs: number =
         headline: $localize`:@@pd.ui.job.failed:Failed`,
         tone: 'danger',
         terminal: true,
+        canRetry: true,
         detail: job.message,
         announcement: $localize`:@@pd.ui.job.announce.failed:${job.title}:title:: failed`,
       };

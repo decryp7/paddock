@@ -175,3 +175,33 @@ pub struct StorageClearResult {
     /// Stopped by Cancel before everything was cleared (what was done stays done).
     pub cancelled: bool,
 }
+
+/// One node of a size tree: a file, a folder, or (`folded` > 0) the smallest items of a folder folded into one line.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SizeNode {
+    /// The file or folder name; empty for a folded node (the UI words it: "N other items").
+    pub name: String,
+    /// Bytes in it and everything below it.
+    #[cfg_attr(test, ts(type = "number"))]
+    pub bytes: u64,
+    /// How many items this node stands for when it is a fold; 0 for a real item.
+    #[cfg_attr(test, ts(type = "number"))]
+    pub folded: u64,
+    /// The biggest items below it, biggest first (none below the tree's depth).
+    pub children: Vec<SizeNode>,
+}
+
+/// The size tree of one category (`storage_tree`'s outcome).
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageTree {
+    /// The category.
+    pub id: String,
+    /// The category's folder as a node named after the category.
+    pub root: SizeNode,
+    /// The walk stopped at its entry or time limit, or was cancelled: the sizes are lower bounds.
+    pub capped: bool,
+}

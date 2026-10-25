@@ -25,6 +25,15 @@ describe('installTestKit', () => {
     }).not.toThrow();
   });
 
+  it('replaces a global a spec stubbed to undefined and left behind (the key exists, the constructor does not)', () => {
+    vi.stubGlobal('ResizeObserver', undefined);
+    vi.stubGlobal('PointerEvent', undefined);
+    installTestKit();
+    expect(typeof ResizeObserver).toBe('function');
+    expect(typeof PointerEvent).toBe('function');
+    vi.unstubAllGlobals();
+  });
+
   it('reports a target to a ResizeObserver stand-in so libraries reading entry.target keep working', () => {
     const el = document.createElement('div');
     const seen: Element[] = [];

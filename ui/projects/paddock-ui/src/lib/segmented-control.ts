@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, inject, input, model } from '@angular/core';
+import { formatCount } from '@decryp7/paddock-ui/format';
 
 export interface SuSegment {
   value: string;
@@ -40,7 +41,7 @@ export function nextEnabled(options: readonly SuSegment[], from: number, dir: 1 
       >
         {{ o.label }}
         @if (o.count !== undefined) {
-          <span class="pd-count">{{ o.count }}</span>
+          <span class="pd-count">{{ countText(o.count) }}</span>
         }
       </button>
     }
@@ -60,6 +61,11 @@ export class SuSegmentedControl {
   readonly label = input.required<string>();
   readonly value = model<string>('');
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  /** The count with the locale's digit grouping (1,204). */
+  protected countText(n: number): string {
+    return formatCount(n);
+  }
 
   protected select(o: SuSegment): void {
     if (!o.disabled) this.value.set(o.value);

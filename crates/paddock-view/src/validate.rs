@@ -453,9 +453,8 @@ impl Checker {
                 Ok(())
             }
             FieldKind::Toggle { .. } => Ok(()),
-            FieldKind::Path { value, .. } => value
-                .as_ref()
-                .map_or(Ok(()), |g| self.id(&format!("{p}.value"), &g.0)),
+            // A `GrantRef` is valid by construction (see `GrantRef::new`).
+            FieldKind::Path { .. } => Ok(()),
             FieldKind::SecretRef { value } => value
                 .as_ref()
                 .map_or(Ok(()), |s| self.id(&format!("{p}.value"), &s.0)),

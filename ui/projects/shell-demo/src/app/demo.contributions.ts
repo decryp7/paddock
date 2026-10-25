@@ -119,6 +119,7 @@ export const SETTINGS_DIALOG = defineDialog({
     'storage_last',
     'storage_scan',
     'storage_clear',
+    'storage_tree',
     'storage_cancel',
     'storage_reveal',
     // The AI access page's (MCP_SETTINGS_COMMANDS; the key is issued in the key dialog's window, not here).
@@ -387,7 +388,7 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
     definePage({
       id: 'sd.pitwall',
       title: msg('sd.page.pitwall', 'Local AI'),
-      icon: 'pd:info',
+      icon: 'pd:search',
       order: 180,
       providers: () => import('./pages/pitwall.providers').then((m) => m.PITWALL_PROVIDERS),
       load: () => import('./pages/pitwall-page').then((m) => m.PitwallPage),

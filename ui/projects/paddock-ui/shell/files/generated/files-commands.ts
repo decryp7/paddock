@@ -4,6 +4,7 @@
 export const FILES_COMMANDS = {
   files_open: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   files_open_app_folder: { kind: 'mutation', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },
+  files_open_at_line: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   files_open_url: { kind: 'mutation', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },
   files_pick: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   files_recent_clear: { kind: 'mutation', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },

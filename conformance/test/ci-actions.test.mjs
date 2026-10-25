@@ -167,8 +167,20 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
   assert.match(stats, /sccache --show-stats/);
   assert.match(stats, /command -v sccache/);
   const ci = read(join(WORKFLOWS, 'ci.yml'));
-  assert.equal((ci.match(/uses: \.\/\.gitea\/actions\/setup-rust/g) ?? []).length, 3, 'setup-rust in the crates, crate (matrix) and shell demo jobs');
-  assert.equal((ci.match(/uses: \.\/\.gitea\/actions\/sccache-stats/g) ?? []).length, 3, 'stats after each');
+  // The jobs that build Rust, by name (a new job that builds Rust joins this list; a count would hide which one).
+  const jobsUsing = (action) => {
+    const found = [];
+    let job = '';
+    for (const line of ci.split('\n')) {
+      const j = /^ {2}([a-z0-9-]+):\s*$/.exec(line);
+      if (j) job = j[1];
+      if (line.includes(`uses: ./.gitea/actions/${action}`)) found.push(job);
+    }
+    return found;
+  };
+  const rustJobs = ['crates', 'crate', 'shell-demo-app', 'workbench-demo-app'];
+  assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
+  assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
   assert.doesNotMatch(ci, /dtolnay\/rust-toolchain/, 'one toolchain setup');
 });
