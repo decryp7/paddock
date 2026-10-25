@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { walkStep } from './keyboard.ts';
+import { tabKey, walkStep } from './keyboard.ts';
 
 test('a walk goes on while every stop is new', () => {
   assert.equal(walkStep([], 'a'), 'continue');
@@ -23,4 +23,13 @@ test('a stop that does not move, or a loop that skips the first stop, is a trap'
   assert.equal(walkStep(['a', 'b'], 'b'), 'trapped');
   assert.equal(walkStep(['a', 'b', 'c'], 'b'), 'trapped');
   assert.equal(walkStep(['a', 'b', 'c', 'd'], 'c'), 'trapped');
+});
+
+test('WebKit on macOS reaches buttons and links only with Option held (full keyboard access is off by default), others with plain Tab', () => {
+  assert.equal(tabKey('webkit', 'darwin'), 'Alt+Tab');
+  assert.equal(tabKey('webkit', 'darwin', true), 'Alt+Shift+Tab');
+  assert.equal(tabKey('chromium', 'darwin'), 'Tab');
+  assert.equal(tabKey('webkit', 'linux'), 'Tab');
+  assert.equal(tabKey('webkit', 'win32', true), 'Shift+Tab');
+  assert.equal(tabKey('firefox', 'darwin'), 'Tab');
 });

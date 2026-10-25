@@ -23,7 +23,7 @@ import { describeConflict, formatKey, Keymap, recordKey } from '@decryp7/paddock
             <td class="key" data-testid="shortcut-key">{{ recording() === row.id ? 'Press a key…' : row.key || '—' }}</td>
             <td class="actions">
               <button type="button" class="btn" [attr.aria-describedby]="'sd-key-' + row.id" [attr.aria-pressed]="recording() === row.id"
-                (click)="record(row.id)" (keydown)="onKey($event, row.id)" (blur)="stop()">Change key</button>
+                (click)="record(row.id, $event)" (keydown)="onKey($event, row.id)" (blur)="stop()">Change key</button>
               <button type="button" class="btn" [attr.aria-describedby]="'sd-key-' + row.id" [disabled]="!row.overridden" (click)="keymap.reset(row.id)">Reset key</button>
             </td>
           </tr>
@@ -66,7 +66,9 @@ export class DemoShortcuts {
   });
   protected readonly conflicts = computed(() => this.keymap.conflicts().map(describeConflict));
 
-  protected record(id: string): void {
+  protected record(id: string, click: Event): void {
+    // Safari and WKWebView (macOS) do not focus a button on click, and the keys go to the focused button: focus it here.
+    if (click.currentTarget instanceof HTMLElement) click.currentTarget.focus();
     this.recording.set(id);
     this.message.set('');
     this.keymap.suspend();

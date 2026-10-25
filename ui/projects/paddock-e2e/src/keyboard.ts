@@ -6,6 +6,27 @@ import { expect, type Locator, type Page } from '@playwright/test';
  * Escape gives the focus back to what opened a popup. Playwright's `press` is used throughout, never a click.
  */
 
+/**
+ * The key that moves the focus to the next (or, with `back`, the previous) focusable element. Safari and WKWebView on macOS
+ * only Tab between text fields and lists unless "Use keyboard navigation to move focus between controls" (full keyboard
+ * access) is on: buttons and links are skipped, and Option+Tab reaches them. Playwright's WebKit follows that default, so a
+ * test of what a keyboard user can reach emulates full keyboard access with Alt. Everywhere else it is plain Tab.
+ */
+export function tabKey(engine: string, platform: string, back = false): string {
+  const alt = engine === 'webkit' && platform === 'darwin';
+  return `${alt ? 'Alt+' : ''}${back ? 'Shift+' : ''}Tab`;
+}
+
+/** {@link tabKey} for the page's own browser engine and the machine the tests run on. */
+export function pageTabKey(page: Page, back = false): string {
+  return tabKey(page.context().browser()?.browserType().name() ?? 'chromium', process.platform, back);
+}
+
+/** Presses the key that moves the focus on ({@link tabKey}). */
+export async function pressTab(page: Page, back = false): Promise<void> {
+  await page.keyboard.press(pageTabKey(page, back));
+}
+
 /** One element the focus stopped on. */
 export interface FocusStop {
   /** Identifies the element within the page: its `data-testid`, else its `id`, else its position in the DOM. */
@@ -81,7 +102,7 @@ export function focusStop(page: Page): Promise<FocusStop | null> {
 export interface TabWalkOptions {
   /** Where to start: this element is focused first (default: the page as it is, the walk begins at the first Tab). */
   readonly from?: Locator;
-  /** The key pressed to move on (default `Tab`; `Shift+Tab` walks backwards). */
+  /** The key pressed to move on (default {@link pageTabKey}: `Tab`, or Alt+Tab in WebKit on macOS; `Shift+Tab` walks backwards). */
   readonly key?: string;
   /** Stops after this many (default 100). */
   readonly max?: number;
@@ -93,7 +114,7 @@ export interface TabWalkOptions {
  */
 export async function tabWalk(page: Page, options: TabWalkOptions = {}): Promise<TabWalk> {
   const max = options.max ?? 100;
-  const key = options.key ?? 'Tab';
+  const key = options.key ?? pageTabKey(page);
   const stops: FocusStop[] = [];
   if (options.from) {
     await options.from.focus();
@@ -141,7 +162,7 @@ export async function unreachableByKeyboard(page: Page, targets: Readonly<Record
   };
   await seen();
   for (let i = 0; i < max && pending.size > 0; i++) {
-    await page.keyboard.press('Tab');
+    await pressTab(page);
     const stop = await focusStop(page);
     if (walkStep(history, stop?.key ?? null) !== 'continue') break;
     if (stop) history.push(stop.key);
