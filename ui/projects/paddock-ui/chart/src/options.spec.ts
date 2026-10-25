@@ -2,6 +2,10 @@ import type { PaddockChartTokens } from '@decryp7/paddock-ui';
 import { describe, expect, it } from 'vitest';
 import { chartOption, chartSummary, donutNarrowHeight, escapeHtml, seriesColor, shares, tooltipHtml, type PdChartSpec } from './options';
 
+/** An ECharts option tree, inspected structurally by these specs. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the option tree is untyped JSON the specs walk by key
+type LooseOption = Record<string, any>;
+
 const tokens: PaddockChartTokens = {
   scheme: 'dark',
   fontFamily: 'system-ui',
@@ -26,7 +30,7 @@ const tokens: PaddockChartTokens = {
 };
 
 const base: PdChartSpec = { kind: 'line', x: ['Mon', 'Tue', 'Wed'], series: [{ name: 'Requests', values: [3, null, 9] }], unit: 'req' };
-const opt = (spec: PdChartSpec, animate = true) => chartOption(spec, tokens, { animate }) as Record<string, any>;
+const opt = (spec: PdChartSpec, animate = true) => chartOption(spec, tokens, { animate }) as LooseOption;
 
 describe('chart options', () => {
   it('escapes what comes from data before it reaches an HTML tooltip', () => {
@@ -69,7 +73,7 @@ describe('chart options', () => {
     const o = opt(two);
     expect(o['legend']).toMatchObject({ show: true, data: ['Requests', 'Errors'] });
     expect(o['yAxis'].min).toBe(0);
-    expect(o['series'].map((s: any) => [s.type, s.stack])).toEqual([['bar', 'total'], ['bar', 'total']]);
+    expect(o['series'].map((s: LooseOption) => [s.type, s.stack])).toEqual([['bar', 'total'], ['bar', 'total']]);
     expect(o['series'][1].color).toBe('#ff6b6b');
     expect(opt({ ...base, kind: 'bar' })['series'][0].stack).toBeUndefined();
     const area = opt({ ...base, kind: 'area' });
@@ -96,13 +100,13 @@ describe('chart options', () => {
   it('isolates a series on hover from four series on, because colour alone does not tell four lines apart', () => {
     const many = (n: number) => opt({ kind: 'line', x: ['a', 'b'], series: Array.from({ length: n }, (_, i) => ({ name: `S${i}`, values: [1, 2] })) });
     expect(many(3)['series'][0].emphasis).toBeUndefined();
-    expect(many(4)['series'].every((s: any) => s.emphasis?.focus === 'series')).toBe(true);
+    expect(many(4)['series'].every((s: LooseOption) => s.emphasis?.focus === 'series')).toBe(true);
   });
 
   it('uses the accent for a lone series (the same blue in every chart) and the palette for several', () => {
     expect(opt(base)['series'][0].color).toBe('#5b9bff');
     const two = opt({ ...base, series: [{ name: 'A', values: [1, 2, 3] }, { name: 'B', values: [1, 2, 3] }] });
-    expect(two['series'].map((s: any) => s.color)).toEqual(['#60aeeb', '#f3aa25']);
+    expect(two['series'].map((s: LooseOption) => s.color)).toEqual(['#60aeeb', '#f3aa25']);
   });
 
   it('uses a time axis with value pairs for epoch x values, and zoom when asked', () => {
@@ -146,15 +150,15 @@ describe('chart options', () => {
     expect(o['graphic'][0].style.font).toContain('16px');
     expect(opt({ kind: 'donut', x: ['A'], series: [{ name: 'S', values: [1234567] }], unit: 'req' })['graphic'][0].style.font).toContain('13px');
     expect(o['series'][0]).toMatchObject({ type: 'pie' });
-    expect(o['series'][0].data.map((d: any) => [d.name, d.value])).toEqual([['Disk', 60], ['Memory', 30], ['Cache', 10]]);
+    expect(o['series'][0].data.map((d: LooseOption) => [d.name, d.value])).toEqual([['Disk', 60], ['Memory', 30], ['Cache', 10]]);
     expect(o['tooltip'].formatter({ name: 'Disk', value: 60, color: '#60aeeb' })).toContain('60%');
     // The ring and the total are drawn around ONE centre, in pixels.
     expect(o['series'][0].center).toEqual([o['graphic'][0].x, o['graphic'][0].y]);
     // Wide: the list starts right of the ring; narrow: the list is under the ring, centred, and the ring is centred in the box.
     const [cx, radius] = [o['series'][0].center[0], o['series'][0].radius[1]];
     expect(o['legend'].left).toBeGreaterThan(cx + radius);
-    const narrow = opt({ kind: 'donut', x: ['A', 'B'], series: [{ name: 'S', values: [1, 1] }] }, true) as Record<string, any>;
-    const n = chartOption({ kind: 'donut', x: ['A', 'B'], series: [{ name: 'S', values: [1, 1] }] }, tokens, { animate: true, narrow: true, width: 320 }) as Record<string, any>;
+    const narrow = opt({ kind: 'donut', x: ['A', 'B'], series: [{ name: 'S', values: [1, 1] }] }, true) as LooseOption;
+    const n = chartOption({ kind: 'donut', x: ['A', 'B'], series: [{ name: 'S', values: [1, 1] }] }, tokens, { animate: true, narrow: true, width: 320 }) as LooseOption;
     expect(n['legend']).toMatchObject({ left: 'center', bottom: 4 });
     expect(n['series'][0].center[0]).toBe(160);
     expect(n['series'][0].center[0] - n['series'][0].radius[1]).toBeGreaterThanOrEqual(0);
