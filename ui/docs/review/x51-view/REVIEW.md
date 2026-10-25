@@ -308,3 +308,46 @@ will approve on a recaptured `*-focus-sort.png` that shows the ring clear of the
 Across three rounds `<pd-view>` has become a renderer that looks like the family in both themes and at 320 px. Status always
 has glyph and word, there is one primary per view, the writes badge is shared, the empty, error, stale, loading and busy
 states are all drawn, the needs-AI state is the family's own, and the drawings read cleanly. Fix P2-1 and it is approved.
+
+---
+
+# Review 4 (2026-10-25, `origin/shell/integrate` 0d45f65; sheet captured from 344eeb0c45)
+
+Material: `review-4/`: `*-focus-sort`, the drawings section with the new radial sample `*-graph-radial-bows`, and the error
+glyphs across text, table, graph, form, review and the invalid banner, in both themes.
+
+## Verdict: NOT APPROVED (0 P1, 1 P2, 1 P3). Yes, the "tokens" label blocks.
+
+Everything from review 3 is fixed. The one blocker is the label of the new bowed radial edge. It is not cosmetic for a
+sample only: it is how the label placer treats a bowed edge, so real graphs will hit it too.
+
+## Review 3 findings and the new work, checked
+
+| Item | Result |
+|---|---|
+| R3 P2-1 sort focus ring | Fixed, both themes. The inset ring sits clear of "State" on all four sides, and the header text still lines up with the cells. |
+| R3 P3-1 caption | Fixed ("back edge in an orthogonal lane"). |
+| R3 P3-2 radial bows in pixels | Now visible (`*-graph-radial-bows`): six nodes, a hub, a fitted canvas, and the view to secrets edge bowing round the hub. See P2-1 and P3-1. |
+| R3 P3-3 pointer off the view | Fixed. No leftover hover in `*-focus-sort` or the stale full view. |
+| Rule 40 error glyph | Done and consistent. Circle-× everywhere a tone is bad or an icon is error: the "Failing" badge and table cell, the graph's Publish box, the "Blocked" finding and its badge, the form's "This is required.", and the invalid-view banner. Warning stays the triangle and info the circle-i. The two failure glyphs read clearly apart. |
+| Layered graph, class, sequence | Unchanged and still clean. |
+
+## P2
+
+1. **A bowed edge's label collides with a box and with its own line.** In `*-graph-radial-bows` (both themes), "tokens" sits on
+   the hub's bottom-right corner (the "t" touches the stroke), and the bowed view→secrets curve runs through the end of the word
+   ("ns"). So the label is struck through and touches a node at once. It blocks because labels on bowed edges are placed by the
+   same rule for every user graph, not only this sample. Fix: put a bow's label at the apex of the bow, offset along the outward
+   normal by half the label height plus 4 units. Run the box-avoid check that edges already use (`pathCrosses`) on the label's
+   rectangle, and nudge along the edge if it hits. Extend `layout.spec.ts` "an edge never crosses a box" to "no label rectangle
+   intersects a box or any edge path" over the sample graphs, `g3` included.
+
+## P3
+
+1. In the same sample, the shell→chromium spoke-to-spoke edge is straight, not bowed (FIXES says both bow). It crosses the
+   view→ipc edge just above its arrowhead, so the two arrows into the hub's top read as one junction. Let this edge bow
+   too (above the hub, the side away from its neighbours' edges), or accept the crossing and make sure its arrow is not hidden.
+   It does not block.
+
+## Overall
+Fix P2-1, recapture `*-graph-radial-bows` in both themes, and I will approve on that shot alone.
