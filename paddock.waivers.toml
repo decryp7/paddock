@@ -5,3 +5,12 @@ check = "C15"
 path = "ui/projects/paddock-e2e/src/*"
 reason = "the unit tests of the installed-Chrome guard must name the installed Chrome (channel and paths) to prove it is refused"
 expires = "2027-04-30"
+
+# Debrief's parser crates without a fuzz target or never-panics test, found when Debrief was imported (ADR 0014): its
+# AGENTS.md already promises one per parser. Each is a Debrief follow-up; the waiver keeps the strict C36 for Paddock's
+# shared crates meanwhile.
+[[waiver]]
+check = "C36"
+path = "apps/debrief/*"
+reason = "Debrief parser crates found at the import (cargo-debrief-plugin, debrief-agent, debrief-cli, debrief-monitor, debrief-plugin-native, debrief-plugin-tools, xtask) get their never-panics tests as a Debrief follow-up"
+expires = "2026-12-31"
