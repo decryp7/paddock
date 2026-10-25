@@ -12,6 +12,13 @@ const PORT = Number(process.env['DEBRIEF_E2E_PORT'] ?? 4300);
 const PREBUILT = !!process.env['DEBRIEF_E2E_PREBUILT'];
 // The CSP guard spec runs in Chromium only.
 const PROD_CSP = '**/prod-csp.e2e.ts';
+// The shell baseline (Paddock X50 W0, e2e/shell-baseline.md) is a manual migration baseline: macOS screenshots that the
+// workbench migration (M5) diffs against on the same Mac. It is not part of the default run (CI runs Linux, whose fonts
+// render differently); DEBRIEF_SHELL_BASELINE=1 adds its two projects (`npm run e2e:shell-baseline`).
+const SHELL_BASELINE = '**/shell-baseline.e2e.ts';
+const BASELINE = !!process.env['DEBRIEF_SHELL_BASELINE'];
+// The baseline projects keep the snapshot names of the browser they run in (`<name>-chromium-darwin.png`).
+const baselineSnapshots = (browser: string) => `{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}-${browser}{-platform}{ext}`;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -30,8 +37,24 @@ export default defineConfig({
     viewport: { width: 1440, height: 900 },
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
-    { name: 'webkit', testIgnore: PROD_CSP, use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 } } },
+    { name: 'chromium', testIgnore: SHELL_BASELINE, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
+    { name: 'webkit', testIgnore: [PROD_CSP, SHELL_BASELINE], use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 } } },
+    ...(BASELINE
+      ? [
+          {
+            name: 'shell-baseline-chromium',
+            testMatch: SHELL_BASELINE,
+            snapshotPathTemplate: baselineSnapshots('chromium'),
+            use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+          },
+          {
+            name: 'shell-baseline-webkit',
+            testMatch: SHELL_BASELINE,
+            snapshotPathTemplate: baselineSnapshots('webkit'),
+            use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 } },
+          },
+        ]
+      : []),
   ],
   webServer: {
     command: PREBUILT ? `node e2e/serve-prod.mjs ${PORT}` : `npx ng build && node e2e/serve-prod.mjs ${PORT}`,
