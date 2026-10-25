@@ -1,9 +1,9 @@
 import { NgComponentOutlet } from '@angular/common';
 import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
-import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore } from './assistant.store';
-import { conversationTitle, type TurnPart, type TurnView } from './chat-model';
+import { chipText, conversationTitle, type TurnPart, type TurnView } from './chat-model';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
 
@@ -22,7 +22,7 @@ const SCROLL_STICK_PX = 24;
   selector: 'pd-assistant',
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [AssistantStore],
-  imports: [NgComponentOutlet, PdGlyph, PdAssistantRichText, PdAssistantToolCard, PdNeedsAi],
+  imports: [PdStatusGlyph, NgComponentOutlet, PdGlyph, PdAssistantRichText, PdAssistantToolCard, PdNeedsAi],
   template: `
     <header class="bar">
       <h2 class="title" data-testid="assistant-title" [attr.title]="store.title()">{{ store.title() }}</h2>
@@ -112,7 +112,7 @@ const SCROLL_STICK_PX = 24;
             }
             @if (failedOf(turn); as err) {
               <div class="fail" role="alert" data-testid="assistant-error">
-                <pd-glyph class="fail-icon" name="alert" [size]="16" />
+                <pd-status-glyph class="fail-icon" status="error" [size]="16" />
                 <div class="fail-body">
                   <p class="fail-title">{{ t.failedTitle }}</p>
                   <p class="fail-cause" data-testid="assistant-error-cause">{{ t.failedCause }}</p>
@@ -146,7 +146,7 @@ const SCROLL_STICK_PX = 24;
       <section class="approval" [class.danger]="ask.destructive" role="alertdialog" aria-labelledby="pd-assistant-approval" [attr.aria-describedby]="ask.destructive ? 'pd-assistant-approval-final' : null" data-testid="assistant-approval">
         <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong>{{ ' ' }}<span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
         @if (ask.destructive) {
-          <p class="final" id="pd-assistant-approval-final" data-testid="assistant-approval-final"><pd-glyph name="alert" [size]="14" /> {{ t.cannotUndo }}</p>
+          <p class="final" id="pd-assistant-approval-final" data-testid="assistant-approval-final"><pd-status-glyph status="warning" [size]="14" /> {{ t.cannotUndo }}</p>
         }
         <details class="details" data-testid="assistant-approval-details">
           <summary><pd-glyph class="chev" name="chevron-right" [size]="14" /> {{ t.details }}</summary>
@@ -183,10 +183,7 @@ const SCROLL_STICK_PX = 24;
                 @if (chip.icon && hasGlyph(chip.icon)) {
                   <pd-glyph [name]="chip.icon" [size]="14" />
                 }
-                <span class="chip-label">{{ chip.label }}</span>
-                @if (chip.detail) {
-                  <span class="chip-detail">{{ chip.detail }}</span>
-                }
+                <span class="chip-label">{{ chipText(chip.label, chip.detail) }}</span>
                 <pd-glyph [name]="chip.on ? 'close' : 'plus'" [size]="14" />
               </button>
             </li>
@@ -230,7 +227,7 @@ const SCROLL_STICK_PX = 24;
     .bar { display: flex; align-items: center; gap: var(--pd-space-1); padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); min-height: var(--pd-toolbar-height); }
     .title { margin: 0; font-size: inherit; font-weight: var(--pd-weight-semibold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .spacer { flex: 1; }
-    .list { list-style: none; margin: 0; padding: var(--pd-space-1); max-height: 40%; overflow-y: auto; border-bottom: 1px solid var(--pd-hairline); }
+    .list { list-style: none; margin: 0; padding: var(--pd-space-1) var(--pd-space-3); max-height: 40%; overflow-y: auto; border-bottom: 1px solid var(--pd-hairline); }
     .row { display: flex; align-items: center; gap: var(--pd-space-1); border-radius: var(--pd-radius-control); }
     .row.active { background: var(--pd-accent-tint); }
     .row:hover { background: var(--pd-hover); }
@@ -288,13 +285,12 @@ const SCROLL_STICK_PX = 24;
     .chip.static { cursor: default; min-height: 0; }
     .chip.off { opacity: 0.6; text-decoration: line-through; }
     .chip:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .chip-label { font-weight: var(--pd-weight-medium); }
-    .chip-detail { color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .chip-label { font-weight: var(--pd-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .input { width: 100%; box-sizing: border-box; resize: none; font: inherit; color: var(--pd-text); background: var(--pd-surface-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-input); padding: var(--pd-space-2); }
     .input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 0; }
     .send-row { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; }
     .allow { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    @container (max-width: 360px) { .log { padding: var(--pd-space-2); } .user { max-width: 100%; } .chip-detail { display: none; } }
+    @container (max-width: 360px) { .log { padding: var(--pd-space-2); } .user { max-width: 100%; } }
   `,
 })
 export class PdAssistant {
@@ -378,6 +374,7 @@ export class PdAssistant {
 
   constructor() {
     // Keeps the newest text in view while an answer streams in, but only for a user who is at the bottom (DOM only).
+    // effect-state: `unseen` records the scroll decision of this effect; the user's position is not a signal, so it cannot be derived.
     effect(() => {
       this.store.turns();
       const el = this.log()?.nativeElement;
@@ -393,6 +390,17 @@ export class PdAssistant {
       const button = this.declineButton()?.nativeElement;
       if (ask?.destructive && button) button.focus();
     });
+    // Keeps the latest item in view when the log itself gets shorter under a user at the bottom (an approval appears or opens
+    // its Details below it): the browser keeps the scroll position, which would hide the waiting card (review 4 P3-1; DOM only).
+    effect((onCleanup) => {
+      const el = this.log()?.nativeElement;
+      if (!el || typeof ResizeObserver === 'undefined') return;
+      const watch = new ResizeObserver(() => {
+        if (this.pinned) el.scrollTop = el.scrollHeight;
+      });
+      watch.observe(el);
+      onCleanup(() => watch.disconnect());
+    });
     // The question box shows the draft. Not a `[value]` binding: that is not re-rendered when typing and Enter happen in one
     // task (the draft goes 'x' then '' before any render), so the sent question would stay in the box (DOM only).
     effect(() => {
@@ -401,6 +409,9 @@ export class PdAssistant {
       if (el && el.value !== draft) el.value = draft;
     });
   }
+
+  /** One format for a context chip, in the composer and in the sent question. */
+  protected readonly chipText = chipText;
 
   /** A conversation title as shown: no leading slash command, sentence case. */
   protected heading(raw: string): string {

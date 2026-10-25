@@ -19,10 +19,6 @@ async function settle(rounds = 12): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
 }
 
-function text(el: Element): string {
-  return (el.textContent ?? '').replace(/\s+/g, ' ').trim();
-}
-
 /** The engine's steps wait until `flush()`/`flushAll()`: a test sees each phase. */
 function held(options: MemoryServiceOptions = {}) {
   const queue: (() => void)[] = [];

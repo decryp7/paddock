@@ -534,9 +534,9 @@ describe('pd-shell-frame with provideShellPages', () => {
   });
 
   it('path URLs, path overrides, the app’s routes, its icon and reserved keys', async () => {
-    @Component({ selector: 'my-icon', template: `I`, changeDetection: ChangeDetectionStrategy.OnPush, inputs: ['name'] })
+    @Component({ selector: 'my-icon', template: `I`, changeDetection: ChangeDetectionStrategy.OnPush })
     class MyIcon {
-      name = '';
+      readonly name = input('');
     }
     @Component({ selector: 'tray-page', template: `tray`, changeDetection: ChangeDetectionStrategy.OnPush })
     class Tray {}

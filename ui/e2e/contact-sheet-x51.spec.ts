@@ -3,12 +3,12 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
-// The contact sheet of <pd-view> (plan X51, ADR 0002) for the independent review (rule 22), review 2: every node kind of the sample
+// The contact sheet of <pd-view> (plan X51, ADR 0002) for the independent review (rule 22), review 5 (after review 4): every node kind of the sample
 // document in both themes at desktop width, the form with its errors, the review list asking for a reason, the stale, invalid,
 // loading and busy states, keyboard focus and hover, and the whole view at 320 px. Tall subjects are shot in slices of at most 1,800
 // CSS px (a single bitmap taller than the GPU texture limit paints blank), and the images are composed into sheets by section, each
 // no taller than about 3,000 CSS px, so every sheet opens at 100%. `CONTACT_SHEET=1 npx playwright test --project=review
-// contact-sheet-x51` rewrites docs/review/x51-view/review-3/. The reviewer looks at the sheets; this test only proves they were
+// contact-sheet-x51` rewrites docs/review/x51-view/review-5/. The reviewer looks at the sheets; this test only proves they were
 // made from the real components.
 
 const GALLERY = `http://localhost:${process.env['PW_PORT'] ?? 4300}`;
@@ -18,7 +18,7 @@ const commit = ((): string => {
   const dirty = git('status', '--porcelain', '--', '../projects', '../e2e/view.spec.ts').length > 0;
   return `${git('rev-parse', '--short=10', 'HEAD')}${dirty ? ' + uncommitted changes' : ''}`;
 })();
-const OUT = join(__dirname, '..', 'docs', 'review', 'x51-view', 'review-3');
+const OUT = join(__dirname, '..', 'docs', 'review', 'x51-view', 'review-5');
 const THEMES = ['dark', 'light'] as const;
 const SLICE = 1800;
 const SHEET_MAX = 3000;
@@ -33,7 +33,7 @@ interface Shot {
 }
 
 test.describe('contact sheet: pd-view', () => {
-  test.skip(!process.env['CONTACT_SHEET'], 'set CONTACT_SHEET=1 to rewrite docs/review/x51-view/review-3');
+  test.skip(!process.env['CONTACT_SHEET'], 'set CONTACT_SHEET=1 to rewrite docs/review/x51-view/review-5');
   test.describe.configure({ timeout: 300_000 });
   test.use({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 2 });
 
@@ -92,6 +92,8 @@ test.describe('contact sheet: pd-view', () => {
         clip.x = moved.x;
         clip.y = moved.y;
       }
+      // A shot that is not about hover is taken with the pointer off the view, so no row keeps the hover of an earlier shot.
+      if (!hover) await page.mouse.move(0, 0);
       const height = Math.min(SLICE, total - top, SLICE + 120 - clip.y);
       const file = join(OUT, `${theme}-${name}${total > SLICE ? `-${k}` : ''}.png`);
       await page.screenshot({ path: file, animations: 'disabled', caret: 'hide', clip: { x: clip.x, y: clip.y, width: Math.min(clip.width, viewport.width - clip.x), height } });
@@ -121,11 +123,12 @@ test.describe('contact sheet: pd-view', () => {
       await s('data', 'Chart: bar', 'chart-bar', node('c2'));
       await s('data', 'Chart: pie as a donut', 'chart-pie', node('c4'));
       await s('data', 'Chart: scatter in the accent, like the others', 'chart-scatter', node('c5'));
-      await s('drawings', 'Layered graph: status glyph in each box, cycle edge as a curve, labels beside the line', 'graph', node('g1'));
+      await s('drawings', 'Layered graph: status glyph in each box, back edge in an orthogonal lane outside the boxes, labels beside the line', 'graph', node('g1'));
       await node('g1').locator('details summary').click();
       await s('drawings', 'The same graph with "Show as a list" open: status words included', 'graph-list', node('g1'));
       await node('g1').locator('details summary').click();
       await s('drawings', 'Radial graph: hub in the middle, spokes on a ring, canvas fitted', 'graph-radial', node('g2'));
+      await s('drawings', 'Second radial graph: edges from spoke to spoke bow clear of the boxes and the canvas grows to hold them', 'graph-radial-bows', node('g3'));
       await s('drawings', 'Class diagram: stereotype, rule under the name, members from the left', 'diagram-class', node('d1'));
       await s('drawings', 'Sequence diagram: lifelines and messages in order', 'diagram-sequence', node('d2'));
       await s('form', 'Form: every field kind, help under the control, "Changes data" on Publish, the one filled button of the view', 'form', node('form'));
@@ -265,7 +268,7 @@ test.describe('contact sheet: pd-view', () => {
         figure{margin:0;background:#fff;padding:6px;border-radius:6px}
         figure img{display:block;max-width:100%;height:auto}
         figcaption{font-size:11px;color:#444;margin-bottom:4px}
-      </style><h1>${esc(sheet.label)}: review 3, not self-approved (left dark, right light)</h1>
+      </style><h1>${esc(sheet.label)}: review 5, not self-approved (left dark, right light)</h1>
       ${sheet.rows
         .map(
           (r) =>
@@ -281,9 +284,9 @@ test.describe('contact sheet: pd-view', () => {
     writeFileSync(
       join(OUT, 'README.md'),
       [
-        '# Contact sheet of `<pd-view>`: review 3 (NOT self-approved)',
+        '# Contact sheet of `<pd-view>`: review 5 (NOT self-approved)',
         '',
-        `Plan X51, ADR 0002. Made from the real components after the fixes for review 2 (\`../REVIEW.md\`, \`../FIXES.md\`). Every section (kinds, states, interaction, 320 px) was captured in one run from one commit: \`${commit}\`. Awaiting the independent reviewer (rule 22).`,
+        `Plan X51, ADR 0002. Made from the real components after the fixes for review 4 (\`../REVIEW.md\`, \`../FIXES.md\`). Every section (kinds, states, interaction, 320 px) was captured in one run from one commit: \`${commit}\`. Awaiting the independent reviewer (rule 22).`,
         '',
         'Open the `sheet-*.png` files: each is one section, dark on the left and light on the right, no taller than about 3,000 px (6,000 px of bitmap), readable at 100%.',
         'The single images (`dark-*.png`, `light-*.png`) are the same shots at 2x; a subject taller than 1,800 px is cut into numbered slices (`-1`, `-2`).',

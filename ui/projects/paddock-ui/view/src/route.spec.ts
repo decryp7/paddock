@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flattenPath, inflate, pathCrosses, roundedPath, segmentCrosses } from './route';
+import { crossNearArrow, flattenPath, inflate, pathCrosses, pointAt, roundedPath, segmentCrosses, segmentsCross, tailOf } from './route';
 
 const box = { x: 10, y: 10, w: 20, h: 20 };
 
@@ -37,5 +37,30 @@ describe('route helpers', () => {
   });
   it('grows a box on every side', () => {
     expect(inflate(box, 3)).toEqual({ x: 7, y: 7, w: 26, h: 26 });
+  });
+});
+
+describe('arrow and label helpers (review 4)', () => {
+  it('tells proper crossings from touching ends', () => {
+    expect(segmentsCross([0, 0], [10, 10], [0, 10], [10, 0])).toBe(true);
+    expect(segmentsCross([0, 0], [10, 0], [10, 0], [10, 10])).toBe(false);
+    expect(segmentsCross([0, 0], [10, 0], [0, 5], [10, 5])).toBe(false);
+  });
+  it('takes the last segment of a polyline and then as many as the length needs', () => {
+    expect(tailOf([[0, 0], [100, 0], [100, 100]], 10)).toEqual([[100, 0], [100, 100]]);
+    expect(tailOf([[0, 0], [20, 0], [30, 0]], 25)).toEqual([[0, 0], [20, 0], [30, 0]]);
+  });
+  it('finds crossings near either arrowhead only', () => {
+    expect(crossNearArrow('M 0 0 L 100 0', 'M 95 -10 L 95 10')).toBe(true);
+    expect(crossNearArrow('M 0 0 L 60 0 L 100 0', 'M 5 -100 L 5 60 L 5 100')).toBe(false);
+    expect(crossNearArrow('M 5 -100 L 5 60 L 5 100', 'M 0 0 L 60 0 L 100 0')).toBe(false);
+    expect(crossNearArrow('M 0 -50 L 0 50', 'M -5 45 L 100 45')).toBe(true);
+  });
+  it('finds the point and direction at a fraction of the length', () => {
+    expect(pointAt([[0, 0], [10, 0], [10, 10]], 0.5)).toEqual({ at: [10, 0], dir: [1, 0] });
+    expect(pointAt([[0, 0], [10, 0], [10, 10]], 0.75)).toEqual({ at: [10, 5], dir: [0, 1] });
+    expect(pointAt([[0, 0], [10, 0]], 1).at).toEqual([10, 0]);
+    expect(pointAt([[3, 3], [3, 3]], 0.5)).toEqual({ at: [3, 3], dir: [1, 0] });
+    expect(pointAt([[3, 3]], 0.5)).toEqual({ at: [3, 3], dir: [1, 0] });
   });
 });

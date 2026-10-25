@@ -98,7 +98,9 @@ test.describe('contact sheet: workbench', () => {
       await readme.click();
       await page.keyboard.press('Shift+F10');
       await expect(wb.explorer.menu).toBeVisible();
+      await expect(wb.explorer.menu.getByRole('menuitem').first()).toBeFocused();
       await page.keyboard.press('ArrowDown');
+      await expect(wb.explorer.menu.getByRole('menuitem').nth(1)).toBeFocused();
       await shoot(page, set, '07b-explorer-menu-keys', 'Explorer menu by Shift+F10 with keyboard focus on an item (2 px ring)');
       await page.keyboard.press('Escape');
 
@@ -122,11 +124,22 @@ test.describe('contact sheet: workbench', () => {
       await ask(page, '/tool request handler');
       await expect(page.getByTestId('assistant-cite').first()).toBeVisible();
       await shoot(page, set, '11-assistant-tool', 'Assistant: a tool card and an answer with a citation button');
+      // Review 3 P2-1: a code block and inline code on their own surface, in both themes.
+      const withCode = page.getByTestId('assistant-answer').filter({ has: page.locator('pre') }).last();
+      await withCode.scrollIntoViewIfNeeded();
+      await shoot(page, set, '11b-assistant-code', 'Assistant: a code block and inline code on the code surface (differs from the pane in both themes)', withCode);
       await page.getByTestId('assistant-allow-actions').check();
       await ask(page, '/write');
       await expect(page.getByTestId('assistant-approval')).toBeVisible();
-      await page.getByTestId('assistant-approval-details').click();
-      await shoot(page, set, '12-assistant-approval', 'Assistant: a write tool waits for Allow or Decline, with its tool and arguments');
+      // Review 3 P3-1: open Details by its summary (the <details> centre is empty space), then give the focus back to Decline
+      // by keyboard, so the shot shows both the tool with its arguments and the focused safe default.
+      await page.getByTestId('assistant-approval-details').locator('summary').click();
+      await expect(page.getByTestId('assistant-approval-tool')).toBeVisible();
+      await page.getByTestId('assistant-decline').focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      await expect(page.getByTestId('assistant-decline')).toBeFocused();
+      await shoot(page, set, '12-assistant-approval', 'Assistant: a destructive write waits: danger card, tool and arguments open, Decline focused as the default');
       await page.getByTestId('assistant-decline').click();
       await expect(page.getByTestId('assistant-send')).toBeVisible();
       await shoot(page, set, '12b-assistant-declined', 'Assistant: a declined tool is a neutral card, not an error');
@@ -221,7 +234,7 @@ test.describe('contact sheet: workbench', () => {
     await page.screenshot({ path: file, fullPage: true, type: 'png' });
     writeFileSync(
       join(OUT, 'README.md'),
-      'Contact sheet of the Paddock workbench (plan X50, ADR 0013), review 3: the workbench demo at @2x, dark with the Pacenotes accent and light with the Debrief accent, with every state review 1 asked for (see REVIEW.md, REVIEW-2.md, RESPONSE-1.md and RESPONSE-2.md), and the demo app icon. Rewritten by `CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x50`. NOT self-approved: awaiting the independent reviewer.\n',
+      'Contact sheet of the Paddock workbench (plan X50, ADR 0013), review 5: the workbench demo at @2x, dark with the Pacenotes accent and light with the Debrief accent, with every state review 1 asked for (see REVIEW.md to REVIEW-4.md and RESPONSE-1.md to RESPONSE-4.md), the demo app icon, and demo-icons-compare.png (the workbench demo beside the shell demo at 16, 32 and 1024 px). Rewritten by `CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x50`. NOT self-approved: awaiting the independent reviewer.\n',
     );
     expect(readFileSync(file).length).toBeGreaterThan(10_000);
   });

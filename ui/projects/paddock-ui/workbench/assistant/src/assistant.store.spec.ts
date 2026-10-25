@@ -6,6 +6,7 @@ import { defineAssistantContext, provideWorkbenchContributions } from '@decryp7/
 import { FIXTURE_CONVERSATION } from '../generated/assistant-fixtures';
 import { ASSISTANT_LIMITS } from '../generated/assistant';
 import { AssistantStore, UNDO_MS } from './assistant.store';
+import type { TurnView } from './chat-model';
 import { AssistantBackend, DEMO_ANSWER, MemoryAssistantBackend, type MemoryAssistantOptions } from './backend';
 
 interface Ctx {
@@ -167,6 +168,41 @@ describe('AssistantStore', () => {
     expect(store.failure()).toBe('No action waits for a decision.');
   });
 
+  it('shows a reopened conversation exactly as it looked live (tool cards, citations, declined write, failed turn)', async () => {
+    const { store } = setup();
+    await quiet();
+    store.setAllowWrite(true);
+    for (const q of ['/tool pipeline', '/write', '/fail', '/tool-slow']) {
+      store.setDraft(q);
+      await store.send();
+      await quiet(2);
+      if (q === '/write') {
+        await store.approve('call_2', false);
+        await quiet();
+      }
+      if (q === '/tool-slow') {
+        await store.stop();
+        await quiet();
+      }
+    }
+    const live = store.turns();
+    const id = store.activeId() as string;
+    expect(live).toHaveLength(4);
+    // What the live view shows is what the test pins first.
+    expect(live[0]?.citations).toEqual([{ text: 'item 7', target: 'record:7', title: 'Item 7' }]);
+    expect(live[1]?.parts.find((p) => p.kind === 'tool')).toMatchObject({ card: { name: 'erase', declined: true, destructive: true, write: true } });
+    expect(live[2]?.error).toEqual({ message: 'The model stopped answering.', needsAi: null });
+    expect(live[3]?.parts.find((p) => p.kind === 'tool')).toMatchObject({ card: { stopped: true } });
+
+    store.newConversation();
+    expect(store.turns()).toEqual([]);
+    await store.open(id);
+    // The input of a write is shown while it waits; usage is a live counter; neither is part of the transcript.
+    const bare = (turns: readonly TurnView[]) =>
+      turns.map((t) => ({ ...t, usage: null, parts: t.parts.map((p) => (p.kind === 'tool' ? { kind: p.kind, card: { ...p.card, input: undefined } } : p)) }));
+    expect(bare(store.turns())).toEqual(bare(live));
+  });
+
   it('does not offer writes when the app has none', async () => {
     const { backend, store } = setup({ info: { provider: 'p', tools: [], hasWrite: false } });
     await quiet();
@@ -281,6 +317,40 @@ describe('AssistantStore', () => {
       expect(store.undoable()).toBeNull();
     });
 
+    it('moves off the open conversation at once when it is deleted, and returns to it on undo', async () => {
+      const { store } = setup({ conversations: [FIXTURE_CONVERSATION] });
+      await quiet();
+      await store.open(FIXTURE_CONVERSATION.id);
+      expect(store.title()).toBe(FIXTURE_CONVERSATION.title);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.removeLater(FIXTURE_CONVERSATION.id);
+      expect(store.title()).toBe('New conversation');
+      expect(store.activeId()).toBeNull();
+      expect(store.turns()).toEqual([]);
+      store.undoRemove(FIXTURE_CONVERSATION.id);
+      vi.useRealTimers();
+      await quiet();
+      expect(store.activeId()).toBe(FIXTURE_CONVERSATION.id);
+      expect(store.title()).toBe(FIXTURE_CONVERSATION.title);
+      expect(store.turns().length).toBeGreaterThan(0);
+    });
+
+    it('opens the next conversation when the open one is deleted', async () => {
+      const second = { ...FIXTURE_CONVERSATION, id: 'second', title: 'Second one' };
+      const { store } = setup({ conversations: [FIXTURE_CONVERSATION, second] });
+      await quiet();
+      const [first, other] = store.conversations();
+      await store.open((first as { id: string }).id);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.removeLater((first as { id: string }).id);
+      vi.useRealTimers();
+      await quiet();
+      expect(store.activeId()).toBe((other as { id: string }).id);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.dispose();
+      vi.useRealTimers();
+    });
+
     it('brings it back on undo and never deletes it', async () => {
       const { store, backend } = setup({ conversations: [FIXTURE_CONVERSATION] });
       await quiet();
@@ -310,6 +380,20 @@ describe('AssistantStore', () => {
       other.dispose();
       await quiet();
     });
+  });
+
+  it('names a new conversation in the heading as soon as its question is sent', async () => {
+    const { store, backend } = setup();
+    await quiet();
+    backend.hold();
+    expect(store.title()).toBe('New conversation');
+    store.setDraft('/slow explain the request pipeline');
+    const sending = store.send();
+    expect(store.title()).toBe('Explain the request pipeline');
+    await sending;
+    expect(store.title()).toBe('Explain the request pipeline');
+    backend.release();
+    await store.stop();
   });
 
   it('titles the pane with the conversation, or "New conversation"', async () => {

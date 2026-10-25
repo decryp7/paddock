@@ -29,6 +29,7 @@ import {
 import { PdSettingsSectionPage } from './settings-section';
 import { PdSettingsWindow } from './settings-window';
 import { settingsBed, settle, SPEC_PAGES } from './spec-helpers';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 interface Bed {
   fixture: ComponentFixture<PdSettingsWindow>;
@@ -136,6 +137,7 @@ describe('pd-settings-window', () => {
     await type(bed, $<HTMLInputElement>(field(el, 'greeting'), 'input'), 'Hi!');
     expect(field(el, 'greeting').querySelector('[role="alert"]')?.textContent).toBe('Does not have the expected format ([A-Za-z ,]+).');
     expect($<HTMLInputElement>(field(el, 'greeting'), 'input').getAttribute('aria-invalid')).toBe('true');
+    assertStatusGlyphs(field(el, 'greeting'));
     expect($(el, '.pd-nav [data-page="sd.general"] .pd-dot')).not.toBeNull();
     // Another field still applies; the refused one stays unsaved.
     await type(bed, $<HTMLInputElement>(field(el, 'repeat'), 'input'), '3');

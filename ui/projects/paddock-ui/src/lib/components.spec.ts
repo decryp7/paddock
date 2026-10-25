@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { SuCard } from './card';
 import { SuMetric, deltaTone, formatNumber } from './metric';
@@ -163,6 +163,7 @@ describe('SuSparkline', () => {
 });
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [SuCard],
   template: `
     <pd-card heading="CPU" [interactive]="interactive()" [flat]="flat()" (activated)="count.set(count() + 1)">

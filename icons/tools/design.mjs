@@ -41,12 +41,13 @@ export const PALETTE = {
   // Neutral silver: no family hue, light like Spotter's tile so it takes dark ink. The CVD search over low-chroma
   // tiles kept the family minimums unchanged only for near-black and light silver (tools/cvd.mjs; icons/README.md).
   'shell-demo': { top: '#DDE1E7', base: '#D1D4DA', bottom: '#B5BCC7', deep: '#4A5361', light: '#F6F7F9' },
-  // Neutral warm stone: the workbench demo's own light tile (dark ink), apart from the shell demo's cool silver.
-  'workbench-demo': { top: '#E7E3DA', base: '#DAD5CB', bottom: '#C4BDB0', deep: '#58534A', light: '#F8F6F2' },
+  // Near-black: the dark neutral that keeps the family CVD minimums (the light neutrals sit within 3 to 12 dE of the shell
+  // demo's silver or Spotter), at least 17.7 dE from every family tile and the shell demo; white ink, a faint light rim for dark docks.
+  'workbench-demo': { top: '#1C1C1C', base: '#050505', bottom: '#000000', deep: '#000000', light: '#8C8C8C', rim: '#FFFFFF' },
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */
-export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF', paddock: '#FFFFFF', 'shell-demo': '#1E2530', 'workbench-demo': '#26231E' };
+export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF', paddock: '#FFFFFF', 'shell-demo': '#1E2530', 'workbench-demo': '#FFFFFF' };
 
 export const CARBON = { top: '#30333B', bottom: '#15171B', rim: '#4A4E58' };
 
@@ -65,10 +66,10 @@ export const STATUSES = {
 };
 
 /** Light tiles (dark ink): a stronger livery and secondary ink, a softer glyph shadow. */
-const LIGHT_TILE = new Set(['spotter', 'shell-demo', 'workbench-demo']);
+const LIGHT_TILE = new Set(['spotter', 'shell-demo']);
 
 /** Tiles close to a white desktop: a 1 px inner rim (8 % black) keeps their outline on white without the shadow. */
-const RIMMED = new Set(['shell-demo', 'workbench-demo']);
+const RIMMED = new Set(['shell-demo']);
 
 export const STATUS_COLOURS = { busy: '#2F8FFF', warning: '#F5A524', error: '#E5484D', new: '#E5484D', serving: '#2FB36B', high: '#F2711C' };
 
@@ -259,13 +260,14 @@ export const GLYPH_1024 = {
     { kind: 'stroke', d: 'M506 492H686', w: 44, tone: 'primary' },
     { kind: 'stroke', d: 'M506 572H660M506 652H620', w: 44, tone: 'secondary' },
   ],
-  // The workbench: a window whose dock is split into a tall pane on the left and two stacked panes on the right.
+  // The workbench: the activity bar as a strip of dots, the dock split into a tall pane and two on the right, tabs on the top one.
   'workbench-demo': () => [
-    { kind: 'stroke', d: rr(260, 280, 504, 464, 72), w: 56, tone: 'primary' },
-    { kind: 'stroke', d: 'M268 404H756', w: 40, tone: 'secondary', cap: 'butt' },
-    { kind: 'stroke', d: 'M470 404V736', w: 44, tone: 'primary', cap: 'butt' },
-    { kind: 'stroke', d: 'M470 580H756', w: 44, tone: 'primary', cap: 'butt' },
-    { kind: 'stroke', d: 'M330 488H400M330 568H400M330 648H376', w: 44, tone: 'secondary' },
+    { kind: 'fill', d: circle(290, 352, 28) + circle(290, 512, 28) + circle(290, 672, 28), tone: 'secondary' },
+    { kind: 'fill', d: rr(372, 272, 174, 480, 48), tone: 'primary' },
+    { kind: 'fill', d: rr(586, 272, 84, 76, 28), tone: 'primary' },
+    { kind: 'fill', d: rr(678, 272, 84, 76, 28), tone: 'secondary' },
+    { kind: 'fill', d: rr(586, 356, 176, 140, 40), tone: 'primary' },
+    { kind: 'fill', d: rr(586, 536, 176, 216, 40), tone: 'secondary' },
   ],
   dyno: () => {
     const cx = 512, cy = 548, r = 248, needle = 318;
@@ -314,10 +316,14 @@ export const GLYPH_SMALL = {
     ],
     pacenotes: PACENOTES[PACENOTES_MAIN].g16,
     paddock: PADDOCK.g16,
+    // Everything sits on whole pixels (no anti-aliased grey): a 1 px tab row with a 1 px gap, 1 px gaps between panes.
     'workbench-demo': [
-      { kind: 'stroke', d: rr(2.5, 3, 11, 10, 2), w: 1.5, tone: 'primary' },
-      { kind: 'stroke', d: 'M7 3.5V12.5', w: 1.5, tone: 'primary', cap: 'butt' },
-      { kind: 'stroke', d: 'M7.5 8H13', w: 1.5, tone: 'primary', cap: 'butt' },
+      { kind: 'fill', d: 'M2 4H3V5H2ZM2 8H3V9H2ZM2 12H3V13H2Z', tone: 'secondary' },
+      { kind: 'fill', d: rr(4, 3, 4, 10, 0.5), tone: 'primary' },
+      { kind: 'fill', d: 'M9 3H11V4H9Z', tone: 'primary' },
+      { kind: 'fill', d: 'M12 3H14V4H12Z', tone: 'secondary' },
+      { kind: 'fill', d: 'M9 5H14V8H9Z', tone: 'primary' },
+      { kind: 'fill', d: 'M9 9H14V13H9Z', tone: 'secondary' },
     ],
     'shell-demo': [
       { kind: 'stroke', d: rr(2.5, 3, 11, 10, 2), w: 1.5, tone: 'primary' },
@@ -369,10 +375,12 @@ export const GLYPH_SMALL = {
     pacenotes: PACENOTES[PACENOTES_MAIN].g32,
     paddock: PADDOCK.g32,
     'workbench-demo': [
-      { kind: 'stroke', d: rr(5.5, 6.5, 21, 19, 3.5), w: 2.5, tone: 'primary' },
-      { kind: 'stroke', d: 'M14.5 7V25', w: 2.25, tone: 'primary', cap: 'butt' },
-      { kind: 'stroke', d: 'M15 16H26', w: 2.25, tone: 'primary', cap: 'butt' },
-      { kind: 'stroke', d: 'M8.5 11.5H11M8.5 15.5H11', w: 2, tone: 'secondary' },
+      { kind: 'fill', d: circle(5, 10, 1) + circle(5, 16, 1) + circle(5, 22, 1), tone: 'secondary' },
+      { kind: 'fill', d: rr(8, 6, 8, 20, 2), tone: 'primary' },
+      { kind: 'fill', d: rr(19, 6, 4, 4, 1), tone: 'primary' },
+      { kind: 'fill', d: rr(24, 6, 4, 4, 1), tone: 'secondary' },
+      { kind: 'fill', d: rr(19, 11, 9, 6, 1), tone: 'primary' },
+      { kind: 'fill', d: rr(19, 18, 9, 8, 1), tone: 'secondary' },
     ],
     'shell-demo': [
       { kind: 'stroke', d: rr(5.5, 6.5, 21, 19, 3.5), w: 2.5, tone: 'primary' },
@@ -460,7 +468,8 @@ function inkPaint(app, concept, uid) {
  * 1024 master. platform 'macos': squircle body 824 at (100,100) with drop shadow (Big Sur grid).
  * platform 'windows': near full-bleed rounded square (margin 40, circular corners), no outer shadow.
  */
-export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)) } = {}) {
+/** `bare` leaves out the glyph and the livery: the tile background alone, for the seam scan (tools/scan.mjs). */
+export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false } = {}) {
   const p = PALETTE[app];
   const mac = platform === 'macos';
   const x = mac ? 100 : 40, s = mac ? 824 : 944;
@@ -490,18 +499,18 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     </linearGradient>
     <clipPath id="${uid}clip"><path d="${shape}"/></clipPath>
     <filter id="${uid}gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="${f(10 * scale)}" stdDeviation="${f(12 * scale)}" flood-color="${glyphShadow}" flood-opacity="${shadowOp}"/></filter>
-    ${mac ? `<filter id="${uid}ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>` : ''}
+    ${mac ? `<filter id="${uid}ts" color-interpolation-filters="sRGB" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>` : ''}
     ${ink.defs}${glyph.defs}
   </defs>
   <path d="${shape}" fill="url(#${uid}bg)"${mac ? ` filter="url(#${uid}ts)"` : ''}/>
   <g clip-path="url(#${uid}clip)">
-    <path d="M${x - 40} ${x + s * 0.98}L${x + s * 0.98} ${x - 40}L${x + s * 1.12} ${x - 40}L${x - 40} ${x + s * 1.12}Z" fill="${liveryCol}" opacity="${liveryOp}"/>
-    <path d="M${x - 40} ${x + s * 1.19}L${x + s * 1.19} ${x - 40}L${x + s * 1.23} ${x - 40}L${x - 40} ${x + s * 1.23}Z" fill="${liveryCol}" opacity="${liveryOp * 1.1}"/>
+    ${bare ? '' : `<path d="M${x - 40} ${x + s * 0.98}L${x + s * 0.98} ${x - 40}L${x + s * 1.12} ${x - 40}L${x - 40} ${x + s * 1.12}Z" fill="${liveryCol}" opacity="${liveryOp}"/>
+    <path d="M${x - 40} ${x + s * 1.19}L${x + s * 1.19} ${x - 40}L${x + s * 1.23} ${x - 40}L${x - 40} ${x + s * 1.23}Z" fill="${liveryCol}" opacity="${liveryOp * 1.1}"/>`}
     <rect x="${x}" y="${x}" width="${s}" height="${s}" fill="url(#${uid}sheen)"/>
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>
     ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="0.14" stroke-width="${f(4 * scale)}"/>` : ''}${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
   </g>
-  <g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>
+  ${bare ? '' : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
 </svg>
 `;
 }
@@ -581,9 +590,10 @@ function trayGlyph(app, status) {
     // thinner than the frame instead.
     case 'workbench-demo':
       return [
-        { kind: 'stroke', d: rr(1.75, 2.25, 12.5, 11.5, 2.25), w: 1.5, tone: 'primary' },
-        { kind: 'stroke', d: 'M6.75 2.75V13.25', w: 1.5, tone: 'primary', cap: 'butt' },
-        { kind: 'stroke', d: 'M7.25 8H14.25', w: 1.25, tone: 'primary', cap: 'butt' },
+        { kind: 'fill', d: 'M2 4H3V5H2ZM2 8H3V9H2ZM2 12H3V13H2Z', tone: 'primary' },
+        { kind: 'fill', d: rr(4, 3, 4, 10, 0.5), tone: 'primary' },
+        { kind: 'fill', d: 'M9 3H11V4H9ZM12 3H14V4H12Z', tone: 'primary' },
+        { kind: 'fill', d: 'M9 5H14V8H9ZM9 9H14V13H9Z', tone: 'primary' },
       ];
     case 'shell-demo':
       return [

@@ -25,6 +25,8 @@ interface NotificationsState {
   read: ReadFilter;
   /** The message to reveal in the centre (an OS notification was clicked). */
   focus: number | null;
+  /** The short forms of this window's own notices by cause (`ShellNotice.short`): a small window's one-line toast. */
+  shorts: Readonly<Record<string, string>>;
 }
 
 const FALLBACK = (): string => $localize`:@@pd.notifications.no-answer:The notification centre did not answer.`;
@@ -47,7 +49,7 @@ function upsertLast(list: readonly Notice[], n: Notice): Notice[] {
  */
 export const NotificationsStore = signalStore(
   { protectedState: true },
-  withState<NotificationsState>({ snapshot: EMPTY_NOTICES, local: [], toasts: [], read: 'all', focus: null }),
+  withState<NotificationsState>({ snapshot: EMPTY_NOTICES, local: [], toasts: [], read: 'all', focus: null, shorts: {} }),
   withRequestStatus(),
   withComputed((store) => {
     const all = computed(() => [...store.local(), ...store.snapshot().notices].sort((a, b) => b.at - a.at || b.id - a.id));
@@ -108,7 +110,11 @@ export const NotificationsStore = signalStore(
             cause,
             scope: 'project',
           };
-      patchState(store, (s) => ({ local: [notice, ...s.local.filter((l) => l.cause !== cause)], toasts: upsertLast(s.toasts, notice) }));
+      patchState(store, (s) => ({
+        local: [notice, ...s.local.filter((l) => l.cause !== cause)],
+        toasts: upsertLast(s.toasts, notice),
+        shorts: n.short ? { ...s.shorts, [cause]: n.short } : s.shorts,
+      }));
       return notice;
     };
     const post = async (n: ShellNotice): Promise<void> => {

@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Changed
+- The shared UI has a lint step: `npm run lint` in `ui/` runs `@decryp7/paddock-eslint` (rules 27 to 39 plus the angular-eslint template and
+  accessibility rules) over every project, and the `ui` CI job runs it before the specs. All 155 findings are fixed (explicit OnPush in test
+  hosts, no `any`, `pd-` font sizes and shadows from tokens, signal reads before the first await, labelled a11y exceptions with reasons).
+  `pd-select` takes its value as a `model`; the glyph's `dots` input is no longer aliased; `pd-job`'s `(cancel)` output keeps its name with a
+  reasoned exception. `@decryp7/paddock-eslint` resolves its peer dependencies from the linted app first (a linked preset works); the style
+  rule accepts any `var(--token)` font family; rule 29 does not flag a read inside the operand of the first `await`; a spec may build a probe store.
+
 ### Fixed
 - sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
   to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
@@ -12,6 +20,20 @@ Conventional Commits; one semver tag for the whole repo.
   (the workspace crates missed on every run; a symlink alone does not help, cargo canonicalizes). The macOS build folder now outlives the job.
 
 ### Added
+- X51 review 5 fixes for `<pd-view>` (2 P3). A drawing label keeps 4 units from every box and every edge (its own included) and sits in the clear slot
+  nearest the middle of its edge (`nearestSlot`, `chooseSlot`; "needs db" was 1 unit from its curve). A radial canvas is the bounds of what is drawn
+  (boxes, edge paths, labels) plus the usual 16 padding, with no extra margin.
+- X51 review 4 fixes for `<pd-view>` (1 P2, 1 P3; `ui/docs/review/x51-view/FIXES.md`). Edge labels are placed by one rule (`placeLabels`): a
+  bowed edge's label sits at the apex of the bow on the outward side, and every label is checked against every box, every edge path and
+  the labels before it, walking distance, place and side deterministically when it collides; the canvas grows to hold a label. A radial
+  edge prefers a bow that does not cross another edge near an arrowhead (the shell to chromium edge now bows). `<pd-view>` scroll regions
+  carry `data-layout="done"` once measured, and the e2e `open()` waits for it and for `document.fonts.ready`. Contact sheet `review-5/`.
+- X51 review 3 fixes for `<pd-view>` (1 P2, 3 P3; `ui/docs/review/x51-view/FIXES.md`). The inset focus ring of a sortable header, of "Show as
+  a list" and of a tree row no longer runs over their text (the e2e ring check now also asserts that). A scroll region is the containing
+  block of its visually hidden text, so that text can no longer widen the page at 320 px (`SCROLL_CSS`). A second radial sample with
+  spoke-to-spoke edges shows the bows (covered by the edge-crossing tests). Contact sheet `review-4/`: the pointer is moved off the view
+  before every non-hover shot.
+- `<pd-view>` has no status-to-glyph map of its own (rule 40): tones and icons resolve through `statusGlyph`, so errors draw the circle-x. `TONE_GLYPH` is replaced by `TONE_STATUS` and `toneGlyph`.
 - X51 review 2 fixes for `<pd-view>` (0 P1, 6 P2, 9 P3; `ui/docs/review/x51-view/FIXES.md`). Edges never cross a box: back, sideways and
   long edges run in a lane outside the boxes and between the rows, radial edges bow or go round the outside (`route.ts`, a test over
   every layout and the sample, and over the real SVG paths); matrix headings keep a minimum width at 320 px; focus rings of sort headers,
@@ -86,6 +108,23 @@ Conventional Commits; one semver tag for the whole repo.
   `toolStarted`/`approvalNeeded` events (generated TS). The approval of such a tool is a danger choice: danger-tinted card,
   "This cannot be undone.", Allow as a danger button (never the primary) and Decline the focused default. New shared glyphs
   `pd:symbol-function`, `pd:symbol-type`, `pd:symbol-module`; `namesPaletteProvider({ icon })` also takes a function per match.
+- Status glyphs (review 4 follow-up, rule 40): `PdNeedsAiCard`'s `icon` is a status (`'info' | 'warning'`, was `'alert'`), the
+  pitwall needs-AI state, the assistant's tool cards and the Knowledge packs page draw their status through
+  `<pd-status-glyph>`, and `assertStatusGlyphs`/`statusGlyphRenderProblems` (`@decryp7/paddock-ui/testing`) check the drawn
+  shapes in each shared component's status states, so a status glyph bound by `[name]` cannot bypass the map.
+- X50 review 4: icon tiles have no seams (the macOS drop shadow blends in sRGB) and `icons/tools/scan.mjs` fails a build
+  on a step above 3 levels in any tile column; a reopened assistant conversation shows its tool cards, citations, declined or
+  stopped calls and failed turn as they were live (`StoredMessage` tool `outcome`, `callSummary`, `write`, `destructive`,
+  `error`, `endMessage`, all optional; `ToolFinished.outcome`); the assistant log keeps the latest item in view when it gets
+  shorter; the status-glyph lint also refuses status → glyph maps in TypeScript.
+- X50 review 3: one status → glyph map (`PD_STATUS_GLYPHS`, `statusGlyph`, `<pd-status-glyph>` in
+  `@decryp7/paddock-ui/icons`) with a lint over every template, so errors draw the circle-×, never the warning triangle;
+  `pd-popmenu` reveals by opacity, so keyboard-opened menus take the focus (Shift+F10 in the Explorer focuses the first
+  item and Escape returns to the row); native checks and radios take `--pd-accent-control`; `--pd-surface-code` for code;
+  `ShellNotice.short` for a small window's one-line toast; tab strips scroll only to tab boundaries without a scrollbar; a
+  bottom slide-out stays off a full-height side column; the assistant's stopped tool is neutral, deleting the open
+  conversation switches away (Undo brings it back), the title shows on send; the workbench demo's icon has its own
+  silhouette on a neutral near-black tile.
 - `scripts/new-app.mjs`: a new app has an e2e smoke suite on `@decryp7/paddock-e2e` (`playwright.config.ts`,
   `e2e/smoke.spec.ts`, `npm run e2e`) and, from the workbench demo, its unit tests (a `test` target, `test-setup.ts`, jsdom and
   the contribution lint); a template without unit tests gets no `test` script. The workbench demo has its own Vitest target
@@ -127,6 +166,9 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-chromium` on Windows: every end of the browser (the time limit's included) goes through its `Supervised`, so the
+  kill-on-close job closes with it; the Chrome for Testing self-test checks the version manifest and a headless page dump (Chrome
+  prints no `--version` there). The real-browser test runs on macOS and Windows CI too (install action, `catalogue:`).
 - Review fixes for the files and storage UI (independent review, 2 P1, 11 P2, 9 P3). Settings > Storage is the shared `pd-table`: one
   line per row, rows grouped by cache or the user's data with the aggregate size on the group row, hover icon buttons (What is inside,
   Show in the file manager) and a "…" menu ending in Clear in danger text; the cache button is a normal button. The size tree no

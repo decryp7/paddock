@@ -60,7 +60,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
     </div>
   `,
   styles: `
-    :host { position: fixed; top: 56px; inset-inline-start: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); max-height: calc(100vh - 96px); box-sizing: border-box; display: flex; flex-direction: column; border-radius: var(--pd-radius-lg, 14px); background: var(--pd-surface-2); color: var(--pd-text); border: 1px solid var(--pd-hairline); box-shadow: var(--pd-elevation-3, 0 12px 32px rgb(0 0 0 / 0.3)); }
+    :host { position: fixed; top: 56px; inset-inline-start: 50%; transform: translateX(-50%); max-width: calc(100vw - 32px); max-height: calc(100vh - 96px); box-sizing: border-box; display: flex; flex-direction: column; border-radius: var(--pd-radius-lg, 14px); background: var(--pd-surface-2); color: var(--pd-text); border: 1px solid var(--pd-hairline); box-shadow: var(--pd-shadow-3); }
     :host(.pd-modeless) { top: 72px; inset-inline-start: auto; inset-inline-end: 24px; transform: none; max-height: calc(100vh - 112px); }
     .pd-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-2, 8px); padding: var(--pd-space-2, 8px) var(--pd-space-2, 8px) var(--pd-space-2, 8px) var(--pd-space-4, 16px); border-bottom: 1px solid var(--pd-hairline); }
     .pd-title { margin: 0; font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); overflow-wrap: anywhere; }
@@ -97,11 +97,12 @@ export class InPageDialogView {
 
   private async load(): Promise<void> {
     const entry = this.entry();
+    const host = this.content();
     try {
       const part = await loadPart(entry.def, this.environment, `dialog ${entry.def.id}`);
       if (part.injector !== this.environment) this.destroyRef.onDestroy(() => part.injector.destroy());
       const injector = contentInjector(part.injector, entry.ref, entry.inputs);
-      const ref = mountContent(this.content(), part.component, injector, part.injector, entry.inputs);
+      const ref = mountContent(host, part.component, injector, part.injector, entry.inputs);
       entry.content = ref.instance as DialogContent;
       entry.injector = injector;
       this.loading.set(false);
@@ -173,7 +174,7 @@ export class InPageDialogView {
     }
   `,
   styles: `
-    .pd-scrim, .pd-backdrop { position: fixed; inset: 0; background: var(--pd-scrim, rgb(0 0 0 / 0.4)); }
+    .pd-scrim, .pd-backdrop { position: fixed; inset: 0; background: var(--pd-scrim); }
     .pd-scrim { z-index: 200; }
   `,
 })

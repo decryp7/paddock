@@ -111,6 +111,28 @@ export function sampleViewDoc(etag = 1): ViewDoc {
               ],
             },
           }),
+          node('g3', {
+            graph: {
+              layout: 'radial',
+              nodes: [
+                { id: 'hub', label: 'paddock-ipc', tone: 'info', action: null },
+                { id: 'p1', label: 'paddock-view', tone: 'neutral', action: null },
+                { id: 'p2', label: 'paddock-shell', tone: 'neutral', action: null },
+                { id: 'p3', label: 'paddock-env', tone: 'neutral', action: null },
+                { id: 'p4', label: 'paddock-secrets', tone: 'neutral', action: null },
+                { id: 'p5', label: 'paddock-chromium', tone: 'neutral', action: null },
+              ],
+              edges: [
+                { from: 'p1', to: 'hub', label: '' },
+                { from: 'p2', to: 'hub', label: '' },
+                { from: 'p3', to: 'hub', label: '' },
+                { from: 'p4', to: 'hub', label: '' },
+                { from: 'p5', to: 'hub', label: '' },
+                { from: 'p1', to: 'p4', label: 'tokens' },
+                { from: 'p2', to: 'p5', label: '' },
+              ],
+            },
+          }),
           node('d1', {
             diagram: {
               kind: 'class',

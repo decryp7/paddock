@@ -1,7 +1,7 @@
 import { panelTitle } from '@decryp7/paddock-ui/workbench';
 import { afterNextRender, ApplicationRef, computed, createComponent, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
-import { panelId as makePanelId, parsePanelId, WorkbenchRegistry, type PerspectiveDef, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
+import { panelId as makePanelId, WorkbenchRegistry, type PerspectiveDef, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { dockview, loadDockview } from './dockview-loader';
 import { AngularContentRenderer, MissingViewRenderer } from './angular-panel';
@@ -542,7 +542,7 @@ export class WorkbenchDock {
         ? { x: Math.round(window.screenX + where.at.x), y: Math.round(window.screenY + where.at.y), width: Math.round(size.width), height: Math.round(size.height) }
         : undefined;
     const slot = this.placement.captureSlot(id) ?? { referencePanel: null, direction: 'within' as const };
-    let ok = false;
+    let ok: boolean;
     try {
       ok = await windows.popOut(id, placement);
     } catch {
@@ -552,6 +552,7 @@ export class WorkbenchDock {
       this.ctx.notice.set({
         key: 'popout',
         message: $localize`:@@pd.wb.dock.popout.failed:The panel could not be moved to its own window.`,
+        short: $localize`:@@pd.wb.dock.popout.failed.short:Pop-out failed`,
         action: { label: $localize`:@@pd.wb.dock.popout.retry:Retry`, run: () => void this.popOut(id, where) },
       });
       return false;

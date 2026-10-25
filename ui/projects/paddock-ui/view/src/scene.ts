@@ -2,7 +2,7 @@ import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementR
 import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { Diagram, Graph } from '../generated/view';
 import { layoutGraph, layoutSequence, MARK_W, type LayoutNode, type Scene, type SceneNode } from './layout';
-import { TONE_GLYPH, toneOf, toneWord } from './model';
+import { toneGlyph, toneOf, toneWord } from './model';
 import { ViewRuntime } from './runtime';
 import { PdViewScroll, SCROLL_CSS } from './scroll';
 import { TONE_CSS, toneClass, VIEW_HOVER_FILL } from './tone';
@@ -124,17 +124,17 @@ export function diagramScene(d: Diagram): Scene {
     .pd-view-scene__node--act:hover rect { fill: ${VIEW_HOVER_FILL}; }
     .pd-view-scene__node--act:focus-visible { outline: none; }
     .pd-view-scene__node--act:focus-visible rect { stroke: var(--pd-focus-ring); stroke-width: 3; }
-    .pd-view-scene__label { fill: var(--pd-text); font-size: 13px; font-weight: 500; }
-    .pd-view-scene__caption { fill: var(--pd-text-muted); font-size: 11px; }
-    .pd-view-scene__detail { fill: var(--pd-text-muted); font-size: 12px; }
+    .pd-view-scene__label { fill: var(--pd-text); font-size: var(--pd-text-body); font-weight: 500; }
+    .pd-view-scene__caption { fill: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .pd-view-scene__detail { fill: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .pd-view-scene__edge { stroke: var(--pd-text-muted); stroke-width: 1.5; }
-    .pd-view-scene__edge-label { fill: var(--pd-text-muted); font-size: 12px; paint-order: stroke; stroke: var(--pd-surface-1); stroke-width: 4px; }
+    .pd-view-scene__edge-label { fill: var(--pd-text-muted); font-size: var(--pd-text-label); paint-order: stroke; stroke: var(--pd-surface-1); stroke-width: 4px; }
     .pd-view-scene__arrow { fill: var(--pd-text-muted); }
     .pd-view-scene__life { stroke: var(--pd-border-strong); stroke-dasharray: 4 4; }
     .pd-view-scene__rule { stroke: var(--pd-border-strong); stroke-width: 1; }
     .pd-view-scene__mark { color: var(--pd-view-tone); }
     .pd-view-scene__list { border-top: 1px solid var(--pd-hairline); padding: 0 var(--pd-space-3); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .pd-view-scene__list summary { display: flex; align-items: center; gap: var(--pd-space-1); cursor: pointer; min-height: 32px; list-style: none; }
+    .pd-view-scene__list summary { display: flex; align-items: center; gap: var(--pd-space-1); cursor: pointer; min-height: 32px; padding-inline: var(--pd-space-1); list-style: none; }
     .pd-view-scene__list summary::-webkit-details-marker { display: none; }
     .pd-view-scene__list summary pd-glyph { transition: transform var(--pd-duration-micro) var(--pd-ease-move); }
     .pd-view-scene__list[open] summary pd-glyph { transform: rotate(90deg); }
@@ -167,7 +167,7 @@ export class PdViewScene {
 
   /** The path data of a node's status glyph (the tone's own shape), or '' for a neutral node. */
   protected mark(n: SceneNode): string {
-    const glyph = TONE_GLYPH[toneOf(n.tone)];
+    const glyph = toneGlyph(toneOf(n.tone));
     return glyph ? ((PD_ICON_PATHS as Readonly<Record<string, string>>)[glyph] ?? '') : '';
   }
   protected markRoom(n: SceneNode): number {

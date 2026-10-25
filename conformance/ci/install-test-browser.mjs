@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CFT_PLATFORMS } from './pin-runtime.mjs';
 import { entryFor, platformKey, readCatalogue } from './runtime-catalogue.mjs';
@@ -104,9 +104,18 @@ async function defaultFetch(url) {
   return Buffer.from(await res.arrayBuffer());
 }
 
+/**
+ * The program and arguments that unpack `zip` into `dir`. On Windows it is the system's own `tar.exe` (bsdtar, which reads zip)
+ * by its full path: Git for Windows puts GNU tar first on PATH, which reads `C:` as a remote host and cannot read zip.
+ */
+export function extractCommand(zip, dir, platform = process.platform, env = process.env) {
+  if (platform === 'win32') return [win32.join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', zip, '-C', dir]];
+  return ['unzip', ['-q', zip, '-d', dir]];
+}
+
 function defaultExtract(zip, dir) {
-  if (process.platform === 'win32') execFileSync('tar', ['-xf', zip, '-C', dir], { timeout: 5 * 60 * 1000 });
-  else execFileSync('unzip', ['-q', zip, '-d', dir], { timeout: 5 * 60 * 1000 });
+  const [cmd, args] = extractCommand(zip, dir);
+  execFileSync(cmd, args, { timeout: 5 * 60 * 1000 });
 }
 
 /** Parses the command line. */

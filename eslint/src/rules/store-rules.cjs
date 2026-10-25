@@ -7,7 +7,7 @@
 const { hasTagBefore, keyName, prop, walk } = require('../ast.cjs');
 
 const FLAGS = new Set(['loading', 'isLoading', 'error', 'isError', 'pending', 'isPending', 'loaded']);
-const STORE_FILE = /\.store(\.spec)?\.[cm]?ts$/;
+const STORE_FILE = /(\.store(\.spec)?|\.spec)\.[cm]?ts$/; // a spec may build a probe store for a store feature
 
 /** @type {import('eslint').Rule.RuleModule} */
 module.exports = {

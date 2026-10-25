@@ -1,5 +1,5 @@
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, signal, untracked } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, Injector, signal, untracked } from '@angular/core';
 import { PdPathText } from '@decryp7/paddock-ui';
 import { CommandService, evaluate, PdIcon, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import type { ExplorerAction, ExplorerNode, ExplorerProviderDef } from '@decryp7/paddock-ui/workbench';
@@ -47,18 +47,20 @@ const INDENT = 12;
               }
             </div>
           } @else {
+            <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the tree only receives keydown bubbling from its rows, which are the focus stops (roving tabindex) -->
             <div
               role="tree"
               class="pd-ex-tree"
               [attr.aria-label]="section.title.text"
               [cdkContextMenuTriggerFor]="menu"
               #trigger="cdkContextMenuTriggerFor"
-              (cdkContextMenuClosed)="menuOpen.set(false)"
+              (cdkContextMenuClosed)="menuClosed()"
               (keydown)="onKey($event, section.id, trigger)"
             >
               @for (row of rowsOf(section.id); track row.key) {
                 @switch (row.kind) {
                   @case ('node') {
+                    <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -- rows are activated from the keyboard by the tree keydown handler (Enter, arrows) -->
                     <div
                       role="treeitem"
                       class="pd-ex-row"
@@ -181,6 +183,9 @@ export class PdExplorer {
   protected readonly target = signal<MenuTarget | null>(null);
   /** The context menu is open (its row keeps a "menu target" outline meanwhile). */
   protected readonly menuOpen = signal(false);
+  /** The row a keyboard-opened menu came from: it gets the focus back when the menu closes (Escape). */
+  private menuOrigin: HTMLElement | null = null;
+  private readonly injector = inject(Injector);
   /** Separators only in a menu of three items or more (P3-5): two items need no grouping. */
   protected readonly grouped = computed(() => (this.target()?.actions.length ?? 0) >= 3);
   protected readonly t = {
@@ -205,6 +210,7 @@ export class PdExplorer {
     const seen = new Map<string, unknown>();
     // Reloading a section is a side effect (a provider call, usually IPC) of a tracked `changes` value; the first value
     // of each section is only remembered (its roots are loading already).
+    // effect-state: writes only the plain `seen` map and calls the store untracked; the reload is the side effect.
     effect(() => {
       const ctx = host.context();
       for (const section of this.store.sections()) {
@@ -218,6 +224,7 @@ export class PdExplorer {
     });
     // Following the active item (review P3-14): expanding and selecting is a side effect (provider loads) of the path.
     const revealed = new Map<string, string>();
+    // effect-state: writes only the plain `revealed` map and calls the store untracked; the reveal is the side effect.
     effect(() => {
       const ctx = host.context();
       for (const section of this.store.sections()) {
@@ -355,6 +362,21 @@ export class PdExplorer {
   private openMenuFor(row: Extract<TreeRow, { kind: 'node' }>, from: HTMLElement | null, trigger: CdkContextMenuTrigger): void {
     const rect = from?.getBoundingClientRect();
     this.openMenu(row, { x: (rect?.left ?? 0) + 24, y: rect?.bottom ?? 0 }, trigger);
+    // Opened from the keyboard: the focus goes into the menu (its first item, with the keyboard focus style), so the arrows
+    // move through the actions (review 3 P1-1), and comes back to the row when the menu closes.
+    this.menuOrigin = from;
+    // Once its items are rendered (they follow the target just set). The context-menu trigger keeps its open menu protected
+    // (`childMenu`); the CDK focuses it the same way after its own keyboard open.
+    afterNextRender(() => (trigger as unknown as { childMenu?: CdkMenu }).childMenu?.focusFirstItem('keyboard'), { injector: this.injector });
+  }
+
+  /** The menu closed (an action ran, Escape, a click outside): a keyboard user lands on the row it was opened from. */
+  protected menuClosed(): void {
+    this.menuOpen.set(false);
+    const origin = this.menuOrigin;
+    this.menuOrigin = null;
+    const active = origin?.ownerDocument.activeElement;
+    if (origin?.isConnected && (!active || active === origin.ownerDocument.body || active.closest('.pd-ex-menu'))) origin.focus();
   }
 
   private openMenu(row: Extract<TreeRow, { kind: 'node' }>, at: { x: number; y: number }, trigger: CdkContextMenuTrigger): void {

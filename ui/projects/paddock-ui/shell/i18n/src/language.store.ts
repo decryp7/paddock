@@ -31,8 +31,8 @@ export const LANGUAGE_CONFIG = new InjectionToken<LanguageConfig>('LANGUAGE_CONF
  * after a restart: `reloadPending` says one is needed; the Settings page asks the user and calls `reload`. Configure it
  * with `LANGUAGE_CONFIG` (the shipped locales and how the app restarts).
  */
+// app-wide: one per window (each window is its own bootstrap, rule 34), a singleton like the appearance.
 export const LanguageStore = signalStore(
-  // One per window (each window is its own bootstrap, rule 34): an app-wide singleton like the appearance.
   { providedIn: 'root' },
   withState<{ choice: LanguageChoice }>(() => ({ choice: inject(LANGUAGE_CONFIG).storage.load() })),
   withComputed((store, config = inject(LANGUAGE_CONFIG)) => ({

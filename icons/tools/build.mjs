@@ -7,6 +7,7 @@ import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'nod
 import { join, resolve } from 'node:path';
 import { ALL, APPS, UMBRELLA, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { writeIco } from './ico.mjs';
+import { render, scanSeams } from './scan.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const TAURI = join(ROOT, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
@@ -32,6 +33,16 @@ for (const app of ONLY) {
   save(join(out, `${app}-windows.svg`), win);
   save(join(out, `${app}-macos-1024.png`), png(mac, 1024));
   save(join(out, `${app}-windows-1024.png`), png(win, 1024));
+
+  // 1b. Seam scan of the tile background (rule in tools/scan.mjs): fails the build on a hard step in a vertical column.
+  for (const platform of ['macos', 'windows']) {
+    const seams = scanSeams(render(masterSvg(app, { platform, bare: true, uid: 'scan' })));
+    console.log(`  seam scan ${app} ${platform}: ${seams.length ? seams.length + ' steps' : 'smooth'}`);
+    if (seams.length) {
+      const e = seams[0];
+      throw new Error(`${app} ${platform} master has a hard seam: column ${e.x}, row ${e.y}, ${e.channel} ${e.from} to ${e.to} (${seams.length} in all; limit 3 levels)`);
+    }
+  }
 
   // 2. Hand-tuned small variants
   const small = dir(app, 'small');

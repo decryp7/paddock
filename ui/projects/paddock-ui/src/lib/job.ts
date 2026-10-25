@@ -120,6 +120,7 @@ export class SuJob {
   /** Offers Retry on a failed job (the host owns the retry; without it no button is shown). */
   readonly retryable = input(false);
   /** Emits the job id when Cancel is pressed. */
+  // eslint-disable-next-line @angular-eslint/no-output-native -- `(cancel)` is the published API of every app; the host element is not a <dialog>
   readonly cancel = output<number>();
   /** Emits the job id when Retry is pressed. */
   readonly retry = output<number>();

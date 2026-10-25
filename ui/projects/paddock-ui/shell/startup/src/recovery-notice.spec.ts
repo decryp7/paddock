@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import type { StartReport, UncleanShutdown } from '../generated/startup';
@@ -6,6 +6,7 @@ import { MockStartupBackend, provideStartupBackend } from './backend';
 import { PdRecoveryNotice } from './recovery-notice';
 import { RecoveryStore } from './recovery.store';
 import { PdSafeModeBadge } from './safe-mode-badge';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 const UNCLEAN: UncleanShutdown = {
   crash: null,
@@ -13,7 +14,7 @@ const UNCLEAN: UncleanShutdown = {
   offers: { restore: true, safeMode: true, startFresh: true },
 };
 
-@Component({ selector: 'pd-test-host', imports: [PdRecoveryNotice, PdSafeModeBadge], providers: [RecoveryStore], template: '<pd-safe-mode-badge /><pd-recovery-notice />' })
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, selector: 'pd-test-host', imports: [PdRecoveryNotice, PdSafeModeBadge], providers: [RecoveryStore], template: '<pd-safe-mode-badge /><pd-recovery-notice />' })
 class Host {}
 
 async function mount(report: StartReport, tweak: (b: MockStartupBackend) => void = () => undefined): Promise<{ fixture: ComponentFixture<Host>; backend: MockStartupBackend; el: HTMLElement }> {
@@ -42,6 +43,7 @@ describe('the unclean-shutdown notice', () => {
   it('offers the three choices as buttons in an alert, with Restore as the primary one', async () => {
     const { el } = await mount({ safeMode: false, unclean: UNCLEAN });
     expect(q(el, 'recovery-notice')?.getAttribute('role')).toBe('alert');
+    assertStatusGlyphs(el);
     expect(q(el, 'recovery-restore')?.textContent).toContain('Restore last session');
     expect(q(el, 'recovery-restore')?.classList.contains('pd-recovery__primary')).toBe(true);
     expect(q(el, 'recovery-safe-mode')?.textContent).toContain('Start in safe mode');

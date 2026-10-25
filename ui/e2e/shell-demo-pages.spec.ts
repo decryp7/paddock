@@ -272,7 +272,7 @@ test.describe('pages frame (plan S14)', () => {
     expect(parseFloat(inset)).toBeGreaterThanOrEqual(78);
   });
 
-  test('the browser build has the in-app menu bar', async ({ app, page }) => {
+  test('the browser build has the in-app menu bar', async ({ app }) => {
     await app.frame.open();
     await expect(app.menus.bar).toBeVisible();
   });

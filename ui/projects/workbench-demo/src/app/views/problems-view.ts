@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { PdPathText } from '@decryp7/paddock-ui';
+import { statusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdIcon, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { WorkbenchDemoContext } from '../context';
@@ -21,7 +22,7 @@ const SEVERITY: Readonly<Record<Problem['level'], number>> = { error: 0, warning
     <pd-table label="Problems" [rows]="rows" [columns]="columns" [rowKey]="key" [maxHeight]="2000" (rowActivate)="open($event)">
       <ng-template pdCell="level" let-r>
         <span class="sev" [attr.data-level]="r.level" role="img" [attr.aria-label]="word(r)" [attr.title]="word(r)">
-          <pd-icon [name]="r.level === 'error' ? 'pd:error' : 'pd:alert'" />
+          <pd-icon [name]="'pd:' + glyph(r.level)" />
         </span>
       </ng-template>
       <ng-template pdCell="message" let-r let-folded="folded">
@@ -47,11 +48,13 @@ const SEVERITY: Readonly<Record<Problem['level'], number>> = { error: 0, warning
   `,
 })
 export class ProblemsView {
+  /** The shared shape of a severity (error circle-×, warning triangle, info circle-i). */
+  protected readonly glyph = (level: Problem['level']) => statusGlyph(level);
   private readonly host = inject(ShellContextHost);
   protected readonly rows = [...inject(DemoRepo).problems].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level] || a.path.localeCompare(b.path) || a.line - b.line);
   protected readonly key = (p: Problem) => `${p.path}:${p.line}`;
   protected readonly columns: PdColumn<Problem>[] = [
-    { key: 'level', header: 'Severity', value: (p) => SEVERITY[p.level], text: (p) => p.level, width: '28px', required: true, headerHidden: true, sortable: false },
+    { key: 'level', header: 'Severity', value: (p) => SEVERITY[p.level], text: (p) => p.level, width: '16px', required: true, headerHidden: true, sortable: false },
     { key: 'message', header: 'Problem', value: (p) => p.message, required: true, width: 'minmax(0, 3fr)', foldBelow: 360 },
     { key: 'path', header: 'File', value: (p) => p.path, truncate: 'middle', width: 'minmax(0, 2fr)', hideBelow: 360 },
     { key: 'line', header: 'Line', value: (p) => p.line, align: 'end', width: '56px', hideBelow: 440 },

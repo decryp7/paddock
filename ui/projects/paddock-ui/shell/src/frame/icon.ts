@@ -42,7 +42,7 @@ function isPdGlyph(name: string): boolean {
   `,
   styles: `
     :host { display: inline-flex; width: 16px; height: 16px; flex: none; align-items: center; justify-content: center; }
-    .pd-letter { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); border: 1px solid var(--pd-border-strong); font-size: 10px; line-height: 1; font-weight: var(--pd-weight-semibold); }
+    .pd-letter { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: var(--pd-radius-tag); background: var(--pd-surface-3); border: 1px solid var(--pd-border-strong); font-size: var(--pd-text-caption); line-height: 1; font-weight: var(--pd-weight-semibold); }
   `,
 })
 export class PdShellIcon {

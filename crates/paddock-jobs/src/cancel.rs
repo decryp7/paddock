@@ -148,6 +148,12 @@ impl CancelToken {
         self.cancel_with(CancelReason::User);
     }
 
+    /// Whether a cancel was requested, without evaluating the deadline (no clock is read, so it is safe under a clock's
+    /// own lock).
+    pub(crate) fn cancel_requested(&self) -> bool {
+        self.0.state.load(Ordering::SeqCst) != LIVE
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.reason().is_some()
     }

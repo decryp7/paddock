@@ -16,6 +16,14 @@ const rules = readRules();
 /** Every --pd-* custom property a stylesheet reads. */
 const used = (css: string): string[] => [...new Set([...css.matchAll(/var\((--pd-[\w-]+)/g)].map((m) => m[1] as string))];
 
+describe('native checks and radios (X50 review 3 P2-2)', () => {
+  it('fill with the control accent everywhere: one rule in the base stylesheet, not the browser blue', () => {
+    const base = compiled('entry-paddock.scss');
+    const rule = /input\[type=['"]?checkbox['"]?\],\s*input\[type=['"]?radio['"]?\]\s*\{[^}]*accent-color:\s*var\(--pd-accent-control\)/;
+    expect(base).toMatch(rule);
+  });
+});
+
 describe('control styles and the Material bridge (plan X37)', () => {
   it.each([
     ['controls', controls],

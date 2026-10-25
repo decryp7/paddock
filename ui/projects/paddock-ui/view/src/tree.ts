@@ -64,8 +64,10 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph, PdViewTone],
   template: `
+    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the tree only receives keydown bubbling from its treeitems, which are the focus stops (roving tabindex) -->
     <ul class="pd-view-tree" role="tree" [attr.aria-label]="label() || defaultLabel" (keydown)="key($event)">
       @for (row of rows(); track row.node.id) {
+        <!-- eslint-disable @angular-eslint/template/role-has-required-aria -- nodes are not selectable, and a tree without a selection model leaves aria-selected out (ARIA APG) -->
         <li
           role="treeitem"
           class="pd-view-tree__row"
@@ -97,6 +99,7 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
             <span class="pd-view-tree__label">{{ row.node.label }}</span>
           }
         </li>
+        <!-- eslint-enable @angular-eslint/template/role-has-required-aria -->
       }
     </ul>
   `,
@@ -104,7 +107,7 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
     ${TONE_CSS}
     :host { display: block; min-width: 0; }
     .pd-view-tree { list-style: none; margin: 0; padding: 0; }
-    .pd-view-tree__row { display: flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-row-height); padding-inline-start: calc(var(--pd-view-depth, 0) * var(--pd-space-4)); color: var(--pd-text); border-radius: var(--pd-radius-control); }
+    .pd-view-tree__row { display: flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-row-height); padding-inline-start: calc(var(--pd-view-depth, 0) * var(--pd-space-4) + var(--pd-space-1)); color: var(--pd-text); border-radius: var(--pd-radius-control); }
     /* Calm by default: only the mark of a tone is coloured; the label stays in text colour and the word is the row's tooltip. */
     .pd-view-tree__row pd-view-tone { color: var(--pd-view-tone); }
     .pd-view-tree__row:hover { background: ${VIEW_HOVER}; }
