@@ -52,3 +52,8 @@
 .gal-states--card { background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); }
 .gal-states--inset { background: var(--pd-surface-2); }
 .gal-path--plain240 { width: 240px; padding: 0; box-sizing: border-box; }
+
+/* Harness readouts (click counters the e2e reads) stay in the DOM but not on screen. */
+.gal-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.gal-metric { display: flex; flex-direction: column; gap: var(--pd-space-1); }
+.gal-cap { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }

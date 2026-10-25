@@ -387,7 +387,7 @@ export const DEMO_CONTRIBUTIONS: ContributionBatch<DemoContext> = {
     definePage({
       id: 'sd.pitwall',
       title: msg('sd.page.pitwall', 'Local AI'),
-      icon: 'pd:info',
+      icon: 'pd:search',
       order: 180,
       providers: () => import('./pages/pitwall.providers').then((m) => m.PITWALL_PROVIDERS),
       load: () => import('./pages/pitwall-page').then((m) => m.PitwallPage),

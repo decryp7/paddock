@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, afterNextRender, effect, inject, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, afterNextRender, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import * as echarts from 'echarts/core';
 import { LineChart, ScatterChart } from 'echarts/charts';
@@ -76,7 +76,8 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
           <pd-card heading="Network" [interactive]="true" (activated)="clicks.set(clicks() + 1)">
             <pd-metric [value]="5.02" unit="MB/s" [decimals]="2" />
             <pd-sparkline slot="sparkline" label="Down, last hour" [values]="net" />
-            <span slot="caption">Up 0.4 MB/s · activated {{ clicks() }}×</span>
+            <span slot="caption">Up 0.4 MB/s · down 4.6 MB/s</span>
+            <span class="gal-sr" data-testid="activations">activated {{ clicks() }}</span>
           </pd-card>
           <pd-card heading="Runners">
             <pd-status-pill slot="status" status="danger" label="1 failing" />
@@ -100,12 +101,12 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
       <section class="gal-section" data-testid="metric" aria-labelledby="h-metric">
         <h2 id="h-metric">Metric</h2>
         <div class="gal-row">
-          <pd-metric [value]="74" unit="/100" />
-          <pd-metric [value]="1234567" />
-          <pd-metric [value]="3.2" unit="%" size="title" [delta]="-1.4" deltaUnit="%" deltaLabel="vs last week" goodDirection="down" />
-          <pd-metric [value]="86" unit="%" size="title" [delta]="12" deltaUnit="%" goodDirection="down" />
-          <pd-metric [value]="18.4" unit="ms" size="body" [decimals]="1" [delta]="0" />
-          <pd-metric [value]="null" />
+          <div class="gal-metric"><pd-metric [value]="74" unit="/100" /><span class="gal-cap">Health score</span></div>
+          <div class="gal-metric"><pd-metric [value]="1234567" /><span class="gal-cap">Events indexed</span></div>
+          <div class="gal-metric"><pd-metric [value]="3.2" unit="%" size="title" [delta]="-1.4" deltaUnit="%" deltaLabel="vs last week" goodDirection="down" /><span class="gal-cap">Error rate</span></div>
+          <div class="gal-metric"><pd-metric [value]="86" unit="%" size="title" [delta]="12" deltaUnit="%" goodDirection="down" /><span class="gal-cap">Disk used</span></div>
+          <div class="gal-metric"><pd-metric [value]="18.4" unit="ms" size="body" [decimals]="1" [delta]="0" /><span class="gal-cap">Median latency</span></div>
+          <div class="gal-metric"><pd-metric [value]="null" /><span class="gal-cap">No data yet</span></div>
         </div>
       </section>
 
@@ -131,7 +132,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         <h2 id="h-error">Error state</h2>
         <div class="gal-box">
           <pd-error-state heading="Can't reach the Gitea server" cause="Check the URL in Settings, then retry." secondaryLabel="Open logs" (retry)="retries.set(retries() + 1)" />
-          <p class="gal-num gal-row">Retried {{ retries() }}×</p>
+          <p class="gal-sr" data-testid="retries">Retried {{ retries() }}</p>
         </div>
       </section>
 
@@ -152,7 +153,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         <h2 id="h-job">Job / long operation</h2>
         <div class="gal-grid">
           @for (j of jobs; track j.id) {
-            <pd-job [job]="j" [stalled]="j.id === 4" />
+            <pd-job [job]="j" [stalled]="j.id === 4" [retryable]="true" />
           }
         </div>
       </section>
@@ -162,16 +163,16 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         <div class="gal-row">
           <pd-segmented-control label="Time range" [options]="ranges" [(value)]="range" />
           <pd-segmented-control label="Level" [options]="levels" [(value)]="level" />
-          <span class="gal-num">Selected: {{ range() }} / {{ level() }}</span>
+          <span class="gal-sr" data-testid="selected">Selected: {{ range() }} / {{ level() }}</span>
         </div>
       </section>
 
       <section class="gal-section" data-testid="tray-popover" aria-labelledby="h-tray">
         <h2 id="h-tray">Tray popover</h2>
         <div class="gal-tray-stage">
-          <pd-tray-popover label="Dyno" platform="macos">
+          <pd-tray-popover [label]="appName()" platform="macos">
             <div slot="header" class="gal-inline">
-              <strong>Dyno</strong>
+              <strong>{{ appName() }}</strong>
               <pd-status-pill status="success" label="Good" />
             </div>
             <div class="gal-tray-tiles">
@@ -179,12 +180,12 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
               <pd-card heading="Memory" [flat]="true"><pd-metric [value]="72" unit="%" size="title" /><pd-sparkline slot="sparkline" label="Memory" [values]="mem" [height]="24" /></pd-card>
             </div>
             <ul class="gal-list">
-              <li><span class="grow">rustc</span><span class="gal-num">42%</span></li>
-              <li><span class="grow">WindowServer</span><span class="gal-num">11%</span></li>
-              <li><span class="grow">Safari</span><span class="gal-num">6%</span></li>
+              <li><span class="grow">rustc</span><span class="gal-num">42 %</span></li>
+              <li><span class="grow">WindowServer</span><span class="gal-num">11 %</span></li>
+              <li><span class="grow">Safari</span><span class="gal-num">6 %</span></li>
             </ul>
             <div slot="footer" class="gal-inline">
-              <button type="button" class="gal-btn gal-btn--primary">Open Dyno</button>
+              <button type="button" class="gal-btn gal-btn--primary">Open {{ appName() }}</button>
               <button type="button" class="gal-btn gal-btn--icon" aria-label="Pause monitoring">II</button>
             </div>
           </pd-tray-popover>
@@ -213,7 +214,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
           <button type="button" class="pd-btn"><pd-glyph name="refresh" /> Refresh</button>
           <button type="button" class="pd-btn pd-btn--ghost">Cancel</button>
           <button type="button" class="pd-btn pd-btn--danger"><pd-glyph name="trash" /> Delete</button>
-          <button type="button" class="pd-btn pd-btn--sm">Compact</button>
+          <button type="button" class="pd-btn pd-btn--sm">Small button</button>
           <button type="button" class="pd-btn pd-btn--icon pd-btn--ghost" aria-label="More"><pd-glyph name="more" /></button>
           <button type="button" class="pd-btn" disabled>Disabled</button>
         </div>
@@ -347,7 +348,7 @@ export class Gallery {
     { value: '7d', label: '7 days' },
   ];
   protected readonly levels = [
-    { value: 'all', label: 'All', count: 1204 },
+    { value: 'all', label: 'All', count: 1_204 },
     { value: 'warn', label: 'Warnings', count: 31 },
     { value: 'err', label: 'Errors', count: 6 },
     { value: 'off', label: 'Off', disabled: true },
@@ -365,6 +366,8 @@ export class Gallery {
   protected readonly range = signal('24h');
   protected readonly level = signal('all');
   protected readonly clicks = signal(0);
+  /** The app the selected accent belongs to: the tray popover is named after it (accents never meet another app's name). */
+  protected readonly appName = computed(() => ({ debrief: 'Debrief', pitcrew: 'Pitcrew', pitwall: 'Pitwall', dyno: 'Dyno', spotter: 'Spotter', pacenotes: 'Pacenotes', sighter: 'Sighter' })[this.accent()] ?? 'Shell demo');
   protected readonly retries = signal(0);
 
   private readonly chartEl = viewChild.required<ElementRef<HTMLElement>>('chart');
