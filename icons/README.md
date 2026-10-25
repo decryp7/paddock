@@ -37,6 +37,15 @@ normal, 19.7 protan, 19.2 deutan, 19.2 tritan; against the shell demo 75.4 or mo
 copy `workbench-demo/tauri/.` to `apps/workbench-demo/src-tauri/icons`. Side-by-side with the shell demo at 16, 32 and 1024 px:
 `ui/docs/review/x50-workbench/demo-icons-compare.png`.
 
+## Seam scan
+
+`node tools/build.mjs` fails when a master has a hard seam in the tile (`tools/scan.mjs`, tests in `tools/scan.test.mjs`, `npm test`).
+For every icon and both masters it renders the tile background alone (`masterSvg(app, { bare: true })`: no glyph, no livery sweep) at
+1024 px and walks each pixel column. A pixel is tile body when it and the pixels 8 px left, right, above and below are fully opaque (this
+drops the rounded edge, its rim strokes and the drop shadow); no channel may change by more than 3 levels between adjacent body pixels.
+The macOS tile's drop-shadow filter must interpolate in sRGB (`color-interpolation-filters="sRGB"`): in the default linearRGB the dark
+ramps are quantised into 6 to 13 level bands. Results with that attribute: all ten icons, both masters, 0 steps.
+
 ## Build
 
 ```sh
