@@ -32,7 +32,7 @@ impl Runner for Script {
 }
 
 fn service(os: Os, home: &std::path::Path, s: &Script) -> Service {
-    Service::with("/opt/dyno/dyno-agent".into(), home.to_path_buf(), 501, Box::new(s.clone()), os)
+    Service::with("/opt/dyno/dyno-agent".into(), home.to_path_buf(), 501, Box::new(s.clone()), os).with_pause(|_| {})
 }
 
 #[test]
@@ -44,7 +44,8 @@ fn macos_installs_by_bootstrapping_after_a_bootout_and_reports_status() {
     svc.install().unwrap();
     let calls = s.calls();
     assert!(calls[0].contains("bootout gui/501/net.decryptology.dyno.agent"), "{calls:?}");
-    assert!(calls[1].contains("bootstrap gui/501"), "{calls:?}");
+    assert!(calls[1].contains("print gui/501/net.decryptology.dyno.agent"), "{calls:?}");
+    assert!(calls[2].contains("bootstrap gui/501"), "{calls:?}");
     assert!(dir.path().join("Library/LaunchAgents/net.decryptology.dyno.agent.plist").exists());
     s.answer("print gui/501", true, "state = running");
     assert_eq!(
@@ -87,7 +88,8 @@ fn a_service_for_another_executable_is_registered_again_and_nothing_is_installed
         501,
         Box::new(s.clone()),
         Os::Mac,
-    );
+    )
+    .with_pause(|_| {});
     old.install().unwrap();
     s.answer("print", true, "state = running");
     let mut new = service(Os::Mac, dir.path(), &s);
@@ -169,4 +171,51 @@ fn windows_uses_the_per_user_run_key() {
     s.answer("reg query", false, "");
     assert_eq!(svc.status(), Status::NotInstalled);
     svc.uninstall().unwrap();
+}
+
+/// After an update the old job can linger after `bootout`; bootstrapping over it does nothing, so the install waits
+/// until launchd has dropped it, and gives up waiting after a bounded time.
+#[test]
+fn macos_bootstraps_only_after_launchd_dropped_the_old_job_and_the_wait_is_bounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Script::default();
+    let waited = Arc::new(Mutex::new(Duration::ZERO));
+    let w = waited.clone();
+    // launchd reports the old job three more times, then it is gone.
+    let lingering = Arc::new(Mutex::new(3u32));
+    struct Lingering(Script, Arc<Mutex<u32>>);
+    impl Runner for Lingering {
+        fn run(&mut self, program: &str, args: &[&str]) -> Result<(bool, String), String> {
+            let out = self.0.run(program, args)?;
+            if args.first() == Some(&"print") {
+                let mut n = self.1.lock().unwrap();
+                if *n > 0 {
+                    *n -= 1;
+                    return Ok((true, "state = spawn scheduled\n".into()));
+                }
+                return Ok((false, String::new()));
+            }
+            Ok(out)
+        }
+    }
+    let mut svc = Service::with(
+        "/opt/dyno/dyno-agent".into(),
+        dir.path().to_path_buf(),
+        501,
+        Box::new(Lingering(s.clone(), lingering.clone())),
+        Os::Mac,
+    )
+    .with_pause(move |d| *w.lock().unwrap() += d);
+    svc.install().unwrap();
+    let calls = s.calls();
+    let verbs: Vec<&str> = calls.iter().map(|c| c.split(' ').nth(1).unwrap_or("")).collect();
+    assert_eq!(verbs, ["bootout", "print", "print", "print", "print", "bootstrap"], "{calls:?}");
+    assert_eq!(*waited.lock().unwrap(), GONE_POLL * 3);
+
+    // A job that never goes away: wait GONE_WAIT, then bootstrap anyway.
+    *lingering.lock().unwrap() = u32::MAX;
+    *waited.lock().unwrap() = Duration::ZERO;
+    svc.install().unwrap();
+    assert_eq!(*waited.lock().unwrap(), GONE_WAIT);
+    assert!(s.calls().last().unwrap().contains("bootstrap"));
 }

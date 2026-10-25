@@ -19,10 +19,13 @@ choice on Windows (a service) is the wrong one for Dyno.
      `dyno-agent run` at login (`RunAtLoad`, `KeepAlive`, `ThrottleInterval` 10 s, `LimitLoadToSessionType Aqua`,
      `ProcessType Background`). The bundle is ad-hoc signed (`signingIdentity "-"`) because `SMAppService` and launch
      agents refuse a linker-signed bundle (-67056). After an app update launchd may keep the old code requirement and
-     refuse the new binary ("needs LWCR update", spawn failed); the shell detects that in `launchctl print` and
-     registers again (`login::stale_registration`). Outside a bundle (development, the CLI) `dyno-agent service
-     install` writes `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` and runs `launchctl bootout` then
-     `bootstrap`, logging to `~/Library/Logs/Dyno/agent.log`.
+     refuse the new binary ("needs LWCR update", spawn failed, exit 78); registering over the live job changes nothing.
+     The shell therefore replaces the registration (unregister, `launchctl bootout`, wait until the job is gone,
+     register, bounded retries) once per version change (the version is recorded in `service-registered-version` in
+     the data folder) and whenever `launchctl print` reports it stale while the agent is silent
+     (`service_repair::plan`, `run_repair`; Paddock rule 24). Outside a bundle (development, the CLI) `dyno-agent
+     service install` writes `~/Library/LaunchAgents/net.decryptology.dyno.agent.plist` and runs `launchctl bootout`,
+     waits (bounded) until launchd dropped the job, then `bootstrap`, logging to `~/Library/Logs/Dyno/agent.log`.
    - **Linux: a systemd user unit.** `~/.config/systemd/user/dyno-agent.service`, `Restart=always`, `RestartSec=5`,
      `Nice=10`, `CPUWeight=20`, `IOSchedulingClass=idle`, `MemoryHigh=256M`, `WantedBy=default.target`, enabled with
      `systemctl --user enable --now`. Without systemd the app starts the agent itself (ADR 0002).
