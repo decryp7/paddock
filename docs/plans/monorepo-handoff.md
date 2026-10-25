@@ -26,10 +26,10 @@ No open branch contains another one; each is its own line of work from an older 
 
 | Repo | Branch | Last commit | Ahead / behind | State | Next step (proposed) |
 |---|---|---|---|---|---|
-| debrief | `chore/rename-trial` | `459d3f7` 2026-10-22 chore: apply the Debrief rename (trial output of the rename script) | 2 / 468 | Trial output; the rename landed on `main` since | Delete |
-| debrief | `docs/usability-review-2026-10-23` | `8aefb60` 2026-10-23 docs: usability review of 2026-10-23 with screenshots | 1 / 271 | Docs only (30 files, screenshots); its fixes merged as `fix/usability-2026-10-23` | Keep as hand-off (old repo) or merge the review text without screenshots |
-| debrief | `perf/test-speed` | `37efa6a` 2026-10-24 perf(test): one integration-test binary per crate, nextest ci profile, one e2e build | 1 / 54 | Not on `main` (272 files); `main` still has `tests/*.rs` binaries | **Decided (2026-10-25):** rebase or merge before the import if it applies cleanly and passes Debrief's affected tests; else hand-off |
-| debrief | `test/x50-shell-baseline` | `8671f1b` 2026-10-25 test(e2e): shell baseline screenshots for the workbench migration (X50) | 1 / 0 | Current; on top of `main` | **Decided (2026-10-25):** merge into Debrief `main` before the import |
+| debrief | `chore/rename-trial` | `459d3f7` 2026-10-22 chore: apply the Debrief rename (trial output of the rename script) | 2 / 468 | Trial output; the rename landed on `main` since | **Decided:** stays in the old repo as a hand-off |
+| debrief | `docs/usability-review-2026-10-23` | `8aefb60` 2026-10-23 docs: usability review of 2026-10-23 with screenshots | 1 / 271 | Docs only (30 files, screenshots); its fixes merged as `fix/usability-2026-10-23` | **Decided:** stays in the old repo as a hand-off |
+| debrief | `perf/test-speed` | `37efa6a` 2026-10-24 perf(test): one integration-test binary per crate, nextest ci profile, one e2e build | 1 / 54 | Not on `main` (272 files); `main` still has `tests/*.rs` binaries | **Done:** rebased onto `main` (one conflict in build.yml, resolved) and imported |
+| debrief | `test/x50-shell-baseline` | `8671f1b` 2026-10-25 test(e2e): shell baseline screenshots for the workbench migration (X50) | 1 / 0 | Current; on top of `main` | **Done:** merged (fast-forward) and imported |
 | pitwall | `feat/shell` | `25270f6` 2026-10-24 style(app): rustfmt | 33 / 2 | Shell adoption, 301 files; not merged | Hand-off; redo on the in-tree shell after Pitwall's import (path dependencies replace the registry) |
 | pitwall | `feat/shell-settings` | `ce56179` 2026-10-24 feat(settings): Pitwall's sections are pages of the shell's Settings window | 28 / 2 | Shell Settings pages, 287 files, overlaps `feat/shell` | Hand-off, together with `feat/shell` |
 | pitwall | `feat/shell-specs` | `aa99e1c` 2026-10-24 test(ui): specs on the shell's notify, dialogs and jobs | 19 / 2 | Specs for the shell adoption, 207 files | Hand-off, together with `feat/shell` |

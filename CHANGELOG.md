@@ -4,6 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Debrief imported (ADR 0014, Debrief first)
+- Debrief's history is in `apps/debrief` (tags `debrief-v1.0.0`, `-v1.0.1`, `-v1.1.1`), with `test/x50-shell-baseline`
+  and `perf/test-speed` (rebased) merged first. Its UI is the `debrief-app` workspace of the root npm lock; its
+  notices generator reads the workspace's production closure from that lock.
+- Its CI is `.gitea/workflows/debrief.yml` (from its build.yml, gated by `affected.mjs --ci --app debrief`), with
+  `debrief-bench`, `-corpus`, `-fuzz`, `-mutants` and `-runner-check`. A `debrief-v*` tag releases here, moves
+  `debrief-latest` and writes the bridge `latest.json` to decryp7/debrief's newest release; the app reads both
+  (`[paddock debrief-latest, old repo latest]`).
+- `affected.mjs`: an app's own workflows (`<app>.yml`, `<app>-*.yml`, `release-<app>.yml`) mark only that app; an app with
+  `workflow` in its `paddock.ci.json` is not a ci.yml leg. `conformance/release/publish.mjs` takes `<app>-vX.Y.Z` and
+  `<app>-latest` tags, `--replace` and `--newest`.
+
 ### Monorepo frame (ADR 0014 §11 steps 1 and 2)
 - One npm workspace at the root (`package.json`, one `package-lock.json` for `ui`, `eslint`, `icons`, the two demos and
   `apps/*/app`); the five package locks are gone, with every resolved version of `ui/`'s lock kept. `npm ci` runs at the
