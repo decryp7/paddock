@@ -3047,6 +3047,9 @@
       <trans-unit id="pd.wb.dock.layout.fit" datatype="html">
         <source>Layout adjusted to fit this window</source>
       </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.fit.short" datatype="html">
+        <source>Layout fitted</source>
+      </trans-unit>
       <trans-unit id="pd.wb.dock.layout.fit.undo" datatype="html">
         <source>Undo</source>
       </trans-unit>
@@ -3223,6 +3226,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.popout.failed" datatype="html">
         <source>The panel could not be moved to its own window.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.popout.failed.short" datatype="html">
+        <source>Pop-out failed</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.popout.retry" datatype="html">
         <source>Retry</source>

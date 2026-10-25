@@ -69,6 +69,14 @@ Conventional Commits; one semver tag for the whole repo.
   `toolStarted`/`approvalNeeded` events (generated TS). The approval of such a tool is a danger choice: danger-tinted card,
   "This cannot be undone.", Allow as a danger button (never the primary) and Decline the focused default. New shared glyphs
   `pd:symbol-function`, `pd:symbol-type`, `pd:symbol-module`; `namesPaletteProvider({ icon })` also takes a function per match.
+- X50 review 3: one status → glyph map (`PD_STATUS_GLYPHS`, `statusGlyph`, `<pd-status-glyph>` in
+  `@decryp7/paddock-ui/icons`) with a lint over every template, so errors draw the circle-×, never the warning triangle;
+  `pd-popmenu` reveals by opacity, so keyboard-opened menus take the focus (Shift+F10 in the Explorer focuses the first
+  item and Escape returns to the row); native checks and radios take `--pd-accent-control`; `--pd-surface-code` for code;
+  `ShellNotice.short` for a small window's one-line toast; tab strips scroll only to tab boundaries without a scrollbar; a
+  bottom slide-out stays off a full-height side column; the assistant's stopped tool is neutral, deleting the open
+  conversation switches away (Undo brings it back), the title shows on send; the workbench demo's icon has its own
+  silhouette on a neutral near-black tile.
 - `scripts/new-app.mjs`: a new app has an e2e smoke suite on `@decryp7/paddock-e2e` (`playwright.config.ts`,
   `e2e/smoke.spec.ts`, `npm run e2e`) and, from the workbench demo, its unit tests (a `test` target, `test-setup.ts`, jsdom and
   the contribution lint); a template without unit tests gets no `test` script. The workbench demo has its own Vitest target
