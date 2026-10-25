@@ -178,9 +178,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.gitea/actions/setup-rust
-        with:
-          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
-          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
       - run: cargo fmt --all --check
 
       # cargo-hakari and cargo-machete come with the image (ci-image/).
@@ -261,14 +258,10 @@ jobs:
         with:
           name: paddock-${{ github.job }}-${{ runner.os }}
 
-      # Toolchain and sccache on every OS: the shared Redis backend (database 5) when the Gitea variables are set. The macOS
-      # leg can switch to the local disk with `sccache-backend: local` if the network proves slower than its disk.
+      # Toolchain and sccache on every OS: sccache's local disk cache (host runners: ~/.paddock-ci/sccache, containers: the /sccache mount).
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
-          sccache-backend: auto
-          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
-          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
 
       - name: Toolchain present
         run: |
@@ -509,9 +502,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: ./.gitea/actions/setup-rust
-        with:
-          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
-          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
 
       # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
       - name: The UI the app embeds
@@ -554,9 +544,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: ./.gitea/actions/setup-rust
-        with:
-          sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
-          sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
 
       # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
       - name: The UI the app embeds

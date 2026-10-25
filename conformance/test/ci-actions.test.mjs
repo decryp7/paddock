@@ -119,36 +119,42 @@ test('the shared actions follow the repo rules: no AI attribution text, Gitea-co
   }
 });
 
-test('setup-rust wires the shared sccache backend: inputs from Gitea variables, Redis on every OS, a cache that never fails a build', () => {
+test('setup-rust declares the sccache backend inputs: local disk by default, Redis only when asked for', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const declared = declaredInputs(text);
   for (const i of ['sccache-backend', 'sccache-redis-endpoint', 'sccache-redis-db']) assert.ok(declared.includes(i), `${i} is declared`);
-  assert.match(text, /default: \$\{\{ vars\.SCCACHE_REDIS_ENDPOINT \}\}/);
-  assert.match(text, /default: \$\{\{ vars\.SCCACHE_REDIS_DB \}\}/);
-  assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: auto/);
+  assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: local/);
   assert.match(text, /BACKEND: \$\{\{ inputs\.sccache-backend \}\}/);
   assert.match(text, /REDIS_ENDPOINT: \$\{\{ inputs\.sccache-redis-endpoint \}\}/);
-  assert.match(text, /REDIS_DB: \$\{\{ inputs\.sccache-redis-db \}\}/);
-  for (const v of ['WRAPPER=sccache', 'RUSTC_WRAPPER=$WRAPPER', 'CARGO_INCREMENTAL=0', 'SCCACHE_IGNORE_SERVER_IO_ERROR=1', 'SCCACHE_REDIS_ENDPOINT=', 'SCCACHE_REDIS_DB=']) {
-    assert.ok(text.includes(v), `${v} is exported`);
-  }
-  // Redis on every OS unless the backend is local or no endpoint is set (then local disk); the database is never part of the URL.
-  assert.match(text, /\[ "\$BACKEND" != local \] && \[ -n "\$REDIS_ENDPOINT" \]/);
-  assert.doesNotMatch(text, /RUNNER_OS" = "Linux" \] && \[ -n/);
-  assert.match(text, /sccache: local disk/);
   assert.match(text, /sccache-backend must be auto, redis or local/);
   assert.match(text, /sccache-backend is redis but sccache-redis-endpoint is empty/);
-  assert.doesNotMatch(text, /SCCACHE_REDIS_ENDPOINT=\$REDIS_ENDPOINT\//);
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  assert.doesNotMatch(ci, /sccache-redis|SCCACHE_REDIS|sccache-backend/, 'Paddock CI no longer uses the shared Redis backend');
 });
 
-test('CI runs its own sccache server on a distinct port, started with the job env and stopped only on that port', () => {
-  const setup = read(join(ACTIONS, 'setup-rust', 'action.yml'));
-  const stats = read(join(ACTIONS, 'sccache-stats', 'action.yml'));
-  assert.match(setup, /echo "SCCACHE_SERVER_PORT=4227"/);
-  assert.match(setup, /export SCCACHE_SERVER_PORT=4227\n(?:.*\n)*?.*sccache --start-server/);
-  assert.ok(setup.indexOf('SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT') < setup.indexOf('sccache --start-server'), 'the server starts after the backend env is set');
-  assert.doesNotMatch(setup + stats, /SCCACHE_SERVER_PORT=4226/);
-  assert.match(stats, /if \[ -n "\$SCCACHE_SERVER_PORT" \]; then sccache --stop-server/);
+test('the sccache step uses the local disk: the runner home on a host, /sccache in a container, a cache that never fails a build', () => {
+  const host = runSccacheStep({});
+  assert.match(host, /^SCCACHE_DIR=.*\/\.paddock-ci\/sccache$/m);
+  assert.match(host, /^SCCACHE_CACHE_SIZE=20G$/m);
+  assert.match(host, /^SCCACHE_SERVER_PORT=4227$/m);
+  assert.match(host, /^SCCACHE_IGNORE_SERVER_IO_ERROR=1$/m);
+  assert.match(host, /^CARGO_INCREMENTAL=0$/m);
+  assert.doesNotMatch(host, /REDIS/);
+  const linux = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: join(tmpdir(), 'paddock-nomount') });
+  assert.match(linux, /^SCCACHE_DIR=.*paddock-nomount\/sccache$/m, 'no /sccache mount: a folder of the container');
+  const redis = runSccacheStep({ BACKEND: 'auto', REDIS_ENDPOINT: 'redis://h:6379', REDIS_DB: '' });
+  assert.match(redis, /^SCCACHE_REDIS_ENDPOINT=redis:\/\/h:6379$/m);
+  assert.match(redis, /^SCCACHE_REDIS_DB=5$/m);
+  assert.doesNotMatch(redis, /SCCACHE_DIR/);
+});
+
+test('a sccache server that cannot start or answer leaves RUSTC_WRAPPER unset and the step green, so the job builds without the cache', () => {
+  for (const shim of ['[ "$1" = --start-server ] && exit 1', '[ "$1" = --show-stats ] && exit 1']) {
+    const r = runSccacheStep({}, shim);
+    assert.doesNotMatch(r.env, /RUSTC_WRAPPER/, shim);
+    assert.doesNotMatch(r.env, /CARGO_INCREMENTAL/, 'incremental builds stay on without the cache');
+    assert.match(r.stdout, /::warning::the sccache server did not start/);
+  }
 });
 
 test('setup-rust installs a pinned, checksum-verified sccache when the runner has none, for every supported OS and architecture', () => {
@@ -231,7 +237,7 @@ test('the strict reader check catches the sccache-stats mistake and leaves block
 
 // sccache puts every CARGO_* variable into its cache key. The host runners' build folder differs per checkout, so CARGO_TARGET_DIR
 // alone made every key unique (2% hits on macOS, 0% on Windows, 95-99% in containers). Run the real step with a shim sccache.
-function runSccacheStep(env) {
+function runSccacheStep(env, shim = 'true') {
   const dir = mkdtempSync(join(tmpdir(), 'paddock-sccache-'));
   const action = join(ACTIONS, 'setup-rust');
   const text = read(join(action, 'action.yml'));
@@ -239,7 +245,7 @@ function runSccacheStep(env) {
   const block = text.slice(at, text.indexOf('- name: Linux dependencies', at));
   const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(dir, 'bin'));
-  writeFileSync(join(dir, 'bin', 'sccache'), '#!/bin/sh\n[ "$1" = --version ] && echo sccache 0.0\nexit 0\n');
+  writeFileSync(join(dir, 'bin', 'sccache'), `#!/bin/sh\n[ "$1" = --version ] && echo sccache 0.19.0\n${shim}\nexit 0\n`);
   chmodSync(join(dir, 'bin', 'sccache'), 0o755);
   writeFileSync(join(dir, 'step.sh'), body);
   const ghEnv = join(dir, 'github-env');
@@ -249,7 +255,8 @@ function runSccacheStep(env) {
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr + r.stdout);
-  return readFileSync(ghEnv, 'utf8');
+  const written = readFileSync(ghEnv, 'utf8');
+  return shim === 'true' ? written : { env: written, stdout: r.stdout };
 }
 
 test('a job with its own CARGO_TARGET_DIR runs rustc through a wrapper that keeps the folder out of the sccache key', () => {

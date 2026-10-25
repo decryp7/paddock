@@ -14,8 +14,8 @@ inputs:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
   sccache-backend:
-    description: "auto (Redis when an endpoint is set, else local disk), redis (the endpoint is required) or local (sccache's disk, e.g. for a runner whose disk beats the network)."
-    default: auto
+    description: "local (default: sccache's disk cache, SCCACHE_DIR=$HOME/.paddock-ci/sccache on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local) or redis (the endpoint is required)."
+    default: local
   sccache-redis-endpoint:
     description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Used on every OS; empty means sccache's local disk."
     default: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
@@ -58,14 +58,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Present on the runner (the garage image, the host runners): use it. Otherwise a pinned release, checksum-verified.
-        if command -v sccache >/dev/null 2>&1; then exit 0; fi
-        VERSION=0.18.0
+        VERSION=0.19.0
+        # The pinned release on every OS (one version, one cache format). A runner that already has exactly it keeps it.
+        if command -v sccache >/dev/null 2>&1 && [ "$(sccache --version | awk '{print $2}')" = "$VERSION" ]; then exit 0; fi
         case "$RUNNER_OS-$(uname -m)" in
-          Linux-x86_64)            T=x86_64-unknown-linux-musl;  EXT=tar.gz; SUM=45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89 ;;
-          Linux-aarch64|Linux-arm64) T=aarch64-unknown-linux-musl; EXT=tar.gz; SUM=2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a ;;
-          macOS-arm64)             T=aarch64-apple-darwin;       EXT=tar.gz; SUM=308184519b646f5125289e8515b36f6ca65a13a041923994aebe702348674e8e ;;
-          Windows-x86_64)          T=x86_64-pc-windows-msvc;     EXT=zip;    SUM=8965c74d5e8a225244f741e18ad2f3f504f48228dc1bac948fc22761a348363d ;;
+          Linux-x86_64)            T=x86_64-unknown-linux-musl;  EXT=tar.gz; SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd ;;
+          Linux-aarch64|Linux-arm64) T=aarch64-unknown-linux-musl; EXT=tar.gz; SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d ;;
+          macOS-arm64)             T=aarch64-apple-darwin;       EXT=tar.gz; SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af ;;
+          Windows-x86_64)          T=x86_64-pc-windows-msvc;     EXT=zip;    SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1 ;;
           *) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."; exit 0 ;;
         esac
         DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
@@ -73,7 +73,10 @@ runs:
         if [ ! -x "$DEST/$BIN" ]; then
           TMP=$(mktemp -d)
           NAME="sccache-v$VERSION-$T"
-          curl -fsSL --retry 3 -o "$TMP/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+          # A failed download must not fail the job: the build runs without the cache.
+          if ! curl -fsSL --retry 3 -o "$TMP/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"; then
+            echo "::warning::could not download sccache $VERSION; building without the compile cache."; exit 0
+          fi
           if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$TMP/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$TMP/$NAME.$EXT" | cut -d' ' -f1); fi
           [ "$GOT" = "$SUM" ] || { echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"; exit 1; }
           if [ "$EXT" = zip ]; then
@@ -97,13 +100,49 @@ runs:
       run: |
         set -euo pipefail
         # The Install step added the pinned copy to PATH for later steps only; this step finds it by its folder.
-        PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.18.0"
+        PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
         if [ -d "$PINNED" ]; then PATH="$PINNED:$PATH"; fi
         if ! command -v sccache >/dev/null 2>&1; then
-          echo "::warning::sccache is not available on this runner; building without the shared compile cache."
+          echo "::warning::sccache is not available on this runner; building without the compile cache."
           exit 0
         fi
         case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis or local (got '$BACKEND')"; exit 1 ;; esac
+        if [ "$BACKEND" = redis ] && [ -z "$REDIS_ENDPOINT" ]; then
+          echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
+        fi
+        # CI's own server: a host runner may run a developer's sccache on the default port 4226 with its own backend, which
+        # would silently ignore the settings below. sccache-stats stops this port's server, never the default one.
+        export SCCACHE_SERVER_PORT=4227 SCCACHE_IGNORE_SERVER_IO_ERROR=1
+        SETTINGS=()
+        if [ "$BACKEND" = redis ] || { [ "$BACKEND" = auto ] && [ -n "$REDIS_ENDPOINT" ]; }; then
+          export SCCACHE_REDIS_ENDPOINT="$REDIS_ENDPOINT" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
+          SETTINGS+=("SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" "SCCACHE_REDIS_DB=${REDIS_DB:-5}")
+          echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
+        else
+          # Local disk. A host runner keeps it under the runner's home, so it outlives the job; a container uses the /sccache
+          # mount the runner provides, or a folder that dies with the container (with a notice: every job then starts cold).
+          if [ "$RUNNER_OS" = Linux ]; then
+            if [ -d /sccache ] && [ -w /sccache ]; then DIR=/sccache
+            else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
+          else
+            DIR="$HOME/.paddock-ci/sccache"
+          fi
+          mkdir -p "$DIR"
+          if [ "$RUNNER_OS" = Windows ]; then DIR="$(cygpath -w "$DIR")"; fi
+          export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE=20G
+          SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=20G")
+          echo "sccache: local disk $DIR"
+        fi
+        sccache --version
+        # A server left on this port by an earlier job would keep that job's backend: start it fresh with this job's settings.
+        sccache --stop-server >/dev/null 2>&1 || true
+        # The cache must slow a build down, never fail it: when the server cannot start or answer (a broken or full backend),
+        # RUSTC_WRAPPER stays unset and the job builds without sccache.
+        if ! sccache --start-server || ! sccache --show-stats >/dev/null 2>&1; then
+          sccache --stop-server >/dev/null 2>&1 || true
+          echo "::warning::the sccache server did not start; the build runs without the compile cache."
+          exit 0
+        fi
         # sccache puts every CARGO_* variable into its cache key, CARGO_TARGET_DIR included. A job that sets it to a folder next
         # to its checkout (host runners: a per-job hashed work folder) would never hit; the wrapper drops it before sccache sees it.
         WRAPPER=sccache
@@ -113,31 +152,12 @@ runs:
         fi
         {
           echo "RUSTC_WRAPPER=$WRAPPER"
-          # Cached builds are not incremental; an unreachable cache must slow a build down, never fail it.
+          # Cached builds are not incremental.
           echo "CARGO_INCREMENTAL=0"
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
-          # CI's own server: a host runner may run a developer's sccache on the default port 4226 with its own backend, which
-          # would silently ignore the settings below. sccache-stats stops this port's server, never the default one.
           echo "SCCACHE_SERVER_PORT=4227"
+          for kv in "${SETTINGS[@]}"; do echo "$kv"; done
         } >> "$GITHUB_ENV"
-        export SCCACHE_SERVER_PORT=4227
-        if [ "$BACKEND" = redis ] && [ -z "$REDIS_ENDPOINT" ]; then
-          echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
-        fi
-        # Every OS uses the shared server when asked (the cache keys include compiler and target); local disk is the fallback.
-        if [ "$BACKEND" != local ] && [ -n "$REDIS_ENDPOINT" ]; then
-          echo "SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" >> "$GITHUB_ENV"
-          echo "SCCACHE_REDIS_DB=${REDIS_DB:-5}" >> "$GITHUB_ENV"
-          echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
-          # GITHUB_ENV reaches the next steps only; the server started below needs the settings now.
-          export SCCACHE_REDIS_ENDPOINT="$REDIS_ENDPOINT" SCCACHE_REDIS_DB="${REDIS_DB:-5}" SCCACHE_IGNORE_SERVER_IO_ERROR=1
-        else
-          echo "sccache: local disk"
-        fi
-        sccache --version
-        # A server left on this port by an earlier job would keep that job's backend: start it fresh with this job's settings.
-        sccache --stop-server >/dev/null 2>&1 || true
-        sccache --start-server || echo "::warning::the sccache server did not start; the build runs without the shared cache."
     - name: Linux dependencies for Tauri
       if: runner.os == 'Linux' && inputs.tauri-linux-deps == 'true'
       shell: bash
