@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "the main window and the tray popup: events, plus dragging the window by its title bar and sidebar header (data-tauri-drag-region; the macOS window has an overlay title bar) and double-click to zoom. Every other Spotter command is an app command (no plugin commands are granted to the webview), so the UI cannot reach the file system, the shell, the notifications or the updater directly",
+  "windows": [
+    "main",
+    "tray"
+  ],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize"
+  ]
+}

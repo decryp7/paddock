@@ -1,0 +1,56 @@
+[package]
+name = "spotter-app"
+description = "Spotter — watches for new releases anywhere and tells you the moment one appears: tray app and window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[lib]
+name = "spotter_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+spotter-core.workspace = true
+spotter-engine.workspace = true
+spotter-render.workspace = true
+spotter-sources.workspace = true
+iana-time-zone = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process"] }
+# "macos-private-api": the transparent windows with vibrancy on macOS (tauri.macos.conf.json `macOSPrivateApi`); a
+# no-op elsewhere. It must sit here, not under a target table: tauri-build checks only this list against the config.
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+# >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version); see docs/releasing.md.
+# No "zip": Spotter publishes v2 updater artifacts (the installers themselves). "rustls-tls" with the platform verifier
+# trusts the OS certificate store, so update checks work behind TLS-inspecting proxies.
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# Tokens, passwords and site cookies live in the OS credential store: Windows Credential Manager, macOS Keychain
+# (Secret Service on Linux).
+keyring = "4.2"
+
+[target.'cfg(windows)'.dependencies]
+# The taskbar's light/dark setting, to pick the tray icon variant.
+winreg = "0.56"
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

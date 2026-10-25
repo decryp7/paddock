@@ -1,0 +1,38 @@
+# Version schemes for names that carry an id, a version and more. Choose one in the add-watch wizard and edit it.
+# Names here are invented ("Acme"); they show the shape of the pattern, not a real product.
+
+[[scheme]]
+id = "letters-build"
+name = "R1.04.00T12 (letters around the numbers)"
+example = "Setup-R1.04.00T12.exe"
+pattern = 'R(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)T(?<build>\d+)'
+
+[[scheme]]
+id = "product-letters-build"
+name = "Acme-PRO-R3.10.00T32 (product id, then R.T version)"
+example = "Acme-PRO-R3.10.00T32.zip"
+pattern = 'Acme-(?<id>[A-Z]+)-R(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)T(?<build>\d+)'
+
+[[scheme]]
+id = "product-semver-channel"
+name = "name-1.2.3-beta (product, semver, channel)"
+example = "agent-2.14.3-beta.zip"
+pattern = '^(?<id>[A-Za-z][A-Za-z0-9]*)[-_](?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<channel>alpha|beta|rc\d*|nightly))?'
+
+[[scheme]]
+id = "product-date-build"
+name = "build-2026-10-23-3 (product, date, build)"
+example = "nightly-2026-10-23-3.iso"
+pattern = '^(?<id>[a-z]+)-(?<major>\d{4})-(?<minor>\d{2})-(?<patch>\d{2})(?:-(?<build>\d+))?'
+
+[[scheme]]
+id = "product-variant"
+name = "name_1.4_x64 (product, version, variant)"
+example = "toolkit_1.4_x64.msi"
+pattern = '^(?<id>[A-Za-z]+)_(?<major>\d+)\.(?<minor>\d+)_(?<variant>x64|x86|arm64|full|lite)'
+
+[[scheme]]
+id = "folder-version"
+name = "R3.10.00T32 (a folder per build; read the version from the folder)"
+example = "R3.10.00T32"
+pattern = '^[Rr]?(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:[Tt](?<build>\d+))?$'

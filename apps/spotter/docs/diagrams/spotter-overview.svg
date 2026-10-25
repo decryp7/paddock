@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1328 1164" width="1328" height="1164" role="img" aria-labelledby="t d">
+  <title id="t">Spotter architecture overview</title>
+  <desc id="d">Release places (folders and shares, HTTP listings, JSON APIs, forges, feeds, web pages) and a supervised Chromium sit outside Spotter. The Spotter engine schedules checks, fetches politely, renders JavaScript pages, selects and soaks versions, and notifies and acts, keeping its history in local SQLite. The Spotter app (window, tray popup, Rust shell) shows and controls it through Tauri commands. A pure Rust core holds all the rules. Everything stays on the machine.</desc>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker></defs>
+  <style>
+    :root{--acc-s:#0B7A6E;--acc-f:#E7F2F1;--ui-s:#0072B2;--ui-f:#E6F1F7;--core-s:#4C5BD4;--core-f:#EDEFFB;--pro-s:#565E6B;--pro-f:#F0F2F5;--ext-s:#6B7380;--ext-f:#F4F5F7;--grp-s:#C4C7CD;--grp-f:#F8F9FA;--ink:#14171C;--mut:#565E6B;--line:#565E6B;}
+    @media (prefers-color-scheme: dark){:root{--acc-s:#2CC4B0;--acc-f:#193333;--ui-s:#56B4E9;--ui-f:#1F303C;--core-s:#8FA3FF;--core-f:#292D3F;--pro-s:#A0A7B2;--pro-f:#1B1E23;--ext-s:#7F8794;--ext-f:#17191E;--grp-s:#353A42;--grp-f:#121418;--ink:#ECEEF1;--mut:#A0A7B2;--line:#A0A7B2;}}
+    text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;fill:var(--ink)}
+    .title{font-size:24px;font-weight:600}.sub{font-size:14px;fill:var(--mut)}.desc{font-size:12px;fill:var(--mut)}
+    .h{font-size:14px;font-weight:600}.t{font-size:12px}.m{font-size:12px;fill:var(--mut)}.gl{font-size:12px;font-weight:600;fill:var(--mut)}.foot{font-size:11px;fill:var(--mut);text-anchor:end}
+    .g{fill:var(--grp-f);stroke:var(--grp-s);stroke-width:1}
+    .n{stroke-width:1.5}
+    .acc{fill:var(--acc-f);stroke:var(--acc-s)}.ui{fill:var(--ui-f);stroke:var(--ui-s)}.core{fill:var(--core-f);stroke:var(--core-s)}.pro{fill:var(--pro-f);stroke:var(--pro-s)}
+    .ext{fill:var(--ext-f);stroke:var(--ext-s);stroke-dasharray:6 4}
+    .e{stroke:var(--line);stroke-width:1.5;fill:none}.ah{fill:var(--line)}
+  </style>
+<text x="48" y="64" class="title">Spotter</text>
+<text x="48" y="94" class="sub">Watches for new releases anywhere and tells you the moment one appears</text>
+<text x="48" y="118" class="desc">Folders, listings, APIs, forges, feeds and pages · local only · Windows, macOS and Linux</text>
+<rect x="48" y="160" width="304" height="736" rx="10" class="g"/>
+<text x="64" y="188" class="gl">Outside Spotter</text>
+<rect x="472" y="160" width="416" height="736" rx="10" class="g"/>
+<text x="488" y="188" class="gl">Spotter engine: watches and checks</text>
+<rect x="1008" y="160" width="272" height="736" rx="10" class="g"/>
+<text x="1024" y="188" class="gl">Spotter app: see and act</text>
+<rect x="496" y="208" width="368" height="88" rx="6" class="n acc"/>
+<text x="512" y="236" class="h">Scheduler</text>
+<text x="512" y="258" class="t">Every 5 seconds the due watches run, a few at a</text>
+<text x="512" y="274" class="t">time, each at its own interval with back-off and</text>
+<text x="512" y="290" class="t">jitter.</text>
+<rect x="496" y="320" width="368" height="96" rx="6" class="n acc"/>
+<text x="512" y="348" class="h">Polite fetching</text>
+<text x="512" y="370" class="t">One request at a time per host, ETag and</text>
+<text x="512" y="386" class="t">Last-Modified, size caps, capped redirects. Loopback</text>
+<text x="512" y="402" class="t">and link-local addresses are refused.</text>
+<rect x="496" y="440" width="368" height="96" rx="6" class="n acc"/>
+<text x="512" y="468" class="h">Page rendering</text>
+<text x="512" y="490" class="t">JavaScript pages run in a supervised, off-screen</text>
+<text x="512" y="506" class="t">Chromium with a throwaway profile. A login or</text>
+<text x="512" y="522" class="t">captcha becomes “Needs you”, never solved.</text>
+<rect x="496" y="560" width="368" height="96" rx="6" class="n acc"/>
+<text x="512" y="588" class="h">Select, soak, decide</text>
+<text x="512" y="610" class="t">Orders versions, applies your filters and soak time</text>
+<text x="512" y="626" class="t">and compares with what the watch remembers.</text>
+<text x="512" y="642" class="t">Presets are TOML packs.</text>
+<rect x="496" y="680" width="368" height="96" rx="6" class="n acc"/>
+<text x="512" y="708" class="h">Notify and act</text>
+<text x="512" y="730" class="t">OS notification, digests and quiet hours, webhook and</text>
+<text x="512" y="746" class="t">ntfy channels, then the watch's actions on the new</text>
+<text x="512" y="762" class="t">release.</text>
+<rect x="496" y="800" width="368" height="72" rx="6" class="n pro"/>
+<text x="512" y="828" class="h">Local data</text>
+<text x="512" y="850" class="t">SQLite history and spotter.toml in your data folder.</text>
+<rect x="72" y="320" width="256" height="96" rx="6" class="n ext"/>
+<text x="88" y="348" class="h">Release places</text>
+<text x="88" y="370" class="t">Folders and shares, HTTP listings,</text>
+<text x="88" y="386" class="t">JSON APIs, forges, feeds and web</text>
+<text x="88" y="402" class="t">pages.</text>
+<rect x="72" y="440" width="256" height="96" rx="6" class="n ext"/>
+<text x="88" y="468" class="h">Chromium</text>
+<text x="88" y="490" class="t">Edge, Chrome or Chromium; or a</text>
+<text x="88" y="506" class="t">pinned, verified download on</text>
+<text x="88" y="522" class="t">request.</text>
+<rect x="72" y="680" width="256" height="96" rx="6" class="n pro"/>
+<text x="88" y="708" class="h">OS and channels</text>
+<text x="88" y="730" class="t">Notifications, the credential store,</text>
+<text x="88" y="746" class="t">and the webhook, ntfy and e-mail</text>
+<text x="88" y="762" class="t">channels you add.</text>
+<rect x="1032" y="208" width="224" height="128" rx="6" class="n ui"/>
+<text x="1048" y="236" class="h">Window</text>
+<text x="1048" y="258" class="t">Dashboard, watches, detail,</text>
+<text x="1048" y="274" class="t">editor and wizard, settings.</text>
+<text x="1048" y="290" class="t">Dark and light.</text>
+<rect x="1032" y="360" width="224" height="112" rx="6" class="n ui"/>
+<text x="1048" y="388" class="h">Tray popup</text>
+<text x="1048" y="410" class="t">Unseen releases at a glance;</text>
+<text x="1048" y="426" class="t">check all, pause notifications.</text>
+<rect x="1032" y="496" width="224" height="112" rx="6" class="n acc"/>
+<text x="1048" y="524" class="h">Rust shell</text>
+<text x="1048" y="546" class="t">Validates every request from</text>
+<text x="1048" y="562" class="t">the web view; keeps secrets</text>
+<text x="1048" y="578" class="t">in the OS store.</text>
+<rect x="1032" y="680" width="224" height="96" rx="6" class="n acc"/>
+<text x="1048" y="708" class="h">Notifier and actions</text>
+<text x="1048" y="730" class="t">Shows the notification; opens,</text>
+<text x="1048" y="746" class="t">downloads or runs, with time</text>
+<text x="1048" y="762" class="t">limits.</text>
+<rect x="1032" y="792" width="224" height="80" rx="6" class="n pro"/>
+<text x="1048" y="820" class="h">Close it</text>
+<text x="1048" y="842" class="t">The tray stays; Quit is the</text>
+<text x="1048" y="858" class="t">only exit.</text>
+<path d="M496 368 L328 368" class="e" marker-end="url(#a)"/>
+<text x="386" y="358" class="m">fetches</text>
+<path d="M496 488 L328 488" class="e" marker-end="url(#a)"/>
+<text x="386" y="478" class="m">renders</text>
+<path d="M496 728 L328 728" class="e" marker-end="url(#a)"/>
+<text x="385" y="718" class="m">notifies</text>
+<path d="M864 256 L1032 256" class="e" marker-end="url(#a)"/>
+<text x="899" y="246" class="m">pushes changes</text>
+<path d="M1032 584 L864 584" class="e" marker-end="url(#a)"/>
+<text x="914" y="574" class="m">commands</text>
+<path d="M864 728 L1032 728" class="e" marker-end="url(#a)"/>
+<text x="913" y="718" class="m">hands over</text>
+<rect x="48" y="936" width="1232" height="88" rx="6" class="n core"/>
+<text x="64" y="964" class="h">spotter-core: pure Rust, no I/O, no clock</text>
+<text x="64" y="988" class="t">Version schemes and ordering, filters, soak time, schedule and back-off, notification policy and digests, packs, config migration.</text>
+<text x="64" y="1008" class="t">Time comes in as values. The engine, the shell and the tests all use it.</text>
+<rect x="48" y="1060" width="860" height="40" rx="14" class="g"/>
+<rect x="68" y="1072" width="28" height="16" rx="4" class="n ext"/>
+<text x="104" y="1084" class="m">Outside</text>
+<rect x="192" y="1072" width="28" height="16" rx="4" class="n acc"/>
+<text x="228" y="1084" class="m">Spotter</text>
+<rect x="319" y="1072" width="28" height="16" rx="4" class="n ui"/>
+<text x="355" y="1084" class="m">Window and tray</text>
+<rect x="499" y="1072" width="28" height="16" rx="4" class="n pro"/>
+<text x="535" y="1084" class="m">Process · OS · data</text>
+<rect x="699" y="1072" width="28" height="16" rx="4" class="n core"/>
+<text x="735" y="1084" class="m">Pure core</text>
+<text x="1280" y="1084" class="foot">Spotter · updated 2026-10-23</text>
+<text x="48" y="1140" class="desc">Everything stays on your machine: no cloud, no account, no telemetry. The window reaches the engine only through Tauri commands.</text>
+</svg>

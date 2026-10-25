@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <title>Spotter 32px</title>
+  <defs>
+    <linearGradient id="szbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD257"/><stop offset="1" stop-color="#E59600"/></linearGradient>
+    <mask id="szm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M8.3 20a2.2 2.2 0 1 1 4.4 0a2.2 2.2 0 1 1 -4.4 0Z" fill="#000"/><path d="M19.3 20a2.2 2.2 0 1 1 4.4 0a2.2 2.2 0 1 1 -4.4 0Z" fill="#000"/></mask>
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#szbg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#7A4E00" stroke-opacity="0.45" stroke-width="0.5"/>
+  <path d="M5.5 20a5 5 0 1 1 10 0a5 5 0 1 1 -10 0ZM16.5 20a5 5 0 1 1 10 0a5 5 0 1 1 -10 0ZM9 10H12A1.5 1.5 0 0 1 13.5 11.5V18.5A1.5 1.5 0 0 1 12 20H9A1.5 1.5 0 0 1 7.5 18.5V11.5A1.5 1.5 0 0 1 9 10ZM20 10H23A1.5 1.5 0 0 1 24.5 11.5V18.5A1.5 1.5 0 0 1 23 20H20A1.5 1.5 0 0 1 18.5 18.5V11.5A1.5 1.5 0 0 1 20 10ZM14 13H18A1 1 0 0 1 19 14V16A1 1 0 0 1 18 17H14A1 1 0 0 1 13 16V14A1 1 0 0 1 14 13Z" fill="#3A2600" mask="url(#szm0)"/><path d="M26.5 4.5C26.75 6.5 27.5 7.25 29.5 7.5C27.5 7.75 26.75 8.5 26.5 10.5C26.25 8.5 25.5 7.75 23.5 7.5C25.5 7.25 26.25 6.5 26.5 4.5Z" fill="#3A2600"/>
+</svg>
