@@ -21,8 +21,8 @@ runs:
         root="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}/src"
         stable="$root/$folder"
         # An unusable move must never fail the job: it only costs the cache hits of the workspace crates.
-        if ! mkdir -p "$root" || ! cd "$root" || ! rm -rf "$stable" || ! mv "$ws" "$stable"; then
-          echo "::warning::stable-workspace: could not move the checkout to $stable; building from the work folder (sccache misses the workspace crates)."
+        if ! why=$({ mkdir -p "$root" && cd "$root" && rm -rf "$stable" && mv "$ws" "$stable"; } 2>&1); then
+          echo "::warning::stable-workspace: could not move the checkout to $stable (${why:-no message}); building from the work folder (sccache misses the workspace crates)."
           exit 0
         fi
         # Git bash's `ln -s` copies on Windows: a junction is the link that resolves to the stable folder.
