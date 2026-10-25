@@ -308,6 +308,49 @@ export const PADDOCK_VARIANTS = {
   },
 };
 
+/**
+ * Paddock in the family grammar (2026-10-25 candidates, alternative/paddock-family-*, built by tools/paddock-family.mjs): a tile of its
+ * own and one bold glyph with one translucent secondary, like the seven apps; the family link is the grammar, not a stripe of their hues.
+ * The glyph is a flat-roof pit garage: a roof slab (flush, or a 1 px overhang on the small grids), a slit under it, and a long, low
+ * building with two wide door openings cut to the ground in tile colour (wider than tall, so the row reads as garage bays, not a gate);
+ * the secondary is the roll-up doors half raised in the openings, slatted at 1024 (dropped at 16 px and in the tray, where a half-tone
+ * part reads as disabled). Pillars are [outer, middle, outer].
+ */
+function pitGarage({ rx0, rx1, ry, rh, rr: rrad = 0, slit, bx0, bx1, pillars: [po, pm], doorTop, bottom, br = 0, dr = 0, roll = 0, slats = [], slatW = 0 }) {
+  const door = (bx1 - bx0 - 2 * po - pm) / 2;
+  const doors = [bx0 + po, bx0 + po + door + pm];
+  const body = ry + rh + slit;
+  return [
+    { kind: 'fill', d: rr(rx0, ry, rx1 - rx0, rh, rrad) + rr(bx0, body, bx1 - bx0, bottom - body, br), tone: 'primary', cut: [doors.map(x => rr(x, doorTop, door, bottom - doorTop + 40, dr)).join('')] },
+    ...(roll ? [{ kind: 'fill', d: doors.map(x => rr(x, doorTop, door, roll, 0)).join(''), tone: 'secondary',
+      ...(slats.length ? { cutStroke: { d: slats.map(y => `M${bx0} ${y}H${bx1}`).join(''), w: slatW, cap: 'butt' } } : {}) }] : []),
+  ];
+}
+export const PADDOCK_FAMILY = {
+  palettes: {
+    // Jade, OKLCH ~(0.745, 0.125, 168): the paddock's turf, light enough to take dark ink like Spotter and Sighter. The only green
+    // band that keeps every family CVD minimum against the seven apps (tools/cvd.mjs): nearest 20.8 normal (Spotter), 12.0 protan
+    // (Spotter), 13.6 deutan (Pitcrew, on the floor), 16.2 tritan (Sighter). Margins: the bottom stop #2FAA83 drops to 10.3 deutan (Dyno)
+    // and 9.4 tritan (Debrief), and the shell demo's silver is 10.2 protan, 12.9 deutan. Ink #08332A, 6.5:1 on the base.
+    jade: { top: '#7ADDBA', base: '#4AC59D', bottom: '#2FAA83', deep: '#0B4A38', light: '#B5EEDA', ink: '#08332A' },
+    // Graphite: the current mark's tile (no hue of its own; keeps every CVD minimum), white ink 13.3:1, with the new single glyph.
+    graphite: { top: '#4A525E', base: '#2B3038', bottom: '#1E2228', deep: '#07080A', light: '#8A94A3', rim: '#FFFFFF' },
+  },
+  glyph: {
+    // 1024: roof 264..760 (16 overhang), slit 18, building 280..744 down to 724; pillars 48/64/48, two 152 x 176 openings from 548;
+    // roll-up doors 72 high with two slats.
+    g1024: pitGarage({ rx0: 264, rx1: 760, ry: 300, rh: 68, rr: 20, slit: 18, bx0: 280, bx1: 744, pillars: [48, 64], doorTop: 548, bottom: 724, br: 12, dr: 10, roll: 72, slats: [572, 596], slatW: 8 }),
+    // 32: roof 5..27 (1 px overhang), building 6..26, pillars 2/2/2, two 7 x 6 openings from 19; the roll-up doors 2 px.
+    g32: pitGarage({ rx0: 5, rx1: 27, ry: 7, rh: 3, rr: 0.5, slit: 1, bx0: 6, bx1: 26, pillars: [2, 2], doorTop: 19, bottom: 25, roll: 2 }),
+    // 24: roof 3..21, building 4..20, pillars 1/2/1, two 6 x 5 openings from 14; roll-up doors 2 px.
+    g24: pitGarage({ rx0: 3, rx1: 21, ry: 5, rh: 2, slit: 1, bx0: 4, bx1: 20, pillars: [1, 2], doorTop: 14, bottom: 19, roll: 2 }),
+    // 16: flush roof 2..14 (the slit sets it apart), building down to 13, pillars 1/2/1, two 4 x 3 openings; no roll-up doors.
+    g16: pitGarage({ rx0: 2, rx1: 14, ry: 4, rh: 2, slit: 1, bx0: 2, bx1: 14, pillars: [1, 2], doorTop: 10, bottom: 13 }),
+    // Tray (alpha only): roof 3 px, building 1..15, two 5 x 4 openings, solid.
+    tray: pitGarage({ rx0: 1, rx1: 15, ry: 2, rh: 3, slit: 1, bx0: 1, bx1: 15, pillars: [1, 2], doorTop: 10, bottom: 14 }),
+  },
+};
+
 export { PACENOTES };
 
 /** Master glyphs on the 1024 grid (optical centre 512,512; live area ~ 270..754). */
@@ -562,15 +605,16 @@ function renderGlyph(layers, paint, uid) {
   return { defs: defs.join(''), body: out };
 }
 
-function inkPaint(app, concept, uid) {
-  const p = PALETTE[app];
+function inkPaint(app, concept, uid, palette) {
+  const p = palette ?? PALETTE[app];
   if (concept === 'carbon') {
     return {
       defs: `<linearGradient id="${uid}ink" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p.light}"/><stop offset="1" stop-color="${p.base}"/></linearGradient>`,
       paint: { primary: `url(#${uid}ink)`, secondary: p.light, accent: p.light, secondaryOpacity: 0.5 },
     };
   }
-  const ink = INK[app];
+  // A palette override may bring its own ink (a light tile takes dark ink, as Spotter and Sighter do).
+  const ink = p.ink ?? INK[app];
   return { defs: '', paint: { primary: ink, secondary: ink, accent: ink, family: true, secondaryOpacity: LIGHT_TILE.has(app) ? 0.55 : 0.6 } };
 }
 
@@ -579,15 +623,15 @@ function inkPaint(app, concept, uid) {
  * platform 'windows': near full-bleed rounded square (margin 40, circular corners), no outer shadow.
  */
 /** `bare` leaves out the glyph and the livery: the tile background alone, for the seam scan (tools/scan.mjs). */
-export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false, glyph: override, title } = {}) {
-  const p = PALETTE[app];
+export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false, glyph: override, title, palette } = {}) {
+  const p = palette ?? PALETTE[app];
   const mac = platform === 'macos';
   const x = mac ? 100 : 40, s = mac ? 824 : 944;
   const shape = mac ? squircle(x, x, s, s, 185.4) : rr(x, x, s, s, 200);
   const scale = s / 824;
   const carbon = concept === 'carbon';
   const g = override ?? GLYPH_1024[app]();
-  const ink = inkPaint(app, concept, uid);
+  const ink = inkPaint(app, concept, uid, palette);
   const glyph = renderGlyph(g, ink.paint, uid);
   const top = carbon ? CARBON.top : p.top, bottom = carbon ? CARBON.bottom : p.bottom, mid = carbon ? '#22252B' : p.base;
   const liveryCol = carbon ? p.base : '#FFFFFF';
@@ -626,14 +670,14 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
 }
 
 /** Hand-tuned small app icon (Windows-style near full-bleed tile; used for the .ico 16/24/32/48 frames). */
-export function smallSvg(app, size, { uid = newUid(idp(app)), glyphs, title } = {}) {
-  // `glyphs`: { 16, 32 [, 24] } layer sets that replace GLYPH_SMALL for this render (design variants).
-  const p = PALETTE[app];
+export function smallSvg(app, size, { uid = newUid(idp(app)), glyphs, title, palette } = {}) {
+  // `glyphs`: { 16, 32 [, 24] } layer sets that replace GLYPH_SMALL for this render (design variants); `palette` replaces the tile colours.
+  const p = palette ?? PALETTE[app];
   // 16 has its own grid; 24 too where an app draws one (GLYPH_SMALL[24]); otherwise 24, 32 and 48 share the 32 grid.
   const set = glyphs ?? { 16: GLYPH_SMALL[16][app], 24: GLYPH_SMALL[24]?.[app], 32: GLYPH_SMALL[32][app] };
   const grid = size === 16 ? 16 : size === 24 && set[24] ? 24 : 32;
   const layers = set[grid];
-  const ink = inkPaint(app, 'enamel', uid);
+  const ink = inkPaint(app, 'enamel', uid, palette);
   const glyph = renderGlyph(layers, ink.paint, uid);
   const inset = grid === 16 ? 0.5 : 1;
   const R = grid === 16 ? 3.5 : grid === 24 ? 5.25 : 7;

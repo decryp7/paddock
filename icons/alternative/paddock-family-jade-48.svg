@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 32 32">
+  <title>Paddock (Jade) 48px</title>
+  <defs>
+    <linearGradient id="k8bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7ADDBA"/><stop offset="1" stop-color="#2FAA83"/></linearGradient>
+    <mask id="k8m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M8 19H15A0 0 0 0 1 15 19V65A0 0 0 0 1 15 65H8A0 0 0 0 1 8 65V19A0 0 0 0 1 8 19ZM17 19H24A0 0 0 0 1 24 19V65A0 0 0 0 1 24 65H17A0 0 0 0 1 17 65V19A0 0 0 0 1 17 19Z" fill="#000"/></mask>
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#k8bg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#0B4A38" stroke-opacity="0.35" stroke-width="0.5"/>
+  <path d="M5.5 7H26.5A0.5 0.5 0 0 1 27 7.5V9.5A0.5 0.5 0 0 1 26.5 10H5.5A0.5 0.5 0 0 1 5 9.5V7.5A0.5 0.5 0 0 1 5.5 7ZM6 11H26A0 0 0 0 1 26 11V25A0 0 0 0 1 26 25H6A0 0 0 0 1 6 25V11A0 0 0 0 1 6 11Z" fill="#08332A" mask="url(#k8m0)"/><g opacity="0.6"><path d="M8 19H15A0 0 0 0 1 15 19V21A0 0 0 0 1 15 21H8A0 0 0 0 1 8 21V19A0 0 0 0 1 8 19ZM17 19H24A0 0 0 0 1 24 19V21A0 0 0 0 1 24 21H17A0 0 0 0 1 17 21V19A0 0 0 0 1 17 19Z" fill="#08332A"/></g>
+</svg>
