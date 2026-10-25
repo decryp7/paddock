@@ -35,9 +35,10 @@ pub mod tool;
 pub mod types;
 
 pub use conversation::{
-    ContextItem, Conversation, ConversationStore, ConversationSummary, MAX_CONTEXT_CHARS,
-    MAX_CONTEXT_ITEMS, MAX_CONVERSATIONS, MAX_DATA_BYTES, MAX_FILE_BYTES, MAX_MESSAGE_CHARS,
-    MAX_MESSAGES, MAX_TITLE_CHARS, SaveError, StoredMessage,
+    ContextItem, Conversation, ConversationStore, ConversationSummary, MAX_CITATIONS,
+    MAX_CONTEXT_CHARS, MAX_CONTEXT_ITEMS, MAX_CONVERSATIONS, MAX_DATA_BYTES, MAX_FILE_BYTES,
+    MAX_MESSAGE_CHARS, MAX_MESSAGES, MAX_NOTE_CHARS, MAX_TITLE_CHARS, SaveError, StoredError,
+    StoredMessage, ToolOutcome,
 };
 pub use event::{AssistantEvent, EVENT, EndReason, Envelope, ErrorKind, EventSink};
 pub use pitwall::PitwallProvider;
