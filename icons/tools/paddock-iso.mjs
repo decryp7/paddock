@@ -177,7 +177,12 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
       lin('cnpFront', P(-ov, -canopy, H1 + C1), P(L + ov, -canopy, H1), [[0, VALUES.litLight[0]], [1, VALUES.litLight[1]]]),
       // Slab edges (canopy and roof fronts): a mid value between the white tops and the dark ends, so the slabs read as slabs.
       lin('edge', P(-ov, -canopy, H1 + C1), P(L + ov, -canopy, H1), [[0, VALUES.edge[0]], [1, VALUES.edge[1]]]),
-      lin('glass', P(0, 0, H1 + C1 + H2), P(L, 0, H1 + C1), [[0, '#34404F'], [0.5, '#1C2531'], [1, '#121821']]),
+      // Glass reflects the sky at the top and the dark interior below; one broad sheen and one narrow streak (polish pass).
+      lin('glass', P(0, 0, H1 + C1 + H2), P(0, 0, H1 + C1), [[0, '#4A5B70'], [0.45, '#222D3A'], [1, '#121821']]),
+      lin('glassL', P(0, 0, H1 + C1), P(L, 0, H1 + C1), [[0, '#FFFFFF', 0.06], [1, '#000000', 0.18]]),
+      // Metal edges: a bright specular along the lit top edge of slabs and the pit wall.
+      lin('spec', P(-ov, -canopy, H1 + C1), P(L + ov, -canopy, H1 + C1), [[0, '#FFFFFF'], [0.7, '#FFFFFF', 0.85], [1, '#FFFFFF', 0.5]]),
+      lin('pwFront', P(-ov, wall0, wallH), P(-ov, wall0, 0), [[0, '#E8ECF1'], [1, '#B4BCC7']]),
       lin('sheen', P(0, 0, H1 + C1 + H2), P(L * 0.5, 0, H1 + C1), [[0, '#FFFFFF', 0.28], [0.55, '#FFFFFF', 0.04], [1, '#FFFFFF', 0]]),
       lin('door', P(0, 0, H1), P(L, 0, H1 * 0.4), simple ? [[0, '#7F8996'], [1, '#66707C']] : [[0, '#9EA8B4'], [1, '#7F8996']]),
       lin('apron', P(-ov, wall0, 0), P(L + ov, 0, 0), [[0, '#6A7380'], [1, '#545D69']]),
@@ -228,18 +233,30 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
     const sh = simple ? 10 : 8;
     const stripeBand = poly(P(-ov, -canopy, H1), P(L + ov, -canopy, H1), P(L + ov, -canopy, H1 + sh), P(-ov, -canopy, H1 + sh));
 
+    // Polish pass (STYLE.md section 0): speculars and edges.
+    // Glass: a narrow bright streak parallel to the sheen, a light sill under the band and a dark head over it.
+    const gTop = H1 + C1 + H2 - 8, gBot = H1 + C1 + 8;
+    const streak = simple ? '' : `<path d="${poly(P(L * 0.16, 0, gTop), P(L * 0.19, 0, gTop), P(L * 0.12, 0, gBot), P(L * 0.09, 0, gBot))}" fill="#FFFFFF" opacity="0.16"/>`;
+    const glassFrame = `<path d="M${P(10, 0, gBot).join(' ')}L${P(L - 10, 0, gBot).join(' ')}" stroke="#E4E8ED" stroke-width="${simple ? 4 : 3}"/><path d="M${P(10, 0, gTop).join(' ')}L${P(L - 10, 0, gTop).join(' ')}" stroke="#0B0F14" stroke-width="3" opacity="0.7"/>`;
+    // Canopy: a specular along its lit top edge (where the light catches the slab) and a crisp dark line under its front.
+    const canopyEdge = `<path d="M${P(-ov, -canopy, H1 + C1).join(' ')}L${P(L + ov, -canopy, H1 + C1).join(' ')}" stroke="url(#${id('spec')})" stroke-width="${simple ? 4 : 2.5}"/><path d="M${P(-ov, -canopy, H1).join(' ')}L${P(L + ov, -canopy, H1).join(' ')}L${P(L + ov, 0, H1).join(' ')}" stroke="#3A424C" stroke-width="2" fill="none" opacity="0.6"/>`;
+    // Pit wall: grounded by its own tight contact shadow, a specular along the top front edge, a light front face.
+    const pitWallShadow = contactShadow(kit, poly(P(-ov, wall0, 0), P(L + ov, wall0, 0), P(L + ov + 3, wall0 + wallD, 0), P(L + ov + 3, wall0 - 3, 0), P(-ov, wall0 - 3, 0)));
+    const pitWallEdge = `<path d="M${P(-ov, wall0, wallH).join(' ')}L${P(L + ov, wall0, wallH).join(' ')}" stroke="#FFFFFF" stroke-width="${simple ? 3.5 : 2.5}"/>`;
+    // The building's lit vertical corners: a thin highlight where front and end faces meet.
+    const cornerHi = `<path d="M${P(L, 0, 0).join(' ')}L${P(L, 0, H1).join(' ')}M${P(L, 0, H1 + C1).join(' ')}L${P(L, 0, H1 + C1 + H2).join(' ')}" stroke="#FFFFFF" stroke-width="2" opacity="0.55"/>`;
     const body = `${shadowLong}${contact}
       <path d="${apronTop}" fill="url(#${id('apron')})"/><path d="${poly(P(-ov, -canopy, 0), P(L + ov, -canopy, 0), P(L + ov, 0, 0), P(-ov, 0, 0))}" fill="#000" opacity="0.3"/>${lane}
       <path d="${g0.front}" fill="url(#${id('front')})"/><path d="${g0.end}" fill="url(#${id('end')})"/>
       ${bayParts.join('')}${aoBand(H1, 'g0')}${canopyShade}
       <path d="${up.front}" fill="url(#${id('front')})"/><path d="${up.end}" fill="url(#${id('end')})"/>
-      <path d="${gl}" fill="url(#${id('glass')})"/><path d="${gl}" fill="url(#${id('sheen')})"/>${simple ? '' : `<path d="${mullions}" stroke="#0E131A" stroke-width="2.5"/>`}
+      <path d="${gl}" fill="url(#${id('glass')})"/><path d="${gl}" fill="url(#${id('glassL')})"/><path d="${gl}" fill="url(#${id('sheen')})"/>${streak}${simple ? '' : `<path d="${mullions}" stroke="#0E131A" stroke-width="2.5"/>`}${glassFrame}
       ${aoBand(H1 + C1 + H2, 'up')}
       <path d="${cnp.front}" fill="url(#${id('edge')})"/><path d="${cnp.end}" fill="#7A8491"/><path d="${cnp.top}" fill="url(#${id('cnpTop')})"/>
-      <path d="${stripeBand}" fill="url(#${id('stripe')})"/>
+      <path d="${stripeBand}" fill="url(#${id('stripe')})"/>${canopyEdge}
       <path d="${roof.front}" fill="url(#${id('edge')})"/><path d="${roof.end}" fill="#727C89"/><path d="${roof.top}" fill="url(#${id('top')})"/>
       <path d="M${P(-ov, -ov, top).join(' ')}L${P(L + ov, -ov, top).join(' ')}L${P(L + ov, D + ov, top).join(' ')}" stroke="#FFFFFF" stroke-width="2.5" fill="none" stroke-linejoin="round"/>
-      <path d="${pw.front}" fill="url(#${id('cnpFront')})"/><path d="${pw.end}" fill="#7A8491"/><path d="${pw.top}" fill="#DCE1E7"/>${cq.length ? `<path d="${cq.join('')}" fill="#1E242C"/>` : ''}`;
+      ${pitWallShadow}<path d="${pw.front}" fill="url(#${id('pwFront')})"/><path d="${pw.end}" fill="#7A8491"/><path d="${pw.top}" fill="#DCE1E7"/>${cq.length ? `<path d="${cq.join('')}" fill="#1E242C"/>` : ''}${pitWallEdge}${cornerHi}`;
     return { defs: defs.join(''), body: `<g transform="${fit.transform}">${body}</g>` };
   };
 }
