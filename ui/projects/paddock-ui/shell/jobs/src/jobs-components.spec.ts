@@ -174,9 +174,9 @@ describe('pd-jobs-status', () => {
     const css = ((PdJobsStatus as unknown as { ɵcmp: { styles: string[] } }).ɵcmp.styles ?? []).join('\n').replace(/\[_ng(?:content|host)-%COMP%\]/g, '').replace(/\s+/g, ' ');
     const busy = /\.pd-busy \.pd-dot \{([^}]*)\}/.exec(css)?.[1] ?? '';
     expect(busy).toMatch(/box-sizing: border-box; width: 14px; height: 14px;/);
-        expect(busy).toMatch(/border: 2px solid/);
+    expect(busy).toMatch(/border: 2px solid/);
     // The ring's hole is 14 px wide minus a 2 px band: a 5 px radius.
-    expect(css).toMatch(/radial-gradient\( circle, transparent 4\.5px, #000 5px\)/);
+    expect(css).toMatch(/radial-gradient\(\s*circle, transparent 4\.5px, var\(\s*--(?:%NS%)?pd-text\s*\) 5px\)/);
   });
 
   it('opens below when the item sits at the top', async () => {

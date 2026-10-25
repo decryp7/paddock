@@ -137,7 +137,7 @@ export class MockStartupBackend extends StartupBackend {
     const flag = s?.getItem(MOCK_RECOVER_KEY) ?? null;
     s?.removeItem(MOCK_RECOVER_KEY);
     const recovered = RECOVERIES.find((r) => r === flag) ?? null;
-    let ui: unknown;
+    let ui: unknown = null;
     if (recovered) {
       try {
         ui = JSON.parse(s?.getItem(MOCK_CHECKPOINT_KEY) ?? 'null');
