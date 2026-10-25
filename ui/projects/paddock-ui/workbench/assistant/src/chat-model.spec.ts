@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantEvent } from '../generated/assistant';
 import { FIXTURE_CONVERSATION, FIXTURE_EVENTS } from '../generated/assistant-fixtures';
-import { answerText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
+import { answerText, chipText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
 
 const run = (events: readonly AssistantEvent[], from: TurnView = startTurn('q')): TurnView => events.reduce(reduceTurn, from);
 const usage = { inputTokens: 1, outputTokens: 2 };
@@ -104,5 +104,23 @@ describe('setDeclined', () => {
     const declined = reduceTurn(setDeclined(base, 'c1', true), { type: 'toolFinished', callId: 'c1', name: 'erase', ok: false, summary: 'Declined by the user' });
     expect(declined.parts[0]).toMatchObject({ kind: 'tool', card: { state: 'failed', declined: true } });
     expect(setDeclined(setDeclined(base, 'c1', true), 'c1', false).parts[0]).toMatchObject({ card: { declined: false } });
+  });
+});
+
+describe('a turn stopped by the user', () => {
+  it('marks a call that was still running as stopped, not as a failure', () => {
+    const base = run([{ type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false }]);
+    const done = reduceTurn(base, { type: 'done', text: '', usage: { inputTokens: 0, outputTokens: 0 }, end: 'cancelled' });
+    expect(done.parts[0]).toMatchObject({ card: { state: 'failed', stopped: true } });
+    const failed = reduceTurn(base, { type: 'error', kind: 'failed', message: 'x' });
+    expect(failed.parts[0]).toMatchObject({ card: { state: 'failed' } });
+    expect((failed.parts[0] as { card: { stopped?: boolean } }).card.stopped).toBeUndefined();
+  });
+});
+
+describe('chipText', () => {
+  it('joins the label and the detail the same way everywhere', () => {
+    expect(chipText('Current file', 'src/main.rs')).toBe('Current file: src/main.rs');
+    expect(chipText('Selection', null)).toBe('Selection');
   });
 });

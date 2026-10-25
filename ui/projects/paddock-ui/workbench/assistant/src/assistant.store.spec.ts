@@ -281,6 +281,40 @@ describe('AssistantStore', () => {
       expect(store.undoable()).toBeNull();
     });
 
+    it('moves off the open conversation at once when it is deleted, and returns to it on undo', async () => {
+      const { store } = setup({ conversations: [FIXTURE_CONVERSATION] });
+      await quiet();
+      await store.open(FIXTURE_CONVERSATION.id);
+      expect(store.title()).toBe(FIXTURE_CONVERSATION.title);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.removeLater(FIXTURE_CONVERSATION.id);
+      expect(store.title()).toBe('New conversation');
+      expect(store.activeId()).toBeNull();
+      expect(store.turns()).toEqual([]);
+      store.undoRemove(FIXTURE_CONVERSATION.id);
+      vi.useRealTimers();
+      await quiet();
+      expect(store.activeId()).toBe(FIXTURE_CONVERSATION.id);
+      expect(store.title()).toBe(FIXTURE_CONVERSATION.title);
+      expect(store.turns().length).toBeGreaterThan(0);
+    });
+
+    it('opens the next conversation when the open one is deleted', async () => {
+      const second = { ...FIXTURE_CONVERSATION, id: 'second', title: 'Second one' };
+      const { store } = setup({ conversations: [FIXTURE_CONVERSATION, second] });
+      await quiet();
+      const [first, other] = store.conversations();
+      await store.open((first as { id: string }).id);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.removeLater((first as { id: string }).id);
+      vi.useRealTimers();
+      await quiet();
+      expect(store.activeId()).toBe((other as { id: string }).id);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      store.dispose();
+      vi.useRealTimers();
+    });
+
     it('brings it back on undo and never deletes it', async () => {
       const { store, backend } = setup({ conversations: [FIXTURE_CONVERSATION] });
       await quiet();
@@ -310,6 +344,20 @@ describe('AssistantStore', () => {
       other.dispose();
       await quiet();
     });
+  });
+
+  it('names a new conversation in the heading as soon as its question is sent', async () => {
+    const { store, backend } = setup();
+    await quiet();
+    backend.hold();
+    expect(store.title()).toBe('New conversation');
+    store.setDraft('/slow explain the request pipeline');
+    const sending = store.send();
+    expect(store.title()).toBe('Explain the request pipeline');
+    await sending;
+    expect(store.title()).toBe('Explain the request pipeline');
+    backend.release();
+    await store.stop();
   });
 
   it('titles the pane with the conversation, or "New conversation"', async () => {
