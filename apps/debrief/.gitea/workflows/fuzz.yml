@@ -1,0 +1,148 @@
+# Nightly fuzzing of every parser with cargo-fuzz (libFuzzer, nightly Rust).
+# Each target runs for FUZZ_SECONDS, up to seven per shard; any crash fails the shard and its
+# reproducer is uploaded as an artifact named after the target. Triage: see docs/fuzzing.md.
+
+name: fuzz
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds per target"
+        default: "300"
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_SECONDS: ${{ github.event.inputs.seconds || '300' }}
+  # cargo-fuzz needs nightly (-Zsanitizer); see the toolchain step.
+  FUZZ_TOOLCHAIN: nightly-2026-10-01
+
+jobs:
+  # Six shards of up to nine targets instead of one job per target: each shard compiles the fuzz workspace once
+  # (cargo fuzz build builds every target in one cargo run) and then fuzzes its targets one after another,
+  # where 28 jobs each compiled the whole workspace and queued for the few shared Linux runner slots.
+  fuzz:
+    name: fuzz (shard ${{ matrix.shard }}/6)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            targets: [fuzz_json, fuzz_csv, fuzz_text, fuzz_timestamp, fuzz_profile_toml, fuzz_ql, fuzz_archive, fuzz_ipc_frame]
+          - shard: 2
+            targets: [fuzz_registry, fuzz_evtx, fuzz_w3c_access_har, fuzz_otel, fuzz_syslog, fuzz_perfmon_csv, fuzz_prof_speedscope, fuzz_plugin_request]
+          - shard: 3
+            targets: [fuzz_prof_folded, fuzz_prof_cpuprofile, fuzz_prof_chrome_trace, fuzz_prof_pprof, fuzz_prof_perf_script, fuzz_prof_nettrace, fuzz_prof_heapsnapshot, fuzz_plugin_reply]
+          - shard: 4
+            targets: [fuzz_procmon_csv, fuzz_minidump, fuzz_eventlog, fuzz_log4j_xml, fuzz_sql_errorlog, fuzz_docker_json, fuzz_cri, fuzz_ai_request, fuzz_worker_http]
+          - shard: 5
+            targets: [fuzz_prof_nettrace_heap, fuzz_dotnet_ipc, fuzz_native_etw, fuzz_native_pe, fuzz_image, fuzz_vision_facts]
+          - shard: 6
+            targets: [fuzz_dump_minidump, fuzz_dump_umdh, fuzz_dump_wire, fuzz_plugin_package, fuzz_parser_toml, fuzz_project, fuzz_notes_knowledge]
+    steps:
+      - uses: actions/checkout@v4
+
+      # A dated nightly (FUZZ_TOOLCHAIN) instead of the moving one: the build, and the cache keyed on it, change
+      # only when the pin does, and a broken nightly cannot fail the run. Move it forward now and then.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+
+      # One key per shard: each shard builds the same targets, so its fuzz/target is all it needs.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-fuzz
+            fuzz/target
+          key: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-${{ hashFiles('fuzz/Cargo.lock', 'Cargo.lock') }}
+          restore-keys: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-
+
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
+
+      - name: Build every fuzz target
+        working-directory: fuzz
+        run: cargo fuzz build
+
+      # Every target of the shard runs even after one crashes; the step fails at the end if any did.
+      - name: Fuzz ${{ join(matrix.targets, ', ') }}
+        working-directory: fuzz
+        shell: bash
+        run: |
+          failed=()
+          for target in ${{ join(matrix.targets, ' ') }}; do
+            echo "::group::$target"
+            mkdir -p "work/$target" "corpus/$target"
+            if ! cargo fuzz run "$target" "work/$target" "corpus/$target" -- -max_total_time=$FUZZ_SECONDS -rss_limit_mb=2048 -max_len=131072 -timeout=20; then
+              failed+=("$target")
+            fi
+            echo "::endgroup::"
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::Crashed: ${failed[*]} (reproducers in the crashes-<target> artifacts)"
+            exit 1
+          fi
+
+      # One artifact per target, as before; a shard has seven targets.
+      - name: Upload crashes (${{ matrix.targets[0] }})
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-${{ matrix.targets[0] }}
+          path: fuzz/artifacts/${{ matrix.targets[0] }}/
+          if-no-files-found: ignore
+
+      - name: Upload crashes (${{ matrix.targets[1] }})
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-${{ matrix.targets[1] }}
+          path: fuzz/artifacts/${{ matrix.targets[1] }}/
+          if-no-files-found: ignore
+
+      - name: Upload crashes (${{ matrix.targets[2] }})
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-${{ matrix.targets[2] }}
+          path: fuzz/artifacts/${{ matrix.targets[2] }}/
+          if-no-files-found: ignore
+
+      - name: Upload crashes (${{ matrix.targets[3] }})
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-${{ matrix.targets[3] }}
+          path: fuzz/artifacts/${{ matrix.targets[3] }}/
+          if-no-files-found: ignore
+
+      - name: Upload crashes (${{ matrix.targets[4] }})
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-${{ matrix.targets[4] }}
+          path: fuzz/artifacts/${{ matrix.targets[4] }}/
+          if-no-files-found: ignore
+
+      - name: Upload crashes (${{ matrix.targets[5] }})
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-${{ matrix.targets[5] }}
+          path: fuzz/artifacts/${{ matrix.targets[5] }}/
+          if-no-files-found: ignore
+
+      - name: Upload crashes (${{ matrix.targets[6] }})
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-${{ matrix.targets[6] }}
+          path: fuzz/artifacts/${{ matrix.targets[6] }}/
+          if-no-files-found: ignore

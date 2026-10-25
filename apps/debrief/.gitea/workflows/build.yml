@@ -1,0 +1,1196 @@
+# Checks Debrief on every push and pull request. Installers are built only for v* tags (which also publish a
+# Gitea release with them attached), the nightly run and manual runs (see the bundle job).
+#
+# Runner labels: ubuntu-latest, windows-latest, macos-latest. Adjust `runs-on`
+# if your act_runner instances use other labels.
+# Linux jobs run in the garage image (Node for JavaScript actions, git,
+# and sudo-free root), since the runner's default ubuntu-latest image has no Node.
+# Releases need a repository secret RELEASE_TOKEN (a Gitea access token with
+# write:repository scope).
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  # Nightly on the default branch (main), with the installers; after midnight UTC so it does not compete
+  # with the fuzz (02:17) and bench (03:47) runs for the Linux runners.
+  schedule:
+    - cron: "30 0 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Line tables only (file:line in backtraces, no variable info): smaller debug builds and caches and much less
+  # memory when linking the test binaries. The test profile inherits this from dev.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+# A newer push to the same branch (or pull request) supersedes the run still going; tags have their own ref,
+# so releases are never cancelled by later pushes.
+# The event is part of the group, so a push to main never cancels the nightly or a manual run of main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # Decides whether this run is needed at all:
+  # a push to main whose commit carries a v* tag is covered by the tag run;
+  # a nightly run is skipped while main is unchanged since the last green one.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      # The checkout is only for `git ls-remote` (credentials and remote URL); it fetches no history.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          fetch-depth: 1
+
+      # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.
+      - uses: actions/cache/restore@v4
+        id: green
+        if: github.event_name == 'schedule'
+        with:
+          path: .nightly-green
+          key: nightly-green-${{ github.sha }}
+          lookup-only: true
+
+      - name: Decide
+        id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          GREEN: ${{ steps.green.outputs.cache-hit }}
+        run: |
+          run=true
+          if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
+            run=false
+            echo "::notice::main has not changed since the last green run ($SHA); skipping."
+          fi
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+            # Lightweight tags list the commit itself, annotated ones list the tag object and the peeled commit (^{}).
+            tag=$(git ls-remote --tags origin 'refs/tags/v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
+            if [ -n "$tag" ]; then
+              run=false
+              echo "::notice::commit is tagged $tag; the tag run is the gate."
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  # The checks run as parallel jobs; the installers and smoke tests wait for all of them. Cargo caches are
+  # restored and saved separately (actions/cache/restore + save with `if: always()`), so a failing run still
+  # warms the cache for the next one; a cache is saved again when Cargo.lock changes. Each job keys its own cache.
+
+  rust-lint:
+    name: rust format + clippy
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    container:
+      # garage: the Paddock CI image (dev.decryptology.net/decryp7/garage) with Rust tools, Tauri libraries, Node 24 and Playwright browsers pre-installed
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # Cheap and first: a formatting slip fails in seconds.
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Linux dependencies for Tauri
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf cmake
+
+      - uses: actions/cache/restore@v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/debug/incremental
+          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: clippy-${{ runner.os }}-
+
+      # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
+      # so every job that builds the workspace links it (a test that is skipped still has to link).
+      - uses: actions/cache@v4
+        if: runner.os != 'Windows'
+        with:
+          path: ~/.cache/debrief-libduckdb
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+
+      - name: libduckdb (prebuilt, pinned SHA-256)
+        shell: bash
+        run: |
+          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
+          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
+          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
+          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
+          case "$RUNNER_OS" in
+            Linux) echo "LD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+            macOS) echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+            Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
+          esac
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Saved only when the dependencies changed (no exact hit): the workspace's own crates rebuild anyway, and
+      # uploading the whole target folder on every run cost about a minute per job.
+      - uses: actions/cache/save@v4
+        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/debug/incremental
+          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+  rust-test:
+    name: rust tests
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      # mold links the test binaries (docs/development.md, "Fast test runs"); it rides on this apt run, which costs nothing
+      # extra. x86_64 Linux already links with rust-lld (the default since Rust 1.90), so the gain is small.
+      - name: Linux dependencies for Tauri, and mold
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf cmake xvfb mold
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
+
+      # Only the downloaded crates: the test build folder was 5.6-10 GB, took 72-163 s to restore or save and
+      # evicted the other jobs' caches on the shared runners. A new key so the old target caches are not restored.
+      - uses: actions/cache/restore@v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: test-registry-${{ runner.os }}-
+
+      # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
+      # so every job that builds the workspace links it (a test that is skipped still has to link).
+      - uses: actions/cache@v4
+        if: runner.os != 'Windows'
+        with:
+          path: ~/.cache/debrief-libduckdb
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+
+      - name: libduckdb (prebuilt, pinned SHA-256)
+        shell: bash
+        run: |
+          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
+          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
+          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
+          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
+          case "$RUNNER_OS" in
+            Linux) echo "LD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+            macOS) echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+            Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
+          esac
+
+      # nextest runs every test in its own process, in parallel across crates, and reports every failure;
+      # .config/nextest.toml serialises the tests that time real child processes. The ci profile never retries (a flaky
+      # test is fixed, not retried) and writes a JUnit report.
+      - name: Temp folders before the tests
+        shell: bash
+        run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
+
+      # The pinned Chrome for Testing build (the one the app may download, runtime.rs), never an installed browser: the
+      # real-browser tests skip without it, and DEBRIEF_REQUIRE_TEST_BROWSER makes a missing browser a failure instead.
+      - name: Pinned test browser
+        shell: bash
+        run: |
+          node scripts/ci/install-test-browser.mjs "$RUNNER_TEMP/debrief-test-browser"
+          echo "DEBRIEF_REQUIRE_TEST_BROWSER=1" >> "$GITHUB_ENV"
+          # Chromium refuses to run as root, which the job's container is: the explicit root-only opt-in to start without
+          # the sandbox (a user's browser keeps it). The window needs a display: the Tests step runs on a virtual one.
+          echo "DEBRIEF_BROWSER_NO_SANDBOX=1" >> "$GITHUB_ENV"
+
+      # xvfb-run: a virtual display (no screen, no desktop) for the real-browser tests' windows.
+      - name: Tests
+        run: xvfb-run -a cargo nextest run --workspace --profile ci
+
+      - name: Test report (JUnit)
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: rust-tests-junit
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+
+      # nextest does not run doc tests.
+      - name: Doc tests
+        run: cargo test --workspace --doc
+
+      # Tests clean up after themselves (docs/testing/temp-leaks.md): a debrief-* / imt-* folder left behind fails the job.
+      - name: No temp folders left behind
+        shell: bash
+        run: node scripts/ci/check-temp-leaks.mjs --check "$RUNNER_TEMP/temp-leaks.json"
+
+      # The analyses' memory budget (ADR 0014) is the shipped worker's: measured on a release build, Linux only
+      # (DuckDB's jemalloc is the allocator there; the test skips itself in debug builds).
+      - name: Memory budget
+        if: runner.os == 'Linux'
+        run: cargo test --release -p debrief-store-duck --test analysis_memory -- --nocapture
+
+      # Saved only when the dependencies changed (no exact hit).
+      - uses: actions/cache/save@v4
+        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+  # The same tests on the macOS host runner: the contained-plugin sandbox (sandbox-exec profiles, the private socket,
+  # symlinked temp paths) and other platform code only run here; a macOS-only bug once passed the Linux-only suite.
+  # Host mode: the build folder stays on the host between runs; libduckdb as on Linux, through DYLD_LIBRARY_PATH (set
+  # in GITHUB_ENV, never under `nice`/`env`, which macOS's SIP would strip it from).
+  rust-test-macos:
+    name: rust tests (macOS)
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: A persistent build folder on the host
+        shell: bash
+        run: |
+          echo "CARGO_TARGET_DIR=$HOME/.debrief-ci/target-$GITHUB_JOB" >> "$GITHUB_ENV"
+          # The Mac runner is shared with other jobs: two rustc at a time keeps its load reasonable.
+          echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/debrief-libduckdb
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+
+      - name: libduckdb (prebuilt, pinned SHA-256)
+        shell: bash
+        run: |
+          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
+          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
+          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
+          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
+          echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Temp folders before the tests
+        shell: bash
+        run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
+
+      # The pinned Chrome for Testing build, never the host's installed Chrome (Paddock rule 7).
+      - name: Pinned test browser
+        shell: bash
+        run: |
+          node scripts/ci/install-test-browser.mjs "$RUNNER_TEMP/debrief-test-browser"
+          echo "DEBRIEF_REQUIRE_TEST_BROWSER=1" >> "$GITHUB_ENV"
+
+      - name: Tests
+        shell: bash
+        run: cargo nextest run --workspace --profile ci
+
+      - name: Doc tests
+        shell: bash
+        run: cargo test --workspace --doc
+
+      - name: No temp folders left behind
+        shell: bash
+        run: node scripts/ci/check-temp-leaks.mjs --check "$RUNNER_TEMP/temp-leaks.json"
+
+  # The plugin SDK as an author uses it: a project of every kind from `cargo debrief-plugin new` builds, and one of them
+  # passes `cargo debrief-plugin test` (conformance in the sandbox, then its own tests). The examples themselves are
+  # workspace members and run in `rust tests`.
+  plugin-sdk:
+    name: plugin SDK templates
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    env:
+      CARGO_TARGET_DIR: /tmp/debrief-sdk-target
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: test-registry-${{ runner.os }}-
+
+      - name: Install cargo debrief-plugin
+        run: cargo install --path crates/cargo-debrief-plugin --locked --debug
+
+      - name: New projects of every kind build
+        shell: bash
+        run: |
+          set -e
+          mkdir -p /tmp/plugins
+          for kind in importer transform tool collector annotator; do
+            cargo debrief-plugin new "my-$kind" --kind "$kind" --dir /tmp/plugins --sdk-path .
+            cargo build --manifest-path "/tmp/plugins/my-$kind/Cargo.toml" --all-targets
+          done
+
+      - name: A new importer passes cargo debrief-plugin test, packages and signs
+        working-directory: /tmp/plugins/my-importer
+        run: |
+          cargo debrief-plugin test
+          cargo debrief-plugin keygen --out ci.secret-key
+          cargo debrief-plugin package --sign ci.secret-key
+          cargo debrief-plugin inspect my-importer-0.1.0.debriefplugin
+
+  licences:
+    name: licences, notices + commits
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so pull requests can check every commit message.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about,cargo-deny
+
+      # cargo about reads every crate's licence from its sources and cargo deny clones the advisory database:
+      # without a cache both download everything on every run.
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: licences-${{ runner.os }}-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Commit messages follow Conventional Commits
+        if: github.event_name == 'pull_request'
+        run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
+
+      # The binary, not the Docker-based action: no image to pull on every run. Every workspace crate, not just
+      # the root package.
+      - name: Licences, advisories and sources
+        run: cargo deny --all-features --workspace check
+
+      - name: Third-party notices are up to date
+        run: |
+          node --test scripts/notices/generate.test.mjs app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/install-test-browser.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs app/e2e/retried-reporter.test.mjs
+          node scripts/ci/check-quarantine.mjs
+          node scripts/ci/scan-fixtures.mjs
+          node scripts/ci/check-icons.mjs
+          scripts/notices/generate.sh
+          git diff --exit-code -- app/src-tauri/resources app/src/app/about/generated
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+
+  frontend:
+    name: frontend build, lint + unit tests
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      # Needs the installed TypeScript (a type-checked call-graph walk), so it runs here and not with the other script tests.
+      - name: Dialog command lint tests
+        run: node --test scripts/check-dialog-commands.test.mjs
+
+      # --stats-json writes dist/app/browser-stats.json for the window-weight step below (the one build of this job).
+      - name: Frontend build
+        run: npx ng build --stats-json
+
+      # Paddock rule 35: the JS the main window loads before first paint (static closure of main, bootstrap, app and
+      # app.config) stays under its budget (measured + 10%, docs/performance.md); pop-out and dialog are reported, the
+      # About dialog window is bounded too.
+      - name: First-paint JS budget (main window)
+        run: |
+          node scripts/window-weight.mjs main --max 1355
+          node scripts/window-weight.mjs popout
+          node scripts/window-weight.mjs about --max 480
+
+      # No inline <style>/<script> (Tauri's CSP nonce would disable the app's styles) and the start-up splash is present.
+      - name: Built index.html (no inline elements, splash present)
+        run: node ../scripts/ci/check-index.mjs
+
+      - name: Translations are extracted and the pseudo-locale builds
+        run: |
+          node --test scripts/i18n/locales.test.mjs
+          npx ng extract-i18n --output-path .i18n-check 2>&1 | tee .i18n-check.log
+          if grep -qi 'duplicate' .i18n-check.log; then echo 'Duplicate i18n message ids (see above)'; exit 1; fi
+          node scripts/i18n/build-locales.mjs --check .i18n-check/messages.xlf
+
+      - name: Frontend unit tests
+        run: |
+          node ../scripts/ci/check-temp-leaks.mjs --snapshot "${RUNNER_TEMP:-/tmp}/temp-leaks-ui.json"
+          npx ng test --watch=false --coverage
+          node ../scripts/ci/check-temp-leaks.mjs --check "${RUNNER_TEMP:-/tmp}/temp-leaks-ui.json"
+
+  e2e:
+    name: end-to-end (shard ${{ matrix.shard }}/2)
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+
+      - name: Install
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium webkit
+
+      # One production build serves every project (Chromium, WebKit) of this shard, under the Tauri CSP.
+      - name: Production build for the end-to-end tests
+        run: npx ng build
+
+      - name: Frontend end-to-end tests
+        env:
+          CI: "true"
+          # Required by playwright.config.ts in CI (no default port, no reused server).
+          DEBRIEF_E2E_PORT: "4355"
+          DEBRIEF_E2E_PREBUILT: "1"
+        run: npx playwright test --shard=${{ matrix.shard }}/2
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: playwright-report-${{ matrix.shard }}
+          path: app/playwright-report
+          if-no-files-found: ignore
+
+  # A few WebdriverIO smoke tests of the real app (engine + shell + production UI, no mock), through
+  # tauri-driver: msedgedriver for WebView2 on Windows, WebKitWebDriver (webkit2gtk-driver) under Xvfb on Linux.
+  # macOS has no WKWebView driver. Locally: see docs/testing-manual.md ("Smoke tests of the real app").
+  tauri-smoke:
+    name: real-app smoke (${{ matrix.os }})
+    needs: [plan, rust-lint]
+    if: needs.plan.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS has no WebDriver for WKWebView: its leg builds the .app, starts every sidecar from it and asserts that the
+        # app stays up and quits within 10 s (scripts/ci/macos-smoke.sh). The v1.0.1 store-worker abort reached users
+        # because no macOS job ever started the sidecars.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Linux legs run in the act image (Node and the usual tools); Windows and macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    timeout-minutes: 60
+    # Windows runners usually run as administrator, where WebView2 ignores WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS (how
+    # msedgedriver enables remote debugging); the debug build hands those arguments to WebView2 itself, so both legs
+    # are required. Each run keeps Debrief's folders in a temp DEBRIEF_DATA_DIR (see app/e2e-tauri/wdio.conf.ts).
+    steps:
+      - uses: actions/checkout@v4
+
+      # Host-mode Windows runners may not have Git's bash on PATH; actions (rust-toolchain) and `shell: bash` need it.
+      # Also keeps the Rust build folder outside the job's checkout, so the next run builds incrementally instead of
+      # from scratch (host runners keep their disk; the Linux legs use the cache instead).
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        # cmd, not PowerShell: runners with a restricted execution policy refuse the .ps1 act writes for a step.
+        shell: cmd
+        run: |
+          rem Which account runs the job: WebView2 smoke tests cannot run as SYSTEM (its temp is C:\Windows\SystemTemp).
+          whoami
+          echo TEMP=%TEMP%
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          rem Host folders that outlive the job (RUNNER_TOOL_CACHE is inside each job's work folder on this runner,
+          rem which is deleted afterwards). One build folder per job: the smoke (debug) and installer (release)
+          rem jobs run at the same time and would otherwise wait for each other on the cargo lock. The npm cache
+          rem is shared: npm ci then installs from disk instead of downloading every package again.
+          set "DEBRIEF_CI=%USERPROFILE%\.debrief-ci"
+          echo CARGO_TARGET_DIR=%DEBRIEF_CI%\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo npm_config_cache=%DEBRIEF_CI%\npm-cache>>"%GITHUB_ENV%"
+          echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
+          echo npm_config_audit=false>>"%GITHUB_ENV%"
+          echo npm_config_fund=false>>"%GITHUB_ENV%"
+          rem The Windows runner is a developer PC (16 cores, 32 GB) that runs two jobs at once: a debug and a release
+          rem build with 16 rustc processes each exhausted its memory. Eight each keeps both inside it.
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux dependencies for Tauri and WebDriver
+        if: runner.os == 'Linux'
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf cmake \
+            webkit2gtk-driver xvfb dbus dbus-x11 mold
+          # mold links the debug app (docs/development.md, "Fast test runs").
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
+
+      # Linux only: on the Windows host restoring this cache took about 13.5 minutes and saving it 26 more, while the
+      # host keeps the build folder (CARGO_TARGET_DIR above) and ~/.cargo between jobs anyway.
+      - uses: actions/cache@v4
+        if: runner.os != 'Windows'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/tauri-driver
+            ~/.cargo/bin/tauri-driver.exe
+            target
+          key: smoke-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: smoke-${{ runner.os }}-
+
+      # Windows runs on the host, which keeps its own Node: setup-node downloaded Node again on every job and its
+      # npm cache took about 7 minutes to restore (the npm cache already lives in %USERPROFILE%\.debrief-ci). Fail fast
+      # when the host's Node is missing or not the major version app/.nvmrc asks for.
+      - name: Host Node matches app/.nvmrc (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+          if ! command -v node >/dev/null; then
+            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/nodejs:$PATH"
+            else
+              echo "::error::Node.js is not installed on this Windows runner: install Node $want (app/.nvmrc) on the host and put it on PATH."
+              exit 1
+            fi
+          fi
+          have=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$have" != "$want" ]; then
+            echo "::error::The Windows runner has Node $(node --version) but app/.nvmrc asks for Node $want: install Node $want on the host."
+            exit 1
+          fi
+          node --version
+
+      - uses: actions/setup-node@v4
+        if: runner.os != 'Windows'
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
+      # so every job that builds the workspace links it (a test that is skipped still has to link).
+      - uses: actions/cache@v4
+        if: runner.os != 'Windows'
+        with:
+          path: ~/.cache/debrief-libduckdb
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+
+      - name: libduckdb (prebuilt, pinned SHA-256)
+        shell: bash
+        run: |
+          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
+          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
+          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
+          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
+          case "$RUNNER_OS" in
+            Linux) echo "LD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+            macOS) echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+            Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
+          esac
+
+      - name: tauri-driver
+        if: runner.os != 'macOS'
+        shell: bash
+        run: command -v tauri-driver || cargo install tauri-driver --locked
+
+      # The Edge WebDriver must match the runner's WebView2 runtime exactly: the script reads the runtime's
+      # version from the registry (EdgeUpdate client {F3017226-…}) and downloads
+      # https://msedgedriver.microsoft.com/<version>/edgedriver_win64.zip into app/e2e-tauri/.drivers/.
+      - name: Edge WebDriver matching WebView2
+        if: runner.os == 'Windows'
+        working-directory: app
+        shell: bash
+        run: node e2e-tauri/scripts/fetch-msedgedriver.mjs
+
+      # Windows host: unpacking ~900 packages into a fresh node_modules took 7–14 min per job even with the npm cache
+      # on disk. A finished node_modules per package-lock.json lives in %USERPROFILE%\.debrief-ci and is linked into the
+      # job's checkout (a directory junction); npm ci runs only when the lockfile changed. The last step removes the
+      # junction before the runner deletes the work folder, so its cleanup never walks into the shared copy (if a
+      # killed job skips that step, the worst case is one reinstall).
+      - name: Reuse node_modules for this lockfile (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          key=$(sha256sum app/package-lock.json | cut -c1-16)
+          base="$USERPROFILE/.debrief-ci"
+          # <hash>/node_modules, not node_modules-<hash>: Node resolves packages from the junction's real path, so it
+          # must still contain a folder named node_modules (else e.g. @tauri-apps/cli cannot find its native binary).
+          cached="$base/node-cache/$key/node_modules"
+          mkdir -p "$base/node-cache/$key"
+          if [ ! -f "$cached/.complete" ]; then
+            rm -rf "$cached"
+            (cd app && npm ci)
+            mv app/node_modules "$cached"
+            touch "$cached/.complete"
+          fi
+          powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '$(cygpath -w "$PWD/app/node_modules")' -Target '$(cygpath -w "$cached")' | Out-Null"
+          # Older lockfiles' copies go (and the first layout's node_modules-<hash> folders).
+          for old in "$base"/node-cache/*; do [ "$old" = "$base/node-cache/$key" ] || rm -rf "$old"; done
+          rm -rf "$base"/node_modules-*
+
+      - name: Debug app binary
+        if: runner.os != 'macOS'
+        working-directory: app
+        shell: bash
+        run: |
+          [ -d node_modules ] || npm ci
+          npm run e2e:tauri:build
+
+      # macOS: a real debug .app (ad-hoc sealed by tauri.macos.conf.json) with the sidecars and libduckdb inside, the same
+      # layout the installer ships; then the signature/Team-ID/load checks and the launch-and-quit smoke.
+      - name: Debug .app (macOS)
+        if: runner.os == 'macOS'
+        working-directory: app
+        shell: bash
+        env:
+          DEBRIEF_CARGO_PROFILE: debug
+        run: |
+          npm ci
+          npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json
+
+      - name: Smoke test, sidecars and quit within 10 s (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app=$(find "${CARGO_TARGET_DIR:-target}/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          [ -d "$app" ] || { echo "::error::no debug .app was built"; exit 1; }
+          node --test scripts/ci/macos-smoke.test.mjs
+          bash scripts/ci/macos-verify-bundle.sh "$app"
+          bash scripts/ci/macos-smoke.sh "$app"
+
+      - name: Smoke tests (Windows)
+        if: runner.os == 'Windows'
+        working-directory: app
+        shell: bash
+        # Keep Debrief's folders so a failure can show the app's own logs (next step).
+        env:
+          DEBRIEF_E2E_KEEP_DATA: "1"
+        run: npm run e2e:tauri
+
+      - name: Debrief logs of the failed smoke run (Windows)
+        if: failure() && runner.os == 'Windows'
+        working-directory: app
+        shell: bash
+        run: |
+          for f in $(find e2e-tauri/.tmp -path '*debrief-e2e-*' -name '*.log' 2>/dev/null | sort); do
+            echo "::group::$f"; tail -n 150 "$f"; echo "::endgroup::"
+          done
+          tasklist //FI "IMAGENAME eq debrief-app.exe" || true
+
+      # A session bus for the single-instance plugin and notifications, and a virtual display for WebKitGTK.
+      - name: Smoke tests (Linux)
+        if: runner.os == 'Linux'
+        working-directory: app
+        # WebKitGTK in a CI container: its web-process sandbox (bubblewrap) cannot start as root inside Docker, and
+        # there is no GPU. These switches apply to this throwaway test container only, never to Debrief itself.
+        env:
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          # Keep Debrief's folders so a failure can show the app's own logs (next step).
+          DEBRIEF_E2E_KEEP_DATA: "1"
+        run: dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" npm run e2e:tauri
+
+      - name: Debrief logs of the failed smoke run (Linux)
+        if: failure() && runner.os == 'Linux'
+        run: |
+          for f in $(find /tmp -path '*debrief-e2e-*' -name '*.log' 2>/dev/null | sort); do
+            echo "::group::$f"; tail -n 150 "$f"; echo "::endgroup::"
+          done
+          dmesg 2>/dev/null | tail -n 30 || true
+
+      # Screenshots and page sources of failed smoke tests (wdio.conf.ts `afterTest`).
+      - name: Smoke test failures
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: tauri-smoke-${{ runner.os }}
+          path: app/e2e-tauri/.artifacts
+          if-no-files-found: ignore
+
+      # The live search test (docs/development.md, "Live search test"): research against the real Google, Bing and
+      # DuckDuckGo in a real Chromium (the runner's Edge or Chrome). Nightly and manual runs only, never on pushes or
+      # pull requests: engines rate-limit automated traffic and change their pages.
+      - name: Live search test
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'macOS'
+        shell: bash
+        env:
+          DEBRIEF_LIVE_SEARCH: "1"
+          DEBRIEF_E2E_LIVE_SEARCH_OUT: ${{ runner.temp }}/live-search
+        run: cargo test -p debrief-app --lib live_search -- --ignored --nocapture
+
+      # The start-up benchmark (Paddock rule 16; startup_timings.rs): five everyday starts of the built app after a
+      # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
+      # Nightly and manual runs only. macOS has measured budgets; Linux reports until its first nightly numbers are in.
+      - name: Start-up benchmark (macOS)
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          app=$(find "${CARGO_TARGET_DIR:-target}/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          node --test scripts/ci/startup-bench.test.mjs
+          node scripts/ci/startup-bench.mjs "$app" --runs 5 --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
+
+      - name: Start-up benchmark (Linux, report only)
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'Linux'
+        env:
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" \
+            node scripts/ci/startup-bench.mjs "${CARGO_TARGET_DIR:-target}/debug/debrief-app" --runs 5 --report-only \
+            --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
+
+      - name: Start-up timings
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'Windows'
+        uses: actions/upload-artifact@v3
+        with:
+          name: startup-timings-${{ runner.os }}
+          path: ${{ runner.temp }}/startup-timings.json
+          if-no-files-found: ignore
+
+      # The report and page screenshots, passed or not (a warning is worth a look too).
+      - name: Live search test report
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'macOS'
+        uses: actions/upload-artifact@v3
+        with:
+          name: live-search-${{ runner.os }}
+          path: ${{ runner.temp }}/live-search
+          if-no-files-found: ignore
+
+      # Unlink the shared node_modules (rmdir on a junction removes the link only, never the target's files).
+      - name: Unlink the shared node_modules (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: cmd
+        run: if exist app\node_modules rmdir app\node_modules
+
+  # Installers only for v* tags, the nightly run and manual runs (workflow_dispatch), never for pushes or pull
+  # requests: they are the slowest jobs and the Windows leg runs on a developer PC. A change that breaks the
+  # installers still shows up within 24 hours, in the nightly run.
+  bundle:
+    name: bundle (${{ matrix.os }})
+    needs: [plan, rust-lint]
+    if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bundles: deb,rpm
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: dmg
+    runs-on: ${{ matrix.os }}
+    # Linux legs run in the act image (Node and the usual tools); Windows and macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Host-mode Windows runners may not have Git's bash on PATH; actions (rust-toolchain) and `shell: bash` need it.
+      # Also keeps the Rust build folder outside the job's checkout, so the next run builds incrementally instead of
+      # from scratch (host runners keep their disk; the Linux legs use the cache instead).
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        # cmd, not PowerShell: runners with a restricted execution policy refuse the .ps1 act writes for a step.
+        shell: cmd
+        run: |
+          rem Which account runs the job: WebView2 smoke tests cannot run as SYSTEM (its temp is C:\Windows\SystemTemp).
+          whoami
+          echo TEMP=%TEMP%
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          rem Host folders that outlive the job (RUNNER_TOOL_CACHE is inside each job's work folder on this runner,
+          rem which is deleted afterwards). One build folder per job: the smoke (debug) and installer (release)
+          rem jobs run at the same time and would otherwise wait for each other on the cargo lock. The npm cache
+          rem is shared: npm ci then installs from disk instead of downloading every package again.
+          set "DEBRIEF_CI=%USERPROFILE%\.debrief-ci"
+          echo CARGO_TARGET_DIR=%DEBRIEF_CI%\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo npm_config_cache=%DEBRIEF_CI%\npm-cache>>"%GITHUB_ENV%"
+          echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
+          echo npm_config_audit=false>>"%GITHUB_ENV%"
+          echo npm_config_fund=false>>"%GITHUB_ENV%"
+          rem The Windows runner is a developer PC (16 cores, 32 GB) that runs two jobs at once: a debug and a release
+          rem build with 16 rustc processes each exhausted its memory. Eight each keeps both inside it.
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux dependencies for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf rpm cmake
+
+      # Linux only: on the Windows host restoring this cache took about 13.5 minutes and saving it 26 more, while the
+      # host keeps the build folder (CARGO_TARGET_DIR above) and ~/.cargo between jobs anyway.
+      - uses: actions/cache@v4
+        if: runner.os != 'Windows'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: bundle-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: bundle-${{ runner.os }}-
+
+      # Windows runs on the host, which keeps its own Node: setup-node downloaded Node again on every job and its
+      # npm cache took about 7 minutes to restore (the npm cache already lives in %USERPROFILE%\.debrief-ci). Fail fast
+      # when the host's Node is missing or not the major version app/.nvmrc asks for.
+      - name: Host Node matches app/.nvmrc (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+          if ! command -v node >/dev/null; then
+            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/nodejs:$PATH"
+            else
+              echo "::error::Node.js is not installed on this Windows runner: install Node $want (app/.nvmrc) on the host and put it on PATH."
+              exit 1
+            fi
+          fi
+          have=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$have" != "$want" ]; then
+            echo "::error::The Windows runner has Node $(node --version) but app/.nvmrc asks for Node $want: install Node $want on the host."
+            exit 1
+          fi
+          node --version
+
+      - uses: actions/setup-node@v4
+        if: runner.os != 'Windows'
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
+      # so every job that builds the workspace links it (a test that is skipped still has to link).
+      - uses: actions/cache@v4
+        if: runner.os != 'Windows'
+        with:
+          path: ~/.cache/debrief-libduckdb
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+
+      - name: libduckdb (prebuilt, pinned SHA-256)
+        shell: bash
+        run: |
+          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
+          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
+          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
+          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
+          case "$RUNNER_OS" in
+            Linux) echo "LD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+            macOS) echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+            Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
+          esac
+
+      # No cargo-about and no notices regeneration here: the licences job fails when the committed notices
+      # (app/src-tauri/resources, app/src/app/about/generated) are out of date, and a release needs that job.
+
+      # Signed updater artifacts (docs/releasing.md): with the signing secrets set, Tauri writes a .sig next to
+      # every installer (v2 updater artifacts: the installers themselves, plus Debrief.app.tar.gz on macOS; never
+      # v1 zips) and the public key is built into the app. Without them (forks, pull requests) the app has no
+      # update key and reports "updates are not available in this build".
+      - name: Build installers
+        working-directory: app
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # Installers use the size-optimised `dist` profile (thin LTO, one codegen unit, stripped); the sidecars match.
+          DEBRIEF_CARGO_PROFILE: dist
+        run: |
+          npm ci
+          # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's
+          # (signed) installer can never be collected into this release.
+          target="${CARGO_TARGET_DIR:-../target}"
+          if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
+          rm -rf "$target/dist/bundle"
+          bundles='${{ matrix.bundles }}'
+          # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"; fi
+          if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"; fi
+          # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json): with it, library validation refuses the
+          # bundled libduckdb even after an ad-hoc re-sign (docs/releasing.md). A Developer ID build turns it back on.
+          extra=()
+          if [ "$RUNNER_OS" = macOS ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
+            mkdir -p ../target
+            echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
+            extra=(--config ../target/hardened.conf.json)
+          fi
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+            # macOS updates install from the .app bundle's archive.
+            if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
+            mkdir -p ../target
+            node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
+            npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+          else
+            echo '::warning::No updater signing secrets: this build cannot update itself.'
+            unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+            npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+          fi
+
+      # The packaged store worker finds libduckdb by run path (crates/debrief-store-worker/build/rpath.rs): a signed,
+      # notarized macOS app ignores DYLD_LIBRARY_PATH. Unpack the package and check that one of the worker's run paths
+      # reaches the packaged library, so a change to the bundle layout cannot ship a worker that fails to start.
+      - name: Packaged store worker finds libduckdb by run path (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bundle="${CARGO_TARGET_DIR:-target}/dist/bundle"
+          if [ "$RUNNER_OS" = Linux ]; then
+            deb=$(find "$bundle/deb" -name '*.deb' | head -n 1)
+            tree=$(mktemp -d)
+            dpkg-deb -x "$deb" "$tree"
+            bin="$tree/usr/bin/debrief-store-worker"; lib=libduckdb.so; origin='$ORIGIN'
+            readelf -d "$bin" | grep -E 'R(UN)?PATH' || true
+            paths=$(readelf -d "$bin" | sed -n 's/.*(R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')
+          else
+            app=$(find "$bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+            bin="$app/Contents/MacOS/debrief-store-worker"; lib=libduckdb.dylib; origin='@executable_path'
+            otool -L "$bin" | grep duckdb
+            paths=$(otool -l "$bin" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }' | paste -sd: -)
+          fi
+          echo "run paths of $bin: $paths"
+          found=
+          IFS=: read -ra entries <<< "$paths"
+          for p in "${entries[@]}"; do
+            p="${p/"$origin"/$(dirname "$bin")}"
+            if [ -f "$p/$lib" ]; then found="$p/$lib"; break; fi
+          done
+          if [ -z "$found" ]; then
+            echo "::error::none of the packaged store worker's run paths ($paths) holds $lib"
+            exit 1
+          fi
+          echo "the worker loads $found"
+
+      # signingIdentity "-" (tauri.macos.conf.json) must leave an ad-hoc sealed .app, in the bundle and in the DMG:
+      # a linker-signed one is reported as "damaged" on a quarantined download.
+      # Also checks every nested Mach-O's Team ID against the app's and runs the packaged store worker's --self-test
+      # (opens and reopens a tiny store) and the plugin host from the bundle, so dyld's library validation is exercised.
+      - name: Verify the .app and the DMG are ad-hoc sealed and load (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/ci/macos-verify-bundle.sh
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          mkdir -p dist
+          dir="${CARGO_TARGET_DIR:-target}"
+          # Git bash on Windows: turn C:\... into a path find understands.
+          if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
+          find "$dir/dist/bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*-setup.exe' -o -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;
+          ls -la dist
+          # Every versioned installer must carry this build's version (the .app.tar.gz has none in its name).
+          version="$(node -p "require('./app/src-tauri/tauri.conf.json').version")"
+          stale="$(ls dist | grep -E '_[0-9]+\.[0-9]+\.[0-9]+' | grep -v "_${version}_" || true)"
+          if [ -n "$stale" ]; then echo "::error::Installers from another version: $stale"; exit 1; fi
+
+      # Gitea Actions supports upload/download-artifact v3.
+      - uses: actions/upload-artifact@v3
+        with:
+          name: debrief-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: release
+    if: needs.plan.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/v')
+    needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Release notes (git-cliff)
+        run: |
+          cargo install git-cliff --locked
+          git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+          # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
+          cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
+
+          ### First launch
+
+          Debrief is not code-signed yet, so your system may warn the first time you open it.
+
+          - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Debrief > **Open Anyway**.
+          - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
+          FIRST_LAUNCH
+
+      - name: SBOMs (CycloneDX)
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --manifest-path app/src-tauri/Cargo.toml --format json --override-filename debrief-rust.cdx
+          cp app/src-tauri/debrief-rust.cdx.json artifacts/
+          (cd app && npm ci && npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-file ../artifacts/debrief-ui.cdx.json)
+
+      # latest.json for the updater: version, notes from RELEASE_NOTES.md, pub_date and, per platform, the
+      # installer's URL in this release, its signature (.sig) and size. Installed apps fetch
+      # releases/download/latest/latest.json, i.e. from the latest (non-pre-release) release.
+      - name: Updater manifest (latest.json)
+        shell: bash
+        env:
+          # The public address installed apps download from. Inside the runners github.server_url is Gitea's internal
+          # http address, which the updater must never be given.
+          BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          node --test scripts/release/latest-json.test.mjs
+          if ! find artifacts -name '*.sig' | grep -q .; then
+            echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
+            exit 0
+          fi
+          tag='${{ github.ref_name }}'
+          node scripts/release/latest-json.mjs --dir artifacts --version "$tag" --notes artifacts/RELEASE_NOTES.md \
+            --base-url "$BASE_URL" --out artifacts/latest.json
+          # The signatures are in latest.json; the .sig files are not release assets.
+          find artifacts -name '*.sig' -delete
+          cat artifacts/latest.json
+
+      # Plain API calls instead of gitea.com/actions/release-action, which is a Go action and the runner image has no Go.
+      - name: Publish the release
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          node --test scripts/release/publish.test.mjs
+          node scripts/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" \
+            --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
+
+  # Records a fully green scheduled run for this commit; `plan` skips the next scheduled run while main is unchanged.
+  # Never runs when anything failed, so a red commit is retried every night.
+  nightly-mark:
+    name: nightly-mark
+    needs: [rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, tauri-smoke, bundle]
+    if: github.event_name == 'schedule' && success()
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - name: Marker file
+        run: |
+          mkdir -p .nightly-green
+          echo "${{ github.sha }}" > .nightly-green/sha
+
+      - uses: actions/cache/save@v4
+        with:
+          path: .nightly-green
+          key: nightly-green-${{ github.sha }}

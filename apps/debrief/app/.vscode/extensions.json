@@ -1,0 +1,4 @@
+{
+  // The repository root's .vscode/extensions.json lists the full set (Rust, debugging, Tauri).
+  "recommendations": ["angular.ng-template", "dbaeumer.vscode-eslint", "esbenp.prettier-vscode", "ms-playwright.playwright"]
+}

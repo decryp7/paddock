@@ -1,0 +1,90 @@
+// Wire contract of the notification centre (`notifications_*` commands, `debrief://notifications` and
+// `debrief://notifications-open` events; camelCase JSON), mirrored by
+// app/src-tauri/src/notification_centre/{centre,persist,mod}.rs. Change both sides together.
+
+export type NoticeSource = 'job' | 'liveAlert' | 'import' | 'plugin' | 'ai' | 'update' | 'session' | 'performance' | 'workspace' | 'health';
+
+export const NOTICE_SOURCES: readonly NoticeSource[] = ['job', 'liveAlert', 'import', 'plugin', 'ai', 'update', 'session', 'performance', 'workspace', 'health'];
+
+export type NoticeSeverity = 'info' | 'success' | 'warning' | 'error' | 'critical';
+
+export type NoticeScope = 'app' | 'project';
+
+/** What a message's button does; the UI maps each to the existing feature. */
+export type NoticeAction =
+  | { type: 'viewJob'; jobId: number }
+  | { type: 'retryJob'; jobId: number }
+  | { type: 'reviewProposals'; jobId: number }
+  | { type: 'resetPlugin'; pluginId: string }
+  | { type: 'setUpFormat'; path: string }
+  | { type: 'fixTimestamps'; path: string; format: string | null }
+  | { type: 'resetAi' }
+  /** Opens the assistant (a finished background set-up). */
+  | { type: 'openAssistant' }
+  /** Sets the assistant up again with this model (a failed background set-up). */
+  | { type: 'setUpAssistant'; modelId: string }
+  | { type: 'installUpdate' }
+  | { type: 'showAlert'; alertId: string }
+  | { type: 'showJobs' }
+  | { type: 'showInFolder'; jobId: number }
+  | { type: 'updateAi'; key: string }
+  | { type: 'laterAiUpdate'; key: string }
+  | { type: 'skipAiUpdate'; key: string }
+  /** Repairs a service from the shell (`health_repair`). */
+  | { type: 'repairService'; service: string }
+  /** Opens Settings at `section` (a service the user fixes there, e.g. Settings ▸ Web browser). */
+  | { type: 'openSettings'; section: string };
+
+export interface NoticeLink {
+  window: string | null;
+  jobId: number | null;
+  recordId: number | null;
+  pluginId: string | null;
+  path: string | null;
+}
+
+export interface Notice {
+  id: number;
+  source: NoticeSource;
+  severity: NoticeSeverity;
+  title: string;
+  body: string;
+  /** Epoch ms of the latest occurrence. */
+  at: number;
+  firstAt: number;
+  /** How many times it happened (the same cause merges). */
+  count: number;
+  read: boolean;
+  primary: NoticeAction | null;
+  secondary: NoticeAction | null;
+  /** A third button (e.g. "Skip this version" next to "Update" and "Later"). */
+  tertiary: NoticeAction | null;
+  link: NoticeLink;
+  /** What the message is about (`health:store`, `job:12`): the same cause updates it in place, a cleared cause removes it. */
+  cause: string;
+  scope: NoticeScope;
+}
+
+/** The window's messages (its project's and the app's), newest first. */
+export interface NoticesSnapshot {
+  notices: Notice[];
+  unread: number;
+}
+
+/** `debrief://notifications`: the list, and the message just posted (previewed as a toast). */
+export interface NoticesEvent extends NoticesSnapshot {
+  posted: Notice | null;
+}
+
+/** The project's messages (UI state key `notifications`). */
+export interface NoticesRecord {
+  version: number;
+  notices: unknown[];
+}
+
+export interface RestoredNotices {
+  snapshot: NoticesSnapshot;
+  warning: string | null;
+}
+
+export const EMPTY_NOTICES: NoticesSnapshot = { notices: [], unread: 0 };

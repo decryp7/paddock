@@ -1,0 +1,223 @@
+/* Demo profile used by the mock backend: the built-in default plus an example extractor and charts. */
+
+export const MOCK_PROFILE_TOML = String.raw`# Debrief analysis profile.
+#
+# A profile is a pipeline: which files to read, what identifies an instance,
+# which values to extract, which events are important (markers) and which
+# charts to draw. How a file becomes events is its parser's business (Settings ▸
+# Parsers). Everything an extractor
+# produces becomes a field on the event, usable like any Serilog property.
+#
+# Field names in conditions/split_by/key may be any property, an extracted
+# field, or a pseudo-field: @level @message @exception @template @source @line.
+
+name = "OrderService (Serilog) — demo"
+
+[files]
+# Globs matched against the path relative to the opened folder. Extensions do
+# not matter: the parser of each file is chosen from its content (Settings ▸ Parsers).
+include = ["**/*"]
+exclude = ["**/*-filtered.*", "**/*.debriefprofile.toml", "**/*.gz", "**/*.zip", "**/*.exe", "**/*.dll", "**/.*"]
+
+[instance]
+# Fields forming the instance key. Empty = the candidates present on at least
+# half of the events, falling back to the source file.
+key = []
+candidates = ["Application", "ApplicationName", "MachineName", "EnvironmentName", "ProcessId", "InstanceId"]
+
+# [[extract]]
+# name = "process-stats"
+# from = "@message"                  # any field or pseudo-field
+# regex = 'CPU (?P<cpu>[\d.]+)% .* WorkingSet (?P<ws>[\d.]+) ?(?P<ws_unit>KB|MB|GB)'
+# when = [{ field = "SourceContext", op = "eq", value = "Diagnostics.ProcessMonitor" }]
+# [extract.fields]
+# cpu = { type = "number", unit = "%" }
+# ws  = { type = "bytes", unit_from = "ws_unit", to = "MB" }
+#
+# Field types: string, number, integer, bool, bytes (unit / unit_from, to),
+# duration (ms, s, m, h or TimeSpan "00:00:01.234"; to = ms|s).
+
+# Markers: first matching rule (in this order) is the event's primary marker.
+# Condition ops: eq ne contains notContains matches exists missing gt lt in
+[[marker]]
+kind = "fatal"
+label = "Fatal"
+color = "#FF4FA3"
+when = [{ field = "@level", op = "eq", value = "Fatal" }]
+
+[[marker]]
+kind = "start"
+label = "Start"
+lifecycle = true
+color = "#3FBF7F"
+when = [{ field = "@message", op = "matches", value = '(?i)(\b(application|app|host|service|server|worker)\b.{0,40}\b(start(ed|ing)?|launch(ed|ing))\b|^start(ing|ed)\b|now listening on)' }]
+
+[[marker]]
+kind = "stop"
+label = "Stop"
+lifecycle = true
+color = "#A7B0C2"
+when = [{ field = "@message", op = "matches", value = '(?i)(\b(application|app|host|service|server|worker)\b.{0,40}\b(stop(ped|ping)?|shut(ting)? ?down|terminat(ed|ing)|exit(ed|ing))\b|^shutting down|^(stopping|stopped)\b)' }]
+
+[[marker]]
+kind = "exception"
+label = "Exception"
+color = "#FF7A59"
+when = [{ field = "@exception", op = "exists" }]
+
+[[marker]]
+kind = "error"
+label = "Error"
+color = "#F2545B"
+when = [{ field = "@level", op = "eq", value = "Error" }]
+
+[[marker]]
+kind = "warning"
+label = "Warning"
+color = "#E9AE3F"
+when = [{ field = "@level", op = "eq", value = "Warning" }]
+
+[[chart]]
+id = "events-by-level"
+title = "Events per interval by level"
+y = "count()"
+bucket = "auto"
+split_by = ["@level"]
+type = "stacked"
+unit = "events"
+
+[[extract]]
+name = "process-stats"
+from = "@message"
+regex = 'CPU (?P<cpu>[\d.]+)% · WorkingSet (?P<ws>[\d.]+) ?(?P<ws_unit>KB|MB|GB) · Threads (?P<threads>\d+)'
+when = [{ field = "SourceContext", op = "eq", value = "Diagnostics.ProcessMonitor" }]
+[extract.fields]
+cpu = { type = "number", unit = "%" }
+ws = { type = "bytes", unit_from = "ws_unit", to = "MB" }
+threads = { type = "integer" }
+
+[[chart]]
+id = "cpu"
+title = "CPU %"
+y = "avg(cpu)"
+bucket = "1m"
+split_by = ["MachineName", "ProcessId"]
+type = "line"
+unit = "%"
+
+[[chart]]
+id = "working-set"
+title = "Working set"
+y = "avg(ws)"
+bucket = "1m"
+split_by = ["MachineName", "ProcessId"]
+type = "line"
+unit = "MB"
+
+# Redaction for the redacted view, exports, reports and bundles.
+[redact]
+detectors = ["bearer-token", "jwt", "api-key", "connection-string", "password", "user-path", "email", "credit-card", "ipv4", "ipv6", "guid"]
+mode = "mask"
+fields = ["@message", "@exception", "CorrelationId", "MessageId", "Address"]
+on_export = false
+
+[[dashboard]]
+id = "orderservice-health"
+title = "OrderService health"
+columns = 12
+
+[[dashboard.tile]]
+id = "errors"
+title = "Errors"
+type = "stat"
+query = 'level >= error | stats count() as errors'
+x = 0
+y = 0
+w = 3
+h = 2
+
+[[dashboard.tile]]
+id = "warnings"
+title = "Warnings"
+type = "stat"
+query = 'level = warning | stats count() as warnings'
+x = 3
+y = 0
+w = 3
+h = 2
+
+[[dashboard.tile]]
+id = "p95"
+title = "p95 request time"
+type = "stat"
+query = '| stats p95(Elapsed) as p95'
+unit = "ms"
+x = 6
+y = 0
+w = 3
+h = 2
+
+[[dashboard.tile]]
+id = "noisy"
+title = "Noisiest sources"
+type = "top"
+field = "SourceContext"
+query = 'level >= warning'
+limit = 6
+x = 9
+y = 0
+w = 3
+h = 4
+
+[[dashboard.tile]]
+id = "levels"
+title = "Events by level"
+type = "chart"
+chart = "events-by-level"
+x = 0
+y = 2
+w = 9
+h = 4
+
+[[dashboard.tile]]
+id = "cpu"
+title = "CPU %"
+type = "chart"
+chart = "cpu"
+x = 0
+y = 6
+w = 6
+h = 4
+
+[[dashboard.tile]]
+id = "slow"
+title = "Slowest endpoints"
+type = "table"
+query = '| stats count() as requests, p95(Elapsed) as p95 by RequestPath | sort p95 desc | head 8'
+x = 6
+y = 6
+w = 6
+h = 4
+
+[[dashboard.tile]]
+id = "alerts"
+title = "Alerts"
+type = "alerts"
+limit = 8
+x = 9
+y = 4
+w = 3
+h = 2
+
+[[lens]]
+id = "errors"
+title = "Errors only"
+description = "Errors and fatal failures"
+levels = ["Error", "Fatal"]
+
+[[lens]]
+id = "warnings"
+title = "Warnings and worse"
+levels = ["Warning", "Error", "Fatal"]
+columns = ["SourceContext"]
+`;

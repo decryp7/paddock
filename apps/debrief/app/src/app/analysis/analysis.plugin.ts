@@ -1,0 +1,40 @@
+import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
+import { AnalysisBackend, TauriAnalysisBackend } from '../core/analysis-backend';
+import { DebriefBackend } from '../core/backend';
+import { reportBackendFailures } from '../core/failure-reporter';
+import { Logger, withFailureLogging } from '../core/logger';
+import { isTauri } from '../core/platform';
+import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS, DebriefView } from '../extensions/tokens';
+import { provideDebriefPlugin } from '../extensions/provide';
+import { analysisActivityItems } from './analysis-activity';
+import { AnalysisCommands } from './analysis-commands';
+import { browserMocks } from '../core/mock-registry';
+
+/** The analysis views; they open from the palette, menus and the Analyze activity. Queries are typed in the filter bar. */
+export const ANALYSIS_VIEWS: DebriefView[] = [
+  { id: 'query-results', category: 'Analysis', title: $localize`:@@analysis.plugin.view.queryResults:Query results`, icon: 'columns', defaultPosition: 'bottom', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./query-results-view').then((m) => m.QueryResultsView) },
+  { id: 'moment', category: 'Analysis', title: $localize`:@@analysis.plugin.view.moment:Moment`, icon: 'timeline', defaultPosition: 'center', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./moment-view').then((m) => m.MomentView) },
+  { id: 'anomalies', category: 'Analysis', title: $localize`:@@analysis.plugin.view.anomalies:Anomalies`, icon: 'alert', defaultPosition: 'bottom', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./anomalies-view').then((m) => m.AnomaliesView) },
+  { id: 'patterns', category: 'Analysis', title: $localize`:@@analysis.plugin.view.patterns:Patterns`, icon: 'group', defaultPosition: 'bottom', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./patterns-view').then((m) => m.PatternsView) },
+  { id: 'exceptions', category: 'Analysis', title: $localize`:@@analysis.plugin.view.exceptions:Exceptions`, icon: 'alert', defaultPosition: 'bottom', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./exceptions-view').then((m) => m.ExceptionsView) },
+  { id: 'outliers', category: 'Analysis', title: $localize`:@@analysis.plugin.view.outliers:Error outliers`, icon: 'alert', defaultPosition: 'bottom', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./outliers-view').then((m) => m.OutliersView) },
+  { id: 'compare', category: 'Analysis', title: $localize`:@@analysis.plugin.view.compare:Compare time ranges`, icon: 'columns', defaultPosition: 'center', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./compare-view').then((m) => m.CompareView) },
+  { id: 'field-stats', category: 'Analysis', title: $localize`:@@analysis.plugin.view.fieldStatistics:Field statistics`, icon: 'chart', defaultPosition: 'center', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./field-stats-view').then((m) => m.FieldStatsView) },
+  { id: 'traces', category: 'Analysis', title: $localize`:@@analysis.plugin.view.traces:Traces`, icon: 'timeline', defaultPosition: 'center', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./traces-view').then((m) => m.TracesView) },
+];
+
+/** The engine-backed analysis backend inside Tauri, the mock (derived from the demo records) in a browser. */
+export function createAnalysisBackend(): AnalysisBackend {
+  const backend: AnalysisBackend = isTauri() ? new TauriAnalysisBackend() : new (browserMocks().MockAnalysisBackend)(browserMocks().recordsFrom(inject(DebriefBackend)));
+  return withFailureLogging<AnalysisBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
+}
+
+/** One line in `app.config.ts`: the analysis backend, views and commands. */
+export function provideAnalysis(): EnvironmentProviders {
+  return makeEnvironmentProviders([
+    { provide: AnalysisBackend, useFactory: createAnalysisBackend },
+    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(AnalysisCommands).commands },
+    { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: analysisActivityItems },
+    provideDebriefPlugin({ views: ANALYSIS_VIEWS }),
+  ]);
+}

@@ -1,0 +1,15 @@
+{
+  // For the whole app (engine, desktop shell, debugging the Rust side), open the repository root
+  // instead: it has tasks and debug configurations for Windows, macOS and Linux (.vscode/ there).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug UI in the browser (mock backend)",
+      "type": "chrome",
+      "request": "launch",
+      "preLaunchTask": "npm: start",
+      "url": "http://localhost:4200/",
+      "webRoot": "${workspaceFolder}"
+    }
+  ]
+}

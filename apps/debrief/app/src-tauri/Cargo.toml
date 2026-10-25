@@ -1,0 +1,122 @@
+[package]
+name = "debrief-app"
+license.workspace = true
+repository.workspace = true
+version = "1.1.1"
+description = "Debrief — an IDE for analysing logs and diagnostic files"
+authors = ["decryp7"]
+edition.workspace = true
+publish = false
+rust-version.workspace = true
+
+[lib]
+name = "debrief_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+debrief-alloc = { path = "../../crates/debrief-alloc" }
+debrief-core = { path = "../../crates/debrief-core" }
+debrief-pdf = { path = "../../crates/debrief-pdf" }
+debrief-profile = { path = "../../crates/debrief-profile" }
+# Dumps and UMDH logs (ADR 0023): the engine; the readers run in the dumps plugin's process.
+debrief-dump = { path = "../../crates/debrief-dump" }
+# PDB identities, the symbol cache and (user-enabled) symbol-server downloads for dumps (ADR 0036).
+debrief-symbols = { path = "../../crates/debrief-symbols", default-features = false, features = ["server"] }
+debrief-notes = { path = "../../crates/debrief-notes" }
+# Video sources (ADR 0033): the FFmpeg runtime, the sandboxed analysis and the project's video records.
+debrief-video = { path = "../../crates/debrief-video" }
+chromium-driver = { path = "../../crates/chromium-driver" }
+debrief-agent = { path = "../../crates/debrief-agent" }
+# Plugins run out of process (ADR 0017): the host side only; no plugin is linked into the app.
+debrief-plugin-host = { path = "../../crates/debrief-plugin-host" }
+debrief-plugin-api = { path = "../../crates/debrief-plugin-api" }
+debrief-plugin-package = { path = "../../crates/debrief-plugin-package" }
+debrief-ai = { path = "../../crates/debrief-ai" }
+# Debrief's Pitwall key in the OS credential store (ADR 0059): macOS Keychain, Windows Credential Manager, Secret Service.
+keyring = "4.2"
+debrief-collect = { path = "../../crates/debrief-collect" }
+# Child-process logs (`debrief_ipc::child_log`) for problem reports.
+debrief-ipc = { path = "../../crates/debrief-ipc" }
+# The store worker's client (ADR 0014): every window's store over the worker; links no database.
+debrief-store-client = { path = "../../crates/debrief-store-client" }
+# Debrief's folders for `--export-diagnostics` without starting Tauri (the same crate Tauri resolves them with).
+dirs = "7"
+open = "5"
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+log = { workspace = true, features = ["kv"] }
+chrono.workspace = true
+# "macos-private-api": a transparent webview for the drag ghost on macOS (`drag_ghost`; with `app.macOSPrivateApi`).
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "unstable", "macos-private-api"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-log = "2"
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "registry"] }
+tracing-appender = "0.2.5"
+tracing-log = { version = "0.2", default-features = false, features = ["std"] }
+# >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version), 2.13.3 rejects non-canonical signatures: see `updater.rs`.
+# No "zip": Debrief publishes v2 updater artifacts (the installers themselves), and zip 4 has open advisories.
+# "rustls-tls" is reqwest 0.13's `rustls-no-provider`, whose default verifier is rustls-platform-verifier: update checks
+# trust the OS certificate store like the AI downloads (`debrief_ai::net`), so they work behind TLS-inspecting proxies.
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
+semver.workspace = true
+notify-debouncer-mini = "0.7"
+base64.workspace = true
+sysinfo = { workspace = true, features = ["system"] }
+zip.workspace = true
+# Error snapshots (ADR 0034): bound and re-encode the native webview capture off the UI thread. Already in the
+# tree through tauri (same version and codecs); no new crates.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+# Awaits the webview's capture callback with a timeout (`window_capture`), on the runtime tauri already runs.
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+# The fake DevTools browser for the research browser's tests (never a real browser).
+chromium-driver = { path = "../../crates/chromium-driver", features = ["test-support"] }
+# The store in process for the shell's tests (the real adapter on a temp folder).
+debrief-store-duck = { path = "../../crates/debrief-store-duck" }
+# The profile importers as a library, for the profiling store's tests (in Debrief they run in the profiling plugin's process).
+debrief-plugin-profiling = { path = "../../crates/debrief-plugin-profiling", default-features = false }
+# The dump readers as a library, for the dumps store's tests (in Debrief they run in the dumps plugin's process).
+debrief-plugin-dumps = { path = "../../crates/debrief-plugin-dumps", default-features = false }
+# The dump DTOs' TypeScript bindings (`generated_types`).
+debrief-dump = { path = "../../crates/debrief-dump", features = ["ts"] }
+debrief-notes = { path = "../../crates/debrief-notes", features = ["ts"] }
+# The video DTOs' TypeScript bindings (`generated_types`, ADR 0033).
+debrief-video = { path = "../../crates/debrief-video", features = ["ts"] }
+# The Store pane's DTOs' TypeScript bindings (`generated_types`, ADR 0030).
+debrief-core = { path = "../../crates/debrief-core", features = ["ts"] }
+# TypeScript bindings of the wire types (`generated_types` test; ADR 0016).
+ts-rs = "11.1"
+# The base64 that tauri-plugin-updater's `Error::Base64` wraps, to build that error in the updater tests.
+updater-base64 = { package = "base64", version = "0.22" }
+tauri = { version = "2.12.4", features = ["test", "tray-icon", "image-png", "unstable", "macos-private-api"] }
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "bitflags", "NSEvent", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSResponder", "NSView", "NSWindow"] }
+# Native window capture (`window_capture::native`, ADR 0034): the versions wry uses.
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSString"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Native window capture (`window_capture::native`, ADR 0034): the versions wry pins.
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+# Whether GTK is initialised before building the tray's GTK menu (`tray::host_available`): the version tao uses.
+gtk = "0.18"
+cairo-rs = "0.18"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows = { workspace = true, features = ["Win32_System_Com", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

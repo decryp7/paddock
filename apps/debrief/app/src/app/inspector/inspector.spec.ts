@@ -1,0 +1,159 @@
+import { Component, input } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { RecordView } from '../core/api.types';
+import { DEBRIEF_INSPECTOR_SECTIONS } from '../extensions/tokens';
+import { all, buttonByText, el, provideTinyBackend, settle, text } from '../../testing/helpers';
+import { DebriefBackend } from '../core/backend';
+import { EMPTY_QUERY, WorkspaceStore } from '../core/workspace.store';
+import { Inspector } from './inspector';
+import { SelectionStore } from '../core/workspace/selection.store';
+import { at } from '../../testing/must';
+import { LEVEL_CODES } from '../shared/colors';
+
+@Component({ selector: 'debrief-test-section', template: '<span class="plugin-section">id {{ record().id }}</span>' })
+class TestSection {
+  readonly record = input.required<RecordView>();
+}
+
+describe('Inspector plugin sections', () => {
+  it('renders contributed sections for matching records, ordered, with the record as input', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideTinyBackend(),
+        { provide: DEBRIEF_INSPECTOR_SECTIONS, multi: true, useValue: [{ id: 'b', title: 'Second', order: 2, component: TestSection }, { id: 'a', title: 'First', order: 1, component: TestSection }, { id: 'no', title: 'Hidden', order: 3, component: TestSection, when: () => false }] },
+      ],
+    });
+    const fixture = TestBed.createComponent(Inspector);
+    const store = TestBed.inject(WorkspaceStore);
+    await settle(fixture);
+    const page = await TestBed.inject(DebriefBackend).queryPage({ query: EMPTY_QUERY, offset: 2, limit: 1, descending: false });
+    store.select(at(page.rows, 0));
+    await settle(fixture);
+    expect(all(fixture, '.section-title.sub').map((t) => t.textContent?.trim())).toEqual(expect.arrayContaining(['First', 'Second']));
+    expect(all(fixture, '.section-title.sub').map((t) => t.textContent?.trim())).not.toContain('Hidden');
+    expect(all(fixture, '.plugin-section').map((e) => e.textContent)).toEqual([`id ${at(page.rows, 0).id}`, `id ${at(page.rows, 0).id}`]);
+  });
+});
+
+describe('Inspector', () => {
+  async function render(id: number) {
+    TestBed.configureTestingModule({ providers: [provideTinyBackend()] });
+    const fixture = TestBed.createComponent(Inspector);
+    const store = TestBed.inject(WorkspaceStore);
+    await settle(fixture);
+    const page = await TestBed.inject(DebriefBackend).queryPage({ query: { ...EMPTY_QUERY, groupBy: ['MachineName', 'ProcessId'] }, offset: id, limit: 1, descending: false });
+    store.select(at(page.rows, 0));
+    await settle(fixture);
+    return { fixture, store };
+  }
+
+  it('names the level once, by the engine\'s level name and never by a three-letter code (K1)', async () => {
+    const { fixture, store } = await render(2);
+    const level = store.selected()!.level;
+    expect(el(fixture, '.badge-lvl').textContent?.trim()).toBe(level);
+    const codes = Object.values(LEVEL_CODES);
+    const words = (el(fixture, '.top').textContent ?? '').split(/\W+/);
+    expect(words.filter((w) => codes.includes(w))).toEqual([]);
+  });
+
+  it('says when the filters hide the event it shows, and offers to clear them or the selection (D4)', async () => {
+    const { fixture, store } = await render(2);
+    const id = store.selected()!.id;
+    expect(all(fixture, '[data-testid=selected-hidden]')).toHaveLength(0);
+    TestBed.inject(SelectionStore).setSelectedHidden(id + 1, true);
+    await settle(fixture);
+    expect(all(fixture, '[data-testid=selected-hidden]')).toHaveLength(0);
+    TestBed.inject(SelectionStore).setSelectedHidden(id, true);
+    store.toggleLevel('Fatal');
+    await settle(fixture);
+    expect(el(fixture, '[data-testid=selected-hidden]').textContent).toContain('hidden by the current filters');
+    buttonByText(fixture, 'Clear filters').click();
+    expect(store.query().levels).toEqual([]);
+    buttonByText(fixture, 'Clear selection').click();
+    await settle(fixture);
+    expect(store.selected()).toBeNull();
+    expect(all(fixture, '[data-testid=selected-hidden]')).toHaveLength(0);
+  });
+
+  it('says when an event has no timestamp, or took its time from the event before it', async () => {
+    const { fixture, store } = await render(0);
+    const rows = (await TestBed.inject(DebriefBackend).queryPage({ query: EMPTY_QUERY, offset: 0, limit: 100, descending: false })).rows;
+    const untimed = rows.find((r) => r.ts === null)!;
+    expect(untimed.tsState).toBe('untimed');
+    store.select(untimed);
+    await settle(fixture);
+    expect(el(fixture, '[data-testid=untimed-note]').textContent).toContain('No timestamp');
+    const timed = rows.find((r) => r.ts !== null)!;
+    store.select({ ...timed, tsState: 'inherited' });
+    await settle(fixture);
+    expect(all(fixture, '[data-testid=untimed-note]')).toHaveLength(0);
+    expect(el(fixture, '[data-testid=inherited-note]').textContent).toContain('Time taken from the event before it');
+  });
+
+  it('shows an empty hint without a selection', async () => {
+    TestBed.configureTestingModule({ providers: [provideTinyBackend()] });
+    const fixture = TestBed.createComponent(Inspector);
+    await settle(fixture);
+    expect(text(fixture)).toContain('Select an event');
+  });
+
+  it('lets the event text be selected and copied, but not its buttons (ADR 0028)', async () => {
+    const { fixture } = await render(5);
+    for (const sel of ['.ts', '.inst', '.message', '.prop .v', '.src-line']) expect(el(fixture, sel).classList, sel).toContain('debrief-selectable');
+    // The exception is a code block: selectable by nature.
+    expect(el(fixture, '.exc').tagName).toBe('PRE');
+    expect(all(fixture, 'button.debrief-selectable')).toEqual([]);
+  });
+
+  it('shows the event with badges, template holes, properties and exception', async () => {
+    const { fixture } = await render(5);
+    expect(text(fixture)).toContain('Host terminated unexpectedly');
+    expect(text(fixture)).toContain('14 Oct 2026');
+    expect(all(fixture, '.badge-mk').map((b) => b.textContent?.trim())).toEqual(['Stop', 'Exception']);
+    // The level badge says Fatal once: a marker of the same name would repeat it.
+    expect(el(fixture, '.badge-lvl').textContent).toContain('Fatal');
+    expect(el(fixture, '.exc').textContent).toContain('TimeoutException');
+    expect(text(fixture)).toContain('app.clef:6');
+    expect(all(fixture, '.prop .k').map((k) => k.textContent)).toEqual(['Application', 'MachineName', 'ProcessId']);
+  });
+
+  it('highlights template holes', async () => {
+    const { fixture } = await render(0);
+    expect(all(fixture, '.hole').map((h) => h.textContent)).toEqual(['{Application}', '{Version}', '{Framework}']);
+  });
+
+  it('adds filters from properties', async () => {
+    const { fixture, store } = await render(5);
+    el<HTMLButtonElement>(fixture, '[aria-label^="Filter Application equals"]').click();
+    el<HTMLButtonElement>(fixture, '[aria-label^="Filter MachineName not equal"]').click();
+    expect(store.query().filters).toEqual([
+      { field: 'Application', op: 'eq', value: 'Svc' },
+      { field: 'MachineName', op: 'ne', value: 'WEB01' },
+    ]);
+  });
+
+  it('shows context and correlated events', async () => {
+    const { fixture, store } = await render(3);
+    buttonByText(fixture, 'Show ±2 min').click();
+    expect(store.query().from).toBe(store.selected()!.ts! - 120_000);
+    expect(store.anchor()?.id).toBe(3);
+    buttonByText(fixture, 'Same CorrelationId').click();
+    expect(store.hasRange()).toBe(false);
+    expect(store.query().filters).toContainEqual({ field: 'CorrelationId', op: 'eq', value: 'c1' });
+  });
+
+  it('copies JSON and reports clipboard failures', async () => {
+    const { fixture, store } = await render(1);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    buttonByText(fixture, 'Copy JSON').click();
+    await settle(fixture);
+    expect(JSON.parse(at(writeText.mock.calls, 0)[0]).id).toBe(1);
+    expect(buttonByText(fixture, 'Copied')).toBeTruthy();
+    writeText.mockRejectedValue(new Error('denied'));
+    await new Promise((r) => setTimeout(r, 1600));
+    buttonByText(fixture, 'Copy JSON').click();
+    await settle(fixture);
+    expect(store.error()).toMatch(/Clipboard/);
+  });
+});

@@ -1,0 +1,81 @@
+import { expect, test } from '@playwright/test';
+import { gridTotal, initialTotal, openApp, parseCount } from './app';
+
+test.describe('filters', () => {
+  test.beforeEach(async ({ page }) => openApp(page));
+
+  test('level chips change the grid total', async ({ page }) => {
+    const levels = page.getByRole('toolbar', { name: 'Levels' });
+    const total = gridTotal(page);
+    const all = await initialTotal(page);
+    const chipCount = async (code: string) => parseCount(await levels.getByRole('button', { name: new RegExp(`^${code}`) }).locator('.faint').innerText());
+    const errors = await chipCount('ERR');
+    const fatals = await chipCount('FTL');
+    expect(errors).toBeLessThan(1000); // chip counts are compact above 1k
+
+    await levels.getByRole('button', { name: /^ERR/ }).click();
+    await expect(levels.getByRole('button', { name: /^ERR/ })).toHaveAttribute('aria-pressed', 'true');
+    await expect(total).toHaveText(String(errors));
+
+    await levels.getByRole('button', { name: /^FTL/ }).click();
+    await expect(total).toHaveText(String(errors + fatals));
+
+    await levels.getByRole('button', { name: /^ERR/ }).click();
+    await levels.getByRole('button', { name: /^FTL/ }).click();
+    await expect(total).toHaveText(all);
+  });
+
+  test('the status bar and the grid agree on the match count, also when nothing matches', async ({ page }) => {
+    const total = gridTotal(page);
+    const all = await initialTotal(page);
+    const status = page.locator('debrief-status-bar span', { hasText: 'matching' });
+    await expect(status).toHaveText(`${all} matching`);
+    await page.getByTestId('query-field').fill('zzqx-nothing-says-this');
+    await expect(total).toHaveText('0');
+    await expect(status).toHaveText('0 matching');
+    await page.getByTestId('query-field').fill('');
+    await expect(total).toHaveText(all);
+    await expect(status).toHaveText(`${all} matching`);
+  });
+
+  test('text search narrows results and clearing restores them', async ({ page }) => {
+    const total = gridTotal(page);
+    const all = await initialTotal(page);
+    const search = page.getByTestId('query-field');
+    await search.fill('timed out');
+    // Wait for the narrowed total itself (not just "different": the bar can be between two states).
+    await expect.poll(async () => {
+      const n = parseCount(await total.innerText());
+      return n > 0 && n < parseCount(all);
+    }).toBe(true);
+    await expect(page.locator('debrief-status-bar')).toContainText('matching');
+    await expect(page.locator('debrief-events-grid [role=row].row').first()).toContainText(/time/i);
+
+    await search.fill('');
+    await expect(total).toHaveText(all);
+  });
+
+  test('smart search finds words first, then adds partial matches', async ({ page }) => {
+    await initialTotal(page);
+    // Close the Explorer first: with it open the search field is only ~200 px wide at this window size, and once the
+    // "+N" partial-match note joins the inline buttons the text area has no width left (see the report).
+    await page.keyboard.press('ControlOrMeta+b');
+    const search = page.getByTestId('query-field');
+    // "imeout" is never a whole word: every hit is a partial match the background scan adds.
+    await search.fill('imeout');
+    const note = page.getByTestId('partial-note');
+    await expect(note).toBeVisible();
+    await expect(note).toHaveAttribute('title', /more partial match(es)? added/);
+    await expect.poll(async () => parseCount(await gridTotal(page).innerText())).toBeGreaterThan(0);
+    await expect(page.locator('debrief-events-grid [role=row].row').first().getByTestId('partial-match')).toBeVisible();
+    // A cleared search clears the note.
+    await search.fill('');
+    await expect(note).toBeHidden();
+  });
+
+  test('search with no hits shows the empty state', async ({ page }) => {
+    await page.getByTestId('query-field').fill('zzzz-no-such-text-zzzz');
+    await expect(gridTotal(page)).toHaveText('0');
+    await expect(page.getByText('No events match the current filters.')).toBeVisible();
+  });
+});
