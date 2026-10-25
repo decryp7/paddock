@@ -1,0 +1,33 @@
+name: stable-workspace
+description: "Host runners only: moves the checkout to a fixed folder under the runner's home and leaves a link at the old path, so the build runs from the same physical path every time. sccache keys a Rust compile on its working folder; the runner's per-job hashed work folder made every path crate miss."
+inputs:
+  name:
+    description: "Folder name under ~/.paddock-ci/src; one per repo and job (the default is both)."
+    default: ${{ github.repository }}-${{ github.job }}
+runs:
+  using: composite
+  steps:
+    - name: Move the checkout to a stable path
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+      run: |
+        set -euo pipefail
+        # The Linux jobs run in a container with a fixed workspace already.
+        if [ "$RUNNER_OS" = Linux ]; then exit 0; fi
+        if [ -L "$GITHUB_WORKSPACE" ]; then echo "stable-workspace: already linked"; exit 0; fi
+        ws=$(cd "$GITHUB_WORKSPACE" && pwd -P)
+        folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
+        root="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}/src"
+        stable="$root/$folder"
+        # An unusable move must never fail the job: it only costs the cache hits of the workspace crates.
+        if ! mkdir -p "$root" || ! cd "$root" || ! rm -rf "$stable" || ! mv "$ws" "$stable"; then
+          echo "::warning::stable-workspace: could not move the checkout to $stable; building from the work folder (sccache misses the workspace crates)."
+          exit 0
+        fi
+        if ! ln -s "$stable" "$ws"; then
+          mv "$stable" "$ws" || true
+          echo "::warning::stable-workspace: could not link $ws to $stable; building from the work folder."
+          exit 0
+        fi
+        echo "stable-workspace: $ws -> $stable"

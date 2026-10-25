@@ -7,7 +7,9 @@ Conventional Commits; one semver tag for the whole repo.
 ### Fixed
 - sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
   to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
-  variables, then sccache) whenever a build folder variable is set.
+  variables, then sccache) whenever a build folder variable is set. The new `stable-workspace` action moves a host job's checkout to
+  `~/.paddock-ci/src/<name>` and links the hashed work folder to it, because sccache also keys on the compile's physical working folder
+  (the workspace crates missed on every run; a symlink alone does not help, cargo canonicalizes). The macOS build folder now outlives the job.
 
 ### Added
 - X51 review 2 fixes for `<pd-view>` (0 P1, 6 P2, 9 P3; `ui/docs/review/x51-view/FIXES.md`). Edges never cross a box: back, sideways and
