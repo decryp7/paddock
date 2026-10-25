@@ -95,7 +95,17 @@ describe('the workflow and ci.yml', () => {
 
   test('ci.yml no longer installs Node, browsers or system packages per job', () => {
     assert.ok(!ci.includes('actions/setup-node'), 'setup-node is back');
-    assert.ok(!/playwright install/.test(ci), 'a browser download is back');
+    // Linux jobs get the browsers from the image. A host-runner job (no container) may install one, only into a kept host
+    // folder keyed by the Playwright version and only when it is missing.
+    for (const m of ci.matchAll(/^ {6}- name: .*\n(?: {8,}.*\n|\n)*?(?= {6}- |\S|$)/gm)) {
+      if (!/playwright install/.test(m[0])) continue;
+      assert.ok(/PW_VERSION=/.test(m[0]) && /paddock-playwright\/\$PW_VERSION/.test(m[0]), 'the browser folder is not keyed by the version');
+      assert.ok(/if \[ ! -f "\$BROWSERS\/\.installed-webkit" \]/.test(m[0]), 'the browser is installed even when present');
+      assert.ok(!/GITHUB_WORKSPACE|~\/|HOME\/(Library|Documents|Desktop|Downloads)/.test(m[0].replace(/\$HOME\/\.cache/, '')), 'the browser folder is in the workspace or a user folder');
+    }
+    for (const job of ci.split(/^ {2}(?=[\w-]+:\n)/m).filter((j) => /playwright install/.test(j))) {
+      assert.ok(/runs-on: macos-latest/.test(job) && !/container:/.test(job), 'only a host-runner job installs a browser');
+    }
     assert.ok(!/apt-get/.test(ci), 'apt-get is back');
     assert.ok(!ci.includes('tauri-linux-deps'), 'the Tauri apt step is back');
   });
