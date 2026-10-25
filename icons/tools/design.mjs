@@ -41,12 +41,13 @@ export const PALETTE = {
   // Neutral silver: no family hue, light like Spotter's tile so it takes dark ink. The CVD search over low-chroma
   // tiles kept the family minimums unchanged only for near-black and light silver (tools/cvd.mjs; icons/README.md).
   'shell-demo': { top: '#DDE1E7', base: '#D1D4DA', bottom: '#B5BCC7', deep: '#4A5361', light: '#F6F7F9' },
-  // Neutral warm stone: the workbench demo's own light tile (dark ink), apart from the shell demo's cool silver.
-  'workbench-demo': { top: '#E7E3DA', base: '#DAD5CB', bottom: '#C4BDB0', deep: '#58534A', light: '#F8F6F2' },
+  // Near-black: the dark neutral that keeps the family CVD minimums (the light neutrals sit within 3 to 12 dE of the shell
+  // demo's silver or Spotter), at least 17.7 dE from every family tile and the shell demo; white ink, a faint light rim for dark docks.
+  'workbench-demo': { top: '#1B1F27', base: '#050609', bottom: '#000000', deep: '#000000', light: '#8A94A3', rim: '#FFFFFF' },
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */
-export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF', paddock: '#FFFFFF', 'shell-demo': '#1E2530', 'workbench-demo': '#26231E' };
+export const INK = { debrief: '#FFFFFF', pitcrew: '#FFFFFF', spotter: '#3A2600', pitwall: '#FFFFFF', dyno: '#FFFFFF', sighter: '#2D1D43', pacenotes: '#FFFFFF', paddock: '#FFFFFF', 'shell-demo': '#1E2530', 'workbench-demo': '#FFFFFF' };
 
 export const CARBON = { top: '#30333B', bottom: '#15171B', rim: '#4A4E58' };
 
@@ -65,10 +66,10 @@ export const STATUSES = {
 };
 
 /** Light tiles (dark ink): a stronger livery and secondary ink, a softer glyph shadow. */
-const LIGHT_TILE = new Set(['spotter', 'shell-demo', 'workbench-demo']);
+const LIGHT_TILE = new Set(['spotter', 'shell-demo']);
 
 /** Tiles close to a white desktop: a 1 px inner rim (8 % black) keeps their outline on white without the shadow. */
-const RIMMED = new Set(['shell-demo', 'workbench-demo']);
+const RIMMED = new Set(['shell-demo']);
 
 export const STATUS_COLOURS = { busy: '#2F8FFF', warning: '#F5A524', error: '#E5484D', new: '#E5484D', serving: '#2FB36B', high: '#F2711C' };
 
@@ -259,13 +260,14 @@ export const GLYPH_1024 = {
     { kind: 'stroke', d: 'M506 492H686', w: 44, tone: 'primary' },
     { kind: 'stroke', d: 'M506 572H660M506 652H620', w: 44, tone: 'secondary' },
   ],
-  // The workbench: a window whose dock is split into a tall pane on the left and two stacked panes on the right.
+  // The workbench: the activity bar as a strip of dots, the dock split into a tall pane and two on the right, tabs on the top one.
   'workbench-demo': () => [
-    { kind: 'stroke', d: rr(260, 280, 504, 464, 72), w: 56, tone: 'primary' },
-    { kind: 'stroke', d: 'M268 404H756', w: 40, tone: 'secondary', cap: 'butt' },
-    { kind: 'stroke', d: 'M470 404V736', w: 44, tone: 'primary', cap: 'butt' },
-    { kind: 'stroke', d: 'M470 580H756', w: 44, tone: 'primary', cap: 'butt' },
-    { kind: 'stroke', d: 'M330 488H400M330 568H400M330 648H376', w: 44, tone: 'secondary' },
+    { kind: 'fill', d: circle(290, 352, 28) + circle(290, 512, 28) + circle(290, 672, 28), tone: 'secondary' },
+    { kind: 'fill', d: rr(372, 272, 174, 480, 48), tone: 'primary' },
+    { kind: 'fill', d: rr(586, 272, 84, 76, 28), tone: 'primary' },
+    { kind: 'fill', d: rr(678, 272, 84, 76, 28), tone: 'secondary' },
+    { kind: 'fill', d: rr(586, 356, 176, 140, 40), tone: 'primary' },
+    { kind: 'fill', d: rr(586, 536, 176, 216, 40), tone: 'secondary' },
   ],
   dyno: () => {
     const cx = 512, cy = 548, r = 248, needle = 318;
@@ -315,9 +317,12 @@ export const GLYPH_SMALL = {
     pacenotes: PACENOTES[PACENOTES_MAIN].g16,
     paddock: PADDOCK.g16,
     'workbench-demo': [
-      { kind: 'stroke', d: rr(2.5, 3, 11, 10, 2), w: 1.5, tone: 'primary' },
-      { kind: 'stroke', d: 'M7 3.5V12.5', w: 1.5, tone: 'primary', cap: 'butt' },
-      { kind: 'stroke', d: 'M7.5 8H13', w: 1.5, tone: 'primary', cap: 'butt' },
+      { kind: 'fill', d: circle(2.25, 4.5, 1) + circle(2.25, 8, 1) + circle(2.25, 11.5, 1), tone: 'secondary' },
+      { kind: 'fill', d: rr(4.5, 2.5, 4.25, 11, 1), tone: 'primary' },
+      { kind: 'fill', d: rr(9.75, 2.5, 2.25, 2, 0.75), tone: 'primary' },
+      { kind: 'fill', d: rr(12.5, 2.5, 2, 2, 0.75), tone: 'secondary' },
+      { kind: 'fill', d: rr(9.75, 5.5, 4.75, 3, 0.75), tone: 'primary' },
+      { kind: 'fill', d: rr(9.75, 9.5, 4.75, 4, 0.75), tone: 'secondary' },
     ],
     'shell-demo': [
       { kind: 'stroke', d: rr(2.5, 3, 11, 10, 2), w: 1.5, tone: 'primary' },
@@ -369,10 +374,12 @@ export const GLYPH_SMALL = {
     pacenotes: PACENOTES[PACENOTES_MAIN].g32,
     paddock: PADDOCK.g32,
     'workbench-demo': [
-      { kind: 'stroke', d: rr(5.5, 6.5, 21, 19, 3.5), w: 2.5, tone: 'primary' },
-      { kind: 'stroke', d: 'M14.5 7V25', w: 2.25, tone: 'primary', cap: 'butt' },
-      { kind: 'stroke', d: 'M15 16H26', w: 2.25, tone: 'primary', cap: 'butt' },
-      { kind: 'stroke', d: 'M8.5 11.5H11M8.5 15.5H11', w: 2, tone: 'secondary' },
+      { kind: 'fill', d: circle(5, 10, 1.4) + circle(5, 16, 1.4) + circle(5, 22, 1.4), tone: 'secondary' },
+      { kind: 'fill', d: rr(8.5, 6, 8, 20, 2), tone: 'primary' },
+      { kind: 'fill', d: rr(19, 6, 4.5, 4, 1.5), tone: 'primary' },
+      { kind: 'fill', d: rr(24.5, 6, 4, 4, 1.5), tone: 'secondary' },
+      { kind: 'fill', d: rr(19, 11.5, 9.5, 5, 1.5), tone: 'primary' },
+      { kind: 'fill', d: rr(19, 18, 9.5, 8, 1.5), tone: 'secondary' },
     ],
     'shell-demo': [
       { kind: 'stroke', d: rr(5.5, 6.5, 21, 19, 3.5), w: 2.5, tone: 'primary' },
@@ -581,9 +588,10 @@ function trayGlyph(app, status) {
     // thinner than the frame instead.
     case 'workbench-demo':
       return [
-        { kind: 'stroke', d: rr(1.75, 2.25, 12.5, 11.5, 2.25), w: 1.5, tone: 'primary' },
-        { kind: 'stroke', d: 'M6.75 2.75V13.25', w: 1.5, tone: 'primary', cap: 'butt' },
-        { kind: 'stroke', d: 'M7.25 8H14.25', w: 1.25, tone: 'primary', cap: 'butt' },
+        { kind: 'fill', d: circle(2.25, 4.5, 1) + circle(2.25, 8, 1) + circle(2.25, 11.5, 1), tone: 'primary' },
+        { kind: 'fill', d: rr(4.5, 2.5, 4.25, 11, 1), tone: 'primary' },
+        { kind: 'fill', d: rr(9.75, 2.5, 2.25, 2, 0.75) + rr(12.5, 2.5, 2, 2, 0.75), tone: 'primary' },
+        { kind: 'fill', d: rr(9.75, 5.5, 4.75, 3, 0.75) + rr(9.75, 9.5, 4.75, 4, 0.75), tone: 'primary' },
       ];
     case 'shell-demo':
       return [
