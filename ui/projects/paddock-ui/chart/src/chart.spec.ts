@@ -8,7 +8,7 @@ import type { PdChartSpec } from './options';
 
 /** An ECharts option tree, inspected structurally by these specs. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the option tree is untyped JSON the specs walk by key
-type LooseOption = Record<string, any>;
+type LooseOption = any;
 
 const SPEC: PdChartSpec = { kind: 'bar', x: ['A', 'B'], series: [{ name: 'Jobs', values: [2, 5] }], unit: 'jobs' };
 

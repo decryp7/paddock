@@ -12,7 +12,7 @@ import { type PaddockChartTokens, mixColors, parseCssColor, readPaddockTokens, s
 
 /** An ECharts option tree, inspected structurally by these specs. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the option tree is untyped JSON the specs walk by key
-type LooseOption = Record<string, any>;
+type LooseOption = any;
 
 const tokens = (scheme: 'dark' | 'light' = 'dark'): PaddockChartTokens => ({
   scheme,
