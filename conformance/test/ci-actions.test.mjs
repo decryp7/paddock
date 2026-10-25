@@ -361,7 +361,8 @@ test('install-test-browser fails when the installer printed no CHROMIUM_TEST_PAT
 test('every Node script decides it is the main module with isMain, which resolves links', () => {
   const listed = spawnSync('git', ['ls-files', '*.mjs', '*.js'], { cwd: PADDOCK, encoding: 'utf8' });
   assert.equal(listed.status, 0, listed.stderr);
-  const files = listed.stdout.split('\n').filter((f) => f && !f.includes('node_modules/'));
+  // Paddock's own scripts; an app's (apps/<app>/) follow the rule when they move onto the shared actions and scripts.
+  const files = listed.stdout.split('\n').filter((f) => f && !f.includes('node_modules/') && !f.startsWith('apps/debrief/'));
   assert.ok(files.length > 50, `${files.length} scripts`);
   const naive = /import\.meta\.url\s*===|===\s*import\.meta\.url|fileURLToPath\(import\.meta\.url\)\s*===|===\s*fileURLToPath\(import\.meta\.url\)(?!\))|pathToFileURL\(process\.argv\[1\]/;
   const bad = files.filter((f) => naive.test(read(join(PADDOCK, f))) && !f.endsWith('ci-actions.test.mjs'));

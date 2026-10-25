@@ -10,6 +10,15 @@
     "crates/paddock-pitwall/tests/contract.rs": "needs the testing feature (required-features)",
     "crates/paddock-window/tests/native_menu.rs": "no test harness: macOS builds menus on the main thread only",
     "apps/shell-demo/src-tauri/tests/app.rs": "the demo is the starter of new apps (scripts/new-app.mjs copies tests/app.rs); one file, so one binary already",
-    "apps/workbench-demo/src-tauri/tests/app.rs": "the demo is the starter of new apps like the shell demo; one file, so one binary already"
+    "apps/workbench-demo/src-tauri/tests/app.rs": "the demo is the starter of new apps like the shell demo; one file, so one binary already",
+    "apps/debrief/crates/debrief-store-duck/tests/analysis_memory.rs": "Debrief: a release-build memory or speed measurement run on its own (`cargo test --release --test analysis_memory`, debrief.yml and debrief-bench.yml), never with the crate's other tests",
+    "apps/debrief/crates/debrief-store-duck/tests/bench.rs": "Debrief: a release-build memory or speed measurement run on its own (`cargo test --release --test bench`, debrief.yml and debrief-bench.yml), never with the crate's other tests",
+    "apps/debrief/crates/debrief-store-duck/tests/bench_reads.rs": "Debrief: a release-build memory or speed measurement run on its own (`cargo test --release --test bench_reads`, debrief.yml and debrief-bench.yml), never with the crate's other tests",
+    "apps/debrief/crates/debrief-store-duck/tests/memory.rs": "Debrief: a release-build memory or speed measurement run on its own (`cargo test --release --test memory`, debrief.yml and debrief-bench.yml), never with the crate's other tests",
+    "apps/debrief/examples/plugins/annotator-example/tests/plugin.rs": "Debrief: an example plugin laid out as `cargo debrief-plugin new` makes one for an author; one file, so one binary already",
+    "apps/debrief/examples/plugins/collector-example/tests/plugin.rs": "Debrief: an example plugin laid out as `cargo debrief-plugin new` makes one for an author; one file, so one binary already",
+    "apps/debrief/examples/plugins/importer-example/tests/plugin.rs": "Debrief: an example plugin laid out as `cargo debrief-plugin new` makes one for an author; one file, so one binary already",
+    "apps/debrief/examples/plugins/tool-example/tests/plugin.rs": "Debrief: an example plugin laid out as `cargo debrief-plugin new` makes one for an author; one file, so one binary already",
+    "apps/debrief/examples/plugins/transform-example/tests/plugin.rs": "Debrief: an example plugin laid out as `cargo debrief-plugin new` makes one for an author; one file, so one binary already"
   }
 }
