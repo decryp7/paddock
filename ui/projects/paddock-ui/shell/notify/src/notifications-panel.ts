@@ -98,7 +98,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
     .pd-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--pd-weight-medium); }
     .pd-notice:not(.pd-unread) .pd-title { font-weight: var(--pd-weight-regular); color: var(--pd-text-muted); }
     .pd-time { white-space: nowrap; color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
-    .pd-body { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; user-select: text; }
+    .pd-body { margin: 0; color: var(--pd-text-muted); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
     .pd-actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); justify-content: flex-end; }
     .pd-row-actions { display: flex; gap: 2px; opacity: 0; }
     .pd-notice:hover .pd-row-actions, .pd-notice:focus-within .pd-row-actions { opacity: 1; }
