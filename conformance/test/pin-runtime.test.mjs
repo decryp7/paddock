@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { cftDownloads, main, measure, moveUrl, parseArgs, pin } from '../ci/pin-runtime.mjs';
-import { installFromCatalogue, parseArgs as installArgs } from '../ci/install-test-browser.mjs';
+import { extractCommand, installFromCatalogue, parseArgs as installArgs } from '../ci/install-test-browser.mjs';
 import { entryFor, platformKey, readCatalogue, writeCatalogue } from '../ci/runtime-catalogue.mjs';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -177,6 +177,12 @@ describe('install-test-browser from a catalogue', () => {
     await assert.rejects(installFromCatalogue({ text, dir: join(scratch, 'b2'), key: 'macos-aarch64', fetchBytes, extract }), /not a SHA-256/);
     await assert.rejects(installFromCatalogue({ text: text.replace('linux-x86_64', 'windows-aarch64'), dir, key: 'windows-aarch64', fetchBytes, extract }), /no build for windows-aarch64/);
     assert.deepEqual(installArgs(['--catalogue', 'c.toml']), { catalogue: 'c.toml' });
+    // Windows: the system tar by its full path, never the GNU tar Git for Windows puts first on PATH.
+    const [win, winArgs] = extractCommand('a.zip', 'd', 'win32', { SystemRoot: 'C:\\Windows' });
+    assert.equal(win, 'C:\\Windows\\System32\\tar.exe');
+    assert.deepEqual(winArgs, ['-xf', 'a.zip', '-C', 'd']);
+    assert.ok(extractCommand('a.zip', 'd', 'win32', {})[0].includes('System32'), 'a default SystemRoot');
+    assert.deepEqual(extractCommand('a.zip', 'd', 'darwin', {}), ['unzip', ['-q', 'a.zip', '-d', 'd']]);
     assert.throws(() => installArgs(['--catalogue', 'a', '--pin', 'b']), /exactly one of/);
   });
 });
