@@ -14,6 +14,9 @@ import {
   formatTable,
   indexPath,
   indexVersions,
+  linkAuth,
+  linkPackages,
+  linkUrl,
   lockstepProblems,
   shellVersionProblems,
   mask,
@@ -264,5 +267,77 @@ describe('registry and secrets', () => {
   });
   test('mask hides every secret', () => {
     assert.equal(mask('a s1 b s2 s1', ['s1', 's2', undefined]), 'a *** b *** ***');
+  });
+});
+
+describe('linking published packages to the paddock repository', () => {
+  /** A fetch that answers each URL from `answers` (status, body) and records the calls. */
+  const fakeFetch = (answers) => {
+    const calls = [];
+    const fn = async (url, init) => {
+      calls.push({ url, method: init.method, auth: init.headers.Authorization });
+      const a = answers(url);
+      if (a instanceof Error) throw a;
+      return { status: a.status, text: async () => a.body ?? '' };
+    };
+    return { fn, calls };
+  };
+  const quiet = () => {
+    const lines = { log: [], warn: [] };
+    return { lines, log: (l) => lines.log.push(l), warn: (l) => lines.warn.push(l) };
+  };
+  const rows = [
+    { kind: 'crate', name: 'paddock-jobs' },
+    { kind: 'npm', name: '@decryp7/paddock-ui' },
+  ];
+
+  test('the link URL names the cargo or npm type and percent-encodes a scoped name', () => {
+    assert.equal(linkUrl('crate', 'paddock-jobs'), 'https://dev.decryptology.net/api/v1/packages/decryp7/cargo/paddock-jobs/-/link/paddock');
+    assert.equal(linkUrl('npm', '@decryp7/paddock-ui'), 'https://dev.decryptology.net/api/v1/packages/decryp7/npm/%40decryp7%2Fpaddock-ui/-/link/paddock');
+    assert.throws(() => linkUrl('pypi', 'x'), /unknown package kind/);
+  });
+
+  test('the publish credential is used: basic auth first, then a package token, then the job token', () => {
+    assert.equal(linkAuth({ PACKAGE_AUTH: 'dXNlcjpwdw==', GITEA_TOKEN: 'g' }), 'Basic dXNlcjpwdw==');
+    assert.equal(linkAuth({ PACKAGE_TOKEN: 'p', GITEA_TOKEN: 'g' }), 'token p');
+    assert.equal(linkAuth({ GITEA_TOKEN: 'g' }), 'token g');
+    assert.equal(linkAuth({}), null);
+  });
+
+  test('201, 204 and "already linked" are all fine; every package gets one POST', async () => {
+    const { fn, calls } = fakeFetch((url) => (url.includes('/cargo/') ? { status: 201 } : { status: 400, body: '{"message":"package is already linked to a repository"}' }));
+    const q = quiet();
+    const res = await linkPackages(rows, { PACKAGE_AUTH: 'c2VjcmV0' }, { fetch: fn, ...q });
+    assert.deepEqual(res.map((r) => [r.ok, r.message]), [[true, 'linked'], [true, 'already linked']]);
+    assert.deepEqual(calls.map((c) => [c.method, c.auth]), [['POST', 'Basic c2VjcmV0'], ['POST', 'Basic c2VjcmV0']]);
+    assert.equal(q.lines.warn.length, 0);
+    const { fn: fn204 } = fakeFetch(() => ({ status: 204 }));
+    assert.ok((await linkPackages(rows.slice(0, 1), { GITEA_TOKEN: 't' }, { fetch: fn204, ...quiet() }))[0].ok);
+  });
+
+  test('a failed link warns and never throws, and the warning never shows the credential', async () => {
+    const { fn } = fakeFetch((url) => (url.includes('/cargo/') ? { status: 403, body: 'denied for c2VjcmV0' } : new Error('connect ECONNREFUSED')));
+    const q = quiet();
+    const res = await linkPackages(rows, { PACKAGE_AUTH: 'c2VjcmV0' }, { fetch: fn, ...q });
+    assert.deepEqual(res.map((r) => r.ok), [false, false]);
+    assert.equal(q.lines.warn.length, 2);
+    assert.match(q.lines.warn[0], /paddock-jobs was published but not linked to paddock \(HTTP 403 denied for \*\*\*\)/);
+    assert.match(q.lines.warn[1], /ECONNREFUSED/);
+    assert.ok(!q.lines.warn.join('\n').includes('c2VjcmV0'));
+  });
+
+  test('without any credential each link is a warning, not a failure', async () => {
+    const { fn, calls } = fakeFetch(() => ({ status: 201 }));
+    const q = quiet();
+    const res = await linkPackages(rows, {}, { fetch: fn, ...q });
+    assert.deepEqual(res.map((r) => r.ok), [false, false]);
+    assert.equal(calls.length, 0);
+    assert.match(q.lines.warn[0], /no PACKAGE_AUTH/);
+  });
+
+  test('the dry run says what it would link, and the publish links before the release is created', () => {
+    const src = readFileSync(join(root, 'scripts/publish.mjs'), 'utf8');
+    assert.match(src, /would link \$\{/);
+    assert.ok(src.indexOf('await linkPackages(todo, env)') < src.indexOf('await createRelease(lead.version, todo, env)'));
   });
 });

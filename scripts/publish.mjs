@@ -16,6 +16,9 @@
 // Auth (publish only): CARGO_REGISTRIES_DECRYP7_TOKEN, else PACKAGE_AUTH (base64 of user:password, basic auth; CI builds it
 // from the DOCKER_* secrets), else PACKAGE_TOKEN (a token with write:package). GITEA_TOKEN creates the release. Secrets
 // go into throw-away files or the child's environment and are masked in all output.
+//
+// Every package a run publishes is then linked to the `paddock` repository in Gitea (its Packages tab), with the package
+// credential. The link is idempotent; a failed link is a warning, never a failed release. The dry run prints "would link".
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +30,9 @@ export const REGISTRY_NAME = 'decryp7';
 export const CARGO_INDEX = 'https://dev.decryptology.net/api/packages/decryp7/cargo/';
 export const NPM_REGISTRY = 'https://dev.decryptology.net/api/packages/decryp7/npm/';
 const GITEA_API = 'https://dev.decryptology.net/api/v1/repos/decryp7/paddock';
+const PACKAGES_API = 'https://dev.decryptology.net/api/v1/packages/decryp7';
+/** The repository every published package is linked to. */
+export const LINK_REPO = 'paddock';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const crates = join(root, 'crates');
@@ -226,6 +232,50 @@ export function mask(text, secrets) {
   return secrets.filter(Boolean).reduce((t, s) => t.split(s).join('***'), text);
 }
 
+/** The Gitea API URL that links a published package to a repository (`npm` names are percent-encoded: `%40decryp7%2Fpaddock-ui`). */
+export function linkUrl(kind, name, repo = LINK_REPO) {
+  const type = kind === 'crate' ? 'cargo' : kind === 'npm' ? 'npm' : null;
+  if (!type) throw new Error(`unknown package kind ${kind}`);
+  return `${PACKAGES_API}/${type}/${encodeURIComponent(name)}/-/link/${encodeURIComponent(repo)}`;
+}
+
+/** The Authorization value for the Gitea packages API: the package credential, else the job token; null when none is set. */
+export function linkAuth(env) {
+  if (env.PACKAGE_AUTH) return `Basic ${env.PACKAGE_AUTH}`;
+  if (env.PACKAGE_TOKEN) return `token ${env.PACKAGE_TOKEN}`;
+  if (env.GITEA_TOKEN) return `token ${env.GITEA_TOKEN}`;
+  return null;
+}
+
+/**
+ * Links each published package to the `paddock` repository. 201 and 204 are fine, and so is an answer that says the
+ * package is already linked (the call is idempotent). Anything else, or a network error, is a warning: the packages are
+ * already in the registry, so a missing link never fails the release. Returns [{ name, ok, message }].
+ */
+export async function linkPackages(rows, env, { fetch: fetchFn = fetch, log = console.log, warn = console.warn } = {}) {
+  const auth = linkAuth(env);
+  const secrets = [env.PACKAGE_AUTH, env.PACKAGE_TOKEN, env.GITEA_TOKEN];
+  const out = [];
+  for (const r of rows) {
+    const label = `${r.kind === 'crate' ? 'crate' : 'npm'} ${r.name}`;
+    let ok = false;
+    let message;
+    try {
+      if (!auth) throw new Error('no PACKAGE_AUTH, PACKAGE_TOKEN or GITEA_TOKEN');
+      const res = await fetchFn(linkUrl(r.kind, r.name), { method: 'POST', headers: { Authorization: auth }, signal: AbortSignal.timeout(15_000) });
+      const body = res.status === 201 || res.status === 204 ? '' : await res.text().catch(() => '');
+      ok = res.status === 201 || res.status === 204 || (res.status >= 400 && res.status < 500 && /already/i.test(body));
+      message = ok ? (res.status < 300 ? 'linked' : 'already linked') : `HTTP ${res.status} ${mask(body, secrets).slice(0, 200)}`.trim();
+    } catch (e) {
+      message = mask(String(e.message), secrets);
+    }
+    if (ok) log(`${label}: ${message} to ${LINK_REPO}`);
+    else warn(`warning: ${label} was published but not linked to ${LINK_REPO} (${message}); link it under the package's settings`);
+    out.push({ name: r.name, ok, message });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------------------------------------------- I/O
 
 const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: 'inherit' });
@@ -366,6 +416,7 @@ async function main() {
 
   if (!opts.publish) {
     const n = rows.filter((r) => r.action === 'publish').length;
+    for (const r of rows.filter((x) => x.action === 'publish')) console.log(`would link ${r.kind === 'crate' ? 'crate' : 'npm'} ${r.name} to ${LINK_REPO}`);
     return console.log(`\ndry run: a tag v${lead.version} would publish ${n} of ${rows.length}; nothing was uploaded`);
   }
   const token = cargoToken(env);
@@ -373,6 +424,7 @@ async function main() {
   if (todo.some((r) => r.kind === 'crate') && !token) throw new Error('no cargo registry token (CARGO_REGISTRIES_DECRYP7_TOKEN, PACKAGE_AUTH or PACKAGE_TOKEN)');
   for (const r of todo.filter((r) => r.kind === 'crate')) publishCrate(crateList.find((c) => c.name === r.name), token);
   for (const r of todo.filter((r) => r.kind === 'npm')) publishNpm(packages.find((p) => p.name === r.name), env);
+  await linkPackages(todo, env);
   await createRelease(lead.version, todo, env);
 }
 
