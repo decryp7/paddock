@@ -22,6 +22,13 @@ export interface ToolCard {
   readonly input?: unknown;
   /** The user declined this call: a choice, not a failure (the card is neutral). */
   readonly declined?: boolean;
+  /** The user stopped the turn while this call ran or waited: a choice, not a failure (the card is neutral). */
+  readonly stopped?: boolean;
+}
+
+/** The text of a context chip, in the composer and in the sent question alike: "Current file: src/main.rs". */
+export function chipText(label: string, detail: string | null | undefined): string {
+  return detail ? `${label}: ${detail}` : label;
 }
 
 /** Marks a waiting call as declined by the user (or takes the mark back when the decision could not be sent). */
@@ -69,11 +76,15 @@ function setCard(t: TurnView, callId: string, change: (c: ToolCard) => ToolCard)
 }
 
 /** A turn that ended: nothing runs, and a card still waiting can no longer be answered. */
-function ended(t: TurnView): TurnView {
+function ended(t: TurnView, byUser = false): TurnView {
   return {
     ...t,
     running: false,
-    parts: t.parts.map((p) => (p.kind === 'tool' && (p.card.state === 'running' || p.card.state === 'awaiting') ? { kind: 'tool', card: { ...p.card, state: 'failed', result: p.card.result ?? null } } : p)),
+    parts: t.parts.map((p) =>
+      p.kind === 'tool' && (p.card.state === 'running' || p.card.state === 'awaiting')
+        ? { kind: 'tool', card: { ...p.card, state: 'failed', result: p.card.result ?? null, ...(byUser ? { stopped: true } : {}) } }
+        : p,
+    ),
   };
 }
 
@@ -101,7 +112,7 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
     case 'notice':
       return { ...t, notes: [...t.notes, e.message] };
     case 'done': {
-      const finished = ended(t);
+      const finished = ended(t, e.end === 'cancelled');
       // An answer that arrived whole (no deltas) still shows.
       const parts = finished.parts.some((p) => p.kind === 'text') || !e.text ? finished.parts : [...finished.parts, { kind: 'text' as const, text: e.text }];
       return { ...finished, parts, end: e.end, message: e.message ?? null, usage: e.usage };
@@ -136,5 +147,10 @@ export function turnsOf(c: Conversation): TurnView[] {
       put(cites.length ? { ...done, citations: [...done.citations, ...cites] } : done);
     }
   }
-  return turns;
+  // A call that never got a result in a turn the user stopped was stopped, not failed.
+  return turns.map((t) =>
+    t.end === 'cancelled'
+      ? { ...t, parts: t.parts.map((p) => (p.kind === 'tool' && p.card.state === 'failed' && p.card.result === null ? { kind: 'tool' as const, card: { ...p.card, stopped: true } } : p)) }
+      : t,
+  );
 }

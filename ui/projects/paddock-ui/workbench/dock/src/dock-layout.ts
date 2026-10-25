@@ -366,6 +366,7 @@ export class DockLayout {
     this.ctx.notice.set({
       key: FIT_NOTICE,
       message: $localize`:@@pd.wb.dock.layout.fit:Layout adjusted to fit this window`,
+      short: $localize`:@@pd.wb.dock.layout.fit.short:Layout fitted`,
       action: { label: $localize`:@@pd.wb.dock.layout.fit.undo:Undo`, run: undo },
     });
   }

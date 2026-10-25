@@ -133,7 +133,7 @@ describe('PaletteStore', () => {
     store.setQuery('> folder');
     expect(store.rows().map((r) => r.label)).toEqual(['Open folder…']);
     expect([...store.rows()[0]!.marks]).toEqual([5, 6, 7, 8, 9, 10]);
-    expect(store.prefixes()).toEqual([{ prefix: '>', title: 'Commands' }]);
+    expect(store.prefixes()).toEqual([{ prefix: '>', title: 'Commands', active: true }]);
     expect(store.placeholder()).toBe('Type a command or search…');
   });
 
@@ -237,7 +237,10 @@ describe('PaletteStore', () => {
     store.open('');
     expect(store.source()).toEqual({ kind: 'commands' });
     expect(store.prefixes().map((p) => p.prefix)).toEqual(['>', '@']);
+    // The footer marks the mode in use (review 3 P3-10).
+    expect(store.prefixes().map((p) => p.active)).toEqual([true, false]);
     store.setQuery('@x');
+    expect(store.prefixes().map((p) => p.active)).toEqual([false, true]);
     timers.flush();
     await settle();
     symbols.calls[0]!.reject(new Error('index is gone'));

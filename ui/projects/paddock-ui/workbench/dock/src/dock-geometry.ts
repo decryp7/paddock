@@ -190,3 +190,22 @@ export function previewRect(position: DropPosition, box: Rect, fraction = 0.5): 
       return { x: box.x, y: box.y + box.height * (1 - fraction), width: box.width, height: box.height * fraction };
   }
 }
+
+/**
+ * Where a bottom slide-out goes across the dock (review 3 P3-3): over the groups along the dock's bottom edge, not over a side
+ * column that runs the dock's full height (an Assistant column keeps its composer in view). Returns the insets from the
+ * dock's left and right edges, or null when it takes the whole width. Pure.
+ */
+export function bottomFlyoutInsets(groups: readonly Rect[], root: Rect, tolerance = 2): { left: number; right: number } | null {
+  const bottom = root.y + root.height;
+  const right = root.x + root.width;
+  const fullHeightSide = (g: Rect) => Math.abs(g.y - root.y) <= tolerance && Math.abs(g.y + g.height - bottom) <= tolerance && (g.x <= root.x + tolerance || g.x + g.width >= right - tolerance) && g.width < root.width - tolerance;
+  const atBottom = groups.filter((g) => g.width > 0 && Math.abs(g.y + g.height - bottom) <= tolerance);
+  const inner = atBottom.filter((g) => !fullHeightSide(g));
+  // Only full-height columns: the widest is the main one (the documents), the others are side columns.
+  const along = inner.length ? inner : atBottom.slice().sort((a, b) => b.width - a.width).slice(0, 1);
+  if (!along.length) return null;
+  const left = Math.max(0, Math.min(...along.map((g) => g.x)) - root.x);
+  const end = Math.max(0, right - Math.max(...along.map((g) => g.x + g.width)));
+  return left <= tolerance && end <= tolerance ? null : { left, right: end };
+}

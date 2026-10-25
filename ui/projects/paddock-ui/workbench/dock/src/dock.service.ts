@@ -552,6 +552,7 @@ export class WorkbenchDock {
       this.ctx.notice.set({
         key: 'popout',
         message: $localize`:@@pd.wb.dock.popout.failed:The panel could not be moved to its own window.`,
+        short: $localize`:@@pd.wb.dock.popout.failed.short:Pop-out failed`,
         action: { label: $localize`:@@pd.wb.dock.popout.retry:Retry`, run: () => void this.popOut(id, where) },
       });
       return false;

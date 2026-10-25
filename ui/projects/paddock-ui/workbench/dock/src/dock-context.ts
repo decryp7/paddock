@@ -13,6 +13,8 @@ export interface DockNotice {
   /** Which cause it belongs to: a new notice of the same key replaces the old; `withdraw(key)` clears it. */
   readonly key: string;
   readonly message: string;
+  /** A one-line form for a small window's toast ("Layout fitted"); the full message stays in Notifications. */
+  readonly short?: string;
   /** The one action (Retry, Undo). */
   readonly action?: { readonly label: string; readonly run: () => void };
 }
