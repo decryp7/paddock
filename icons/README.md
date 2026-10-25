@@ -49,8 +49,8 @@ ramps are quantised into 6 to 13 level bands. Results with that attribute: all t
 ## Build
 
 ```sh
+npm ci                       # at the repo root: one npm workspace (ADR 0014 §1)
 cd icons
-npm ci
 npm run all                  # everything: SVG, PNG, tray, Tauri sets, .ico, preview, screenshots
 ONLY=pacenotes node tools/build.mjs   # one app (or ONLY=paddock for the umbrella mark)
 node tools/umbrella-sheet.mjs <dir>   # review renders: the umbrella beside the apps, small frames, tray

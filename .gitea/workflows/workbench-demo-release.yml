@@ -53,7 +53,7 @@ jobs:
           PW_PORT: 4300
           WORKBENCH_DEMO_PORT: 4302
         run: |
-          npm ci
+          (cd .. && npm ci)  # the root npm workspace (ADR 0014 §1)
           npm test
           npm run test:scripts
           npm run build

@@ -31,14 +31,14 @@ The shell crates are path dependencies here; an app outside this repository take
 ## Build and test
 
 ```sh
-cd ui && npm ci && npx ng build shell-demo                     # the UI the app embeds (tauri.conf.json frontendDist)
+npm ci && cd ui && npx ng build shell-demo                     # the UI the app embeds (tauri.conf.json frontendDist)
 cd apps/shell-demo/src-tauri && cargo test                      # the app on the mock runtime (no window, no user folders)
 cd ui && npx playwright test --project=shell-demo               # the UI in the browser, and over a fake Tauri IPC (shell-demo-desktop.spec.ts)
 scripts/demo/bundle.sh shell-demo app,dmg                         # a local DMG to try (never published)
 scripts/demo/verify-macos.sh shell-demo                           # the ad-hoc seal, `codesign --verify --deep --strict`, the app inside the DMG
 ```
 
-`cd apps/shell-demo && npm ci && npx tauri dev` runs it against `ng serve shell-demo`.
+`npm ci && cd apps/shell-demo && npx tauri dev` runs it against `ng serve shell-demo`.
 
 ## Releases
 

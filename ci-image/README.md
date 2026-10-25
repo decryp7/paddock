@@ -11,7 +11,7 @@ Chromium and WebKit with their dependencies, sccache) and adds what jobs still f
 | libduckdb | 1.5.6 (the `duckdb` crate's), in `/opt/libduckdb`, `DUCKDB_LIB_DIR` set | GitHub release, SHA-256 checked |
 | Chrome for Testing | 156.0.8078.47 (the build the apps download: `paddock-chromium`'s `chromium.toml`; Playwright keeps its own Chromium), `CHROMIUM_TEST_PATH` set | Google storage, SHA-256 checked (amd64 only) |
 | Node | the major in `/.nvmrc` (checked, not installed) | garage |
-| Playwright | the version `ui/package-lock.json` locks | garage, re-installed if absent |
+| Playwright | the version the root `package-lock.json` locks | garage, re-installed if absent |
 
 The last Dockerfile step runs `verify.sh` (`paddock-ci-verify`): the build fails when a tool is missing or off its pin, and
 `/etc/paddock-ci-release` lists every version. Jobs test `[ -f /etc/paddock-ci-release ]`; the `setup-rust` action then skips its

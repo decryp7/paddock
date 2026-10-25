@@ -1,6 +1,6 @@
 # Workspace root for Paddock's shared Rust crates: `paddock-jobs` (ADR 0008) and the app shell crates (ADR 0012, plan
 # docs/plans/workbench.md). Every crate has a pure core and a `tauri` feature for its adapter; all are published to the
-# Gitea cargo registry `decryp7` (crates/.cargo/config.toml) by the tag workflow only (.gitea/workflows/publish.yml).
+# Gitea cargo registry `decryp7` (the root .cargo/config.toml) by the tag workflow only (.gitea/workflows/publish.yml).
 [workspace]
 resolver = "3"
 # Fuzz targets are their own workspaces (cargo-fuzz).

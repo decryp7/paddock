@@ -15,8 +15,9 @@ if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
 # A build folder kept between runs must not hand an older version's installer to this one.
 rm -rf "$dir/release/bundle"
 
-[ -d ui/node_modules ] || (cd ui && npm ci)
-(cd apps/$app && npm ci && npx tauri build --bundles "$bundles")
+# One npm workspace for the repo (ADR 0014 §1): the root install brings the UI's packages and the app's Tauri CLI.
+[ -d node_modules ] || npm ci
+(cd apps/$app && npx tauri build --bundles "$bundles")
 
 # Tauri seals the .app ad-hoc (signingIdentity "-"), but not the DMG around it: seal that too, so the DMG verifies with
 # `codesign --verify --deep --strict` like the app (rule 23).

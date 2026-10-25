@@ -42,7 +42,7 @@ jobs:
       - name: UI (install, tokens, specs, script tests)
         working-directory: ui
         run: |
-          npm ci
+          (cd .. && npm ci)  # the root npm workspace (ADR 0014 §1)
           npm run test:tokens
           npm test
           npm run test:scripts
@@ -64,7 +64,6 @@ jobs:
           node-version: 24
 
       - name: Install
-        working-directory: ui
         run: npm ci
 
       # publish.mjs publishes each crate with `cargo hakari publish` (without the workspace-hack dependency).

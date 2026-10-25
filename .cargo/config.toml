@@ -7,3 +7,11 @@
 # (docs/dev-setup.md).
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
+
+# The Gitea cargo registry the shared crates are published to (`publish = ["decryp7"]`; no token needed to read). It is
+# defined here, once, because cargo reads configuration from the current folder upwards, not from the manifest: every
+# workspace that uses a shared crate by path (crates/, apps/<app>/...) needs it, as the crates' manifests name it
+# (ADR 0014 §2). Publishing happens only in the tag workflow (.gitea/workflows/publish.yml) with a token from CI secrets;
+# `scripts/publish.mjs` without `--publish` is the local dry run.
+[registries.decryp7]
+index = "sparse+https://dev.decryptology.net/api/packages/decryp7/cargo/"

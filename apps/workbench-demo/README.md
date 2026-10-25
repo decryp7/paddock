@@ -32,14 +32,14 @@ does not touch the user's credential store.
 ## Build and test
 
 ```sh
-cd ui && npm ci && npx ng build workbench-demo                 # the UI the app embeds (tauri.conf.json frontendDist)
+npm ci && cd ui && npx ng build workbench-demo                 # the UI the app embeds (tauri.conf.json frontendDist)
 cd apps/workbench-demo/src-tauri && cargo test                  # the app on the mock runtime (no window, no user folders)
 cd ui && npx playwright test --project=workbench-demo           # the UI in the browser (mock backends)
 scripts/demo/bundle.sh workbench-demo app,dmg                     # a local DMG to try (never published)
 scripts/demo/verify-macos.sh workbench-demo                       # the ad-hoc seal, `codesign --verify --deep --strict`, the app inside the DMG
 ```
 
-`cd apps/workbench-demo && npm ci && npx tauri dev` runs it against `ng serve workbench-demo`.
+`npm ci && cd apps/workbench-demo && npx tauri dev` runs it against `ng serve workbench-demo`.
 
 ## Releases
 

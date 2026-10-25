@@ -1,5 +1,5 @@
 {
-  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "$schema": "../node_modules/@angular/cli/lib/config/schema.json",
   "version": 1,
   "cli": { "packageManager": "npm", "analytics": false, "cache": { "enabled": true, "environment": "all" } },
   "newProjectRoot": "projects",
@@ -111,7 +111,7 @@
             "polyfills": ["@angular/localize/init"],
             "tsConfig": "projects/workbench-demo/tsconfig.app.json",
             "assets": [{ "glob": "**/*", "input": "projects/workbench-demo/public" }],
-            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "node_modules/dockview/dist/styles/dockview.css",
+            "styles": ["projects/paddock-ui/css/paddock.css", "projects/paddock-ui/css/controls.css", "dockview/dist/styles/dockview.css",
               "projects/workbench-demo/src/styles.css"]
           },
           "configurations": {

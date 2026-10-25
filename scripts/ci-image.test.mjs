@@ -55,8 +55,8 @@ describe('pins', () => {
     assert.equal(arg('NODE_MAJOR'), nvmrc);
   });
 
-  test('Playwright is the version the UI locks, in both stages', () => {
-    const lock = JSON.parse(read('ui/package-lock.json'));
+  test('Playwright is the version the root workspace locks, in both stages', () => {
+    const lock = JSON.parse(read('package-lock.json'));
     const locked = lock.packages['node_modules/playwright-core'].version;
     const all = [...dockerfile.matchAll(/^ARG PLAYWRIGHT_VERSION=(\S+)$/gm)].map((m) => m[1]);
     assert.ok(all.length >= 2);

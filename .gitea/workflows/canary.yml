@@ -64,7 +64,7 @@ jobs:
         if: steps.uses.outputs.ui == 'true'
         working-directory: paddock/ui
         run: |
-          npm ci
+          (cd .. && npm ci)  # the root npm workspace (ADR 0014 §1)
           npm run build
           npm run build:e2e
           mkdir -p ../../candidate

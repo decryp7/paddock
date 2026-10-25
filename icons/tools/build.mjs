@@ -4,13 +4,15 @@
 import { Resvg } from '@resvg/resvg-js';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { ALL, APPS, UMBRELLA, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { writeIco } from './ico.mjs';
 import { render, scanSeams } from './scan.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const TAURI = join(ROOT, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+// Resolved, not joined: in the root npm workspace the CLI is hoisted to the repo's node_modules.
+const TAURI = createRequire(import.meta.url).resolve('@tauri-apps/cli/tauri.js');
 const dir = (...p) => {
   const d = join(ROOT, ...p);
   mkdirSync(d, { recursive: true });

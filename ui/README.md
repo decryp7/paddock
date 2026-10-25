@@ -530,8 +530,8 @@ densities, high contrast (`data-contrast`) and reduced motion (`data-motion`).
 ## Tests and gates
 
 ```sh
+npm ci                   # at the repo root: one npm workspace and lock for ui/, eslint/, icons/ and the apps
 cd ui
-npm ci
 npm run test:tokens      # WCAG contrast of every pair (standard and high contrast) + colour-vision separation (289 tests)
 npm run lint             # @decryp7/paddock-eslint preset (rules 27 to 39, template a11y) over all projects, 0 findings
 npm test                 # component and helper specs (Vitest via ng test), 100% lines

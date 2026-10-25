@@ -1,0 +1,21 @@
+{
+  "name": "paddock",
+  "private": true,
+  "license": "MIT OR Apache-2.0",
+  "description": "The Paddock monorepo's one npm workspace (ADR 0014 §1): the shared UI packages, the ESLint preset, the icon pipeline, the demo apps and every app UI under apps/<app>/app, with one package-lock.json.",
+  "workspaces": [
+    "ui",
+    "eslint",
+    "icons",
+    "apps/shell-demo",
+    "apps/workbench-demo",
+    "apps/*/app"
+  ],
+  "scripts": {
+    "affected": "node scripts/affected.mjs",
+    "test:affected": "node --test scripts/affected.test.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
