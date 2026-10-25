@@ -41,6 +41,8 @@ export interface SuJobView {
   headline: string;
   /** "12,345 so far", "3 of 40", "42 MB of 118 MB"; empty when there is nothing to count. */
   count: string;
+  /** The count is only the running time ("14 s elapsed"): a step with nothing to count. */
+  timed: boolean;
   /** 0..100 for a determinate bar, null for indeterminate. */
   percent: number | null;
   showBar: boolean;
@@ -119,6 +121,7 @@ export function jobView(job: SuJobSnapshot, stalled = false, elapsedMs: number =
     subject: job.subject ?? '',
     eta: '',
     count: '',
+    timed: false,
     percent: null as number | null,
     showBar: false,
     terminal: false,
@@ -142,10 +145,12 @@ export function jobView(job: SuJobSnapshot, stalled = false, elapsedMs: number =
       const total = p?.total ?? null;
       const determinate = p !== null && total !== null && total > 0;
       const headline = p ? p.label : $localize`:@@pd.ui.job.starting:Starting`;
+      const counted = p ? countText(p) : '';
       return {
         ...base,
         headline,
-        count: (p ? countText(p) : '') || (determinate ? '' : $localize`:@@pd.ui.job.elapsed:${formatElapsed(elapsedMs)}:elapsed: elapsed`),
+        count: counted || (determinate ? '' : $localize`:@@pd.ui.job.elapsed:${formatElapsed(elapsedMs)}:elapsed: elapsed`),
+        timed: !counted && !determinate,
         percent: determinate ? Math.min(100, Math.max(0, (p.done / total) * 100)) : null,
         showBar: true,
         eta: determinate ? formatEta(job.etaMs) : '',

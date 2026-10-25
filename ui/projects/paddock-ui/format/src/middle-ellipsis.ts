@@ -92,3 +92,85 @@ export function middleEllipsis(text: string, max: number): string {
   const head = budget - tail;
   return chars.slice(0, head).join('') + ELLIPSIS + chars.slice(chars.length - tail).join('');
 }
+
+/** The leading root of a path that always stays: a UNC share ("\\server\share\"), a drive ("C:\") or a POSIX root ("/"); empty for a relative path. */
+const ROOT = /^(?:[\\/]{2}[^\\/]+[\\/][^\\/]+[\\/]?|[A-Za-z]:[\\/]?|[\\/])/;
+
+/** Largest `n` in `[0, max]` for which `fits(n)` holds, given that `fits` is true for small `n` and stays false from some point on. */
+function largest(max: number, fits: (n: number) => boolean): number {
+  let lo = 0;
+  let hi = max;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(mid)) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/**
+ * Shortens a path to the width `maxWidth` (in whatever unit `measure` returns, normally pixels) with at most one ellipsis and
+ * no gap beside it. The root ("C:\", "/", "\\server\share\") is never dropped. What gives way, in order: the folders (one ellipsis
+ * for them, flush against the root and the separator: "C:\…\Builder.Service.2026-10-24.log"), then the start of the file name
+ * (the ellipsis flush against the root, the end of the name kept with its extension: "C:\…Service.2026-10-24.log"). A path
+ * with no root shortens its folders the same way and then its name in the middle (`keepTail`). Text that fits is returned unchanged.
+ */
+export function fitPath(text: string, maxWidth: number, measure: (s: string) => number, keepTail = DEFAULT_KEEP_TAIL): string {
+  if (measure(text) <= maxWidth) return text;
+  const chars = Array.from(text);
+  const rootLength = Array.from(ROOT.exec(text)?.[0] ?? '').length;
+  const cut = Math.max(lastSeparatorIndex(chars) + 1, rootLength); // the directory with its last separator, at least the root
+  const root = chars.slice(0, rootLength).join('');
+  const name = chars.slice(cut).join('');
+  if (cut > rootLength) {
+    const sep = chars[cut - 1] ?? '/';
+    const middle = chars.slice(rootLength, cut - 1); // the folders between the root and the name
+    const build = (n: number): string => root + middle.slice(0, n).join('') + ELLIPSIS + sep + name;
+    if (measure(build(0)) <= maxWidth) {
+      let n = largest(middle.length, (k) => measure(build(k)) <= maxWidth);
+      // End the kept start on a separator when that keeps most of it ("/Users/" rather than "/Users/l").
+      const stop = middle.slice(0, n).lastIndexOf(sep);
+      if (n < middle.length && stop >= 0 && stop + 1 >= n / 2) n = stop + 1;
+      return build(n);
+    }
+  }
+  if (rootLength > 0) {
+    const nameChars = Array.from(name);
+    const fits = (start: number): boolean => measure(root + ELLIPSIS + nameChars.slice(start).join('')) <= maxWidth;
+    // The tail starts at a word: after a . - _ or space, or at a lower-to-upper change ("BuilderService"); the longest that fits.
+    for (let start = 1; start < nameChars.length; start += 1) {
+      const prev = nameChars[start - 1] ?? '';
+      const here = nameChars[start] ?? '';
+      if ((isBoundary(prev) || (/\p{Ll}/u.test(prev) && /\p{Lu}/u.test(here))) && fits(start)) return root + ELLIPSIS + nameChars.slice(start).join('');
+    }
+    // No word start fits: cut at a character.
+    const k = largest(nameChars.length, (j) => fits(nameChars.length - j));
+    return root + ELLIPSIS + nameChars.slice(nameChars.length - k).join('');
+  }
+  return fitName(name === '' ? text : name, maxWidth, measure, keepTail);
+}
+
+/** One ellipsis in the middle of a name: its start and its last `keepTail` characters; only the end when that alone is too wide. */
+function fitName(name: string, maxWidth: number, measure: (s: string) => number, keepTail: number): string {
+  const chars = Array.from(name);
+  const { head, tail } = splitForEllipsis(name, keepTail);
+  const tailChars = Array.from(tail);
+  const headChars = Array.from(head);
+  if (headChars.length > 0 && measure(ELLIPSIS + tail) <= maxWidth) {
+    const n = largest(headChars.length, (k) => measure(headChars.slice(0, k).join('') + ELLIPSIS + tail) <= maxWidth);
+    return headChars.slice(0, n).join('') + ELLIPSIS + tail;
+  }
+  const k = largest(tailChars.length, (j) => measure(ELLIPSIS + chars.slice(chars.length - j).join('')) <= maxWidth);
+  return ELLIPSIS + chars.slice(chars.length - k).join('');
+}
+
+/**
+ * Shortens ordinary text (a title) to `maxWidth` by cutting its end: the start and one ellipsis, never a space before the
+ * ellipsis ("Paddock Sh…", not "Paddock …"). Text that fits is returned unchanged; with no room for a letter, the ellipsis alone.
+ */
+export function fitEnd(text: string, maxWidth: number, measure: (s: string) => number): string {
+  if (measure(text) <= maxWidth) return text;
+  const chars = Array.from(text);
+  const n = largest(chars.length, (k) => measure(chars.slice(0, k).join('').trimEnd() + ELLIPSIS) <= maxWidth);
+  return chars.slice(0, n).join('').trimEnd() + ELLIPSIS;
+}

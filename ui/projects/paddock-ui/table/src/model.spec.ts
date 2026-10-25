@@ -172,6 +172,28 @@ describe('table model', () => {
     expect(fitColumns([wide[0]!], 100, 28).map((c) => c.key)).toEqual(['name']);
   });
 
+  it('counts the minimum of a minmax track, so the last column drops out before the row grows wider than its table (re-review P2)', () => {
+    const cols: PdColumn<{ a: string }>[] = [
+      { key: 'name', header: 'Name', value: (r) => r.a, required: true },
+      { key: 'state', header: 'State', value: (r) => r.a, width: '92px' },
+      { key: 'jobs', header: 'Jobs', value: (r) => r.a, width: '96px' },
+      { key: 'when', header: 'When', value: (r) => r.a, width: 'minmax(7.5rem, 1fr)' },
+    ];
+    // 128 + 92 + 96 + 120 (7.5rem) + 28 + 4 gaps (48) + 24 = 536: at 525 px the last column must go, so the action column stays inside the table.
+    expect(fitColumns(cols, 540, 28).map((c) => c.key)).toEqual(['name', 'state', 'jobs', 'when']);
+    expect(fitColumns(cols, 525, 28).map((c) => c.key)).toEqual(['name', 'state', 'jobs']);
+  });
+
+  it('keeps a narrow column beside a primary column that has shrunk to 40 % of a phone-width table, as the track does (re-review P3)', () => {
+    const cols: PdColumn<{ a: string }>[] = [
+      { key: 'name', header: 'Name', value: (r) => r.a, required: true },
+      { key: 'state', header: 'State', value: (r) => r.a, width: '80px' },
+    ];
+    // 0.4 * 272 = 108.8 + 80 + 28 + 2 gaps (24) + 24 = 264.8 <= 272.
+    expect(fitColumns(cols, 272, 28).map((c) => c.key)).toEqual(['name', 'state']);
+    expect(fitColumns(cols, 200, 28).map((c) => c.key)).toEqual(['name']);
+  });
+
   it('sizes the action column from what the rows can show', () => {
     expect(actionColumnWidth(false, 2, false)).toBe(0);
     expect(actionColumnWidth(true, 2, true)).toBe(28);

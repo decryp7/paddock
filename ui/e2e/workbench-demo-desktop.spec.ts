@@ -85,7 +85,8 @@ test('a pop-out window boots the pop-out shell through the panel layer, with its
   const ipc = await desktop(page);
   // What Rust loads for a pop-out (`paddock_panels::popout_url`): the panel, its host window and its own label.
   await page.goto('/#/popout?panel=wd.orientation&host=main&label=p-main-1');
-  await expect(page.getByRole('button', { name: 'Dock back' })).toBeVisible();
+  // By test id: on Linux and Windows the frameless title bar also has a Close button whose name ends in "(dock back)".
+  await expect(page.getByTestId('popout-dock-back')).toBeVisible();
   await expect(page.locator('pd-workbench')).toHaveCount(0);
   // It tells the host window it is there (`ui_sync_publish`, the whole shared state), listening to this window's events only.
   await expect.poll(async () => (await ipc.callsOf(wb('ui_sync_publish'))).length).toBeGreaterThan(0);

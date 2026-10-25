@@ -71,9 +71,10 @@ test.describe('user files (plan X31)', () => {
     await expectNoHorizontalScroll(page);
     // A long file name shortens in the middle, so its extension is still there (rule 18).
     const long = page.getByTestId('recent-entry').nth(1).locator('.pd-entry > .pd-text > .pd-name');
-    await expect(long.locator('.pd-tail')).toContainText('.log');
-    const box = await long.locator('.pd-tail').boundingBox();
-    const outer = await long.boundingBox();
-    expect(box!.x + box!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 0.5);
+    await expect(long.locator('.pd-shown')).toContainText('.log');
+    const shown = (await long.locator('.pd-shown').textContent()) ?? '';
+    expect(shown.split('…').length - 1, shown).toBeLessThanOrEqual(1);
+    const text = await long.locator('.pd-text').evaluate((e) => e.scrollWidth <= e.clientWidth);
+    expect(text, 'the shortened name is not clipped').toBe(true);
   });
 });

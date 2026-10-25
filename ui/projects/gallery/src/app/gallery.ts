@@ -294,7 +294,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 
       <section class="gal-section" data-testid="path-text" aria-labelledby="h-path">
         <h2 id="h-path">Path text</h2>
-        <div class="gal-row">
+        <div class="gal-row gal-row--center">
           <div class="gal-box gal-path"><pd-path-text value="/Users/lin/Library/Application Support/Builder/logs/builder.service.log" [copy]="true" /></div>
           <div class="gal-box gal-path gal-path--narrow"><pd-path-text value="C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log" /></div>
           <div class="gal-path gal-path--plain240" data-testid="path-win-240"><pd-path-text value="C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log" /></div>
