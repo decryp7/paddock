@@ -287,3 +287,123 @@ test('P2-4: stale is drawn as a warning, not as the danger of a failure', async 
   expect(failed.icon).toBe(failed.border);
   expect(stale.icon).toBe(stale.border);
 });
+
+// ---- Review 2 fixes (docs/review/x51-view/FIXES.md, review 2).
+
+test('R2 P2-1: no edge of a graph or diagram runs through a box that is not one of its ends', async ({ page }) => {
+  const box = await open(page);
+  for (const id of ['g1', 'g2', 'd1']) {
+    const crossing = await box.locator(`[data-node-id="${id}"] svg.pd-view-scene__svg`).evaluate((svg) => {
+      const rects = Array.from(svg.querySelectorAll<SVGRectElement>('g.pd-view-scene__node rect')).map((r) => ({ x: r.x.baseVal.value, y: r.y.baseVal.value, w: r.width.baseVal.value, h: r.height.baseVal.value }));
+      const bad: string[] = [];
+      for (const path of Array.from(svg.querySelectorAll<SVGPathElement>('path.pd-view-scene__edge'))) {
+        const len = path.getTotalLength();
+        // Skip the few units at either end: they are on the outline of the two boxes the edge joins.
+        for (let d = 5; d < len - 5; d += 2) {
+          const p = path.getPointAtLength(d);
+          const hit = rects.findIndex((r) => p.x > r.x + 1 && p.x < r.x + r.w - 1 && p.y > r.y + 1 && p.y < r.y + r.h - 1);
+          if (hit >= 0) {
+            bad.push(`${path.getAttribute('d')} at ${Math.round(p.x)},${Math.round(p.y)} in box ${hit}`);
+            break;
+          }
+        }
+      }
+      return bad;
+    });
+    expect(crossing, id).toEqual([]);
+  }
+});
+
+for (const theme of THEMES) {
+  test(`R2 P2-2: the matrix headings stay whole at 320 px, the cells scroll (${theme})`, async ({ page }) => {
+    const box = await open(page, theme, 320);
+    const heads = await box.locator('[data-node-id="matrix"] th').evaluateAll((ths) => ths.map((t) => ({ text: t.textContent?.trim() ?? '', width: t.getBoundingClientRect().width, height: t.getBoundingClientRect().height })));
+    expect(heads.length).toBeGreaterThan(3);
+    for (const h of heads) {
+      expect(h.width, h.text).toBeGreaterThanOrEqual(96);
+      // At most two lines of 12 to 13 px text plus padding: a heading is never cut into word fragments.
+      expect(h.height, h.text).toBeLessThanOrEqual(60);
+    }
+  });
+
+  test(`R2 P2-3: a focus ring is never clipped by the region that scrolls or hides overflow around it (${theme})`, async ({ page }) => {
+    const box = await open(page, theme);
+    const found = await box.evaluate(async (root) => {
+      const bad: string[] = [];
+      const targets = Array.from(root.querySelectorAll<HTMLElement | SVGElement>('button, a[href], summary, input, select, textarea, [tabindex="0"], g[role=button]')).filter((e) => !e.closest('[inert]'));
+      for (const el of targets) {
+        if ((el as HTMLButtonElement).disabled) continue;
+        (el as HTMLElement).focus({ preventScroll: false });
+        // The ring may be transitioning in: measure it when every animation has finished.
+        await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)));
+        const cs = getComputedStyle(el);
+        const grow = el instanceof SVGElement ? 0 : (cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset));
+        const r = el.getBoundingClientRect();
+        const ring = { left: r.left - grow, top: r.top - grow, right: r.right + grow, bottom: r.bottom + grow };
+        for (let p = el.parentElement; p && p !== root.parentElement; p = p.parentElement) {
+          const o = getComputedStyle(p);
+          if (/(hidden|auto|scroll|clip)/.test(o.overflowX + o.overflowY)) {
+            const b = p.getBoundingClientRect();
+            const inner = { left: b.left + parseFloat(o.borderLeftWidth), top: b.top + parseFloat(o.borderTopWidth), right: b.right - parseFloat(o.borderRightWidth), bottom: b.bottom - parseFloat(o.borderBottomWidth) };
+            // Only the sides the element really sits against matter: a ring beyond the visible area of the clipping box is cut.
+            if (ring.left < inner.left - 0.5 || ring.top < inner.top - 0.5 || ring.right > inner.right + 0.5 || ring.bottom > inner.bottom + 0.5) {
+              bad.push(`${el.tagName.toLowerCase()}.${el.getAttribute('class') ?? ''} "${(el.textContent ?? '').trim().slice(0, 24)}" in ${p.tagName.toLowerCase()}.${p.getAttribute('class') ?? ''} ring ${JSON.stringify(ring)} inner ${JSON.stringify(inner)} focus-visible ${el.matches(':focus-visible')}`);
+              break;
+            }
+          }
+        }
+      }
+      return bad;
+    });
+    expect(found).toEqual([]);
+  });
+}
+
+test('R2 P2-4: a hovered table row, tree row and drawing box change their fill (the pointer, no focus)', async ({ page }) => {
+  const box = await open(page);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  const fill = (loc: Locator, prop: 'backgroundColor' | 'fill') => loc.evaluate((e, p) => getComputedStyle(e)[p as 'fill'], prop);
+  const row = box.locator('[data-node-id="t1"] tbody tr').nth(1);
+  const before = await fill(row, 'backgroundColor');
+  await row.hover();
+  expect(await fill(row, 'backgroundColor')).not.toBe(before);
+  const tree = box.locator('[data-node-id="tree"] [role=treeitem]').nth(1);
+  const treeBefore = await fill(tree, 'backgroundColor');
+  await tree.hover();
+  expect(await fill(tree, 'backgroundColor')).not.toBe(treeBefore);
+  expect(await tree.evaluate((e) => e === document.activeElement)).toBe(false);
+  const rect = box.locator('[data-node-id="g1"] g[role=button] rect').first();
+  const rectBefore = await fill(rect, 'fill');
+  await rect.hover();
+  expect(await fill(rect, 'fill')).not.toBe(rectBefore);
+});
+
+test('R2 P3: tone glyph and word are apart in a table cell, the secret name sits next to its lock, the scatter unit is in the title only', async ({ page }) => {
+  const box = await open(page);
+  const gap = await box.locator('[data-node-id="t1"] td pd-view-tone').first().evaluate((e) => {
+    const next = e.nextElementSibling as HTMLElement;
+    return next.getBoundingClientRect().left - e.getBoundingClientRect().right;
+  });
+  expect(gap).toBeGreaterThanOrEqual(3);
+  const form = box.locator('[data-node-id="form"]');
+  await form.getByRole('button', { name: 'Publish token: Choose a secret…' }).click();
+  const secret = form.locator('[data-testid=view-chosen]').nth(1);
+  const lock = await secret.locator('pd-glyph').evaluate((e) => e.getBoundingClientRect().right);
+  const name = await secret.locator('pd-path-text').evaluate((e) => e.getBoundingClientRect().left);
+  expect(name - lock).toBeLessThanOrEqual(6);
+  await expect(box.locator('[data-node-id="c5"]')).toContainText(/\(.+\)/);
+});
+
+test('R2 P3: at 320 px the review filter scrolls on one row, "Changes data" is the short badge, a wide table fades its far side and a wide drawing opens at its middle', async ({ page }) => {
+  const box = await open(page, 'dark', 320);
+  const filter = box.locator('.pd-view-review__filter');
+  const rows = await filter.locator('button').evaluateAll((bs) => new Set(bs.map((b) => Math.round(b.getBoundingClientRect().top))).size);
+  expect(rows).toBe(1);
+  const writes = box.locator('[data-node-id="review"] pd-view-writes').first();
+  expect(await writes.evaluate((e) => e.getBoundingClientRect().width)).toBeLessThan(80);
+  expect(await writes.evaluate((e) => getComputedStyle(e.querySelector('.pd-view-writes__text')!, '::after').content)).toContain('Edits');
+  const table = box.locator('[data-node-id="t1"] [role=region]');
+  if (await table.evaluate((e) => e.scrollWidth > e.clientWidth + 1)) await expect(table).toHaveAttribute('data-more', 'end');
+  const g2 = box.locator('[data-node-id="g2"] [role=region]');
+  if (await g2.evaluate((e) => e.scrollWidth > e.clientWidth + 1)) expect(await g2.evaluate((e) => e.scrollLeft)).toBeGreaterThan(0);
+});

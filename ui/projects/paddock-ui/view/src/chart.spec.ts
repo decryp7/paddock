@@ -12,7 +12,7 @@ describe('view chart', () => {
     expect(chartSpecOf(c('line', { unit: 's' }))).toMatchObject({ unit: 's' });
     expect(chartSpecOf(c('pie', { unit: '%' }))).toMatchObject({ unit: '%' });
     expect(chartSpecOf(c('line'))).not.toHaveProperty('unit');
-    expect(scatterOption(c('scatter', { unit: 'ms' }))['yAxis']).toMatchObject({ axisLabel: { formatter: '{value} ms' } });
+    expect(scatterOption(c('scatter', { unit: 'ms' }))['yAxis']).toEqual({ type: 'value' });
     expect(chartWords(c('line', { unit: 's' }))).toBe('S from 1 s to 4 s over 2 points, last 4 s');
   });
   it('colours scatter series from the tokens it is given, like the other kinds', () => {

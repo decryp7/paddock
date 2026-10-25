@@ -1,4 +1,4 @@
-# `<pd-view>`: review 1 to fixes (review 2 is NOT self-approved)
+# `<pd-view>`: review 1 and review 2 to fixes (review 3 is NOT self-approved)
 
 Review 1 is `REVIEW.md` (not approved: 3 P1, 13 P2, 12 P3). The new contact sheet is `review-2/` (open the `sheet-*.png` files; see its
 README). Tests: Vitest `view/src/review1.spec.ts` (and the specs it extends), Playwright Chromium `e2e/view.spec.ts` (the `P*` tests, axe in
@@ -36,3 +36,26 @@ both themes, 320 px), `paddock-view` unit tests.
 | P3-12 | Signal Forms exception written down (code comment, `docs/plans/shared-next.md` X51); path, secret and toggle fields are marked touched | `review1.spec.ts` |
 
 Not done: a spike of Signal Forms for dynamic fields (scheduled before Pacenotes, see the plan).
+
+## Review 2 (0 P1, 6 P2, 9 P3) to fixes
+
+The new contact sheet is `review-3/` (every section captured in one run from one commit, named in its README). Tests: Vitest
+`view/src/layout.spec.ts`, `route.spec.ts`, `review1.spec.ts`, `chart.spec.ts`; Playwright Chromium `e2e/view.spec.ts` (the `R2` tests).
+
+| Id | Change | Test |
+|---|---|---|
+| P2-1 | Edges are routed around boxes: `route.ts` (`pathCrosses`, `roundedPath`, `flattenPath`). A back, sideways or long forward edge runs in a lane right of every box and through the free space between rows (exit and entry by the right side, or by the bottom and top, whichever is clear); a radial edge is straight, then bows to each side, then goes round the outside of all boxes; the canvas grows to hold what bows out | `layout.spec.ts` "an edge never crosses a box" over six graphs in both layouts and the sample's graphs and class diagram, `route.spec.ts`, e2e R2 P2-1 (the real SVG paths) |
+| P2-2 | Matrix: row headings `min-width: min(8rem, 40vw)`, column headings `6rem` | e2e R2 P2-2 (320 px) |
+| P2-3 | One rule for every region that scrolls or clips: the ring is drawn inside (`outline-offset: -2px`): sort headers, "Show as a list", the three scroll regions (`SCROLL_CSS`), the review filter | e2e R2 P2-3 focuses every focusable element of the view and checks its ring box against every clipping ancestor |
+| P2-4 | `VIEW_HOVER` (9% of the text colour) and `VIEW_HOVER_FILL` for table rows, tree rows and drawing boxes (the family `--pd-hover` is 5%); the contact sheet puts the pointer on the target after scrolling and blurs the focus first | e2e R2 P2-4 (the fill changes on hover, no focus) |
+| P2-5 | `review-3/`: every section recaptured in one run, the commit in its README; the invalid and loading shots are the view only | the contact-sheet spec |
+| P2-6 | A dev-mode check in `PdViewNode`: a `needsAi` node drawn with neither `VIEW_NEEDS_AI` nor `VIEW_OPEN_AI_SETTINGS` reports `NEEDS_AI_WITHOUT_REPAIR` to the `ErrorHandler`; the no-opener hint is "Set up local AI in this app's settings." Hosts that show `<pd-view>`: the gallery (provides the opener; the shell demo and the workbench demo do not show views) | `review1.spec.ts` P1-3 (reported once, not when either is provided), e2e "needs local AI" |
+| P3-1 | Class members: 8 units above the first and under the last | `layout.spec.ts`, contact sheet |
+| P3-2 | The scatter's ticks are plain numbers; the unit is in the title once | `chart.spec.ts`, e2e R2 P3 |
+| P3-3 | The secret's name sits 4 units from its lock (measured; the 20 px of the old shot was not reproducible in the layout) | e2e R2 P3 |
+| P3-4 | 4 units between a table cell's status mark and its word | e2e R2 P3 |
+| P3-5 | The review filter scrolls on one row instead of wrapping | e2e R2 P3 |
+| P3-6 | Under 360 px of view width the "Changes data" badge is the pencil and "Edits" (the full words stay for assistive technology) | e2e R2 P3 |
+| P3-7 | A drawing wider than the pane opens at its middle | e2e R2 P3 |
+| P3-8 | A region that scrolls fades the side that continues (`data-more`, `PdViewScroll`) | e2e R2 P3 |
+| P3-9 | Tree hover is a pointer-only shot | the contact-sheet spec |
