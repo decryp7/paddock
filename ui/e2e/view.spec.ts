@@ -326,7 +326,7 @@ for (const theme of THEMES) {
     }
   });
 
-  test(`R2 P2-3: a focus ring is never clipped by the region that scrolls or hides overflow around it (${theme})`, async ({ page }) => {
+  test(`R2 P2-3 and R3 P2-1: a focus ring is never clipped by the region that scrolls or hides overflow around it, nor drawn over the text it rings (${theme})`, async ({ page }) => {
     const box = await open(page, theme);
     const found = await box.evaluate(async (root) => {
       const bad: string[] = [];
@@ -340,6 +340,16 @@ for (const theme of THEMES) {
         const grow = el instanceof SVGElement ? 0 : (cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset));
         const r = el.getBoundingClientRect();
         const ring = { left: r.left - grow, top: r.top - grow, right: r.right + grow, bottom: r.bottom + grow };
+        // Review 3, P2-1: an inset ring is a band along the edge of the element; it must not run over the element's own text or glyph.
+        if (!(el instanceof SVGElement) && cs.outlineStyle !== 'none' && parseFloat(cs.outlineOffset) < 0) {
+          const inset = -parseFloat(cs.outlineOffset);
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const t = range.getBoundingClientRect();
+          if (t.width > 0 && (t.left < r.left + inset - 0.01 || t.top < r.top + inset - 0.01 || t.right > r.right - inset + 0.01 || t.bottom > r.bottom - inset + 0.01)) {
+            bad.push(`${el.tagName.toLowerCase()}.${el.getAttribute('class') ?? ''} "${(el.textContent ?? '').trim().slice(0, 24)}" ring band ${inset}px over its text ${JSON.stringify(t.toJSON())} in ${JSON.stringify(r.toJSON())}`);
+          }
+        }
         for (let p = el.parentElement; p && p !== root.parentElement; p = p.parentElement) {
           const o = getComputedStyle(p);
           if (/(hidden|auto|scroll|clip)/.test(o.overflowX + o.overflowY)) {
