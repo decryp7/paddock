@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Fixed
+- sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
+  to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
+  variables, then sccache) whenever a build folder variable is set.
+
 ### Added
 - X51 review 2 fixes for `<pd-view>` (0 P1, 6 P2, 9 P3; `ui/docs/review/x51-view/FIXES.md`). Edges never cross a box: back, sideways and
   long edges run in a lane outside the boxes and between the rows, radial edges bow or go round the outside (`route.ts`, a test over

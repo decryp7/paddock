@@ -17,3 +17,6 @@ crates/*/tests/fixtures/** -text
 
 # The same for fixtures that sit beside tests/ (paddock-testplan): a CRLF checkout would break the text comparisons.
 crates/*/fixtures/** -text
+
+# Windows batch files keep CRLF.
+*.cmd text eol=crlf
