@@ -97,6 +97,7 @@ interface LoadedPage {
     }
 
     <div class="pd-main">
+      <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the nav only receives keydown bubbling from its focusable page buttons (arrow-key roving) -->
       <nav class="pd-nav" [attr.aria-label]="t.pages" (keydown)="navKey($event)">
         @for (g of nav(); track g.id) {
           <h2 class="pd-group" [id]="'pd-settings-group-' + g.id">{{ g.title }}</h2>
@@ -186,7 +187,7 @@ interface LoadedPage {
     .pd-page-hit { margin: 0; }
     .pd-link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }
     .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-btn.pd-primary { background: var(--pd-accent); border-color: var(--pd-accent); color: var(--pd-on-accent, #fff); }
+    .pd-btn.pd-primary { background: var(--pd-accent); border-color: var(--pd-accent); color: var(--pd-on-accent); }
     .pd-foot { display: flex; align-items: center; gap: var(--pd-space-2); padding-top: var(--pd-space-2); border-top: 1px solid var(--pd-hairline); }
     .pd-status { min-width: 0; color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-spacer { flex: 1; }

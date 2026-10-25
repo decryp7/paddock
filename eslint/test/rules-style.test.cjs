@@ -12,6 +12,7 @@ ts().run('no-raw-style-values (design guide)', rules['no-raw-style-values'], {
     comp('`:host { color: var(--pd-text); font-size: var(--pd-size-2); font-family: var(--font-body); }`'),
     comp('[`a { padding: 4px; }`, `b { background: var(--pd-bg); }`]'),
     comp("'a { font-family: inherit; }'"),
+    comp('`code { font-family: var(--pd-font-mono); } kbd { font-family: var(--pd-font-sans, system-ui); }`'),
     '@Injectable() class S { styles = `a { color: #fff; }`; }',
     { code: 'const x = `not styles #fff`;', filename: 'a.ts' },
   ],

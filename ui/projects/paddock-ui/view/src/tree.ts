@@ -64,8 +64,10 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph, PdViewTone],
   template: `
+    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the tree only receives keydown bubbling from its treeitems, which are the focus stops (roving tabindex) -->
     <ul class="pd-view-tree" role="tree" [attr.aria-label]="label() || defaultLabel" (keydown)="key($event)">
       @for (row of rows(); track row.node.id) {
+        <!-- eslint-disable @angular-eslint/template/role-has-required-aria -- nodes are not selectable, and a tree without a selection model leaves aria-selected out (ARIA APG) -->
         <li
           role="treeitem"
           class="pd-view-tree__row"
@@ -97,6 +99,7 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
             <span class="pd-view-tree__label">{{ row.node.label }}</span>
           }
         </li>
+        <!-- eslint-enable @angular-eslint/template/role-has-required-aria -->
       }
     </ul>
   `,

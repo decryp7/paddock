@@ -3,13 +3,13 @@
 
 use crate::conversation::{
     ContextItem, Conversation, ConversationStore, ConversationSummary, MAX_CONTEXT_CHARS,
-    MAX_CONTEXT_ITEMS, SaveError, StoredMessage,
+    MAX_CONTEXT_ITEMS, SaveError, StoredError, StoredMessage,
 };
-use crate::event::{AssistantEvent, Envelope, ErrorKind, EventSink};
+use crate::event::{AssistantEvent, EndReason, Envelope, ErrorKind, EventSink};
 use crate::provider::{LlmProvider, ProviderError};
 use crate::run::{Budgets, Gate, Hooks, Turn, run_turn};
 use crate::tool::{ToolInfo, Tools};
-use crate::types::Cancel;
+use crate::types::{Cancel, Role};
 use paddock_health::Clock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -378,6 +378,28 @@ impl Assistant {
             };
             run_turn(&turn, &mut hooks, &now)
         };
+        let (error, end_message) = match &result {
+            Ok(end) => (None, end.message.clone()),
+            Err(ProviderError::Unavailable(state)) => (
+                Some(StoredError {
+                    message: state.message(&self.cfg.app),
+                    needs_ai: serde_json::to_value(state).ok(),
+                }),
+                None,
+            ),
+            Err(e) => (
+                Some(StoredError {
+                    message: e.to_string(),
+                    needs_ai: None,
+                }),
+                None,
+            ),
+        };
+        let ended = match &result {
+            Ok(end) => end.end,
+            Err(_) => EndReason::Failed,
+        };
+        settle(&mut kept, ended, error, end_message, self.now_ms());
         if let Some(Err(e)) = self.store.append(id, kept)
             && !told
         {
@@ -405,5 +427,28 @@ impl Assistant {
                 needs_ai: None,
             }),
         }
+    }
+}
+
+/// Makes the turn's last stored message say how the turn ended: the end reason, the failure and the budget message, so a
+/// reopened conversation shows what the live one showed. A turn that ended without a closing assistant message (a failure
+/// before any text, a budget, a stop between tool calls) gets an empty one.
+fn settle(
+    kept: &mut Vec<StoredMessage>,
+    end: EndReason,
+    error: Option<StoredError>,
+    end_message: Option<String>,
+    at_ms: u64,
+) {
+    let closes = kept
+        .last()
+        .is_some_and(|m| m.role == Role::Assistant && m.end.is_none_or(|e| e == end));
+    if !closes {
+        kept.push(StoredMessage::assistant("", vec![], None, at_ms));
+    }
+    if let Some(last) = kept.last_mut() {
+        last.end = Some(end);
+        last.error = error;
+        last.end_message = end_message;
     }
 }

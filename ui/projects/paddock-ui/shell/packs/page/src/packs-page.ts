@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { PdPathText } from '@decryp7/paddock-ui';
-import { PdGlyph, PdStatusGlyph, statusGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import { PacksStore, type KindView } from '@decryp7/paddock-ui/shell/packs';
 import { PACKS_STYLES } from './styles';
 
@@ -45,7 +45,7 @@ import { PACKS_STYLES } from './styles';
       @for (k of store.kinds(); track k.id) {
         <section class="pd-packs__kind" [attr.aria-labelledby]="'pd-packs-' + k.id" [attr.data-testid]="'packs-kind-' + k.id">
           <div class="pd-packs__kind-title">
-            <pd-glyph [name]="glyph(k)" [size]="16" [class]="tone(k)" />
+            <pd-status-glyph [status]="status(k)" [size]="16" [class]="tone(k)" />
             <h3 [id]="'pd-packs-' + k.id">{{ k.label }}</h3>
             <span class="pd-packs__muted" [attr.data-testid]="'packs-state-' + k.id">{{ stateWord(k) }}</span>
           </div>
@@ -131,8 +131,9 @@ export class PdPacksPage {
     }
   }
 
-  protected glyph(k: KindView): string {
-    return statusGlyph(k.health.level === 'ok' ? 'success' : k.health.level === 'notes' ? 'info' : 'warning');
+  /** The status of a kind, drawn from the suite's one map: ok, some keys ignored, packs left out. */
+  protected status(k: KindView): PdStatus {
+    return k.health.level === 'ok' ? 'success' : k.health.level === 'notes' ? 'info' : 'warning';
   }
 
   protected tone(k: KindView): string {

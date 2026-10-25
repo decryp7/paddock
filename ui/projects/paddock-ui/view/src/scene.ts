@@ -124,11 +124,11 @@ export function diagramScene(d: Diagram): Scene {
     .pd-view-scene__node--act:hover rect { fill: ${VIEW_HOVER_FILL}; }
     .pd-view-scene__node--act:focus-visible { outline: none; }
     .pd-view-scene__node--act:focus-visible rect { stroke: var(--pd-focus-ring); stroke-width: 3; }
-    .pd-view-scene__label { fill: var(--pd-text); font-size: 13px; font-weight: 500; }
-    .pd-view-scene__caption { fill: var(--pd-text-muted); font-size: 11px; }
-    .pd-view-scene__detail { fill: var(--pd-text-muted); font-size: 12px; }
+    .pd-view-scene__label { fill: var(--pd-text); font-size: var(--pd-text-body); font-weight: 500; }
+    .pd-view-scene__caption { fill: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+    .pd-view-scene__detail { fill: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .pd-view-scene__edge { stroke: var(--pd-text-muted); stroke-width: 1.5; }
-    .pd-view-scene__edge-label { fill: var(--pd-text-muted); font-size: 12px; paint-order: stroke; stroke: var(--pd-surface-1); stroke-width: 4px; }
+    .pd-view-scene__edge-label { fill: var(--pd-text-muted); font-size: var(--pd-text-label); paint-order: stroke; stroke: var(--pd-surface-1); stroke-width: 4px; }
     .pd-view-scene__arrow { fill: var(--pd-text-muted); }
     .pd-view-scene__life { stroke: var(--pd-border-strong); stroke-dasharray: 4 4; }
     .pd-view-scene__rule { stroke: var(--pd-border-strong); stroke-width: 1; }

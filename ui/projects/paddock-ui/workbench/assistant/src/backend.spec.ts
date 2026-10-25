@@ -187,7 +187,9 @@ describe('MemoryAssistantBackend', () => {
     expect(slow.events[1]).toMatchObject({ summary: 'lookup', write: false, destructive: false });
     expect(await b.stop(slow.ack.conversationId)).toBe(true);
     await settle(30);
-    expect(slow.events.some((e) => e.type === 'toolFinished' || e.type === 'delta')).toBe(false);
+    // As the engine does: the stopped call reports itself as stopped by the user (not as a failure of the tool), and nothing is said.
+    expect(slow.events.some((e) => e.type === 'delta')).toBe(false);
+    expect(slow.events.find((e) => e.type === 'toolFinished')).toMatchObject({ ok: false, outcome: 'stopped' });
     expect(slow.events.at(-1)).toMatchObject({ type: 'done', end: 'cancelled' });
 
     const fail = await ask(b, '/tool-fail');

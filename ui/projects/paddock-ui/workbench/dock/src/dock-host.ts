@@ -111,6 +111,7 @@ export const HOVER_HIDE_MS = 300;
     }
     @if (menus.state(); as menu) {
       <div class="pd-dock-menu-backdrop" (pointerdown)="menus.close()"></div>
+      <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the menu only receives keydown bubbling from its focusable items (arrow keys move between them) -->
       <ul class="pd-dock-menu pd-popmenu" role="menu" data-testid="pd-dock-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" (keydown)="menuKey($event, menu.items)">
         @for (item of menu.items; track item.label) {
           <li role="none">

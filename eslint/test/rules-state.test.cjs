@@ -26,6 +26,7 @@ ts().run('store-rules (rules 30 to 32)', rules['store-rules'], {
   valid: [
     { code: store('withState({ items: [], status: "idle" })'), filename: 'a.store.ts' },
     { code: store('withState({ items: [] })'), filename: 'a.store.spec.ts' },
+    { code: store('withState({ items: [] })'), filename: 'request-status.spec.ts' },
     { code: '// app-wide: the one clock\n' + store('{ providedIn: "root" }, withState({})'), filename: 'clock.store.ts' },
     { code: store('withState({ loading: true })'), filename: 'request-status.store.ts', options: [{ allowFlagsIn: 'request-status' }] },
     { code: store('withProps(() => ({ a: inject(AStore), b: inject(BStore) }))'), filename: 'a.store.ts' },
