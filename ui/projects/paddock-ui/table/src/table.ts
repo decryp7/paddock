@@ -21,7 +21,7 @@ import {
   TemplateRef,
   viewChild,
 } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdMiddleText } from './middle-text';
 import {
   actionColumnWidth,
@@ -100,7 +100,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
 @Component({
   selector: 'pd-table',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, CdkContextMenuTrigger, PdGlyph, PdMiddleText],
+  imports: [PdStatusGlyph, NgTemplateOutlet, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, CdkContextMenuTrigger, PdGlyph, PdMiddleText],
   host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"' },
   template: `
     <div class="pd-toolbar">
@@ -158,7 +158,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
         @case ('error') {
           <div class="pd-body" role="rowgroup">
             <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty pd-error" data-testid="table-error">
-              <pd-glyph name="alert" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
+              <pd-status-glyph status="error" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
               <button type="button" class="pd-retry" (click)="retry.emit()">{{ t.retry }}</button>
             </div></div>
           </div>

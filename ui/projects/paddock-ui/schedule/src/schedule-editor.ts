@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, model } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { PdDayPicker } from './day-picker';
 import {
@@ -43,7 +43,7 @@ export function presetLabel(secs: number): string {
 @Component({
   selector: 'pd-schedule-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdDayPicker, PdGlyph, PdSelect],
+  imports: [PdStatusGlyph, PdDayPicker, PdGlyph, PdSelect],
   template: `
     <div class="pd-modes" role="radiogroup" [attr.aria-label]="modeLabel">
       @for (m of modes; track m.id) {
@@ -100,12 +100,12 @@ export function presetLabel(secs: number): string {
 
     <section class="pd-preview" aria-live="polite" [attr.aria-label]="previewLabel" data-testid="schedule-preview">
       @for (p of problems(); track $index) {
-        <p class="pd-problem" role="alert"><pd-glyph name="alert" [size]="14" />{{ p }}</p>
+        <p class="pd-problem" role="alert"><pd-status-glyph status="error" [size]="14" />{{ p }}</p>
       }
       @if (problems().length === 0 && preview(); as pv) {
         <p class="pd-description">{{ pv.description }}</p>
         @for (w of pv.warnings; track $index) {
-          <p class="pd-warning"><pd-glyph name="info" [size]="14" />{{ w }}</p>
+          <p class="pd-warning"><pd-status-glyph status="warning" [size]="14" />{{ w }}</p>
         }
         <ol class="pd-runs" [attr.aria-label]="nextRunsLabel">
           @for (r of pv.nextRuns; track $index) {
