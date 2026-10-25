@@ -10,17 +10,64 @@ use crate::keys::KeyVerifier;
 use crate::lines::{Line, read_line, serve_lines};
 use crate::server::{Server, Session};
 use serde_json::{Value, json};
-use std::io::{self, BufReader, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Longest handshake line.
 const HANDSHAKE_MAX: usize = 512;
 /// A client that does not send its key within this is dropped.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long one blocking read waits before the connection looks at the stop flag again. Shutting a socket down wakes a
+/// blocked read on Linux and macOS, but not on Windows, where only the system's own connection timeout (about two minutes)
+/// would end it; so reads are cut into slices and [`Serving::stop`] is noticed within one.
+const STOP_SLICE: Duration = Duration::from_millis(100);
+
+/// The read half of a connection: reads in [`STOP_SLICE`]s, ends (as end of input) once the server stops, and fails with
+/// `TimedOut` when its deadline (the handshake's) has passed.
+struct Watched {
+    stream: TcpStream,
+    stop: Arc<AtomicBool>,
+    deadline: Option<Instant>,
+}
+
+impl Watched {
+    fn new(stream: TcpStream, stop: Arc<AtomicBool>) -> io::Result<Watched> {
+        stream.set_read_timeout(Some(STOP_SLICE))?;
+        Ok(Watched {
+            stream,
+            stop,
+            deadline: None,
+        })
+    }
+}
+
+impl Read for Watched {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            if self.stop.load(Ordering::SeqCst) {
+                return Ok(0);
+            }
+            match self.stream.read(buf) {
+                // A slice ended without data (`WouldBlock` on Unix, `TimedOut` on Windows).
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    if self.deadline.is_some_and(|d| Instant::now() >= d) {
+                        return Err(io::ErrorKind::TimedOut.into());
+                    }
+                }
+                other => return other,
+            }
+        }
+    }
+}
 
 type Conns = Arc<Mutex<Vec<(TcpStream, JoinHandle<()>)>>>;
 
@@ -75,10 +122,10 @@ fn refuse(stream: &mut TcpStream, why: &str) {
 
 fn handshake(
     stream: &mut TcpStream,
-    reader: &mut BufReader<TcpStream>,
+    reader: &mut BufReader<Watched>,
     keys: &dyn KeyVerifier,
 ) -> Option<String> {
-    let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+    reader.get_mut().deadline = Some(Instant::now() + HANDSHAKE_TIMEOUT);
     let line = match read_line(reader, HANDSHAKE_MAX) {
         Ok(Line::Text(t)) => t,
         _ => {
@@ -96,7 +143,7 @@ fn handshake(
         );
         return None;
     };
-    let _ = stream.set_read_timeout(None);
+    reader.get_mut().deadline = None;
     let _ = writeln!(stream, "{}", json!({"ok": true, "client": client}));
     Some(client)
 }
@@ -151,9 +198,9 @@ pub fn serve_loopback(
             let Ok(kept) = stream.try_clone() else {
                 continue;
             };
-            let (server, keys) = (server.clone(), keys.clone());
+            let (server, keys, stop) = (server.clone(), keys.clone(), stop2.clone());
             let handle = std::thread::spawn(move || {
-                if let Ok(read_half) = stream.try_clone() {
+                if let Ok(read_half) = stream.try_clone().and_then(|s| Watched::new(s, stop)) {
                     let mut reader = BufReader::new(read_half);
                     if let Some(client) = handshake(&mut stream, &mut reader, keys.as_ref()) {
                         let _ =
@@ -177,6 +224,34 @@ pub fn serve_loopback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A connected pair on loopback: (the server's end, the client's end).
+    fn pair() -> (TcpStream, TcpStream) {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        (l.accept().unwrap().0, client)
+    }
+
+    #[test]
+    fn a_watched_read_ends_once_the_server_stops_and_fails_after_its_deadline() {
+        let (server_end, mut client) = pair();
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut w = Watched::new(server_end, stop.clone()).unwrap();
+        let mut buf = [0u8; 8];
+        // Data is read as usual.
+        client.write_all(b"hi").unwrap();
+        assert_eq!(w.read(&mut buf).unwrap(), 2);
+        // A deadline that has passed fails the read after one empty slice.
+        w.deadline = Some(Instant::now());
+        assert_eq!(
+            w.read(&mut buf).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+        // Once the server stops, the read ends as end of input although the client is still connected.
+        w.deadline = None;
+        stop.store(true, Ordering::SeqCst);
+        assert_eq!(w.read(&mut buf).unwrap(), 0);
+    }
 
     #[test]
     fn only_loopback_addresses_are_accepted() {
