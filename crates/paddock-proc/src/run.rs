@@ -385,8 +385,9 @@ mod tests {
             .find_map(|l| l.strip_prefix("pid "))
             .and_then(|p| p.parse().ok())
             .unwrap();
+        // The pipes reach EOF a moment before the killed helper shows as a zombie: wait for that state (a deadline, not a sleep).
         assert!(
-            !crate::is_alive(pid),
+            crate::testchild::is_gone(pid),
             "the helper that held the pipes was ended with the tree"
         );
     }
