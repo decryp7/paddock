@@ -21,8 +21,10 @@ Rules for a crate here:
 - A crate that uses another one writes `paddock-jobs = { workspace = true }` (the workspace dependency carries path,
   version and registry, so the published crate points at the registry).
 - `publish = ["decryp7"]` in every crate. A new crate starts with `[package.metadata.paddock] scaffold = true`, which keeps
-  the publish job from uploading it; its work package removes the marker. A new member also needs its step in the `crate`
-  job of `.gitea/workflows/ci.yml` (`scripts/publish.test.mjs` fails without it).
+  the publish job from uploading it; its work package removes the marker. A new member needs no CI step of its own: the `crate`
+  job's workspace-wide steps (and the coverage job) test every member; `scripts/publish.test.mjs` and conformance C37 fail
+  when a member is left out (an `--exclude`). A crate whose code changes with an optional feature off joins the job's
+  "Tests with the optional features off" step.
 - Published to the Gitea cargo registry by the tag workflow only (`.gitea/workflows/publish.yml`, rule 9). One repo tag
   `vX.Y.Z` releases everything; each crate bumps its own `version` only when it changes, and a version the registry
   already has is skipped. `node scripts/publish.mjs` is the local dry run (lists every crate and npm package with what a
@@ -706,7 +708,8 @@ The shell as one Tauri plugin (ADR 0012 §3, decision D2): `paddock_shell::Build
   real Rust side is the app `apps/shell-demo/src-tauri` (plan S18): its table writes the demo's `app-commands.ts`.
 
 To add a crate: create `crates/<name>` (as one of the scaffolds), add it to `members` and `[workspace.dependencies]` in
-`Cargo.toml`, and add its step to the `crate` job in `.gitea/workflows/ci.yml`.
+`Cargo.toml` (CI's workspace-wide steps pick it up; add it to the feature-off step of the `crate` job in
+`.gitea/workflows/ci.yml` when it has `cfg(not(feature))` code or a default feature).
 
 ## `paddock-updater` (plan S11)
 

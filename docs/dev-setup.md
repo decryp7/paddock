@@ -102,11 +102,15 @@ another database number. sccache's keys include the compiler and target, so one 
   still name file and line) and dependencies get no debug info, which shrinks the objects and speeds up linking. For a
   debugger session with variables: `CARGO_PROFILE_DEV_DEBUG=full cargo build`. `split-debuginfo` stays at the platform
   default (macOS already keeps debug info out of the binaries; Windows supports only `packed`).
+- **Linkers.** On Windows every workspace of the repo links with the toolchain's `rust-lld.exe` (lld-link) instead of
+  MSVC's `link.exe` (`.cargo/config.toml` at the repo root: `[target.x86_64-pc-windows-msvc] linker = "rust-lld.exe"`),
+  locally, in CI and in the release builds alike; it still needs Visual Studio's build tools for the MSVC and Windows SDK
+  libraries. On x86_64 Linux rustc links with its bundled lld by default (Rust 1.90 and later); macOS uses Apple's `ld`.
 
 ## Tests
 
 - **Rust:** `cargo nextest run` (each app's `.config/nextest.toml`: one test per core but one, slow-test warnings after
-  30 s, and a `ci` profile without retries, because a flaky test is fixed rather than retried, with a JUnit report).
+  30 s, and a `ci` profile without retries that stops a test after its 60 s budget, waivers in the file with a reason, because a flaky test is fixed rather than retried, with a JUnit report).
   nextest does not run doc tests: `cargo test --doc` runs them.
 - **One integration-test binary per crate:** `tests/it/main.rs` declares one module per test file (`mod pool;` for
   `tests/it/pool.rs`), shared helpers in `tests/it/common/` or `tests/it/support/`. Linking one binary per file cost more

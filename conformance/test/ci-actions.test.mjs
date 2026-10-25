@@ -398,3 +398,19 @@ test('the WebKit job runs on the Mac runner for pushes to main and v* tags only,
   for (const project of ['gallery-webkit', 'shell-demo-webkit', 'workbench-demo-webkit']) assert.match(job, new RegExp(`--project=${project}`));
   assert.match(job, /PADDOCK_WEBKIT: "1"/, 'the projects exist only with PADDOCK_WEBKIT');
 });
+
+test('the nextest ci profile fails a test over its time budget, and every longer budget is a waiver with a reason', () => {
+  const text = read(join(PADDOCK, 'crates', '.config', 'nextest.toml'));
+  const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
+  const own = ci.slice(0, ci.search(/^\[/m));
+  assert.match(own, /^slow-timeout = \{ period = "\d+s", terminate-after = \d+ \}$/m, 'the ci profile stops a slow test');
+  const lines = text.split('\n');
+  const overrides = lines.flatMap((l, i) => (l.trim() === '[[profile.ci.overrides]]' ? [i] : []));
+  for (const at of overrides) {
+    let j = at - 1;
+    while (j >= 0 && lines[j].startsWith('#') && !lines[j].startsWith('# waiver:')) j -= 1;
+    assert.ok(j >= 0 && /^# waiver: \S/.test(lines[j]), `the override at line ${at + 1} of nextest.toml has no "# waiver:" reason`);
+    const body = lines.slice(at + 1, lines.findIndex((l, k) => k > at && l.startsWith('['))).join('\n');
+    assert.match(body, /^filter = "/m, `the override at line ${at + 1} names its tests`);
+  }
+});
