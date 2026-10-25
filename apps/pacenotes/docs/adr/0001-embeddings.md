@@ -1,7 +1,6 @@
 # 1. Where Pacenotes' embeddings come from
 
-Status: proposed (2026-10-25). The number is provisional; it is allocated again when this branch merges (see
-`docs/suite-lessons.md`).
+Status: accepted (2026-10-25, by the user). Proposed the same day.
 
 ## Context
 
@@ -149,7 +148,7 @@ enough** when, fused with BM25, it (1) finds a right chunk in the top 5 for at l
 | BM25 + BGE-small | 0.844 | +41% | yes | +24.5 MB binary, 34-133 MB model, 0.9-37 GB RSS, 15-47 chunks/s, static C++ runtime, CDN at build time, no Intel Mac |
 | Qwen3-Embedding (Pitwall), dense alone | 0.938 | +209% | yes, by far | Pitwall: 610 MB model, 1.9 GB RSS while loaded, 30 chunks/s on Metal |
 
-## Decision (proposed)
+## Decision
 
 The `Embedder` port gets three implementations, chosen in this order:
 
