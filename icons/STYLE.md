@@ -97,7 +97,7 @@ helpers with a `defsKit(uid + letter)`, and add `shadowFilters(kit)` to the defs
 
 | Layer | Helper | Shape | Blur | Opacity |
 |---|---|---|---|---|
-| Long shadow | `longShadow(kit, foot, SHADOW.longSweep, longOpacity(PALETTE[app].base))` | the footprint swept (+110, +66) away from the light | 18 | 0.6 on dark tiles (base L below 50: Paddock, Pitwall, Pacenotes), 0.55 on mid and light tiles; `longOpacity(base)` picks it |
+| Long shadow | `longShadow(kit, foot, SHADOW.longSweep, longOpacity(PALETTE[app].base))` | the footprint swept (+110, +66) away from the light | 18 | 0.7 on dark tiles (base L below 50: Paddock, Pitwall, Pacenotes), 0.55 on mid and light tiles; `longOpacity(base)` picks it |
 | Contact | `contactShadow(kit, d)` | the footprint, 3 to 4 units wider on the shade side | 2.5 | 0.8 |
 | Occlusion | `occlusion(kit, clip, d)` | a band about 16 deep under every overhang or where parts meet, clipped to the faces below | 6 | 0.6 |
 | Cast shadow | `occlusion(kit, clip, d, SHADOW.castOpacity)` | the shadow of a large overhang on the face below, about 30 deep | 6 | 0.35 |
@@ -133,7 +133,7 @@ No icon uses another shadow colour, blur or opacity.
 | 48 | the simple frame scaled onto the small tile |
 | 32, 24 | 2:1 pixel isometric with `pixelIso` and `pixelLayer` (flat colours, crisp, one pixel per part, whole-pixel widths for repeats), or a simplified object if the isometric one cannot be read; keep the defining parts even at 24, and end faces at least 3 px |
 | 16 | the flat symbol: one tone, whole pixels; coverage 18 to 26 % for line glyphs, up to 30 % for filled silhouettes. Paddock: the slatted door with a 1 px band of the seven hues above it |
-| Tray | the flat symbol as a template, x 2 to 14, with light and dark variants made from it. Whole pixels only: no partial alpha anywhere, except a deliberate dim of the whole glyph for a state |
+| Tray | the flat symbol as a template, x 2 to 14, with light and dark variants made from it. Whole pixels only: crisp edges (badges included), no partial alpha anywhere except a deliberate dim of the whole glyph for a state. Sizes: 16 pt and 18 pt templates at 1x and 2x (18 pt is the 16 grid padded by one unit, never a resample), Windows light and dark at 16 and 32. The apps load the 18 pt @2x template (36 px) and the 32 px light and dark PNGs |
 
 Rule: a part that cannot be drawn on whole pixels at a size is dropped at that size, never blurred.
 

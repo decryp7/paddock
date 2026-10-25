@@ -195,7 +195,8 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
     const shadowLong = longShadow(kit, foot);
     const contact = contactShadow(kit, poly(P(-ov, wall0, 0), P(L + ov, wall0, 0), P(L + ov, D + ov, 0), P(L + ov + 4, D + ov, 0), P(L + ov + 4, wall0 - 3, 0), P(-ov, wall0 - 3, 0)));
 
-    // Pit lane: the apron from the pit wall to the building, a lane line, and the building's own contact shadow on it.
+    // Pit lane: the apron from the pit wall to the building (its two end edges catch a faint light, so the ground reads on the dark
+    // tile), a lane line, and the building's own contact shadow on it.
     const apronTop = poly(P(-ov, wall0 + wallD, 0), P(L + ov, wall0 + wallD, 0), P(L + ov, 0, 0), P(-ov, 0, 0));
     const lane = simple ? '' : `<path d="M${P(-ov + 6, -apron * 0.42, 0).join(' ')}L${P(L + ov - 6, -apron * 0.42, 0).join(' ')}" stroke="#E9EDF2" stroke-opacity="0.9" stroke-width="5"/>`;
 
@@ -247,7 +248,7 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
     // The building's lit vertical corners: a thin highlight where front and end faces meet.
     const cornerHi = `<path d="M${P(L, 0, 0).join(' ')}L${P(L, 0, H1).join(' ')}M${P(L, 0, H1 + C1).join(' ')}L${P(L, 0, H1 + C1 + H2).join(' ')}" stroke="#FFFFFF" stroke-width="2" opacity="0.55"/>`;
     const body = `${shadowLong}${contact}
-      <path d="${apronTop}" fill="url(#${id('apron')})"/><path d="${poly(P(-ov, -canopy, 0), P(L + ov, -canopy, 0), P(L + ov, 0, 0), P(-ov, 0, 0))}" fill="${SHADOW.colour}" opacity="0.3"/>${lane}
+      <path d="${apronTop}" fill="url(#${id('apron')})"/><path d="M${P(-ov, wall0 + wallD, 0).join(' ')}L${P(-ov, 0, 0).join(' ')}M${P(L + ov, wall0 + wallD, 0).join(' ')}L${P(L + ov, 0, 0).join(' ')}" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="${simple ? 4 : 2.5}"/><path d="${poly(P(-ov, -canopy, 0), P(L + ov, -canopy, 0), P(L + ov, 0, 0), P(-ov, 0, 0))}" fill="${SHADOW.colour}" opacity="0.3"/>${lane}
       <path d="${g0.front}" fill="url(#${id('front')})"/><path d="${g0.end}" fill="url(#${id('end')})"/>
       ${bayParts.join('')}${aoBand(H1, 'g0')}${canopyShade}
       <path d="${up.front}" fill="url(#${id('front')})"/><path d="${up.end}" fill="url(#${id('end')})"/>

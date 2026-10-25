@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
   <title>Paddock tray</title>
-  <defs><mask id="t6m1" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M1 9.5H15" fill="none" stroke="#000" stroke-width="1" stroke-linecap="butt"/></mask></defs>
-  <g><path d="M1 5.25L8 1.75L15 5.25" fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 7H7A0 0 0 0 1 7 7V12A0 0 0 0 1 7 12H2A0 0 0 0 1 2 12V7A0 0 0 0 1 2 7ZM9 7H14A0 0 0 0 1 14 7V12A0 0 0 0 1 14 12H9A0 0 0 0 1 9 12V7A0 0 0 0 1 9 7Z" fill="#000000" mask="url(#t6m1)"/><path d="M1.5 13H14.5A0.5 0.5 0 0 1 15 13.5V13.5A0.5 0.5 0 0 1 14.5 14H1.5A0.5 0.5 0 0 1 1 13.5V13.5A0.5 0.5 0 0 1 1.5 13Z" fill="#000000"/></g>
+  <defs><mask id="t3am1" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M1 9.5H15" fill="none" stroke="#000" stroke-width="1" stroke-linecap="butt"/></mask></defs>
+  <g><path d="M1 5.25L8 1.75L15 5.25" fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 7H7A0 0 0 0 1 7 7V12A0 0 0 0 1 7 12H2A0 0 0 0 1 2 12V7A0 0 0 0 1 2 7ZM9 7H14A0 0 0 0 1 14 7V12A0 0 0 0 1 14 12H9A0 0 0 0 1 9 12V7A0 0 0 0 1 9 7Z" fill="#000000" mask="url(#t3am1)"/><path d="M1.5 13H14.5A0.5 0.5 0 0 1 15 13.5V13.5A0.5 0.5 0 0 1 14.5 14H1.5A0.5 0.5 0 0 1 1 13.5V13.5A0.5 0.5 0 0 1 1.5 13Z" fill="#000000"/></g>
   
 </svg>

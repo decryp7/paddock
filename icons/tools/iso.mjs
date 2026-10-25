@@ -110,17 +110,17 @@ export function defsKit(prefix) {
 /**
  * The family shadow, one recipe for every icon: a cool near-black, blurred in sRGB. Geometry: the long shadow is the footprint swept
  * (+110, +66) away from the light at blur 18; the contact shadow is the footprint grown 3 to 4 units on the shade side at blur 2.5;
- * occlusion bands are about 16 deep at blur 6; a cast shadow is about 30 deep at 0.35. Opacities: long 0.6 on dark tiles and 0.55 on
- * mid and light tiles (longOpacity), contact 0.8, occlusion 0.6.
+ * occlusion bands are about 16 deep at blur 6; a cast shadow is about 30 deep at 0.35. Opacities: long 0.7 on dark tiles (at 0.6 it
+ * nearly vanished on graphite) and 0.55 on mid and light tiles (longOpacity), contact 0.8, occlusion 0.6.
  */
-export const SHADOW = { colour: '#0E1016', longSweep: [110, 66], longBlur: 18, longOpacity: 0.75, longDark: 0.6, longLight: 0.55, contactBlur: 2.5, contactOpacity: 0.8, aoBlur: 6, aoOpacity: 0.6, castOpacity: 0.35 };
-/** The long-shadow opacity for a tile: 0.6 on dark tiles (base OKLab L below 50: Paddock, Pitwall, Pacenotes), 0.55 on the rest. */
+export const SHADOW = { colour: '#0E1016', longSweep: [110, 66], longBlur: 18, longOpacity: 0.75, longDark: 0.7, longLight: 0.55, contactBlur: 2.5, contactOpacity: 0.8, aoBlur: 6, aoOpacity: 0.6, castOpacity: 0.35 };
+/** The long-shadow opacity for a tile: 0.7 on dark tiles (base OKLab L below 50: Paddock, Pitwall, Pacenotes), 0.55 on the rest. */
 export const longOpacity = tileBase => (Lof(tileBase) < 50 ? SHADOW.longDark : SHADOW.longLight);
 /** The three filters the shadow helpers use: `soft` (long shadow), `crisp` (contact) and `ao` (occlusion bands). */
 export const shadowFilters = kit => kit.blur('soft', SHADOW.longBlur) + kit.blur('crisp', SHADOW.contactBlur) + kit.blur('ao', SHADOW.aoBlur);
 /**
  * Long shadow: the footprint (4 screen points: front-left, front-right, back-right, back-left) swept away from the light by `sweep`
- * and blurred, at `opacity` (pass longOpacity(PALETTE[app].base); the default 0.6 is the dark-tile value, Paddock's).
+ * and blurred, at `opacity` (pass longOpacity(PALETTE[app].base); the default is the dark-tile value, Paddock's).
  */
 export function longShadow(kit, foot, sweep = SHADOW.longSweep, opacity = SHADOW.longDark) {
   const sw = foot.map(([x, y]) => [f(x + sweep[0]), f(y + sweep[1])]);

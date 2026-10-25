@@ -869,16 +869,20 @@ function badge(status, ink, theme) {
 /**
  * Tray icon on a 16 grid. theme 'template' = macOS template (black + alpha);
  * 'light' = Windows light taskbar (dark glyph), 'dark' = Windows dark taskbar (white glyph). Badges are coloured on Windows.
+ * Whole pixels only (STYLE.md section 6): crisp edges everywhere, badges included, and no partial alpha except a deliberate dim of
+ * the whole glyph for a state (a glyph drawn entirely in the secondary tone, such as Pitwall idle). `pt18`: the 18 pt menu-bar size,
+ * the 16 grid with one unit of padding on every side (so 18 pt at 1x and 2x are exact multiples, never a resample of 16).
  */
-export function traySvg(app, status, theme, { size = 16, uid = newUid('t'), glyph: override, title } = {}) {
+export function traySvg(app, status, theme, { size = 16, uid = newUid('t'), glyph: override, title, pt18 = false } = {}) {
   const ink = theme === 'dark' ? '#FFFFFF' : theme === 'light' ? '#1C1C1E' : '#000000';
   const layers = override ?? trayGlyph(app, status);
   const b = badge(status, ink, theme);
-  const glyph = renderGlyph(layers, { primary: ink, secondary: ink, accent: ink, secondaryOpacity: 0.45 }, uid);
+  const wholeDim = layers.every(L => L.tone === 'secondary');
+  const glyph = renderGlyph(layers, { primary: ink, secondary: ink, accent: ink, secondaryOpacity: wholeDim ? 0.45 : 1 }, uid);
   const knock = b
     ? `<mask id="${uid}k" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#fff"/><path d="${b.knock}" fill="#000"/></mask>`
     : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 16 16">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="${pt18 ? '-1 -1 18 18' : '0 0 16 16'}" shape-rendering="crispEdges">
   <title>${title ?? NAMES[app]} tray${status !== 'default' ? ` (${status})` : ''}</title>
   <defs>${glyph.defs}${knock}</defs>
   <g${b ? ` mask="url(#${uid}k)"` : ''}>${glyph.body}</g>

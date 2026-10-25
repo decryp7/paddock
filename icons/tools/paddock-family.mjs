@@ -41,12 +41,13 @@ for (const theme of ['template', 'light', 'dark']) {
   tray[theme] = traySvg('paddock', 'default', theme, { glyph: g.tray, title: 'Paddock' });
   writeFileSync(join(ALT, `paddock-family-tray-${theme}.svg`), tray[theme]);
   if (theme === 'template') {
-    for (const pt of [16, 18]) {
-      writeFileSync(join(ALT, `paddock-family-tray-${pt}ptTemplate.png`), png(tray[theme], pt));
-      writeFileSync(join(ALT, `paddock-family-tray-${pt}ptTemplate@2x.png`), png(tray[theme], pt * 2));
+    const t18 = traySvg('paddock', 'default', 'template', { glyph: g.tray, title: 'Paddock', pt18: true });
+    for (const [pt, svg] of [[16, tray[theme]], [18, t18]]) {
+      writeFileSync(join(ALT, `paddock-family-tray-${pt}ptTemplate.png`), png(svg, pt));
+      writeFileSync(join(ALT, `paddock-family-tray-${pt}ptTemplate@2x.png`), png(svg, pt * 2));
     }
   } else {
-    const frames = [16, 20, 24, 32].map(px => ({ size: px, png: png(tray[theme], px) }));
+    const frames = [16, 32].map(px => ({ size: px, png: png(tray[theme], px) }));
     frames.forEach(fr => writeFileSync(join(ALT, `paddock-family-tray-${theme}-${fr.size}.png`), fr.png));
     writeFileSync(join(ALT, `paddock-family-tray-${theme}.ico`), writeIco(frames));
   }
