@@ -46,13 +46,17 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph],
   template: `
-    <div class="card" [attr.data-state]="declined() ? 'declined' : card().state" data-testid="assistant-tool-card">
-      <pd-glyph class="state" [name]="icon()" [size]="14" />
+    <div class="card" [attr.data-state]="declined() ? 'declined' : stopped() ? 'stopped' : card().state" data-testid="assistant-tool-card">
+      @if (card().state === 'running') {
+        <span class="spin" aria-hidden="true" data-testid="assistant-tool-spinner"></span>
+      } @else {
+        <pd-glyph class="state" [name]="icon()" [size]="14" />
+      }
       <span class="name">{{ card().name || unreadable }}</span>
       @if (card().summary) {
         <span class="call" [attr.title]="card().summary">{{ card().summary }}</span>
       }
-      <span class="result" [class.muted]="declined()" data-testid="assistant-tool-result">{{ declined() ? declinedText : stateText() }}</span>
+      <span class="result" [class.muted]="declined() || stopped()" data-testid="assistant-tool-result">{{ declined() ? declinedText : stopped() ? stoppedText : stateText() }}</span>
     </div>
   `,
   styles: `
@@ -60,6 +64,10 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
     .card { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--pd-space-1) var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); min-width: 0; }
     .card[data-state='failed'] { border-color: var(--pd-danger); }
     .state { align-self: center; }
+    /* A 14 px spinner like the status bar's: a faint track with a quarter arc (static at 45 degrees without motion). */
+    .spin { align-self: center; flex: none; box-sizing: border-box; width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--pd-text-muted) 35%, transparent); border-top-color: var(--pd-text); transform: rotate(45deg); animation: pd-tool-spin 0.9s linear infinite; }
+    @keyframes pd-tool-spin { to { transform: rotate(405deg); } }
+    @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
     .name { font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
     .call { min-width: 0; flex: 1 1 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .result { overflow-wrap: anywhere; }
@@ -70,6 +78,11 @@ export class PdAssistantToolCard {
   readonly card = input.required<ToolCard>();
   protected readonly unreadable = $localize`:@@pd.wb.assistant.tool.unreadable:(unreadable call)`;
   protected readonly declinedText = $localize`:@@pd.wb.assistant.tool.declined:Declined`;
+  protected readonly stoppedText = $localize`:@@pd.wb.assistant.tool.stopped:Stopped`;
+  /** The user stopped the turn while the call ran: neutral too. */
+  protected stopped(): boolean {
+    return this.card().stopped === true && this.card().state === 'failed';
+  }
   /** The user said no: a neutral card, not a failure. */
   protected declined(): boolean {
     return this.card().declined === true && this.card().state === 'failed';
@@ -77,6 +90,7 @@ export class PdAssistantToolCard {
   protected icon(): string {
     const s = this.card().state;
     if (this.declined()) return 'close';
+    if (this.stopped()) return 'stop';
     return s === 'ok' ? statusGlyph('success') : s === 'failed' ? statusGlyph('error') : s === 'awaiting' ? 'lock' : 'clock';
   }
   protected stateText(): string {
