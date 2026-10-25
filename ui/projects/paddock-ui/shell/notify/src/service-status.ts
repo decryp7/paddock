@@ -100,7 +100,7 @@ let nextId = 0;
     .pd-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     details { max-width: 100%; color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
     summary { cursor: pointer; }
-    code { display: block; margin-top: var(--pd-space-1); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--pd-font-mono); user-select: text; }
+    code { display: block; margin-top: var(--pd-space-1); white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--pd-font-mono); -webkit-user-select: text; user-select: text; }
   `,
 })
 export class PdServiceStatus {

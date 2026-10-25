@@ -44,7 +44,11 @@ test('interactive card activates with Enter and Space', async ({ page }) => {
 
 test('native feel: the shell is not selectable, content opts in', async ({ page }) => {
   await open(page, 'dark', 'debrief');
-  const shell = await page.locator('h2').first().evaluate((e) => getComputedStyle(e).userSelect);
+  // WebKit (WKWebView) keeps the prefixed property as the one that inherits; its unprefixed computed value stays "auto".
+  const shell = await page.locator('h2').first().evaluate((e) => {
+    const style = getComputedStyle(e);
+    return style.userSelect === 'auto' && style.webkitUserSelect ? style.webkitUserSelect : style.userSelect;
+  });
   expect(shell).toBe('none');
 });
 

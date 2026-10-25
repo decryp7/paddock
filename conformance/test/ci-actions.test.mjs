@@ -278,3 +278,19 @@ test('the rustc wrapper hands sccache the compile without the build folder varia
   assert.match(cmd, /set "CARGO_TARGET_DIR="/);
   assert.match(cmd, /sccache\.exe %\*\r?\nexit \/b %ERRORLEVEL%/);
 });
+
+test('the WebKit job runs on the Mac runner for pushes to main and v* tags only, and runs the three WebKit projects', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const on = ci.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
+  assert.match(on, /push:\n\s+branches: \[main\]\n\s+tags: \["v\*"\]/, 'a push is only main or a v* tag');
+  const job = ci.match(/^  e2e-webkit:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
+  assert.notEqual(job, '', 'the e2e-webkit job exists');
+  assert.match(job, /runs-on: macos-latest/);
+  const cond = job.match(/^    if: (.*)$/m)?.[1] ?? '';
+  assert.match(cond, /github\.event_name == 'push'/, 'never a pull request or a manual run');
+  assert.match(cond, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(cond, /startsWith\(github\.ref, 'refs\/tags\/v'\)/);
+  assert.doesNotMatch(cond, /pull_request|workflow_dispatch/);
+  for (const project of ['gallery-webkit', 'shell-demo-webkit', 'workbench-demo-webkit']) assert.match(job, new RegExp(`--project=${project}`));
+  assert.match(job, /PADDOCK_WEBKIT: "1"/, 'the projects exist only with PADDOCK_WEBKIT');
+});

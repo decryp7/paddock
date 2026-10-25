@@ -160,7 +160,7 @@ export class PdWaitingFor {
     .pd-btn:focus-visible, summary:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
     .pd-tech { max-width: 100%; color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
     .pd-tech summary { cursor: pointer; }
-    .pd-tech code { display: block; margin-top: var(--pd-space-1); white-space: pre-wrap; overflow-wrap: anywhere; text-align: start; font-family: var(--pd-font-mono); user-select: text; }
+    .pd-tech code { display: block; margin-top: var(--pd-space-1); white-space: pre-wrap; overflow-wrap: anywhere; text-align: start; font-family: var(--pd-font-mono); -webkit-user-select: text; user-select: text; }
   `,
 })
 export class PdServiceError {
