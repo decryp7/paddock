@@ -421,3 +421,15 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   another thread's short wait (a finished call's timer, its token already cancelled) bumps the count, the test advances
   before the wait it meant exists, and that wait never ends (plugin-host hang, CI run 6319; reproduced 1 in 192 under
   CPU stress, 0 in 384 with `FakeClock::wait_for_pending`).
+- WebKit (Safari, and WKWebView in the macOS apps) is a different engine, and its failures are macOS bugs, not test noise.
+  (1) It has only `-webkit-user-select`: the unprefixed property is a separate one it ignores, so a rule that says only
+  `user-select: text` cannot opt back in under the shell's `-webkit-user-select: none`; every rule sets both
+  (`scripts/webkit-prefix.test.mjs`). (2) A click does not focus a button, so a key recorder that listens on the button
+  hears nothing: focus it in the click handler. (3) Tab skips buttons and links unless macOS "Keyboard navigation" (full
+  keyboard access) is on, Playwright's WebKit follows that default, and a test of what a keyboard user reaches presses
+  Option+Tab there (`pressTab`, `tabKey` in paddock-e2e). Tauri's WKWebView takes the same system setting, so on a Mac
+  without it a user also needs Option+Tab (or the setting) to reach buttons and links; Paddock keeps every action reachable
+  by menu and shortcut for that reason. (4) `transition-duration: 0.01ms` is a real transition in WebKit: inherited colours
+  arrive about 250 ms late after a theme change (axe saw the old scheme's colours); reduced motion sets `0s`. Run the three
+  ui projects in WebKit before a build: `PADDOCK_WEBKIT=1 npx playwright test --project=gallery-webkit
+  --project=shell-demo-webkit --project=workbench-demo-webkit` (in `ui/`).

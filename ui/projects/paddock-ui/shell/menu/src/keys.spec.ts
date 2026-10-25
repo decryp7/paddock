@@ -64,6 +64,9 @@ describe('recordKey', () => {
     expect(recordKey(key('k', { metaKey: true }), 'other')).toEqual({ kind: 'binding', binding: 'Meta+K' });
     expect(recordKey(key('F6'), 'other')).toEqual({ kind: 'binding', binding: 'F6' });
     expect(recordKey(key('Dead', { altKey: true, code: 'KeyN' }), 'mac')).toEqual({ kind: 'binding', binding: 'Alt+N' });
+    // macOS: Option composes a character (Option+G is "©", Option+1 is "¡"); the physical key names the binding.
+    expect(recordKey(key('©', { metaKey: true, altKey: true, code: 'KeyG' }), 'mac')).toEqual({ kind: 'binding', binding: 'Mod+Alt+G' });
+    expect(recordKey(key('¡', { metaKey: true, altKey: true, code: 'Digit1' }), 'mac')).toEqual({ kind: 'binding', binding: 'Mod+Alt+1' });
   });
 
   it('cancels on Escape, clears on Backspace or Delete, waits on modifiers', () => {

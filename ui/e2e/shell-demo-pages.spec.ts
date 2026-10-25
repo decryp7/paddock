@@ -5,6 +5,7 @@ import {
   expectWithinWidth,
   installTauriFake,
   LAYOUT_WIDTHS,
+  pressTab,
   test,
   THEMES,
   type Page,
@@ -332,7 +333,7 @@ test.describe('pages frame (plan S14)', () => {
 
   test('a skip link leads to the page', async ({ app, page }) => {
     await app.frame.open();
-    await page.keyboard.press('Tab');
+    await pressTab(page);
     const skip = app.frame.skipLink;
     await expect(skip).toBeFocused();
     await skip.press('Enter');

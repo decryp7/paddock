@@ -82,14 +82,14 @@ interface Timer {
     [data-severity='error'] .pd-mark, [data-severity='critical'] .pd-mark { background: var(--pd-danger); border-radius: 1px; }
     .pd-title { overflow-wrap: anywhere; font-weight: var(--pd-weight-semibold); }
     .pd-count { color: var(--pd-text-muted); font-weight: var(--pd-weight-regular); font-size: var(--pd-text-caption); }
-    .pd-body { color: var(--pd-text-muted); line-height: var(--pd-lh-body); overflow-wrap: anywhere; user-select: text; }
+    .pd-body { color: var(--pd-text-muted); line-height: var(--pd-lh-body); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
     .pd-err { color: var(--pd-danger); }
     .pd-actions { display: flex; gap: var(--pd-space-1); flex-wrap: wrap; }
     .pd-btn { min-height: 26px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-btn.pd-primary { background: var(--pd-accent-fill); border-color: transparent; color: var(--pd-on-accent); }
     .pd-btn.pd-ghost { background: transparent; border-color: transparent; color: var(--pd-accent); }
     .pd-btn:focus-visible, .pd-x:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .pd-details { display: block; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pd-text-muted); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); user-select: text; }
+    .pd-details { display: block; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pd-text-muted); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); -webkit-user-select: text; user-select: text; }
     .pd-x { position: absolute; top: var(--pd-space-1); right: var(--pd-space-1); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
     .pd-x:hover { background: var(--pd-hover); color: var(--pd-text); }
     /* A small window (review 2, P3-14): one line above the status bar, full width, never wider than 360 px: the message, the
