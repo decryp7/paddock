@@ -49,7 +49,7 @@ publishers' own keys, not with the updater key (see [plugin-sdk.md](plugin-sdk.m
 - **Flow.** Check → version, notes and size → download (progress, cancel) → verified → "Restart to update"
   or "Install when Debrief quits". The install runs after Debrief has closed its windows and plugins.
 
-`latest.json` (written by `scripts/release/latest-json.mjs`):
+`latest.json` (written by the shared `conformance/release/latest-json.mjs`):
 
 ```json
 {

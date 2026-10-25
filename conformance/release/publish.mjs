@@ -2,7 +2,7 @@
 // Publishes a Gitea release for a tag and uploads its files, through the Gitea API only (no Go action needed on the
 // runner). Re-running is safe: an existing release for the tag is reused and files already attached are skipped.
 //
-//   GITEA_TOKEN=... node scripts/release/publish.mjs --api https://host/api/v1 --repo owner/name --tag v1.2.0 \
+//   GITEA_TOKEN=... node conformance/release/publish.mjs --api https://host/api/v1 --repo owner/name --tag v1.2.0 \
 //     --notes artifacts/RELEASE_NOTES.md --dir artifacts [--replace]
 //
 // Tags: `vX.Y.Z`, an app's `<app>-vX.Y.Z` in the monorepo, or its moving `<app>-latest` (ADR 0014 §4: installed apps read

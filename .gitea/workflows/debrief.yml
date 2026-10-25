@@ -375,7 +375,7 @@ jobs:
 
       - name: Third-party notices are up to date
         run: |
-          node --test scripts/notices/generate.test.mjs app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/install-test-browser.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs scripts/ci/build-folder.test.mjs app/e2e/retried-reporter.test.mjs
+          node --test scripts/notices/generate.test.mjs app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs scripts/ci/build-folder.test.mjs app/e2e/retried-reporter.test.mjs
           node scripts/ci/check-quarantine.mjs
           node scripts/ci/scan-fixtures.mjs
           node scripts/ci/check-icons.mjs
@@ -1021,7 +1021,7 @@ jobs:
           cp app/src-tauri/debrief-rust.cdx.json artifacts/
           (cd ../.. && npm ci && npx --yes @cyclonedx/cyclonedx-npm --workspace debrief-app --omit dev --output-file apps/debrief/artifacts/debrief-ui.cdx.json)
 
-      # latest.json for the updater: version, notes from RELEASE_NOTES.md, pub_date and, per platform, the
+      # latest.json for the updater (the shared conformance/release/latest-json.mjs, tested there): version, notes from RELEASE_NOTES.md, pub_date and, per platform, the
       # installer's URL in this release, its signature (.sig) and size. Installed apps fetch
       # releases/download/debrief-latest/latest.json (tauri.conf.json), the moving release published below.
       - name: Updater manifest (latest.json)
@@ -1030,13 +1030,12 @@ jobs:
           # http address, which the updater must never be given.
           BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
-          node --test scripts/release/latest-json.test.mjs
           if ! find artifacts -name '*.sig' | grep -q .; then
             echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
             exit 0
           fi
           tag='${{ github.ref_name }}'
-          node scripts/release/latest-json.mjs --dir artifacts --version "${tag#debrief-}" --notes artifacts/RELEASE_NOTES.md \
+          node ../../conformance/release/latest-json.mjs --dir artifacts --version "${tag#debrief-}" --notes artifacts/RELEASE_NOTES.md \
             --base-url "$BASE_URL" --out artifacts/latest.json
           # The signatures are in latest.json; the .sig files are not release assets.
           find artifacts -name '*.sig' -delete
