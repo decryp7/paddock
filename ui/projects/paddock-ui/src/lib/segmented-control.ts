@@ -74,7 +74,7 @@ export class SuSegmentedControl {
   protected onKey(event: KeyboardEvent): void {
     const opts = this.options();
     const current = Math.max(0, opts.findIndex((o) => o.value === this.value()));
-    let target = -1;
+    let target: number;
     if (event.key === 'ArrowRight' || event.key === 'ArrowDown') target = nextEnabled(opts, current, 1);
     else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') target = nextEnabled(opts, current, -1);
     else if (event.key === 'Home') target = nextEnabled(opts, -1, 1);

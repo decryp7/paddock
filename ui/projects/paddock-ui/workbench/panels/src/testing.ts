@@ -1,5 +1,5 @@
 import type { SyncTimers } from './ui-sync';
-import { Component, inject, InjectionToken, signal, type WritableSignal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, InjectionToken, signal, type WritableSignal } from '@angular/core';
 import { defineSharedState, defineView, provideWorkbenchContributions, VIEW_PANEL, type PanelRef } from '@decryp7/paddock-ui/workbench';
 import { defineCommand, msg } from '@decryp7/paddock-ui/shell';
 import { provideShellTesting } from '@decryp7/paddock-ui/shell/testing';
@@ -75,7 +75,7 @@ export interface TestCtx {
 }
 
 /** A view component that records the panel it is rendered in. */
-@Component({ selector: 'pd-test-view', template: `<p data-testid="test-view">{{ panel.panel }}</p>` })
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, selector: 'pd-test-view', template: `<p data-testid="test-view">{{ panel.panel }}</p>` })
 export class TestView {
   protected readonly panel = inject(VIEW_PANEL);
   constructor() {

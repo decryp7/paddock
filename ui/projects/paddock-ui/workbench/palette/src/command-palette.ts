@@ -53,6 +53,7 @@ let nextId = 0;
             @if (row.heading) {
               <li class="pd-pal-group" role="presentation" aria-hidden="true">{{ row.heading }}</li>
             }
+            <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -- options are chosen with the keyboard from the input (aria-activedescendant); the click is the pointer path -->
             <li
               role="option"
               class="pd-pal-opt"

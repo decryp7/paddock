@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { one, text } from '@decryp7/paddock-ui/testing';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import { PdNeedsAiCard } from './needs-ai-card';
 import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdNeedsAiCard],
   template: `<pd-needs-ai-card [title]="title" [message]="message" [icon]="icon" [code]="code" [codeLabel]="'Pairing code'" [approve]="approve" [hint]="hint" [error]="error" kind="needsPairing"><button type="button" class="pd-btn">Do it</button></pd-needs-ai-card>`,
 })

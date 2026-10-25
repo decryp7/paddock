@@ -19,6 +19,7 @@ import { selected, selectId } from './switcher';
               <h2 [id]="'pd-dock-sw-' + col.kind">{{ col.title }}</h2>
               <ul role="listbox" [attr.aria-labelledby]="'pd-dock-sw-' + col.kind" [attr.aria-activedescendant]="current()?.kind === col.kind ? activeId() : null">
                 @for (item of col.items; track item.id) {
+                  <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events, @angular-eslint/template/interactive-supports-focus -- options are chosen with the keyboard by the overlay key handling (aria-activedescendant); the click is the pointer path -->
                   <li
                     role="option"
                     [id]="'pd-dock-sw-item-' + item.id"

@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { form, FormField, maxLength, min, minLength, required, validate } from '@angular/forms/signals';
 import { describe, expect, it } from 'vitest';
@@ -57,6 +57,7 @@ interface Model {
 }
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdField, PdFieldControl, FormField],
   template: `
     <pd-field label="Name" hint="Shown in the list" [state]="f.name()" [submitted]="submitted()" [messages]="messages">
