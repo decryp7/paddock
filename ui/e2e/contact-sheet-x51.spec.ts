@@ -3,12 +3,12 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
-// The contact sheet of <pd-view> (plan X51, ADR 0002) for the independent review (rule 22), review 4 (after review 3): every node kind of the sample
+// The contact sheet of <pd-view> (plan X51, ADR 0002) for the independent review (rule 22), review 5 (after review 4): every node kind of the sample
 // document in both themes at desktop width, the form with its errors, the review list asking for a reason, the stale, invalid,
 // loading and busy states, keyboard focus and hover, and the whole view at 320 px. Tall subjects are shot in slices of at most 1,800
 // CSS px (a single bitmap taller than the GPU texture limit paints blank), and the images are composed into sheets by section, each
 // no taller than about 3,000 CSS px, so every sheet opens at 100%. `CONTACT_SHEET=1 npx playwright test --project=review
-// contact-sheet-x51` rewrites docs/review/x51-view/review-4/. The reviewer looks at the sheets; this test only proves they were
+// contact-sheet-x51` rewrites docs/review/x51-view/review-5/. The reviewer looks at the sheets; this test only proves they were
 // made from the real components.
 
 const GALLERY = `http://localhost:${process.env['PW_PORT'] ?? 4300}`;
@@ -18,7 +18,7 @@ const commit = ((): string => {
   const dirty = git('status', '--porcelain', '--', '../projects', '../e2e/view.spec.ts').length > 0;
   return `${git('rev-parse', '--short=10', 'HEAD')}${dirty ? ' + uncommitted changes' : ''}`;
 })();
-const OUT = join(__dirname, '..', 'docs', 'review', 'x51-view', 'review-4');
+const OUT = join(__dirname, '..', 'docs', 'review', 'x51-view', 'review-5');
 const THEMES = ['dark', 'light'] as const;
 const SLICE = 1800;
 const SHEET_MAX = 3000;
@@ -33,7 +33,7 @@ interface Shot {
 }
 
 test.describe('contact sheet: pd-view', () => {
-  test.skip(!process.env['CONTACT_SHEET'], 'set CONTACT_SHEET=1 to rewrite docs/review/x51-view/review-4');
+  test.skip(!process.env['CONTACT_SHEET'], 'set CONTACT_SHEET=1 to rewrite docs/review/x51-view/review-5');
   test.describe.configure({ timeout: 300_000 });
   test.use({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 2 });
 
@@ -268,7 +268,7 @@ test.describe('contact sheet: pd-view', () => {
         figure{margin:0;background:#fff;padding:6px;border-radius:6px}
         figure img{display:block;max-width:100%;height:auto}
         figcaption{font-size:11px;color:#444;margin-bottom:4px}
-      </style><h1>${esc(sheet.label)}: review 4, not self-approved (left dark, right light)</h1>
+      </style><h1>${esc(sheet.label)}: review 5, not self-approved (left dark, right light)</h1>
       ${sheet.rows
         .map(
           (r) =>
@@ -284,9 +284,9 @@ test.describe('contact sheet: pd-view', () => {
     writeFileSync(
       join(OUT, 'README.md'),
       [
-        '# Contact sheet of `<pd-view>`: review 4 (NOT self-approved)',
+        '# Contact sheet of `<pd-view>`: review 5 (NOT self-approved)',
         '',
-        `Plan X51, ADR 0002. Made from the real components after the fixes for review 3 (\`../REVIEW.md\`, \`../FIXES.md\`). Every section (kinds, states, interaction, 320 px) was captured in one run from one commit: \`${commit}\`. Awaiting the independent reviewer (rule 22).`,
+        `Plan X51, ADR 0002. Made from the real components after the fixes for review 4 (\`../REVIEW.md\`, \`../FIXES.md\`). Every section (kinds, states, interaction, 320 px) was captured in one run from one commit: \`${commit}\`. Awaiting the independent reviewer (rule 22).`,
         '',
         'Open the `sheet-*.png` files: each is one section, dark on the left and light on the right, no taller than about 3,000 px (6,000 px of bitmap), readable at 100%.',
         'The single images (`dark-*.png`, `light-*.png`) are the same shots at 2x; a subject taller than 1,800 px is cut into numbered slices (`-1`, `-2`).',
