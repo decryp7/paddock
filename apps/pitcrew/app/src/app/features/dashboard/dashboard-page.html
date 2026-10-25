@@ -1,0 +1,195 @@
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Dashboard</h1>
+      <p class="subtitle">{{ status.status() ? summary() : status.offline() ? 'Not connected to the Pitcrew service' : 'Connecting to the Pitcrew service…' }}</p>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn primary" (click)="register.open()">
+        <mat-icon svgIcon="pc:plus" aria-hidden="true" />Register runner
+      </button>
+    </div>
+  </header>
+
+  @if (!status.status() && status.offline()) {
+    <section class="card">
+      <pc-empty-state [brand]="true" title="Waiting for the Pitcrew service" text="The runners, their jobs and their history appear here once Pitcrew can reach its service. The banner above says what is wrong and how to fix it." />
+    </section>
+  } @else if (!status.status()) {
+    <div class="tiles">
+      @for (i of [1, 2]; track i) {
+        <div class="card skel-tile"><span class="skeleton" style="height: 18px; width: 40%"></span><span class="skeleton" style="height: 56px"></span><span class="skeleton" style="height: 28px"></span></div>
+      }
+    </div>
+  } @else if (status.status() && runners().length === 0) {
+    <section class="card">
+      <pc-empty-state [brand]="true" title="No runners yet" text="Register a runner with your Gitea or Forgejo server, or adopt a runner folder that is registered already. Pitcrew then keeps it running and up to date.">
+        <button type="button" class="btn primary" (click)="register.open()"><mat-icon svgIcon="pc:plus" aria-hidden="true" />Register a runner</button>
+      </pc-empty-state>
+    </section>
+  } @else if (status.status()) {
+    <section aria-label="Runners" class="tiles">
+      @for (r of runners(); track r.name) {
+        <pc-runner-tile [runner]="r" [details]="store.details()[r.name]" [lastJob]="lastJobs()[r.name]" [now]="clock.now()" />
+      }
+    </section>
+
+    <section aria-labelledby="machine-title" class="block">
+      <div class="block-head">
+        <h2 id="machine-title" class="section-label">Runner load</h2>
+        <span class="faint small">last {{ rangeLabel() }}</span>
+      </div>
+      <pc-load-state what="Machine metrics" [hasValue]="!!store.machine().value" [error]="store.machine().error" [skeleton]="[96]" (retry)="store.retry()">
+        <pc-machine-tiles [samples]="store.machine().value?.machine ?? []" [service]="status.service()" [now]="clock.now()" />
+      </pc-load-state>
+    </section>
+
+    <section aria-labelledby="history-title" class="block">
+      <div class="block-head">
+        <h2 id="history-title" class="section-label">History</h2>
+        <div class="btn-row">
+          <div class="segmented" role="radiogroup" aria-label="History range">
+            @for (r of ranges; track r.key) {
+              <button type="button" role="radio" [attr.aria-checked]="store.range() === r.key" (click)="store.setRange(r.key)">{{ r.label }}</button>
+            }
+          </div>
+          <label class="focus">
+            <span class="visually-hidden">Show history for</span>
+            <select class="select sm" [value]="store.focus() ?? ''" (change)="setFocus($any($event.target).value)">
+              <option value="">All runners</option>
+              @for (n of names(); track n) {
+                <option [value]="n">{{ n }}</option>
+              }
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="grid">
+        <article class="card span-2">
+          <header class="card-header">
+            <h3>{{ hourly() ? 'Jobs per hour' : 'Jobs per day' }}</h3>
+            <span class="meta">{{ jobTotal() }} {{ jobTotal() === 1 ? 'job' : 'jobs' }}</span>
+          </header>
+          <div class="card-body">
+            <pc-load-state what="Activity" [hasValue]="activityState().hasValue" [error]="activityState().error" [skeleton]="[200]" (retry)="store.retry()">
+              @if (noToken().length > 0) {
+                <div class="hint">
+                  <mat-icon svgIcon="pc:key" aria-hidden="true" />
+                  <span>Outcomes of {{ noToken().join(', ') }} are unknown without a Gitea read token.</span>
+                  <a routerLink="/settings" [queryParams]="{ section: 'tokens' }">Add a token</a>
+                </div>
+              }
+              <pc-chart [option]="jobsOption()" [height]="224" [label]="(hourly() ? 'Jobs per hour by outcome, ' : 'Jobs per day by outcome, ') + jobTotal() + ' jobs in the range'" />
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card feed-card">
+          <header class="card-header">
+            <h3>Events</h3>
+            <span class="meta">restarts, updates, cleanups</span>
+          </header>
+          <div class="card-body feed-body">
+            <pc-load-state what="Events" [hasValue]="activityState().hasValue" [error]="null" [skeleton]="[40, 40, 40, 40]" (retry)="store.retry()">
+              <pc-events-feed [items]="feed()" [now]="clock.now()" />
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card span-3">
+          <header class="card-header">
+            <h3>Uptime</h3>
+            <span class="meta">restarts and stalls marked</span>
+          </header>
+          <div class="card-body">
+            <pc-load-state what="Uptime" [hasValue]="activityState().hasValue" [error]="activityState().error" [skeleton]="[18, 18, 18]" (retry)="store.retry()">
+              <pc-timeline [rows]="timelineRows()" [from]="timelineFrom()" [to]="clock.now()" />
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card">
+          <header class="card-header"><h3>Average job duration</h3></header>
+          <div class="card-body">
+            <pc-load-state what="Durations" [hasValue]="activityState().hasValue" [error]="activityState().error" [skeleton]="[160]" (retry)="store.retry()">
+              <pc-chart [option]="durationOpt()" [height]="168" label="Average job duration per day" />
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card">
+          <header class="card-header"><h3>Queue wait</h3></header>
+          <div class="card-body">
+            <pc-load-state what="Queue times" [hasValue]="activityState().hasValue" [error]="activityState().error" [skeleton]="[160]" (retry)="store.retry()">
+              @if (hasQueue()) {
+                <pc-chart [option]="queueOpt()" [height]="168" label="Average time jobs waited in the queue per day" />
+              } @else {
+                <p class="placeholder faint">Queue times come from the Gitea API and need a read token.</p>
+              }
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card">
+          <header class="card-header">
+            <h3>Updates</h3>
+          </header>
+          <div class="card-body">
+            <pc-load-state what="Updates" [hasValue]="activityState().hasValue" [error]="activityState().error" [skeleton]="[28, 28, 28]" (retry)="store.retry()">
+              @if (updates().length === 0) {
+                <p class="placeholder faint">No updates in this range.</p>
+              } @else {
+                <ul class="updates">
+                  @for (u of updates(); track u.runner + u.at) {
+                    <li>
+                      <span class="badge" [class]="u.look.tone">{{ u.look.label }}</span>
+                      <span class="truncate" [title]="u.runner + ': ' + u.look.detail"><strong>{{ u.runner }}</strong><span class="muted detail">{{ u.look.detail }}</span></span>
+                      <span class="faint when">{{ when(u.at) }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card span-2">
+          <header class="card-header">
+            <h3>CPU</h3>
+            <span class="meta">runners and the rest of the machine</span>
+          </header>
+          <div class="card-body">
+            <pc-load-state what="CPU history" [hasValue]="!!store.machine().value" [error]="store.machine().error" [skeleton]="[168]" (retry)="store.retry()">
+              <pc-chart [option]="cpuOpt()" [height]="176" label="CPU use of the runners and of the rest of the machine over time" />
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card">
+          <header class="card-header">
+            <h3>Memory</h3>
+            <span class="meta">runners and the rest</span>
+          </header>
+          <div class="card-body">
+            <pc-load-state what="Memory history" [hasValue]="!!store.machine().value" [error]="store.machine().error" [skeleton]="[168]" (retry)="store.retry()">
+              <pc-chart [option]="memOpt()" [height]="176" label="Memory use of the runners and of the rest of the machine over time" />
+            </pc-load-state>
+          </div>
+        </article>
+
+        <article class="card span-3">
+          <header class="card-header">
+            <h3>Runner folders</h3>
+            <span class="meta">size on disk; lines mark cleanups</span>
+          </header>
+          <div class="card-body">
+            <pc-load-state what="Disk history" [hasValue]="diskState().hasValue" [error]="diskState().error" [skeleton]="[160]" (retry)="store.retry()">
+              <pc-chart [option]="diskOpt()" [height]="180" label="Size of each runner folder over time, with cleanups marked" />
+            </pc-load-state>
+          </div>
+        </article>
+      </div>
+    </section>
+  }
+</div>

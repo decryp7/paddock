@@ -1,0 +1,34 @@
+/* Pitcrew's global styles: tokens, element defaults and the shared building blocks every screen uses.
+   Components keep only their own layout in their styles; anything reused lives in these partials. */
+
+@use '@angular/cdk' as cdk;
+@use '@angular/material' as mat;
+@use 'styles/tokens';
+@use 'styles/base';
+@use 'styles/controls';
+@use 'styles/surfaces';
+
+@include cdk.overlay();
+@include cdk.a11y-visually-hidden();
+
+/* Material's base tokens (shapes, sizes, typography) for the few Material components; colours follow color-scheme. */
+html {
+  @include mat.theme((color: (theme-type: color-scheme, primary: mat.$orange-palette), typography: system-ui, density: 0));
+}
+
+/* Material's system tokens, mapped onto Pitcrew's so the few Material components follow both themes. */
+:root {
+  --mat-sys-primary: var(--accent-bg);
+  --mat-sys-on-primary: var(--on-accent);
+  --mat-sys-surface: var(--surface);
+  --mat-sys-on-surface: var(--text);
+  --mat-sys-on-surface-variant: var(--text-2);
+  --mat-sys-outline: var(--border-strong);
+  --mat-sys-surface-container-highest: var(--surface-3);
+  --mat-sys-inverse-surface: var(--text);
+  --mat-sys-inverse-on-surface: var(--surface);
+  --mat-sys-body-medium-font: var(--font-sans);
+  --mat-sys-body-small-font: var(--font-sans);
+  --mat-sys-body-medium-size: var(--text-md);
+  --mat-sys-body-small-size: var(--text-sm);
+}

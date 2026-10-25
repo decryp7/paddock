@@ -1,0 +1,167 @@
+@let d = draft();
+<div class="wizard">
+  <header class="top">
+    <div>
+      <h2 id="register-title">Register a runner</h2>
+      <p class="muted small">Pitcrew registers it with your server, then keeps it running and up to date.</p>
+    </div>
+    <button type="button" class="btn ghost icon" aria-label="Close" (click)="close()"><mat-icon svgIcon="pc:x" aria-hidden="true" /></button>
+  </header>
+
+  <ol class="stepper" aria-label="Steps">
+    @for (s of steps; track s; let i = $index) {
+      <li [class.done]="i < step()" [class.current]="i === step()" [attr.aria-current]="i === step() ? 'step' : null">
+        <button type="button" (click)="goTo(i)" [disabled]="i >= step()">
+          <span class="num-badge">
+            @if (i < step()) {
+              <mat-icon svgIcon="pc:check" aria-hidden="true" />
+            } @else {
+              {{ i + 1 }}
+            }
+          </span>
+          {{ s }}
+        </button>
+      </li>
+    }
+  </ol>
+
+  <form class="body" (submit)="$event.preventDefault(); step() === steps.length - 1 ? submit() : next()">
+    @switch (step()) {
+      @case (0) {
+        <div class="field">
+          <label for="reg-url">Server URL</label>
+          <input id="reg-url" class="input" type="url" placeholder="https://git.example.com" autocomplete="url" [value]="d.serverUrl" (input)="set('serverUrl', $any($event.target).value)" />
+          <span class="hint">Your Gitea or Forgejo server.</span>
+        </div>
+        <div class="field">
+          <label for="reg-token">Registration token</label>
+          <input id="reg-token" class="input" type="password" autocomplete="off" spellcheck="false" [value]="d.token" (input)="set('token', $any($event.target).value)" />
+          <span class="hint">From the server’s Site, Organization or Repository settings ▸ Actions ▸ Runners ▸ Create new runner. It goes straight to the runner’s register command and is never written to Pitcrew’s files or logs.</span>
+        </div>
+        <label class="check">
+          <input type="checkbox" [checked]="d.rememberToken" (change)="set('rememberToken', $any($event.target).checked)" />
+          Remember it in {{ credentialStore }} (to re-register later)
+        </label>
+      }
+      @case (1) {
+        <div class="field">
+          <label for="reg-name">Name in Pitcrew</label>
+          <input id="reg-name" class="input mono" placeholder="build-win" [value]="d.runner" (input)="setName($any($event.target).value)" maxlength="32" />
+          <span class="hint">Lower-case letters, digits and “-”. Also the folder name.</span>
+        </div>
+        <div class="field">
+          <label for="reg-display">Name on the server <span class="faint">(optional)</span></label>
+          <input id="reg-display" class="input" [placeholder]="d.runner || 'Same as the name in Pitcrew'" [value]="d.displayName" (input)="set('displayName', $any($event.target).value)" />
+        </div>
+        <div class="field">
+          <label for="reg-labels">Labels</label>
+          <div class="labels">
+            @for (l of d.labels; track l) {
+              <span class="chip">{{ l }}<button type="button" [attr.aria-label]="'Remove label ' + l" (click)="removeLabel(l)"><mat-icon svgIcon="pc:x" aria-hidden="true" /></button></span>
+            }
+            <input #lab id="reg-labels" class="bare" placeholder="windows, x64…" (keydown)="labelKey($event, lab)" (blur)="addLabel(lab)" />
+          </div>
+          <span class="hint">Workflows pick runners by label (<code>runs-on</code>). Press Enter after each.</span>
+        </div>
+      }
+      @case (2) {
+        <fieldset class="choice">
+          <legend>Folder</legend>
+          <label class="option" [class.on]="d.folder === 'default'">
+            <input type="radio" name="folder" [checked]="d.folder === 'default'" (change)="set('folder', 'default')" />
+            <span><strong>A new folder</strong><span class="muted">in Pitcrew’s data folder, named after the runner</span></span>
+          </label>
+          <label class="option" [class.on]="d.folder === 'existing'">
+            <input type="radio" name="folder" [checked]="d.folder === 'existing'" (change)="set('folder', 'existing')" />
+            <span><strong>An existing runner folder</strong><span class="muted">a folder that is registered already is adopted as it is</span></span>
+          </label>
+          @if (d.folder === 'existing') {
+            <input class="input mono" aria-label="Folder to adopt" placeholder="C:\runners\build-win" [value]="d.dir" (input)="set('dir', $any($event.target).value)" />
+          }
+        </fieldset>
+        <fieldset class="choice">
+          <legend>Session</legend>
+          <label class="option" [class.on]="d.session === 'interactive'">
+            <input type="radio" name="session" [checked]="d.session === 'interactive'" (change)="set('session', 'interactive')" />
+            <span><strong>The logged-on user’s desktop</strong><span class="muted">jobs can use a desktop: UI tests, WebView2, simulators, signing</span></span>
+          </label>
+          <label class="option" [class.on]="d.session === 'service'">
+            <input type="radio" name="session" [checked]="d.session === 'service'" (change)="set('session', 'service')" />
+            <span><strong>The service session</strong><span class="muted">starts before anyone logs on; no desktop</span></span>
+          </label>
+        </fieldset>
+        @if (d.session === 'interactive') {
+          <fieldset class="choice">
+            <legend>When nobody is logged on</legend>
+            <label class="option" [class.on]="d.loggedOff === 'wait'">
+              <input type="radio" name="off" [checked]="d.loggedOff === 'wait'" (change)="set('loggedOff', 'wait')" />
+              <span><strong>Wait for a user to log on</strong><span class="muted">the runner starts at log-on, like a log-on task</span></span>
+            </label>
+            <label class="option" [class.on]="d.loggedOff === 'service-account'">
+              <input type="radio" name="off" [checked]="d.loggedOff === 'service-account'" (change)="set('loggedOff', 'service-account')" />
+              <span><strong>Run as the service account</strong><span class="muted">keeps taking jobs while nobody is logged on</span></span>
+            </label>
+          </fieldset>
+        }
+        @if (d.session === 'service' || d.loggedOff === 'service-account') {
+          <div class="callout warning" role="note">
+            <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+            <div class="callout-body">
+              <strong>Jobs would run as LocalSystem, without a desktop</strong>
+              <span>{{ d.session === 'service' ? 'Every job' : 'Jobs that run while nobody is logged on' }} get the service account’s full rights on this machine and no desktop: UI tests and WebView2 fail there. Use it only for trusted repositories.</span>
+            </div>
+          </div>
+        }
+      }
+      @case (3) {
+        <dl class="kv review">
+          <dt>Server</dt>
+          <dd>{{ d.serverUrl }}</dd>
+          <dt>Token</dt>
+          <dd>•••••••• {{ d.rememberToken ? '(remembered in ' + credentialStore + ')' : '(not stored)' }}</dd>
+          <dt>Name</dt>
+          <dd class="mono">{{ d.runner }}{{ d.displayName ? ' (“' + d.displayName + '” on the server)' : '' }}</dd>
+          <dt>Labels</dt>
+          <dd>{{ d.labels.length ? d.labels.join(', ') : 'none' }}</dd>
+          <dt>Folder</dt>
+          <dd>{{ d.folder === 'existing' ? 'Adopt ' + d.dir : 'New folder in Pitcrew’s data folder' }}</dd>
+          <dt>Session</dt>
+          <dd>{{ d.session === 'interactive' ? 'Logged-on user’s desktop' : 'Service session' }}{{ d.session === 'interactive' ? (d.loggedOff === 'wait' ? '; waits for log-on' : '; service account while logged off') : '' }}</dd>
+        </dl>
+        @if (failure(); as f) {
+          <div class="callout danger" role="alert">
+            <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+            <div class="callout-body"><strong>Registration failed</strong><span>{{ f }}</span></div>
+          </div>
+        }
+      }
+    }
+
+    @if (touched() && errors().length > 0) {
+      <ul class="errors" role="alert">
+        @for (e of errors(); track e) {
+          <li>{{ e }}</li>
+        }
+      </ul>
+    }
+
+    <footer class="actions">
+      @if (step() > 0) {
+        <button type="button" class="btn" (click)="back()" [disabled]="submitting()">Back</button>
+      }
+      <span class="spacer"></span>
+      <button type="button" class="btn ghost" (click)="close()" [disabled]="submitting()">Cancel</button>
+      @if (step() < steps.length - 1) {
+        <button type="submit" class="btn primary">Continue</button>
+      } @else {
+        <button type="submit" class="btn primary" [disabled]="submitting()">
+          @if (submitting()) {
+            <mat-icon svgIcon="pc:loader" class="spin" aria-hidden="true" />Registering…
+          } @else {
+            Register
+          }
+        </button>
+      }
+    </footer>
+  </form>
+</div>

@@ -1,0 +1,50 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Pitcrew",
+  "version": "1.0.2",
+  "identifier": "net.decryptology.pitcrew",
+  "build": {
+    "frontendDist": "../dist/app/browser",
+    "devUrl": "http://localhost:4200",
+    "beforeDevCommand": "node ../scripts/sidecar.mjs --dev && npm run start",
+    "beforeBuildCommand": "node ../scripts/sidecar.mjs && npm run build && node ../scripts/check-index.mjs"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pitcrew",
+        "width": 1200,
+        "height": 780,
+        "minWidth": 760,
+        "minHeight": 520,
+        "resizable": true,
+        "zoomHotkeysEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "dmg", "app"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "externalBin": ["binaries/pitcrew-service"],
+    "category": "DeveloperTool",
+    "shortDescription": "A runner manager for Gitea and Forgejo",
+    "longDescription": "Pitcrew keeps CI runners for Gitea and Forgejo running, healthy, clean and up to date: a service supervises them, and the tray app shows what they do."
+  },
+  "mainBinaryName": "pitcrew-app",
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": ["https://dev.decryptology.net/decryp7/Pitcrew/releases/download/latest/latest.json"],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

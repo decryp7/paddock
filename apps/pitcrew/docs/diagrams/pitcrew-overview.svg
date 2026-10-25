@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1328 1084" width="1328" height="1084" role="img" aria-labelledby="t d">
+  <title id="t">Pitcrew architecture overview</title>
+  <desc id="d">The outside world (the operating system, runner release hosts, the Gitea or Forgejo server) meets the Pitcrew service, which supervises runner processes, restarts stalled or crashed runners, updates them safely with roll-back and cleans their disks. The Pitcrew app (window, tray, Rust shell) shows and controls it over one local IPC. A pure Rust core holds all the rules.</desc>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker></defs>
+  <style>
+    :root{--acc-s:#BF3A0C;--acc-f:#F9EBE7;--ui-s:#4C5BD4;--ui-f:#EDEFFB;--core-s:#007A5E;--core-f:#E6F2EF;--pro-s:#565E6B;--pro-f:#F0F2F5;--ext-s:#6B7380;--ext-f:#F4F5F7;--grp-s:#C4C7CD;--grp-f:#F8F9FA;--ink:#14171C;--mut:#565E6B;--line:#565E6B;}
+    @media (prefers-color-scheme: dark){:root{--acc-s:#FF7A45;--acc-f:#3A2722;--ui-s:#8FA3FF;--ui-f:#292D3F;--core-s:#2EC4A0;--core-f:#193330;--pro-s:#A0A7B2;--pro-f:#1B1E23;--ext-s:#7F8794;--ext-f:#17191E;--grp-s:#353A42;--grp-f:#121418;--ink:#ECEEF1;--mut:#A0A7B2;--line:#A0A7B2;}}
+    text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;fill:var(--ink)}
+    .title{font-size:24px;font-weight:600}.sub{font-size:14px;fill:var(--mut)}.desc{font-size:12px;fill:var(--mut)}
+    .h{font-size:14px;font-weight:600}.t{font-size:12px}.m{font-size:12px;fill:var(--mut)}.gl{font-size:12px;font-weight:600;fill:var(--mut)}.foot{font-size:11px;fill:var(--mut);text-anchor:end}
+    .g{fill:var(--grp-f);stroke:var(--grp-s);stroke-width:1}
+    .n{stroke-width:1.5}
+    .acc{fill:var(--acc-f);stroke:var(--acc-s)}.ui{fill:var(--ui-f);stroke:var(--ui-s)}.core{fill:var(--core-f);stroke:var(--core-s)}.pro{fill:var(--pro-f);stroke:var(--pro-s)}
+    .ext{fill:var(--ext-f);stroke:var(--ext-s);stroke-dasharray:6 4}
+    .e{stroke:var(--line);stroke-width:1.5;fill:none}.ah{fill:var(--line)}
+  </style>
+<text x="48" y="64" class="title">Pitcrew</text>
+<text x="48" y="94" class="sub">A runner manager for Gitea and Forgejo: install, run, watch, update and clean CI runners</text>
+<text x="48" y="118" class="desc">Keep running, update safely, show everything · Windows, macOS and Linux</text>
+<rect x="48" y="160" width="304" height="656" rx="10" class="g"/>
+<text x="64" y="188" class="gl">Outside Pitcrew</text>
+<rect x="472" y="160" width="416" height="656" rx="10" class="g"/>
+<text x="488" y="188" class="gl">Pitcrew service: keeps runners going</text>
+<rect x="1008" y="160" width="272" height="656" rx="10" class="g"/>
+<text x="1024" y="188" class="gl">Pitcrew app: see and control</text>
+<rect x="496" y="208" width="368" height="96" rx="6" class="n acc"/>
+<text x="512" y="236" class="h">Supervisor</text>
+<text x="512" y="258" class="t">One thread owns every runner: a controller, a job</text>
+<text x="512" y="274" class="t">tracker and an update machine each, driven by one</text>
+<text x="512" y="290" class="t">message channel.</text>
+<rect x="496" y="328" width="368" height="96" rx="6" class="n acc"/>
+<text x="512" y="356" class="h">Watchdog and restarts</text>
+<text x="512" y="378" class="t">Stall rule: 6 timed-out polls in 15 min with no job.</text>
+<text x="512" y="394" class="t">Back-off 10 s to 5 min, crash-loop pause. A running</text>
+<text x="512" y="410" class="t">job is never killed.</text>
+<rect x="496" y="448" width="368" height="96" rx="6" class="n acc"/>
+<text x="512" y="476" class="h">Safe updates</text>
+<text x="512" y="498" class="t">Download, verify, wait for the job, swap, restart,</text>
+<text x="512" y="514" class="t">confirm. Roll back automatically if the new runner is</text>
+<text x="512" y="530" class="t">not accepted.</text>
+<rect x="496" y="568" width="368" height="80" rx="6" class="n acc"/>
+<text x="512" y="596" class="h">Housekeeping, history, metrics</text>
+<text x="512" y="618" class="t">Cleanup of work and cache folders; uptime, restarts</text>
+<text x="512" y="634" class="t">and jobs; CPU and memory of runners.</text>
+<rect x="496" y="672" width="368" height="72" rx="6" class="n pro"/>
+<text x="512" y="700" class="h">Runner processes</text>
+<text x="512" y="722" class="t">gitea-runner, one per runner, children of the service.</text>
+<rect x="72" y="208" width="256" height="96" rx="6" class="n pro"/>
+<text x="88" y="236" class="h">The operating system</text>
+<text x="88" y="258" class="t">Service manager, credential store,</text>
+<text x="88" y="274" class="t">notifications and tray.</text>
+<rect x="72" y="448" width="256" height="112" rx="6" class="n ext"/>
+<text x="88" y="476" class="h">Runner release hosts</text>
+<text x="88" y="498" class="t">dl.gitea.com and gitea.com: version,</text>
+<text x="88" y="514" class="t">binary and SHA-256 checksums</text>
+<text x="88" y="530" class="t">from two hosts. Pitcrew's own</text>
+<text x="88" y="546" class="t">updates are opt-in.</text>
+<rect x="72" y="672" width="256" height="112" rx="6" class="n ext"/>
+<text x="88" y="700" class="h">Gitea / Forgejo server</text>
+<text x="88" y="722" class="t">Hands out jobs; runners register</text>
+<text x="88" y="738" class="t">and poll it. The app reads job</text>
+<text x="88" y="754" class="t">outcomes with a read-only token.</text>
+<rect x="1032" y="208" width="224" height="120" rx="6" class="n ui"/>
+<text x="1048" y="236" class="h">Window</text>
+<text x="1048" y="258" class="t">Dashboard, runners, activity,</text>
+<text x="1048" y="274" class="t">logs, updates, settings and the</text>
+<text x="1048" y="290" class="t">register wizard, dark and</text>
+<text x="1048" y="306" class="t">light.</text>
+<rect x="1032" y="352" width="224" height="104" rx="6" class="n ui"/>
+<text x="1048" y="380" class="h">Tray and notifications</text>
+<text x="1048" y="402" class="t">Worst state at a glance;</text>
+<text x="1048" y="418" class="t">stalls, crash loops, updates,</text>
+<text x="1048" y="434" class="t">disk.</text>
+<rect x="1032" y="480" width="224" height="120" rx="6" class="n acc"/>
+<text x="1048" y="508" class="h">Rust shell</text>
+<text x="1048" y="530" class="t">Validates every request; keeps</text>
+<text x="1048" y="546" class="t">tokens in the OS credential</text>
+<text x="1048" y="562" class="t">store.</text>
+<rect x="1032" y="624" width="224" height="120" rx="6" class="n pro"/>
+<text x="1048" y="652" class="h">Close it, crash it</text>
+<text x="1048" y="674" class="t">The service goes on</text>
+<text x="1048" y="690" class="t">supervising; quitting the app</text>
+<text x="1048" y="706" class="t">never stops the runners.</text>
+<path d="M328 256 L496 256" class="e" marker-end="url(#a)"/>
+<text x="389" y="246" class="m">starts</text>
+<!-- -->
+<path d="M496 496 L328 496" class="e" marker-end="url(#a)"/>
+<text x="378" y="486" class="m">downloads</text>
+<path d="M496 708 L328 708" class="e" marker-end="url(#a)"/>
+<text x="367" y="698" class="m">polls for jobs</text>
+<path d="M864 256 L1032 256" class="e" marker-end="url(#a)"/>
+<text x="902" y="246" class="m">pushes events</text>
+<path d="M1032 536 L864 536" class="e" marker-end="url(#a)"/>
+<text x="918" y="526" class="m">requests</text>
+<rect x="48" y="856" width="1232" height="88" rx="6" class="n core"/>
+<text x="64" y="884" class="h">pitcrew-core: pure Rust, no I/O, no clock</text>
+<text x="64" y="908" class="t">Controller, watchdog, restart policy, update machine and policy, housekeeping plan, history, metrics, config, protocol.</text>
+<text x="64" y="928" class="t">Time comes in as values. The service and the app both use it.</text>
+<rect x="48" y="980" width="860" height="40" rx="14" class="g"/>
+<rect x="68" y="992" width="28" height="16" rx="4" class="n ext"/>
+<text x="104" y="1004" class="m">Outside</text>
+<rect x="192" y="992" width="28" height="16" rx="4" class="n acc"/>
+<text x="228" y="1004" class="m">Pitcrew</text>
+<rect x="320" y="992" width="28" height="16" rx="4" class="n ui"/>
+<text x="356" y="1004" class="m">Window and tray</text>
+<rect x="500" y="992" width="28" height="16" rx="4" class="n pro"/>
+<text x="536" y="1004" class="m">Process · OS</text>
+<rect x="658" y="992" width="28" height="16" rx="4" class="n core"/>
+<text x="694" y="1004" class="m">Pure core</text>
+<text x="1280" y="1004" class="foot">Pitcrew · updated 2026-10-22</text>
+<text x="48" y="1060" class="desc">One local IPC joins app and service: a named pipe or Unix socket, length-prefixed JSON frames, pushed status events.</text>
+</svg>

@@ -1,0 +1,25 @@
+[package]
+name = "pitcrew-core"
+description = "Pitcrew's pure core: watchdog rules, restart policy, update decisions and state machine, versions, checksums, configuration and the app-service protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+semver.workspace = true
+serde.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+serde_norway.workspace = true
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

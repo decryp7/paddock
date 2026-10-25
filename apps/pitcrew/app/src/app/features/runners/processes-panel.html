@@ -1,0 +1,136 @@
+<pc-load-state what="The process list" [hasValue]="!!list()" [error]="store.list().error" [skeleton]="[48, 160]" (retry)="store.retry()">
+  @if (list(); as l) {
+    @if (summary(); as s) {
+      <section class="card" aria-labelledby="proc-title">
+        <header class="card-header">
+          <h3 id="proc-title">Processes</h3>
+          <div class="chips">
+            <span class="chip" data-testid="process-summary">{{ s.text }}</span>
+            <span class="chip" data-testid="cleanup-state"><mat-icon [svgIcon]="l.cleanup ? 'pc:check' : 'pc:minus'" aria-hidden="true" />{{ s.cleanup }}</span>
+            <span class="chip"><mat-icon [svgIcon]="l.idle ? 'pc:check-circle' : 'pc:play-circle'" aria-hidden="true" />{{ l.idle ? 'Idle: leftovers can be stopped' : 'A job is running' }}</span>
+          </div>
+        </header>
+        <div class="card-body flush">
+          @if (store.actionError(); as err) {
+            <div class="callout danger" role="alert">
+              <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+              <div class="callout-body">
+                <strong>That did not work</strong>
+                <span>{{ err }}</span>
+              </div>
+              <button type="button" class="btn sm" (click)="store.dismissError()">Dismiss</button>
+            </div>
+          }
+          @if (rows().length === 0) {
+            <p class="empty-note muted">No processes: this runner is not running, so it has no process tree.</p>
+          } @else {
+            <div class="scroll">
+              <table class="table procs">
+                <caption class="visually-hidden">Processes of {{ runner() }}</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Process</th>
+                    <th scope="col" class="num">PID</th>
+                    <th scope="col" class="num">CPU</th>
+                    <th scope="col" class="num">Memory</th>
+                    <th scope="col" class="num">Age</th>
+                    <th scope="col">Job</th>
+                    <th scope="col"><span class="visually-hidden">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of rows(); track row.entry.pid + ':' + row.entry.startedAt) {
+                    @let e = row.entry;
+                    <tr [class.leftover]="!!e.leftover" [attr.data-pid]="e.pid">
+                      <td class="proc">
+                        <div class="name-line">
+                          <strong>{{ e.name }}</strong>
+                          @if (e.isRunner) {
+                            <span class="badge info"><mat-icon svgIcon="pc:runner" aria-hidden="true" />runner</span>
+                          }
+                          @if (e.leftover) {
+                            <span class="badge warning"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />Leftover</span>
+                          }
+                        </div>
+                        <div class="cmd-line">
+                          <code class="cmd" [title]="e.command">{{ e.command }}</code>
+                          <button type="button" class="btn icon sm ghost" [attr.aria-label]="'Copy the command of ' + e.name + ' (pid ' + e.pid + ')'" (click)="copy(e)"><mat-icon svgIcon="pc:copy" aria-hidden="true" /></button>
+                        </div>
+                        @if (row.fate; as f) {
+                          <div class="fate" [class]="f.tone" data-testid="fate">
+                            <strong>{{ f.headline }}</strong>
+                            <span class="faint"> · {{ f.because }}</span>
+                          </div>
+                        }
+                      </td>
+                      <td class="num">{{ e.pid }}</td>
+                      <td class="num">{{ row.cpu }}</td>
+                      <td class="num">{{ row.mem }}</td>
+                      <td class="num">{{ row.age }}</td>
+                      <td class="job-cell">
+                        @if (row.job; as j) {
+                          <span class="job-text">{{ j }}</span>
+                          @if (e.job?.running) {
+                            <span class="badge info"><span class="dot pulse" aria-hidden="true"></span>running</span>
+                          }
+                        } @else {
+                          <span class="faint">—</span>
+                        }
+                      </td>
+                      <td class="actions">
+                        @if (row.canKeep) {
+                          <button type="button" class="btn icon sm ghost" [cdkMenuTriggerFor]="keepMenu" [cdkMenuTriggerData]="{ $implicit: e }" [attr.aria-label]="'Keep ' + e.name + ' longer'" [disabled]="store.busy() === e.pid">
+                            <mat-icon svgIcon="pc:clock" aria-hidden="true" />
+                          </button>
+                        }
+                        @if (e.isRunner) {
+                          <button type="button" class="btn icon sm ghost" [cdkMenuTriggerFor]="runnerMenu" [cdkMenuTriggerData]="{ $implicit: e }" [attr.aria-label]="'More actions for ' + e.name" [disabled]="store.busy() === e.pid">
+                            <mat-icon svgIcon="pc:more" aria-hidden="true" />
+                          </button>
+                        } @else {
+                          <button type="button" class="btn icon sm ghost" [attr.aria-label]="'Stop ' + e.name + ' now (pid ' + e.pid + ')'" [disabled]="store.busy() === e.pid" (click)="stop(e)">
+                            <mat-icon svgIcon="pc:stop-circle" aria-hidden="true" />
+                          </button>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+          @if (l.truncated) {
+            <p class="faint small note">The list is cut off: only the biggest processes are shown.</p>
+          }
+        </div>
+      </section>
+    }
+
+    <section class="card" aria-labelledby="override-title">
+      <header class="card-header">
+        <h3 id="override-title">Overrides for this runner</h3>
+        <span class="meta">defaults are in Settings ▸ Defaults</span>
+      </header>
+      <div class="card-body">
+        @if (defaults(); as d) {
+          <pc-process-override-editor id="runner-processes" [override]="override()" [defaults]="d" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="saveOverride($event)" />
+        } @else {
+          <span class="skeleton" style="height: 80px"></span>
+        }
+      </div>
+    </section>
+  }
+</pc-load-state>
+
+<ng-template #keepMenu let-e>
+  <div class="pc-menu" cdkMenu aria-label="Keep longer">
+    @for (x of extras; track x.label) {
+      <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="keep(e, x.extra)">+ {{ x.label }}</button>
+    }
+  </div>
+</ng-template>
+<ng-template #runnerMenu let-e>
+  <div class="pc-menu" cdkMenu>
+    <button type="button" class="pc-menu-item danger" cdkMenuItem (cdkMenuItemTriggered)="stop(e)"><mat-icon svgIcon="pc:stop-circle" aria-hidden="true" />Stop the runner process…</button>
+  </div>
+</ng-template>

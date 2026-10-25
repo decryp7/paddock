@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0c701ea68f3261b4d4454c1678ad6f4f16000a4c3edaef0280d58110023085ae # shrinks to g = Gen { sections: [("a", [("a", "a", None, None)]), ("aa", [("a", "0e0", None, None)])] }, pick = Index(9223372036854775808), new = ""
+cc 2fa50cc3d5cca0b1b89a73eface0daa68ac00be04f6b637196dbd0fe1a62a003 # shrinks to g = Gen { sections: [("a", [("a", "a", None, None)])] }, items = ["i"], second = ["0", "i"]

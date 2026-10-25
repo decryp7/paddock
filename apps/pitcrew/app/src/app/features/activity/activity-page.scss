@@ -1,0 +1,136 @@
+pc-load-state {
+  gap: var(--space-4);
+}
+
+h2 {
+  font-size: var(--text-md);
+}
+
+.runners {
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+
+  .sort {
+    all: unset;
+    cursor: pointer;
+    white-space: nowrap;
+
+    &:focus-visible {
+      outline: 2px solid var(--focus-ring);
+      outline-offset: 2px;
+    }
+  }
+
+  .arrow {
+    display: inline-block;
+    min-width: 1ch;
+  }
+
+  .name a {
+    color: var(--text);
+    font-weight: var(--weight-semibold);
+  }
+
+  .low {
+    color: var(--warning);
+  }
+}
+
+td,
+th {
+  white-space: nowrap;
+}
+
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+tbody tr {
+  height: 40px;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: var(--space-2);
+  border-radius: 50%;
+  background: var(--text-3);
+  flex: none;
+
+  &.success {
+    background: var(--success);
+  }
+  &.warning {
+    background: var(--warning);
+  }
+  &.danger {
+    background: var(--danger);
+  }
+  &.info {
+    background: var(--info, var(--text-3));
+  }
+}
+
+.result {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text);
+}
+
+.row-action pc-debrief-button {
+  opacity: 0;
+}
+
+tr:hover .row-action pc-debrief-button,
+tr:focus-within .row-action pc-debrief-button,
+.row-action pc-debrief-button:focus-within {
+  opacity: 1;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: var(--space-4);
+}
+
+.update {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0;
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  .text {
+    display: grid;
+    min-width: 0;
+
+    > * {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  .when {
+    white-space: nowrap;
+    padding-left: var(--space-2);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.flush {
+  padding: var(--space-1) var(--space-2) var(--space-2);
+}
