@@ -1,6 +1,6 @@
 [package]
 name = "paddock-jobs"
-version = "0.1.0"
+version = "0.2.0"
 description = "Long operations for the Paddock apps: phases, throttled progress, cancel tokens, streaming hashes and bounded parallel helpers."
 edition.workspace = true
 license.workspace = true

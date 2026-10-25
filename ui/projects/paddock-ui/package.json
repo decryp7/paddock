@@ -1,6 +1,6 @@
 {
   "name": "@decryp7/paddock-ui",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The shared design system of the Paddock app family: tokens, components and chart theme.",
   "license": "MIT OR Apache-2.0",
   "repository": {

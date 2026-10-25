@@ -1,6 +1,6 @@
 [package]
 name = "paddock-health"
-version = "0.1.0"
+version = "0.2.0"
 description = "Service health for the Paddock apps: service state, cause and repair action, the registry and its snapshot, and the cause-key notification centre with versioned persistence."
 edition.workspace = true
 license.workspace = true

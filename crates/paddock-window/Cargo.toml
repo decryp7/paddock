@@ -1,6 +1,6 @@
 [package]
 name = "paddock-window"
-version = "0.1.0"
+version = "0.2.0"
 description = "Windows for the Paddock apps: top-level windows in the shell's label scheme, remembered bounds on the right monitor, single instance and deep links, the bounded quit, native feel, the tray icon and the tray popover window."
 edition.workspace = true
 license.workspace = true

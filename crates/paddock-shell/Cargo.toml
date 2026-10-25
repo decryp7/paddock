@@ -2,7 +2,7 @@
 name = "paddock-shell"
 # Lockstep with the npm package @decryp7/paddock-ui (ADR 0012 §3, "one version across the boundary"): the UI checks
 # `shell_version` against its own version at start-up. `scripts/publish.mjs` and this crate's tests check the two agree.
-version = "0.2.0"
+version = "0.3.0"
 description = "The Paddock app shell as one Tauri plugin: every shell command behind one guard, the shell's managed state and window, page and run hooks, generated permission sets per window class, and the manifest check."
 edition.workspace = true
 license.workspace = true

@@ -7,9 +7,6 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
-[package.metadata.paddock]
-scaffold = true
-
 [features]
 # The Tauri adapter (`paddock_live::tauri`: the `paddock://live/<channel>` events, `live_snapshot` in a `paddock-commands`
 # table); the core never depends on Tauri.

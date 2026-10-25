@@ -1,6 +1,6 @@
 {
   "name": "@decryp7/paddock-e2e",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Playwright helpers and page objects for the Paddock app shell: test with the Chrome for Testing guard, e2e port, axe in both themes, page objects, layout scenarios, a fake Tauri IPC, settled screenshots and the retried-test reporter.",
   "license": "MIT OR Apache-2.0",
   "repository": {

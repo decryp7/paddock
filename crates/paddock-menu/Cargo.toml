@@ -1,6 +1,6 @@
 [package]
 name = "paddock-menu"
-version = "0.1.0"
+version = "0.2.0"
 description = "Menus for the Paddock apps: the menu model, its validation and limits, the macOS native menu with the standard items, diffing and routing to the focused window."
 edition.workspace = true
 license.workspace = true

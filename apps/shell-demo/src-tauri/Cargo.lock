@@ -3029,7 +3029,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-commands"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "log",
  "paddock-workspace-hack",
@@ -3060,7 +3060,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-dialogs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
@@ -3072,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-download"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fs4",
  "httpdate",
@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-health"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "log",
@@ -3128,7 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-jobs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "croner",
  "jiff",
@@ -3176,7 +3176,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-menu"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
@@ -3273,7 +3273,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-settings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
@@ -3287,7 +3287,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-shell"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "log",
  "paddock-channels",
@@ -3366,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-startup"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
@@ -3405,7 +3405,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-updater"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "log",
@@ -3431,7 +3431,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-window"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",

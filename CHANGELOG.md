@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-25 (the plugin platform and workbench release)
+
+The family release. Highlights: the survey work packages X21 to X54 (shared crates and packages the apps copied until now), the workbench
+(`paddock-workbench`, `paddock-panels`, `paddock-view`, the workbench demo app), the out-of-process plugin platform (`paddock-plugin-api`,
+`-host`, `-package`, `-test`, `cargo-paddock-plugin`, `paddock-ipc`), the i18n and accessibility kits in `@decryp7/paddock-ui` and
+`@decryp7/paddock-e2e`, the shared lint preset, and a much faster CI. Versions: `@decryp7/paddock-ui`, `@decryp7/paddock-e2e` and
+`paddock-shell` are 0.3.0; `paddock-commands`, `-download`, `-health`, `-jobs`, `-startup`, `-window`, `-dialogs`,
+`-menu`, `-settings` and `-updater` are 0.2.0 (the last four expose types of the bumped crates); the crates new since 0.2.0 are published as 0.1.0 (the six former scaffolds - archive, bench, cli, live, mcp, metrics - have real code and are published too).
+
 ### Fixed
 - paddock-mcp: stopping the loopback server ends connections whose client stays connected at once on Windows too (reads are cut into 100 ms
   slices that notice the stop; shutting a socket down does not wake a blocked read there, so `Serving::stop` waited about two minutes).

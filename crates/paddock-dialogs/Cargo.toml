@@ -1,6 +1,6 @@
 [package]
 name = "paddock-dialogs"
-version = "0.1.0"
+version = "0.2.0"
 description = "Dialogs as OS windows for the Paddock apps: the dialog contract schema and `allows(dialog, command)`, pure placement on the parent's monitor, window creation by kind, fit/grow and bounds."
 edition.workspace = true
 license.workspace = true

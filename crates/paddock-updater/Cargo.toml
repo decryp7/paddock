@@ -1,6 +1,6 @@
 [package]
 name = "paddock-updater"
-version = "0.1.0"
+version = "0.2.0"
 description = "Updates for the Paddock apps: the update state machine, release information and minisign signature check over `paddock-download`, the install hand-off, service re-registration per version, and About and What's New."
 edition.workspace = true
 license.workspace = true
