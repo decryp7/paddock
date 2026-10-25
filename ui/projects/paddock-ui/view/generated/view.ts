@@ -90,7 +90,17 @@ label: string,
 /**
  * The user may ask for this order (the host sends the action `sort` with `column` and `descending`).
  */
-sortable: boolean, };
+sortable: boolean, 
+/**
+ * Where the column's text sits; numbers are [`Align::End`] (right-aligned, tabular).
+ */
+align: Align, 
+/**
+ * The unit of the column's values ("ms", "lines"), shown beside the header; empty for none.
+ */
+unit: string, };
+
+export type Align = "start" | "end";
 
 export type Sort = { 
 /**
@@ -244,7 +254,11 @@ export type ChartSpec = { kind: ChartKind, title: string,
 /**
  * The x axis (or the slices); every series has one value per category.
  */
-categories: Array<string>, series: Array<Series>, };
+categories: Array<string>, series: Array<Series>, 
+/**
+ * The unit of the values ("s", "%"), for the value axis and the summary; empty for none.
+ */
+unit: string, };
 
 export type ChartKind = "line" | "bar" | "area" | "pie" | "scatter";
 

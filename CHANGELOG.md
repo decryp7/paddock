@@ -5,6 +5,16 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- X51 review 1 fixes for `<pd-view>` (3 P1, 13 P2, 12 P3; `ui/docs/review/x51-view/FIXES.md`). The radial graph puts its hub in the middle
+  and the rest on rings that cannot touch, in a canvas fitted to the boxes (a test over every layout: no two boxes overlap); graph
+  boxes carry a status glyph and the status word in their name and in "Show as a list", which also lists captions and members;
+  `@decryp7/paddock-ui/states` has `pd-needs-ai-card`, `pd-needs-ai` is a container over it, and a `needsAi` node draws the app's own
+  component (`VIEW_NEEDS_AI`) or the same card with the plugin's reason; inline kinds pack in a row, words break only when they must,
+  headings sit under the view title, stale is a warning with Reload, loading is a skeleton and busy a visible status, one filled
+  button per view, one `pd-view-writes` badge, tree status on the mark only, numbers right-aligned with their unit (`Column.align`,
+  `Column.unit`, `ChartSpec.unit` in `paddock-view`), chosen paths and secrets shown by name (`ViewHost` pickers resolve `{ value,
+  name }`), class diagrams with a stereotype and a member compartment, the review list fits 320 px, scroll regions are tab stops
+  only while they overflow. The contact sheet is `ui/docs/review/x51-view/review-2/` as sheets by section.
 - Review 2 verification fixes. `pd-table`: a required column's floor is `min(128px, 40%)`, so in a phone-width pane the rows fit the
   body (no sideways scroll inside the table, the last row action stays inside, header and rows share one edge with a scrolling body).
   Recent files: the file name shortens in the middle (the extension survives) through `pd-path-text`, and a bare name takes no space

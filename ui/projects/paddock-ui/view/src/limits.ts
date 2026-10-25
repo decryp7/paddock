@@ -253,6 +253,8 @@ class Checker {
       const c = this.rec(p, col);
       this.unique(p, keys, this.id(`${p}.key`, c['key']));
       this.label(`${p}.label`, c['label']);
+      this.text(`${p}.unit`, c['unit']);
+      if (c['align'] !== 'start' && c['align'] !== 'end') invalid(`${p}.align`, $localize`:@@pd.view.issue.align:"start" or "end" was expected`);
     });
     if (t['sort'] !== null && t['sort'] !== undefined) {
       const col = this.str(`${path}.sort`, this.rec(`${path}.sort`, t['sort'])['column']);
@@ -467,6 +469,7 @@ class Checker {
 
   private chart(c: Rec, path: string): void {
     this.text(`${path}.title`, c['title']);
+    this.text(`${path}.unit`, c['unit']);
     const categories = this.list(`${path}.categories`, c['categories']);
     categories.forEach((cat, i) => this.text(`${path}.categories[${i}]`, cat));
     const series = this.list(`${path}.series`, c['series']);

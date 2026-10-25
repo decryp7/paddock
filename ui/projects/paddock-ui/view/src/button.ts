@@ -2,9 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { ActionRef, Link } from '../generated/view';
 import { ViewRuntime } from './runtime';
-
-/** The text a `writes` action carries so nobody changes something without noticing (`ActionRef.writes`). */
-export const writesText = (): string => $localize`:@@pd.view.writes:Changes data`;
+import { PdViewWrites, writesText } from './writes';
 
 /**
  * An `ActionRef` as a button: its label is the text, a `writes` action carries the "Changes data" badge, a `confirm` question is
@@ -13,7 +11,7 @@ export const writesText = (): string => $localize`:@@pd.view.writes:Changes data
 @Component({
   selector: 'pd-view-button',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph],
+  imports: [PdViewWrites],
   template: `
     <button
       type="button"
@@ -27,14 +25,14 @@ export const writesText = (): string => $localize`:@@pd.view.writes:Changes data
     >
       {{ action().label }}
       @if (action().writes) {
-        <span class="pd-view-writes" data-testid="view-writes"><pd-glyph name="edit" [size]="14" />{{ writes }}</span>
+        <pd-view-writes />
       }
     </button>
   `,
   styles: `
     :host { display: inline-flex; min-width: 0; }
-    button { max-width: 100%; }
-    .pd-view-writes { display: inline-flex; align-items: center; gap: var(--pd-space-1); margin-inline-start: var(--pd-space-2); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); background: var(--pd-surface-1); color: var(--pd-text); border: 1px solid var(--pd-border-strong); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); white-space: nowrap; }
+    /* A long label (with its "Changes data" badge) wraps inside the button instead of widening the pane. */
+    button { max-width: 100%; white-space: normal; flex-wrap: wrap; }
   `,
 })
 export class PdViewButton {
@@ -64,7 +62,7 @@ export class PdViewButton {
 @Component({
   selector: 'pd-view-link',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph],
+  imports: [PdGlyph, PdViewWrites],
   template: `
     <button type="button" class="pd-view-link" [disabled]="runtime.disabled()" [attr.aria-label]="name()" (click)="runtime.follow(link(), extra())">
       <span class="pd-view-link__text">{{ shown() }}</span>
@@ -72,7 +70,7 @@ export class PdViewButton {
         <pd-glyph name="external" [size]="14" />
       }
       @if (writing()) {
-        <span class="pd-view-writes" data-testid="view-writes"><pd-glyph name="edit" [size]="14" />{{ writes }}</span>
+        <pd-view-writes />
       }
     </button>
   `,
@@ -82,8 +80,7 @@ export class PdViewButton {
     .pd-view-link:hover:not(:disabled) .pd-view-link__text { text-decoration: underline; }
     .pd-view-link:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; border-radius: 2px; }
     .pd-view-link:disabled { color: var(--pd-text-subtle); cursor: default; }
-    .pd-view-link__text { overflow-wrap: anywhere; }
-    .pd-view-writes { display: inline-flex; align-items: center; gap: var(--pd-space-1); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); background: var(--pd-surface-1); color: var(--pd-text); border: 1px solid var(--pd-border-strong); font-size: var(--pd-text-caption); white-space: nowrap; }
+    .pd-view-link__text { overflow-wrap: break-word; }
   `,
 })
 export class PdViewLink {

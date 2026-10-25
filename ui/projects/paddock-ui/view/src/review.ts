@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import type { ActionRef, Finding, ReviewList, StateDef } from '../generated/view';
-import { PdViewButton, PdViewLink, writesText } from './button';
+import { PdViewButton, PdViewLink } from './button';
 import { toneOf } from './model';
 import { ViewRuntime } from './runtime';
 import { PdViewTone, TONE_CSS, toneClass } from './tone';
+import { PdViewWrites } from './writes';
 
 /** A finding with the definition of its state (null when the plugin named a state it did not define; validation refuses that). */
 export interface ReviewRow {
@@ -33,13 +34,13 @@ export function reviewCounts(list: ReviewList): ReadonlyMap<string, number> {
 @Component({
   selector: 'pd-view-review',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdField, PdFieldControl, PdViewButton, PdViewLink, PdViewTone],
+  imports: [PdField, PdFieldControl, PdViewButton, PdViewLink, PdViewTone, PdViewWrites],
   template: `
     @if (list().states.length > 1) {
-      <div class="pd-view-review__filter" role="group" [attr.aria-label]="filterName">
-        <button type="button" class="pd-btn pd-btn--sm" [class.pd-btn--primary]="filter() === null" [attr.aria-pressed]="filter() === null" (click)="filter.set(null)">{{ all }} ({{ list().items.length }})</button>
+      <div class="pd-segmented pd-view-review__filter" role="group" [attr.aria-label]="filterName">
+        <button type="button" [attr.aria-pressed]="filter() === null" (click)="filter.set(null)">{{ all }} ({{ list().items.length }})</button>
         @for (s of list().states; track s.id) {
-          <button type="button" class="pd-btn pd-btn--sm" [class.pd-btn--primary]="filter() === s.id" [attr.aria-pressed]="filter() === s.id" (click)="filter.set(s.id)">{{ s.label }} ({{ counts().get(s.id) ?? 0 }})</button>
+          <button type="button" [attr.aria-pressed]="filter() === s.id" (click)="filter.set(s.id)">{{ s.label }} ({{ counts().get(s.id) ?? 0 }})</button>
         }
       </div>
     }
@@ -70,8 +71,8 @@ export function reviewCounts(list: ReviewList): ReadonlyMap<string, number> {
                   <textarea class="pd-textarea" pdFieldControl rows="2" [value]="q.reason" (input)="reason($any($event.target).value)" data-testid="view-reason"></textarea>
                 </pd-field>
                 <div class="pd-btn-row">
-                  <button type="button" class="pd-btn pd-btn--primary" [disabled]="runtime.disabled()" data-testid="view-reason-send" (click)="send()">
-                    {{ q.action.label }}@if (q.action.writes) { <span class="pd-view-writes">{{ writes }}</span> }
+                  <button type="button" class="pd-btn" [class.pd-btn--primary]="runtime.primary() === null" [disabled]="runtime.disabled()" data-testid="view-reason-send" (click)="send()">
+                    {{ q.action.label }}@if (q.action.writes) { <pd-view-writes /> }
                   </button>
                   <button type="button" class="pd-btn" data-testid="view-reason-cancel" (click)="asking.set(null)">{{ cancel }}</button>
                 </div>
@@ -80,7 +81,7 @@ export function reviewCounts(list: ReviewList): ReadonlyMap<string, number> {
               @for (a of s.actions; track a.id) {
                 @if (s.needsReason) {
                   <button type="button" class="pd-btn pd-btn--sm" [disabled]="runtime.disabled()" [attr.aria-label]="a.label + ': ' + r.finding.title" (click)="ask(r.finding.id, a)">
-                    {{ a.label }}@if (a.writes) { <span class="pd-view-writes">{{ writes }}</span> }
+                    {{ a.label }}@if (a.writes) { <pd-view-writes /> }
                   </button>
                 } @else {
                   <pd-view-button [action]="a" [extra]="{ finding: r.finding.id }" [small]="true" [context]="r.finding.title" />
@@ -97,19 +98,21 @@ export function reviewCounts(list: ReviewList): ReadonlyMap<string, number> {
   styles: `
     ${TONE_CSS}
     :host { display: block; min-width: 0; }
-    .pd-view-review__filter { display: flex; flex-wrap: wrap; gap: var(--pd-space-1); margin-bottom: var(--pd-space-2); }
-    .pd-view-review { list-style: none; margin: 0; padding: 0; display: grid; }
-    .pd-view-review__item { display: grid; gap: var(--pd-space-1); padding: var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-view-tone); }
+    .pd-view-review__filter { flex-wrap: wrap; max-width: 100%; margin-bottom: var(--pd-space-2); }
+    .pd-view-review__filter > button { white-space: nowrap; }
+    .pd-view-review { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+    .pd-view-review__item > * { min-width: 0; }
+    .pd-view-review__item { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--pd-space-1); padding: var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-view-tone); }
     .pd-view-review__item.pd-view-tone-neutral { border-inline-start-color: var(--pd-hairline); }
     .pd-view-review__head { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; }
-    .pd-view-review__title { font-weight: var(--pd-weight-semibold); min-width: 0; overflow-wrap: anywhere; }
+    .pd-view-review__title { font-weight: var(--pd-weight-semibold); min-width: 0; overflow-wrap: break-word; }
     .pd-view-review__state { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: 20px; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); background: var(--pd-view-tint); color: var(--pd-view-tone); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); white-space: nowrap; }
-    .pd-view-review__where { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); color: var(--pd-text-muted); overflow-wrap: anywhere; }
-    .pd-view-review__detail { margin: 0; color: var(--pd-text-body); overflow-wrap: anywhere; }
+    .pd-view-review__where { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); color: var(--pd-text-muted); overflow-wrap: break-word; }
+    .pd-view-review__detail { margin: 0; color: var(--pd-text-body); overflow-wrap: break-word; }
     .pd-view-review__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); }
+    .pd-view-review__actions .pd-btn { max-width: 100%; white-space: normal; flex-wrap: wrap; }
     .pd-view-review__reason { display: grid; gap: var(--pd-space-2); width: 100%; }
     .pd-view-review__none { padding: var(--pd-space-4); text-align: center; color: var(--pd-text-muted); }
-    .pd-view-writes { margin-inline-start: var(--pd-space-2); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); background: var(--pd-surface-1); color: var(--pd-text); border: 1px solid var(--pd-border-strong); font-size: var(--pd-text-caption); }
   `,
 })
 export class PdViewReview {
@@ -118,7 +121,6 @@ export class PdViewReview {
   readonly label = input('');
   protected readonly toneClass = toneClass;
   protected readonly toneOf = toneOf;
-  protected readonly writes = writesText();
   protected readonly defaultLabel = $localize`:@@pd.view.review.label:Findings`;
   protected readonly filterName = $localize`:@@pd.view.review.filter:Show findings by state`;
   protected readonly all = $localize`:@@pd.view.review.all:All`;

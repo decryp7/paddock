@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
-import type { Cell, Table } from '../generated/view';
+import type { Cell, Column, Table } from '../generated/view';
 import { PdViewButton, PdViewLink } from './button';
 import { toneOf } from './model';
 import { ViewRuntime } from './runtime';
+import { PdViewScroll } from './scroll';
 import { PdViewTone, TONE_CSS, toneClass } from './tone';
 
 let nextId = 0;
@@ -34,25 +35,25 @@ export function tableWindow(t: Table): TableWindow {
 @Component({
   selector: 'pd-view-table',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph, PdViewButton, PdViewLink, PdViewTone],
+  imports: [PdGlyph, PdViewButton, PdViewLink, PdViewScroll, PdViewTone],
   template: `
     @let w = window();
-    <div class="pd-view-table__scroll" role="region" tabindex="0" [attr.aria-labelledby]="captionId">
+    <div class="pd-view-table__scroll" role="region" pdViewScroll [attr.aria-labelledby]="captionId">
       <table class="pd-view-table__table">
         <caption class="pd-view-sr" [id]="captionId">{{ caption() }}</caption>
         <thead>
           <tr>
             @for (c of table().columns; track c.key) {
-              <th scope="col" [attr.aria-sort]="ariaSort(c.key)">
+              <th scope="col" [class.pd-view-table__num]="c.align === 'end'" [attr.aria-sort]="ariaSort(c.key)">
                 @if (c.sortable) {
-                  <button type="button" class="pd-view-table__sort" [disabled]="runtime.disabled()" (click)="sort(c.key)" [attr.aria-label]="sortLabel(c.label, c.key)">
-                    {{ c.label }}
+                  <button type="button" class="pd-view-table__sort" [disabled]="runtime.disabled()" (click)="sort(c.key)" [attr.aria-label]="sortLabel(heading(c), c.key)">
+                    {{ c.label }}@if (c.unit) {<span class="pd-view-table__unit"> ({{ c.unit }})</span>}
                     @if (table().sort?.column === c.key) {
                       <pd-glyph [name]="table().sort?.descending ? 'chevron-down' : 'chevron-up'" [size]="14" />
                     }
                   </button>
                 } @else {
-                  {{ c.label }}
+                  {{ c.label }}@if (c.unit) {<span class="pd-view-table__unit"> ({{ c.unit }})</span>}
                 }
               </th>
             }
@@ -65,7 +66,7 @@ export function tableWindow(t: Table): TableWindow {
           @for (row of w.rows; track $index; let r = $index) {
             <tr [class.pd-view-table__row--act]="!!table().rowAction" (click)="activate(r)">
               @for (cell of row; track $index; let c = $index) {
-                <td [class]="cellClass(cell)" (click)="cell.link && $event.stopPropagation()">
+                <td [class]="cellClass(cell)" [class.pd-view-table__num]="table().columns[c]?.align === 'end'" [class.pd-view-table__status]="isStatus(cell)" (click)="cell.link && $event.stopPropagation()">
                   <pd-view-tone [tone]="cell.tone" />
                   @if (cell.link) {
                     <pd-view-link [link]="cell.link" [text]="cell.text" [extra]="{ row: r }" />
@@ -98,17 +99,23 @@ export function tableWindow(t: Table): TableWindow {
     ${TONE_CSS}
     :host { display: block; min-width: 0; }
     .pd-view-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    .pd-view-table__scroll { overflow: auto; max-width: 100%; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); }
+    .pd-view-table__scroll { overflow: auto; max-width: 100%; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
     .pd-view-table__scroll:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-view-table__table { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
     th { position: sticky; top: 0; z-index: 1; background: var(--pd-surface-2); text-align: start; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; padding: 0 var(--pd-space-3); height: var(--pd-row-height); border-bottom: 1px solid var(--pd-hairline); }
     td { padding: var(--pd-space-1) var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); min-height: var(--pd-row-height); vertical-align: middle; font-variant-numeric: tabular-nums; color: var(--pd-view-tone, var(--pd-text)); }
     td.pd-view-tone-neutral { color: var(--pd-text); }
+    /* A status is a short word with its mark: it stays on one line. */
+    td.pd-view-table__status { white-space: nowrap; }
+    /* Numbers line up on the right, in tabular figures, and the header sits over them. */
+    th.pd-view-table__num, td.pd-view-table__num { text-align: end; }
+    th.pd-view-table__num .pd-view-table__sort { justify-content: flex-end; }
+    .pd-view-table__unit { font-weight: var(--pd-weight-regular); }
     td > * { vertical-align: middle; }
     tbody tr:last-child td { border-bottom: 0; }
     .pd-view-table__row--act { cursor: pointer; }
     .pd-view-table__row--act:hover { background: var(--pd-hover); }
-    .pd-view-table__text { overflow-wrap: anywhere; }
+    .pd-view-table__text { overflow-wrap: break-word; }
     .pd-view-table__act { width: 1%; white-space: nowrap; text-align: end; }
     .pd-view-table__sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: 100%; min-height: 24px; padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
     .pd-view-table__sort:hover:not(:disabled) { color: var(--pd-text); }
@@ -138,6 +145,13 @@ export class PdViewTable {
     return $localize`:@@pd.view.table.range:Rows ${from}:from: to ${to}:to: of ${w.total}:total:`;
   });
 
+  /** The header text with its unit, the accessible name of a sortable column ("Time (ms)"). */
+  protected heading(c: Column): string {
+    return c.unit ? `${c.label} (${c.unit})` : c.label;
+  }
+  protected isStatus(cell: Cell): boolean {
+    return toneOf(cell.tone) !== 'neutral';
+  }
   protected cellClass(cell: Cell): string {
     return toneClass(toneOf(cell.tone));
   }
