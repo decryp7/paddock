@@ -230,7 +230,8 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
     }
     // The canopy's own shadow: a band down the ground-floor face and the strip of apron under it.
     const canopyShade = occlusion(kit, 'g0', poly(P(-ov, 0, H1 - 30), P(L, 0, H1 - 30), P(L, 0, H1 + 4), P(-ov, 0, H1 + 4)), SHADOW.castOpacity);
-    const sh = simple ? 10 : 8;
+    // The stripe: 8 on the master, 10 in the simple frame, 25 at 60 (one pixel wider there, so its hues do not merge).
+    const sh = tiny ? 25 : simple ? 10 : 8;
     const stripeBand = poly(P(-ov, -canopy, H1), P(L + ov, -canopy, H1), P(L + ov, -canopy, H1 + sh), P(-ov, -canopy, H1 + sh));
 
     // Polish pass (STYLE.md section 0): speculars and edges.
@@ -246,7 +247,7 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
     // The building's lit vertical corners: a thin highlight where front and end faces meet.
     const cornerHi = `<path d="M${P(L, 0, 0).join(' ')}L${P(L, 0, H1).join(' ')}M${P(L, 0, H1 + C1).join(' ')}L${P(L, 0, H1 + C1 + H2).join(' ')}" stroke="#FFFFFF" stroke-width="2" opacity="0.55"/>`;
     const body = `${shadowLong}${contact}
-      <path d="${apronTop}" fill="url(#${id('apron')})"/><path d="${poly(P(-ov, -canopy, 0), P(L + ov, -canopy, 0), P(L + ov, 0, 0), P(-ov, 0, 0))}" fill="#000" opacity="0.3"/>${lane}
+      <path d="${apronTop}" fill="url(#${id('apron')})"/><path d="${poly(P(-ov, -canopy, 0), P(L + ov, -canopy, 0), P(L + ov, 0, 0), P(-ov, 0, 0))}" fill="${SHADOW.colour}" opacity="0.3"/>${lane}
       <path d="${g0.front}" fill="url(#${id('front')})"/><path d="${g0.end}" fill="url(#${id('end')})"/>
       ${bayParts.join('')}${aoBand(H1, 'g0')}${canopyShade}
       <path d="${up.front}" fill="url(#${id('front')})"/><path d="${up.end}" fill="url(#${id('end')})"/>

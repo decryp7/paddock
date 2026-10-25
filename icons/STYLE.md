@@ -92,16 +92,18 @@ OKLab lightness x 100 (L). Adjacent faces of one solid differ by at least 8 L, s
 
 ## 4. Shadows and occlusion (1024 grid, `SHADOW` in `tools/iso.mjs`)
 
-All black, blurred in sRGB, under the object. Use the helpers with a `defsKit(uid + letter)`, and add `shadowFilters(kit)` to the
-defs.
+One family shadow for every icon: colour cool near-black `#0E1016` (`SHADOW.colour`), blurred in sRGB, under the object. Use the
+helpers with a `defsKit(uid + letter)`, and add `shadowFilters(kit)` to the defs.
 
 | Layer | Helper | Shape | Blur | Opacity |
 |---|---|---|---|---|
-| Long shadow | `longShadow(kit, foot)` | the footprint swept (+110, +66) away from the light | 18 | 0.75 x 0.8 |
+| Long shadow | `longShadow(kit, foot, SHADOW.longSweep, longOpacity(PALETTE[app].base))` | the footprint swept (+110, +66) away from the light | 18 | 0.6 on dark tiles (base L below 50: Paddock, Pitwall, Pacenotes), 0.55 on mid and light tiles; `longOpacity(base)` picks it |
 | Contact | `contactShadow(kit, d)` | the footprint, 3 to 4 units wider on the shade side | 2.5 | 0.8 |
 | Occlusion | `occlusion(kit, clip, d)` | a band about 16 deep under every overhang or where parts meet, clipped to the faces below | 6 | 0.6 |
 | Cast shadow | `occlusion(kit, clip, d, SHADOW.castOpacity)` | the shadow of a large overhang on the face below, about 30 deep | 6 | 0.35 |
 | Recesses | flat faces | the head and the inner jamb of every opening in `recessHead` and `recessJamb` | none | 1 |
+
+No icon uses another shadow colour, blur or opacity.
 
 ## 5. Size and placement
 
