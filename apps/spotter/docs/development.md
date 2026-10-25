@@ -69,7 +69,7 @@ starts is asked to quit (`Browser.close`) and given a few seconds before any kil
 
 ## CI
 
-`.gitea/workflows/build.yml` runs on pushes to `main` and `wip/**`, `v*` tags, pull requests and manual runs:
+`.gitea/workflows/spotter.yml (repo root)` runs on pushes to `main` and `wip/**`, `v*` tags, pull requests and manual runs:
 `rust-lint` (format and clippy), `rust-test` (Linux and Windows), `macos` (clippy and tests on the Mac host runner),
 `licences` (commit messages, script tests, cargo-deny), `frontend` (audit, lint, build, unit tests with coverage) and
 `e2e` (Playwright, Chromium and WebKit against the mock backend). `bundle` (NSIS, `.dmg`, `.deb`/AppImage) runs only

@@ -246,5 +246,5 @@ too), removed when the run ends; `DEBRIEF_E2E_KEEP_DATA=1` keeps it for inspecti
 and the page HTML to `app/e2e-tauri/.artifacts/`. The single-instance lock is not covered by `DEBRIEF_DATA_DIR`:
 close any running Debrief first.
 
-CI: the `tauri-smoke` job in `.gitea/workflows/build.yml` runs this on `windows-latest` and `ubuntu-latest`;
+CI: the `tauri-smoke` job in `.gitea/workflows/debrief.yml (repo root)` runs this on `windows-latest` and `ubuntu-latest`;
 both legs are required, and failure artifacts are uploaded.

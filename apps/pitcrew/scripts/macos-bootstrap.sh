@@ -20,7 +20,7 @@ xcode-select -p >/dev/null 2>&1 && ok "Xcode command line tools ($(xcode-select 
   fail "Xcode command line tools" "run: xcode-select --install"
 command -v cargo >/dev/null && ok "Rust $(rustc --version | cut -d' ' -f2)" ||
   fail "Rust" "install rustup from https://rustup.rs (user-level), then open a new shell"
-want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+want=$(tr -d ' v\r\n' < ../../.nvmrc | cut -d. -f1)
 if command -v node >/dev/null; then
   have=$(node -p 'process.versions.node.split(".")[0]')
   [ "$have" = "$want" ] && ok "Node $(node --version)" || fail "Node $want" "found Node $(node --version); install Node $want (e.g. with nvm)"
@@ -32,7 +32,7 @@ fi
 
 echo
 echo "Building (a first build takes a few minutes)..."
-(cd app && npm ci --no-audit --no-fund)
+(cd ../.. && npm ci --no-audit --no-fund)  # the monorepo's one npm workspace
 # Unsigned updater artefacts unless the signing key is in the environment (docs/releasing.md).
 (cd app && CI=true npx tauri build --bundles app,dmg -- --profile dist)
 

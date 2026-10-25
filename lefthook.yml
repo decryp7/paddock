@@ -1,0 +1,88 @@
+# Git hooks for the whole monorepo (https://lefthook.dev; lefthook reads only this root file). Install once with
+# `npx lefthook install`. Each app's checks run in its own folder (`root:`) and only on its staged files; CI runs the
+# full gates (scripts/affected.mjs). The apps' own lefthook.yml files were merged here at their import (ADR 0014).
+pre-commit:
+  parallel: true
+  commands:
+    debrief-rustfmt:
+      root: "apps/debrief/"
+      glob: "*.rs"
+      run: rustfmt --edition 2021 --check {staged_files}
+    debrief-clippy:
+      root: "apps/debrief/"
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets --quiet -- -D warnings
+    debrief-eslint:
+      root: "apps/debrief/app/"
+      glob: "*.{ts,html}"
+      run: npx eslint --max-warnings 0 {staged_files}
+    dyno-rustfmt:
+      root: "apps/dyno/"
+      glob: "*.rs"
+      run: rustfmt --edition 2021 --check {staged_files}
+    dyno-clippy:
+      root: "apps/dyno/"
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets --quiet -- -D warnings
+    dyno-eslint:
+      root: "apps/dyno/app/"
+      glob: "*.{ts,html}"
+      run: npx eslint --max-warnings 0 {staged_files}
+    pitcrew-rustfmt:
+      root: "apps/pitcrew/"
+      glob: "*.rs"
+      run: rustfmt --edition 2021 --check {staged_files}
+    pitcrew-clippy:
+      root: "apps/pitcrew/"
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets --quiet -- -D warnings
+    pitcrew-eslint:
+      root: "apps/pitcrew/app/"
+      glob: "*.{ts,html}"
+      run: npx eslint --max-warnings 0 {staged_files}
+    pitwall-rustfmt:
+      root: "apps/pitwall/"
+      glob: "*.rs"
+      run: rustfmt --edition 2021 --check {staged_files}
+    pitwall-clippy:
+      root: "apps/pitwall/"
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets --quiet -- -D warnings
+    pitwall-eslint:
+      root: "apps/pitwall/app/"
+      glob: "*.{ts,html}"
+      run: npx eslint --max-warnings 0 {staged_files}
+    spotter-rustfmt:
+      root: "apps/spotter/"
+      glob: "*.rs"
+      run: rustfmt --edition 2021 --check {staged_files}
+    spotter-clippy:
+      root: "apps/spotter/"
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets --quiet -- -D warnings
+    spotter-eslint:
+      root: "apps/spotter/app/"
+      glob: "*.{ts,html}"
+      run: npx eslint --max-warnings 0 {staged_files}
+    pitwall-privacy:
+      root: "apps/pitwall/"
+      glob: "*.{rs,toml}"
+      run: bash scripts/ci/privacy-check.sh
+    crates-rustfmt:
+      root: "crates/"
+      glob: "*.rs"
+      run: rustfmt --edition 2024 --check {staged_files}
+
+commit-msg:
+  commands:
+    conventional:
+      run: node conformance/bin/paddock-conformance.mjs commit-lint --file {1}
+
+pre-push:
+  commands:
+    pitwall-scripts:
+      root: "apps/pitwall/"
+      run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/ci/
+    pitwall-deny:
+      root: "apps/pitwall/"
+      run: cargo deny --workspace check

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs Debrief's Playwright e2e in the CI image (same as the `e2e` job in .gitea/workflows/build.yml), so Linux fonts,
+# Runs Debrief's Playwright e2e in the CI image (same as the `e2e` job in .gitea/workflows/debrief.yml (repo root)), so Linux fonts,
 # metrics and WebKit are tested before a push or a tag. Usage:
 #   scripts/ci/e2e-linux-local.sh [playwright args...]     e.g. e2e/search-field.e2e.ts --project=webkit --repeat-each=3
 # Environment: E2E_CPUS (default 6), E2E_WORKERS (default 2), E2E_PLATFORM (default: the image's, linux/amd64).

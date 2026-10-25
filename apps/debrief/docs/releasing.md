@@ -1,6 +1,6 @@
 # Releasing Debrief (and signed updates)
 
-A `v*` tag on `main` runs `.gitea/workflows/build.yml`: the `bundle` jobs build the installers on Linux,
+A `v*` tag on `main` runs `.gitea/workflows/debrief.yml (repo root)`: the `bundle` jobs build the installers on Linux,
 Windows and macOS, and the `release` job publishes a Gitea release with the installers, release notes
 (`RELEASE_NOTES.md`, from git-cliff), SBOMs and `latest.json`, the release information Debrief's updater reads.
 Installers are built only for tags, the nightly run of `main` and manual runs (*Run workflow* on `build`,

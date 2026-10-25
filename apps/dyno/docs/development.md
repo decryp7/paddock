@@ -89,7 +89,7 @@ with another `TZ`).
 
 ## CI/CD
 
-`.gitea/workflows/build.yml` (see the header comment for the runner labels):
+`.gitea/workflows/dyno.yml (repo root)` (see the header comment for the runner labels):
 
 | Job | Runner | What it checks |
 | --- | --- | --- |

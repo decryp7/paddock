@@ -1,6 +1,6 @@
 # Releasing Dyno (and signed updates)
 
-A `v*` tag on `main` runs `.gitea/workflows/build.yml`: the `bundle` jobs build the installers (Windows NSIS on the
+A `v*` tag on `main` runs `.gitea/workflows/dyno.yml (repo root)`: the `bundle` jobs build the installers (Windows NSIS on the
 `windows-latest` host runner, the macOS `.dmg` on the `macos-latest` host runner, and a `.deb` plus AppImage on a Linux
 container), and the `release` job publishes a Gitea release with the installers, release notes (`RELEASE_NOTES.md`, from
 git-cliff) and `latest.json`, the release information Dyno's updater reads. Installers are also built for the nightly run

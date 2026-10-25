@@ -21,7 +21,7 @@ case "$(uname -m)" in
 esac
 command -v cargo >/dev/null && ok "Rust $(rustc --version | cut -d' ' -f2)" ||
   fail "Rust" "install rustup from https://rustup.rs (user-level), then open a new shell"
-want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+want=$(tr -d ' v\r\n' < ../../.nvmrc | cut -d. -f1)
 if command -v node >/dev/null; then
   have=$(node -p 'process.versions.node.split(".")[0]')
   [ "$have" = "$want" ] && ok "Node $(node --version)" || fail "Node $want" "found Node $(node --version); install Node $want (e.g. with nvm)"
@@ -40,7 +40,7 @@ command -v systemctl >/dev/null && ok "systemd (the server runs as a user unit)"
 
 echo
 echo "Building (a first build takes several minutes)..."
-(cd app && npm ci --no-audit --no-fund)
+(cd ../.. && npm ci --no-audit --no-fund)  # the monorepo's one npm workspace
 # Unsigned updater artefacts unless the signing key is in the environment (docs/releasing.md).
 (cd app && CI=true npx tauri build --bundles deb,appimage -- --profile dist)
 

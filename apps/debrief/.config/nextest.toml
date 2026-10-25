@@ -35,7 +35,7 @@ filter = '''
 test-group = 'child-processes'
 retries = 2
 
-# CI (.gitea/workflows/build.yml): every failure reported, no retries, a JUnit report.
+# CI (.gitea/workflows/debrief.yml (repo root)): every failure reported, no retries, a JUnit report.
 [profile.ci]
 fail-fast = false
 retries = 0

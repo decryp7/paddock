@@ -1,6 +1,6 @@
 # Releasing Spotter (and signed updates)
 
-A `v*` tag on `main` runs `.gitea/workflows/build.yml`: the `bundle` jobs build the installers (Windows NSIS, the macOS `.dmg` on the `macos-latest` host runner, and Linux `.deb` and AppImage), and the `release` job publishes a Gitea release with the
+A `v*` tag on `main` runs `.gitea/workflows/spotter.yml (repo root)`: the `bundle` jobs build the installers (Windows NSIS, the macOS `.dmg` on the `macos-latest` host runner, and Linux `.deb` and AppImage), and the `release` job publishes a Gitea release with the
 installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Spotter's
 updater reads. Installers are also built for the nightly run of `main` and manual runs (`workflow_dispatch`).
 

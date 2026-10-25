@@ -114,7 +114,7 @@ and `Square*`/`StoreLogo` files (Pitcrew ships no mobile or Store packages).
 
 ## CI/CD
 
-`.gitea/workflows/build.yml`: jobs `rust-lint` (format + clippy, Linux), `rust-test` (Linux and the Windows host runner),
+`.gitea/workflows/pitcrew.yml (repo root)`: jobs `rust-lint` (format + clippy, Linux), `rust-test` (Linux and the Windows host runner),
 `macos` (clippy + tests on the Mac host runner, kept lean), `licences` (cargo-deny, commit messages, the three script
 tests), `frontend` (lint, build, unit tests with coverage); `bundle` (Windows NSIS and macOS `.dmg`) on `v*` tags, the
 nightly run and manual runs; the `release` job publishes the installers, release notes (git-cliff) and `latest.json`.
