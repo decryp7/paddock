@@ -40,7 +40,7 @@
 
 use crate::PackageError;
 use crate::names::{GrantRef, HostPattern, Namespace, PluginId, ProgramRef, valid_ident};
-use crate::version::ProtocolVersion;
+use paddock_ipc::ProtocolVersion;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -804,40 +804,6 @@ impl Manifest {
     pub fn contribution_keys(&self) -> Vec<String> {
         self.contributions.iter().map(Contribution::key).collect()
     }
-
-    /// Whether `host_name` (speaking platform protocol `host` and the contracts `supported`) can serve the plugin. The error
-    /// says who must update: the platform protocol needs the same major and a known minor, and each contract namespace the
-    /// plugin speaks must be one the app has, with a minor the app knows.
-    pub fn check_compatible(
-        &self,
-        host: ProtocolVersion,
-        supported: &[Namespace],
-        host_name: &str,
-    ) -> Result<(), PackageError> {
-        let label = format!("plugin \"{}\"", self.id);
-        if let Some(why) = host.mismatch(self.protocol, &label, host_name) {
-            return Err(PackageError::Incompatible(why));
-        }
-        for ns in self.namespaces() {
-            let Some(known) = supported.iter().find(|s| s.ns() == ns.ns()) else {
-                return Err(PackageError::Incompatible(format!(
-                    "{label} speaks \"{}\", a contract this {host_name} does not have; it was built for another app or a newer {host_name}",
-                    ns.ns()
-                )));
-            };
-            let (have, want) = (
-                ProtocolVersion::new(0, known.minor),
-                ProtocolVersion::new(0, ns.minor),
-            );
-            if !have.accepts(want) {
-                return Err(PackageError::Incompatible(format!(
-                    "{label} needs {host_name} to speak {} or newer (it speaks {known}); update {host_name}",
-                    ns
-                )));
-            }
-        }
-        Ok(())
-    }
 }
 
 fn unique<T: std::hash::Hash + Eq>(items: &[T]) -> bool {
@@ -1250,46 +1216,5 @@ reason = "Looks up host names."
         let mut m = parse(SAMPLE).unwrap();
         m.name = "x".repeat(81);
         assert!(m.check().is_err());
-    }
-
-    #[test]
-    fn compatibility_names_who_must_update() {
-        let m = parse(SAMPLE).unwrap();
-        let host = ProtocolVersion::new(2, 1);
-        let ns = |s: &str| s.parse::<Namespace>().unwrap();
-        assert!(
-            m.check_compatible(host, &[ns("debrief.import/3")], "Debrief")
-                .is_ok()
-        );
-        assert!(
-            m.check_compatible(host, &[ns("debrief.import/5"), ns("other/1")], "Debrief")
-                .is_ok(),
-            "the host runs older minors"
-        );
-        let e = m
-            .check_compatible(host, &[ns("debrief.import/2")], "Debrief")
-            .unwrap_err();
-        assert_eq!(e.code(), "incompatible");
-        assert!(
-            e.to_string().contains("debrief.import/3 or newer")
-                && e.to_string().contains("update Debrief"),
-            "{e}"
-        );
-        let e = m
-            .check_compatible(host, &[ns("pacenotes.index/1")], "Pacenotes")
-            .unwrap_err();
-        assert!(e.to_string().contains("does not have"), "{e}");
-        let e = m
-            .check_compatible(ProtocolVersion::new(3, 0), &[], "Debrief")
-            .unwrap_err();
-        assert!(
-            e.to_string().contains("older contract")
-                && e.to_string().contains("plugin \"com.example.kv-lines\""),
-            "{e}"
-        );
-        let e = m
-            .check_compatible(ProtocolVersion::new(1, 9), &[], "Debrief")
-            .unwrap_err();
-        assert!(e.to_string().contains("update Debrief"), "{e}");
     }
 }

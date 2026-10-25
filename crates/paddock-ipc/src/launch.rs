@@ -233,7 +233,15 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
         s.write_all(line.as_bytes()).and_then(|()| s.flush())
     });
     // On failure `process` is dropped, which ends its tree.
-    written.map_err(|e| IpcError::Spawn(format!("{label} did not take its bootstrap ({e})")))?;
+    // A closed pipe means the child is already gone (a child that exits at once may do so before the line is written).
+    written.map_err(|e| {
+        let what = if e.kind() == io::ErrorKind::BrokenPipe {
+            "exited before it took"
+        } else {
+            "did not take"
+        };
+        IpcError::Spawn(format!("{label} {what} its bootstrap ({e})"))
+    })?;
     let conn = host.accept_while(Some(pid), spec.start_timeout, &mut || {
         if process.is_running() {
             Ok(())

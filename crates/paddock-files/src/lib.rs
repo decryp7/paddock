@@ -38,7 +38,7 @@ pub mod path;
 mod pick;
 pub mod recent;
 
-pub use files::{AppFolder, Files};
+pub use files::{AppFolder, Editor, Files};
 pub use grants::{Access, GRANT_TTL, GrantSource, GrantedPath, MAX_GRANTS, PathGrants};
 pub use paddock_commands::CommandError;
 pub use pick::{
@@ -70,6 +70,8 @@ paddock_commands::command_table! {
     Mutation [WINDOW | TRAY] => tauri::files_reveal,
     /// Opens a granted path with the OS's program for it (never a file that would run).
     Mutation [WINDOW] => tauri::files_open,
+    /// Opens a granted file in the editor at a line (1 to ten million); the file is an argument of the editor, never run.
+    Mutation [WINDOW] => tauri::files_open_at_line,
     /// Shows one of the app's own folders (data, config, cache, logs) in the file manager.
     Mutation [WINDOW | TRAY] => tauri::files_open_app_folder,
     /// Opens a web address (http, https or mailto) in the browser.

@@ -34,6 +34,15 @@ describe('pins', () => {
     assert.ok(dockerfile.includes('ARG CHROME_SHA256_AMD64='));
   });
 
+  test('Chrome for Testing is the build the apps download (paddock-chromium chromium.toml, linux-x86_64)', () => {
+    const toml = read('crates/paddock-chromium/src/chromium.toml');
+    const version = toml.match(/^version = "([^"]+)"$/m)[1];
+    const linux = toml.split('[[platform]]').find((t) => t.includes('key = "linux-x86_64"'));
+    assert.equal(arg('CHROME_VERSION'), version);
+    assert.equal(arg('CHROME_SHA256_AMD64'), linux.match(/sha256 = "([0-9a-f]{64})"/)[1]);
+    assert.ok(linux.includes(`/${version}/linux64/chrome-linux64.zip`));
+  });
+
   test('sccache is the version the setup-rust action pins, with the same checksums', () => {
     const action = read('.gitea/actions/setup-rust/action.yml');
     assert.equal(arg('SCCACHE_VERSION'), action.match(/VERSION=(\d+\.\d+\.\d+)/)[1]);
@@ -182,12 +191,12 @@ describe('verify.sh', () => {
     mkdirSync(duck);
     if (!over.noDuck) writeFileSync(join(duck, 'libduckdb.so'), '');
     const chrome = join(m, 'chrome');
-    put('chrome', over.chrome ?? 'echo "Google Chrome for Testing 156.0.8078.4 "');
+    put('chrome', over.chrome ?? 'echo "Google Chrome for Testing 156.0.8078.47 "');
     writeFileSync(chrome, readFileSync(join(bin, 'chrome')));
     chmodSync(chrome, 0o755);
     const env = {
       PATH: bin, PLAYWRIGHT_BROWSERS_PATH: pw, DUCKDB_LIB_DIR: duck, CHROMIUM_TEST_PATH: chrome,
-      EXPECT_NODE_MAJOR: '24', EXPECT_SCCACHE: '0.18.0', EXPECT_PLAYWRIGHT: '1.64.1', EXPECT_DUCKDB: '1.5.6', EXPECT_CHROME: '156.0.8078.4', ...over.env,
+      EXPECT_NODE_MAJOR: '24', EXPECT_SCCACHE: '0.18.0', EXPECT_PLAYWRIGHT: '1.64.1', EXPECT_DUCKDB: '1.5.6', EXPECT_CHROME: '156.0.8078.47', ...over.env,
     };
     return { m, env, manifest: join(m, 'release') };
   }
@@ -198,7 +207,7 @@ describe('verify.sh', () => {
     const r = run(mc);
     assert.equal(r.code, 0, r.out);
     const text = readFileSync(mc.manifest, 'utf8');
-    for (const s of ['rustc 1.99.1', 'cargo-nextest 0.9.149', 'cargo-hakari 0.9.39', 'cargo-machete: 0.9.2', 'sccache: sccache 0.18.0', 'node: v24.19.0', 'chrome for testing: Google Chrome for Testing 156.0.8078.4', 'libduckdb 1.5.6', 'playwright chromium', 'webkit2gtk-4.1: 2.52.6']) {
+    for (const s of ['rustc 1.99.1', 'cargo-nextest 0.9.149', 'cargo-hakari 0.9.39', 'cargo-machete: 0.9.2', 'sccache: sccache 0.18.0', 'node: v24.19.0', 'chrome for testing: Google Chrome for Testing 156.0.8078.47', 'libduckdb 1.5.6', 'playwright chromium', 'webkit2gtk-4.1: 2.52.6']) {
       assert.ok(text.includes(s), `${s}\n${text}`);
     }
   });
@@ -217,7 +226,7 @@ describe('verify.sh', () => {
     assert.match(run(machine({ tools: { node: 'echo "v22.1.0"' } })).out, /node is v22\.1\.0, \.nvmrc wants major 24/);
     const r = run(machine({ chrome: 'echo "Google Chrome for Testing 150.0.1.2"' }));
     assert.equal(r.code, 1);
-    assert.match(r.out, /Chrome for Testing is 'Google Chrome for Testing 150\.0\.1\.2', the image pins 156\.0\.8078\.4/);
+    assert.match(r.out, /Chrome for Testing is 'Google Chrome for Testing 150\.0\.1\.2', the image pins 156\.0\.8078\.47/);
   });
 
   test('missing Chrome, libduckdb, browsers and Tauri libraries are each reported', () => {

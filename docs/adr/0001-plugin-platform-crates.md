@@ -131,7 +131,8 @@ Built as described, with these deliberate differences:
 - The host maps manifest and grants to a `SandboxSpec` (pure data); the OS-level sandbox stays in the app. The elevated process (a
   second process of the plugin's binary with the `elevated` role) is also the app's: the platform offers the role in `serve`, the
   `HostCall::Elevated` call (allowed per name) and the `ElevatedRunner` port.
-- The version rule exists twice, on purpose: `paddock_plugin_package::ProtocolVersion` (so a package needs no IPC crate) and
-  `paddock_ipc::ProtocolVersion`; `HostInfo` in `paddock-plugin-api::compat` is the host's policy and words the refusals.
+- The version rule exists once: `paddock_ipc::ProtocolVersion` (`accepts`, `skew`, `introduced_in`, `mismatch`), re-exported by
+  `paddock-plugin-package` and `paddock-plugin-api`; `HostInfo` in `paddock-plugin-api::compat` is the host's policy and words the
+  refusals on top of it. `GrantRef` likewise exists once, in `paddock-view`, re-exported by the package.
 - Protocol 1 (Debrief's own) is refused by the version gate; the compatibility shim of ADR 0003 phase 3 is Debrief's.
 

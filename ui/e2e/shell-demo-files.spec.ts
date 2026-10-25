@@ -15,11 +15,17 @@ test.describe('user files (plan X31)', () => {
     await openFiles(app, page);
     const entries = page.getByTestId('recent-entry');
     await expect(entries).toHaveCount(2);
-    const long = entries.nth(1).getByTestId('path-text');
+    const long = entries.nth(1).locator('.pd-dir').getByTestId('path-text');
     await expect(long).toHaveAttribute('title', /a-very-long-project-folder-name.*service-2026-10-24-11-30\.log$/);
     expect(await axeViolations(page)).toEqual([]);
     await expectNoHorizontalScroll(page);
 
+    // A glyph of the pd: set draws each entry's kind, 16 px (a log is a text page; the second path has no known extension).
+    const icon = entries.first().getByTestId('recent-icon').locator('svg');
+    await expect(icon).toHaveAttribute('width', '16');
+    expect(await entries.first().getByTestId('recent-icon').locator('path').getAttribute('d')).toContain('M8.75 12.5h6.5');
+    // The file name leads; the folder is the muted second line, with its separator kept.
+    await expect(entries.first().locator('.pd-entry > .pd-text > .pd-name')).toHaveText('session-2026-10-24.log');
     await entries.first().locator('.pd-entry').click();
     await expect(page.getByTestId('files-last')).toHaveText('Opened /demo/logs/session-2026-10-24.log');
     expect(pageErrors).toEqual([]);
@@ -63,5 +69,11 @@ test.describe('user files (plan X31)', () => {
     await page.getByTestId('files-url').click();
     await expect(page.getByTestId('files-failure')).toHaveCount(0);
     await expectNoHorizontalScroll(page);
+    // A long file name shortens in the middle, so its extension is still there (rule 18).
+    const long = page.getByTestId('recent-entry').nth(1).locator('.pd-entry > .pd-text > .pd-name');
+    await expect(long.locator('.pd-tail')).toContainText('.log');
+    const box = await long.locator('.pd-tail').boundingBox();
+    const outer = await long.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(outer!.x + outer!.width + 0.5);
   });
 });

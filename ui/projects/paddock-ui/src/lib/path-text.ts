@@ -15,7 +15,7 @@ import { copyText } from './clipboard';
   selector: 'pd-path-text',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph],
-  template: `<span class="pd-text" [class.pd-plain]="plain()" [attr.title]="whole()" data-testid="path-text"><span class="pd-head">{{ parts().dir }}</span><span class="pd-name">{{ parts().name }}</span><span class="pd-tail">{{ parts().tail }}</span></span>
+  template: `<span class="pd-text" [class.pd-plain]="plain()" [attr.title]="whole()" data-testid="path-text">@if (dirText() || sepText()) {<span class="pd-head">{{ dirText() }}</span><span class="pd-sep">{{ sepText() }}</span>}<span class="pd-name">{{ parts().name }}</span><span class="pd-tail">{{ parts().tail }}</span></span>
     @if (copy()) {
       <button class="pd-copy" type="button" [attr.aria-label]="copied() ? copiedLabel : copyLabel" [attr.title]="copied() ? copiedLabel : copyLabel" (click)="doCopy($event)">
         <pd-glyph [name]="copied() ? 'check' : 'copy'" [size]="14" />
@@ -25,8 +25,10 @@ import { copyText } from './clipboard';
     :host { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; }
     .pd-text { display: flex; min-width: 0; flex: 0 1 auto; overflow: hidden; white-space: nowrap; font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
     .pd-text.pd-plain { font-family: inherit; font-size: inherit; }
-    /* Shrink order: the directory first (weight 100000, so the name loses less than a layout unit until the directory is at its minimum, never below 2ch so its ellipsis stays), then the start of the name; the tail never. */
-    .pd-head { flex: 0 100000 auto; min-width: 2ch; overflow: hidden; text-overflow: ellipsis; }
+    /* Shrink order: the directory first (weight 100000, so the name loses less than a layout unit until the directory is gone), then the start of the name; the tail never. So at most one ellipsis shows: the directory's, or the name's once the directory has nothing left to give. */
+    .pd-head { flex: 0 100000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    /* The separator before the name never shrinks: the ellipsis cuts the directory, not the "/", so the name never reads as a continuation. */
+    .pd-sep { flex: none; }
     .pd-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .pd-tail { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
     .pd-copy { flex: none; display: inline-flex; padding: 2px; border: 0; border-radius: var(--pd-radius-tag); background: transparent; color: var(--pd-text-muted); cursor: pointer; opacity: 0; }
@@ -49,6 +51,16 @@ export class PdPathText {
   readonly copy = input(false);
 
   protected readonly parts = computed(() => splitPath(this.value(), this.keepTail()));
+  /** The directory without its last separator (the part that shrinks). */
+  protected readonly dirText = computed(() => {
+    const dir = this.parts().dir;
+    return /[\\/]$/.test(dir) ? dir.slice(0, -1) : dir;
+  });
+  /** The separator that ends the directory (kept visible beside the ellipsis). */
+  protected readonly sepText = computed(() => {
+    const dir = this.parts().dir;
+    return /[\\/]$/.test(dir) ? dir.slice(-1) : '';
+  });
   protected readonly whole = computed(() => this.full() ?? this.value());
   protected readonly copied = signal(false);
   protected readonly copyLabel = $localize`:@@pd.pathText.copy:Copy the full path`;

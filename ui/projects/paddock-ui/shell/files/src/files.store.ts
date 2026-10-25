@@ -79,6 +79,10 @@ export const FilesStore = signalStore(
       open(path: string): Promise<boolean> {
         return attempt(() => backend.open(path).then(() => true), false);
       },
+      /** Opens a granted file in the editor at a line; whether it worked. */
+      openAtLine(path: string, line: number): Promise<boolean> {
+        return attempt(() => backend.openAtLine(path, line).then(() => true), false);
+      },
       /** Shows one of the app's own folders; whether it worked. */
       openAppFolder(folder: AppFolder): Promise<boolean> {
         return attempt(() => backend.openAppFolder(folder).then(() => true), false);

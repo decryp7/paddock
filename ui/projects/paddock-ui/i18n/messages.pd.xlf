@@ -1916,14 +1916,17 @@
       <trans-unit id="pd.startup.session-restored" datatype="html">
         <source>Your last session was restored.</source>
       </trans-unit>
+      <trans-unit id="pd.storage.at-least" datatype="html">
+        <source>At least (the walk stopped early):</source>
+      </trans-unit>
       <trans-unit id="pd.storage.cancel" datatype="html">
         <source>Cancel</source>
       </trans-unit>
       <trans-unit id="pd.storage.cancelling" datatype="html">
         <source>Cancelling…</source>
       </trans-unit>
-      <trans-unit id="pd.storage.clear" datatype="html">
-        <source>Clear…</source>
+      <trans-unit id="pd.storage.categories" datatype="html">
+        <source><x id="count"/> kinds of data</source>
       </trans-unit>
       <trans-unit id="pd.storage.clear-cache" datatype="html">
         <source>Clear cache</source>
@@ -1943,8 +1946,20 @@
       <trans-unit id="pd.storage.col-folder" datatype="html">
         <source>Folder</source>
       </trans-unit>
+      <trans-unit id="pd.storage.col-group" datatype="html">
+        <source>Folder</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-item" datatype="html">
+        <source>Item</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-kind" datatype="html">
+        <source>Kind</source>
+      </trans-unit>
       <trans-unit id="pd.storage.col-name" datatype="html">
         <source>Kept</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.col-share" datatype="html">
+        <source>Share</source>
       </trans-unit>
       <trans-unit id="pd.storage.col-size" datatype="html">
         <source>Size</source>
@@ -1965,7 +1980,7 @@
         <source>Keep</source>
       </trans-unit>
       <trans-unit id="pd.storage.confirm-question" datatype="html">
-        <source>Clear <x id="what"/>? Up to <x id="size"/> is removed.</source>
+        <source>Up to <x id="size"/> is removed.</source>
       </trans-unit>
       <trans-unit id="pd.storage.confirm-title" datatype="html">
         <source>Clear <x id="what"/>?</source>
@@ -1985,8 +2000,26 @@
       <trans-unit id="pd.storage.failed" datatype="html">
         <source>That did not work.</source>
       </trans-unit>
+      <trans-unit id="pd.storage.folders" datatype="html">
+        <source>Folders</source>
+      </trans-unit>
       <trans-unit id="pd.storage.freed" datatype="html">
         <source>Cleared. <x id="size"/> freed.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.group-cache" datatype="html">
+        <source>Cache: rebuilt by the app</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.group-data" datatype="html">
+        <source>Your data: cannot be rebuilt</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.inside" datatype="html">
+        <source>What is inside</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.items" datatype="html">
+        <source><x id="total"/> items</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.items-of" datatype="html">
+        <source><x id="shown"/> of <x id="total"/> items</source>
       </trans-unit>
       <trans-unit id="pd.storage.kind-cache" datatype="html">
         <source>Cache</source>
@@ -2012,14 +2045,17 @@
       <trans-unit id="pd.storage.no-usage-title" datatype="html">
         <source>What the app keeps could not be read.</source>
       </trans-unit>
+      <trans-unit id="pd.storage.other-many" datatype="html">
+        <source><x id="count"/> smaller items</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.other-one" datatype="html">
+        <source>1 smaller item</source>
+      </trans-unit>
       <trans-unit id="pd.storage.retry" datatype="html">
         <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.storage.show" datatype="html">
-        <source>Show</source>
-      </trans-unit>
-      <trans-unit id="pd.storage.show-label" datatype="html">
-        <source>Show <x id="name"/> in the file manager</source>
+        <source>Show in the file manager</source>
       </trans-unit>
       <trans-unit id="pd.storage.skipped-many" datatype="html">
         <source><x id="count"/> items left in place</source>
@@ -2044,6 +2080,21 @@
       </trans-unit>
       <trans-unit id="pd.storage.total" datatype="html">
         <source>The app keeps <x id="size"/> on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.total-least" datatype="html">
+        <source>The app keeps at least <x id="size"/> on this computer.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-capped" datatype="html">
+        <source>The walk stopped early (too many items or too long), so these sizes are at least that much.</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-other" datatype="html">
+        <source>Other items</source>
+      </trans-unit>
+      <trans-unit id="pd.storage.tree-title" datatype="html">
+        <source>What is in <x id="name"/></source>
       </trans-unit>
       <trans-unit id="pd.storage.working" datatype="html">
         <source>Working…</source>
@@ -2148,10 +2199,13 @@
         <source>In progress</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.not-cancellable" datatype="html">
-        <source>This step cannot be stopped</source>
+        <source>This step cannot be stopped; Cancel takes effect when it ends.</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.of" datatype="html">
         <source><x id="done"/> of <x id="total"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.retry" datatype="html">
+        <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.so-far" datatype="html">
         <source><x id="done"/> so far</source>
@@ -2161,6 +2215,9 @@
       </trans-unit>
       <trans-unit id="pd.ui.job.starting" datatype="html">
         <source>Starting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.stops-after" datatype="html">
+        <source><x id="reason"/>: Cancel takes effect when this step ends.</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.user-cancelled" datatype="html">
         <source>Stopped at your request.</source>
@@ -2335,6 +2392,318 @@
       </trans-unit>
       <trans-unit id="pd.updates.up-to-date" datatype="html">
         <source>You have the latest version.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.chart.name" datatype="html">
+        <source>Chart</source>
+      </trans-unit>
+      <trans-unit id="pd.view.chart.no-data" datatype="html">
+        <source>No data.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.chart.words" datatype="html">
+        <source><x id="name"/> from <x id="lo"/> to <x id="hi"/> over <x id="n"/> points, last <x id="last"/></source>
+      </trans-unit>
+      <trans-unit id="pd.view.confirm-failed" datatype="html">
+        <source>The question could not be asked, so nothing was done.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.diagram" datatype="html">
+        <source>Diagram</source>
+      </trans-unit>
+      <trans-unit id="pd.view.error" datatype="html">
+        <source>This view cannot be shown</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.choose-file" datatype="html">
+        <source>Choose a file…</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.choose-folder" datatype="html">
+        <source>Choose a folder…</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.choose-secret" datatype="html">
+        <source>Choose a secret…</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.no-file" datatype="html">
+        <source>No file chosen</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.no-folder" datatype="html">
+        <source>No folder chosen</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.no-secret" datatype="html">
+        <source>No secret chosen</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.none" datatype="html">
+        <source>Not chosen</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.path-chosen" datatype="html">
+        <source>Chosen</source>
+      </trans-unit>
+      <trans-unit id="pd.view.form.secret-chosen" datatype="html">
+        <source>A stored secret is chosen</source>
+      </trans-unit>
+      <trans-unit id="pd.view.graph" datatype="html">
+        <source>Graph</source>
+      </trans-unit>
+      <trans-unit id="pd.view.host.confirm" datatype="html">
+        <source>ask for a confirmation</source>
+      </trans-unit>
+      <trans-unit id="pd.view.host.missing" datatype="html">
+        <source>This app cannot <x id="what"/> from a view yet, so nothing was done.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.host.open" datatype="html">
+        <source>open a web page</source>
+      </trans-unit>
+      <trans-unit id="pd.view.host.path" datatype="html">
+        <source>choose a file or folder</source>
+      </trans-unit>
+      <trans-unit id="pd.view.host.secret" datatype="html">
+        <source>choose a secret</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.args" datatype="html">
+        <source>arguments larger than <x id="max"/> bytes</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.beyond" datatype="html">
+        <source>the page is beyond the last row</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.bool" datatype="html">
+        <source>true or false was expected</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.cells" datatype="html">
+        <source><x id="n"/> cells for <x id="columns"/> columns</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.deep" datatype="html">
+        <source><x id="path"/> is nested more than <x id="max"/> levels deep.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.dup" datatype="html">
+        <source><x id="path"/> repeats the id &quot;<x id="id"/>&quot;.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.field" datatype="html">
+        <source>unknown kind of field</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.finite" datatype="html">
+        <source>values are finite numbers</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.graph" datatype="html">
+        <source><x id="path"/> has <x id="nodes"/> nodes and <x id="edges"/> edges; the limit is <x id="maxn"/> and <x id="maxe"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.id" datatype="html">
+        <source>an id is 1 to <x id="max"/> bytes</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.int" datatype="html">
+        <source>a whole number from 0 to 2^53 - 1 was expected</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.invalid" datatype="html">
+        <source><x id="path"/> is not valid: <x id="reason"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.large" datatype="html">
+        <source>The view is larger than <x id="max"/> bytes.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.list" datatype="html">
+        <source>a list was expected</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.long" datatype="html">
+        <source><x id="path"/> is longer than <x id="max"/> bytes.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.long-url" datatype="html">
+        <source><x id="path"/> is a web address that is too long.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.minmax" datatype="html">
+        <source>the value is outside min and max</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.more-rows" datatype="html">
+        <source>more rows on the page than the total allows</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.no-node" datatype="html">
+        <source>there is no node &quot;<x id="id"/>&quot;</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.nodes" datatype="html">
+        <source>The view has more than <x id="max"/> items.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.not-doc" datatype="html">
+        <source>The view is not a document.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.number" datatype="html">
+        <source>a number was expected</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.object" datatype="html">
+        <source>an object was expected</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.option" datatype="html">
+        <source>not one of the options</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.outside" datatype="html">
+        <source>the cell is outside the matrix</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.page" datatype="html">
+        <source>a page is 1 to <x id="max"/> rows</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.points" datatype="html">
+        <source><x id="n"/> values; the limit is <x id="max"/></source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.progress" datatype="html">
+        <source>progress is a number from 0 to 1</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.rows" datatype="html">
+        <source><x id="path"/> has <x id="rows"/> rows; more than <x id="max"/> must be paged.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.same-place" datatype="html">
+        <source>two cells at the same place</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.schema" datatype="html">
+        <source>This view needs a different version of the app (it is version <x id="found"/>, this app reads <x id="supported"/>). Update the app to view this.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.series" datatype="html">
+        <source><x id="n"/> values for <x id="c"/> categories</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.sort" datatype="html">
+        <source>there is no column &quot;<x id="column"/>&quot;</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.state" datatype="html">
+        <source>there is no state &quot;<x id="state"/>&quot;</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.string" datatype="html">
+        <source>text was expected</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.tree-depth" datatype="html">
+        <source>a tree node is at most one level below the node before it</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.tree-lazy" datatype="html">
+        <source>only a lazy tree has expandable nodes</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.unlabelled" datatype="html">
+        <source><x id="path"/> has no text, so nobody could read it.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.unreadable" datatype="html">
+        <source>The view could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.url" datatype="html">
+        <source><x id="path"/> is not a web address (http or https, without a user name).</source>
+      </trans-unit>
+      <trans-unit id="pd.view.loading" datatype="html">
+        <source>Loading…</source>
+      </trans-unit>
+      <trans-unit id="pd.view.matrix.label" datatype="html">
+        <source>Matrix</source>
+      </trans-unit>
+      <trans-unit id="pd.view.needs-ai" datatype="html">
+        <source>This needs local AI, which is not ready.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.open-failed" datatype="html">
+        <source>The page could not be opened.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.opens-browser" datatype="html">
+        <source>opens in your browser</source>
+      </trans-unit>
+      <trans-unit id="pd.view.patch.malformed" datatype="html">
+        <source>The update to the view could not be read.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.patch.no-doc" datatype="html">
+        <source>There is no view to update yet.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.patch.same" datatype="html">
+        <source>The update has the same version as the view on screen.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.patch.stale" datatype="html">
+        <source>The view changed while you were working. Reload it to see the latest.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.patch.unknown" datatype="html">
+        <source>The update names a part of the view that is not there (&quot;<x id="id"/>&quot;).</source>
+      </trans-unit>
+      <trans-unit id="pd.view.pick-failed" datatype="html">
+        <source>The choice could not be made.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.progress" datatype="html">
+        <source>Progress</source>
+      </trans-unit>
+      <trans-unit id="pd.view.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.view.review.all" datatype="html">
+        <source>All</source>
+      </trans-unit>
+      <trans-unit id="pd.view.review.cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.view.review.filter" datatype="html">
+        <source>Show findings by state</source>
+      </trans-unit>
+      <trans-unit id="pd.view.review.label" datatype="html">
+        <source>Findings</source>
+      </trans-unit>
+      <trans-unit id="pd.view.review.none" datatype="html">
+        <source>No findings.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.review.reason" datatype="html">
+        <source>Reason for “<x id="action"/>”</source>
+      </trans-unit>
+      <trans-unit id="pd.view.review.reason-hint" datatype="html">
+        <source>Saved with the decision.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.scene.edge" datatype="html">
+        <source><x id="from"/> to <x id="to"/></source>
+      </trans-unit>
+      <trans-unit id="pd.view.scene.edge-label" datatype="html">
+        <source><x id="from"/> to <x id="to"/> (<x id="label"/>)</source>
+      </trans-unit>
+      <trans-unit id="pd.view.scene.list" datatype="html">
+        <source>Show as a list</source>
+      </trans-unit>
+      <trans-unit id="pd.view.scene.summary" datatype="html">
+        <source><x id="label"/>, <x id="nodes"/> items and <x id="edges"/> connections</source>
+      </trans-unit>
+      <trans-unit id="pd.view.stale" datatype="html">
+        <source>This view is out of date</source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.caption" datatype="html">
+        <source>Table</source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.empty-range" datatype="html">
+        <source>No rows</source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.next" datatype="html">
+        <source>Next page</source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.none" datatype="html">
+        <source>No rows.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.pager" datatype="html">
+        <source>Pages of the table</source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.prev" datatype="html">
+        <source>Previous page</source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.range" datatype="html">
+        <source>Rows <x id="from"/> to <x id="to"/> of <x id="total"/></source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.sort-asc" datatype="html">
+        <source>Sort by <x id="column"/>, ascending</source>
+      </trans-unit>
+      <trans-unit id="pd.view.table.sort-desc" datatype="html">
+        <source>Sort by <x id="column"/>, descending</source>
+      </trans-unit>
+      <trans-unit id="pd.view.tone.bad" datatype="html">
+        <source>Problem</source>
+      </trans-unit>
+      <trans-unit id="pd.view.tone.good" datatype="html">
+        <source>Good</source>
+      </trans-unit>
+      <trans-unit id="pd.view.tone.info" datatype="html">
+        <source>Note</source>
+      </trans-unit>
+      <trans-unit id="pd.view.tone.warn" datatype="html">
+        <source>Warning</source>
+      </trans-unit>
+      <trans-unit id="pd.view.tree.collapse" datatype="html">
+        <source>Collapse</source>
+      </trans-unit>
+      <trans-unit id="pd.view.tree.expand" datatype="html">
+        <source>Expand</source>
+      </trans-unit>
+      <trans-unit id="pd.view.tree.label" datatype="html">
+        <source>Tree</source>
+      </trans-unit>
+      <trans-unit id="pd.view.unknown" datatype="html">
+        <source>Update the app to view this</source>
+      </trans-unit>
+      <trans-unit id="pd.view.writes" datatype="html">
+        <source>Changes data</source>
       </trans-unit>
       <trans-unit id="pd.wb.activity.empty" datatype="html">
         <source>Nothing here</source>

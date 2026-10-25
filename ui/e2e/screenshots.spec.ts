@@ -1,4 +1,4 @@
-import { captureDocScreens, e2ePort, expect, installTauriFake, ShellApp, waitForStableFrame, WINDOW_SIZES, type DocScreen, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { captureDocScreens, e2ePort, type DocScreensOptions, expect, installTauriFake, ShellApp, waitForStableFrame, WINDOW_SIZES, type DocScreen, type Locator, type Page } from '@decryp7/paddock-e2e';
 
 // The documentation screenshots of this repository (UI rule 20, rule 22), all taken by the kit's runner (plan X39):
 // 1440 x 900 at twice the pixel density (the `screenshots` project), a fake clock at one fixed time (paused for the gallery; the shell demo's runs until its app context has loaded, then `freeze` stops it), UTC and en-GB,
@@ -9,10 +9,32 @@ const DEMO = `http://localhost:${e2ePort('SHELL_DEMO_PORT', 4301)}`;
 const OUT = `${process.cwd()}/docs/screenshots`;
 const common = { outDir: OUT, clock: 'paused' as const };
 
+/**
+ * The documentation runs resolve the mono face to a real monospace: headless Chromium has no `ui-monospace` and falls back to
+ * Courier, which is not what the product shows (the apps' WebViews resolve it to SF Mono, Cascadia or Consolas).
+ */
+const mono = async (page: Page): Promise<void> => {
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const style = document.createElement('style');
+      style.textContent = ":root:root { --pd-font-mono: Menlo, 'DejaVu Sans Mono', 'Liberation Mono', monospace; }";
+      document.head.append(style);
+    });
+  });
+};
+
+/** `captureDocScreens` with the shared options and the mono face. */
+function doc(options: Omit<DocScreensOptions, 'outDir' | 'clock'> & { readonly clock?: DocScreensOptions['clock']; readonly monoFace?: boolean }): void {
+  const { monoFace, ...rest } = options;
+  captureDocScreens({ ...common, ...rest, prepare: async (page, theme) => { if (monoFace) await mono(page); await options.prepare?.(page, theme); } });
+}
+
 // ---- the component gallery: each section of each accent, the two full pages, the density comparison --------------------
 
 const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter'] as const;
 const SECTIONS = ['card', 'status-pill', 'metric', 'sparkline', 'empty-state', 'error-state', 'skeleton', 'job', 'segmented-control', 'icons', 'controls', 'path-text', 'tray-popover', 'chart-theme'] as const;
+
+const NARROW_SECTIONS: ReadonlySet<string> = new Set(['metric', 'path-text', 'segmented-control']);
 
 /** Opens the gallery in the run's theme and lets the charts draw on the paused clock (their animation is 300 ms). */
 async function gallery(page: Page, theme: string, query: string): Promise<void> {
@@ -21,28 +43,42 @@ async function gallery(page: Page, theme: string, query: string): Promise<void> 
   await page.clock.runFor(1_000);
 }
 
-captureDocScreens({
-  ...common,
-  appSelector: 'pd-card',
-  screens: ACCENTS.flatMap((accent): DocScreen[] =>
-    SECTIONS.map((section) => ({
-      name: `${accent}/${section}`,
-      url: `${GALLERY}/?accent=${accent}`,
-      ready: (page, theme) => gallery(page, theme, `accent=${accent}&density=standard`),
-      element: (page) => page.locator(`section[data-testid="${section}"]`),
-    })),
-  ),
-});
+/** One screen per accent for each of `sections`. */
+const sectionScreens = (sections: readonly string[]): DocScreen[] =>
+  ACCENTS.flatMap((accent) =>
+    sections.map(
+      (section): DocScreen => ({
+        name: `${accent}/${section}`,
+        url: `${GALLERY}/?accent=${accent}`,
+        ready: async (page, theme) => {
+          await gallery(page, theme, `accent=${accent}&density=standard`);
+          // Sections whose content is a short row are photographed at the content's width, not as an empty strip.
+          if (NARROW_SECTIONS.has(section)) await page.locator(`section[data-testid="${section}"]`).evaluate((e) => (e.style.width = 'fit-content'));
+        },
+        element: (page) => page.locator(`section[data-testid="${section}"]`),
+      }),
+    ),
+  );
 
-captureDocScreens({
-  ...common,
+doc({ appSelector: 'pd-card', screens: sectionScreens(SECTIONS.filter((s) => s !== 'path-text')) });
+
+// The path-text sections need the real mono face (headless Chromium has none for ui-monospace and draws Courier).
+doc({ appSelector: 'pd-card', monoFace: true, screens: sectionScreens(['path-text']) });
+
+doc({
   layout: 'flat',
   appSelector: 'pd-card',
   screens: [
     ...(['debrief', 'dyno'] as const).map((accent): DocScreen => ({
       name: `gallery-${accent}`,
       url: `${GALLERY}/?accent=${accent}`,
+      // The overview ends at a section boundary (after Metric), never in the middle of a card.
+      frame: 'page',
       ready: (page, theme) => gallery(page, theme, `accent=${accent}&density=standard`),
+      clip: async (page) => {
+        const box = await page.locator('section[data-testid="metric"]').boundingBox();
+        return box ? { x: 0, y: 0, width: 1440, height: Math.ceil(box.y + box.height) } : undefined;
+      },
     })),
     ...(['comfortable', 'compact'] as const).map((density): DocScreen => ({
       name: `density/card-${density}`,
@@ -75,29 +111,32 @@ const settle = async (page: Page): Promise<void> => {
 };
 
 /** The Runners page with a running job and the search index down; the toasts have timed out. Developer pages off. */
-async function scene(page: Page, size: { readonly width: number; readonly height: number }): Promise<ShellApp> {
+async function scene(page: Page, size: { readonly width: number; readonly height: number }, desktop = false): Promise<ShellApp> {
   const app = new ShellApp(page);
   await page.setViewportSize(size);
   await loaded(page);
-  await page.getByRole('button', { name: 'Start quiet job' }).click();
-  await page.getByRole('button', { name: 'Break the search index' }).click();
-  await page.getByRole('button', { name: 'Notify three times' }).click();
+  // The desktop scene's engine is a fake that answers nothing: it shows the same frame at rest, so no job or outage is staged.
+  if (!desktop) {
+    await page.getByRole('button', { name: 'Start quiet job' }).click();
+    await page.getByRole('button', { name: 'Break the search index' }).click();
+    await page.getByRole('button', { name: 'Notify three times' }).click();
+  }
   await page.evaluate(() => (location.hash = '#/runners'));
   await expect(page.locator('sd-runners-page')).toBeVisible();
   await expect(app.sidebar.link('Dialogs')).toHaveCount(0);
   await page.clock.runFor(14_000);
   await page.mouse.move(size.width / 2, size.height - 60);
-  await expect(app.statusBar.item('pd.jobs')).not.toHaveClass(/hidden/);
+  if (!desktop) await expect(app.statusBar.item('pd.jobs')).not.toHaveClass(/hidden/);
   await settle(page);
   return app;
 }
 
-const pages = (name: string, size: keyof typeof WINDOW_SIZES, steps?: (app: ShellApp, page: Page) => Promise<void>): DocScreen => ({
+const pages = (name: string, size: keyof typeof WINDOW_SIZES, steps?: (app: ShellApp, page: Page) => Promise<void>, desktop = false): DocScreen => ({
   name: `shell-demo/pages-${name}`,
   url: `${DEMO}/#/home`,
   size: WINDOW_SIZES[size],
   ready: async (page) => {
-    const app = await scene(page, WINDOW_SIZES[size]);
+    const app = await scene(page, WINDOW_SIZES[size], desktop);
     await steps?.(app, page);
     await settle(page);
     await freeze(page);
@@ -113,8 +152,7 @@ const developerOff = async (page: Page): Promise<void> => {
   await page.addInitScript(() => localStorage.setItem('sd.developer', 'off'));
 };
 
-captureDocScreens({
-  ...common,
+doc({
   clock: 'ticking', // the demo loads its app context when the window is idle: timers run until `freeze`
   layout: 'flat',
   appSelector: 'pd-shell-frame',
@@ -153,16 +191,19 @@ captureDocScreens({
 });
 
 // The macOS desktop app, played in the browser: a Mac platform and a fake Tauri IPC that answers every call.
-captureDocScreens({
-  ...common,
+doc({
   clock: 'ticking', // the demo loads its app context when the window is idle: timers run until `freeze`
   layout: 'flat',
   appSelector: 'pd-shell-frame',
   prepare: async (page) => {
     await developerOff(page);
-    await installTauriFake(page, { platform: 'mac', otherwise: 'null' });
+    await installTauriFake(page, {
+      platform: 'mac',
+      otherwise: 'null',
+      replies: { health_snapshot: { revision: 1, services: [{ service: 'sd.engine', label: 'the demo engine', state: 'ok', cause: null, repair: null }, { service: 'sd.index', label: 'the search index', state: 'ok', cause: null, repair: null }] }, notifications_list: { revision: 1, notices: [], unread: 0 }, jobs_snapshot: [] },
+    });
   },
-  screens: [pages('macos', 'wide')],
+  screens: [pages('macos', 'wide', undefined, true)],
 });
 
 /** Clicks on the stopped clock and lets the page's timers run a moment (the page reacts to a click on a timer). */
@@ -188,8 +229,7 @@ async function theLook(page: Page): Promise<void> {
   await settle(page);
 }
 
-captureDocScreens({
-  ...common,
+doc({
   clock: 'ticking', // the demo loads its app context when the window is idle: timers run until `freeze`
   layout: 'flat',
   appSelector: 'pd-shell-frame',
@@ -217,8 +257,7 @@ captureDocScreens({
   ],
 });
 
-captureDocScreens({
-  ...common,
+doc({
   clock: 'ticking', // the demo loads its app context when the window is idle: timers run until `freeze`
   layout: 'flat',
   appSelector: 'pd-shell-frame',

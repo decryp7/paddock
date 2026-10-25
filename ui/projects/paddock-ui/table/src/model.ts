@@ -7,7 +7,7 @@ export interface PdColumn<T> {
   readonly header: string;
   readonly value: (row: T) => string | number | boolean | Date | null | undefined;
   readonly text?: (row: T) => string;
-  /** A grid track (`2fr`, `120px`); default `minmax(0, 1fr)`. */
+  /** A grid track (`2fr`, `120px`); default `minmax(0, 1fr)`. Use px or fr, never em: the header and the rows have different font sizes, so an em track would be a different width in each and the columns would not line up. */
   readonly width?: string;
   /** Numbers, sizes and dates: right-aligned, tabular figures, never wrapped. */
   readonly align?: 'start' | 'end';
@@ -103,14 +103,20 @@ export function shownColumns<T>(columns: readonly PdColumn<T>[], hiddenByUser: r
 
 /** One line of the flattened table: a group heading or a row. */
 export type PdTableItem<T> =
-  | { readonly kind: 'group'; readonly key: string; readonly label: string; readonly count: number; readonly collapsed: boolean }
+  | { readonly kind: 'group'; readonly key: string; readonly label: string; readonly count: number; readonly collapsed: boolean; readonly cells?: Readonly<Record<string, string>> }
   | { readonly kind: 'row'; readonly row: T };
 
 /**
  * Rows grouped by the text of one column (rule 6: group rows live in the same table). Groups come in order of first
- * appearance in the (already sorted) rows; a collapsed group contributes its heading only.
+ * appearance in the (already sorted) rows; a collapsed group contributes its heading only. `summary` gives the group row's own
+ * cell text by column key (the aggregate of its rows: a folder's size), drawn in the columns beneath the heading.
  */
-export function groupItems<T>(rows: readonly T[], column: PdColumn<T> | undefined, collapsed: ReadonlySet<string>): readonly PdTableItem<T>[] {
+export function groupItems<T>(
+  rows: readonly T[],
+  column: PdColumn<T> | undefined,
+  collapsed: ReadonlySet<string>,
+  summary?: ((rows: readonly T[]) => Readonly<Record<string, string>>) | null,
+): readonly PdTableItem<T>[] {
   if (!column) return rows.map((row) => ({ kind: 'row', row }));
   const groups = new Map<string, T[]>();
   for (const row of rows) {
@@ -122,7 +128,7 @@ export function groupItems<T>(rows: readonly T[], column: PdColumn<T> | undefine
   const out: PdTableItem<T>[] = [];
   for (const [key, list] of groups) {
     const isCollapsed = collapsed.has(key);
-    out.push({ kind: 'group', key, label: key, count: list.length, collapsed: isCollapsed });
+    out.push({ kind: 'group', key, label: key, count: list.length, collapsed: isCollapsed, ...(summary ? { cells: summary(list) } : {}) });
     if (!isCollapsed) for (const row of list) out.push({ kind: 'row', row });
   }
   return out;
@@ -193,9 +199,13 @@ function minPx<T>(c: PdColumn<T>): number {
   return px ? Number(px[1]) : 64;
 }
 
-/** The grid track of a column: required ones never shrink under {@link PD_PRIMARY_MIN_PX}. */
+/**
+ * The grid track of a column: required ones do not shrink under {@link PD_PRIMARY_MIN_PX}, except in a table so narrow that the
+ * floor plus the other columns would not fit (a phone-width pane): then the floor is 40 % of the grid, so the row never grows wider
+ * than the body and the last action stays inside the table.
+ */
 export function columnTrack<T>(c: PdColumn<T>): string {
-  const floor = `${PD_PRIMARY_MIN_PX}px`;
+  const floor = `min(${PD_PRIMARY_MIN_PX}px, 40%)`;
   if (!c.required) return c.width ?? 'minmax(0, 1fr)';
   if (!c.width) return `minmax(${floor}, 2fr)`;
   return c.width.replace(/^minmax\(\s*0(px)?\s*,/, `minmax(${floor},`);
