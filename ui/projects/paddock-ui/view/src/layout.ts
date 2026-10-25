@@ -10,6 +10,8 @@ export interface SceneNode {
   readonly caption: string;
   readonly tone: Tone;
   readonly action: ActionRef | null;
+  /** The detail lines are the members of a class: a rule under the name and left-aligned lines, not centred text. */
+  readonly compartment: boolean;
   readonly x: number;
   readonly y: number;
   readonly w: number;
@@ -24,6 +26,8 @@ export interface SceneEdge {
   readonly path: string;
   readonly lx: number;
   readonly ly: number;
+  /** How the label sits at (`lx`, `ly`): `middle` over a horizontal line, `start` beside a line that runs mostly up and down. */
+  readonly anchor: 'start' | 'middle';
 }
 
 /** A sequence diagram's vertical line under a participant. */
@@ -51,6 +55,7 @@ export interface LayoutNode {
   readonly caption?: string;
   readonly tone?: Tone;
   readonly action?: ActionRef | null;
+  readonly compartment?: boolean;
 }
 export interface LayoutEdge {
   readonly from: string;
@@ -67,6 +72,9 @@ const MIN_W = 96;
 const MAX_W = 240;
 const ROW_H = 44;
 const COL_W = 168;
+/** The room a status glyph takes at the start of a box, in user units. */
+export const MARK_W = 20;
+const RING_GAP = 24;
 
 /** Splits a detail into its lines (bounded: at most 12 lines of 60 characters are drawn). */
 export function detailLines(detail: string | undefined): readonly string[] {
@@ -80,8 +88,10 @@ export function detailLines(detail: string | undefined): readonly string[] {
 
 function sized(n: LayoutNode): Pick<SceneNode, 'w' | 'h' | 'detail'> {
   const detail = detailLines(n.detail);
-  const longest = Math.max(n.label.length, n.caption?.length ?? 0, ...detail.map((l) => l.length * 0.9));
-  const w = Math.min(MAX_W, Math.max(MIN_W, Math.ceil(longest * CHAR_W + 28)));
+  const longest = Math.max(n.label.length, n.caption?.length ?? 0, ...detail.map((l) => l.length));
+  // A box with a status carries its mark (a glyph) before the label, so it is wider by the mark.
+  const mark = n.tone && n.tone !== 'neutral' ? MARK_W : 0;
+  const w = Math.min(MAX_W, Math.max(MIN_W, Math.ceil(longest * CHAR_W + 28 + mark)));
   const h = 36 + (n.caption ? 12 : 0) + detail.length * LINE_H + (detail.length ? 6 : 0);
   return { w, h, detail };
 }
@@ -164,6 +174,104 @@ function boxEdge(n: { x: number; y: number; w: number; h: number }, tx: number, 
 
 const r1 = (n: number): number => Math.round(n * 10) / 10;
 
+/** The hub of a radial graph: the node with the most connections (either direction), the first one in the input on a tie. */
+export function hubOf(count: number, pairs: readonly (readonly [number, number])[]): number {
+  const degree = new Array<number>(count).fill(0);
+  for (const [a, b] of pairs) {
+    if (a === b) continue;
+    degree[a] = (degree[a] ?? 0) + 1;
+    degree[b] = (degree[b] ?? 0) + 1;
+  }
+  let best = 0;
+  degree.forEach((d, i) => {
+    if (d > (degree[best] ?? 0)) best = i;
+  });
+  return best;
+}
+
+/** Distance in edges from `hub` (edges taken in both directions); nodes it cannot reach (another component) are one ring beyond the farthest. */
+export function ringsFrom(hub: number, count: number, pairs: readonly (readonly [number, number])[]): number[] {
+  const near: number[][] = Array.from({ length: count }, () => []);
+  for (const [a, b] of pairs) {
+    if (a === b) continue;
+    near[a]?.push(b);
+    near[b]?.push(a);
+  }
+  const ring = new Array<number>(count).fill(-1);
+  ring[hub] = 0;
+  const queue = [hub];
+  for (let q = 0; q < queue.length; q++) {
+    const a = queue[q] as number;
+    for (const b of near[a] ?? []) {
+      if (ring[b] === -1) {
+        ring[b] = (ring[a] ?? 0) + 1;
+        queue.push(b);
+      }
+    }
+  }
+  const far = Math.max(0, ...ring) + 1;
+  return ring.map((r) => (r === -1 ? far : r));
+}
+
+/**
+ * Where a radial layout puts each box (centres) and the size of the canvas that fits them. The best-connected node is the hub in the
+ * middle; the others sit on rings by their distance from it (another component is one ring beyond), each ring wide enough that its
+ * boxes cannot touch (a box is treated as its circumscribed circle) and each ring far enough from the one inside it. Inside a ring
+ * the nodes follow the mean direction of their neighbours on the ring before. The canvas is the real bounding box of the boxes plus
+ * the padding, so a small graph is a small drawing.
+ */
+function radialPlace(
+  boxes: readonly { w: number; h: number }[],
+  pairs: readonly (readonly [number, number])[],
+): { at: ({ x: number; y: number } | undefined)[]; shiftX: number; shiftY: number; width: number; height: number } {
+  const count = boxes.length;
+  if (count === 0) return { at: [], shiftX: 0, shiftY: 0, width: MIN_W + PAD * 2, height: PAD * 2 + 36 };
+  const hub = hubOf(count, pairs);
+  const ring = ringsFrom(hub, count, pairs);
+  const rings: number[][] = [];
+  ring.forEach((r, i) => (rings[r] ??= []).push(i));
+  const radius = (i: number): number => Math.hypot(boxes[i]?.w ?? 0, boxes[i]?.h ?? 0) / 2;
+  const at: ({ x: number; y: number } | undefined)[] = new Array(count);
+  const angle = new Array<number>(count).fill(0);
+  at[hub] = { x: 0, y: 0 };
+  let inner = 0;
+  let innerRadius = radius(hub);
+  for (let k = 1; k < rings.length; k++) {
+    const members = rings[k] ?? [];
+    if (members.length === 0) continue;
+    const reach = Math.max(...members.map(radius));
+    // Far enough from the ring inside (centres on two circles are at least their radii apart), and wide enough for its own boxes.
+    const around = members.length > 1 ? (2 * reach + RING_GAP) / (2 * Math.sin(Math.PI / members.length)) : 0;
+    const r = Math.max(inner + innerRadius + reach + RING_GAP, around);
+    // Neighbours on the ring inside decide the order: the mean direction of the ones already placed.
+    const key = new Map<number, number>();
+    for (const n of members) {
+      const sx = pairs.reduce((sum, [a, b]) => sum + (a === n && ring[b] === k - 1 ? Math.cos(angle[b] ?? 0) : b === n && ring[a] === k - 1 ? Math.cos(angle[a] ?? 0) : 0), 0);
+      const sy = pairs.reduce((sum, [a, b]) => sum + (a === n && ring[b] === k - 1 ? Math.sin(angle[b] ?? 0) : b === n && ring[a] === k - 1 ? Math.sin(angle[a] ?? 0) : 0), 0);
+      key.set(n, sx === 0 && sy === 0 ? Infinity : Math.atan2(sy, sx));
+    }
+    members.sort((a, b) => (key.get(a) ?? Infinity) - (key.get(b) ?? Infinity) || a - b);
+    members.forEach((n, i) => {
+      const a = (2 * Math.PI * i) / members.length - Math.PI / 2;
+      angle[n] = a;
+      at[n] = { x: r * Math.cos(a), y: r * Math.sin(a) };
+    });
+    inner = r;
+    innerRadius = reach;
+  }
+  let [minX, minY, maxX, maxY] = [Infinity, Infinity, -Infinity, -Infinity];
+  at.forEach((p, i) => {
+    if (!p) return;
+    const w = boxes[i]?.w ?? 0;
+    const h = boxes[i]?.h ?? 0;
+    minX = Math.min(minX, p.x - w / 2);
+    maxX = Math.max(maxX, p.x + w / 2);
+    minY = Math.min(minY, p.y - h / 2);
+    maxY = Math.max(maxY, p.y + h / 2);
+  });
+  return { at, shiftX: PAD - minX, shiftY: PAD - minY, width: maxX - minX + PAD * 2, height: maxY - minY + PAD * 2 };
+}
+
 /**
  * A layered (top-down) layout of a graph or diagram: nodes in layers by longest path from a source (cycles are broken by a depth-first
  * walk), ordered inside a layer to cut crossings, each layer centred; edges are curves from the bottom of the source to the top of the
@@ -188,25 +296,14 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
   let width = 0;
   let height = 0;
   if (radial) {
-    let r = 0;
-    const centres = rows.map((row, l) => {
-      const maxW = Math.max(0, ...row.map((n) => boxes[n]?.w ?? 0));
-      const maxH = Math.max(0, ...row.map((n) => boxes[n]?.h ?? 0));
-      if (l > 0) r = Math.max(r + maxH + 70, (row.length * (maxW + 24)) / (2 * Math.PI));
-      return r;
+    const placed = radialPlace(boxes, pairs);
+    boxes.forEach((box, i) => {
+      const p = placed.at[i];
+      box.x = r1((p?.x ?? 0) - box.w / 2 + placed.shiftX);
+      box.y = r1((p?.y ?? 0) - box.h / 2 + placed.shiftY);
     });
-    const extent = (centres[centres.length - 1] ?? 0) + 140 + PAD;
-    width = extent * 2;
-    height = extent * 2;
-    rows.forEach((row, l) => {
-      row.forEach((n, i) => {
-        const box = boxes[n] as { x: number; y: number; w: number; h: number };
-        const radius = centres[l] ?? 0;
-        const angle = row.length === 1 && l === 0 ? 0 : (2 * Math.PI * i) / row.length - Math.PI / 2;
-        box.x = r1(extent + radius * Math.cos(angle) - box.w / 2);
-        box.y = r1(extent + radius * Math.sin(angle) - box.h / 2);
-      });
-    });
+    width = placed.width;
+    height = placed.height;
   } else {
     const widths = rows.map((row) => row.reduce((sum, n) => sum + (boxes[n]?.w ?? 0), 0) + Math.max(0, row.length - 1) * NODE_GAP);
     width = Math.max(MIN_W, ...widths) + PAD * 2;
@@ -227,7 +324,7 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
   }
   const sceneNodes: SceneNode[] = nodes.map((n, i) => {
     const b = boxes[i] as { x: number; y: number; w: number; h: number };
-    return { id: n.id, label: n.label, detail: dims[i]?.detail ?? [], caption: n.caption ?? '', tone: n.tone ?? 'neutral', action: n.action ?? null, ...b };
+    return { id: n.id, label: n.label, detail: dims[i]?.detail ?? [], caption: n.caption ?? '', tone: n.tone ?? 'neutral', action: n.action ?? null, compartment: n.compartment === true && (dims[i]?.detail.length ?? 0) > 0, ...b };
   });
   let backs = 0;
   let reach = 0;
@@ -237,31 +334,40 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
     if (a === undefined || b === undefined) return [];
     const s = boxes[a] as { x: number; y: number; w: number; h: number };
     const t = boxes[b] as { x: number; y: number; w: number; h: number };
+    const edge = (path: string, lx: number, ly: number, anchor: 'start' | 'middle'): SceneEdge => ({ from: e.from, to: e.to, label: e.label, path, lx: r1(lx), ly: r1(ly), anchor });
     if (a === b) {
       const x = s.x + s.w;
       const y = s.y + s.h / 2;
-      return [{ from: e.from, to: e.to, label: e.label, path: `M ${r1(x)} ${r1(y - 8)} C ${r1(x + 36)} ${r1(y - 24)}, ${r1(x + 36)} ${r1(y + 24)}, ${r1(x)} ${r1(y + 8)}`, lx: r1(x + 40), ly: r1(y) }];
+      reach = Math.max(reach, x + 44 + e.label.length * CHAR_W);
+      return [edge(`M ${r1(x)} ${r1(y - 8)} C ${r1(x + 36)} ${r1(y - 24)}, ${r1(x + 36)} ${r1(y + 24)}, ${r1(x)} ${r1(y + 8)}`, x + 44, y + 4, 'start')];
     }
     if (radial) {
       const [x1, y1] = boxEdge(s, t.x + t.w / 2, t.y + t.h / 2);
       const [x2, y2] = boxEdge(t, s.x + s.w / 2, s.y + s.h / 2);
-      return [{ from: e.from, to: e.to, label: e.label, path: `M ${r1(x1)} ${r1(y1)} L ${r1(x2)} ${r1(y2)}`, lx: r1((x1 + x2) / 2), ly: r1((y1 + y2) / 2) }];
+      // The label sits beside the line, not on it: 10 units to the side that points up.
+      const [dx, dy] = [x2 - x1, y2 - y1];
+      const len = Math.hypot(dx, dy) || 1;
+      const side = dx >= 0 ? -1 : 1;
+      return [edge(`M ${r1(x1)} ${r1(y1)} L ${r1(x2)} ${r1(y2)}`, (x1 + x2) / 2 + (side * -dy * 10) / len, (y1 + y2) / 2 + (side * dx * 10) / len, 'middle')];
     }
     const down = (layer[b] ?? 0) > (layer[a] ?? 0);
     if (!down) {
-      // An edge that goes back up (or sideways) runs outside the boxes, on the right, instead of through them.
+      // An edge that goes back up (or sideways) runs outside the boxes, on the right, as a curve like the others.
       const bx = Math.max(...boxes.map((x) => x.x + x.w)) + 24 + (backs++ % 4) * 10;
       const ys = s.y + s.h / 2;
       const yt = t.y + t.h / 2;
-      reach = Math.max(reach, bx);
-      return [{ from: e.from, to: e.to, label: e.label, path: `M ${r1(s.x + s.w)} ${r1(ys)} H ${r1(bx)} V ${r1(yt)} H ${r1(t.x + t.w)}`, lx: r1(bx), ly: r1((ys + yt) / 2) }];
+      reach = Math.max(reach, bx + 8 + e.label.length * CHAR_W);
+      const xs = s.x + s.w;
+      const xt = t.x + t.w;
+      return [edge(`M ${r1(xs)} ${r1(ys)} C ${r1(bx + 12)} ${r1(ys)}, ${r1(bx + 12)} ${r1(yt)}, ${r1(xt)} ${r1(yt)}`, (xs + xt) / 8 + (3 * (bx + 12)) / 4 + 6, (ys + yt) / 2, 'start')];
     }
     const x1 = s.x + s.w / 2;
-    const y1 = down ? s.y + s.h : s.y;
+    const y1 = s.y + s.h;
     const x2 = t.x + t.w / 2;
-    const y2 = down ? t.y : t.y + t.h;
+    const y2 = t.y;
     const ym = (y1 + y2) / 2;
-    return [{ from: e.from, to: e.to, label: e.label, path: `M ${r1(x1)} ${r1(y1)} C ${r1(x1)} ${r1(ym)}, ${r1(x2)} ${r1(ym)}, ${r1(x2)} ${r1(y2)}`, lx: r1((x1 + x2) / 2), ly: r1(ym) }];
+    // Beside the middle of the curve, not on it.
+    return [edge(`M ${r1(x1)} ${r1(y1)} C ${r1(x1)} ${r1(ym)}, ${r1(x2)} ${r1(ym)}, ${r1(x2)} ${r1(y2)}`, (x1 + x2) / 2 + 8, ym, 'start')];
   });
   return { kind: radial ? 'radial' : 'layered', width: r1(Math.max(width, reach + PAD + 24)), height: r1(height), nodes: sceneNodes, edges: sceneEdges, lifelines: [] };
 }
@@ -276,7 +382,7 @@ export function layoutSequence(nodes: readonly LayoutNode[], edges: readonly Lay
   const sceneNodes: SceneNode[] = nodes.map((n, i) => {
     const d = sized(n);
     const w = Math.min(COL_W - 16, d.w);
-    return { id: n.id, label: n.label, detail: [], caption: n.caption ?? '', tone: n.tone ?? 'neutral', action: n.action ?? null, x: r1(colX(i) - w / 2), y: PAD, w, h: headH };
+    return { id: n.id, label: n.label, detail: [], caption: n.caption ?? '', tone: n.tone ?? 'neutral', action: n.action ?? null, compartment: false, x: r1(colX(i) - w / 2), y: PAD, w, h: headH };
   });
   const index = new Map(nodes.map((n, i) => [n.id, i]));
   const bottom = PAD + headH + 24 + edges.length * ROW_H + 8;
@@ -287,8 +393,8 @@ export function layoutSequence(nodes: readonly LayoutNode[], edges: readonly Lay
     const y = PAD + headH + 24 + k * ROW_H + ROW_H / 2;
     const x1 = colX(a);
     const x2 = colX(b);
-    if (a === b) return [{ from: e.from, to: e.to, label: e.label, path: `M ${x1} ${y - 8} h 28 v 16 h -28`, lx: x1 + 62, ly: y + 4 }];
-    return [{ from: e.from, to: e.to, label: e.label, path: `M ${x1} ${y} L ${x2} ${y}`, lx: (x1 + x2) / 2, ly: y - 6 }];
+    if (a === b) return [{ from: e.from, to: e.to, label: e.label, path: `M ${x1} ${y - 8} h 28 v 16 h -28`, lx: x1 + 62, ly: y + 4, anchor: 'middle' as const }];
+    return [{ from: e.from, to: e.to, label: e.label, path: `M ${x1} ${y} L ${x2} ${y}`, lx: (x1 + x2) / 2, ly: y - 6, anchor: 'middle' as const }];
   });
   return {
     kind: 'sequence',

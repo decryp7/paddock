@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, inject, Injectable, signal, viewChild } from '@angular/core';
-import { PdView, VIEW_HOST, sampleViewDoc, type ViewAction, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPickRequest } from '@decryp7/paddock-ui/view';
+import { PdView, PdViewWrites, VIEW_HOST, sampleViewDoc, type GrantRef, type SecretRef, type ViewAction, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from '@decryp7/paddock-ui/view';
 
 interface Asking {
   readonly text: string;
   readonly yes: string;
+  readonly writes: boolean;
   resolve(ok: boolean): void;
 }
 
@@ -16,20 +17,20 @@ export class GalViewHost implements ViewHost {
   readonly asking = signal<Asking | null>(null);
   readonly opened = signal<string[]>([]);
 
-  private ask(text: string, yes: string): Promise<boolean> {
-    return new Promise((resolve) => this.asking.set({ text, yes, resolve: (ok) => (this.asking.set(null), resolve(ok)) }));
+  private ask(text: string, yes: string, writes = false): Promise<boolean> {
+    return new Promise((resolve) => this.asking.set({ text, yes, writes, resolve: (ok) => (this.asking.set(null), resolve(ok)) }));
   }
   confirm(r: ViewConfirmRequest): Promise<boolean> {
-    return this.ask(r.question, r.action.label);
+    return this.ask(r.question, r.action.label, r.writes);
   }
   async openInBrowser(r: ViewOpenRequest): Promise<void> {
     if (await this.ask(`Open ${r.url} in your browser?`, 'Open')) this.opened.update((o) => [...o, r.url]);
   }
-  async pickPath(r: ViewPickRequest): Promise<string> {
-    return r.folder ? 'grant-folder-1' : 'grant-file-1';
+  async pickPath(r: ViewPickRequest): Promise<ViewPicked<GrantRef>> {
+    return r.folder ? { value: 'grant-folder-1', name: '/Users/sample/Projects/paddock/target/release/bundle' } : { value: 'grant-file-1', name: '/Users/sample/notes.md' };
   }
-  async pickSecret(): Promise<string> {
-    return 'secret-ref-1';
+  async pickSecret(): Promise<ViewPicked<SecretRef>> {
+    return { value: 'secret-ref-1', name: 'release-publish-token' };
   }
 }
 
@@ -37,7 +38,7 @@ export class GalViewHost implements ViewHost {
 @Component({
   selector: 'gal-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdView],
+  imports: [PdView, PdViewWrites],
   providers: [GalViewHost, { provide: VIEW_HOST, useExisting: GalViewHost }],
   template: `
     <section class="gal-section" data-testid="view" aria-labelledby="h-view">
@@ -48,19 +49,23 @@ export class GalViewHost implements ViewHost {
         <button type="button" class="gal-btn" data-testid="view-stale" (click)="stale()">Send a stale patch</button>
         <button type="button" class="gal-btn" data-testid="view-bad" (click)="bad()">Send an invalid view</button>
         <button type="button" class="gal-btn" data-testid="view-reload" (click)="reload()">Reload</button>
+        <button type="button" class="gal-btn" data-testid="view-load-demo" (click)="load()">Show loading</button>
+        <button type="button" class="gal-btn" data-testid="view-busy-demo" [attr.aria-pressed]="working()" (click)="working.set(!working())">Show busy</button>
       </div>
       @if (host.asking(); as q) {
         <div class="gal-box gal-pad" role="alertdialog" aria-label="Confirm" data-testid="view-confirm">
           <p>{{ q.text }}</p>
           <div class="gal-row">
-            <button type="button" class="gal-btn gal-btn--primary" data-testid="view-confirm-yes" (click)="q.resolve(true)">{{ q.yes }}</button>
             <button type="button" class="gal-btn" data-testid="view-confirm-no" (click)="q.resolve(false)">Cancel</button>
+            <button type="button" class="gal-btn gal-btn--primary" data-testid="view-confirm-yes" (click)="q.resolve(true)">{{ q.yes }}@if (q.writes) { <pd-view-writes /> }</button>
           </div>
         </div>
       }
       <p data-testid="view-log" aria-live="polite">Last action: {{ last() }}. Opened: {{ host.opened().length ? host.opened().join(', ') : 'nothing' }}.</p>
       <div class="gal-box gal-pad" data-testid="view-box">
-        <pd-view view="gallery.release" [doc]="doc()" [busy]="host.asking() !== null" (action)="record($event)" (retry)="reload()" />
+        @for (key of [mounted()]; track key) {
+          <pd-view view="gallery.release" plugin="Release checks" logsLink [doc]="doc()" [loading]="loading()" [busy]="host.asking() !== null || working()" (action)="record($event)" (retry)="reload()" />
+        }
       </div>
     </section>
   `,
@@ -74,6 +79,10 @@ export class GalView {
   private readonly view = viewChild.required(PdView);
   protected readonly doc = signal<unknown>(sampleViewDoc(1));
   protected readonly last = signal('none');
+  protected readonly loading = signal(false);
+  /** Changing it draws the view again from nothing (the loading state is the first thing a view shows). */
+  protected readonly mounted = signal(0);
+  protected readonly working = signal(false);
   private etag = 1;
 
   protected record(a: ViewAction): void {
@@ -92,6 +101,13 @@ export class GalView {
   }
   protected reload(): void {
     this.etag = 1;
+    this.loading.set(false);
     this.doc.set(sampleViewDoc(1));
+  }
+  /** The host is fetching the view and has no document yet: the loading skeleton. */
+  protected load(): void {
+    this.doc.set(null);
+    this.loading.set(true);
+    this.mounted.update((n) => n + 1);
   }
 }

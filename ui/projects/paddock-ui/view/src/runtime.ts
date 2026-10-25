@@ -1,15 +1,17 @@
 import { computed, inject, Injectable, signal, type Signal } from '@angular/core';
 import { errorMessage } from '@decryp7/paddock-ui/shell/store';
-import type { ActionRef, GrantRef, Link, SecretRef, ViewAction } from '../generated/view';
-import { VIEW_HOST } from './host';
+import type { ActionRef, GrantRef, Link, Node, SecretRef, ViewAction } from '../generated/view';
+import { VIEW_HOST, type ViewPicked } from './host';
 import { validateViewAction } from './limits';
-import { mergeArgs } from './model';
+import { mergeArgs, primaryNode } from './model';
 
 /** What `<pd-view>` gives its runtime: the view's id, whether the host is busy, and where actions go. */
 export interface ViewRuntimeContext {
   readonly view: Signal<string>;
   /** The document's title: it names the tables, drawings and lists inside it. */
   readonly title: Signal<string>;
+  /** The root of the document on screen (null before the first), for the one primary button of the view. */
+  readonly root: Signal<Node | null>;
   readonly busy: Signal<boolean>;
   readonly emit: (action: ViewAction) => void;
 }
@@ -30,6 +32,8 @@ export class ViewRuntime {
   readonly error = signal<string | null>(null);
   /** Controls are off while the host is busy with the last action or the user is being asked something. */
   readonly disabled = computed(() => this.pending() || this.context()?.busy() === true);
+  /** The node that draws its action as the view's one filled button (`primaryNode`); every other action is secondary. */
+  readonly primary = computed(() => primaryNode(this.context()?.root()));
   /** The document's title, for the accessible names of its parts. */
   readonly title = computed(() => this.context()?.title() ?? '');
 
@@ -82,13 +86,13 @@ export class ViewRuntime {
     }
   }
 
-  /** The host's picker for a path field: a `GrantRef`, or null when cancelled or refused (then `error` says why). */
-  async pickPath(fieldId: string, label: string, folder: boolean): Promise<GrantRef | null> {
+  /** The host's picker for a path field: the grant and the name to show, or null when cancelled or refused (then `error` says why). */
+  async pickPath(fieldId: string, label: string, folder: boolean): Promise<ViewPicked<GrantRef> | null> {
     return this.pick(() => this.host.pickPath({ fieldId, label, folder }));
   }
 
-  /** The host's picker for a secret field: a `SecretRef` (never the secret), or null. */
-  async pickSecret(fieldId: string, label: string): Promise<SecretRef | null> {
+  /** The host's picker for a secret field: a `SecretRef` (never the secret) and its name, or null. */
+  async pickSecret(fieldId: string, label: string): Promise<ViewPicked<SecretRef> | null> {
     return this.pick(() => this.host.pickSecret({ fieldId, label }));
   }
 

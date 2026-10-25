@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ActionRef, GrantRef, Node, NodeKind, SecretRef, ViewAction, ViewDoc } from '../generated/view';
 import { VIEW_EXTRA_LIMITS } from './limits';
 import { KNOWN_KINDS, shapeOf } from './model';
-import { NO_VIEW_HOST, VIEW_HOST, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPickRequest } from './host';
+import { NO_VIEW_HOST, VIEW_HOST, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from './host';
 import { sampleViewDoc } from './sample';
 import { fieldProblem, initialValues } from './form';
 import { PdView } from './view';
@@ -19,8 +19,8 @@ class FakeHost implements ViewHost {
   secrets: ViewPickRequest[] = [];
   answer = true;
   failWith: Error | null = null;
-  grant: GrantRef | null = 'grant-7';
-  secret: SecretRef | null = 'secret-3';
+  grant: ViewPicked<GrantRef> | null = { value: 'grant-7', name: '/work/releases/1.4/out' };
+  secret: ViewPicked<SecretRef> | null = { value: 'secret-3', name: 'publish-token' };
   async confirm(r: ViewConfirmRequest): Promise<boolean> {
     this.confirms.push(r);
     if (this.failWith) throw this.failWith;
@@ -30,12 +30,12 @@ class FakeHost implements ViewHost {
     this.opens.push(r);
     if (this.failWith) throw this.failWith;
   }
-  async pickPath(r: ViewPickRequest): Promise<GrantRef | null> {
+  async pickPath(r: ViewPickRequest): Promise<ViewPicked<GrantRef> | null> {
     this.paths.push(r);
     if (this.failWith) throw this.failWith;
     return this.grant;
   }
-  async pickSecret(r: ViewPickRequest): Promise<SecretRef | null> {
+  async pickSecret(r: ViewPickRequest): Promise<ViewPicked<SecretRef> | null> {
     this.secrets.push(r);
     if (this.failWith) throw this.failWith;
     return this.secret;
@@ -107,7 +107,8 @@ describe('pd-view', () => {
       const kinds = new Set(all(el(f), '[data-kind]').map((n) => n.getAttribute('data-kind')));
       for (const k of KNOWN_KINDS) expect(kinds.has(k), k).toBe(true);
       expect(all(el(f), '[data-testid=view-unknown]')).toHaveLength(1);
-      expect(text(node(f, 'future'))).toBe('Update the app to view this');
+      expect(text(node(f, 'future'))).toBe('Update the app to view this (hologram)');
+      expect(one(node(f, 'future'), '[data-testid=view-unknown]').getAttribute('title')).toBe('hologram');
       // The rest of the view still draws.
       expect(text(node(f, 'h'))).toContain('Release 1.4: what is left');
     });
@@ -415,7 +416,8 @@ describe('pd-view', () => {
       expect(text(t.querySelector('caption'))).toBe('Release readiness');
       expect(all(t, 'tbody tr')).toHaveLength(3);
       expect(text(all(t, 'tbody tr')[2])).toContain('Problem: Failing');
-      expect(t.querySelector('[role=region]')?.getAttribute('tabindex')).toBe('0');
+      // A region that fits is not a tab stop (PdViewScroll adds it only while it overflows).
+      expect(t.querySelector('[role=region]')?.getAttribute('tabindex')).toBeNull();
     });
 
     it('sends sort with the column and the direction, flipping the sorted column', async () => {
@@ -625,7 +627,7 @@ describe('pd-view', () => {
       expect(all(g, 'path.pd-view-scene__edge')).toHaveLength(6);
       expect(text(g.querySelector('details'))).toContain('Build to Unit tests');
       expect(text(g.querySelector('details'))).toContain('Build to Integration tests (needs db)');
-      expect(g.querySelector('[role=region]')?.getAttribute('tabindex')).toBe('0');
+      expect(g.querySelector('[role=region]')?.getAttribute('tabindex')).toBeNull();
     });
 
     it('sends the action of a box with its id, by click and by keyboard, and leaves other boxes alone', async () => {
@@ -633,7 +635,7 @@ describe('pd-view', () => {
       const g = node(f, 'g1');
       const buttons = all(g, 'g[role=button]');
       expect(buttons).toHaveLength(2);
-      expect(buttons[0]?.getAttribute('aria-label')).toBe('Open step: Unit tests');
+      expect(buttons[0]?.getAttribute('aria-label')).toBe('Open step: Unit tests — Good');
       buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await settle(f);
       expect(last(f)).toEqual({ view: 'demo.view', action: 'open-node', args: { node: 'b' } });
@@ -754,7 +756,9 @@ describe('pd-view', () => {
       buttonByText(form(f), 'Choose a folder…').click();
       await settle(f);
       expect(host.paths).toEqual([{ fieldId: 'out', label: 'Output folder', folder: true }]);
-      expect(text(form(f))).toContain('Chosen');
+      // The field shows the name the host gave the choice (cut in the middle, the full path as its tooltip), never the grant.
+      expect(one(form(f), '[data-testid=path-text]').getAttribute('title')).toBe('/work/releases/1.4/out');
+      expect(form(f).innerHTML).not.toContain('grant-7');
       publish(f).click();
       await settle(f);
       expect((last(f).args as { values: Record<string, unknown> }).values['out']).toBe('grant-7');
@@ -782,7 +786,7 @@ describe('pd-view', () => {
       buttonByText(form(f), 'Choose a secret…').click();
       await settle(f);
       expect(host.secrets).toEqual([{ fieldId: 'token', label: 'Publish token' }]);
-      expect(text(form(f))).toContain('A stored secret is chosen');
+      expect(text(form(f))).toContain('publish-token');
       expect(form(f).innerHTML).not.toContain('secret-3');
       buttonByText(form(f), 'Choose a file…').click();
       await settle(f);
@@ -960,13 +964,13 @@ describe('pd-view', () => {
       expect(options.some((o) => o.includes('"type":"pie"'))).toBe(true);
       expect(text(node(f, 'c1'))).toContain('Test time per run');
       expect(node(f, 'c1').querySelector('[role=img]')?.getAttribute('aria-label')).toBe('Test time per run');
-      expect(text(node(f, 'c1').querySelector('p.pd-sr'))).toContain('Seconds from 39 to 52');
+      expect(text(node(f, 'c1').querySelector('p.pd-sr'))).toContain('Seconds from 39 s to 52 s');
     });
   });
 
   describe('empty', () => {
-    it('draws icon, title and hint, and the action as the one primary button', async () => {
-      const f = await setup();
+    it('draws icon, title and hint, and the action as the one primary button when no form comes first', async () => {
+      const f = await setup(edited((c) => c.splice(c.findIndex((x) => x.id === 'form'), 1)));
       const e = node(f, 'empty');
       expect(text(e)).toContain('Nothing matches');
       expect(text(e)).toContain('Change the filter');
