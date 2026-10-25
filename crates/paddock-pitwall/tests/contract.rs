@@ -1660,8 +1660,9 @@ fn every_keyed_call_refuses_a_client_without_a_key_the_same_way() {
 #[test]
 fn a_killed_fake_refuses_connections_at_once() {
     // Pitwall quitting means the port is closed when `kill` returns, not shortly after: a request in between would be
-    // accepted and dropped, which reads as "stopped answering" instead of "not running".
-    for _ in 0..25 {
+    // accepted and dropped, which reads as "stopped answering" instead of "not running". `kill` joins the accept loop,
+    // which owns the listener, so a few rounds are enough; each refused connection costs about two seconds on Windows.
+    for _ in 0..3 {
         let fake = FakePitwall::start(FakeState::default());
         fake.kill();
         assert!(
