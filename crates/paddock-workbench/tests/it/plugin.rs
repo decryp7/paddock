@@ -276,7 +276,11 @@ fn a_dialog_reaches_only_what_its_contract_declares() {
     assert!(text(&e["message"]).contains("unknown dialog"), "{e}");
     // The layout commands are open to dialogs (Manage layouts), still only through a contract.
     let e = invoke(&unknown, "layout_get", json!({ "key": "wd.layouts" })).unwrap_err();
-    assert_eq!((e["code"].as_str(), e["command"].as_str()), (Some("denied"), Some("layout_get")), "{e}");
+    assert_eq!(
+        (e["code"].as_str(), e["command"].as_str()),
+        (Some("denied"), Some("layout_get")),
+        "{e}"
+    );
 }
 
 #[test]

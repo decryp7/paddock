@@ -115,18 +115,20 @@ async function scene(page: Page, size: { readonly width: number; readonly height
   const app = new ShellApp(page);
   await page.setViewportSize(size);
   await loaded(page);
-  // The desktop scene's engine is a fake that answers nothing: it shows the same frame at rest, so no job or outage is staged.
+  // The desktop scene's engine is a fake that already answers with the staged job and outage, so nothing is clicked.
   if (!desktop) {
     await page.getByRole('button', { name: 'Start quiet job' }).click();
     await page.getByRole('button', { name: 'Break the search index' }).click();
     await page.getByRole('button', { name: 'Notify three times' }).click();
   }
+  // The browser scene has clicked by now, so the page it focuses after the navigation shows no focus ring (:focus-visible follows the last input). The desktop scene clicks on empty ground first, so it is the same.
+  if (desktop) await page.mouse.click(150, size.height - 200);
   await page.evaluate(() => (location.hash = '#/runners'));
   await expect(page.locator('sd-runners-page')).toBeVisible();
   await expect(app.sidebar.link('Dialogs')).toHaveCount(0);
   await page.clock.runFor(14_000);
   await page.mouse.move(size.width / 2, size.height - 60);
-  if (!desktop) await expect(app.statusBar.item('pd.jobs')).not.toHaveClass(/hidden/);
+  await expect(app.statusBar.item('pd.jobs')).not.toHaveClass(/hidden/);
   await settle(page);
   return app;
 }
@@ -197,10 +199,28 @@ doc({
   appSelector: 'pd-shell-frame',
   prepare: async (page) => {
     await developerOff(page);
+    // The fake answers the job and health calls with the scene the browser shots stage by hand (a running job, the search index down), so this shot differs only in its title bar.
+    const cause = { message: 'The search index stopped: a segment is damaged.', hint: 'Search is unavailable until it is reset; resetting rebuilds it from the logs.', detail: 'index: checksum mismatch in segment 3', code: null, raiseCap: null, settings: null };
+    const job = { id: 1, kind: 'demo', title: 'Update runner', subject: 'build-mac-2', seq: 2, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'wait', label: 'Waiting for the device', unit: 'items', total: null, done: 0 } };
+    const notice = { code: null, at: 0, firstAt: 0, read: false, primary: null, secondary: null, tertiary: null, link: { window: null, jobId: null, path: null }, scope: 'app' };
+    const indexNotice = { ...notice, id: 1, source: 'health', severity: 'error', title: cause.message, body: cause.hint, count: 1, cause: 'health:sd.index' };
+    const diskNotice = { ...notice, id: 2, source: 'sd.greeting', severity: 'warning', title: 'The disk is almost full', body: '', count: 3, cause: 'ui:sd.greeting:The disk is almost full' };
     await installTauriFake(page, {
       platform: 'mac',
       otherwise: 'null',
-      replies: { health_snapshot: { revision: 1, services: [{ service: 'sd.engine', label: 'the demo engine', state: 'ok', cause: null, repair: null }, { service: 'sd.index', label: 'the search index', state: 'ok', cause: null, repair: null }] }, notifications_list: { revision: 1, notices: [], unread: 0 }, jobs_snapshot: [] },
+      replies: {
+        health_snapshot: {
+          revision: 2,
+          services: [
+            { service: 'sd.engine', label: 'the demo engine', state: 'ok', cause: null, repair: null },
+            { service: 'sd.index', label: 'the search index', state: 'down', cause, repair: 'reset' },
+            { service: 'sd.agent', label: 'the demo agent', state: 'ok', cause: null, repair: null },
+          ],
+        },
+        // The two unread messages the browser scene ends with: the index outage and the greeting warning, merged three times.
+        notifications_list: { revision: 2, notices: [indexNotice, diskNotice], unread: 2 },
+        jobs_snapshot: [job],
+      },
     });
   },
   screens: [pages('macos', 'wide', undefined, true)],
@@ -273,8 +293,8 @@ doc({
         await loaded(page);
         await freeze(page);
         await tap(page, page.locator('button.cmd[data-command="sd.job.start"]'));
-        // The View menu (after File).
-        await tap(page, page.getByRole('menubar').getByRole('menuitem').nth(1));
+        // The View menu (File, Edit, View, Help).
+        await tap(page, page.getByRole('menubar').getByRole('menuitem').nth(2));
         await tap(page, page.getByRole('menu').first().locator('[aria-haspopup]').first());
         await settle(page);
       },

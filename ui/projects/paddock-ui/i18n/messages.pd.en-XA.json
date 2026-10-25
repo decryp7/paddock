@@ -289,6 +289,7 @@
     "pd.jobs.status.idle": "⟦Ĵööƀš⟧",
     "pd.jobs.status.percent": "⟦{$phase} {$percent}%⟧",
     "pd.jobs.status.running": "⟦{$count} ŕûûññîîñĝ⟧",
+    "pd.jobs.status.timed": "⟦{$phase} · {$time}⟧",
     "pd.jobs.still-working": "⟦šţîîļļ ŵööŕķîîñĝ, ţĥîš šţééþ îîš ţááķîñĝ ļööñĝééŕ ţĥááñ ûšûûááļ⟧",
     "pd.language.english": "⟦ÉÉñĝļîîšĥ⟧",
     "pd.language.lede": "⟦Ţĥéé ļááñĝûûáĝéé ööƒ ţĥéé áþþ’š ɱééñûûš, ðîîáļööĝš ááñð ɱééššáĝééš. Ñááɱééš öƒ ƒîîļééš, ļööĝš áñð ööţĥééŕ ðááţá ááŕéé ñééṽéŕ ţŕááñšļááţééð.⟧",

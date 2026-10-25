@@ -16,8 +16,21 @@ export interface AxeOptions {
   readonly idsOnly?: boolean;
 }
 
+/**
+ * Waits until the page's finite animations and CSS transitions have ended: axe reads the colours at the moment it looks, and a
+ * theme switch is a colour transition (axe saw the old scheme's text colour on the new background, slowly under emulation).
+ * Endless animations (a spinner) are left running.
+ */
+export async function settleTransitions(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const finite = () => document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity);
+    for (let round = 0; round < 5 && finite().length; round++) await Promise.all(finite().map((a) => a.finished.catch(() => undefined)));
+  });
+}
+
 /** The page's axe violations as `rule: target, target` lines (empty: none), against `WCAG_TAGS`. */
 export async function axeViolations(page: Page, options: AxeOptions = {}): Promise<string[]> {
+  await settleTransitions(page);
   let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS]);
   for (const s of options.include ?? []) builder = builder.include(s);
   for (const s of options.exclude ?? []) builder = builder.exclude(s);

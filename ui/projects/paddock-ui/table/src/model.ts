@@ -195,8 +195,9 @@ export const PD_PRIMARY_MIN_PX = 128;
 
 /** Pixels a column needs at least: its fixed width, or a small floor for flexible ones. */
 function minPx<T>(c: PdColumn<T>): number {
-  const px = /^(\d+(?:\.\d+)?)px$/.exec(c.width ?? '');
-  return px ? Number(px[1]) : 64;
+  // A fixed width, or the minimum of a `minmax(<n>px|rem, ...)` track; 64 for a flexible one.
+  const px = /^(?:minmax\(\s*)?(\d+(?:\.\d+)?)(px|rem)\b/.exec(c.width ?? '');
+  return px ? Number(px[1]) * (px[2] === 'rem' ? 16 : 1) : 64;
 }
 
 /**
@@ -220,7 +221,9 @@ export function fitColumns<T>(shown: readonly PdColumn<T>[], width: number, acti
   const out = [...shown];
   const need = (): number => {
     const cols = out.length + (actions ? 1 : 0);
-    const fixed = out.reduce((a, c) => a + (c.required ? PD_PRIMARY_MIN_PX : minPx(c)), 0);
+    // A required column's floor is the track's: 128 px, or 40 % of a phone-width table (columnTrack).
+    const floor = Math.min(PD_PRIMARY_MIN_PX, 0.4 * width);
+    const fixed = out.reduce((a, c) => a + (c.required ? floor : minPx(c)), 0);
     return fixed + actions + gap * Math.max(0, cols - 1) + padding;
   };
   while (need() > width) {

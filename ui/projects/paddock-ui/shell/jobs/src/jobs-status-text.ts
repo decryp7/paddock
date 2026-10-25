@@ -20,8 +20,9 @@ export function jobsStatusDetail(lead: string | null, phase: string | null, stal
  * The lead job's live progress beside its name (rule 11): the phase and its value, a percentage on a known scale or the
  * growing count while the total is unknown ("Reading 40%", "Finding files 1,240 so far"); empty before the first phase.
  */
-export function jobsStatusProgress(view: Pick<SuJobView, 'headline' | 'percent' | 'count'> | null): string {
+export function jobsStatusProgress(view: Pick<SuJobView, 'headline' | 'percent' | 'count' | 'timed'> | null): string {
   if (!view) return '';
   if (view.percent !== null) return $localize`:@@pd.jobs.status.percent:${view.headline}:phase: ${Math.floor(view.percent)}:percent:%`;
+  if (view.count && view.timed) return $localize`:@@pd.jobs.status.timed:${view.headline}:phase: · ${view.count}:time:`;
   return view.count ? $localize`:@@pd.jobs.status.count:${view.headline}:phase: ${view.count}:count:` : view.headline;
 }
