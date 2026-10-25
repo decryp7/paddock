@@ -380,6 +380,39 @@ describe('PdAssistant', () => {
       expect(r.all('[data-testid=assistant-jump]')).toHaveLength(0);
     });
 
+    it('keeps the latest item in view when the log shrinks under a user at the bottom, such as an approval growing (review 4 P3-1)', async () => {
+      const fired: ResizeObserverCallback[] = [];
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(cb: ResizeObserverCallback) {
+            fired.push(cb);
+          }
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      const { r } = await open();
+      await settle(r.fixture);
+      const log = r.one('[data-testid=assistant-log]');
+      let top = 800;
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 });
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
+      Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => void (top = v) });
+      log.dispatchEvent(new Event('scroll'));
+      // The approval's Details open: the log is shorter, its scroll position is not.
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 120 });
+      expect(fired.length).toBeGreaterThan(0);
+      for (const cb of fired) cb([], {} as ResizeObserver);
+      expect(top).toBe(1000);
+      // A user who scrolled up to read is left where they are.
+      top = 300;
+      log.dispatchEvent(new Event('scroll'));
+      for (const cb of fired) cb([], {} as ResizeObserver);
+      expect(top).toBe(300);
+    });
+
     it('follows the streaming text only while the user is at the bottom, else offers Jump to latest', async () => {
       const { r, backend } = await open();
       backend.hold();
