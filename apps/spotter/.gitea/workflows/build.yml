@@ -454,6 +454,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           BUNDLES: ${{ matrix.bundles }}
         run: |
           npm ci
@@ -466,15 +468,26 @@ jobs:
           export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"
           export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"
           bundles="$BUNDLES"
+          # The DMG step removes the .app it packed unless the app bundle is requested too; the bundle check and the
+          # macOS updater both need it.
+          if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
+          # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, Paddock rule 23): ad-hoc code under it
+          # cannot load a vendor-signed library ("different Team IDs"). A real signing identity turns it back on, as
+          # notarization requires.
+          extra=()
+          if [ "$RUNNER_OS" = macOS ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
+            mkdir -p ../target
+            echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
+            extra=(--config ../target/hardened.conf.json)
+          fi
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
-            if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
             mkdir -p ../target
             node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
-            npx tauri build --bundles "$bundles" --config ../target/updater.conf.json -- --profile dist
+            npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
           else
             echo '::warning::No updater signing secrets: this build cannot update itself.'
             unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-            npx tauri build --bundles "$bundles" -- --profile dist
+            npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
 
       - name: sccache statistics
@@ -486,6 +499,13 @@ jobs:
         with:
           path: /sccache
           key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+
+      # signingIdentity "-" must leave an ad-hoc sealed .app and DMG with the hardened runtime off, one TeamIdentifier on
+      # every bundled Mach-O, and sidecars that start from the built app (Paddock rule 23).
+      - name: Verify the .app and the DMG (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/ci/macos-verify-bundle.sh
 
       - name: Collect installers
         shell: bash

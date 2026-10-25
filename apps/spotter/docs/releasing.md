@@ -65,6 +65,17 @@ Spotter needs its **own** key pair — never reuse another product's updater key
 install the next version by hand. **If it leaks**, generate a new pair, publish a release signed with the new key,
 tell users to reinstall from the releases page, and revoke the old secrets.
 
+## The macOS bundle
+
+The `.app` is sealed ad hoc (`"signingIdentity": "-"` in `app/src-tauri/tauri.macos.conf.json`): a bundle that is only
+linker-signed has no sealed resources and a quarantined download is reported as damaged. While the build is ad hoc the
+**hardened runtime is off** (`"hardenedRuntime": false`, Paddock rule 23): ad-hoc code under the hardened runtime
+enforces library validation and cannot load a library signed by its vendor ("different Team IDs"). When the
+`APPLE_SIGNING_IDENTITY` secret names a real identity, the CI bundle step passes
+`{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). `scripts/ci/macos-verify-bundle.sh` fails the
+build when an ad-hoc Mach-O has the hardened runtime on, when bundled Mach-Os disagree on their TeamIdentifier, or
+when a sidecar does not start from the built app (`--version`), on the `.app` and on the copy inside the DMG.
+
 ## First launch note
 
 Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
