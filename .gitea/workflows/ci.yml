@@ -113,11 +113,17 @@ jobs:
       - name: Install
         run: npm ci
 
-      # The browser lives next to the checkout, never in the runner user's own caches (rule 7).
+      # A host runner has no image: the browser is installed once per Playwright version into a kept host folder (outside the
+      # checkout and the runner user's own caches, rule 7) and only when that folder is missing.
       - name: WebKit
         run: |
-          echo "PLAYWRIGHT_BROWSERS_PATH=$GITHUB_WORKSPACE/../.paddock-ci-playwright" >> "$GITHUB_ENV"
-          PLAYWRIGHT_BROWSERS_PATH="$GITHUB_WORKSPACE/../.paddock-ci-playwright" npx playwright install webkit
+          PW_VERSION=$(node -p "require('./node_modules/playwright-core/package.json').version")
+          BROWSERS="${RUNNER_TOOL_CACHE:-$HOME/.cache}/paddock-playwright/$PW_VERSION"
+          echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS" >> "$GITHUB_ENV"
+          if [ ! -f "$BROWSERS/.installed-webkit" ]; then
+            PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" npx playwright install webkit
+            touch "$BROWSERS/.installed-webkit"
+          fi
 
       - name: Reference app checks in WebKit
         env:
@@ -281,7 +287,7 @@ jobs:
         run: |
           echo "CARGO_TARGET_DIR=$HOME/.paddock-ci/target-$GITHUB_JOB" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-          echo "PADDOCK_TEST_BROWSER_DIR=$GITHUB_WORKSPACE/../.paddock-ci-test-browser" >> "$GITHUB_ENV"
+          echo "PADDOCK_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser" >> "$GITHUB_ENV"  # outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it
 
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
       # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the cargo steps' working-directory

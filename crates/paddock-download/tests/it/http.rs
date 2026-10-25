@@ -691,13 +691,27 @@ fn a_stopped_download_resumes_from_the_hashed_prefix() {
         .find(|p| p.0 == phases::DOWNLOAD)
         .unwrap();
     assert!(first_download.1 == 0 || first_download.1 == got.resumed_from);
-    let asked: usize = server.log()[before..]
+    // An idle connection takes over the far half of a running range, whose own request still names the whole range: the
+    // requests may overlap, so their sum depends on timing. What is fixed: nothing below the resumed bytes is asked for,
+    // and together the requests cover everything from there to the end.
+    let mut asked: Vec<(usize, usize)> = server.log()[before..]
         .iter()
         .filter_map(|r| r.range())
         .filter(|r| *r != (0, Some(0)))
-        .map(|(a, b)| b.unwrap() + 1 - a)
-        .sum();
-    assert_eq!(asked as u64, data.len() as u64 - got.resumed_from);
+        .map(|(a, b)| (a, b.map_or(data.len(), |b| b + 1)))
+        .collect();
+    asked.sort_unstable();
+    let from = got.resumed_from as usize;
+    assert!(
+        asked.first().is_some_and(|r| r.0 >= from),
+        "{asked:?} asks for bytes already kept ({from})"
+    );
+    let mut covered = from;
+    for (a, b) in asked {
+        assert!(a <= covered, "bytes {covered}..{a} were never asked for");
+        covered = covered.max(b);
+    }
+    assert_eq!(covered, data.len(), "the tail was never asked for");
 }
 
 #[test]
