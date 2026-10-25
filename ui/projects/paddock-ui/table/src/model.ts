@@ -26,6 +26,11 @@ export interface PdColumn<T> {
    * button's name keep it, the header row shows nothing, so the column can be as narrow as its glyph.
    */
   readonly headerHidden?: boolean;
+  /**
+   * Below this table width the column's cell shows a second line (its template gets `folded: true`, the other columns
+   * having dropped out by `hideBelow`), and every row grows to two lines (row height + 12 px), so nothing overflows.
+   */
+  readonly foldBelow?: number;
 }
 
 /** The sort of a table: one column, one direction. */
@@ -194,9 +199,13 @@ function minPx<T>(c: PdColumn<T>): number {
   return px ? Number(px[1]) : 64;
 }
 
-/** The grid track of a column: required ones never shrink under {@link PD_PRIMARY_MIN_PX}. */
+/**
+ * The grid track of a column: required ones do not shrink under {@link PD_PRIMARY_MIN_PX}, except in a table so narrow that the
+ * floor plus the other columns would not fit (a phone-width pane): then the floor is 40 % of the grid, so the row never grows wider
+ * than the body and the last action stays inside the table.
+ */
 export function columnTrack<T>(c: PdColumn<T>): string {
-  const floor = `${PD_PRIMARY_MIN_PX}px`;
+  const floor = `min(${PD_PRIMARY_MIN_PX}px, 40%)`;
   if (!c.required) return c.width ?? 'minmax(0, 1fr)';
   if (!c.width) return `minmax(${floor}, 2fr)`;
   return c.width.replace(/^minmax\(\s*0(px)?\s*,/, `minmax(${floor},`);
@@ -238,6 +247,9 @@ export function actionColumnWidth(hasActions: boolean, inlineCount: number, narr
 export const PD_ROW_HEIGHTS = [24, 32, 36] as const;
 /** The sticky header's height, whatever the rows' (UI guide §8). */
 export const PD_HEADER_HEIGHT = 28;
+
+/** The extra height of a row whose cells fold a second line (two lines with 6 px above and below). */
+export const PD_FOLD_EXTRA = 12;
 
 /** The row height for a density: the token's value when it is one of the family's, else Standard. */
 export function rowHeightFor(token: number): number {

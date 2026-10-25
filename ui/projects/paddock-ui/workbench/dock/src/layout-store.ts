@@ -20,6 +20,12 @@ export interface DisplacedView {
 /** The sizes the user dragged views to (a wish the plan honours, never below a minimum); absent until the user drags. */
 export type UserSizes = Record<string, { width?: number; height?: number }>;
 
+/** A panel that lives in a window of its own, and where it returns when that window closes or docks back. */
+export interface PoppedOutPanel {
+  id: string;
+  slot: DockSlot;
+}
+
 /** What dockview's own JSON does not hold. */
 export interface DockExtras {
   autoHidden: AutoHideItem[];
@@ -30,6 +36,8 @@ export interface DockExtras {
   displaced?: DisplacedView[];
   /** The sizes the user dragged views to (absent in older layouts). */
   sizes?: UserSizes;
+  /** Panels popped out into their own windows when this was saved; they open there again on restore (absent in older layouts). */
+  poppedOut?: PoppedOutPanel[];
 }
 
 /** A complete saved arrangement: the dockview grid and the extras. */
@@ -76,6 +84,11 @@ export function sanitizeExtras(raw: unknown): DockExtras {
     if (!isRecord(d) || typeof d['id'] !== 'string' || !d['id'] || displaced.some((x) => x.id === d['id'])) continue;
     displaced.push({ id: d['id'], slot: sanitizeSlot(d['slot']), into: typeof d['into'] === 'string' && d['into'] ? d['into'] : null });
   }
+  const poppedOut: PoppedOutPanel[] = [];
+  for (const d of Array.isArray(raw['poppedOut']) ? raw['poppedOut'] : []) {
+    if (!isRecord(d) || typeof d['id'] !== 'string' || !d['id'] || poppedOut.some((x) => x.id === d['id'])) continue;
+    poppedOut.push({ id: d['id'], slot: sanitizeSlot(d['slot']) });
+  }
   const sizes: UserSizes = {};
   if (isRecord(raw['sizes'])) {
     for (const [id, v] of Object.entries(raw['sizes'])) {
@@ -91,6 +104,7 @@ export function sanitizeExtras(raw: unknown): DockExtras {
     ...(Object.keys(sides).length ? { autoHideSides: sides } : {}),
     ...(displaced.length ? { displaced } : {}),
     ...(Object.keys(sizes).length ? { sizes } : {}),
+    ...(poppedOut.length ? { poppedOut } : {}),
   };
 }
 

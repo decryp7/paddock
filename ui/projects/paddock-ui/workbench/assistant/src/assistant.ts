@@ -1,9 +1,9 @@
 import { NgComponentOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
 import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore } from './assistant.store';
-import type { TurnPart, TurnView } from './chat-model';
+import { conversationTitle, type TurnPart, type TurnView } from './chat-model';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
 
@@ -39,8 +39,8 @@ const SCROLL_STICK_PX = 24;
       <ul class="list" data-testid="assistant-list" [attr.aria-label]="t.conversations">
         @for (c of store.visibleConversations(); track c.id) {
           <li class="row" [class.active]="c.id === store.activeId()">
-            <button type="button" class="open" data-testid="assistant-open" [disabled]="store.busy()" [attr.title]="c.title" (click)="store.open(c.id)">{{ c.title }}</button>
-            <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm del" data-testid="assistant-delete" [attr.aria-label]="t.deleteChat + ': ' + c.title" [attr.title]="t.deleteChat" (click)="store.removeLater(c.id)">
+            <button type="button" class="open" data-testid="assistant-open" [disabled]="store.busy()" [attr.title]="heading(c.title)" (click)="store.open(c.id)">{{ heading(c.title) }}</button>
+            <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm del" data-testid="assistant-delete" [attr.aria-label]="t.deleteChat + ': ' + heading(c.title)" [attr.title]="t.deleteChat" (click)="deleteChat(c.id)">
               <pd-glyph name="trash" [size]="14" />
             </button>
           </li>
@@ -52,8 +52,8 @@ const SCROLL_STICK_PX = 24;
 
     @if (store.undoable(); as gone) {
       <div class="undo" role="status" data-testid="assistant-undo">
-        <span class="undo-text">{{ deleted(gone.title) }}</span>
-        <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" data-testid="assistant-undo-button" (click)="store.undoRemove(gone.id)">{{ t.undo }}</button>
+        <span class="undo-text">{{ deleted(heading(gone.title)) }}</span>
+        <button type="button" #undoButton class="pd-btn pd-btn--ghost pd-btn--sm" data-testid="assistant-undo-button" (click)="store.undoRemove(gone.id)">{{ t.undo }}</button>
       </div>
     }
 
@@ -73,7 +73,7 @@ const SCROLL_STICK_PX = 24;
       } @else if (!store.turns().length && store.isLoaded()) {
         <p class="hint" data-testid="assistant-empty">{{ t.empty }}</p>
       }
-      @for (turn of store.turns(); track $index) {
+      @for (turn of store.turns(); track $index; let last = $last) {
         <article class="turn" data-testid="assistant-turn">
           <div class="user" data-testid="assistant-user">
             <p>{{ turn.user }}</p>
@@ -95,6 +95,9 @@ const SCROLL_STICK_PX = 24;
                 <pd-assistant-tool-card [card]="part.card" />
               }
             }
+            @if (turn.running && turn.parts.at(-1)?.kind === 'text') {
+              <span class="pulse" aria-hidden="true" data-testid="assistant-streaming"><i></i><i></i><i></i></span>
+            }
             @if (turn.running && !turn.parts.length) {
               <p class="hint" data-testid="assistant-thinking">{{ t.thinking }}</p>
             }
@@ -107,8 +110,25 @@ const SCROLL_STICK_PX = 24;
             @if (turn.end === 'cancelled') {
               <p class="note" data-testid="assistant-stopped">{{ t.stopped }}</p>
             }
-            @if (turn.error && !turn.error.needsAi) {
-              <p class="error" role="alert" data-testid="assistant-error">{{ turn.error.message }}</p>
+            @if (failedOf(turn); as err) {
+              <div class="fail" role="alert" data-testid="assistant-error">
+                <pd-glyph class="fail-icon" name="alert" [size]="16" />
+                <div class="fail-body">
+                  <p class="fail-title">{{ t.failedTitle }}</p>
+                  <p class="fail-cause" data-testid="assistant-error-cause">{{ t.failedCause }}</p>
+                  @if (details() === $index) {
+                    <p class="fail-details" data-testid="assistant-error-details">{{ err.message }}</p>
+                  }
+                  <div class="fail-actions">
+                    @if (last) {
+                      <button type="button" class="pd-btn" data-testid="assistant-error-retry" [disabled]="store.busy() || blocked()" (click)="store.retry()">{{ t.retryTurn }}</button>
+                    }
+                    <button type="button" class="pd-btn pd-btn--ghost" data-testid="assistant-error-details-toggle" [attr.aria-expanded]="details() === $index" (click)="details.set(details() === $index ? -1 : $index)">
+                      {{ details() === $index ? t.hideDetails : t.showDetails }}
+                    </button>
+                  </div>
+                </div>
+              </div>
             }
           </div>
         </article>
@@ -124,19 +144,25 @@ const SCROLL_STICK_PX = 24;
 
     @if (store.approval(); as ask) {
       <section class="approval" role="alertdialog" aria-labelledby="pd-assistant-approval" data-testid="assistant-approval">
-        <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong> {{ ask.summary }}</p>
+        <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong>&#32;<span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
         <details class="details" data-testid="assistant-approval-details">
-          <summary>{{ t.details }}</summary>
+          <summary><pd-glyph class="chev" name="chevron-right" [size]="14" /> {{ t.details }}</summary>
           <dl>
             <dt>{{ t.tool }}</dt>
             <dd data-testid="assistant-approval-tool">{{ ask.name }}</dd>
             <dt>{{ t.arguments }}</dt>
-            <dd><pre data-testid="assistant-approval-args">{{ args(ask.input) }}</pre></dd>
+            <dd>
+              @if (hasArgs(ask.input)) {
+                <pre data-testid="assistant-approval-args">{{ args(ask.input) }}</pre>
+              } @else {
+                <span class="none" data-testid="assistant-approval-args">{{ t.noArguments }}</span>
+              }
+            </dd>
           </dl>
         </details>
         <div class="actions">
-          <button type="button" class="pd-btn pd-btn--primary" data-testid="assistant-allow" (click)="store.approve(ask.callId, true)">{{ t.allow }}</button>
-          <button type="button" class="pd-btn" data-testid="assistant-decline" (click)="store.approve(ask.callId, false)">{{ t.decline }}</button>
+          <button type="button" class="pd-btn" data-testid="assistant-allow" (click)="store.approve(ask.callId, true)">{{ allowLabel(ask.name) }}</button>
+          <button type="button" class="pd-btn pd-btn--ghost" data-testid="assistant-decline" (click)="store.approve(ask.callId, false)">{{ t.decline }}</button>
         </div>
       </section>
     }
@@ -145,12 +171,12 @@ const SCROLL_STICK_PX = 24;
       <p class="error" role="alert" data-testid="assistant-failure">{{ failure }} <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" (click)="store.dismissFailure()">{{ t.dismiss }}</button></p>
     }
 
-    <form class="composer" (submit)="$event.preventDefault(); store.send()">
+    <form class="composer" (submit)="$event.preventDefault(); submit()">
       @if (store.chips().length) {
         <ul class="chips" [attr.aria-label]="t.context" data-testid="assistant-chips">
           @for (chip of store.chips(); track chip.id) {
             <li>
-              <button type="button" class="chip" data-testid="assistant-chip" [class.off]="!chip.on" [attr.aria-pressed]="chip.on" [disabled]="blocked()" [attr.title]="chip.on ? t.removeChip : t.addChip" (click)="store.toggleChip(chip.id)">
+              <button type="button" class="chip" data-testid="assistant-chip" [class.off]="!chip.on" [class.inert]="blocked()" [attr.aria-pressed]="chip.on" [disabled]="blocked()" [attr.title]="chip.on ? t.removeChip : t.addChip" (click)="store.toggleChip(chip.id)">
                 @if (chip.icon && hasGlyph(chip.icon)) {
                   <pd-glyph [name]="chip.icon" [size]="14" />
                 }
@@ -173,7 +199,6 @@ const SCROLL_STICK_PX = 24;
         [disabled]="blocked()"
         [attr.placeholder]="placeholder()"
         [attr.maxlength]="store.limit()"
-        [value]="store.draft()"
         (input)="store.setDraft($any($event.target).value)"
         (keydown)="key($event)"
       ></textarea>
@@ -214,7 +239,11 @@ const SCROLL_STICK_PX = 24;
     .jump { align-self: center; margin-top: calc(-1 * var(--pd-space-8, 32px)); box-shadow: var(--pd-shadow-1, none); }
     .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
     .details { margin: 0 0 var(--pd-space-2); font-size: var(--pd-text-label); }
-    .details summary { cursor: pointer; color: var(--pd-text-muted); }
+    .details summary { cursor: pointer; color: var(--pd-text-muted); list-style: none; display: inline-flex; align-items: center; gap: var(--pd-space-1); }
+    .details summary::-webkit-details-marker { display: none; }
+    .chev { transition: transform var(--pd-duration-fast, 120ms); }
+    .details[open] .chev { transform: rotate(90deg); }
+    .none { color: var(--pd-text-muted); }
     .details dl { margin: var(--pd-space-1) 0 0; display: grid; grid-template-columns: auto 1fr; gap: var(--pd-space-1) var(--pd-space-2); }
     .details dt { color: var(--pd-text-muted); }
     .details dd { margin: 0; min-width: 0; }
@@ -231,6 +260,20 @@ const SCROLL_STICK_PX = 24;
     .answer { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
     .note { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .error { margin: 0; color: var(--pd-danger); overflow-wrap: anywhere; padding: 0 var(--pd-space-3); }
+    .pulse { display: inline-flex; gap: 3px; align-items: center; height: 14px; }
+    .pulse i { width: 5px; height: 5px; border-radius: 50%; background: var(--pd-text-muted); animation: pd-pulse 1.2s ease-in-out infinite; }
+    .pulse i:nth-child(2) { animation-delay: 0.2s; }
+    .pulse i:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes pd-pulse { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .pulse i { animation: none; opacity: 0.6; } .chev { transition: none; } }
+    .fail { display: flex; gap: var(--pd-space-2); align-items: flex-start; min-width: 0; }
+    .fail-icon { color: var(--pd-danger); flex: none; margin-top: 2px; }
+    .fail-body { min-width: 0; display: flex; flex-direction: column; gap: var(--pd-space-1); }
+    .fail p { margin: 0; overflow-wrap: anywhere; }
+    .fail-title { color: var(--pd-danger); font-weight: var(--pd-weight-semibold); }
+    .fail-cause, .fail-details { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .fail-actions { display: flex; gap: var(--pd-space-2); flex-wrap: wrap; margin-top: var(--pd-space-1); }
+    .chip.inert { opacity: 0.5; cursor: default; }
     .failure { display: flex; gap: var(--pd-space-2); align-items: center; color: var(--pd-danger); }
     .approval { margin: 0 var(--pd-space-3); padding: var(--pd-space-3); border: 1px solid var(--pd-warning); background: var(--pd-warning-tint); border-radius: var(--pd-radius-card); }
     .approval p { margin: 0 0 var(--pd-space-2); overflow-wrap: anywhere; }
@@ -256,6 +299,10 @@ export class PdAssistant {
   private readonly citations = inject(ASSISTANT_CITATIONS);
   private readonly log = viewChild<ElementRef<HTMLElement>>('log');
   private readonly inputEl = viewChild<ElementRef<HTMLTextAreaElement>>('input');
+  private readonly undoButton = viewChild<ElementRef<HTMLButtonElement>>('undoButton');
+  private readonly injector = inject(Injector);
+  /** The turn whose error details are open (-1: none). */
+  protected readonly details = signal(-1);
 
   /** Offer "Open AI settings" in the needs-AI state (the app's AI page). */
   readonly settingsLink = input(false);
@@ -296,7 +343,12 @@ export class PdAssistant {
     details: $localize`:@@pd.wb.assistant.approve.details:Details`,
     tool: $localize`:@@pd.wb.assistant.approve.tool:Tool`,
     arguments: $localize`:@@pd.wb.assistant.approve.arguments:Arguments`,
-    noArguments: $localize`:@@pd.wb.assistant.approve.no-arguments:None`,
+    noArguments: $localize`:@@pd.wb.assistant.approve.no-arguments:No arguments`,
+    failedTitle: $localize`:@@pd.wb.assistant.turn-failed.title:The answer did not finish.`,
+    failedCause: $localize`:@@pd.wb.assistant.turn-failed.cause:Likely cause: the local model stopped answering. Check that Pitwall is running, then try again.`,
+    retryTurn: $localize`:@@pd.wb.assistant.turn-failed.retry:Retry`,
+    showDetails: $localize`:@@pd.wb.assistant.turn-failed.show:Show details`,
+    hideDetails: $localize`:@@pd.wb.assistant.turn-failed.hide:Hide details`,
     answerReady: $localize`:@@pd.wb.assistant.answer-ready:Answer ready`,
     failed: $localize`:@@pd.wb.assistant.answer-failed:The answer failed.`,
   };
@@ -323,10 +375,38 @@ export class PdAssistant {
       this.store.turns();
       const el = this.log()?.nativeElement;
       if (!el) return;
-      if (this.pinned) el.scrollTop = el.scrollHeight;
+      // After the new turn's DOM is rendered (an effect runs before the view updates), else the last block stays below.
+      if (this.pinned) afterNextRender(() => (el.scrollTop = el.scrollHeight), { injector: this.injector });
       // The pill is state of this effect's scroll decision (the user's position is not a signal): set only, never read.
       else this.unseen.set(true);
     });
+    // The question box shows the draft. Not a `[value]` binding: that is not re-rendered when typing and Enter happen in one
+    // task (the draft goes 'x' then '' before any render), so the sent question would stay in the box (DOM only).
+    effect(() => {
+      const draft = this.store.draft();
+      const el = this.inputEl()?.nativeElement;
+      if (el && el.value !== draft) el.value = draft;
+    });
+  }
+
+  /** A conversation title as shown: no leading slash command, sentence case. */
+  protected heading(raw: string): string {
+    return conversationTitle(raw);
+  }
+
+  /** Deletes a conversation; the row (and the focused Delete button) goes away, so focus moves to Undo. */
+  protected deleteChat(id: string): void {
+    this.store.removeLater(id);
+    afterNextRender(() => this.undoButton()?.nativeElement.focus(), { injector: this.injector });
+  }
+
+  /** The error of a turn that failed for its own reasons (a missing Pitwall is shown by the shared needs-AI state instead). */
+  protected failedOf(turn: TurnView): { readonly message: string } | null {
+    return turn.error && !turn.error.needsAi ? turn.error : null;
+  }
+
+  protected allowLabel(tool: string): string {
+    return $localize`:@@pd.wb.assistant.approve.allow-tool:Allow ${tool}:tool:`;
   }
 
   protected scrolled(): void {
@@ -334,6 +414,13 @@ export class PdAssistant {
     if (!el) return;
     this.pinned = el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_STICK_PX;
     if (this.pinned) this.unseen.set(false);
+  }
+
+  /** Sends the question; the log follows it to the end (the user's own message is where they look next). */
+  protected submit(): void {
+    this.pinned = true;
+    this.unseen.set(false);
+    void this.store.send();
   }
 
   protected jumpToLatest(): void {
@@ -358,8 +445,11 @@ export class PdAssistant {
   }
 
   /** The call's arguments as the prompt's details show them (bounded). */
+  protected hasArgs(input: unknown): boolean {
+    return !(input === undefined || input === null || (typeof input === 'object' && Object.keys(input).length === 0));
+  }
+
   protected args(input: unknown): string {
-    if (input === undefined || input === null || (typeof input === 'object' && Object.keys(input).length === 0)) return this.t.noArguments;
     const text = JSON.stringify(input, null, 2) ?? '';
     return text.length <= 2000 ? text : `${text.slice(0, 1999)}…`;
   }
@@ -407,7 +497,7 @@ export class PdAssistant {
       void this.store.stop();
     } else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      if (!this.blocked()) void this.store.send();
+      if (!this.blocked()) this.submit();
     }
   }
 

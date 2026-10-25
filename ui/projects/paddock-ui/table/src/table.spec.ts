@@ -2,7 +2,7 @@ import { Component, provideZonelessChangeDetection, signal } from '@angular/core
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './table';
-import type { PdColumn, PdRowAction, PdSort } from './model';
+import { PD_FOLD_EXTRA, type PdColumn, type PdRowAction, type PdSort } from './model';
 
 interface Plugin {
   id: string;
@@ -202,7 +202,30 @@ describe('pd-table', () => {
     );
     const f = await setup();
     expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Actions']);
+    // No column folds: rows keep one line.
+    expect(rowEls(f).some((r) => r.classList.contains('pd-folded'))).toBe(false);
     expect(getComputedStyle(el(f).querySelector('.pd-grid')!).overflow).not.toBe('scroll');
+  });
+
+  it('grows every row to two lines when a column folds a second line below its width (review 2 P1-A)', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly cb: ResizeObserverCallback) {}
+        observe(target: Element): void {
+          this.cb([{ target, contentRect: { width: 320 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Host);
+    f.componentInstance.columnsOverride = COLUMNS.map((c, i) => (i === 1 ? { ...c, foldBelow: 360 } : c));
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    expect(rowEls(f).every((r) => r.classList.contains('pd-folded'))).toBe(true);
+    expect(el(f).querySelector<HTMLElement>('pd-table')!.style.getPropertyValue('--pd-table-row')).toBe(`${32 + PD_FOLD_EXTRA}px`);
   });
 
   it('moves between rows with the keyboard on one tab stop and opens a row with Enter', async () => {

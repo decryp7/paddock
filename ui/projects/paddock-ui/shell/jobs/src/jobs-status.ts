@@ -48,9 +48,10 @@ let nextId = 0;
     .pd-dot svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
     .pd-progress { color: var(--pd-text-muted); }
     /* Running: a neutral spinner (accent is for action and selection, design guide §4). */
-    /* A full faint track with a quarter arc: a spinner, never a letter (static at 45 degrees without motion). */
-    .pd-busy .pd-dot { width: 10px; height: 10px; opacity: 1; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--pd-text-muted) 35%, transparent); border-top-color: var(--pd-text); transform: rotate(45deg); animation: pd-jobs-spin 0.9s linear infinite; }
-    .pd-busy .pd-dot.pd-ring { border: 0; transform: none; animation: none; background: conic-gradient(var(--pd-text) calc(var(--pd-jobs-progress) * 1%), color-mix(in srgb, var(--pd-text-muted) 35%, transparent) 0); -webkit-mask: radial-gradient(circle, transparent 2.5px, #000 3px); mask: radial-gradient(circle, transparent 2.5px, #000 3px); }
+    /* A full faint track with a quarter arc: a spinner, never a letter (static at 45 degrees without motion). It is 14 px with a 2 px
+       stroke, the icon floor (review 2, P3-9); the ring on a known scale has the same size and a 2 px band. */
+    .pd-busy .pd-dot { box-sizing: border-box; width: 14px; height: 14px; opacity: 1; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--pd-text-muted) 35%, transparent); border-top-color: var(--pd-text); transform: rotate(45deg); animation: pd-jobs-spin 0.9s linear infinite; }
+    .pd-busy .pd-dot.pd-ring { border: 0; transform: none; animation: none; background: conic-gradient(var(--pd-text) calc(var(--pd-jobs-progress) * 1%), color-mix(in srgb, var(--pd-text-muted) 35%, transparent) 0); -webkit-mask: radial-gradient(circle, transparent 4.5px, #000 5px); mask: radial-gradient(circle, transparent 4.5px, #000 5px); }
     @keyframes pd-jobs-spin { to { transform: rotate(405deg); } }
     @media (prefers-reduced-motion: reduce) { .pd-busy .pd-dot { animation: none; } }
     .pd-popover { position: absolute; right: 0; bottom: calc(100% + var(--pd-space-1)); z-index: 10; width: min(360px, calc(100vw - 32px)); max-height: min(480px, 70vh); overflow: auto; padding: var(--pd-space-2); background: var(--pd-surface-3); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-2); }
@@ -86,7 +87,10 @@ export class PdJobsStatus {
   /** The lead job's view while it runs (null otherwise). */
   private readonly leadView = computed(() => {
     const lead = this.store.lead();
-    return lead?.state === 'running' && lead.phase ? jobView(lead, this.stalled()) : null;
+    if (lead?.state !== 'running' || !lead.phase) return null;
+    // The running time now, as the job card counts it (the snapshot's plus the time since it arrived), so both agree.
+    const heard = this.store.heardAt()[lead.id];
+    return jobView(lead, this.stalled(), lead.elapsedMs + (heard === undefined ? 0 : Math.max(0, this.store.now() - heard)));
   });
   /** The lead's share on a known scale (0..100), for the ring; null for the spinner. */
   protected readonly percent = computed(() => this.leadView()?.percent ?? null);

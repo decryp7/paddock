@@ -38,6 +38,7 @@ import {
   nextSort,
   PD_HEADER_HEIGHT,
   rowHeightFor,
+  PD_FOLD_EXTRA,
   shownColumns,
   sortRows,
   type PdColumn,
@@ -46,12 +47,15 @@ import {
   type PdTableItem,
 } from './model';
 
-/** A custom cell: `<ng-template pdCell="status" let-row>...</ng-template>` replaces the text of column `status`. */
+/**
+ * A custom cell: `<ng-template pdCell="status" let-row>...</ng-template>` replaces the text of column `status`. With
+ * `let-folded="folded"` it learns whether its column folds a second line now (`PdColumn.foldBelow`).
+ */
 @Directive({ selector: 'ng-template[pdCell]' })
 export class PdCell {
   /** The column key. */
   readonly key = input.required<string>({ alias: 'pdCell' });
-  readonly template = inject<TemplateRef<{ $implicit: unknown; column: PdColumn<unknown> }>>(TemplateRef);
+  readonly template = inject<TemplateRef<{ $implicit: unknown; column: PdColumn<unknown>; folded: boolean }>>(TemplateRef);
 }
 
 /** Marks the content shown when the table has no rows at all: `<div pdTableEmpty>No plugins yet <button>Install one</button></div>` (a next step). */
@@ -217,6 +221,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
         <div
           role="row"
           class="pd-row"
+          [class.pd-folded]="folded()"
           [class.pd-selected]="selectedKey() === rowKey()(row)"
           [attr.aria-rowindex]="i + 2"
           [attr.aria-selected]="selectedKey() === rowKey()(row)"
@@ -232,7 +237,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
             <div role="gridcell" class="pd-cell" [class.pd-end]="c.align === 'end'" [class.pd-first]="$first">
               @let custom = customCells().get(c.key);
               @if (custom) {
-                <ng-container *ngTemplateOutlet="custom; context: { $implicit: row, column: c }" />
+                <ng-container *ngTemplateOutlet="custom; context: { $implicit: row, column: c, folded: folded() }" />
               } @else if (c.truncate === 'middle') {
                 <pd-middle-text [value]="text(c, row)" />
               } @else {
@@ -320,6 +325,7 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-header { padding-inline-end: calc(var(--pd-space-3) + var(--pd-gutter, 0px)); }
     .pd-row { height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); cursor: default; }
     .pd-row:last-child { border-bottom: 0; }
+    .pd-row.pd-folded { align-items: start; padding-block: 6px; box-sizing: border-box; }
     .pd-row:hover { background: var(--pd-hover); }
     .pd-row:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     /* Selected: the accent tint with a 2 px accent bar on the left (the guide). */
@@ -446,7 +452,9 @@ export class PdTable<T> {
   /** The density's row height, read from `--pd-row-height` and read again when the page's density changes. */
   private readonly density = signal(readDensity());
   protected readonly headerPx = PD_HEADER_HEIGHT;
-  protected readonly rowPx = computed(() => rowHeightFor(this.rowHeight() ?? this.density()));
+  /** Some column folds a second line at this width (`PdColumn.foldBelow`): rows grow to two lines. */
+  protected readonly folded = computed(() => this.columns().some((c) => c.foldBelow !== undefined && this.width() > 0 && this.width() < c.foldBelow));
+  protected readonly rowPx = computed(() => rowHeightFor(this.rowHeight() ?? this.density()) + (this.folded() ? PD_FOLD_EXTRA : 0));
   protected readonly narrow = computed(() => this.width() < 480);
   private readonly rowActionLists = computed(() => {
     const actions = this.rowActions();

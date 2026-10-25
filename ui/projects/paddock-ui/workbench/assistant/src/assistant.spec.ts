@@ -343,6 +343,23 @@ describe('PdAssistant', () => {
       }
     });
 
+    it('follows the user’s own question to the end even when they had scrolled up (review 2 shot 13)', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      const log = r.one('[data-testid=assistant-log]');
+      let top = 0;
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 });
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
+      Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => void (top = v) });
+      top = 100;
+      log.dispatchEvent(new Event('scroll'));
+      await press(r, await type(r, 'next question'), { key: 'Enter' });
+      backend.emit('m1', { type: 'delta', text: 'answer' });
+      await settle(r.fixture);
+      expect(top).toBe(1000);
+      expect(r.all('[data-testid=assistant-jump]')).toHaveLength(0);
+    });
+
     it('follows the streaming text only while the user is at the bottom, else offers Jump to latest', async () => {
       const { r, backend } = await open();
       backend.hold();
@@ -411,7 +428,7 @@ describe('PdAssistant', () => {
       r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
       await press(r, await type(r, '/write'), { key: 'Enter' });
       expect(text(r, 'assistant-approval-tool')).toBe('erase');
-      expect(text(r, 'assistant-approval-args')).toBe('None');
+      expect(text(r, 'assistant-approval-args')).toBe('No arguments');
       expect(r.one('[data-testid=assistant-allow]').classList.contains('pd-btn--sm')).toBe(false);
       expect(r.one('[data-testid=assistant-decline]').classList.contains('pd-btn--sm')).toBe(false);
       backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
@@ -422,12 +439,140 @@ describe('PdAssistant', () => {
       expect(text(r, 'assistant-approval-args').endsWith('…')).toBe(true);
       backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: undefined });
       await settle(r.fixture);
-      expect(text(r, 'assistant-approval-args')).toBe('None');
+      expect(text(r, 'assistant-approval-args')).toBe('No arguments');
     });
 
     it('draws a chip icon only when the glyph exists', async () => {
       const { r } = await open();
       expect(r.element.querySelectorAll('[data-testid=assistant-chip] pd-glyph')).toHaveLength(2);
+    });
+
+    it('empties the box when typing and Enter happen in one task (P2-I)', async () => {
+      const { r } = await open();
+      const box = r.one<HTMLTextAreaElement>('[data-testid=assistant-input]');
+      box.value = 'hello';
+      box.dispatchEvent(new Event('input'));
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(box.value).toBe('');
+      expect(text(r, 'assistant-user')).toContain('hello');
+    });
+
+    it('shows a progress cue after the streaming text only while the turn runs (P2-I)', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      await press(r, await type(r, 'q'), { key: 'Enter' });
+      backend.emit('m1', { type: 'delta', text: 'partial' });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-streaming]')).toHaveLength(1);
+      backend.emit('m1', { type: 'done', text: 'partial', usage: { inputTokens: 1, outputTokens: 1 }, end: 'answered' });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-streaming]')).toHaveLength(0);
+    });
+
+    it('makes Allow neutral and Decline the secondary on the right, and names the tool (P2-C)', async () => {
+      const { r } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      const allow = r.one('[data-testid=assistant-allow]');
+      const decline = r.one('[data-testid=assistant-decline]');
+      expect(allow.classList.contains('pd-btn--primary')).toBe(false);
+      expect(allow.textContent?.trim()).toBe('Allow erase');
+      expect(decline.classList.contains('pd-btn--ghost')).toBe(true);
+      expect(allow.compareDocumentPosition(decline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(text(r, 'assistant-approval-consequence')).toBe('Erase everything');
+      expect(r.element.querySelectorAll('[data-testid=assistant-approval] .pd-btn--primary')).toHaveLength(0);
+    });
+
+    it('draws a declined tool as a neutral card with a muted Declined, not as a failure (P2-G)', async () => {
+      const { r } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      r.one('[data-testid=assistant-decline]').click();
+      for (let i = 0; i < 8; i++) await settle(r.fixture);
+      const card = r.one('[data-testid=assistant-tool-card]');
+      expect(card.getAttribute('data-state')).toBe('declined');
+      expect(text(r, 'assistant-tool-result')).toBe('Declined');
+      expect(r.one('[data-testid=assistant-tool-result]').classList.contains('muted')).toBe(true);
+    });
+
+    it('still draws a tool that failed for real as a failure with its reason (P2-G)', async () => {
+      const { r } = await open();
+      await press(r, await type(r, '/tool-fail'), { key: 'Enter' });
+      for (let i = 0; i < 8; i++) await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-tool-card]').getAttribute('data-state')).toBe('failed');
+      expect(text(r, 'assistant-tool-result')).toBe('The index is locked by another process.');
+    });
+
+    it('designs a failed turn: icon, plain words, likely cause, Retry that resends and details, in the answer column (P2-H)', async () => {
+      const { r, backend } = await open();
+      await press(r, await type(r, '/fail Explain it'), { key: 'Enter' });
+      for (let i = 0; i < 40; i++) await settle(r.fixture);
+      const error = r.one('[data-testid=assistant-error]');
+      expect(error.closest('[data-testid=assistant-answer]')).toBeTruthy();
+      expect(error.querySelector('pd-glyph')).toBeTruthy();
+      expect(error.textContent).toContain('The answer did not finish.');
+      expect(text(r, 'assistant-error-cause')).toContain('Likely cause');
+      expect(r.one('[data-testid=assistant-answer]').textContent).toContain('A request first');
+      expect(r.all('[data-testid=assistant-error-details]')).toHaveLength(0);
+      r.one('[data-testid=assistant-error-details-toggle]').click();
+      await settle(r.fixture);
+      expect(text(r, 'assistant-error-details')).toBe('The model stopped answering.');
+      r.one('[data-testid=assistant-error-retry]').click();
+      for (let i = 0; i < 40; i++) await settle(r.fixture);
+      expect(backend.sent.map((s) => s.text)).toEqual(['/fail Explain it', '/fail Explain it']);
+      expect(r.all('[data-testid=assistant-turn]')).toHaveLength(2);
+      // Only the newest failed turn can be retried.
+      expect(r.all('[data-testid=assistant-error-retry]')).toHaveLength(1);
+    });
+
+    it('titles a conversation without its leading slash command, in sentence case (P3-11)', async () => {
+      const { r } = await open({
+        conversations: [{ ...FIXTURE_CONVERSATION, title: '/slow explain the request pipeline' }],
+      });
+      r.one('[data-testid=assistant-list-toggle]').click();
+      await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-open]').textContent?.trim()).toBe('Explain the request pipeline');
+      r.one('[data-testid=assistant-open]').click();
+      for (let i = 0; i < 4; i++) await settle(r.fixture);
+      expect(text(r, 'assistant-title')).toBe('Explain the request pipeline');
+      expect(r.one('[data-testid=assistant-title]').getAttribute('title')).toBe('Explain the request pipeline');
+    });
+
+    it('dims the context chip together with the inert composer (P3-12)', async () => {
+      const pitwall = new MemoryPitwallBackend({ state: { kind: 'notRunning' }, app: 'Demo' });
+      const { r } = await open({ pitwall });
+      const chip = r.one<HTMLButtonElement>('[data-testid=assistant-chip]');
+      expect(chip.disabled).toBe(true);
+      expect(chip.classList.contains('inert')).toBe(true);
+      pitwall.setState({ kind: 'ready', model: 'q', vision: false, contextTokens: 8192 });
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-chip]').classList.contains('inert')).toBe(false);
+    });
+
+    it('draws the Details disclosure with a 14 px chevron glyph that rotates when open (P3-13)', async () => {
+      const { r } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      const glyph = r.one('[data-testid=assistant-approval-details] summary pd-glyph');
+      expect(glyph.getAttribute('name') ?? glyph.outerHTML).toContain('chevron-right');
+      expect(glyph.outerHTML).toMatch(/14/);
+      expect(r.element.querySelector('[data-testid=assistant-approval-details]')?.hasAttribute('open')).toBe(false);
+    });
+
+    it('moves the focus to Undo after Delete (deviation 1)', async () => {
+      const { r } = await open({ conversations: [FIXTURE_CONVERSATION] });
+      r.one('[data-testid=assistant-list-toggle]').click();
+      await settle(r.fixture);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const del = r.one<HTMLButtonElement>('[data-testid=assistant-delete]');
+      del.focus();
+      del.click();
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(document.activeElement).toBe(r.one('[data-testid=assistant-undo-button]'));
     });
   });
 });

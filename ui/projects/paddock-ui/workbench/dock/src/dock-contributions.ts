@@ -3,6 +3,9 @@ import { defineCommand, defineKeybinding, defineMenuItem, msg, type Message } fr
 import { provideLiveContributions, type WorkbenchBatch } from '@decryp7/paddock-ui/workbench';
 import { Perspectives, PERSPECTIVE_KEYS } from './perspectives';
 import { WorkbenchDock } from './dock.service';
+import { DOCK_OPTIONS } from './dock-options';
+import { dockLayoutDialogs, LAYOUT_MANAGE_DIALOG_ID, LAYOUT_SAVE_DIALOG_ID } from './layout-dialogs';
+import type { LayoutManageResult } from './layout-manage-dialog';
 import { WindowLayouts } from './window-layouts';
 
 /** Command ids of the dock (`pd.wb.dock.*`). */
@@ -16,8 +19,13 @@ export const DOCK_COMMANDS = {
   closeAllDocuments: 'pd.wb.dock.close-all-documents',
   switcher: 'pd.wb.dock.switcher',
   fullScreen: 'pd.wb.dock.full-screen',
-  /** `{ name?: string }`: saves the arrangement as a named layout (and perspective); without a name "Layout N". */
+  /**
+   * `{ name?: string }`: saves the arrangement as a named layout (and perspective). Given a name it saves at once; without one
+   * it opens the "Save layout" dialog (a modal form: the name, validated for empty, duplicate and too long).
+   */
   layoutSave: 'pd.wb.dock.layout.save',
+  /** Opens the "Manage layouts" tool window: apply, rename and delete (with Undo) the saved layouts. */
+  layoutManage: 'pd.wb.dock.layout.manage',
   /** `{ name: string }`: applies a saved layout. */
   layoutApply: 'pd.wb.dock.layout.apply',
   /** `{ name: string }`: deletes a saved layout. */
@@ -74,12 +82,30 @@ export function dockContributions(injector: Injector): WorkbenchBatch {
       defineCommand({ id: DOCK_COMMANDS.fullScreen, title: msg('pd.wb.dock.cmd.full-screen', 'Full screen'), category: CATEGORY, run: () => dock().toggleFullScreen() }),
       defineCommand({
         id: DOCK_COMMANDS.layoutSave,
-        title: msg('pd.wb.dock.cmd.layout-save', 'Save current as perspective'),
+        title: msg('pd.wb.dock.cmd.layout-save', 'Save layout…'),
         category: CATEGORY,
-        run: (_ctx, args) => {
+        run: async (ctx, args) => {
           const given = nameOf(args);
-          const name = given ?? `${$localize`:@@pd.wb.dock.layout.default-name:Layout`} ${layouts().list().length + 1}`;
-          void perspectives().saveCurrent(name);
+          if (given !== null) {
+            perspectives().saveCurrent(given);
+            return;
+          }
+          await layouts().ready;
+          const names = layouts().list().map((l) => l.name);
+          const suggested = `${$localize`:@@pd.wb.dock.layout.default-name:Layout`} ${names.length + 1}`;
+          const name = await ctx.openDialog<string>(LAYOUT_SAVE_DIALOG_ID, { names, suggested });
+          if (typeof name === 'string') perspectives().saveCurrent(name);
+        },
+      }),
+      defineCommand({
+        id: DOCK_COMMANDS.layoutManage,
+        title: msg('pd.wb.dock.cmd.layout-manage', 'Manage layouts…'),
+        category: CATEGORY,
+        run: async (ctx) => {
+          const result = await ctx.openDialog<LayoutManageResult>(LAYOUT_MANAGE_DIALOG_ID, {});
+          // The window edited the stored layouts from its own window: read them again before anything is applied.
+          await perspectives().refresh();
+          if (result?.apply) layouts().apply(result.apply);
         },
       }),
       defineCommand({ id: DOCK_COMMANDS.layoutApply, title: msg('pd.wb.dock.cmd.layout-apply', 'Apply saved layout'), category: CATEGORY, when: () => layouts().list().length > 0, run: (_ctx, args) => void dock().applyNamedLayout(nameOf(args) ?? '') }),
@@ -87,6 +113,7 @@ export function dockContributions(injector: Injector): WorkbenchBatch {
       defineCommand({ id: DOCK_COMMANDS.layoutReset, title: msg('pd.wb.dock.cmd.layout-reset', 'Reset perspective'), category: CATEGORY, run: () => perspectives().reset() }),
       ...Array.from({ length: PERSPECTIVE_KEYS }, (_, i) => perspectiveAt(i + 1)),
     ],
+    dialogs: [...dockLayoutDialogs(injector.get(DOCK_OPTIONS))],
     keybindings: [
       defineKeybinding({ command: DOCK_COMMANDS.popOut, key: 'Ctrl+Alt+O' }),
       defineKeybinding({ command: DOCK_COMMANDS.panelMenu, key: 'Alt+-' }),
@@ -104,6 +131,7 @@ export function dockContributions(injector: Injector): WorkbenchBatch {
       defineMenuItem({ menu: 'window', command: DOCK_COMMANDS.switcher, group: 'dock', order: 160 }),
       defineMenuItem({ menu: 'window', command: DOCK_COMMANDS.fullScreen, group: 'dock', order: 170 }),
       defineMenuItem({ menu: 'window', command: DOCK_COMMANDS.layoutSave, group: 'layout', order: 200 }),
+      defineMenuItem({ menu: 'window', command: DOCK_COMMANDS.layoutManage, group: 'layout', order: 205 }),
       defineMenuItem({ menu: 'window', command: DOCK_COMMANDS.layoutReset, group: 'layout', order: 210 }),
     ],
   };
