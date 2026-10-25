@@ -310,7 +310,8 @@ jobs:
 
       - name: DIAG dump wrapper log
         if: runner.os == 'macOS' && !cancelled()
-        run: sed -E 's#/work/[0-9a-f]+/#/work/HASH/#g' "$HOME/.paddock-ci/diag-wrapper.log" | head -400
+        run: sed -E 's#/work/[0-9a-f]+/#/work/HASH/#g' "$HOME/.paddock-ci/diag-wrapper.log" | head -3
+          grep -E 'compiler\] \[.*(Cache miss in|Cache hit in)' "$HOME/.paddock-ci/sccache-server.log" | sed -E 's/^[^ ]+ DEBUG sccache::compiler::compiler\] //; s/ in [0-9.]+ s//' | sort | uniq -c | sort -rn | head -150
 
       - name: paddock-menu
         if: ${{ !cancelled() }}
