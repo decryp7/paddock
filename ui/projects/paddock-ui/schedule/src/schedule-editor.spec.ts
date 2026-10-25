@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { PdPauseEditor } from './pause-editor';
 import { PdScheduleEditor } from './schedule-editor';
 import type { PauseWindows, Schedule, SchedulePreview } from './schedule-model';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 const PREVIEW: SchedulePreview = {
   description: 'Weekdays at 09:00',
@@ -139,6 +140,7 @@ describe('pd-schedule-editor', () => {
     await settle(t.f);
     expect(t.q('.pd-problem').getAttribute('role')).toBe('alert');
     expect(t.q('.pd-problem').textContent).toContain('Not a cron expression.');
+    assertStatusGlyphs(t.q('.pd-problem'));
     expect(t.el.querySelector('.pd-description')).toBeNull();
     expect(t.all<HTMLButtonElement | HTMLInputElement>('button, input').every((c) => c.disabled)).toBe(true);
   });

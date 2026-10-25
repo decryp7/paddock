@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { PD_ICON_PATHS } from './paths';
 import { PD_STATUS_GLYPHS, PdStatusGlyph, statusGlyph } from './status';
-import { statusGlyphProblems } from './status-lint';
+import { statusGlyphProblems, statusMapProblems } from './status-lint';
 
 /** Node's `fs`, loaded at run time (the spec programme has no Node types). */
 interface NodeFs {
@@ -45,6 +45,27 @@ describe('status glyphs (review 3 P2-4)', () => {
       'f.ts:2: <pd-glyph name="alert"> (use <pd-status-glyph status="…"> or statusGlyph)',
       'f.ts:3: <pd-glyph name="error"> (use <pd-status-glyph status="…"> or statusGlyph)',
     ]);
+  });
+
+  it('finds a status mapped to a glyph in TypeScript, and leaves other maps alone (review 4 P2-3)', () => {
+    const text = "const A = { neutral: '', warn: 'alert', bad: 'close' };\nconst B = {\n  error: 'pd:alert',\n  file: 'file',\n};\nconst C = { error: statusGlyph('error') };";
+    expect(statusMapProblems('m.ts', text)).toEqual([
+      "m.ts:1: warn: 'alert' (derive it from PD_STATUS_GLYPHS / statusGlyph)",
+      "m.ts:1: bad: 'close' (derive it from PD_STATUS_GLYPHS / statusGlyph)",
+      "m.ts:3: error: 'alert' (derive it from PD_STATUS_GLYPHS / statusGlyph)",
+    ]);
+    expect(statusMapProblems('x/icons/src/status.ts', "{ error: 'error', warning: 'alert' }")).toEqual([]);
+    // A map to statuses, not glyphs, is fine: the shared map draws them.
+    expect(statusMapProblems('v.ts', "export const TONE_STATUS: Readonly<Record<Tone, PdStatus | null>> = { neutral: null, bad: 'error' };")).toEqual([]);
+  });
+
+  it('has no second status → glyph map in TypeScript (review 4 P2-3)', async () => {
+    const fs = await nodeFs();
+    const files = ['projects/paddock-ui', 'projects/shell-demo/src', 'projects/workbench-demo/src', 'projects/gallery/src']
+      .flatMap((d) => sources(fs, d))
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('/status-lint.ts'));
+    expect(files.length).toBeGreaterThan(100);
+    expect(files.flatMap((f) => statusMapProblems(f, fs.readFileSync(f, 'utf8')))).toEqual([]);
   });
 
   it('is used by every template of the library, the demos and the gallery: no status glyph is written by name', async () => {

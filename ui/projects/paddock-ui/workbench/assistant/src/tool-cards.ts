@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, InjectionToken, input, type EnvironmentProviders, makeEnvironmentProviders, type Type } from '@angular/core';
-import { PdGlyph, statusGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import type { ToolCard } from './chat-model';
 import type { CitationOpened } from './rich-text';
 
@@ -44,11 +44,13 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
 @Component({
   selector: 'pd-assistant-tool-card',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph],
+  imports: [PdGlyph, PdStatusGlyph],
   template: `
     <div class="card" [attr.data-state]="declined() ? 'declined' : stopped() ? 'stopped' : card().state" data-testid="assistant-tool-card">
       @if (card().state === 'running') {
         <span class="spin" aria-hidden="true" data-testid="assistant-tool-spinner"></span>
+      } @else if (status(); as st) {
+        <pd-status-glyph class="state" [status]="st" [size]="14" />
       } @else {
         <pd-glyph class="state" [name]="icon()" [size]="14" />
       }
@@ -87,11 +89,17 @@ export class PdAssistantToolCard {
   protected declined(): boolean {
     return this.card().declined === true && this.card().state === 'failed';
   }
-  protected icon(): string {
+  /** The status the card stands for (a result or a real failure), drawn from the shared map; null for the user's own choices and a wait. */
+  protected status(): PdStatus | null {
+    if (this.declined() || this.stopped()) return null;
     const s = this.card().state;
+    return s === 'ok' ? 'success' : s === 'failed' ? 'error' : null;
+  }
+  /** The glyph of a card that is not a status: declined (×), stopped, waiting for a decision. */
+  protected icon(): string {
     if (this.declined()) return 'close';
     if (this.stopped()) return 'stop';
-    return s === 'ok' ? statusGlyph('success') : s === 'failed' ? statusGlyph('error') : s === 'awaiting' ? 'lock' : 'clock';
+    return this.card().state === 'awaiting' ? 'lock' : 'clock';
   }
   protected stateText(): string {
     const c = this.card();

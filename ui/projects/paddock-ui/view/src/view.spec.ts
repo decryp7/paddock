@@ -10,6 +10,7 @@ import { NO_VIEW_HOST, VIEW_HOST, VIEW_OPEN_AI_SETTINGS, type ViewConfirmRequest
 import { sampleViewDoc } from './sample';
 import { fieldProblem, initialValues } from './form';
 import { PdView } from './view';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 /** A host that records what it was asked and answers as the test says. */
 class FakeHost implements ViewHost {
@@ -109,6 +110,7 @@ describe('pd-view', () => {
       for (const k of KNOWN_KINDS) expect(kinds.has(k), k).toBe(true);
       expect(all(el(f), '[data-testid=view-unknown]')).toHaveLength(1);
       expect(text(node(f, 'future'))).toBe('Update the app to view this (hologram)');
+      assertStatusGlyphs(node(f, 'future'));
       expect(one(node(f, 'future'), '[data-testid=view-unknown]').getAttribute('title')).toBe('hologram');
       // The rest of the view still draws.
       expect(text(node(f, 'h'))).toContain('Release 1.4: what is left');
@@ -302,6 +304,7 @@ describe('pd-view', () => {
       await settle(f);
       expect(f.componentInstance.actions).toHaveLength(0);
       expect(text(one(el(f), '[data-testid=view-notice]'))).toContain('cannot ask for a confirmation');
+      assertStatusGlyphs(one(el(f), '[data-testid=view-notice]'));
       expect(NO_VIEW_HOST.confirm).toBeTypeOf('function');
     });
 
