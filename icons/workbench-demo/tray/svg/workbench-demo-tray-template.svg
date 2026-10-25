@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Paddock Workbench Demo tray</title>
   <defs></defs>
-  <g><path d="M4 2.25H12A2.25 2.25 0 0 1 14.25 4.5V11.5A2.25 2.25 0 0 1 12 13.75H4A2.25 2.25 0 0 1 1.75 11.5V4.5A2.25 2.25 0 0 1 4 2.25Z" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.75 2.75V13.25" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="butt" stroke-linejoin="round"/><path d="M7.25 8H14.25" fill="none" stroke="#000000" stroke-width="1.25" stroke-linecap="butt" stroke-linejoin="round"/></g>
+  <g><path d="M1.25 4.5a1 1 0 1 1 2 0a1 1 0 1 1 -2 0ZM1.25 8a1 1 0 1 1 2 0a1 1 0 1 1 -2 0ZM1.25 11.5a1 1 0 1 1 2 0a1 1 0 1 1 -2 0Z" fill="#000000"/><path d="M5.5 2.5H7.75A1 1 0 0 1 8.75 3.5V12.5A1 1 0 0 1 7.75 13.5H5.5A1 1 0 0 1 4.5 12.5V3.5A1 1 0 0 1 5.5 2.5Z" fill="#000000"/><path d="M10.5 2.5H11.25A0.75 0.75 0 0 1 12 3.25V3.75A0.75 0.75 0 0 1 11.25 4.5H10.5A0.75 0.75 0 0 1 9.75 3.75V3.25A0.75 0.75 0 0 1 10.5 2.5ZM13.25 2.5H13.75A0.75 0.75 0 0 1 14.5 3.25V3.75A0.75 0.75 0 0 1 13.75 4.5H13.25A0.75 0.75 0 0 1 12.5 3.75V3.25A0.75 0.75 0 0 1 13.25 2.5Z" fill="#000000"/><path d="M10.5 5.5H13.75A0.75 0.75 0 0 1 14.5 6.25V7.75A0.75 0.75 0 0 1 13.75 8.5H10.5A0.75 0.75 0 0 1 9.75 7.75V6.25A0.75 0.75 0 0 1 10.5 5.5ZM10.5 9.5H13.75A0.75 0.75 0 0 1 14.5 10.25V12.75A0.75 0.75 0 0 1 13.75 13.5H10.5A0.75 0.75 0 0 1 9.75 12.75V10.25A0.75 0.75 0 0 1 10.5 9.5Z" fill="#000000"/></g>
   
 </svg>
