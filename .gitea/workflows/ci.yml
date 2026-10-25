@@ -309,11 +309,9 @@ jobs:
           rustc --version && cargo --version
           cargo clippy --version || { echo "::error::clippy is missing on this runner (rustup component add clippy)"; exit 1; }
 
-      # The paddock-ci image has cargo-nextest; the host runners get the prebuilt binary.
-      - uses: taiki-e/install-action@v2
-        if: runner.os != 'Linux'
-        with:
-          tool: cargo-nextest
+      # The pinned cargo-nextest: the image's on Linux, a copy kept under ~/.paddock-ci/tools on the hosts (downloaded once
+      # per version); the step fails when the runner has another version.
+      - uses: ./.gitea/actions/host-tools
 
       # Whole-workspace steps: one build per feature set instead of one per crate (each `-p X --all-features` resolved its own
       # features and rebuilt the shared dependencies). Every step runs even after another failed; nextest and clippy name
