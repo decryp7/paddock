@@ -630,7 +630,9 @@ pub struct NeedsAi {
     pub feature: String,
     /// Why it cannot run now; may be empty.
     pub reason: String,
-    /// The way forward ("Set up Pitwall").
+    /// The plugin's own wording of a way forward ("Set up Pitwall"). The host does NOT send it to the plugin (rule 19: a repair never
+    /// depends on the thing that is broken): the host shows the reason and its own "Open AI settings", so this is kept only for the
+    /// wire shape.
     pub setup: ActionRef,
 }
 

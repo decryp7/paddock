@@ -865,6 +865,8 @@
     "pd.view.logs": "⟦ÖÖþééñ ļööĝš⟧",
     "pd.view.matrix.label": "⟦Ṁááţŕîîẋ⟧",
     "pd.view.needs-ai": "⟦Ţĥîîš ñééééðš ļöçááļ ÅÅÎÎ, ŵĥîçĥ îîš ñööţ ŕééáðý.⟧",
+    "pd.view.needs-ai.elsewhere": "⟦Ŵĥééŕéé ţöö šéţ ûûþ ļööçááļ ÅÎÎ îîš ûûþ ţö ţĥéé ááþþ; ļöööķ îîñ îîţš šééţţîñĝš.⟧",
+    "pd.view.needs-ai.settings": "⟦ÖÖþééñ ÅÅÎ šééţţîîñĝš⟧",
     "pd.view.needs-ai.title": "⟦{$feature} ñééééðš ļööçáļ ÅÅÎÎ⟧",
     "pd.view.open-failed": "⟦Ţĥéé þááĝéé çöûûļð ñööţ ƀéé öþééñééð.⟧",
     "pd.view.opens-browser": "⟦ööþééñš îîñ ýöûûŕ ƀŕööŵšééŕ⟧",

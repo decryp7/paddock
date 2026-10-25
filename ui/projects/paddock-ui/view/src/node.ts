@@ -6,7 +6,7 @@ import type { Node } from '../generated/view';
 import { PdViewButton, PdViewLink } from './button';
 import { PdViewChart } from './chart';
 import { PdViewForm } from './form';
-import { VIEW_NEEDS_AI } from './host';
+import { VIEW_NEEDS_AI, VIEW_OPEN_AI_SETTINGS } from './host';
 import { diagramScene, graphScene, PdViewScene } from './scene';
 import { childKey, glyphFor, shapeOf, toneOf, unknownKindName } from './model';
 import { PdViewMatrix } from './matrix';
@@ -95,8 +95,10 @@ import { PdViewTree } from './tree';
         @if (appNeedsAi; as live) {
           <ng-container *ngComponentOutlet="live; inputs: { feature: s.v.feature }" />
         } @else {
-          <pd-needs-ai-card [title]="needsAiTitle(s.v.feature)" [message]="s.v.reason || needsAiDefault" icon="info" testid="view-needs-ai">
-            <pd-view-button [action]="s.v.setup" [variant]="isPrimary() ? 'primary' : 'default'" />
+          <pd-needs-ai-card [title]="needsAiTitle(s.v.feature)" [message]="s.v.reason || needsAiDefault" icon="info" testid="view-needs-ai" [hint]="openAiSettings ? '' : needsAiElsewhere">
+            @if (openAiSettings; as open) {
+              <button type="button" class="pd-btn" [class.pd-btn--primary]="isPrimary()" data-testid="view-needs-ai-settings" [disabled]="runtime.disabled()" (click)="open()">{{ needsAiSettings }}</button>
+            }
           </pd-needs-ai-card>
         }
       }
@@ -143,7 +145,7 @@ import { PdViewTree } from './tree';
 })
 export class PdViewNode {
   readonly node = input.required<Node>();
-  private readonly runtime = inject(ViewRuntime);
+  protected readonly runtime = inject(ViewRuntime);
   /** The view's title: the accessible name of the table, tree, list and drawing nodes. */
   protected readonly title = this.runtime.title;
   protected readonly shape = computed(() => shapeOf(this.node()));
@@ -156,6 +158,10 @@ export class PdViewNode {
   protected readonly progressName = $localize`:@@pd.view.progress:Progress`;
   /** The app's own live "needs local AI" component (it has the window's Pitwall state), or null. */
   protected readonly appNeedsAi = inject(VIEW_NEEDS_AI);
+  /** The app's "Open AI settings", or null (the card then says where to look is up to the app). The plugin's `setup` is never sent. */
+  protected readonly openAiSettings = inject(VIEW_OPEN_AI_SETTINGS);
+  protected readonly needsAiSettings = $localize`:@@pd.view.needs-ai.settings:Open AI settings`;
+  protected readonly needsAiElsewhere = $localize`:@@pd.view.needs-ai.elsewhere:Where to set up local AI is up to the app; look in its settings.`;
   protected readonly needsAiDefault = $localize`:@@pd.view.needs-ai:This needs local AI, which is not ready.`;
   protected readonly updateApp = $localize`:@@pd.view.unknown:Update the app to view this`;
   private static next = 0;

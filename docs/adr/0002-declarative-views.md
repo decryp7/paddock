@@ -25,7 +25,7 @@ pub enum Node {
     Chart(ChartSpec),            // data series + kind; the host draws with ECharts
     Badge { text: String, tone: Tone }, Progress { value: f32, label: String },
     Empty { icon: Icon, title: String, hint: String, action: Option<ActionRef> },
-    NeedsAi(NeedsAi),            // the standard "Needs local AI -> Set up Pitwall" state (ADR 0004)
+    NeedsAi(NeedsAi),            // the standard "Needs local AI" state (ADR 0004); the host shows the reason and its own Open AI settings
 }
 pub struct Table  { pub columns: Vec<Column>, pub rows: RowSource, pub row_action: Option<ActionRef>, pub sort: Option<Sort> }
 pub enum RowSource { Inline(Vec<Vec<Cell>>), Paged { total: u64, page_size: u32 } } // paged -> host calls ViewAction{ "page", n }

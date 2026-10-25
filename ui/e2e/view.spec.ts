@@ -36,6 +36,17 @@ test('draws a node of every kind and one "update the app" for the unknown one', 
   await expect(box.getByTestId('view-unknown')).toContainText('Update the app to view this');
 });
 
+test('needs local AI: the only action is the app\'s Open AI settings, the plugin\'s setup is never sent', async ({ page }) => {
+  const box = await open(page);
+  const card = box.getByTestId('view-needs-ai');
+  await expect(card).toContainText('Pitwall is not running.');
+  await expect(card.getByRole('button')).toHaveCount(1);
+  await expect(card).not.toContainText('Set up Pitwall');
+  await card.getByRole('button', { name: 'Open AI settings' }).click();
+  await expect(log(page)).toContainText('AI settings opened: 1');
+  await expect(log(page)).not.toContainText('setup-ai');
+});
+
 test('table: sort and paging send their actions with the host keys', async ({ page }) => {
   const box = await open(page);
   await box.locator('[data-node-id="t1"]').getByRole('button', { name: 'Sort by State, ascending' }).click();

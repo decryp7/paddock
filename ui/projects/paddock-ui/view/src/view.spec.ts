@@ -385,14 +385,13 @@ describe('pd-view', () => {
       expect(text(one(el(f), '[data-testid=view-notice]'))).toBe('No browser.');
     });
 
-    it('sends the needs-AI setup action and the empty action', async () => {
+    it('shows the needs-AI reason without routing the plugin\'s setup action', async () => {
       const f = await setup();
       const ai = one(el(f), '[data-testid=view-needs-ai]');
       expect(text(ai)).toContain('Explain the failing check');
       expect(text(ai)).toContain('Pitwall is not running.');
-      buttonByText(ai, 'Set up Pitwall').click();
-      await settle(f);
-      expect(last(f).action).toBe('setup-ai');
+      expect(ai.querySelector('button')).toBeNull();
+      expect(f.componentInstance.actions.map((a) => a.action)).not.toContain('setup-ai');
     });
 
     it('says why in the needs-AI state when the plugin gave no reason', async () => {
