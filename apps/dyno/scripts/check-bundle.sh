@@ -4,7 +4,9 @@
 # Linux: unpacks the .deb and checks that every ELF binary's RPATH/RUNPATH holds only $ORIGIN-relative or system
 #   folders (never a build directory), and that dyno-app, dyno-agent, dyno-helper and the dyno command are present.
 # macOS: checks that every Mach-O's LC_RPATH is @executable_path/@loader_path relative or a system folder, that the
-#   .app seal verifies (ad-hoc is fine; a linker-signed bundle is refused by SMAppService), and that the agent, the helper and the dyno command are bundled.
+#   .app seal verifies (ad-hoc is fine; a linker-signed bundle is refused by SMAppService), and that the agent, the helper and the dyno command are bundled;
+#   then scripts/ci/macos-verify-bundle.sh: no hardened runtime while ad hoc, one TeamIdentifier on every Mach-O, every
+#   sidecar starts from the built .app and the DMG copy (Paddock rule 23).
 # Windows is not checked here (no run paths); the Windows runner's tests and the installer smoke cover it.
 set -euo pipefail
 bundle="${1:?bundle directory}"
@@ -62,6 +64,7 @@ case "$(uname -s)" in
     (( found_agent )) || err "the .app has no dyno-agent executable"
     (( found_helper )) || err "the .app has no dyno-helper executable"
     (( found_cli )) || err "the .app has no dyno (command line) executable"
+    bash "$(dirname "$0")/ci/macos-verify-bundle.sh" "$app" || err "$app fails the macOS bundle verification"
     ;;
   *)
     echo "check-bundle: nothing to check on $(uname -s)"

@@ -14,12 +14,12 @@ npx tauri build --bundles app,dmg -- --profile dist
 
 `beforeBuildCommand` builds the `dyno-agent` sidecar and the UI first. The bundle is
 `target/dist/bundle/macos/Dyno.app` and `target/dist/bundle/dmg/Dyno_<version>_aarch64.dmg` (or under `CARGO_TARGET_DIR`).
-`tauri.macos.conf.json` sets `signingIdentity "-"` (ad-hoc seal) and bundles
+`tauri.macos.conf.json` sets `signingIdentity "-"` (ad-hoc seal), `hardenedRuntime false` (rule 23) and bundles
 `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`. Set `CI=true` to stop the DMG step from scripting Finder.
 
 ```sh
 codesign -dv --verbose=2 target/dist/bundle/macos/Dyno.app 2>&1 | grep -E 'Signature|Identifier'   # Signature=adhoc
-bash scripts/check-bundle.sh target/dist/bundle                                                      # run paths, seal, sidecar
+bash scripts/check-bundle.sh target/dist/bundle                                                      # run paths, seal, Team IDs, sidecars start
 ```
 
 ## 2. Install
