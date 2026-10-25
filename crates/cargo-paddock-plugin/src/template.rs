@@ -291,7 +291,9 @@ mod tests {
         t.api = Api::Path(PathBuf::from("/checkout/crates"));
         let cargo = text(&t, "Cargo.toml");
         assert!(
-            cargo.contains("paddock-plugin-api = { path = \"/checkout/crates")
+            // A TOML string in double quotes, or in single quotes where the joined path holds a backslash (Windows).
+            (cargo.contains("paddock-plugin-api = { path = \"/checkout/crates")
+                || cargo.contains("paddock-plugin-api = { path = '/checkout/crates"))
                 && !cargo.contains("registry"),
             "{cargo}"
         );
