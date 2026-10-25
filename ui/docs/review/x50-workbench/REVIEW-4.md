@@ -117,3 +117,44 @@ TypeScript and bound `[name]` values escape it.
 - **P2-3:** both `view` maps derived from `PD_STATUS_GLYPHS`, and a lint that catches maps in TypeScript.
 
 These can be checked from one shot, one pixel scan and one search. No further full review is needed.
+
+---
+
+## Review 4 verification
+
+- Reviewer: the review 3 and review 4 reviewer. Date: 2026-10-25.
+  Branch: `origin/shell/integrate` @ 36ad76f.
+- Scope: the three P2s and three P3s of review 4, checked against RESPONSE-4.md.
+- **Verdict: approved.** Every review-4 finding is fixed, and nothing new came up in the checked shots or files. With
+  this, the X50 workbench passes independent design review (rule 22). There are no open P1 or P2 findings.
+
+| # | Verdict | Evidence |
+|---|---|---|
+| P2-1 icon seams | **Fixed** | See the scans after this table. |
+| P2-2 reopened conversation | **Fixed** | `*-13e`, after the delete switches to "Explain the request pipeline". The `find` card is there with "2 things found", and the `item 7` citation is a link again (accent with an underline). The declined `erase` card is neutral, with "Declined" and "I did not erase anything." The `/fail` turn keeps its partial sentence, the circle-× "The answer did not finish.", the cause, Retry and Show details. Undo is focused with the 2 px ring. |
+| P2-3 second glyph map | **Fixed** | `view/src/model.ts` imports `statusGlyph` from `@decryp7/paddock-ui/icons`. `TONE_STATUS` maps `bad` to `error`, and `toneGlyph()` derives each glyph from it. `ICON_GLYPH` takes `info`, `warning`, `error` and `check` from `statusGlyph(...)`. A search for `'alert'` or `'close'` used as a status glyph finds no map left. |
+| P3-1 waiting card | **Fixed** | `*-12`: "erase · Erase everything · Waiting for your decision" (lock glyph) sits directly above the approval. Details is open and Decline is focused. |
+| P3-2 small frames | **Fixed** | See the small frames after this table. |
+| P3-3 filled glyph | **Accepted** | It stays as a demo-only style, outside the family sheet, as review 4 allowed. |
+
+**P2-1, the icon seams.** The masters were scanned for any step of 4 or more levels.
+- **macOS master:** at x = 230 and x = 880, the steps at y = 307 and y = 524 are gone. The only steps left are the
+  livery band edges (y ≈ 737 and 852) and the glyph edges, the same pattern as `pacenotes-macos-1024.png`.
+- **Windows master:** its steps match the Pacenotes Windows master position for position (y = 64–85 rim, 217, 283,
+  320 livery).
+- **Comparison sheet:** at 1024 the tile is a smooth dark ramp.
+- **Cause and fix:** the cause RESPONSE-4 gives (the drop-shadow filter interpolating in linearRGB, fixed with
+  `color-interpolation-filters="sRGB"`) fits a step that stayed after the sheen and the inner edge were removed.
+
+**P3-2, the small frames.**
+- **16 px:** the bar, the three 1 px dots, the tab row and the pane edges land on whole pixels; only the tile's corner
+  anti-aliasing is grey.
+- **32 px:** crisp, with the two tabs distinct from the pane.
+- **Both sizes:** clearly apart from the shell demo.
+
+Notes, not blocking:
+- `shell/pitwall/src/needs-ai.ts:74` and `:104` still pass `'alert'` by name. It means a warning (the assistant can't
+  run yet), so the glyph is right. Routing it through `statusGlyph('warning')` would make the lint's rule hold without
+  exceptions.
+- The literal-name lint does not see bound values such as `[name]="…"`. The map refactor removes today's cases, but a
+  test that every `PdIconName` used for status comes from `PD_STATUS_GLYPHS` would keep it that way.
