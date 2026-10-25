@@ -5,7 +5,7 @@
 //       `ownTestBinaries` of `paddock.conformance.json` names it with the reason it needs a process of its own (a feature it
 //       needs, a process-wide log or hook, no test harness). A listed file that no longer exists warns.
 //   (b) Every member of a Cargo workspace is tested by a workflow step (`-p <name>` in a cargo test/nextest/llvm-cov command,
-//       or a `--workspace` one unless the workspace is in `perCrateSteps`), and, in a workspace with cargo-hakari
+//       or a `--workspace` one that does not `--exclude` it, unless the workspace is in `perCrateSteps`), and, in a workspace with cargo-hakari
 //       (`.config/hakari.toml`), depends on the workspace-hack crate.
 import { error, warn } from '../finding.mjs';
 
@@ -36,6 +36,13 @@ export function hakariPackage(text) {
 export function namesPackage(command, name) {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(?:^|\\s)(?:-p|--package)(?:\\s+|=)${esc}(?=\\s|$)`).test(command);
+}
+
+/** Whether a `--workspace` workflow command text tests package `name`: it does unless it names it in `--exclude`. */
+export function workspaceTests(command, name) {
+  if (!/\s--workspace\b/.test(command)) return false;
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return !new RegExp(`(?:^|\\s)--exclude(?:\\s+|=)${esc}(?=\\s|$)`).test(command);
 }
 
 const join = (dir, p) => (dir ? `${dir}/${p}` : p);
@@ -85,13 +92,13 @@ export default {
         const base = full.slice(0, -2);
         return manifests.filter((x) => dirOf(dirOf(x)) === base).map(dirOf);
       });
-      const wholeWorkspace = !perCrate.has(wsDir) && commands.some((c) => /\s--workspace\b/.test(c));
+      const wholeWorkspace = !perCrate.has(wsDir);
       for (const d of memberDirs) {
         const manifest = join(d, 'Cargo.toml');
         const text = ctx.read(manifest);
         const name = packageName(text);
         if (!name || name === hack) continue;
-        if (!wholeWorkspace && !commands.some((c) => namesPackage(c, name))) {
+        if (!commands.some((c) => namesPackage(c, name) || (wholeWorkspace && workspaceTests(c, name)))) {
           out.push(error('C37', 40, manifest, 1, `${name} is a workspace member that no workflow tests`, `Add a CI step for it (\`cargo nextest run -p ${name}\`, as the other members have).`));
         }
         if (hack && !new RegExp(`^${hack.replace(/[-]/g, '\\-')}(?:\\.workspace)?\\s*=`, 'm').test(text ?? '')) {
