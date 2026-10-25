@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 32 32">
   <title>Paddock Workbench Demo 24px</title>
   <defs>
-    <linearGradient id="w3bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1B1F27"/><stop offset="1" stop-color="#000000"/></linearGradient>
+    <linearGradient id="w3bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1C1C1C"/><stop offset="1" stop-color="#000000"/></linearGradient>
     
   </defs>
   <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#w3bg)"/>

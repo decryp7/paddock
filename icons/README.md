@@ -11,7 +11,7 @@ Open `preview.html` to review them, or see the renders in `screenshots/`.
 | Pacenotes | Approved (2026-10-23) |
 | Paddock (umbrella mark) | Reviewed (2026-10-24) |
 | Paddock Shell Demo (a demo app, not a family member) | New (2026-10-24), awaiting independent review |
-| Paddock Workbench Demo (a demo app, not a family member) | New (2026-10-25), awaiting independent review (rule 22); a near-black tile (`#050609`) with its own silhouette (activity-bar dots, a split dock with tabs on the top pane), white ink; family CVD minimums unchanged (review 3 P2-6) |
+| Paddock Workbench Demo (a demo app, not a family member) | New (2026-10-25), awaiting independent review (rule 22); a near-black tile (`#050505`) with its own silhouette (activity-bar dots, a split dock with tabs on the top pane), white ink; family CVD minimums unchanged (review 3 P2-6) |
 
 ## Demo apps
 
@@ -27,13 +27,13 @@ they are equal).
 
 Paddock Workbench Demo (`apps/workbench-demo`) has its own silhouette, not the shell's window with a sidebar: the activity bar as a
 strip of three dots, then the dock split into a tall pane and two stacked panes, with two tabs on the top one (solid shapes, no outline
-frame; the tray template is the same shape in one tone). Its tile is near-black `#050609` (`#1B1F27` to `#000000`, deep `#000000`, a faint
-light rim for dark docks), white ink: 20.3:1 on the base, 16.5:1 on the top stop, 21:1 on the bottom stop. The first warm stone tile
+frame; the tray template is the same shape in one tone). Its tile is near-black `#050505` (neutral grey ramp `#1C1C1C` to `#000000`, R=G=B so the 8-bit steps cannot tint, deep `#000000`, a faint
+light rim for dark docks), white ink: 20.4:1 on the base, 17.0:1 on the top stop, 21:1 on the bottom stop. The first warm stone tile
 `#DAD5CB` was only 2.4 dE from the shell demo's silver. A grid search over every colour (`tools/cvd.mjs`, all family tiles plus Paddock and
-the shell demo) found only near-black below about `#050609` keeps the family minimums (normal 17.7, protan 11.6, deutan 13.6, tritan 10.7,
+the shell demo) found only near-black below about `#050609` (the shipped `#050505` is neutral) keeps the family minimums (normal 17.7, protan 11.6, deutan 13.6, tritan 10.7,
 unchanged); every light or mid neutral lowered one of them, and Paddock's graphite `#2B3038` rules out a lighter near-black (`#0E1014`
-already gives 13.5 normal). Against the whole family plus Paddock and the shell demo the tile's own nearest distances are Paddock 18.6
-normal, 18.7 protan, 18.5 deutan, 18.5 tritan; against the shell demo 74.7 under all four. `ONLY=workbench-demo node tools/build.mjs`,
+already gives 13.5 normal). Against the whole family plus Paddock and the shell demo the tile's own nearest distances are Paddock 19.3
+normal, 19.7 protan, 19.2 deutan, 19.2 tritan; against the shell demo 75.4 or more under all four. `ONLY=workbench-demo node tools/build.mjs`,
 copy `workbench-demo/tauri/.` to `apps/workbench-demo/src-tauri/icons`. Side-by-side with the shell demo at 16, 32 and 1024 px:
 `ui/docs/review/x50-workbench/demo-icons-compare.png`.
 

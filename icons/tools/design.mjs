@@ -43,7 +43,7 @@ export const PALETTE = {
   'shell-demo': { top: '#DDE1E7', base: '#D1D4DA', bottom: '#B5BCC7', deep: '#4A5361', light: '#F6F7F9' },
   // Near-black: the dark neutral that keeps the family CVD minimums (the light neutrals sit within 3 to 12 dE of the shell
   // demo's silver or Spotter), at least 17.7 dE from every family tile and the shell demo; white ink, a faint light rim for dark docks.
-  'workbench-demo': { top: '#1B1F27', base: '#050609', bottom: '#000000', deep: '#000000', light: '#8A94A3', rim: '#FFFFFF' },
+  'workbench-demo': { top: '#1C1C1C', base: '#050505', bottom: '#000000', deep: '#000000', light: '#8C8C8C', rim: '#FFFFFF' },
 };
 
 /** Glyph ink: white wherever it reaches 3:1 on the tile; Spotter's light amber tile takes the dark ink. */

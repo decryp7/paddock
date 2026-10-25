@@ -2,7 +2,7 @@
   <title>Paddock Workbench Demo</title>
   <defs>
     <linearGradient id="w0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#1B1F27"/><stop offset="0.55" stop-color="#050609"/><stop offset="1" stop-color="#000000"/>
+      <stop offset="0" stop-color="#1C1C1C"/><stop offset="0.55" stop-color="#050505"/><stop offset="1" stop-color="#000000"/>
     </linearGradient>
     <radialGradient id="w0sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
