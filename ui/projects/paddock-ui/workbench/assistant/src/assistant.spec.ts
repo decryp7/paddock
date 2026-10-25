@@ -106,6 +106,16 @@ describe('PdAssistant', () => {
     expect(backend.sent[0]?.context).toEqual([]);
   });
 
+  it('labels the context chip the same way in the composer and in the sent question (P3-5)', async () => {
+    const { r } = await open();
+    const inComposer = r.one('[data-testid=assistant-chip] .chip-label').textContent?.trim();
+    r.one('[data-testid=assistant-send]');
+    const box = await type(r, 'q');
+    await press(r, box, { key: 'Enter' });
+    for (let i = 0; i < 6; i++) await settle(r.fixture);
+    expect(r.one('[data-testid=assistant-user] .chip').textContent?.trim()).toBe(inComposer);
+  });
+
   it('stops a running answer with Escape or the Stop button and says so', async () => {
     const { r, backend } = await open({ reply: () => 'one two three' });
     backend.hold();
@@ -197,6 +207,16 @@ describe('PdAssistant', () => {
     await settle(r.fixture);
     expect(r.one('[data-testid=assistant-list]').textContent).toContain('No conversations yet.');
     expect(text(r, 'assistant-undo')).toContain('Deleted "Why did the build fail?"');
+    expect(text(r, 'assistant-title')).toBe('New conversation');
+    expect(text(r, 'assistant-turn')).toBe('');
+    r.one('[data-testid=assistant-undo-button]').click();
+    for (let i = 0; i < 4; i++) await settle(r.fixture);
+    expect(text(r, 'assistant-title')).toBe('Why did the build fail?');
+    expect(text(r, 'assistant-user')).toContain('Why did the build fail?');
+    r.one('[data-testid=assistant-list-toggle]').click();
+    await settle(r.fixture);
+    r.one('[data-testid=assistant-delete]').click();
+    await settle(r.fixture);
     await vi.advanceTimersByTimeAsync(8000);
     vi.useRealTimers();
     for (let i = 0; i < 4; i++) await settle(r.fixture);
@@ -523,6 +543,18 @@ describe('PdAssistant', () => {
       expect(r.one('[data-testid=assistant-tool-result]').classList.contains('muted')).toBe(true);
     });
 
+    it('draws a tool the user stopped as a neutral card with a muted Stopped, not as a failure (P2-3)', async () => {
+      const { r } = await open();
+      await press(r, await type(r, '/tool-slow find'), { key: 'Enter' });
+      for (let i = 0; i < 8; i++) await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-tool-card]').getAttribute('data-state')).toBe('running');
+      r.one('[data-testid=assistant-stop]').click();
+      for (let i = 0; i < 8; i++) await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-tool-card]').getAttribute('data-state')).toBe('stopped');
+      expect(text(r, 'assistant-tool-result')).toBe('Stopped');
+      expect(r.one('[data-testid=assistant-tool-result]').classList.contains('muted')).toBe(true);
+    });
+
     it('still draws a tool that failed for real as a failure with its reason (P2-G)', async () => {
       const { r } = await open();
       await press(r, await type(r, '/tool-fail'), { key: 'Enter' });
@@ -540,7 +572,7 @@ describe('PdAssistant', () => {
       expect(error.querySelector('pd-glyph')).toBeTruthy();
       expect(error.textContent).toContain('The answer did not finish.');
       expect(text(r, 'assistant-error-cause')).toContain('Likely cause');
-      expect(r.one('[data-testid=assistant-answer]').textContent).toContain('A request first');
+      expect(r.one('[data-testid=assistant-answer]').textContent).toContain('Let me explain how the request');
       expect(r.all('[data-testid=assistant-error-details]')).toHaveLength(0);
       r.one('[data-testid=assistant-error-details-toggle]').click();
       await settle(r.fixture);

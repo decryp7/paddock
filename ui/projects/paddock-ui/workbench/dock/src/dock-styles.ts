@@ -127,6 +127,9 @@ body.pd-dock-drag-cancel .dv-tab-ghost-drag { opacity: 0.5 !important; }
   color-scheme: inherit;
   font-family: var(--pd-font-sans);
 }
+/* The strip scrolls only to tab boundaries (keepActiveTabVisible) and the overflow chip lists the rest: no scrollbar (review 3 P3-2). */
+.pd-dockview .dv-tabs-container { scrollbar-width: none; }
+.pd-dockview .dv-tabs-container::-webkit-scrollbar { display: none; }
 .pd-dockview .dv-tab { color: var(--pd-text-muted); transition: color calc(var(--pd-duration-micro, 120ms) * var(--pd-motion-scale, 1)) ease, background-color calc(var(--pd-duration-micro, 120ms) * var(--pd-motion-scale, 1)) ease; }
 .pd-dockview .dv-tab:hover { color: var(--pd-text-body); }
 .pd-dockview .dv-tab.dv-active-tab { color: var(--pd-text); }

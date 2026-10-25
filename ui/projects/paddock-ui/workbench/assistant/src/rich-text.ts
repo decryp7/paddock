@@ -46,8 +46,8 @@ export interface CitationOpened {
     .h { font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
     ul, ol { margin: 0 0 var(--pd-space-2); padding-left: var(--pd-space-6); }
     li { margin: var(--pd-space-1) 0; }
-    code { font-family: var(--pd-font-mono); background: var(--pd-surface-3); padding: 0 var(--pd-space-1); border-radius: var(--pd-radius-tag); font-size: 0.92em; }
-    pre { font-family: var(--pd-font-mono); background: var(--pd-surface-3); padding: var(--pd-space-2); border-radius: var(--pd-radius-control); overflow-x: auto; margin: 0 0 var(--pd-space-2); font-size: var(--pd-text-label); white-space: pre; max-width: 100%; }
+    code { font-family: var(--pd-font-mono); background: var(--pd-surface-code); padding: 0 var(--pd-space-1); border-radius: var(--pd-radius-tag); font-size: 0.92em; }
+    pre { font-family: var(--pd-font-mono); background: var(--pd-surface-code); padding: var(--pd-space-2); border-radius: var(--pd-radius-control); overflow-x: auto; margin: 0 0 var(--pd-space-2); font-size: var(--pd-text-label); white-space: pre; max-width: 100%; }
     pre code { background: none; padding: 0; }
     .cite { all: unset; cursor: pointer; color: var(--pd-accent); text-decoration: underline; text-underline-offset: 2px; }
     .cite:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; border-radius: var(--pd-radius-tag); }

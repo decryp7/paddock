@@ -218,6 +218,12 @@ describe('pd-notification-host in a small window (review 2, P3-14)', () => {
     expect(compact).toMatch(/\.pd-x \{[^}]*position: static/);
   });
 
+  it('shows a notice\'s short form instead of its title at 480 px and below, and the title otherwise (review 3 P3-8)', () => {
+    expect(css).toMatch(/\.pd-short \{ display: none; \}/);
+    expect(compact).toMatch(/\.pd-has-short \.pd-full \{ display: none; \}/);
+    expect(compact).toMatch(/\.pd-has-short \.pd-short \{ display: inline; \}/);
+  });
+
   it('keeps every action and the close in the markup (the small form only hides them), the primary first as authored', async () => {
     const list = signal<readonly HostNotification[]>([
       n('a', { actions: [{ label: 'Undo', kind: 'primary', run: () => undefined }, { label: 'More', kind: 'ghost', run: () => undefined }], body: 'long body', details: 'd' }),

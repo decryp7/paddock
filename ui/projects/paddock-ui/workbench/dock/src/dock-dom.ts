@@ -117,9 +117,20 @@ export function keepActiveTabVisible(root: HTMLElement): { refresh(): void; disp
       const tab = strip.querySelector<HTMLElement>('.dv-tab.dv-active-tab');
       if (!tab) return;
       const box = strip.getBoundingClientRect();
+      const width = box.right - box.left;
+      const cur = strip.scrollLeft;
+      // Positions in the strip's content (independent of its scroll).
+      const startOf = (t: HTMLElement): number => t.getBoundingClientRect().left - box.left + cur;
       const at = tab.getBoundingClientRect();
-      if (at.left < box.left) strip.scrollLeft += at.left - box.left;
-      else if (at.right > box.right) strip.scrollLeft += Math.min(at.right - box.right, at.left - box.left);
+      const [al, ar] = [at.left - box.left + cur, at.right - box.left + cur];
+      // Only tab boundaries (review 3 P3-2): the strip never starts with a sliver of a tab; the tabs out of view are the
+      // overflow chip's count.
+      const starts = [...strip.querySelectorAll<HTMLElement>('.dv-tab')].map(startOf).sort((a, b) => a - b);
+      let start: number;
+      if (al < cur || ar - al >= width) start = al;
+      else if (ar > cur + width) start = starts.find((b) => b <= al && ar - b <= width) ?? al;
+      else start = Math.min(starts.find((b) => b >= cur - 0.5) ?? al, al);
+      if (start !== cur) strip.scrollLeft = start;
     });
   const observer = new MutationObserver(refresh);
   observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });

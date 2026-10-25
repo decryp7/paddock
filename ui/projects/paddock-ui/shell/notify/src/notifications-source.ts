@@ -37,6 +37,7 @@ export class NotificationsSource implements NotificationSource {
       cause: t.cause,
       severity: t.severity,
       title: t.title,
+      short: this.store.shorts()[t.cause] ?? null,
       body: t.body || null,
       count: t.count,
       actions,

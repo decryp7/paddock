@@ -1,7 +1,7 @@
 import { NgComponentOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, effect, ErrorHandler, inject, input, isDevMode } from '@angular/core';
 import { PdNeedsAiCard } from '@decryp7/paddock-ui/states';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import type { Node } from '../generated/view';
 import { PdViewButton, PdViewLink } from './button';
 import { PdViewChart } from './chart';
@@ -28,7 +28,7 @@ export const NEEDS_AI_WITHOUT_REPAIR =
 @Component({
   selector: 'pd-view-node',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgComponentOutlet, PdGlyph, PdNeedsAiCard, PdViewButton, PdViewLink, PdViewTone, PdViewTable, PdViewTree, PdViewScene, PdViewForm, PdViewReview, PdViewMatrix, PdViewChart],
+  imports: [PdStatusGlyph, NgComponentOutlet, PdGlyph, PdNeedsAiCard, PdViewButton, PdViewLink, PdViewTone, PdViewTable, PdViewTree, PdViewScene, PdViewForm, PdViewReview, PdViewMatrix, PdViewChart],
   host: { '[attr.data-kind]': 'shape().tag', '[attr.data-node-id]': 'node().id || null' },
   template: `
     @let s = shape();
@@ -111,7 +111,7 @@ export const NEEDS_AI_WITHOUT_REPAIR =
       }
       @default {
         <p class="pd-view-unknown" role="note" data-testid="view-unknown" [attr.title]="s.name || null">
-          <pd-glyph name="info" [size]="14" /><span>{{ updateApp }}@if (s.name) { <span class="pd-view-unknown__kind"> ({{ kindName(s.name) }})</span> }</span>
+          <pd-status-glyph status="info" [size]="14" /><span>{{ updateApp }}@if (s.name) { <span class="pd-view-unknown__kind"> ({{ kindName(s.name) }})</span> }</span>
         </p>
       }
     }
