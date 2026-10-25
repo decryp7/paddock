@@ -1,5 +1,5 @@
 name: stable-workspace
-description: "Host runners only: moves the checkout to a fixed folder under the runner's home and leaves a link at the old path, so the build runs from the same physical path every time. sccache keys a Rust compile on its working folder; the runner's per-job hashed work folder made every path crate miss."
+description: "Host runners only: moves the checkout to a fixed folder under the runner's home and leaves a link at the old path (where the folder cannot move, as on Windows, keeps a clone there at the same commit), sets PADDOCK_WORKSPACE to it, so the build runs from the same physical path every time. sccache keys a Rust compile on its working folder; the runner's per-job hashed work folder made every path crate miss."
 inputs:
   name:
     description: "Folder name under ~/.paddock-ci/src; one per repo and job (the default is both)."
@@ -20,9 +20,32 @@ runs:
         folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
         root="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}/src"
         stable="$root/$folder"
+        # The folder later steps build from: PADDOCK_WORKSPACE, which a step uses as its working-directory (falling back to the
+        # workspace when the variable is unset).
+        use() {
+          local p="$1"; if [ "$RUNNER_OS" = Windows ]; then p="$(cygpath -w "$1")"; fi
+          echo "PADDOCK_WORKSPACE=$p" >> "$GITHUB_ENV"
+          echo "stable-workspace: building from $p"
+        }
         # An unusable move must never fail the job: it only costs the cache hits of the workspace crates.
         if ! why=$({ mkdir -p "$root" && cd "$root" && rm -rf "$stable" && mv "$ws" "$stable"; } 2>&1); then
-          echo "::warning::stable-workspace: could not move the checkout to $stable (${why:-no message}); building from the work folder (sccache misses the workspace crates)."
+          # Under act on Windows the runner keeps a handle on the work folder, so it cannot move. Keep a clone at the stable
+          # path instead and bring it to this commit (a local clone and fetch: hard links, no network), with every file
+          # that is not git's removed; ignored files (no build output lives there: CARGO_TARGET_DIR is elsewhere) stay.
+          if why2=$({
+            sha=$(git -C "$ws" rev-parse HEAD) &&
+            if [ ! -d "$stable/.git" ]; then rm -rf "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable"; fi
+            # The checkout is shallow: --update-shallow lets the clone take a commit whose parents it does not have.
+            git -C "$stable" fetch -q --no-tags --update-shallow "$ws" HEAD &&
+              [ "$(git -C "$stable" rev-parse FETCH_HEAD)" = "$sha" ] &&
+              git -C "$stable" checkout -q -f --detach "$sha" &&
+              git -C "$stable" clean -q -ffd
+          } 2>&1); then
+            echo "stable-workspace: could not move the checkout (${why:-no message}); a clone at $stable is at $(git -C "$stable" rev-parse HEAD) instead."
+            use "$stable"
+          else
+            echo "::warning::stable-workspace: could not move the checkout to $stable (${why:-no message}) nor clone it there (${why2:-no message}); building from the work folder (sccache misses the workspace crates)."
+          fi
           exit 0
         fi
         # Git bash's `ln -s` copies on Windows: a junction is the link that resolves to the stable folder.
@@ -33,3 +56,4 @@ runs:
           exit 0
         fi
         echo "stable-workspace: $ws -> $stable"
+        use "$stable"
