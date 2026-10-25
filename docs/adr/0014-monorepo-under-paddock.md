@@ -4,7 +4,8 @@
 - Date: 2026-10-24
 - Amended 2026-10-25 (twice: Debrief is imported first, see the last amendment) after the trial ([2026-10-monorepo-spike.md](../research/2026-10-monorepo-spike.md)): history size,
   import checklist (§2), sccache wording (§1, §9), affected rules (§6), task runner decided (§7), per-app `latest`
-  releases and the bridge target (§4), CODEOWNERS syntax (§9)
+  releases and the bridge target (§4), CODEOWNERS syntax (§9). Amended again 2026-10-25 (user): no transition release
+  and no update bridge; installs from before the monorepo are reinstalled once (last amendment)
 - Decision by the user (2026-10-24): "finish 0.3.0, then monorepo under paddock". This ADR decides how.
 - Related: rules 1-4, 8, 9, 39, 41, 42, 43; ADRs 0006 (versioning and consumption, partly replaced here), 0012 §8 (the
   canary); plan [shared-next.md](../plans/shared-next.md) X9, X10, X53; research
@@ -152,10 +153,10 @@ Each old repo becomes a frozen pointer, in two stages:
 
 1. **At import:** a last commit replaces the README with "This repository moved to
    `paddock/apps/<app>`" and a link, branch protection forbids pushes to `main`, issues are closed with a link to the
-   new place (open ones are re-filed in `paddock` with an `app:<app>` label; there are few). The `latest` release and
-   its assets stay, because installed apps read them (§4).
-2. **After the updater bridge period (§4):** the repo is set to Gitea "archived" (read-only, releases still
-   downloadable).
+   new place (open ones are re-filed in `paddock` with an `app:<app>` label; there are few). The old releases and
+   their assets stay downloadable.
+2. **After the app's first release from the monorepo (§4):** the repo is set to Gitea "archived" (read-only, releases
+   still downloadable). There is no update bridge to wait for.
 
 Repos are never deleted: old release URLs, old commit hashes and Renovate history stay reachable.
 
@@ -174,20 +175,12 @@ Repos are never deleted: old release URLs, old commit hashes and Renovate histor
   `/releases/download/latest/<file>` to the repo's **newest release** (checked 2026-10-25: Pitwall's URL serves
   v1.0.3's `latest.json`). In `paddock` that URL would serve whichever app released last, so each app gets its own
   moving release `<app>-latest` in `paddock`, with `latest.json` as an asset, and the app's endpoint names that tag.
-- **Installed users keep updating.** Their endpoint is the old repo's `latest/latest.json`, and Gitea does not redirect
-  release downloads between repos. So:
-  1. Every app release from the monorepo uploads `latest.json` (and nothing else: it points at the installers in
-     `paddock`) to **both** `paddock/releases/download/<app>-latest/latest.json` and the old repo, where it replaces
-     `latest.json` on the old repo's **newest release** (or creates a new release there for it), because that is what
-     the old endpoint resolves to. The upload uses a user token with `write:repository` stored as a secret: Gitea access
-     tokens are user-wide (the trial read the usual token's scopes as `write:package, write:repository, read:user` and
-     confirmed release writes to other repos pass the scope check, without uploading), while the Actions job token is
-     meant for the workflow's own repository.
-  2. The first monorepo release of each app changes its `endpoints` to `[new URL, old URL]` (Tauri tries them in
-     order), so every user who installs it moves to the new URL.
-  3. The bridge stays for at least two minor releases of the app or six months, whichever is later. Then stage 2 of §3
-     archives the old repo. A user who skipped every release in that time still gets the last bridged `latest.json`,
-     which leads to a build with the new endpoint.
+- **Installed users reinstall once** (replaced 2026-10-25, last amendment; this was a dual upload to the old repo's
+  newest release, an endpoint pair and a bridge period). An app's one endpoint is
+  `paddock/releases/download/<app>-latest/latest.json`, and every release from the monorepo writes `latest.json` there
+  only. Copies installed before the monorepo read the old repo's `latest/latest.json`, which no release updates any more,
+  and could not verify the family's updater key anyway: their users download the first monorepo release once by hand.
+  Every release's First launch notes say so.
 - `latest-json.mjs` and `publish.mjs` (five copies today, X9) become one `scripts/release/` with the app name and
   endpoint list as arguments.
 
@@ -378,25 +371,24 @@ smallest first, Debrief last (largest, most CI).
 3. **Import Pacenotes and Sighter** (docs only, no CI): import (§2), pointer commit in the old repo.
 4. **Import Spotter, then Pitcrew, then Dyno, then Pitwall.** For each: import; switch shared dependencies to path and
    workspace; move its `build.yml` into the matrix leg and `release-<app>.yml`; run its full gates locally and one CI
-   bundle build (`workflow_dispatch`); add the endpoint pair (§4); freeze the old repo (§3 stage 1). Its next real
-   release is the first from the monorepo and starts the bridge.
+   bundle build (`workflow_dispatch`); set the one endpoint `<app>-latest` (§4); freeze the old repo (§3 stage 1). Its
+   next real release is the first from the monorepo.
 5. **Import Debrief** the same way, with its extra workflows (`bench`, `corpus`, `fuzz`, `mutants`) as nightly jobs
    scoped to `apps/debrief`.
 6. **Retire:** `canary.yml`, the registry steps of `publish.yml`, ADR 0006 consumption text; update rules (§10).
-7. **After the bridge period:** archive the old repos (§3 stage 2).
+7. **After each app's first monorepo release:** archive its old repo (§3 stage 2).
 
 **Rollback point:** until an app's first release from the monorepo (end of step 4 for that app), rollback is: revert its
 import merge in `paddock` (or reset `main` to `pre-monorepo` if nothing else landed), remove the pointer commit and
 branch protection in the old repo, and continue there. Commits made in `apps/<app>/` meanwhile are carried back with
-`git format-patch --relative=apps/<app>`. After its first monorepo release, rollback is still possible because the old
-endpoint keeps working (§4), but the old repo would have to take over publishing `latest.json`; treat that as a
-forward fix, not a rollback.
+`git format-patch --relative=apps/<app>`. After its first monorepo release, installed copies of that release update
+only from `paddock` (§4); treat any later problem as a forward fix, not a rollback.
 
 ### 12. Risks
 
 | Risk | Mitigation |
 |---|---|
-| Installed apps stop updating | Dual `latest.json` publishing, endpoint pair, bridge of two minors or six months; release verification fetches both URLs |
+| Installed apps stop updating | Accepted once (last amendment): installs from before the monorepo are reinstalled by hand, as every release's First launch notes say; from then on one endpoint, `<app>-latest`, which release verification fetches |
 | A wrong affected filter hides a failure | Nightly full run; release workflows run full gates; affected script has tests on replayed history |
 | One red app blocks everyone's `main` | Matrix legs are per app; a red leg blocks only pushes that affect that app (rule 4 still applies to whoever broke it) |
 | CI load: a shell change runs every app | sccache warm cache; the apps' tests run in parallel matrix legs within rule-41 limits; WebKit only nightly and on release |
@@ -404,7 +396,7 @@ forward fix, not a rollback.
 | Lost history or tags | filter-repo on a fresh clone, compare `git log --oneline | wc -l` and tag lists before and after; old repos stay |
 | Old commit hashes in issues and docs no longer resolve in `paddock` | Old repos stay readable; import merge names the last old hash; a `docs/history.md` table maps repo to import commit |
 | Debrief 1.1 or another release in flight during the move | Migration starts only after 0.3.0 and with no release in progress; one app at a time; its release waits for its own import step |
-| Gitea features not as assumed (CODEOWNERS, cross-repo token for the bridge upload, artifact v4) | Step 0 checked CODEOWNERS (supported, regex patterns) and the token (user-wide `write:repository` passes for other repos); artifact v4 is checked in step 2; the bridge can also use a dedicated release-only token per old repo |
+| Gitea features not as assumed (CODEOWNERS, artifact v4) | Step 0 checked CODEOWNERS (supported, regex patterns); artifact v4 is checked in step 2 |
 | History larger than planned (703 MiB, mostly screenshots) | Accepted at import; screenshots recaptured only per release; LFS revisited above 1 GB |
 | Renovate opens too many PRs at once | Grouping and weekly schedule as today; one `lockFileMaintenance` PR per lockfile |
 | Feature unification sneaks in via path dependencies | Per-app workspaces (§1); `cargo tree -e features` diff in the spike for one app before and after |
@@ -421,7 +413,7 @@ Agent-days, one agent unless noted; wall time with 2 to 3 agents in parallel whe
 | 4 Spotter 1, Pitcrew 1, Dyno 1.5, Pitwall 1.5 | 5 |
 | 5 Debrief (largest CI, extra workflows, plugin SDK job) | 3 |
 | 6 Retire canary and publishing, rules and docs | 1 |
-| First monorepo release per app (bridge check, both endpoints verified) | 0.5 per app, about 2.5 |
+| First monorepo release per app (the `<app>-latest` endpoint verified) | 0.5 per app, about 2.5 |
 | **Total** | **about 17.5 agent-days; about 2 weeks wall time** |
 
 Steps 0 to 2 are on the critical path (about 6 days). Most of step 2 is work already planned as X9 and X10 in
@@ -449,8 +441,8 @@ Steps 0 to 2 are on the critical path (about 6 days). Most of step 2 is work alr
 - **A new repo instead of `paddock`.** `paddock` already holds the shared code, the rules and the shell demo in the
   target layout. Rejected.
 - **Redirect old release URLs** (proxy rules on the Gitea host). Possible with a reverse-proxy rewrite for
-  `/decryp7/<app>/releases/download/latest/latest.json`, but ties updates to server config outside CI. Kept as a fallback
-  if the dual upload fails.
+  `/decryp7/<app>/releases/download/latest/latest.json`, but ties updates to server config outside CI, and old installs
+  could not verify the family key anyway. Not used (last amendment).
 
 ## Amendment: one updater key for every app (user, 2026-10-25)
 
@@ -458,10 +450,9 @@ Every app signs its updates with one shared Tauri updater key pair, stored as `p
 `PADDOCK_TAURI_SIGNING_PRIVATE_KEY`, `PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` and `PADDOCK_TAURI_UPDATER_PUBKEY`
 (the owner keeps the key file as the backup). Each app's release job maps them to Tauri's standard names. The apps
 shipped so far each have their own key, and an installed copy only accepts updates signed with the key it was built
-with, so each app moves over once: its first monorepo release is a **transition release** signed with the app's old
-key (from its old repo's secrets) and built with the shared public key. The update bridge serves that release to old
-installs through the old repo's `latest.json`; every later release is signed with the shared key only. A transition
-release must never be skipped; the bridge keeps pointing old installs at it until the bridge period ends. New apps
+with. The transition release this amendment planned (the first monorepo release signed with the app's old key and
+served to old installs through the bridge) is dropped (last amendment): every release from the monorepo, the first
+included, is signed with the shared key only, and copies installed before it are reinstalled once by hand. New apps
 (Pacenotes, Sighter, the demos) use the shared key from their first release.
 
 ## Amendment: Debrief first (user, 2026-10-25)
@@ -470,8 +461,8 @@ The user changed the order of §11 to reach a Debrief release sooner. After the 
 next** (step 5 moves before steps 3 and 4), with the same checklist (§2) and the same per-app steps as step 4: the
 history-preserving import into `apps/debrief` with tags renamed to `debrief-v*`; its CI as an affected matrix leg; its
 `bench`, `corpus`, `fuzz` and `mutants` workflows as nightly jobs scoped to `apps/debrief`; a `release-debrief.yml` for
-`debrief-v*` tags; the endpoint pair (§4), so installed copies keep updating through the old repo's `latest.json`; and
-the pointer commit in the old repo (§3 stage 1) last, after the import's CI is green. Before the import, Debrief's
+`debrief-v*` tags; the one endpoint `debrief-latest` (§4; installs from before the move are reinstalled once, last
+amendment); and the pointer commit in the old repo (§3 stage 1) last, after the import's CI is green. Before the import, Debrief's
 `test/x50-shell-baseline` is merged into its `main`, and `perf/test-speed` is rebased or merged if it still applies
 cleanly and passes Debrief's affected tests (otherwise it stays a hand-off branch, [monorepo-handoff.md](../plans/monorepo-handoff.md)).
 The other six apps (Pacenotes and Sighter, then Spotter, Pitcrew, Dyno and Pitwall) are imported after that Debrief
@@ -491,15 +482,31 @@ Found while importing all seven apps; each point replaces the text above where t
   five apps with gates on several OS (Rust tests on Linux, macOS and Windows, real-app smoke tests, installers) keep
   their pre-monorepo workflow as `.gitea/workflows/<app>.yml`, every step in `apps/<app>`, with a plan job that asks
   `scripts/affected.mjs --ci --app <app>` and runs the rest only when the change reaches the app. The same file releases
-  from an `<app>-v*` tag: the Gitea release here, the moving `<app>-latest` release and the bridge `latest.json` on the
-  old repo's newest release (§4). Extra workflows are `<app>-<what>.yml`. A single Linux leg would have dropped the
+  from an `<app>-v*` tag: the Gitea release here and the moving `<app>-latest` release (§4); nothing is written to the
+  old repo (last amendment). Extra workflows are `<app>-<what>.yml`. A single Linux leg would have dropped the
   macOS and Windows coverage those workflows exist for. The demos stay ci.yml legs with `<app>-release.yml`. The plan
   marks only the app for any of its workflow files.
-- **Release signing:** each app's release maps `<APP>_TRANSITION_SIGNING_KEY` (the old key, copied from the old repo's
-  secrets for the transition release, then deleted) or else `PADDOCK_TAURI_SIGNING_PRIVATE_KEY`, and always
-  `PADDOCK_TAURI_UPDATER_PUBKEY`. The release job needs `RELEASE_TOKEN` (a user token with `write:repository`, for the
-  bridge upload to the old repo).
+- **Release signing:** each app's release maps `PADDOCK_TAURI_SIGNING_PRIVATE_KEY` (and its password) and
+  `PADDOCK_TAURI_UPDATER_PUBKEY` only; there is no `<APP>_TRANSITION_SIGNING_KEY` (last amendment). The release job
+  needs `RELEASE_TOKEN` (a token with `write:repository` for `paddock`'s releases).
 - **Imported commit messages** lose co-author and AI-session trailers (rule 8) in the filter-repo step.
 - Docs-only apps (Pacenotes, Sighter) have a `paddock.ci.json` with nothing to run: no leg, docs mark only the link check.
 - Git hooks: one root `lefthook.yml` with a `root:` per app (lefthook reads only the repo root's file).
 
+## Amendment: no transition release, no update bridge (user, 2026-10-25)
+
+Every app release from the monorepo is signed with the shared `PADDOCK_TAURI_*` key only, and installed copies are
+reinstalled once by hand. This replaces the transition release (amendment "one updater key") and the update bridge (§4,
+§3 stage 2, §11 steps 4 and 7, §12):
+
+- No `<APP>_TRANSITION_SIGNING_KEY` secrets (they are deleted) and no release signed with an app's old key.
+- No `latest.json` is written to an old repository: `conformance/release/publish.mjs` has no `--newest` mode any more,
+  and the release jobs publish only the tag's release and the moving `<app>-latest` release in `paddock`.
+- An app's `plugins.updater.endpoints` lists only `https://dev.decryptology.net/decryp7/paddock/releases/download/<app>-latest/latest.json`.
+- Every release's notes keep the First launch section with "Existing installs: download this version once by hand";
+  a copy installed before the monorepo reads the old repo's endpoint, which no longer changes, and could not verify the
+  shared key in any case.
+- Old repositories are archived after the app's first monorepo release; nothing waits for a bridge period.
+
+Why: a transition release would have needed each app's old private key in `paddock`'s secrets and a cross-repository
+write for months, for a handful of installed copies that can be reinstalled in a minute.

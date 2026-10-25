@@ -15,4 +15,4 @@
 | [0011](0011-layout-by-declared-constraints.md) | Layout by declared constraints: one pure layout function (proposed) |
 | [0012](0012-paddock-app-shell.md) | Paddock app shell: one shell for every app (frame, startup, notifications and health, dialogs, jobs, settings, updates, menu, pages, test kit) (proposed) |
 | [0013](0013-paddock-workbench.md) | Paddock workbench: the docked IDE layer on the shell for Debrief, Pacenotes and Sighter (proposed) |
-| [0014](0014-monorepo-under-paddock.md) | One monorepo under `paddock`: layout, history import, per-app tags and releases, updater bridge, affected CI, task runner (accepted) |
+| [0014](0014-monorepo-under-paddock.md) | One monorepo under `paddock`: layout, history import, per-app tags and releases, one updater endpoint per app (no bridge: old installs reinstall once), affected CI, task runner (accepted) |
