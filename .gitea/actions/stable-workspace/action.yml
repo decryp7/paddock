@@ -25,7 +25,9 @@ runs:
           echo "::warning::stable-workspace: could not move the checkout to $stable; building from the work folder (sccache misses the workspace crates)."
           exit 0
         fi
-        if ! ln -s "$stable" "$ws"; then
+        # Git bash's `ln -s` copies on Windows: a junction is the link that resolves to the stable folder.
+        if [ "$RUNNER_OS" = Windows ]; then link() { cmd //c mklink //J "$(cygpath -w "$2")" "$(cygpath -w "$1")" >/dev/null; }; else link() { ln -s "$1" "$2"; }; fi
+        if ! link "$stable" "$ws"; then
           mv "$stable" "$ws" || true
           echo "::warning::stable-workspace: could not link $ws to $stable; building from the work folder."
           exit 0
