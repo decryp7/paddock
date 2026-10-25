@@ -268,6 +268,10 @@ jobs:
           sccache-redis-endpoint: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
           sccache-redis-db: ${{ vars.SCCACHE_REDIS_DB }}
 
+      - name: DIAG reset wrapper log
+        if: runner.os == 'macOS'
+        run: mkdir -p "$HOME/.paddock-ci" && : > "$HOME/.paddock-ci/diag-wrapper.log"
+
       - name: Toolchain present
         run: |
           rustc --version && cargo --version
@@ -303,6 +307,10 @@ jobs:
       - name: paddock-jobs
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-jobs --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-jobs --all-features --profile ci && cargo test -p paddock-jobs --all-features --doc
+
+      - name: DIAG dump wrapper log
+        if: runner.os == 'macOS' && !cancelled()
+        run: sed -E 's#/work/[0-9a-f]+/#/work/HASH/#g' "$HOME/.paddock-ci/diag-wrapper.log" | head -400
 
       - name: paddock-menu
         if: ${{ !cancelled() }}
