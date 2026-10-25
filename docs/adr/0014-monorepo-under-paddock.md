@@ -451,3 +451,15 @@ Steps 0 to 2 are on the critical path (about 6 days). Most of step 2 is work alr
 - **Redirect old release URLs** (proxy rules on the Gitea host). Possible with a reverse-proxy rewrite for
   `/decryp7/<app>/releases/download/latest/latest.json`, but ties updates to server config outside CI. Kept as a fallback
   if the dual upload fails.
+
+## Amendment: one updater key for every app (user, 2026-10-25)
+
+Every app signs its updates with one shared Tauri updater key pair, stored as `paddock` repo secrets
+`PADDOCK_TAURI_SIGNING_PRIVATE_KEY`, `PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` and `PADDOCK_TAURI_UPDATER_PUBKEY`
+(the owner keeps the key file as the backup). Each app's release job maps them to Tauri's standard names. The apps
+shipped so far each have their own key, and an installed copy only accepts updates signed with the key it was built
+with, so each app moves over once: its first monorepo release is a **transition release** signed with the app's old
+key (from its old repo's secrets) and built with the shared public key. The update bridge serves that release to old
+installs through the old repo's `latest.json`; every later release is signed with the shared key only. A transition
+release must never be skipped; the bridge keeps pointing old installs at it until the bridge period ends. New apps
+(Pacenotes, Sighter, the demos) use the shared key from their first release.
