@@ -13,6 +13,10 @@ Conventional Commits; one semver tag for the whole repo.
   rule accepts any `var(--token)` font family; rule 29 does not flag a read inside the operand of the first `await`; a spec may build a probe store.
 
 ### Fixed
+- sccache in CI uses a local disk cache on every runner (host: `~/.paddock-ci/sccache`, 20G; containers: the `/sccache` mount, else a folder of the
+  container) instead of the shared Dragonfly, which filled up and broke the Mac job's cache server. `setup-rust` pins sccache 0.19.0 on every
+  OS, and a server that cannot start or answer leaves `RUSTC_WRAPPER` unset so the job builds without the cache. The Redis backend stays an
+  option (`sccache-backend: redis`) and is unused by `ci.yml`.
 - sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
   to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
   variables, then sccache) whenever a build folder variable is set. The new `stable-workspace` action moves a host job's checkout to
