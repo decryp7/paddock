@@ -90,6 +90,10 @@ Conventional Commits; one semver tag for the whole repo.
   `toolStarted`/`approvalNeeded` events (generated TS). The approval of such a tool is a danger choice: danger-tinted card,
   "This cannot be undone.", Allow as a danger button (never the primary) and Decline the focused default. New shared glyphs
   `pd:symbol-function`, `pd:symbol-type`, `pd:symbol-module`; `namesPaletteProvider({ icon })` also takes a function per match.
+- Status glyphs (review 4 follow-up, rule 40): `PdNeedsAiCard`'s `icon` is a status (`'info' | 'warning'`, was `'alert'`), the
+  pitwall needs-AI state, the assistant's tool cards and the Knowledge packs page draw their status through
+  `<pd-status-glyph>`, and `assertStatusGlyphs`/`statusGlyphRenderProblems` (`@decryp7/paddock-ui/testing`) check the drawn
+  shapes in each shared component's status states, so a status glyph bound by `[name]` cannot bypass the map.
 - X50 review 4: icon tiles have no seams (the macOS drop shadow blends in sRGB) and `icons/tools/scan.mjs` fails a build
   on a step above 3 levels in any tile column; a reopened assistant conversation shows its tool cards, citations, declined or
   stopped calls and failed turn as they were live (`StoredMessage` tool `outcome`, `callSummary`, `write`, `destructive`,

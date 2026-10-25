@@ -6,6 +6,7 @@ import { PdNeedsAi, stepLabel } from './needs-ai';
 import { PitwallStore } from './pitwall.store';
 import { providePitwall } from './provide-pitwall';
 import { groupCode, parseSnapshot, pitwallMessage } from './wire';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 async function settle(rounds = 8): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
@@ -330,6 +331,9 @@ describe('<pd-needs-ai>', () => {
     memory.setState({ kind: 'unavailable', message: 'Odd.' });
     f.detectChanges();
     expect(q(f, 'needs-ai')!.getAttribute('data-kind')).toBe('unavailable');
+    // A blocking state draws the warning shape from the suite's map (review 4 follow-up).
+    assertStatusGlyphs(q(f, 'needs-ai')!);
+    expect(q(f, 'needs-ai')!.querySelector('pd-status-glyph')?.getAttribute('data-status')).toBe('warning');
     const spy = vi.spyOn(memory, 'snapshot');
     (q(f, 'needs-ai-wait') as HTMLButtonElement).click();
     await settle();

@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { one, text } from '@decryp7/paddock-ui/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PdNeedsAiCard } from './needs-ai-card';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 @Component({
   imports: [PdNeedsAiCard],
@@ -11,7 +12,7 @@ import { PdNeedsAiCard } from './needs-ai-card';
 class Host {
   title = 'Ask needs local AI';
   message = 'Pitwall is not running.';
-  icon: 'info' | 'alert' = 'info';
+  icon: 'info' | 'warning' = 'info';
   code = '';
   approve = '';
   hint = '';
@@ -41,13 +42,14 @@ describe('<pd-needs-ai-card>', () => {
   });
 
   it('shows the code with its hint, a quiet hint under the actions, a blocking icon and an alert', async () => {
-    const el = await render({ code: '482 913', approve: 'Approve it in Pitwall.', hint: 'On the built-in engine.', error: 'Failed.', icon: 'alert' });
+    const el = await render({ code: '482 913', approve: 'Approve it in Pitwall.', hint: 'On the built-in engine.', error: 'Failed.', icon: 'warning' });
     expect(text(one(el, '[data-testid=needs-ai-code]'))).toBe('482 913');
     expect(one(el, '[data-testid=needs-ai-code]').getAttribute('aria-label')).toBe('Pairing code');
     expect(text(one(el, '[data-testid=needs-ai-approve]'))).toBe('Approve it in Pitwall.');
     expect(text(one(el, '[data-testid=needs-ai-on-builtin]'))).toBe('On the built-in engine.');
     expect(one(el, '[data-testid=needs-ai-error]').getAttribute('role')).toBe('alert');
     expect(one(el, '.pd-needs-ai__icon--blocked')).toBeTruthy();
+    assertStatusGlyphs(el);
   });
 
   it('names a card that has no title by its name', async () => {
