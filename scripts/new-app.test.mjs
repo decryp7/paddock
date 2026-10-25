@@ -124,6 +124,18 @@ describe('a new app', () => {
     const pkg = JSON.parse(read('app/package.json'));
     assert.match(pkg.dependencies['@decryp7/paddock-ui'], /^\^\d+\.\d+\.\d+$/);
     assert.equal(JSON.parse(read('app/angular.json')).projects.app.architect.build.options.outputPath, 'dist/app');
+    // An e2e smoke suite on the shared preset: the window, axe in both themes, no horizontal scroll at 320 px.
+    assert.equal(pkg.scripts.e2e, 'playwright test --project=chromium');
+    // The shell demo has no unit-test target of its own, so there is no `test` script that could only fail.
+    assert.equal(pkg.scripts.test, undefined);
+    assert.equal(pkg.devDependencies.jsdom, undefined);
+    assert.equal(JSON.parse(read('app/angular.json')).projects.app.architect.test, undefined);
+    assert.match(read('app/playwright.config.ts'), /paddockConfig\(\{ app: 'pacenotes', defaultPort: 4200, serve: \(port\) => `npx ng serve --port \$\{port\}` \}\)/);
+    const smoke = read('app/e2e/smoke.spec.ts');
+    assert.match(smoke, /page\.locator\('#pd-main'\)/);
+    assert.match(smoke, /axeInThemes\(page\)/);
+    assert.match(smoke, /expectNoHorizontalScroll\(page, '320 px'\)/);
+    assert.doesNotMatch(smoke, /WorkbenchApp/);
   });
 
   test('never writes into a folder that has something in it', () => {
@@ -179,6 +191,18 @@ describe('a new app from the workbench demo', () => {
     assert.equal(JSON.parse(read('app/package.json')).description, 'Sightr: the UI (Angular, @decryp7/paddock-ui). Started from Paddock Workbench Demo.');
     assert.match(read('CHANGELOG.md'), /started from Paddock Workbench Demo/);
     assert.ok(!existsSync(join(dest, 'app/src-tauri/Cargo.lock')));
+    const smoke = read('app/e2e/smoke.spec.ts');
+    assert.match(smoke, /pd-dock \[role=tab\]/);
+    assert.match(smoke, /workbench\.palette\.open\(\)/);
+    assert.match(read('app/playwright.config.ts'), /app: 'sightr'/);
+    // The demo's unit tests come along, with their own target, setup and tsconfig.
+    const test = JSON.parse(read('app/angular.json')).projects.app.architect.test;
+    assert.equal(test.builder, '@angular/build:unit-test');
+    assert.deepEqual([test.options.tsConfig, test.options.setupFiles], ['tsconfig.spec.json', ['src/test-setup.ts']]);
+    assert.equal(JSON.parse(read('app/package.json')).scripts.test, 'ng test --watch=false');
+    assert.ok(JSON.parse(read('app/package.json')).devDependencies.jsdom, 'the unit tests need a DOM');
+    assert.match(read('app/tsconfig.spec.json'), /"extends": "\.\/tsconfig\.json"/);
+    assert.ok(existsSync(join(dest, 'app/src/test-setup.ts')) && existsSync(join(dest, 'app/src/app/demo.contributions.spec.ts')));
   });
 
   test('an unknown template stops the run before anything is written', () => {

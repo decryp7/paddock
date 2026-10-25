@@ -17,9 +17,15 @@ This file lists what changed for each finding of [REVIEW-2.md](REVIEW-2.md). The
 
 - **P2-A** The active tab stays visible in an overflowed strip (`keepActiveTabVisible`). The others go to the overflow.
 - **P2-B** The pop-out title bar and the OS window title use the panel's title ("main.rs"), with the path in the tooltip.
-- **P2-C** Partly done. Allow is now neutral and Decline is on the right. A missing argument list reads "No arguments".
-  Danger styling for destructive tools is still open: tools do not yet declare whether they are destructive (`ToolInfo`
-  has no such flag), so every write approval gets the same neutral Allow.
+- **P2-C** A tool now declares `Access::Destructive` (paddock-assistant) when what it changes cannot be undone. That
+  reaches the UI as `ToolInfo.destructive` and as `destructive` on the `toolStarted` and `approvalNeeded` events, through
+  the generated TypeScript.
+  - A destructive approval is a danger choice: a danger-tinted card, "This cannot be undone." (also the dialog's
+    description), Allow as a danger text button (never the filled primary), and Decline focused as the default. See
+    shot 12.
+  - A write that can be undone keeps a neutral Allow and a ghost Decline on the right.
+  - A missing argument list reads "No arguments". The space after "wants to:" is now kept (a regression test came first;
+    the compiler dropped the `&#32;` entity).
 - **P2-D** Each severity has its own glyph: error is a circle with ×, the new `pd:error`; warning is a triangle; info is a
   circle with i. Each is drawn in its status colour, and its accessible name is the word.
 - **P2-E** An open fly-out marks its trigger with `aria-expanded` and a hover-level tint (`pd-open`). It never gets the
@@ -50,8 +56,9 @@ This file lists what changed for each finding of [REVIEW-2.md](REVIEW-2.md). The
 - **P3-2** The perspectives fly-out uses checkbox items with a check mark on the current perspective.
 - **P3-3** The severity column is 28 px, unsortable and `headerHidden`.
 - **P3-4** Control is drawn as ⌃ (U+2303) on macOS. The `^` in shot 03 was the old build.
-- **P3-5** Symbol rows have no letter badge. The detail is the file path, for example `src/server/request_handler.rs`.
-  There is no per-kind glyph yet.
+- **P3-5** Symbol rows have no letter badge. They show the kind glyph from the shared set: `pd:symbol-function` (new),
+  `pd:symbol-type` and `pd:symbol-module`, 14 px. The palette (`namesPaletteProvider({ icon })` takes a function per
+  match) and the Outline both use it, and the detail is the file path (shot 04).
 - **P3-6** Palette rows are one component, with the category in muted text and a single space. Perspective commands now
   have the category "Perspective".
 - **P3-7** The Jobs slide-out is sized to its content (at most 50 %) and the card has the 12 px pane inset.
@@ -83,7 +90,15 @@ This file lists what changed for each finding of [REVIEW-2.md](REVIEW-2.md). The
 - **Desktop paths.** `workbench-demo-desktop.spec.ts` plays the main, pop-out and dialog windows over a faked Tauri IPC.
 - **Release scripts (rule 42).** There is one `scripts/demo-release.mjs` for both demos, and `scripts/demo/` takes the app
   as an argument.
-- **`new-app.mjs --template workbench-demo`** starts an IDE-style app. The copied app points at its own dialog contracts.
+- **`new-app.mjs --template workbench-demo`** starts an IDE-style app, and its copy points at its own dialog contracts.
+  - **New for every app:** a new app now gets an e2e smoke suite on `@decryp7/paddock-e2e`. It checks the window, axe in
+    both themes and 320 px; a workbench app also opens the dock and the palette.
+  - **New from the workbench demo:** the unit tests come along: the demo's new Vitest target and a contribution-lint spec.
+  - **Checked end to end once:** a generated workbench app passed `cargo test`, `ng build`, `npm test` and `npm run e2e` against this
+    branch's crates and packed packages. The scratch folder was removed afterwards.
+  - **Found on the way:** `npm test` failed in every generated app (no test target), a test target needs jsdom, and the
+    demo's contributions were never linted. The new lint found two references that only resolve with the palette and the
+    assistant registered, which the spec now registers as the main window does.
 - **`cargo deny`** runs for the demo app (`apps/workbench-demo/src-tauri/deny.toml`, as a CI job and in the release
   workflow).
 - **Demo icon.** It is on the contact sheet.
@@ -106,7 +121,5 @@ After the fix, two full `ng test paddock-ui` runs passed: 172 files, 2036 tests 
 
 ## Known gaps
 
-- P2-C: danger styling for destructive tools needs a `destructive` flag on tools (paddock-assistant `ToolInfo`).
-- P3-5: symbol rows have no per-kind glyph.
-- Keep on top cannot be shot in the browser.
-- A newly generated app's build has not been run end to end in CI.
+- Keep on top cannot be shot in the browser. The first desktop app shows it.
+- A generated app is checked by `new-app.test.mjs`, and once end to end by hand. CI does not build one.
