@@ -84,7 +84,12 @@ git clone --bare --filter=blob:none https://dev.decryptology.net/decryp7/<repo>.
 git -C <repo>.git rev-list --left-right --count main...<branch>   # behind, ahead
 ```
 
-Order (user, 2026-10-25, ADR 0014's last amendment): Debrief is imported first, right after the frame; the other six
+Imported (2026-10-25): every app. Merged into the app mains before their import: Pitwall `feat/debrief-client` (with `fix/pre-shell`,
+`fix/hardened-runtime-off`), Spotter `fix/monotonic-found-count` and `fix/hardened-runtime-off`, Dyno
+`fix/agent-after-update` and `fix/hardened-runtime-off`, Pitcrew `fix/hardened-runtime-off` (docs/history.md). Every
+other open branch stays a hand-off in its old repo.
+
+Order (user, 2026-10-25, ADR 0014's Debrief-first amendment): Debrief is imported first, right after the frame; the other six
 apps after the Debrief release.
 
 Re-read the list right before each app's import (§11 step 3 to 5): branches keep moving until the old repo is frozen.

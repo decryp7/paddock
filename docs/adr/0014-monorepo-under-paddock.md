@@ -476,3 +476,30 @@ the pointer commit in the old repo (§3 stage 1) last, after the import's CI is 
 cleanly and passes Debrief's affected tests (otherwise it stays a hand-off branch, [monorepo-handoff.md](../plans/monorepo-handoff.md)).
 The other six apps (Pacenotes and Sighter, then Spotter, Pitcrew, Dyno and Pitwall) are imported after that Debrief
 release. The frame and the Debrief import land on `main` as two separate merges, each verified locally and by one CI run.
+
+## Amendment: what the imports changed (2026-10-25)
+
+Found while importing all seven apps; each point replaces the text above where they disagree.
+
+- **Shared dependencies stay as they are at import.** An app keeps its registry versions of Paddock crates and
+  packages in its import commit, so the import stays mechanical; switching it to path crates
+  (`../../../../crates/<crate>`) and the workspace `@decryp7/paddock-ui` is a separate follow-up change per app with
+  its own gates (§11 step 4 put it inside the import). Exception: Spotter, the only app on the npm registry's
+  `@decryp7/paddock-ui` (0.1), moved to the workspace build at import (tsconfig paths to `ui/dist/paddock-ui`), because
+  the root workspace has no registry for the `@decryp7` scope; it builds and passes its tests on 0.3.
+- **An app's own workflow instead of a ci.yml leg** (§6 "one matrix leg per affected app", §4 `release-<app>.yml`): the
+  five apps with gates on several OS (Rust tests on Linux, macOS and Windows, real-app smoke tests, installers) keep
+  their pre-monorepo workflow as `.gitea/workflows/<app>.yml`, every step in `apps/<app>`, with a plan job that asks
+  `scripts/affected.mjs --ci --app <app>` and runs the rest only when the change reaches the app. The same file releases
+  from an `<app>-v*` tag: the Gitea release here, the moving `<app>-latest` release and the bridge `latest.json` on the
+  old repo's newest release (§4). Extra workflows are `<app>-<what>.yml`. A single Linux leg would have dropped the
+  macOS and Windows coverage those workflows exist for. The demos stay ci.yml legs with `<app>-release.yml`. The plan
+  marks only the app for any of its workflow files.
+- **Release signing:** each app's release maps `<APP>_TRANSITION_SIGNING_KEY` (the old key, copied from the old repo's
+  secrets for the transition release, then deleted) or else `PADDOCK_TAURI_SIGNING_PRIVATE_KEY`, and always
+  `PADDOCK_TAURI_UPDATER_PUBKEY`. The release job needs `RELEASE_TOKEN` (a user token with `write:repository`, for the
+  bridge upload to the old repo).
+- **Imported commit messages** lose co-author and AI-session trailers (rule 8) in the filter-repo step.
+- Docs-only apps (Pacenotes, Sighter) have a `paddock.ci.json` with nothing to run: no leg, docs mark only the link check.
+- Git hooks: one root `lefthook.yml` with a `root:` per app (lefthook reads only the repo root's file).
+

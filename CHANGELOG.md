@@ -4,6 +4,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### The other six apps imported (ADR 0014)
+- Pacenotes, Sighter, Spotter, Pitcrew, Dyno and Pitwall are in `apps/<app>` with their history (tags `pitcrew-v*`,
+  `pitwall-v*`). Their UIs are workspaces of the root npm lock; Spotter uses `@decryp7/paddock-ui` from `ui/dist`
+  (tsconfig paths) instead of the registry's 0.1.
+- Each of Spotter, Pitcrew, Dyno and Pitwall has `.gitea/workflows/<app>.yml` (its build.yml, gated by
+  `affected.mjs --ci --app <app>`, releasing from `<app>-v*` with `<app>-latest` and the bridge); their updaters read
+  `[paddock <app>-latest, old repo latest]`. Pacenotes and Sighter are docs only.
+- One root `lefthook.yml` (a `root:` per app); Renovate ignores Dyno's plugin template and example.
+- Pitwall: the fake engine counts a start only once it serves, so a port lost at the real bind (a parallel test) is
+  not a second model load (the flaky `a_dead_engine_is_forgotten_and_reloaded`).
+
 ### Debrief imported (ADR 0014, Debrief first)
 - Debrief's history is in `apps/debrief` (tags `debrief-v1.0.0`, `-v1.0.1`, `-v1.1.1`), with `test/x50-shell-baseline`
   and `perf/test-speed` (rebased) merged first. Its UI is the `debrief-app` workspace of the root npm lock; its
