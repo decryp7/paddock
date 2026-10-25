@@ -25,8 +25,11 @@ const MAP_ENTRY = /\b(error|errors|bad|fail|failed|failure|danger|critical|warn|
 export function statusMapProblems(path: string, text: string): string[] {
   if (path.endsWith('/icons/src/status.ts')) return [];
   const out: string[] = [];
+  const lines = text.split('\n');
   for (const m of text.matchAll(MAP_ENTRY)) {
     const line = text.slice(0, m.index).split('\n').length;
+    // A map to statuses (typed `PdStatus`), not to glyphs: `bad: 'error'` names the status, which the shared map draws.
+    if (lines.slice(Math.max(0, line - 4), line).some((l) => /\bPdStatus\b/.test(l))) continue;
     out.push(`${path}:${line}: ${m[1]}: '${m[2]}' (derive it from PD_STATUS_GLYPHS / statusGlyph)`);
   }
   return out;

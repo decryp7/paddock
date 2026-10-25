@@ -55,22 +55,17 @@ describe('status glyphs (review 3 P2-4)', () => {
       "m.ts:3: error: 'alert' (derive it from PD_STATUS_GLYPHS / statusGlyph)",
     ]);
     expect(statusMapProblems('x/icons/src/status.ts', "{ error: 'error', warning: 'alert' }")).toEqual([]);
+    // A map to statuses, not glyphs, is fine: the shared map draws them.
+    expect(statusMapProblems('v.ts', "export const TONE_STATUS: Readonly<Record<Tone, PdStatus | null>> = { neutral: null, bad: 'error' };")).toEqual([]);
   });
 
-  it('has no second status → glyph map in TypeScript; the files their owners still fix only warn (review 4 P2-3)', async () => {
+  it('has no second status → glyph map in TypeScript (review 4 P2-3)', async () => {
     const fs = await nodeFs();
     const files = ['projects/paddock-ui', 'projects/shell-demo/src', 'projects/workbench-demo/src', 'projects/gallery/src']
       .flatMap((d) => sources(fs, d))
       .filter((f) => f.endsWith('.ts') && !f.endsWith('/status-lint.ts'));
-    const problems = files.flatMap((f) => statusMapProblems(f, fs.readFileSync(f, 'utf8')));
-    // A warning, not a failure, until the pd-view owner derives its maps from PD_STATUS_GLYPHS (the coordinator makes the
-    // check blocking by emptying this list). Every other file fails at once.
-    const pending = ['projects/paddock-ui/view/src/model.ts'];
-    const waiting = problems.filter((p) => pending.some((f) => p.startsWith(`${f}:`)));
-    if (waiting.length) console.warn(`status → glyph maps still to derive from PD_STATUS_GLYPHS:\n- ${waiting.join('\n- ')}`);
-    expect(problems.filter((p) => !waiting.includes(p))).toEqual([]);
-    // A pending file that no longer maps statuses itself leaves the list (so the check becomes blocking for it).
-    expect(pending.filter((f) => !waiting.some((p) => p.startsWith(`${f}:`))), 'fixed: remove from pending').toEqual([]);
+    expect(files.length).toBeGreaterThan(100);
+    expect(files.flatMap((f) => statusMapProblems(f, fs.readFileSync(f, 'utf8')))).toEqual([]);
   });
 
   it('is used by every template of the library, the demos and the gallery: no status glyph is written by name', async () => {
