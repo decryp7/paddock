@@ -136,7 +136,15 @@ export function fitPath(text: string, maxWidth: number, measure: (s: string) => 
   }
   if (rootLength > 0) {
     const nameChars = Array.from(name);
-    const k = largest(nameChars.length, (j) => measure(root + ELLIPSIS + nameChars.slice(nameChars.length - j).join('')) <= maxWidth);
+    const fits = (start: number): boolean => measure(root + ELLIPSIS + nameChars.slice(start).join('')) <= maxWidth;
+    // The tail starts at a word: after a . - _ or space, or at a lower-to-upper change ("BuilderService"); the longest that fits.
+    for (let start = 1; start < nameChars.length; start += 1) {
+      const prev = nameChars[start - 1] ?? '';
+      const here = nameChars[start] ?? '';
+      if ((isBoundary(prev) || (/\p{Ll}/u.test(prev) && /\p{Lu}/u.test(here))) && fits(start)) return root + ELLIPSIS + nameChars.slice(start).join('');
+    }
+    // No word start fits: cut at a character.
+    const k = largest(nameChars.length, (j) => fits(nameChars.length - j));
     return root + ELLIPSIS + nameChars.slice(nameChars.length - k).join('');
   }
   return fitName(name === '' ? text : name, maxWidth, measure, keepTail);

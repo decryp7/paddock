@@ -219,6 +219,8 @@ test.describe('UI basics review fixes (regressions)', () => {
     expect(shown).toContain('2026-10-24.log');
     // The root is never dropped: the folders collapse first, then the start of the name, with the ellipsis flush against "C:\".
     expect(shown).toMatch(/^C:\\…/);
+    // The tail starts at a word, never mid-word ("…uilder.Service" reads like a rendering bug): it begins after a . - _ or space of the name.
+    expect(shown).toBe('C:\\…Service.2026-10-24.log');
   });
 
   test('the four path samples sit on one line: their text is centred on the same height (re-review P2)', async ({ page }) => {
