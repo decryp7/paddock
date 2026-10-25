@@ -1,0 +1,30 @@
+[package]
+name = "cargo-paddock-plugin"
+version = "0.1.0"
+description = "The plugin author's tool (ADR 0001): `cargo paddock-plugin new | build | pack | keygen | sign | verify | run | test`. Makes a plugin project that depends on paddock-plugin-api alone, builds it, packs a deterministic .paddockplugin (optionally Ed25519-signed), verifies a package against trusted keys, and starts the built program against a fake host to run the platform's conformance checks."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[lib]
+name = "cargo_paddock_plugin"
+
+[[bin]]
+name = "cargo-paddock-plugin"
+path = "src/main.rs"
+
+[dependencies]
+paddock-cli = { workspace = true }
+paddock-plugin-api = { workspace = true }
+paddock-plugin-package = { workspace = true }
+paddock-plugin-test = { workspace = true }
+paddock-proc = { workspace = true }
+serde_json = "1"
+tempfile = "3"
+toml = "0.9"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+# The tampered-package test rewrites an archive with one program changed.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }

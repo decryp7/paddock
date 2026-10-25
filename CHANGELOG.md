@@ -4,6 +4,32 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Added
+- Review 2 verification fixes. `pd-table`: a required column's floor is `min(128px, 40%)`, so in a phone-width pane the rows fit the
+  body (no sideways scroll inside the table, the last row action stays inside, header and rows share one edge with a scrolling body).
+  Recent files: the file name shortens in the middle (the extension survives) through `pd-path-text`, and a bare name takes no space
+  for an empty directory part.
+- Review 2 of the files and storage UI. The clear confirmation no longer repeats its title and is sentence case ("Clear logs?",
+  "Up to 4.8 MB is removed."); loose entries and the folded smallest items of a tree share one "Other items" group (no group of one that
+  repeats its row, no glyph that looks like a menu); `pd-table`'s `groupMono` takes a predicate, a column track in `em` is documented as
+  wrong (header and rows differ in font size, which put the tree's Size header 5 px off its values), the header keeps the body's
+  scrollbar width and group names truncate; the Storage table counts "3 kinds of data"; the `reveal` arrow is inside the margin; the
+  320 px shots show their subject (Settings closed before the Files shot, the table scrolled into view, the row menu open).
+- X51 `@decryp7/paddock-ui/view`: `<pd-view>`, the renderer of the declarative views plugins return (ADR 0002, `paddock-view`). Every
+  node kind (stack, text, table with sort and paging, lazy tree, graph, diagram, form, review list, matrix, chart, badge, progress,
+  empty, needs-AI, link); an unknown kind says "Update the app to view this" for that node only. Documents are validated on receipt by a
+  TypeScript mirror of the engine limits (`validateViewDoc`), patches (`applyViewPatch`: replace by id with the base etag checked, or a
+  whole document) are applied by `ViewStore` (stale or invalid: inline error with Retry, the last good view stays), actions leave as
+  `ViewAction` with the host keys `row`, `page`, `node`, `finding`, `reason`, `values`, `column`, `descending` (matrix cells add `row`,
+  `col`, `rowId`, `colId`). Confirmations, the OS browser and the path and secret pickers are the host's (`VIEW_HOST`, refused by default).
+  Gallery section, Playwright spec (axe, 320 px) and the review sheet `ui/docs/review/x51-view/`.
+- `cargo-paddock-plugin` (X51, ADR 0001): the plugin author's tool, `cargo paddock-plugin new | build | pack | keygen | sign | verify
+  | run | test` on `paddock-cli` conventions (ported from Debrief's `cargo-debrief-plugin`). `new` makes a project that depends on
+  `paddock-plugin-api` alone; `pack` writes a deterministic `.paddockplugin` (optionally Ed25519-signed); `verify` checks checksums,
+  signature and trusted keys (exit 4 on failure); `test` starts the built program against a fake host, compares it with its
+  manifest and runs the conformance checks (exit 5 on findings). `paddock-plugin-test` gains `FakeHost::launch(program, args)`, which
+  starts a plugin program through the same launcher as the app.
+
 ### Fixed
 - Findings of the independent screenshot review (`ui/docs/screenshots/REVIEW.md`): the menu bar never wraps (it stays one line and
   the app name gives way first; the title bar clips nothing at 320 px); the demo's runner names truncate with an ellipsis and a
@@ -20,6 +46,12 @@ Conventional Commits; one semver tag for the whole repo.
   relying on a fresh worker.
 
 ### Changed
+- BREAKING (X51, unreleased crates): one `ProtocolVersion` and one `GrantRef`. `paddock-plugin-package` drops its own
+  `ProtocolVersion` (and the `version` module) and re-exports `paddock_ipc::ProtocolVersion`; `paddock_ipc` gains `Skew`,
+  `ProtocolVersion::skew` and `introduced_in`, which `paddock-plugin-api`'s `HostInfo` now builds on instead of a second copy of
+  the rule. `Manifest::check_compatible` and `paddock_plugin_api::compat::protocol_of` are removed (use `HostInfo`).
+  `paddock_view::GrantRef` is now the validated type of `paddock-plugin-package` (private field, `GrantRef::new`; still a plain
+  string in JSON, postcard and TypeScript), re-exported by the package; the view validator no longer re-checks it.
 - X21 review 3: the resting "..." button shows the full subtle text on a selected row (the rest mix was 2.71:1 on the tint; the
   token test now covers the selected tint and surface-2); paths are cut at segment boundaries and keep their trailing segments
   (`…/Debrief/plugins/viewer/plugin-1.bin`); the donut total is one line; chart loading shows muted bars and a label (never an empty
@@ -48,6 +80,45 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- Review fixes for the files and storage UI (independent review, 2 P1, 11 P2, 9 P3). Settings > Storage is the shared `pd-table`: one
+  line per row, rows grouped by cache or the user's data with the aggregate size on the group row, hover icon buttons (What is inside,
+  Show in the file manager) and a "…" menu ending in Clear in danger text; the cache button is a normal button. The size tree no
+  longer counts a folder twice (its size is on the group row, its items are the rows, with `pd:` glyphs and a title and Close);
+  lower bounds read "at least 3.9 GB", rounded down. `pd-table` gains `groupSummary`, `groupMono` and `countLabel`. Recent files lead
+  with the file name and show the folder as a muted second line; `pd-path-text` keeps the separator beside the ellipsis. Glyphs: the
+  page fold fixed, bigger `file-code` brackets, a lighter `archive` lid, a `reveal` glyph for the action. The contact sheet is
+  1440 x 900 at 2x with 320 px, hover, menu and confirmation shots.
+- `conformance/ci/pin-runtime.mjs`: pins any `paddock-runtime` catalogue (size and SHA-256 measured while downloading, `--version`,
+  `--chrome-for-testing`); `install-test-browser.mjs --catalogue` and the action's `catalogue:` input install the build a catalogue
+  pins. `paddock-chromium`'s waits (`start_page`, start-up, `wait_ready`) run on the injected clock; its real-browser test runs
+  in the Linux CI job. The `paddock-ci` image (v2) carries Chrome for Testing 156.0.8078.47, the build `chromium.toml` pins
+  (was 156.0.8078.4); `scripts/ci-image.test.mjs` keeps them equal.
+- Files and storage follow-ups (plan X31/X32). `paddock-storage`: the size tree (`Storage::tree`, `storage_tree`, `StorageEvent::Tree`:
+  depth 3, 12 items per folder with the rest folded, bounded in entries and time, no links, one volume) and, in `shell/storage`, a
+  Folders button on the Storage page that shows it as a `pd-table` grouped by top-level folder. `paddock-files`: `Files::open_at_line` and
+  `files_open_at_line` (a granted file in the editor at a bounded line, the editor found per OS, never run); `RecentEntry::folder`.
+  `@decryp7/paddock-ui/icons`: four glyphs (`file`, `file-text`, `file-code`, `archive`) and `fileIcon()` in `shell/files`, which `pd-recent-files`
+  draws at 16 px; a contact sheet for their independent review (`CONTACT_SHEET=1 npx playwright test --project=review contact-sheet-x3x`).
+- `paddock-plugin-api`, `paddock-plugin-host` and `paddock-plugin-test` (plan X51, ADR 0001 to 0003), the platform half of
+  Debrief's `debrief-plugin-api`, `-host`, `-registry` and `-test`. `paddock-plugin-api`: platform protocol 2.0
+  (`PlatformRequest`, `HostCall`), `Plugin`/`Contributions` (tools with checked schemas, settings, views, MCP tools), the
+  `Extension` mechanism (`Contract`: an app's own postcard enums routed by namespace, never decoded by the platform), version
+  rules with refusals that say who must update, host files, output files, `serve`. `paddock-plugin-host`: installed
+  `.paddockplugin` discovery (verified before every start; a changed program is quarantined), grants with default deny and
+  the pure `sandbox_for`, a `Supervisor` per plugin (restart with back-off on the injected clock, quarantine through
+  `paddock-guard`), guarded `Remote<C>` proxies, grant-checked file reads, outputs and elevated operations, `PluginHost` and
+  `Status` for the Plugins view. `paddock-plugin-test`: `FakeHost`, conformance checks, golden helpers and the fixture plugin.
+- `paddock-guard` (plan X51, ADR 0001), from Debrief's `debrief_core::guard` without its plugin types: `catch` (panic to a typed
+  `Crashed`), `Quarantine` with a `QuarantinePolicy` (3 failures in 10 minutes by default) on the shared `Clock`, failures as
+  `Panic`, `Hang` or `Garbled` (a typed error the owner returns is not one), manual `release`, status, an observer, quarantined
+  owners kept in a versioned state file that tolerates a missing or damaged file, and `Guard::call`, the building block of
+  guarded adapters (refuses a quarantined or hung owner, runs under a time budget on the clock, catches panics, abandons hangs).
+- `paddock-view` (plan X51, ADR 0002): the declarative view model plugins return. `ViewDoc` with `Node`/`NodeKind` (stack, text,
+  table, tree, graph, diagram, form, review list, matrix, chart, badge, progress, empty, needs-AI, link), `ActionRef` (with a
+  label), `ViewAction`, `ViewPatch` and `apply_patch`; JSON (camelCase) and postcard codecs with a size limit and a decode depth
+  guard; `validate` with the ADR limits (errors name the node path; http and https links only; every interactive node labelled);
+  a never-panics property test and a cargo-fuzz target (`crates/paddock-view/fuzz`); generated TypeScript in
+  `@decryp7/paddock-ui` (`view/generated/view.ts`, stale-checked by a test). The `<pd-view>` renderer is the next step.
 - The shell demo desktop app serves Settings > AI access (MCP): `Builder::mcp` with a sample server (two read-only tools, one action), the settings in its config folder and the client keys in the OS credential store.
 - `paddock-storage` and `@decryp7/paddock-ui/shell/storage` (plan X32): what an app keeps on disk and clearing it safely. Declared
   `Category`s (cache or the user's data, a confined folder, items with the reason they stay, an optional removal through the app),
@@ -119,6 +190,13 @@ Conventional Commits; one semver tag for the whole repo.
   channel (ordered delivery, nothing after the call settled, failure, handler error, last-message marker, abort). `paddock-metrics`:
   `folder_size` does not cross volumes (`other_volumes`) and reads a folder entry by entry, so a cancel or the time limit is seen
   between reads. CI: a step for `paddock-net`; `paddock-archive` and `paddock-net` take the workspace hack.
+- `paddock-plugin-package` (plan X51, ADR 0001): the `.paddockplugin` package and manifest model, ported from Debrief's
+  `debrief-plugin-package` and `debrief-plugin-api` manifest. `Manifest` with `Contribution` (tool, settings, view, MCP tool,
+  extension namespace; `writes` marking on actions) and `Permission` (opened file paths, read/write folders by grant, programs,
+  network hosts, named elevated operations, MCP, memory, CPU), parsed once from `manifest.toml` with limits and typed errors;
+  validated names (`PluginId`, `GrantRef`, `HostPattern`, `Namespace`); a zip with `SHA256SUMS` and a detached Ed25519 signature,
+  bounded reading (traversal, links, size and entry limits), `build`, `extract`, `verify_installed`; keys saved owner-only; trust
+  levels Builtin / Signed / Unsigned with a versioned `TrustStore`. Fuzz targets for the manifest and the archive reader.
 - `paddock-mcp` (plan X22, ADR 0007): the local-only MCP server. `Server` with `ToolDef`/`ResourceDef` registration, `Policy` (off by
   default, read-only tools, actions only by name), schema validation, result caps, cursors, time limits with cancel, panic
   containment, `AuditLog` with redacted arguments, `serve_stdio` and `serve_loopback` (per-client `KeyStore` keys, loopback peers

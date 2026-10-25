@@ -7,6 +7,7 @@ export const STORAGE_COMMANDS = {
   storage_last: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   storage_reveal: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   storage_scan: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
+  storage_tree: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
 } as const;
 
 /** A command name of the table. */

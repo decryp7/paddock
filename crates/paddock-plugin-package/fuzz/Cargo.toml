@@ -1,0 +1,32 @@
+# Fuzz targets for paddock-plugin-package's parsers (ADR 0001: a plugin package is untrusted input). Its own workspace, outside
+# the crates' one; run with `cargo +nightly fuzz run manifest` or `... package` from `crates/paddock-plugin-package`.
+[package]
+name = "paddock-plugin-package-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+paddock-plugin-package = { path = ".." }
+
+[[bin]]
+name = "manifest"
+path = "fuzz_targets/manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "package"
+path = "fuzz_targets/package.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
