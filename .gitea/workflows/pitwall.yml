@@ -464,7 +464,11 @@ jobs:
           TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
           # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: bash scripts/ci/tauri-bundle.sh "${{ matrix.bundles }}"
+        run: |
+          # Rule 25: whitespace out of the signing secrets here too, where conformance C06 sees it (the script strips again).
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"; fi
+          if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"; fi
+          bash scripts/ci/tauri-bundle.sh "${{ matrix.bundles }}"
 
       # signingIdentity "-" must leave an ad-hoc sealed bundle; native libraries resolve by run path.
       - name: Verify the .app and the DMG (seal, no hardened runtime while ad hoc, Team IDs, sidecars start, run path)
