@@ -215,6 +215,35 @@ fn loopback_needs_a_valid_key_then_speaks_the_same_protocol() {
     assert!(c.next().is_none());
 }
 
+/// Regression: on Windows shutting a socket down does not wake a read blocked on it, so `stop` waited ~120 s for the
+/// system to drop each connection whose client stayed connected. Stopping must end promptly while the client keeps the
+/// connection open and silent. The bound below only turns a hang into a failure; a passing run never waits for it.
+#[test]
+fn stopping_ends_a_connection_whose_client_stays_connected_and_silent() {
+    let r = rig();
+    let keys = Arc::new(KeyStore::new());
+    let (_, key) = keys.issue("a", 1).unwrap();
+    let serving = serve_loopback(r.server.clone(), keys, listener(), 2).unwrap();
+    let mut idle = Conn::open(serving.addr());
+    idle.send(&json!({"key": key}).to_string());
+    assert_eq!(idle.next().unwrap()["ok"], true);
+    // A second client that never sends its key: the handshake read is blocked as well.
+    let _mute = TcpStream::connect(serving.addr()).unwrap();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let stopper = std::thread::spawn(move || {
+        serving.stop();
+        let _ = done_tx.send(());
+    });
+    assert!(
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .is_ok(),
+        "stop did not return while a client stayed connected"
+    );
+    stopper.join().unwrap();
+    assert!(idle.next().is_none(), "the client sees the connection end");
+}
+
 #[test]
 fn loopback_limits_clients_and_bounds_every_line() {
     let r = rig();
