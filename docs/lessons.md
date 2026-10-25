@@ -412,6 +412,17 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   folder out of sccache's key (it hashes every `CARGO_*` variable) set it as cargo configuration
   (`--config build.target-dir='...'`), not with `CARGO_TARGET_DIR`. nextest still writes its own store (junit) under the
   default `target/nextest`.
+- Moving a suite from `cargo test` to nextest changes one thing tests can notice: every test is its own process. A static
+  `Mutex` that made tests take turns on an outside resource (Spotter's real-browser tests, which starve each other when
+  several Chromes start at once) serialises nothing any more; the turn-taking becomes a nextest test group
+  (`max-threads = 1`) in the workspace's `.config/nextest.toml`. Grep for `static .*Mutex<()>` in tests before switching.
+- Tests that need a build in a particular order (Pitwall: tauri-build copies a placeholder sidecar over
+  `target/debug/pitwall-server`, which the server's tests start) stay two nextest runs, the shell's last.
+- The imported apps' workflows (2026-10-25): installers, the real-app smoke and WebKit only on full runs (main, the app's
+  tag, nightly, a manual run with `bundles: true`); the image's Chrome for Testing and Playwright browsers instead of a
+  download per job; one port per e2e shard across every workflow (ci-actions.test.mjs checks it). `tauri build` needs
+  CARGO_TARGET_DIR (it asks cargo where the build is), so the bundle jobs keep it, at one fixed path per app, which keeps
+  sccache's key stable from run to run.
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for

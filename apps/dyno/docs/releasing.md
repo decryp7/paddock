@@ -40,7 +40,7 @@ folders (never a build directory), the macOS seal must verify, and `dyno-agent` 
 
 - **Opt-in.** Dyno checks for updates only when the user turns the check on; a manual check always works.
 - **One endpoint.** A check is one HTTPS GET of
-  `https://dev.decryptology.net/decryp7/dyno/releases/download/latest/latest.json` (`plugins.updater.endpoints` in
+  `https://dev.decryptology.net/decryp7/paddock/releases/download/dyno-latest/latest.json` (the moving `dyno-latest` release of the Paddock monorepo; copies installed before the move are reinstalled once by hand) (`plugins.updater.endpoints` in
   `tauri.conf.json`). It carries no identifier or usage data.
 - **Signatures are mandatory.** Every update is verified with the minisign public key built into the app before it is
   installed. A build without the public key says "Updates are not available in this build" and never checks.

@@ -1,22 +1,30 @@
 # Spotter's CI and release in the Paddock monorepo (ADR 0014; moved from decryp7/spotter's build.yml): every step runs in
 # apps/spotter. The plan job runs the rest only when the change reaches Spotter (scripts/affected.mjs --ci --app spotter).
-# Installers are built for spotter-v* tags (which publish the Gitea release here, the moving spotter-latest release the app's
-# updater reads and the bridge latest.json in the old repo), the nightly run and manual runs.
 #
-# Checks Spotter on every push and pull request. Installers are built only for v* tags (which also publish a Gitea
-# release with them attached), the nightly run and manual runs (see the bundle job).
+# Built like Paddock's own CI (ci.yml): the paddock-ci image on Linux (Rust, Tauri's libraries, Node, Playwright's browsers,
+# Chrome for Testing, cargo-nextest and cargo-deny baked in), one Rust leg per OS through the shared actions (setup-rust:
+# sccache on local disk; stable-workspace and a kept build folder on the host runners, set as cargo configuration, never
+# CARGO_TARGET_DIR; host-tools: the pinned cargo-nextest; install-test-browser: the pinned Chrome for Testing kept on the
+# host), nextest's ci profile with its per-test time budget (apps/spotter/.config/nextest.toml) plus the doc tests, the npm
+# and Angular caches (node-caches), and the Chromium e2e in two shards.
 #
-# Runner labels: ubuntu-latest, windows-latest, macos-latest (a host runner on the owner's Apple Silicon Mac: one job at
-# a time, so macOS jobs stay lean; they install nothing system-wide and leave no processes or launch agents behind).
-# Linux jobs run in the garage image (https://dev.decryptology.net/decryp7/garage): Rust, Tauri libraries, Node, Playwright
-# browsers and sccache pre-installed, root, no sudo.
-# Releases need a repository secret RELEASE_TOKEN (a Gitea access token with write:repository scope); signed
-# updates need TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD and TAURI_UPDATER_PUBKEY
-# (docs/releasing.md).
-# The shared UI kit (@decryp7 scope) is installed from the Gitea npm registry configured in app/.npmrc. If that registry
-# requires authentication from CI, add an npm token as a repository secret and write it to the runner's npmrc before
-# `npm ci`; no such secret is assumed here.
-# Actions are referenced by tag; Renovate (renovate.json, helpers:pinGitHubActionDigests) pins them to digests.
+# Where each check runs:
+#   rust (Linux, Windows, macOS)  format (Linux), clippy (Linux, macOS), tests with the real browser (nextest), doc tests
+#   licences                      cargo deny, commit messages (pull requests), script tests, icons
+#   frontend                      npm audit, lint, ng build, unit tests with coverage
+#   e2e (2 shards)                Playwright, Chromium, mock backend
+#   e2e-webkit                    Playwright, WebKit (full runs only)
+#   bundle (3 OS)                 installers; the real-app smoke: macOS seal, sidecars started from the built app (full runs)
+#   release                       a spotter-v* tag: notes, latest.json, the Gitea release
+# A full run is a push to main, a spotter-v* tag, the nightly run, or a manual run with `bundles: true`; other branches and
+# pull requests run Chromium only and build no installers (rule 3).
+#
+# Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
+# system-wide and leave no processes or launch agents behind).
+# Releases need RELEASE_TOKEN (a Gitea access token with write:repository scope); signed updates need the family's updater
+# key, PADDOCK_TAURI_SIGNING_PRIVATE_KEY, PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD and PADDOCK_TAURI_UPDATER_PUBKEY.
+# Installed copies update from the moving spotter-latest release here; copies installed before the move to the monorepo
+# are reinstalled once by hand (no transition release).
 
 name: spotter
 
@@ -28,6 +36,11 @@ on:
   schedule:
     - cron: "45 0 * * *"
   workflow_dispatch:
+    inputs:
+      bundles:
+        description: "Full run: also the installers, the real-app smoke and the WebKit e2e"
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -46,7 +59,7 @@ defaults:
 
 jobs:
   # Runs the rest only when the change reaches Spotter (the same plan as ci.yml); a push to main whose commit carries a
-  # spotter-v* tag is covered by the tag run.
+  # spotter-v* tag is covered by the tag run. `full`: the installers, the real-app smoke and WebKit run too.
   plan:
     name: plan
     runs-on: ubuntu-latest
@@ -57,6 +70,7 @@ jobs:
         working-directory: .
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      full: ${{ steps.plan.outputs.full }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,6 +82,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
+          BUNDLES: ${{ github.event.inputs.bundles }}
           PLAN_TOKEN: ${{ github.token }}
         run: |
           run=$(node scripts/affected.mjs --ci --app spotter)
@@ -75,70 +90,29 @@ jobs:
             tag=$(git ls-remote --tags origin 'refs/tags/spotter-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
             if [ -n "$tag" ]; then run=false; echo "::notice::commit is tagged $tag; the tag run is the gate."; fi
           fi
+          full=false
+          case "$EVENT" in
+            schedule) full=true ;;
+            workflow_dispatch) if [ "$BUNDLES" = true ]; then full=true; fi ;;
+            push) case "$REF" in refs/heads/main|refs/tags/spotter-v*) full=true ;; esac ;;
+          esac
           echo "run=$run" >> "$GITHUB_OUTPUT"
-  rust-lint:
-    name: rust format + clippy
-    if: needs.plan.outputs.run == 'true'
-    needs: [plan]
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
-    steps:
-      - uses: actions/checkout@v4
+          echo "full=$full" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      # Cheap and first: a formatting slip fails in seconds.
-      - name: Format
-        run: cargo fmt --all --check
-
-      - name: Linux dependencies for Tauri
-        run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
-
-      - uses: actions/cache/restore@v4
-        id: cargo-cache
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/spotter/target
-            !apps/spotter/target/debug/incremental
-          key: clippy-garage-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
-          restore-keys: clippy-garage-${{ runner.os }}-
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - uses: actions/cache/save@v4
-        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/spotter/target
-            !apps/spotter/target/debug/incremental
-          key: clippy-garage-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
-
-  rust-test:
-    name: rust tests (${{ matrix.os }})
+  # One leg per OS, as Paddock's crate job: the macOS code for real (the launch agent, Unix socket, SIGTERM stops, Keychain,
+  # SMAppService) on the Mac host runner, the Windows code on the Windows host runner. Every step runs even after another
+  # failed; nextest names the crate of every failure.
+  rust:
+    name: rust (${{ matrix.os }})
     if: needs.plan.outputs.run == 'true'
     needs: [plan]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     env:
-      RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
-      SCCACHE_DIR: /sccache
-      SCCACHE_CACHE_SIZE: 5G
       # The real-browser tests run in CI; a skipped one fails the job.
       SPOTTER_REQUIRE_TEST_BROWSER: "1"
       # The Linux container runs as root, where Chrome refuses to start with its sandbox: tests only (the product keeps it).
@@ -146,148 +120,99 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runners: Git's bash on PATH (actions and `shell: bash` need it) and a build folder that
-      # outlives the job, so the next run builds incrementally.
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it), a build folder that outlives the job as cargo
+      # configuration (PADDOCK_CARGO_TARGET; CARGO_TARGET_DIR would enter sccache's key), eight build jobs.
       - name: Git bash on PATH and a persistent build folder (Windows)
         if: runner.os == 'Windows'
         shell: cmd
+        working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.spotter-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo PADDOCK_CARGO_TARGET=--config=build.target-dir='%USERPROFILE%\.paddock-ci\target-spotter-%GITHUB_JOB%'>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+          echo PADDOCK_TEST_BROWSER_DIR=%USERPROFILE%\.paddock-ci\test-browser-spotter>>"%GITHUB_ENV%"
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Linux dependencies for Tauri
-        if: runner.os == 'Linux'
+      - name: Persistent build folder (macOS)
+        if: runner.os == 'macOS'
+        working-directory: .
         run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+          echo "PADDOCK_CARGO_TARGET=--config=build.target-dir='$HOME/.paddock-ci/target-spotter-$GITHUB_JOB'" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+          echo "PADDOCK_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser-spotter" >> "$GITHUB_ENV"
 
-      # sccache compile cache for the Linux build (docs/development.md: a runner volume is the faster option).
-      - name: Restore the sccache compile cache
-        if: runner.os == 'Linux'
-        id: sccache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # The same physical checkout path every run on the host runners, so sccache hits the workspace crates too.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
         with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/spotter/**/Cargo.lock') }}
-          restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
+          name: spotter-${{ github.job }}-${{ runner.os }}
 
-      - uses: actions/cache/restore@v4
-        if: runner.os == 'Linux'
-        id: cargo-cache
+      - uses: ./.gitea/actions/setup-rust
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
-          restore-keys: test-registry-${{ runner.os }}-
+          components: clippy rustfmt
 
-      # Inside the job's own temp folder, never the user's ~/.cache (the runner context is not available in job env).
-      - name: Test browser location
+      - uses: ./.gitea/actions/host-tools
+
+      # Cheap and first: a formatting slip fails in seconds.
+      - name: Format
+        if: runner.os == 'Linux'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/spotter
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/spotter
         shell: bash
-        run: echo "SPOTTER_TEST_BROWSER_DIR=$RUNNER_TEMP/spotter-test-browser" >> "$GITHUB_ENV"
+        run: cargo clippy $PADDOCK_CARGO_TARGET --workspace --all-targets -- -D warnings
 
-      # The pinned Chrome for Testing (never an installed browser), cached by the manifest that pins it.
-      - uses: actions/setup-node@v4
+      # The pinned Chrome for Testing, never an installed browser: the image's on Linux (the pin of
+      # crates/spotter-render/src/chromium-manifest.toml; conformance/test/ci-actions.test.mjs checks they agree), kept in a
+      # folder of the runner user on the hosts (downloaded once per pin).
+      - name: Chrome for Testing (macOS, Windows)
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
+        uses: ./.gitea/actions/install-test-browser
         with:
-          node-version-file: .nvmrc
+          catalogue: ${{ github.workspace }}/apps/spotter/crates/spotter-render/src/chromium-manifest.toml
+          env-prefix: SPOTTER
+          dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
 
-      - name: Restore the test browser
-        id: test-browser
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.SPOTTER_TEST_BROWSER_DIR }}
-          key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/spotter/crates/spotter-render/src/chromium-manifest.toml') }}
-
-      - name: Install the test browser
-        if: steps.test-browser.outputs.cache-hit != 'true'
-        run: node scripts/install-test-browser.mjs
-
-      - uses: actions/cache/save@v4
-        if: steps.test-browser.outputs.cache-hit != 'true'
-        with:
-          path: ${{ env.SPOTTER_TEST_BROWSER_DIR }}
-          key: test-browser-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('apps/spotter/crates/spotter-render/src/chromium-manifest.toml') }}
+      - name: The tests' browser
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          # The image sets CHROMIUM_TEST_PATH; on the hosts the installer above did (and checked the file).
+          if [ -z "${CHROMIUM_TEST_PATH:-}" ]; then echo "::error::no Chrome for Testing (CHROMIUM_TEST_PATH is empty)"; exit 1; fi
+          echo "SPOTTER_TEST_BROWSER=$CHROMIUM_TEST_PATH" >> "$GITHUB_ENV"
 
       # The renderer's default window is a real (off-screen) one, which needs a display: a virtual one in the container.
       - name: Tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/spotter
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session -- cargo test --workspace
+            xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session -- cargo nextest run $PADDOCK_CARGO_TARGET --workspace --profile ci
           else
-            cargo test --workspace
+            cargo nextest run $PADDOCK_CARGO_TARGET --workspace --profile ci
           fi
 
-      - name: sccache statistics
-        if: always() && runner.os == 'Linux'
-        run: sccache --show-stats
-
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/spotter/**/Cargo.lock') }}
-
-      - uses: actions/cache/save@v4
-        if: always() && runner.os == 'Linux' && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
-
-  # The macOS code for real (the launch agent, Unix socket, SIGTERM stops, Keychain, SMAppService): clippy and the
-  # tests on the Mac host runner. Host toolchains are used as they are (Rust and Node are installed there).
-  macos:
-    name: macOS clippy + tests
-    if: needs.plan.outputs.run == 'true'
-    needs: [plan]
-    runs-on: macos-latest
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/../.spotter-ci-target
-      CARGO_BUILD_JOBS: "4"
-      SPOTTER_REQUIRE_TEST_BROWSER: "1"
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Toolchain present
-        run: |
-          rustc --version && cargo --version
-          cargo clippy --version || { echo "::error::clippy is missing on the Mac runner (rustup component add clippy)"; exit 1; }
-
-      - name: Clippy (macOS)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      # Inside the job's own temp folder, never the user's ~/.cache (the runner context is not available in job env).
-      - name: Test browser location
+      # nextest does not run doc tests.
+      - name: Doc tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/spotter
         shell: bash
-        run: echo "SPOTTER_TEST_BROWSER_DIR=$RUNNER_TEMP/spotter-test-browser" >> "$GITHUB_ENV"
+        run: cargo test $PADDOCK_CARGO_TARGET --workspace --doc
 
-      # Downloaded fresh each run on the host Mac (no cache): the browser lives only in runner.temp and is deleted below.
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install the test browser (macOS)
-        run: node scripts/install-test-browser.mjs
-
-      - name: Tests (macOS)
-        run: cargo test --workspace
-
-      # Nothing may stay behind on the host: no fake runners, no test sockets.
-      - name: Clean up test processes
-        if: always()
+      # Nothing may stay behind on the host: no test browsers, no test sockets.
+      - name: Clean up test processes (macOS)
+        if: always() && runner.os == 'macOS'
         run: |
           pkill -f spotter-render || true
           pkill -f 'spotter-chromium' || true
           rm -rf "${TMPDIR:-/tmp}"/spotter-* || true
-          rm -rf "$SPOTTER_TEST_BROWSER_DIR" || true
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   licences:
     name: licences, scripts + commits
@@ -295,31 +220,12 @@ jobs:
     needs: [plan]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
         with:
           # Full history so pull requests can check every commit message.
           fetch-depth: 0
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
-          restore-keys: licences-${{ runner.os }}-
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
 
       - name: Commit messages follow Conventional Commits
         if: github.event_name == 'pull_request'
@@ -331,17 +237,9 @@ jobs:
       - name: App icons fill the canvas
         run: node scripts/ci/check-icons.mjs
 
+      # cargo-deny comes with the image.
       - name: Licences, advisories and sources
         run: cargo deny --all-features --workspace check
-
-      - uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}-${{ github.run_id }}
 
   frontend:
     name: frontend build, lint + unit tests
@@ -349,18 +247,17 @@ jobs:
     needs: [plan]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: apps/spotter/app
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: ./.gitea/actions/node-caches
         with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
+          angular-dir: apps/spotter/app
+          name: spotter-${{ github.job }}
 
       - name: Install
         run: |
@@ -376,48 +273,85 @@ jobs:
       - name: Frontend unit tests
         run: npx ng test --watch=false --coverage
 
-  # Browser flows against `ng serve` with the mock backend. Port 4370 (Spotter's, not the default) and one worker.
+  # Browser flows against `ng serve` with the mock backend in Chromium, in two shards that run at the same time (one worker
+  # each; --fully-parallel lets a shard take part of a file). Playwright's browsers come with the image. One port per
+  # shard: another job may hold a port on the same runner.
   e2e:
-    name: e2e (playwright, mock backend)
+    name: e2e chromium (shard ${{ matrix.shard }}/2)
     if: needs.plan.outputs.run == 'true'
     needs: [plan]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     defaults:
       run:
         working-directory: apps/spotter/app
     env:
-      PW_PORT: "4370"
+      PW_PORT: ${{ matrix.shard == 1 && '4370' || '4371' }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: ./.gitea/actions/node-caches
         with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
+          angular-dir: apps/spotter/app
+          name: spotter-e2e-${{ matrix.shard }}
 
       - name: Install
         run: (cd ../../.. && npm ci && npm run build -w ui)
 
-      - name: Playwright browsers (Chromium + WebKit)
-        run: npx playwright install --with-deps chromium webkit
-
-      - name: End-to-end tests
-        run: npx playwright test --project=chromium --project=webkit --workers=1
+      - name: End-to-end tests (Chromium)
+        run: npx playwright test --project=chromium --workers=1 --fully-parallel --shard=${{ matrix.shard }}/2
 
       - uses: actions/upload-artifact@v3
         if: failure()
         with:
-          name: playwright-results
+          name: playwright-results-chromium-${{ matrix.shard }}
           path: apps/spotter/app/.angular/playwright-results
           if-no-files-found: ignore
 
+  # WebKit (the engine of the macOS app's WKWebView) on full runs only (rule 3: branches run Chromium).
+  e2e-webkit:
+    name: e2e webkit
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
+    needs: [plan]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: apps/spotter/app
+    env:
+      PW_PORT: "4372"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/spotter/app
+          name: spotter-e2e-webkit
+
+      - name: Install
+        run: (cd ../../.. && npm ci && npm run build -w ui)
+
+      - name: End-to-end tests (WebKit)
+        run: npx playwright test --project=webkit --workers=1
+
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: playwright-results-webkit
+          path: apps/spotter/app/.angular/playwright-results
+          if-no-files-found: ignore
+
+  # Installers and the real-app smoke (the macOS seal, sidecars started from the built app) on full runs only.
   bundle:
     name: bundle (${{ matrix.os }})
-    needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -429,53 +363,32 @@ jobs:
           - os: ubuntu-latest
             bundles: deb,appimage
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
-    env:
-      RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
-      SCCACHE_DIR: /sccache
-      SCCACHE_CACHE_SIZE: 5G
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     steps:
       - uses: actions/checkout@v4
 
-      # The WebKitGTK, GTK and appindicator packages the app links against, and what the AppImage bundler needs.
-      - name: Linux dependencies for Tauri and the bundles
-        if: runner.os == 'Linux'
-        run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf file xdg-utils
-
-      # sccache compile cache for the Linux build (docs/development.md: a runner volume is the faster option).
-      - name: Restore the sccache compile cache
-        if: runner.os == 'Linux'
-        id: sccache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/spotter/**/Cargo.lock') }}
-          restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
-
-      - uses: actions/setup-node@v4
-        if: runner.os == 'Linux'
-        with:
-          node-version-file: .nvmrc
-
+      # The host runners keep the release build folder between runs. `tauri build` finds the build folder through cargo's
+      # environment, so here it is CARGO_TARGET_DIR, at one fixed path per app (a fixed value keeps sccache's key stable).
       - name: Git bash on PATH and a persistent build folder (Windows)
         if: runner.os == 'Windows'
         shell: cmd
+        working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.spotter-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-spotter-bundle>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      # The Mac host runner keeps its own toolchain (nothing is installed there).
-      - uses: dtolnay/rust-toolchain@stable
-        if: runner.os != 'macOS'
+      - name: Persistent build folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_TARGET_DIR=$HOME/.paddock-ci/target-spotter-bundle" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: ./.gitea/actions/setup-rust
 
       # Host runners keep their own Node; fail fast when it is missing or not the major version the repo root .nvmrc asks for.
-      - name: Host Node matches app/.nvmrc
+      - name: Host Node matches .nvmrc
         if: runner.os != 'Linux'
         shell: bash
         run: |
@@ -495,34 +408,36 @@ jobs:
             exit 1
           fi
 
-      # Signed updater artifacts (docs/releasing.md): with the signing secrets set, Tauri writes a .sig next to every
-      # installer and the public key is built into the app. Without them (forks, pull requests) the app reports
-      # "Updates are not available in this build".
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/spotter/app
+          name: spotter-bundle
+
+      # Rule 25 (C06): the family's updater keys, whitespace out, for the following steps.
+      - uses: ./.gitea/actions/strip-signing-keys
+        with:
+          signing-private-key: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+          updater-pubkey: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+
+      # Signed updater artifacts: with the keys set, Tauri writes a .sig next to every installer and the public key is built
+      # into the app. Without them (forks, pull requests) the app reports "Updates are not available in this build".
       - name: Build installers
         working-directory: apps/spotter/app
         shell: bash
         env:
           # Tauri's DMG step skips Finder window scripting on CI (no Automation permission prompt on the host).
           CI: "true"
-          # One updater key for the family (ADR 0014, amendment): built with the shared public key; the first monorepo
-          # release is the transition release, signed with the app's old key (SPOTTER_TRANSITION_SIGNING_KEY, copied from the
-          # old repo's secrets; delete it after that release), every later one with the shared key.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.SPOTTER_TRANSITION_SIGNING_KEY || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.SPOTTER_TRANSITION_SIGNING_KEY && secrets.SPOTTER_TRANSITION_SIGNING_KEY_PASSWORD || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           BUNDLES: ${{ matrix.bundles }}
         run: |
           (cd ../../.. && npm ci && npm run build -w ui)
-          # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's
-          # (signed) installer can never be collected into this release.
-          target="${CARGO_TARGET_DIR:-target}"
+          # The host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
+          # installer can never be collected into this release.
+          target="${CARGO_TARGET_DIR:-../target}"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
-          # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
-          export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"
-          export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"
           bundles="$BUNDLES"
           # The DMG step removes the .app it packed unless the app bundle is requested too; the bundle check and the
           # macOS updater both need it.
@@ -536,7 +451,7 @@ jobs:
             echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
             extra=(--config ../target/hardened.conf.json)
           fi
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then
             mkdir -p ../target
             node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
             npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
@@ -546,22 +461,15 @@ jobs:
             npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
 
-      - name: sccache statistics
-        if: always() && runner.os == 'Linux'
-        run: sccache --show-stats
-
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/spotter/**/Cargo.lock') }}
-
-      # signingIdentity "-" must leave an ad-hoc sealed .app and DMG with the hardened runtime off, one TeamIdentifier on
-      # every bundled Mach-O, and sidecars that start from the built app (Paddock rule 23).
+      # The real-app smoke: signingIdentity "-" must leave an ad-hoc sealed .app and DMG with the hardened runtime off, one
+      # TeamIdentifier on every bundled Mach-O, and sidecars that start from the built app (Paddock rule 23).
       - name: Verify the .app and the DMG (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: bash scripts/ci/macos-verify-bundle.sh
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
       - name: Collect installers
         shell: bash
@@ -586,10 +494,10 @@ jobs:
   release:
     name: release
     if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/spotter-v'))
-    needs: [plan, bundle, rust-lint, rust-test, macos, licences, frontend, e2e]
+    needs: [plan, bundle, rust, licences, frontend, e2e, e2e-webkit]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -598,12 +506,6 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           path: apps/spotter/artifacts
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
 
       - name: Release notes (git-cliff)
         run: |
@@ -616,12 +518,13 @@ jobs:
 
           Spotter is not code-signed yet, so your system may warn the first time you open it.
 
+          - **Existing installs:** download this version once by hand. Spotter now updates from the Paddock releases, which a copy installed before this version does not look at.
           - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Spotter > **Open Anyway**.
           - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
           FIRST_LAUNCH
 
       # latest.json for the updater: version, notes, pub_date and, per platform, the installer's URL, signature and
-      # size. Installed apps fetch releases/download/latest/latest.json (the latest non-pre-release release).
+      # size. Installed apps fetch it from the moving spotter-latest release.
       - name: Updater manifest (latest.json)
         shell: bash
         env:
@@ -645,15 +548,12 @@ jobs:
         shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          OLD_REPO: decryp7/spotter
         run: |
           node --test scripts/release/publish.test.mjs
           publish=../../conformance/release/publish.mjs
           api="${{ github.server_url }}/api/v1"
           node "$publish" --api "$api" --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
           if [ ! -f artifacts/latest.json ]; then exit 0; fi
-          # The updater's two endpoints (ADR 0014 §4): the moving spotter-latest release here, and the bridge, the old repo's newest
-          # release (its releases/download/latest/ resolves there), for copies installed before the move.
+          # The updater's one endpoint (tauri.conf.json): the moving spotter-latest release here.
           mkdir -p "$RUNNER_TEMP/latest" && cp artifacts/latest.json "$RUNNER_TEMP/latest/"
           node "$publish" --api "$api" --repo "${{ github.repository }}" --tag spotter-latest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace
-          node "$publish" --api "$api" --repo "$OLD_REPO" --newest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace

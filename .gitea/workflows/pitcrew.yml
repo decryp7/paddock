@@ -1,19 +1,27 @@
 # Pitcrew's CI and release in the Paddock monorepo (ADR 0014; moved from decryp7/pitcrew's build.yml): every step runs in
 # apps/pitcrew. The plan job runs the rest only when the change reaches Pitcrew (scripts/affected.mjs --ci --app pitcrew).
-# Installers are built for pitcrew-v* tags (which publish the Gitea release here, the moving pitcrew-latest release the app's
-# updater reads and the bridge latest.json in the old repo), the nightly run and manual runs.
 #
-# Checks Pitcrew on every push and pull request. Installers are built only for v* tags (which also publish a Gitea
-# release with them attached), the nightly run and manual runs (see the bundle job).
+# Built like Paddock's own CI (ci.yml): the paddock-ci image on Linux (Rust, Tauri's libraries, Node, cargo-nextest and
+# cargo-deny baked in), one Rust leg per OS through the shared actions (setup-rust: sccache on local disk; stable-workspace
+# and a kept build folder on the host runners, set as cargo configuration, never CARGO_TARGET_DIR; host-tools: the pinned
+# cargo-nextest), nextest's ci profile with its per-test time budget (apps/pitcrew/.config/nextest.toml) plus the doc tests,
+# and the npm and Angular caches (node-caches). Pitcrew's Playwright suite is not a CI gate (as in its old build.yml).
 #
-# Runner labels: ubuntu-latest, windows-latest, macos-latest (a host runner on the owner's Apple Silicon Mac: one job at
-# a time, so macOS jobs stay lean; they install nothing system-wide and leave no processes or launch agents behind).
-# Linux jobs run in the garage image (https://dev.decryptology.net/decryp7/garage): Rust, Tauri libraries, Node, Playwright
-# browsers and sccache pre-installed, root, no sudo.
-# Releases need a repository secret RELEASE_TOKEN (a Gitea access token with write:repository scope); signed
-# updates need TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD and TAURI_UPDATER_PUBKEY
-# (docs/releasing.md).
-# Actions are referenced by tag; Renovate (renovate.json, helpers:pinGitHubActionDigests) pins them to digests.
+# Where each check runs:
+#   rust (Linux, Windows, macOS)  format (Linux), clippy (Linux, macOS), tests (nextest), doc tests
+#   licences                      cargo deny, commit messages (pull requests), script tests
+#   frontend                      npm audit, lint, ng build, unit tests with coverage
+#   bundle (3 OS)                 installers; the real-app smoke: macOS seal, sidecars started from the built app (full runs)
+#   release                       a pitcrew-v* tag: notes, latest.json, the Gitea release
+# A full run is a push to main, a pitcrew-v* tag, the nightly run, or a manual run with `bundles: true`; other branches and
+# pull requests build no installers.
+#
+# Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
+# system-wide and leave no processes or launch agents behind).
+# Releases need RELEASE_TOKEN (a Gitea access token with write:repository scope); signed updates need the family's updater
+# key, PADDOCK_TAURI_SIGNING_PRIVATE_KEY, PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD and PADDOCK_TAURI_UPDATER_PUBKEY.
+# Installed copies update from the moving pitcrew-latest release here; copies installed before the move to the monorepo
+# are reinstalled once by hand (no transition release).
 
 name: pitcrew
 
@@ -25,6 +33,11 @@ on:
   schedule:
     - cron: "45 0 * * *"
   workflow_dispatch:
+    inputs:
+      bundles:
+        description: "Full run: also the installers and the real-app smoke"
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -43,7 +56,7 @@ defaults:
 
 jobs:
   # Runs the rest only when the change reaches Pitcrew (the same plan as ci.yml); a push to main whose commit carries a
-  # pitcrew-v* tag is covered by the tag run.
+  # pitcrew-v* tag is covered by the tag run. `full`: the installers and the real-app smoke run too.
   plan:
     name: plan
     runs-on: ubuntu-latest
@@ -54,6 +67,7 @@ jobs:
         working-directory: .
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      full: ${{ steps.plan.outputs.full }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +79,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
+          BUNDLES: ${{ github.event.inputs.bundles }}
           PLAN_TOKEN: ${{ github.token }}
         run: |
           run=$(node scripts/affected.mjs --ci --app pitcrew)
@@ -72,165 +87,96 @@ jobs:
             tag=$(git ls-remote --tags origin 'refs/tags/pitcrew-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
             if [ -n "$tag" ]; then run=false; echo "::notice::commit is tagged $tag; the tag run is the gate."; fi
           fi
+          full=false
+          case "$EVENT" in
+            schedule) full=true ;;
+            workflow_dispatch) if [ "$BUNDLES" = true ]; then full=true; fi ;;
+            push) case "$REF" in refs/heads/main|refs/tags/pitcrew-v*) full=true ;; esac ;;
+          esac
           echo "run=$run" >> "$GITHUB_OUTPUT"
-  rust-lint:
-    name: rust format + clippy
-    if: needs.plan.outputs.run == 'true'
-    needs: [plan]
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
-    steps:
-      - uses: actions/checkout@v4
+          echo "full=$full" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      # Cheap and first: a formatting slip fails in seconds.
-      - name: Format
-        run: cargo fmt --all --check
-
-      - name: Linux dependencies for Tauri
-        run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
-
-      - uses: actions/cache/restore@v4
-        id: cargo-cache
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/pitcrew/target
-            !apps/pitcrew/target/debug/incremental
-          key: clippy-garage-${{ runner.os }}-${{ hashFiles('apps/pitcrew/Cargo.lock') }}
-          restore-keys: clippy-garage-${{ runner.os }}-
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - uses: actions/cache/save@v4
-        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/pitcrew/target
-            !apps/pitcrew/target/debug/incremental
-          key: clippy-garage-${{ runner.os }}-${{ hashFiles('apps/pitcrew/Cargo.lock') }}
-
-  rust-test:
-    name: rust tests (${{ matrix.os }})
+  # One leg per OS, as Paddock's crate job: the macOS code for real (the launch agent, Unix socket, SIGTERM stops, Keychain,
+  # SMAppService) on the Mac host runner, the Windows code on the Windows host runner. Every step runs even after another
+  # failed; nextest names the crate of every failure.
+  rust:
+    name: rust (${{ matrix.os }})
     if: needs.plan.outputs.run == 'true'
     needs: [plan]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
-    env:
-      RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
-      SCCACHE_DIR: /sccache
-      SCCACHE_CACHE_SIZE: 5G
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runners: Git's bash on PATH (actions and `shell: bash` need it) and a build folder that
-      # outlives the job, so the next run builds incrementally.
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it), a build folder that outlives the job as cargo
+      # configuration (PADDOCK_CARGO_TARGET; CARGO_TARGET_DIR would enter sccache's key), eight build jobs.
       - name: Git bash on PATH and a persistent build folder (Windows)
         if: runner.os == 'Windows'
         shell: cmd
+        working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.pitcrew-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo PADDOCK_CARGO_TARGET=--config=build.target-dir='%USERPROFILE%\.paddock-ci\target-pitcrew-%GITHUB_JOB%'>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Linux dependencies for Tauri
-        if: runner.os == 'Linux'
+      - name: Persistent build folder (macOS)
+        if: runner.os == 'macOS'
+        working-directory: .
         run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+          echo "PADDOCK_CARGO_TARGET=--config=build.target-dir='$HOME/.paddock-ci/target-pitcrew-$GITHUB_JOB'" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      # sccache compile cache for the Linux build (docs/development.md: a runner volume is the faster option).
-      - name: Restore the sccache compile cache
-        if: runner.os == 'Linux'
-        id: sccache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # The same physical checkout path every run on the host runners, so sccache hits the workspace crates too.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
         with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/pitcrew/**/Cargo.lock') }}
-          restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
+          name: pitcrew-${{ github.job }}-${{ runner.os }}
 
-      - uses: actions/cache/restore@v4
-        if: runner.os == 'Linux'
-        id: cargo-cache
+      - uses: ./.gitea/actions/setup-rust
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/pitcrew/Cargo.lock') }}
-          restore-keys: test-registry-${{ runner.os }}-
+          components: clippy rustfmt
+
+      - uses: ./.gitea/actions/host-tools
+
+      # Cheap and first: a formatting slip fails in seconds.
+      - name: Format
+        if: runner.os == 'Linux'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitcrew
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitcrew
+        shell: bash
+        run: cargo clippy $PADDOCK_CARGO_TARGET --workspace --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitcrew
+        shell: bash
+        run: cargo nextest run $PADDOCK_CARGO_TARGET --workspace --profile ci
 
-      - name: sccache statistics
-        if: always() && runner.os == 'Linux'
-        run: sccache --show-stats
-
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/pitcrew/**/Cargo.lock') }}
-
-      - uses: actions/cache/save@v4
-        if: always() && runner.os == 'Linux' && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/pitcrew/Cargo.lock') }}
-
-  # The macOS code for real (the launch agent, Unix socket, SIGTERM stops, Keychain, SMAppService): clippy and the
-  # tests on the Mac host runner. Host toolchains are used as they are (Rust and Node are installed there).
-  macos:
-    name: macOS clippy + tests
-    if: needs.plan.outputs.run == 'true'
-    needs: [plan]
-    runs-on: macos-latest
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/../.pitcrew-ci-target
-      CARGO_BUILD_JOBS: "4"
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Toolchain present
-        run: |
-          rustc --version && cargo --version
-          cargo clippy --version || { echo "::error::clippy is missing on the Mac runner (rustup component add clippy)"; exit 1; }
-
-      - name: Clippy (macOS)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Tests (macOS)
-        run: cargo test --workspace
+      # nextest does not run doc tests.
+      - name: Doc tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitcrew
+        shell: bash
+        run: cargo test $PADDOCK_CARGO_TARGET --workspace --doc
 
       # Nothing may stay behind on the host: no fake runners, no test sockets.
-      - name: Clean up test processes
-        if: always()
+      - name: Clean up test processes (macOS)
+        if: always() && runner.os == 'macOS'
         run: |
           pkill -f fake_runner || true
           rm -rf "${TMPDIR:-/tmp}"/pitcrew-* || true
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   licences:
     name: licences, scripts + commits
@@ -238,31 +184,12 @@ jobs:
     needs: [plan]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
         with:
           # Full history so pull requests can check every commit message.
           fetch-depth: 0
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('apps/pitcrew/Cargo.lock') }}
-          restore-keys: licences-${{ runner.os }}-
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
 
       - name: Commit messages follow Conventional Commits
         if: github.event_name == 'pull_request'
@@ -271,17 +198,9 @@ jobs:
       - name: Script tests
         run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs scripts/ci/*.test.mjs
 
+      # cargo-deny comes with the image.
       - name: Licences, advisories and sources
         run: cargo deny --all-features --workspace check
-
-      - uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('apps/pitcrew/Cargo.lock') }}-${{ github.run_id }}
 
   frontend:
     name: frontend build, lint + unit tests
@@ -289,18 +208,17 @@ jobs:
     needs: [plan]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: apps/pitcrew/app
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: ./.gitea/actions/node-caches
         with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
+          angular-dir: apps/pitcrew/app
+          name: pitcrew-${{ github.job }}
 
       - name: Install
         run: |
@@ -316,10 +234,11 @@ jobs:
       - name: Frontend unit tests
         run: npx ng test --watch=false --coverage
 
+  # Installers and the real-app smoke (the macOS seal, sidecars started from the built app) on full runs only.
   bundle:
     name: bundle (${{ matrix.os }})
-    needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -331,53 +250,32 @@ jobs:
           - os: ubuntu-latest
             bundles: deb,appimage
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
-    env:
-      RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
-      SCCACHE_DIR: /sccache
-      SCCACHE_CACHE_SIZE: 5G
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     steps:
       - uses: actions/checkout@v4
 
-      # The WebKitGTK, GTK and appindicator packages the app links against, and what the AppImage bundler needs.
-      - name: Linux dependencies for Tauri and the bundles
-        if: runner.os == 'Linux'
-        run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf file xdg-utils
-
-      # sccache compile cache for the Linux build (docs/development.md: a runner volume is the faster option).
-      - name: Restore the sccache compile cache
-        if: runner.os == 'Linux'
-        id: sccache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/pitcrew/**/Cargo.lock') }}
-          restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
-
-      - uses: actions/setup-node@v4
-        if: runner.os == 'Linux'
-        with:
-          node-version-file: .nvmrc
-
+      # The host runners keep the release build folder between runs. `tauri build` finds the build folder through cargo's
+      # environment, so here it is CARGO_TARGET_DIR, at one fixed path per app (a fixed value keeps sccache's key stable).
       - name: Git bash on PATH and a persistent build folder (Windows)
         if: runner.os == 'Windows'
         shell: cmd
+        working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.pitcrew-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-pitcrew-bundle>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      # The Mac host runner keeps its own toolchain (nothing is installed there).
-      - uses: dtolnay/rust-toolchain@stable
-        if: runner.os != 'macOS'
+      - name: Persistent build folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_TARGET_DIR=$HOME/.paddock-ci/target-pitcrew-bundle" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: ./.gitea/actions/setup-rust
 
       # Host runners keep their own Node; fail fast when it is missing or not the major version the repo root .nvmrc asks for.
-      - name: Host Node matches app/.nvmrc
+      - name: Host Node matches .nvmrc
         if: runner.os != 'Linux'
         shell: bash
         run: |
@@ -397,31 +295,33 @@ jobs:
             exit 1
           fi
 
-      # Signed updater artifacts (docs/releasing.md): with the signing secrets set, Tauri writes a .sig next to every
-      # installer and the public key is built into the app. Without them (forks, pull requests) the app reports
-      # "Updates are not available in this build".
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/pitcrew/app
+          name: pitcrew-bundle
+
+      # Rule 25 (C06): the family's updater keys, whitespace out, for the following steps.
+      - uses: ./.gitea/actions/strip-signing-keys
+        with:
+          signing-private-key: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+          updater-pubkey: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+
+      # Signed updater artifacts: with the keys set, Tauri writes a .sig next to every installer and the public key is built
+      # into the app. Without them (forks, pull requests) the app reports "Updates are not available in this build".
       - name: Build installers
         working-directory: apps/pitcrew/app
         shell: bash
         env:
           # Tauri's DMG step skips Finder window scripting on CI (no Automation permission prompt on the host).
           CI: "true"
-          # One updater key for the family (ADR 0014, amendment): built with the shared public key; the first monorepo
-          # release is the transition release, signed with the app's old key (PITCREW_TRANSITION_SIGNING_KEY, copied from the
-          # old repo's secrets; delete it after that release), every later one with the shared key.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PITCREW_TRANSITION_SIGNING_KEY || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PITCREW_TRANSITION_SIGNING_KEY && secrets.PITCREW_TRANSITION_SIGNING_KEY_PASSWORD || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           BUNDLES: ${{ matrix.bundles }}
         run: |
-          # Rule 25: whitespace out of the signing secrets (a trailing newline from a pasted secret breaks the key).
-          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"; fi
-          if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"; fi
           (cd ../../.. && npm ci)
-          # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's
-          # (signed) installer can never be collected into this release.
+          # The host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
+          # installer can never be collected into this release.
           target="${CARGO_TARGET_DIR:-../target}"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
@@ -438,7 +338,7 @@ jobs:
             echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
             extra=(--config ../target/hardened.conf.json)
           fi
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then
             mkdir -p ../target
             node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
             npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
@@ -448,22 +348,15 @@ jobs:
             npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
 
-      - name: sccache statistics
-        if: always() && runner.os == 'Linux'
-        run: sccache --show-stats
-
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/pitcrew/**/Cargo.lock') }}
-
-      # signingIdentity "-" must leave an ad-hoc sealed .app and DMG with the hardened runtime off, one TeamIdentifier on
-      # every bundled Mach-O, and sidecars that start from the built app (Paddock rule 23).
+      # The real-app smoke: signingIdentity "-" must leave an ad-hoc sealed .app and DMG with the hardened runtime off, one
+      # TeamIdentifier on every bundled Mach-O, and sidecars that start from the built app (Paddock rule 23).
       - name: Verify the .app and the DMG (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: bash scripts/ci/macos-verify-bundle.sh
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
       - name: Collect installers
         shell: bash
@@ -488,10 +381,10 @@ jobs:
   release:
     name: release
     if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/pitcrew-v'))
-    needs: [plan, bundle, rust-lint, rust-test, macos, licences, frontend]
+    needs: [plan, bundle, rust, licences, frontend]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -500,12 +393,6 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           path: apps/pitcrew/artifacts
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
 
       - name: Release notes (git-cliff)
         run: |
@@ -518,18 +405,19 @@ jobs:
 
           Pitcrew is not code-signed yet, so your system may warn the first time you open it.
 
+          - **Existing installs:** download this version once by hand. Pitcrew now updates from the Paddock releases, which a copy installed before this version does not look at.
           - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Pitcrew > **Open Anyway**.
           - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
           FIRST_LAUNCH
 
       # latest.json for the updater: version, notes, pub_date and, per platform, the installer's URL, signature and
-      # size. Installed apps fetch releases/download/latest/latest.json (the latest non-pre-release release).
+      # size. Installed apps fetch it from the moving pitcrew-latest release.
       - name: Updater manifest (latest.json)
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
-          # The public address installed apps download from. Inside the runners github.server_url is Gitea's internal
-          # http address, which the updater must never be given.
+          # Public URL, not github.server_url: inside the runners that is the internal http address, and the updater
+          # requires https.
           BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
           node --test scripts/release/latest-json.test.mjs
@@ -547,15 +435,12 @@ jobs:
         shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          OLD_REPO: decryp7/Pitcrew
         run: |
           node --test scripts/release/publish.test.mjs
           publish=../../conformance/release/publish.mjs
           api="${{ github.server_url }}/api/v1"
           node "$publish" --api "$api" --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
           if [ ! -f artifacts/latest.json ]; then exit 0; fi
-          # The updater's two endpoints (ADR 0014 §4): the moving pitcrew-latest release here, and the bridge, the old repo's newest
-          # release (its releases/download/latest/ resolves there), for copies installed before the move.
+          # The updater's one endpoint (tauri.conf.json): the moving pitcrew-latest release here.
           mkdir -p "$RUNNER_TEMP/latest" && cp artifacts/latest.json "$RUNNER_TEMP/latest/"
           node "$publish" --api "$api" --repo "${{ github.repository }}" --tag pitcrew-latest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace
-          node "$publish" --api "$api" --repo "$OLD_REPO" --newest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace

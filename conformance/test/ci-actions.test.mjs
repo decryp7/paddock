@@ -596,3 +596,153 @@ test('node-caches keeps the npm and Angular caches on the host or the container 
   assert.match(bare.stdout, /::notice::no \/sccache mount/);
   assert.match(read(join(PADDOCK, 'ui', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, 'Angular keeps its cache in CI too');
 });
+
+// ---- The imported apps' own workflows (spotter, pitcrew, dyno, pitwall; each the app's old build.yml) ----
+// They follow Paddock's CI: the paddock-ci image, the shared actions, workspace-wide steps, nextest's ci profile, sharded e2e,
+// installers and the real-app smoke only on full runs, and the family's signing keys stripped before the bundler.
+import { parseJobs } from '../src/util/workflows.mjs';
+
+const APP_WORKFLOWS = ['spotter', 'pitcrew', 'dyno', 'pitwall'];
+const appWorkflow = (app) => read(join(WORKFLOWS, `${app}.yml`));
+const appJob = (app, id) => parseJobs(appWorkflow(app)).find((j) => j.id === id);
+
+test('the app workflows run on the paddock-ci image and the shared actions, with nothing fetched per run', () => {
+  for (const app of APP_WORKFLOWS) {
+    const wf = appWorkflow(app);
+    for (const m of wf.matchAll(/(?:image: |container: .*')(\S+?:\S+?)'?$/gm)) {
+      assert.equal(m[1], 'dev.decryptology.net/decryp7/paddock-ci:v2', `${app}.yml: ${m[1]}`);
+    }
+    assert.doesNotMatch(wf, /garage:|catthehacker|dtolnay\/rust-toolchain|taiki-e\/install-action|actions\/setup-node|actions\/cache|playwright install|apt-get/, `${app}.yml fetches per run what the image and actions keep`);
+    for (const id of ['rust', 'bundle']) {
+      const job = appJob(app, id)?.text ?? '';
+      assert.match(job, /uses: \.\/\.gitea\/actions\/setup-rust/, `${app} ${id}: setup-rust (sccache)`);
+      assert.match(job, /uses: \.\/\.gitea\/actions\/sccache-stats\n\s+if: always\(\)/, `${app} ${id}: sccache-stats`);
+      assert.doesNotMatch(job, /setup-rust\n\s+if: runner\.os/, `${app} ${id}: every OS leg`);
+    }
+    for (const id of ['frontend', 'e2e', 'e2e-webkit', 'bundle']) {
+      const job = appJob(app, id);
+      if (!job) continue;
+      assert.match(job.text, new RegExp(`uses: \\./\\.gitea/actions/node-caches\\n\\s+with:\\n\\s+angular-dir: apps/${app}/app`), `${app} ${id}: npm and Angular caches`);
+    }
+    assert.match(read(join(PADDOCK, 'apps', app, 'app', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, `${app}: Angular keeps its cache in CI`);
+  }
+});
+
+test('the app rust legs build like the crate job: stable path, kept build folder as cargo configuration, pinned nextest', () => {
+  for (const app of APP_WORKFLOWS) {
+    const job = appJob(app, 'rust')?.text ?? '';
+    assert.notEqual(job, '', `${app}: a rust job`);
+    assert.match(job, /os: \[ubuntu-latest, windows-latest, macos-latest\]|- os: ubuntu-latest[\s\S]*- os: windows-latest[\s\S]*- os: macos-latest/, `${app}: one leg per OS`);
+    assert.doesNotMatch(job, /CARGO_(BUILD_)?TARGET_DIR[=:]/, `${app}: the build folder is never CARGO_TARGET_DIR (sccache's key)`);
+    const set = [...job.matchAll(/PADDOCK_CARGO_TARGET=(\S+?)'?(?:"|>>)/g)].map((m) => m[1]);
+    assert.equal(set.length, 2, `${app}: one build folder per host OS`);
+    for (const v of set) assert.match(v, new RegExp(`^--config=build\\.target-dir='.*\\.paddock-ci[\\\\/]target-${app}-`), v);
+    const sw = job.indexOf('uses: ./.gitea/actions/stable-workspace');
+    assert.ok(sw > job.indexOf('Git bash on PATH'), `${app}: stable-workspace after Git bash is on PATH`);
+    assert.match(job.slice(sw, sw + 120), /\n\s+if: runner\.os != 'Linux'/, `${app}: stable-workspace on the hosts only`);
+    assert.match(job, /uses: \.\/\.gitea\/actions\/host-tools/, `${app}: the pinned cargo-nextest`);
+    for (const s of parseSteps(job).filter((st) => /\bcargo (clippy|nextest run|test|build|run|llvm-cov)\b/.test(st.run ?? ''))) {
+      const linuxOnly = /runner\.os == 'Linux'/.test(s.text);
+      if (!linuxOnly) assert.match(s.run, /cargo (clippy|nextest run|test|build|run) \$PADDOCK_CARGO_TARGET /, `${app} "${s.name}": a host step builds in the kept folder`);
+      if (!linuxOnly) assert.match(s.text, /working-directory: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}/, `${app} "${s.name}": builds from the stable path`);
+      assert.doesNotMatch(s.run, /\bcargo test\b(?![^\n]*--doc)/, `${app} "${s.name}": tests run under nextest (cargo test only for doc tests)`);
+    }
+    assert.match(job, /cargo nextest run \$PADDOCK_CARGO_TARGET [^\n]*--profile ci/, `${app}: nextest with the ci profile`);
+    assert.match(job, /cargo test \$PADDOCK_CARGO_TARGET [^\n]*--doc/, `${app}: doc tests (nextest skips them)`);
+    assert.match(job, /cargo fmt --all --check/, `${app}: format`);
+    assert.match(job, /cargo clippy \$PADDOCK_CARGO_TARGET [^\n]*-- -D warnings/, `${app}: clippy`);
+  }
+});
+
+test('every app workspace has a nextest ci profile that stops a slow test, and every longer budget is a waiver with a reason', () => {
+  for (const app of APP_WORKFLOWS) {
+    const file = join(PADDOCK, 'apps', app, '.config', 'nextest.toml');
+    const text = read(file);
+    const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
+    assert.match(ci.slice(0, ci.search(/^\[/m)), /^slow-timeout = \{ period = "30s", terminate-after = 2 \}$/m, `${app}: the 60-second budget`);
+    assert.match(ci, /^retries = 0$/m, `${app}: no retries (rule 5)`);
+    const lines = text.split('\n');
+    for (const [at] of lines.map((l, i) => [i, l]).filter(([, l]) => l.trim() === '[[profile.ci.overrides]]')) {
+      let j = at - 1;
+      while (j >= 0 && lines[j].startsWith('#') && !lines[j].startsWith('# waiver:')) j -= 1;
+      assert.ok(j >= 0 && /^# waiver: \S/.test(lines[j]), `${app}: the override at line ${at + 1} has no "# waiver:" reason`);
+    }
+  }
+});
+
+/** Runs the `full=false ... esac` part of an app's plan step: whether the installers, the real-app smoke and WebKit run. */
+function appFull(app, env) {
+  const run = parseSteps(appWorkflow(app)).find((s) => s.name === 'Decide')?.run ?? '';
+  const body = run.slice(run.indexOf('full=false'), run.indexOf('esac\n', run.lastIndexOf('case "$EVENT"')) + 5);
+  const r = spawnSync('bash', ['--noprofile', '--norc', '-euc', `${body}\necho "$full"`], { env: { PATH: '/usr/bin:/bin', HOME: tmpdir(), BUNDLES: 'false', ...env }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.trim();
+}
+
+test('installers, the real-app smoke and WebKit run only on main pushes, the app tags, the nightly run and a manual run that asks', () => {
+  for (const app of APP_WORKFLOWS) {
+    const wf = appWorkflow(app);
+    assert.match(wf, /workflow_dispatch:\n\s+inputs:\n\s+bundles:\n[\s\S]*?type: boolean\n\s+default: false/, `${app}: the bundles input`);
+    assert.equal(appFull(app, { EVENT: 'push', REF: 'refs/heads/main' }), 'true');
+    assert.equal(appFull(app, { EVENT: 'push', REF: `refs/tags/${app}-v1.2.3` }), 'true');
+    assert.equal(appFull(app, { EVENT: 'schedule', REF: 'refs/heads/main' }), 'true');
+    assert.equal(appFull(app, { EVENT: 'workflow_dispatch', REF: 'refs/heads/x', BUNDLES: 'true' }), 'true');
+    assert.equal(appFull(app, { EVENT: 'workflow_dispatch', REF: 'refs/heads/main', BUNDLES: 'false' }), 'false');
+    assert.equal(appFull(app, { EVENT: 'push', REF: 'refs/heads/feature' }), 'false');
+    assert.equal(appFull(app, { EVENT: 'push', REF: 'refs/tags/other-v1.0.0' }), 'false', 'another app\'s tag');
+    assert.equal(appFull(app, { EVENT: 'pull_request', REF: 'refs/pull/1/merge' }), 'false');
+    assert.match(appJob(app, 'bundle').text, /^ {4}if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${app}: bundles on full runs`);
+    const webkit = appJob(app, 'e2e-webkit');
+    if (webkit) assert.match(webkit.text, /^ {4}if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${app}: WebKit on full runs (rule 3)`);
+    for (const s of parseSteps(wf).filter((st) => /Agent measures once/.test(st.name ?? ''))) assert.match(s.text, /needs\.plan\.outputs\.full == 'true'/, `${app}: the real-app smoke on full runs`);
+  }
+});
+
+test('the larger app e2e suites run in Chromium in two shards, each on a port no other e2e job uses', () => {
+  const ports = [];
+  for (const app of APP_WORKFLOWS) {
+    const wf = appWorkflow(app);
+    for (const m of wf.matchAll(/PW_(?:E2E_)?PORT: (?:\$\{\{ matrix\.shard == 1 && '(\d+)' \|\| '(\d+)' \}\}|"(\d+)")/g)) ports.push(...m.slice(1).filter(Boolean).map((p) => `${app}:${p}`));
+    const e2e = appJob(app, 'e2e');
+    if (app === 'pitcrew') {
+      assert.equal(e2e, undefined, 'Pitcrew has no e2e gate');
+      continue;
+    }
+    assert.match(e2e.text, /shard: \[1, 2\]/, `${app}: two shards`);
+    assert.match(e2e.text, /npx playwright test --project=chromium [^\n]*--fully-parallel --shard=\$\{\{ matrix\.shard \}\}\/2/, `${app}: Chromium, split by test`);
+    assert.match(appJob(app, 'e2e-webkit').text, /--project=webkit/, `${app}: WebKit on full runs`);
+  }
+  const numbers = ports.map((p) => p.split(':')[1]);
+  assert.equal(new Set(numbers).size, numbers.length, `one port per e2e job: ${ports.join(', ')}`);
+  for (const ci of [read(join(WORKFLOWS, 'ci.yml')), read(join(WORKFLOWS, 'debrief.yml'))]) {
+    for (const n of numbers) assert.doesNotMatch(ci, new RegExp(`['"]${n}['"]`), `port ${n} is also used by ci.yml or debrief.yml`);
+  }
+});
+
+test('the app bundles get the family keys stripped of whitespace (rule 25, C06), and no transition key or old-repo bridge is left', () => {
+  for (const app of APP_WORKFLOWS) {
+    const wf = appWorkflow(app);
+    const job = appJob(app, 'bundle').text;
+    const strip = job.indexOf('uses: ./.gitea/actions/strip-signing-keys');
+    assert.ok(strip > 0 && strip < job.indexOf('name: Build installers'), `${app}: keys stripped before the bundler`);
+    assert.match(job.slice(strip, strip + 300), /signing-private-key: \$\{\{ secrets\.PADDOCK_TAURI_SIGNING_PRIVATE_KEY \}\}\n\s+updater-pubkey: \$\{\{ secrets\.PADDOCK_TAURI_UPDATER_PUBKEY \}\}/);
+    for (const s of parseSteps(wf)) {
+      for (const k of ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_UPDATER_PUBKEY']) assert.ok(!(k in s.env), `${app} "${s.name}": ${k} comes stripped from strip-signing-keys, never raw from a secret`);
+    }
+    assert.doesNotMatch(wf, /TRANSITION_SIGNING_KEY|OLD_REPO|--newest/, `${app}: one key for the family, no bridge release in the old repo`);
+    const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
+    assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
+    assert.match(wf, /\*\*Existing installs:\*\* download this version once by hand/, `${app}: the First launch section says to reinstall once`);
+  }
+});
+
+test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: Spotter's pin is the image's", () => {
+  const version = (text) => /^version = "([^"]+)"$/m.exec(text)?.[1];
+  const spotter = version(read(join(PADDOCK, 'apps', 'spotter', 'crates', 'spotter-render', 'src', 'chromium-manifest.toml')));
+  assert.equal(spotter, version(read(join(PADDOCK, 'crates', 'paddock-chromium', 'src', 'chromium.toml'))), 'the image installs paddock-chromium\'s pin');
+  assert.match(read(join(PADDOCK, 'ci-image', 'Dockerfile')), new RegExp(`ARG CHROME_VERSION=${spotter.replace(/\./g, '\\.')}\\n`), 'the image carries that build');
+  const job = appJob('spotter', 'rust').text;
+  assert.match(job, /SPOTTER_TEST_BROWSER=\$CHROMIUM_TEST_PATH/, 'the tests launch the pinned build');
+  assert.match(job, /test-browser-spotter/, 'a kept host folder of its own (two jobs may run on a host at once)');
+  assert.match(read(join(PADDOCK, 'apps', 'spotter', '.config', 'nextest.toml')), /filter = "package\(spotter-render\) & binary\(real_browser\)"\ntest-group = "real-browser"/, 'real browsers take turns under nextest too');
+});
