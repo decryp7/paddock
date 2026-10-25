@@ -31,15 +31,36 @@ export const box = (s0, s1, d0, d1, t0, t1) => ({
 
 // ---------- placement ----------
 /**
- * Fit an object into the family's glyph box: `pts` are [s, d, t] points of its outline (corners of the outermost boxes, including
- * ground details); the box defaults to 690 x 560 on the 1024 grid (the visible mass lands at about 72 % of the tile width), centred
- * on (512 + dx, 512 + dy). Returns the scale, the origin and the SVG transform for the art group.
+ * Fit an object into the family's glyph area. `pts` are [s, d, t] points of its outline (corners of the outermost boxes, including
+ * ground details). Two modes:
+ *  - `mass` (use this for new icons): the outline's width is set to `mass` x the tile width (824 on the 1024 grid), so the visible
+ *    mass lands on the rule (0.70 to 0.75; 0.72 is the family's target) whatever the object's proportions; `maxHeight` (default
+ *    560) caps tall objects, which then come out narrower.
+ *  - `box` (the Paddock pit building, kept for it): the outline fits a w x h box (690 x 560), whichever side binds first. Wide, low
+ *    objects hit 78 to 80 % in a 690 box; do not use it for them.
+ * Centred on (512 + dx, 512 + dy). Returns the scale, the origin, the outline's fitted size and the SVG transform for the art group.
  */
-export function fitBox(pts, { box: [bw, bh] = [690, 560], dx = 0, dy = 0 } = {}) {
+export function fitBox(pts, { box, mass, maxHeight = 560, tile = 824, dx = 0, dy = 0 } = {}) {
   const xs = pts.map(([s, d]) => (s + d) * C), ys = pts.map(([s, d, t]) => (s - d) / 2 - t);
-  const k = Math.min(bw / (Math.max(...xs) - Math.min(...xs)), bh / (Math.max(...ys) - Math.min(...ys)));
+  const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+  const [bw, bh] = mass ? [mass * tile, maxHeight] : box ?? [690, 560];
+  const k = Math.min(bw / w, bh / h);
   const ox = 512 + dx - k * (Math.max(...xs) + Math.min(...xs)) / 2, oy = 512 + dy - k * (Math.max(...ys) + Math.min(...ys)) / 2;
-  return { k, ox, oy, transform: `translate(${f(ox)} ${f(oy)}) scale(${f(k)})` };
+  return { k, ox, oy, width: k * w, height: k * h, transform: `translate(${f(ox)} ${f(oy)}) scale(${f(k)})` };
+}
+
+/**
+ * Measure the visible mass of a rendered master: the share of the tile width (824 of 1024 on macOS) in which the art changes the
+ * bare tile by more than `threshold` levels (the faint long shadow below it does not count). Pass RGBA pixel buffers of the master and
+ * of the same master with `bare: true`, both rendered at 1024 (resvg `render().pixels`).
+ */
+export function visibleMass(pixels, barePixels, { px = 1024, tile = 824, threshold = 40 } = {}) {
+  let x0 = px, x1 = -1;
+  for (let x = 0; x < px; x++) for (let y = 0; y < px; y++) {
+    const i = 4 * (y * px + x);
+    if (Math.abs(pixels[i] - barePixels[i]) + Math.abs(pixels[i + 1] - barePixels[i + 1]) + Math.abs(pixels[i + 2] - barePixels[i + 2]) > threshold) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); break; }
+  }
+  return x1 < 0 ? 0 : (x1 - x0 + 1) / tile;
 }
 
 // ---------- shading ----------

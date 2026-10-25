@@ -91,8 +91,12 @@ defs.
 
 ## 5. Size and placement
 
-- **Fit box:** `fitBox(outlinePoints, { box: [690, 560], dx, dy })` scales the object's outline (all outer corners, including
-  ground details) into 690 x 560 on the 1024 grid, so the visible mass is 70 to 75 % of the tile width. Shadows may reach past it.
+- **Fit by mass:** `fitBox(outlinePoints, { mass: 0.72, dx, dy })` scales the object so its outline (all outer corners, including
+  ground details) is 72 % of the tile width (824 on the 1024 grid); the visible mass rule is 70 to 75 %. `maxHeight` (default 560)
+  caps tall objects, which then come out narrower; that is fine as long as the measured mass stays at 70 % or more. Measure the
+  render with `visibleMass(pixels, barePixels)` (`tools/iso.mjs`) and adjust `mass` until it lands in 70 to 75 %. The fixed
+  `box: [690, 560]` mode is kept for the Paddock pit building only: wide, low objects (binoculars, tablet) reach 78 to 80 % in it.
+- **Clipping:** `masterSvg` clips the art to the tile, so long shadows never spill past the squircle or the Windows square.
 - **Optical centring:** isometric masses lean to the upper right. Shift with `dx` and `dy` (Paddock: -4, +10) and check the icon
   beside the others at 128.
 - `masterSvg(app, { art })` takes the art as `uid => ({ defs, body })`, with the body wrapped in `fit.transform`.
@@ -136,7 +140,7 @@ Rule: a part that cannot be drawn on whole pixels at a size is dropped at that s
 | Tile CVD distance | every tile at least 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan from every other | `node tools/cvd.mjs` |
 | Contrast | the object's front against the tile base at least 3:1 (Paddock `#C9D0D8` on `#2B3038`: 9.6:1) | `contrast()` in `tools/cvd.mjs` |
 | Face steps | adjacent faces at least 8 L apart | OKLab |
-| Size | visible mass 70 to 75 % of the tile width at 1024 | measure the render |
+| Size | visible mass 70 to 75 % of the tile width at 1024 | `visibleMass()` in `tools/iso.mjs` |
 | Coverage at 16 | 18 to 26 % (line glyphs), up to 30 % (filled silhouettes) | `coverage()` in `tools/paddock-symbols.mjs` |
 | Tray alpha | every pixel fully opaque or fully transparent (except a whole-glyph state dim) | magnify the template |
 | Whole pixels | 32, 24 and 16 frames have no half-tone edges on repeated parts | sheet close-ups |

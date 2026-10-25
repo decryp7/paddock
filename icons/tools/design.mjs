@@ -680,7 +680,8 @@ function inkPaint(app, concept, uid, palette) {
 /** `bare` leaves out the glyph and the livery: the tile background alone, for the seam scan (tools/scan.mjs). */
 export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false, glyph: override, title, palette, art: artFn } = {}) {
   const p = palette ?? PALETTE[app];
-  // `art`: (uid) => { defs, body }, a fully rendered glyph (its own light, shading and shadow) in place of the layer glyph.
+  // `art`: (uid) => { defs, body }, a fully rendered glyph (its own light, shading and shadow) in place of the layer glyph. It is
+  // clipped to the tile, so long shadows never spill past the squircle.
   const art = artFn ? artFn(uid) : null;
   const mac = platform === 'macos';
   const x = mac ? 100 : 40, s = mac ? 824 : 944;
@@ -721,7 +722,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>
     ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="${p.rimMaster ?? 0.14}" stroke-width="${f(4 * scale)}"/>` : ''}${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
   </g>
-  ${bare ? '' : art ? `<g transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${art.body}</g>` : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
+  ${bare ? '' : art ? `<g clip-path="url(#${uid}clip)"><g transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${art.body}</g></g>` : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
 </svg>
 `;
 }

@@ -24,7 +24,7 @@
     <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="none" stroke="url(#k1edge)" stroke-width="6.87"/>
     <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="4.58"/>
   </g>
-  <g transform="translate(512 512) scale(1.15) translate(-512 -512)"><g transform="translate(303.35 514.74) scale(1.09)"><g filter="url(#k1isoft)" opacity="0.6"><path d="M-6.93 0L311.77 184L405.3 130L86.6 -54Z" transform="translate(22 20)" fill="#000"/></g>
+  <g clip-path="url(#k1clip)"><g transform="translate(512 512) scale(1.15) translate(-512 -512)"><g transform="translate(303.35 514.74) scale(1.09)"><g filter="url(#k1isoft)" opacity="0.6"><path d="M-6.93 0L311.77 184L405.3 130L86.6 -54Z" transform="translate(22 20)" fill="#000"/></g>
       <g filter="url(#k1itight)" opacity="0.7"><path d="M-6.93 0L311.77 184L405.3 130L86.6 -54Z" transform="translate(0 3)" fill="#000"/></g>
 
       <path d="M-25.98 15L285.79 195L311.77 180L0 0Z" fill="url(#k1iapron)"/>
@@ -52,5 +52,5 @@
         <g filter="url(#k1iao)" opacity="0.55"><path d="M222.28 48.33L313.5 101L313.5 83L222.28 30.33Z" fill="#000"/></g>
       </g><g clip-path="url(#k1iwalls)"><g filter="url(#k1iao)" opacity="0.55"><path d="M-8.66 -105L311.77 80L407.03 25L407.03 7L-8.66 -123Z" fill="#000"/></g></g><path d="M311.77 180L311.77 72" stroke="#FFFFFF" stroke-opacity="0.5" stroke-width="2"/>
       <path d="M-24.25 -108L311.77 86L311.77 62L-24.25 -132Z" fill="url(#k1iroofFront)"/><path d="M311.77 86L422.62 22L422.62 -2L311.77 62Z" fill="url(#k1iroofEnd)"/><path d="M-24.25 -132L311.77 62L422.62 -2L86.6 -196Z" fill="url(#k1iroofTop)"/><path d="M-24.25 -132L311.77 62L422.62 -2" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linejoin="round"/>
-      </g></g>
+      </g></g></g>
 </svg>
