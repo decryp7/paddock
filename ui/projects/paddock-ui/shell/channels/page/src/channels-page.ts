@@ -476,6 +476,7 @@ export class PdChannelsPage {
     const id = c.id;
     const confirmed = await this.dialogs.open<boolean>(CHANNELS_REMOVE_DIALOG_ID, { inputs: { channelId: id, name: c.name } }).closed;
     if (confirmed !== true) return;
+    // after-await: the form may have moved to another channel while the dialog was open.
     if (this.editingId() === id) this.open.set(false);
     await this.store.remove(id);
   }

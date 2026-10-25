@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Changed
+- The shared UI has a lint step: `npm run lint` in `ui/` runs `@decryp7/paddock-eslint` (rules 27 to 39 plus the angular-eslint template and
+  accessibility rules) over every project, and the `ui` CI job runs it before the specs. All 155 findings are fixed (explicit OnPush in test
+  hosts, no `any`, `pd-` font sizes and shadows from tokens, signal reads before the first await, labelled a11y exceptions with reasons).
+  `pd-select` takes its value as a `model`; the glyph's `dots` input is no longer aliased; `pd-job`'s `(cancel)` output keeps its name with a
+  reasoned exception. `@decryp7/paddock-eslint` resolves its peer dependencies from the linted app first (a linked preset works); the style
+  rule accepts any `var(--token)` font family; rule 29 does not flag a read inside the operand of the first `await`; a spec may build a probe store.
+
 ### Fixed
 - sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
   to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
