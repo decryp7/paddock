@@ -180,6 +180,7 @@ export class PdDock implements OnDestroy {
         shell.notify({
           level: notice.key === 'popout' ? 'warning' : 'info',
           message: notice.message,
+          ...(notice.short ? { short: notice.short } : {}),
           kind: `pd.wb.dock.${notice.key.replace(/[^a-z0-9-]/g, '-')}`,
           ...(notice.action ? { action: { type: DOCK_NOTICE_ACTION, key: notice.key, label: notice.action.label } } : {}),
         }),
