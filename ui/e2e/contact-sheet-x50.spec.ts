@@ -54,6 +54,8 @@ test.describe('contact sheet: workbench', () => {
     await expect(wb.page.getByTestId('code-lines')).toBeVisible();
   }
   async function ask(page: Page, text: string): Promise<void> {
+    // The previous turn has ended (no Stop): a question sent while one runs would be refused.
+    await expect(page.getByTestId('assistant-stop')).toHaveCount(0);
     const input = page.getByTestId('assistant-input');
     await input.fill(text);
     await input.press('Enter');
@@ -82,10 +84,15 @@ test.describe('contact sheet: workbench', () => {
       await shoot(page, set, '06-palette-none', 'Palette: no match and no suggestion');
       await page.keyboard.press('Escape');
 
+      await expect(wb.palette.dialog).toHaveCount(0);
       const readme = wb.explorer.node('wd.files', 'README.md');
+      await expect(readme).toBeVisible();
       const box = (await readme.boundingBox())!;
       await page.mouse.click(box.x + 60, box.y + box.height / 2, { button: 'right' });
-      await expect.poll(async () => Math.abs(((await wb.explorer.menu.boundingBox()) ?? { x: 0 }).x - (box.x + 60))).toBeLessThanOrEqual(8);
+      await expect.poll(async () => {
+        const m = await wb.explorer.menu.boundingBox();
+        return m ? Math.abs(m.x - (box.x + 60)) : 999;
+      }, { message: 'the menu at the pointer' }).toBeLessThanOrEqual(8);
       await shoot(page, set, '07-explorer-menu', 'Explorer: the menu at the pointer, below its row (the label stays readable), the row marked');
       await page.keyboard.press('Escape');
       await readme.click();
@@ -124,15 +131,18 @@ test.describe('contact sheet: workbench', () => {
       await expect(page.getByTestId('assistant-send')).toBeVisible();
       await shoot(page, set, '12b-assistant-declined', 'Assistant: a declined tool is a neutral card, not an error');
       await ask(page, '/fail');
-      await expect(page.getByTestId('assistant-failure').or(page.getByTestId('assistant-error')).first()).toBeVisible();
+      await expect(page.getByTestId('assistant-error')).toBeVisible();
+      await expect(page.getByTestId('assistant-stop')).toHaveCount(0);
       await shoot(page, set, '13-assistant-failed', 'Assistant: a failed turn as an error state: icon, what failed, likely cause, Retry and Show details');
       await page.getByTestId('assistant-new').click();
       await ask(page, '/tool-slow request handler');
       await expect(page.getByTestId('assistant-stop')).toBeVisible();
+      await expect(page.getByTestId('assistant-tool-card').last()).toBeVisible();
       await shoot(page, set, '13b-assistant-tool-running', 'Assistant: a tool card while it runs; Stop in the place of Send');
       await page.getByTestId('assistant-stop').click();
+      await expect(page.getByTestId('assistant-stop')).toHaveCount(0);
       await ask(page, '/tool-fail request handler');
-      await expect(page.getByTestId('assistant-send')).toBeVisible();
+      await expect(page.getByTestId('assistant-stop')).toHaveCount(0);
       await shoot(page, set, '13c-assistant-tool-failed', 'Assistant: a failed tool card with its reason (a declined one is neutral, shot 12b)');
       await page.getByTestId('assistant-list-toggle').click();
       await page.getByTestId('assistant-delete').first().focus();

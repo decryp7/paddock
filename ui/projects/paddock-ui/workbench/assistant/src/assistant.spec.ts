@@ -343,6 +343,23 @@ describe('PdAssistant', () => {
       }
     });
 
+    it('follows the user’s own question to the end even when they had scrolled up (review 2 shot 13)', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      const log = r.one('[data-testid=assistant-log]');
+      let top = 0;
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 });
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
+      Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => void (top = v) });
+      top = 100;
+      log.dispatchEvent(new Event('scroll'));
+      await press(r, await type(r, 'next question'), { key: 'Enter' });
+      backend.emit('m1', { type: 'delta', text: 'answer' });
+      await settle(r.fixture);
+      expect(top).toBe(1000);
+      expect(r.all('[data-testid=assistant-jump]')).toHaveLength(0);
+    });
+
     it('follows the streaming text only while the user is at the bottom, else offers Jump to latest', async () => {
       const { r, backend } = await open();
       backend.hold();
