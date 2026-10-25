@@ -231,3 +231,32 @@ async fn slots_survive_a_restart_and_damaged_values_read_as_unset() {
     );
     assert_eq!(third.rpc("settings", json!({})).await.status, 200);
 }
+
+#[tokio::test]
+async fn models_and_select_report_the_context_each_slot_gets() {
+    let h = fresh().await;
+    let key = h.make_key("Context Probe").await;
+    // Not loaded: the default (capped by the model), the same number select reports.
+    let models = h.call("GET", "/x/v1/models", Some(&key), None, &[]).await.json();
+    let entry = &models["models"][0];
+    let per_slot = entry["contextPerSlot"].as_u64().expect("contextPerSlot is a number");
+    assert!(per_slot >= 512);
+    if let Some(max) = entry["contextMax"].as_u64() {
+        assert!(per_slot <= max);
+    }
+    let sel = h
+        .call("POST", "/x/v1/select", Some(&key), Some(json!({"model": "auto"})), &[])
+        .await
+        .json();
+    assert_eq!(sel["contextPerSlot"].as_u64(), Some(per_slot));
+    // Loaded with 4 slots: the launch is the total, each slot still reports the per-slot context.
+    assert_eq!(set_slots(&h, json!(4)).await.status, 200);
+    assert_eq!(
+        h.call("POST", "/v1/chat/completions", Some(&key), Some(chat()), &[]).await.status,
+        200
+    );
+    let total = h.contexts.lock().unwrap()[0];
+    let models = h.call("GET", "/x/v1/models", Some(&key), None, &[]).await.json();
+    assert_eq!(models["models"][0]["contextPerSlot"].as_u64(), Some(u64::from(total / 4)));
+    h.st.serving.release_all();
+}

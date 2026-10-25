@@ -100,6 +100,14 @@ pub fn lenient<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Slots>, D::Erro
     })
 }
 
+/// The context each slot gets when a model is loaded: the explicit request, else the model's preference, else the
+/// default, capped at the model's trained maximum (when known) and never below [`MIN_CONTEXT`]. The one rule shared by
+/// the load path and what `/x/v1` reports as `contextPerSlot`.
+pub fn context_per_slot(requested: Option<u32>, preferred: Option<u32>, default: u32, trained_max: Option<u64>) -> u32 {
+    let cap = trained_max.unwrap_or(u64::MAX).min(u64::from(u32::MAX)) as u32;
+    requested.or(preferred).unwrap_or(default).min(cap).max(MIN_CONTEXT)
+}
+
 /// KV cache bytes one slot holds at `per_slot_context` tokens.
 pub fn kv_per_slot(size: &ModelSize, per_slot_context: u32) -> u64 {
     size.kv_per_token.saturating_mul(u64::from(per_slot_context))
@@ -299,6 +307,18 @@ pub fn solve(size: Option<&ModelSize>, context: u32, chosen: Slots, trained_max:
 mod tests {
     use super::*;
     use crate::GIB;
+
+    #[test]
+    fn context_per_slot_prefers_request_then_preference_then_default_within_limits() {
+        assert_eq!(context_per_slot(Some(4096), Some(8192), 16384, None), 4096);
+        assert_eq!(context_per_slot(None, Some(8192), 16384, None), 8192);
+        assert_eq!(context_per_slot(None, None, 16384, None), 16384);
+        // capped by the trained maximum, floored at the minimum
+        assert_eq!(context_per_slot(None, None, 16384, Some(8192)), 8192);
+        assert_eq!(context_per_slot(None, None, 16384, Some(100)), MIN_CONTEXT);
+        assert_eq!(context_per_slot(Some(10), None, 16384, None), MIN_CONTEXT);
+        assert_eq!(context_per_slot(None, None, u32::MAX, Some(u64::MAX)), u32::MAX);
+    }
 
     fn room(avail_gib: u64) -> Room {
         Room {

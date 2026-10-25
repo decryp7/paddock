@@ -532,6 +532,39 @@ async fn a_dead_engine_is_forgotten_and_reloaded() {
     assert_eq!(h.starts.load(Ordering::SeqCst), 2, "reloaded after release");
 }
 
+/// A taken port is retried on a fresh port inside one load: it is one model load, however many start attempts it took.
+/// (This was the flaky CI count of 3 loads: parallel tests raced for the probed port and the retry was counted as a load.)
+#[tokio::test]
+async fn a_start_retried_after_a_taken_port_is_still_one_model_load() {
+    let h = harness(false).await;
+    h.port_taken.store(1, Ordering::SeqCst);
+    let key = h.make_key("Racer").await;
+    let r = h
+        .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    assert_eq!(
+        h.attempts.load(Ordering::SeqCst),
+        2,
+        "the first attempt lost the port, the retry won it"
+    );
+    assert_eq!(h.starts.load(Ordering::SeqCst), 1, "one load");
+}
+
+#[tokio::test]
+async fn a_dead_engine_is_forgotten_and_reloaded_despite_a_port_race() {
+    let h = harness(false).await;
+    let key = h.make_key("Phoenix").await;
+    h.port_taken.store(1, Ordering::SeqCst);
+    h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    h.st.serving.release_all();
+    h.port_taken.store(1, Ordering::SeqCst);
+    h.call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
+        .await;
+    assert_eq!(h.starts.load(Ordering::SeqCst), 2, "two loads, whatever the port races");
+}
+
 #[tokio::test]
 async fn benchmarks_are_kept_and_models_report_their_engine() {
     let h = harness(false).await;

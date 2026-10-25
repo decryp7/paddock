@@ -1,6 +1,8 @@
 # 9. How apps (Debrief first) find, pair with and use Pitwall
 
 - Status: accepted (2026-10-22); the Debrief side is not built yet
+- History: 2026-10-24 Debrief's side decided (setting, explicit pairing, no mixing); `contextPerSlot`, `serving` in the
+  discovery file and `X-Pitwall-Job-Id` added to /x/v1 (additive)
 - Related: ADR 0001 (local only); code: `pitwall_core::{discovery, keys, select, scheduler, mgmt}`, `API_VERSION`
 
 ## Context
@@ -40,12 +42,31 @@ llama.cpp), streaming (SSE). The extensions apps may use:
 **Versioning.** `/x/v1` and `apiVersion: 1` change only additively. A breaking change is `/x/v2`, served alongside
 v1 for at least one release. The standard APIs (`/v1/...`, `/api/...`) follow their upstream shapes.
 
-**Debrief's side (to build when Pitwall is complete).**
-- Settings ▸ AI ▸ "Use Pitwall when it's running"; off until the user turns it on.
-- Debrief's built-in llama.cpp stays the **default and the offline fallback**: if Pitwall isn't running, isn't paired,
-  or refuses (revoked key, no suitable model), Debrief uses its own runtime and says so once, without failing the
-  request.
+**Debrief's side (decided 2026-10-24, Debrief ADR 0059).**
+- Settings > AI > Engine: **Automatic** (default) | **Pitwall** | **Built-in**. Automatic uses Pitwall only when the
+  user has already paired Debrief with it and it is reachable; otherwise the built-in llama.cpp.
+- Debrief never pairs on its own. The user explicitly chooses "Use Pitwall" / "Connect to Pitwall", and only then does
+  the six-digit-code pairing above start.
+- One session, one engine: no silent per-request fallback or mixing. If Pitwall is lost (stopped, key revoked, no
+  suitable model) the request fails with a clear message and the user can switch to the built-in engine.
 - Debrief keeps its own leak guard and redaction before anything is sent; local only on both sides.
+
+**Installed but not running.** `discovery.json` carries `serving` (bool). A serving Pitwall writes `"serving": true`;
+on a clean shutdown it rewrites the file with `"serving": false` instead of deleting it. An app tells the states apart:
+- *not installed*: no Pitwall data folder and no discovery file;
+- *installed, not running*: the file exists and `serving` is false, or `pid` is not alive (crash or kill);
+- *running*: `serving` is true, `pid` alive, and `GET /x/v1/health` answers.
+Files without the field (older Pitwall) are read as `serving: true` and judged by `pid` as before.
+
+**Cancel by id.** Chat, completions and messages answers carry `X-Pitwall-Job-Id`, the id of the queued job.
+`DELETE /x/v1/jobs/{id}` cancels it while queued without closing the connection: a streamed request that has to wait
+answers at once (200, `X-Pitwall-Job-Id`; the model/engine headers are then absent) and its body ends with a typed
+`cancelled` error frame (HTTP 499 code `cancelled` elsewhere). A running job still stops by the connection closing
+(`wasRunning: true` is reported); non-streamed answers carry the id only with the finished answer; an app may cancel
+only its own jobs (others answer 404), the admin may cancel any.
+
+**Context per slot.** `GET /x/v1/models` entries and the `POST /x/v1/select` answer report `contextPerSlot` (the context
+each slot gets when the model is loaded, ADR 0016) next to `contextMax`, so apps can size prompts.
 
 ## Consequences
 

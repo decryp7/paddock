@@ -56,7 +56,7 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 - Installers: Windows NSIS, macOS `.dmg`, Linux `.deb` and AppImage; unsigned until the signing secrets are set
   ([releasing.md](releasing.md)).
 - Updater with signed `latest.json`: **planned**, needs the secrets.
-- CI on Linux, the Windows runner and the macOS host: `build.yml` and `release.yml` exist.
+- CI on Linux, the Windows runner and the macOS host: `build.yml` (checks, installers and the gated release job) exists.
 
 ## Phase 3: the rest of the product brief *(planned)*
 

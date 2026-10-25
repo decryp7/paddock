@@ -126,6 +126,14 @@ fn cache_header(r: &mut Response, outcome: Option<pitwall_core::cache::Outcome>)
     }
 }
 
+/// `X-Pitwall-Job-Id`: the queue job behind the answer, for `DELETE /x/v1/jobs/{id}` (absent for a cached answer).
+fn job_header(r: &mut Response, job: u64) {
+    if job > 0 {
+        r.headers_mut()
+            .insert(HeaderName::from_static("x-pitwall-job-id"), HeaderValue::from(job));
+    }
+}
+
 fn provenance(
     r: &mut Response,
     run_model: &str,
@@ -227,6 +235,7 @@ fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'st
     );
     let alias = run.resolved.preset.as_ref().map(|p| p.alias.to_string());
     let cache = run.cache;
+    let job = run.job;
     struct St {
         run: Run,
         pending: VecDeque<String>,
@@ -275,7 +284,59 @@ fn sse(run: Run, mut fmt: Fmt, err_frame: fn(&str) -> String, content_type: &'st
         .unwrap_or_default();
     provenance(&mut r, &model, &engine, by, (cold, alias.as_deref()));
     cache_header(&mut r, cache);
+    job_header(&mut r, job);
     r
+}
+
+use futures_util::StreamExt as _;
+
+type Body_ = futures_util::stream::BoxStream<'static, Result<Bytes, axum::Error>>;
+
+/// Starts a streamed request. If it has to wait in the queue, the answer starts at once (200, `X-Pitwall-Job-Id`) so the
+/// app can cancel it by id with `DELETE /x/v1/jobs/{id}` without closing the connection; the body then carries the
+/// answer when the job runs, or a typed error frame (for example `cancelled`). A request that runs immediately
+/// answers as before, with the full provenance headers. Dropping the response drops the request, as ever.
+async fn start_streamed(
+    st: &Arc<AppState>,
+    who: &Principal,
+    m: Meta,
+    req: pitwall_core::chat::ChatRequest,
+    (content_type, err_frame): (&'static str, fn(&ApiError) -> String),
+    build: impl FnOnce(Run) -> Response + Send + 'static,
+) -> Result<Response, ApiError> {
+    let (tx, mut rx) = tokio::sync::oneshot::channel();
+    let (st, who) = (st.clone(), who.clone());
+    let mut fut = Box::pin(async move { st.start_chat_queued(&who, m, req, Some(tx)).await });
+    let job = tokio::select! {
+        biased;
+        r = &mut fut => return r.map(build),
+        Ok(job) = &mut rx => job,
+    };
+    let body: Body_ = futures_util::stream::once(async move {
+        let inner: Body_ = match fut.await {
+            Ok(run) => build(run).into_body().into_data_stream().boxed(),
+            Err(e) => futures_util::stream::once(async move { Ok(Bytes::from(err_frame(&e))) }).boxed(),
+        };
+        inner
+    })
+    .flatten()
+    .boxed();
+    let mut r = Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, "no-cache")
+        .header("x-accel-buffering", "no")
+        .body(Body::from_stream(body))
+        .unwrap_or_default();
+    job_header(&mut r, job);
+    Ok(r)
+}
+
+fn openai_typed_frame(e: &ApiError) -> String {
+    pitwall_core::sse::data(&e.body(ApiFamily::OpenAi).to_string())
+}
+
+fn anthropic_typed_frame(e: &ApiError) -> String {
+    pitwall_core::sse::named("error", &e.body(ApiFamily::Anthropic).to_string())
 }
 
 /// Drain a run into a whole answer. Returns the output and the timing facts.
@@ -321,6 +382,7 @@ fn json_response(v: Value, run: &Run) -> Response {
         (run.cold_start_ms, run.resolved.preset.as_ref().map(|p| p.alias.as_str())),
     );
     cache_header(&mut r, run.cache);
+    job_header(&mut r, run.job);
     r
 }
 
@@ -373,13 +435,18 @@ async fn openai_chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         let req = openai::parse_chat(&json_body(&body)?)?;
         let m = meta(ApiFamily::OpenAi, "/v1/chat/completions", &h, JobKind::Chat)?;
         let stream = req.stream;
-        let run = st.start_chat(&who, m, req).await?;
-        let name = run.resolved.id.to_string();
         let (cid, created) = (id("chatcmpl"), now_ms() / 1000);
         if stream {
-            let mut s = openai::ChatStream::new(&cid, &name, created);
-            Ok(sse(run, Box::new(move |e| s.event(e)), openai_err_frame, "text/event-stream"))
-        } else {
+            return start_streamed(&st, &who, m, req, ("text/event-stream", openai_typed_frame), move |run| {
+                let name = run.resolved.id.to_string();
+                let mut s = openai::ChatStream::new(&cid, &name, created);
+                sse(run, Box::new(move |e| s.event(e)), openai_err_frame, "text/event-stream")
+            })
+            .await;
+        }
+        let run = st.start_chat(&who, m, req).await?;
+        let name = run.resolved.id.to_string();
+        {
             let (out, run) = collect(run).await?;
             Ok(json_response(openai::chat_response(&out, &cid, &name, created), &run))
         }
@@ -393,13 +460,18 @@ async fn openai_responses(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         let req = openai::parse_responses(&json_body(&body)?)?;
         let m = meta(ApiFamily::OpenAi, "/v1/responses", &h, JobKind::Chat)?;
         let stream = req.stream;
-        let run = st.start_chat(&who, m, req).await?;
-        let name = run.resolved.id.to_string();
         let (rid, created) = (id("resp"), now_ms() / 1000);
         if stream {
-            let mut s = openai::ResponsesStream::new(&rid, &name, created);
-            Ok(sse(run, Box::new(move |e| s.event(e)), openai_err_frame, "text/event-stream"))
-        } else {
+            return start_streamed(&st, &who, m, req, ("text/event-stream", openai_typed_frame), move |run| {
+                let name = run.resolved.id.to_string();
+                let mut s = openai::ResponsesStream::new(&rid, &name, created);
+                sse(run, Box::new(move |e| s.event(e)), openai_err_frame, "text/event-stream")
+            })
+            .await;
+        }
+        let run = st.start_chat(&who, m, req).await?;
+        let name = run.resolved.id.to_string();
+        {
             let (out, run) = collect(run).await?;
             Ok(json_response(openai::responses_response(&out, &rid, &name, created), &run))
         }
@@ -479,7 +551,7 @@ async fn embed(
     if !missing.is_empty() {
         let permit = st
             .serving
-            .acquire(app.clone(), resolved.id.clone(), pr, JobKind::Embedding, None)
+            .acquire(app.clone(), resolved.id.clone(), pr, JobKind::Embedding, None, None)
             .await?;
         let (busy, _cold) = st.serving.ensure_for(&resolved).await?;
         let todo = pitwall_core::chat::EmbedRequest {
@@ -563,13 +635,18 @@ async fn anthropic_messages(State(st): S, h: HeaderMap, body: Bytes) -> Response
         let m = meta(ApiFamily::Anthropic, "/v1/messages", &h, JobKind::Chat)?;
         let stream = req.stream;
         let prompt: u32 = req.messages.iter().map(|m| pitwall_core::tokens::estimate(&m.text_content())).sum();
-        let run = st.start_chat(&who, m, req).await?;
-        let name = run.resolved.id.to_string();
         let mid = id("msg");
         if stream {
-            let mut s = anthropic::MessagesStream::new(&mid, &name, prompt);
-            Ok(sse(run, Box::new(move |e| s.event(e)), anthropic_err_frame, "text/event-stream"))
-        } else {
+            return start_streamed(&st, &who, m, req, ("text/event-stream", anthropic_typed_frame), move |run| {
+                let name = run.resolved.id.to_string();
+                let mut s = anthropic::MessagesStream::new(&mid, &name, prompt);
+                sse(run, Box::new(move |e| s.event(e)), anthropic_err_frame, "text/event-stream")
+            })
+            .await;
+        }
+        let run = st.start_chat(&who, m, req).await?;
+        let name = run.resolved.id.to_string();
+        {
             let (out, run) = collect(run).await?;
             Ok(json_response(anthropic::messages_response(&out, &mid, &name), &run))
         }
@@ -838,7 +915,7 @@ async fn x_select(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         let v = json_body(&body)?;
         let spec = v.get("model").and_then(Value::as_str).unwrap_or("auto");
         let r = st.serving.resolve(&ModelRef::Named(spec.to_string()), false, false)?;
-        Ok(axum::Json(json!({"model": r.id.as_str(), "chosenBy": r.chosen_by, "loaded": st.serving.is_loaded(&r.id)})).into_response())
+        Ok(axum::Json(json!({"model": r.id.as_str(), "chosenBy": r.chosen_by, "loaded": st.serving.is_loaded(&r.id), "contextPerSlot": st.serving.context_per_slot(&r.id)})).into_response())
     };
     go().unwrap_or_else(|e| fail(&e, ApiFamily::Extended))
 }
@@ -856,7 +933,7 @@ async fn x_models(State(st): S, h: HeaderMap) -> Response {
             let all = crate::library::capabilities(f);
             let blocked = st.serving.blocked(&f.id, &all);
             let servable: Vec<_> = all.into_iter().filter(|c| !blocked.iter().any(|b| b.capability == *c)).collect();
-            json!({"id": f.id.as_str(), "capabilities": servable, "unavailable": blocked, "contextMax": f.info.context_length, "sizeBytes": f.size, "loaded": loaded.iter().any(|l| l.model_id == f.id.as_str())})
+            json!({"id": f.id.as_str(), "capabilities": servable, "unavailable": blocked, "contextMax": f.info.context_length, "contextPerSlot": st.serving.context_per_slot(&f.id), "sizeBytes": f.size, "loaded": loaded.iter().any(|l| l.model_id == f.id.as_str())})
         })
         .collect();
     axum::Json(json!({"models": v})).into_response()

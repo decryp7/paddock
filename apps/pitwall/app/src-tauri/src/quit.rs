@@ -105,6 +105,30 @@ impl PendingAsk {
     }
 }
 
+/// How long a quit may take before the watchdog ends the process: the server's own bound for stopping serving
+/// (`stop_serving` times out at 30 s in `commands::timeout_for`) plus time to close the windows.
+pub const EXIT_STALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(40);
+
+/// Ends a quit that stalls (an engine that never stops, a webview that never closes): after `limit` without the
+/// process having exited, calls `end(code)`. The engines belong to the service, which keeps running, so ending the
+/// process loses nothing. Starts a thread; returns whether it was started.
+fn spawn_exit_watchdog(limit: std::time::Duration, code: i32, end: impl FnOnce(i32) + Send + 'static) -> bool {
+    let spawned = std::thread::Builder::new().name("pitwall-exit-watchdog".into()).spawn(move || {
+        std::thread::sleep(limit);
+        eprintln!("Pitwall: quitting stalled for {} s; ending the process", limit.as_secs());
+        end(code);
+    });
+    spawned.is_ok()
+}
+
+/// Arms the exit watchdog once per process, at the start of a quit.
+pub fn arm_exit_watchdog(code: i32) {
+    static ARMED: AtomicBool = AtomicBool::new(false);
+    if !ARMED.swap(true, Ordering::SeqCst) {
+        spawn_exit_watchdog(EXIT_STALL_LIMIT, code, |code| std::process::exit(code));
+    }
+}
+
 /// The user asked to quit with `forced` (the "Quit and stop serving" items) or by the setting (`None`).
 pub async fn request<R: Runtime>(app: &AppHandle<R>, forced: Option<QuitChoice>) {
     let client: SharedClient = app.state::<SharedClient>().inner().clone();
@@ -114,6 +138,7 @@ pub async fn request<R: Runtime>(app: &AppHandle<R>, forced: Option<QuitChoice>)
     };
     match plan {
         Plan::Quit(choice) => {
+            arm_exit_watchdog(0);
             for p in apply(client.as_ref(), choice, false).await {
                 eprintln!("Pitwall: {p}");
             }
@@ -141,6 +166,7 @@ pub async fn quit_app<R: Runtime>(
     } else {
         QuitChoice::KeepServing
     };
+    arm_exit_watchdog(0);
     for p in apply(client.as_ref(), choice, remember_choice).await {
         eprintln!("Pitwall: {p}");
     }
@@ -150,8 +176,8 @@ pub async fn quit_app<R: Runtime>(
 
 /// Whether a quit is waiting for the dialog (it was asked while no window was open): true once.
 #[tauri::command]
-pub fn take_quit_ask(pending: tauri::State<'_, PendingAsk>) -> bool {
-    pending.take()
+pub async fn take_quit_ask(pending: tauri::State<'_, PendingAsk>) -> Result<bool, pitwall_core::mgmt::CommandError> {
+    Ok(pending.take())
 }
 
 /// After Pitwall was quit with "stop serving", opening it again resumes serving. Called when the app starts.
@@ -168,6 +194,39 @@ mod tests {
     use super::*;
     use crate::server_client::fake::{FakeServer, Reply};
     use pitwall_core::mgmt::{CommandError, ErrorCode};
+
+    #[tokio::test]
+    async fn a_quit_whose_engine_never_stops_is_ended_by_the_watchdog() {
+        use crate::server_client::BoxFuture;
+        // A server whose stop never answers (an engine that will not die); the call's own timeout is far away.
+        struct NeverStops;
+        impl ServerClient for NeverStops {
+            fn call<'a>(&'a self, _: &'a str, _: Value, _: std::time::Duration) -> BoxFuture<'a, Result<Value, CommandError>> {
+                Box::pin(std::future::pending())
+            }
+            fn open_stream<'a>(
+                &'a self,
+                _: &'a str,
+                _: Option<Value>,
+                _: std::time::Duration,
+            ) -> BoxFuture<'a, Result<Box<dyn crate::server_client::FrameStream>, CommandError>> {
+                Box::pin(std::future::pending())
+            }
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        assert!(spawn_exit_watchdog(std::time::Duration::from_millis(20), 7, move |code| {
+            let _ = tx.send(code);
+        }));
+        // The quit itself hangs in the stop, as it did before the watchdog existed...
+        let quit = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            apply(&NeverStops, QuitChoice::StopServing, false),
+        )
+        .await;
+        assert!(quit.is_err(), "the stop never finishes");
+        // ...and the watchdog has ended the process with the quit's exit code.
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(10)), Ok(7));
+    }
 
     #[test]
     fn the_setting_decides_and_defaults_to_keep_serving() {

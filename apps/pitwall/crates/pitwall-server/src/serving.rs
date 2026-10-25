@@ -72,6 +72,8 @@ pub struct HotModel {
     pub vram: u64,
     /// Context tokens per slot it was loaded with.
     pub context: u32,
+    /// The context per slot Pitwall launched it with (what a client may send in one request).
+    pub context_per_slot: u32,
     /// Parallel slots it was loaded with (a change in the preferences applies on the next load).
     pub slots: Slots,
     /// When it was loaded.
@@ -572,7 +574,7 @@ impl Serving {
         }
     }
 
-    /// Wait for a turn in the queue.
+    /// Wait for a turn in the queue. `on_queued` is told the job id if the job has to wait.
     pub async fn acquire(
         &self,
         app: AppId,
@@ -580,7 +582,9 @@ impl Serving {
         priority: Priority,
         kind: JobKind,
         app_cap: Option<usize>,
+        on_queued: Option<tokio::sync::oneshot::Sender<u64>>,
     ) -> Result<Permit, ApiError> {
+        let mut on_queued = on_queued;
         let slots = self.slots_for(&model);
         let id = {
             let mut sched = lock(&self.inner.sched);
@@ -617,7 +621,11 @@ impl Serving {
                     return Ok(permit);
                 }
                 if s.job(id).is_none() {
-                    return Err(api(ErrorKind::Overloaded, "the request was cancelled while it waited"));
+                    return Err(api(ErrorKind::Cancelled, "the request was cancelled while it waited"));
+                }
+                // Still waiting: tell the caller the job's id once, so it can answer at once and be cancelled by id.
+                if let Some(tx) = on_queued.take() {
+                    let _ = tx.send(id);
                 }
             }
             tokio::select! { () = &mut notified => {}, () = tokio::time::sleep(Duration::from_millis(500)) => {} }
@@ -798,12 +806,7 @@ impl Serving {
             .ok_or_else(|| api(ErrorKind::NotFound, format!("the model {id} is no longer installed")))?;
         let s = self.settings();
         let prefs = s.prefs(id);
-        let context = o
-            .context
-            .or(prefs.context)
-            .unwrap_or(s.models.default_context)
-            .min(f.info.context_length.unwrap_or(u64::MAX).min(u64::from(u32::MAX)) as u32)
-            .max(512);
+        let context = pitwall_core::slots::context_per_slot(o.context, prefs.context, s.models.default_context, f.info.context_length);
         let slots = s.slots_for(id);
         let hw = self.hw();
         let policy = s.memory.policy();
@@ -884,6 +887,7 @@ impl Serving {
             ram: if rss > 0 { rss.max(need.ram) } else { need.ram },
             vram: need.vram,
             context: running.props.n_ctx.unwrap_or(context),
+            context_per_slot: context,
             slots,
             running,
             loaded_at: now_ms(),
@@ -1105,6 +1109,21 @@ impl Serving {
     /// keeps its slots until it is reloaded, so a changed preference never disturbs running work.
     pub fn slots_for(&self, id: &ModelId) -> Slots {
         self.loaded_slots(id).unwrap_or_else(|| self.settings().slots_for(id))
+    }
+
+    /// The context each slot gets (or has, when loaded) for a model: what a client may put in one request.
+    pub fn context_per_slot(&self, id: &ModelId) -> Option<u32> {
+        if let Some(h) = lock(&self.inner.hot).get(id) {
+            return Some(h.context_per_slot);
+        }
+        let f = self.inner.library.local().into_iter().find(|f| &f.id == id)?;
+        let s = self.settings();
+        Some(pitwall_core::slots::context_per_slot(
+            None,
+            s.prefs(id).context,
+            s.models.default_context,
+            f.info.context_length,
+        ))
     }
 
     /// The slots a model is loaded with (`None`: not loaded).

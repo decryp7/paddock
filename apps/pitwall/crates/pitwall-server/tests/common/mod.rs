@@ -26,7 +26,12 @@ impl Drop for AbortOnDrop {
 
 /// A fake llama-server: /health, /props, streamed chat completions, embeddings.
 pub struct FakeEngine {
+    /// Engines actually started (a model load); a start refused because the port was taken is not one.
     pub starts: Arc<AtomicUsize>,
+    /// Every call of `start`, including ones refused with "address in use".
+    pub attempts: Arc<AtomicUsize>,
+    /// How many of the next starts fail as if another program had taken the port (a race `free_port` cannot rule out).
+    pub port_taken: Arc<AtomicUsize>,
     /// `POST /slots/{n}?action=erase` calls received (the context release).
     pub erases: Arc<AtomicUsize>,
     pub fail: bool,
@@ -64,6 +69,23 @@ impl Engine for FakeEngine {
     }
     fn start<'a>(&'a self, l: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            let taken = loop {
+                let n = self.port_taken.load(Ordering::SeqCst);
+                if n == 0 {
+                    break false;
+                }
+                if self
+                    .port_taken
+                    .compare_exchange(n, n - 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    break true;
+                }
+            };
+            if taken {
+                return Err(EngineError::Start("bind: Address already in use (os error 98)".into()));
+            }
             self.starts.fetch_add(1, Ordering::SeqCst);
             self.contexts.lock().unwrap().push(l.context);
             self.parallels.lock().unwrap().push(l.parallel);
@@ -172,6 +194,8 @@ pub struct Harness {
     pub client: Client,
     pub admin: String,
     pub starts: Arc<AtomicUsize>,
+    pub attempts: Arc<AtomicUsize>,
+    pub port_taken: Arc<AtomicUsize>,
     pub erases: Arc<AtomicUsize>,
     pub bodies: Arc<std::sync::Mutex<Vec<Value>>>,
     pub contexts: Arc<std::sync::Mutex<Vec<u32>>>,
@@ -215,6 +239,8 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
         std::fs::write(m.join("tiny-Q4_K_M.gguf"), gguf("llama")).unwrap();
     }
     let starts = Arc::new(AtomicUsize::new(0));
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let port_taken = Arc::new(AtomicUsize::new(0));
     let erases = Arc::new(AtomicUsize::new(0));
     let bodies = Arc::new(std::sync::Mutex::new(vec![]));
     let contexts = Arc::new(std::sync::Mutex::new(vec![]));
@@ -227,6 +253,8 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
     let engine: Arc<dyn Engine> = other.unwrap_or_else(|| {
         Arc::new(FakeEngine {
             starts: starts.clone(),
+            attempts: attempts.clone(),
+            port_taken: port_taken.clone(),
             erases: erases.clone(),
             fail,
             bodies: bodies.clone(),
@@ -254,6 +282,8 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
         client: Client::new(LoopbackPort::new(port).unwrap(), None),
         admin,
         starts,
+        attempts,
+        port_taken,
         erases,
         bodies,
         contexts,
@@ -341,6 +371,8 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
         client: Client::new(LoopbackPort::new(port).unwrap(), None),
         admin,
         starts: Arc::new(AtomicUsize::new(0)),
+        attempts: Arc::new(AtomicUsize::new(0)),
+        port_taken: Arc::new(AtomicUsize::new(0)),
         erases: Arc::new(AtomicUsize::new(0)),
         bodies: Arc::new(std::sync::Mutex::new(vec![])),
         contexts: Arc::new(std::sync::Mutex::new(vec![])),

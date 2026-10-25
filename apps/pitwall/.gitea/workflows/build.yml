@@ -1,5 +1,6 @@
-# Checks Pitwall on every push and pull request on all three platforms; installers are built for main pushes, the
-# nightly run and manual runs (release.yml builds and publishes them for v* tags).
+# Checks Pitwall on every push and pull request on all three platforms; installers are built for main pushes, tags,
+# the nightly run and manual runs. A v* tag runs the same checks and the release job publishes only if all of them
+# (and the installer builds) passed: one workflow, one gate (docs/releasing.md).
 #
 # Runner labels: ubuntu-latest (container jobs in catthehacker/ubuntu:act-latest), windows-latest (host runner, Git
 # for Windows on PATH), macos-latest (host runner on the owner's Apple Silicon Mac: one job at a time, so the macOS
@@ -12,6 +13,7 @@ name: build
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   schedule:
     - cron: "45 1 * * *"
@@ -322,8 +324,8 @@ jobs:
           path: app/playwright-report
           if-no-files-found: ignore
 
-  # Installers (unsigned unless the signing secrets are set). Main pushes, the nightly run and manual runs; tags are
-  # handled by release.yml. Every step skips while app/src-tauri does not exist.
+  # Installers (unsigned unless the signing secrets are set). Main pushes, tags, the nightly run and manual runs.
+  # Every step skips while app/src-tauri does not exist.
   bundle:
     name: bundle (${{ matrix.os }})
     needs: [rust-lint]
@@ -402,10 +404,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: bash scripts/ci/tauri-bundle.sh "${{ matrix.bundles }}"
 
       # signingIdentity "-" must leave an ad-hoc sealed bundle; native libraries resolve by run path.
-      - name: Verify the .app (ad-hoc signature, run path)
+      - name: Verify the .app and the DMG (seal, no hardened runtime while ad hoc, Team IDs, sidecars start, run path)
         if: runner.os == 'macOS' && hashFiles('app/src-tauri/Cargo.toml') != ''
         run: bash scripts/ci/macos-verify-bundle.sh
 
@@ -419,3 +423,78 @@ jobs:
       - name: Clean up (macOS)
         if: always() && runner.os == 'macOS'
         run: bash scripts/ci/macos-cleanup.sh --build-outputs
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    # Gated: a tag publishes only when every check job and every installer build passed (a skipped or failed need blocks it).
+    needs: [rust-lint, rust-test, windows, macos, licences, frontend, e2e, bundle]
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
+        with:
+          path: artifacts
+
+      - name: Installers are present
+        run: |
+          if ! find artifacts -type f | grep -q .; then
+            echo "::error::No installers were built (app/src-tauri missing?): nothing to release."
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Release notes (git-cliff)
+        run: |
+          cargo install git-cliff --locked
+          git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+          # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
+          cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
+
+          ### First launch
+
+          Pitwall is not code-signed yet, so your system may warn the first time you open it.
+
+          - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Pitwall > **Open Anyway**.
+          - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
+          FIRST_LAUNCH
+
+      # latest.json: version, notes, pub_date and, per platform, the installer's URL, signature and size. Installed
+      # apps fetch releases/download/latest/latest.json (the latest non-pre-release).
+      - name: Updater manifest (latest.json)
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          # Not github.server_url: inside the runners that is Gitea's internal http://172.16.1.220:7400, which latest-json
+          # refuses (the updater needs an https base URL), failing the release job after every installer is built.
+          BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          node --test scripts/release/latest-json.test.mjs
+          if ! find artifacts -name '*.sig' | grep -q .; then
+            echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
+            exit 0
+          fi
+          node scripts/release/latest-json.mjs --dir artifacts --version "$TAG" --notes artifacts/RELEASE_NOTES.md \
+            --base-url "$BASE_URL" --out artifacts/latest.json
+          find artifacts -name '*.sig' -delete
+          cat artifacts/latest.json
+
+      # Plain API calls instead of gitea.com/actions/release-action, which is a Go action and the runner image has no Go.
+      - name: Publish the release
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          node --test scripts/release/publish.test.mjs
+          node scripts/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" \
+            --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
