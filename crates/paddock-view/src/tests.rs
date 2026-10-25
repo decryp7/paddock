@@ -54,11 +54,15 @@ fn sample() -> ViewDoc {
                 key: "a".into(),
                 label: "A".into(),
                 sortable: true,
+                align: Align::Start,
+                unit: String::new(),
             },
             Column {
                 key: "b".into(),
                 label: "B".into(),
                 sortable: false,
+                align: Align::End,
+                unit: "ms".into(),
             },
         ],
         rows: RowSource::Inline(vec![vec![cell("1"), Cell::text("2")]]),
@@ -73,6 +77,8 @@ fn sample() -> ViewDoc {
             key: "a".into(),
             label: "A".into(),
             sortable: false,
+            align: Align::Start,
+            unit: String::new(),
         }],
         rows: RowSource::Paged {
             total: 5000,
@@ -242,6 +248,7 @@ fn sample() -> ViewDoc {
             name: "cpu".into(),
             values: vec![0.5, 1.25],
         }],
+        unit: "%".into(),
     };
     let kinds = vec![
         Node::new(NodeKind::Text {
@@ -443,6 +450,10 @@ fn every_enum_variant_round_trips() {
             s
         );
     }
+    for a in [Align::Start, Align::End] {
+        assert_eq!(from_json::<Align>(&to_json(&a).unwrap()).unwrap(), a);
+    }
+    assert_eq!(Align::default(), Align::Start);
     assert_eq!(Tone::default(), Tone::Neutral);
     assert_eq!(TextStyle::default(), TextStyle::Body);
 }
@@ -553,6 +564,8 @@ fn the_node_count_is_limited() {
                 key: "a".into(),
                 label: "A".into(),
                 sortable: false,
+                align: Align::Start,
+                unit: String::new(),
             }],
             rows: RowSource::Inline(vec![row; n]),
             row_action: None,
@@ -812,6 +825,10 @@ fn tables_check_columns_rows_paging_and_sort() {
     assert!(matches!(
         table(&|t| t.columns[0].key = String::new()),
         Err(ViewError::Invalid { .. })
+    ));
+    assert!(matches!(
+        table(&|t| t.columns[0].unit = "x".repeat(MAX_STRING + 1)),
+        Err(ViewError::StringTooLong { ref path, .. }) if path.ends_with(".unit")
     ));
     assert!(matches!(
         table(&|t| t.columns[0].label = String::new()),
@@ -1338,6 +1355,10 @@ fn charts_check_series() {
         Err(ViewError::StringTooLong { .. })
     ));
     assert!(matches!(
+        chart(&|c| c.unit = "x".repeat(MAX_STRING + 1)),
+        Err(ViewError::StringTooLong { ref path, .. }) if path.ends_with(".unit")
+    ));
+    assert!(matches!(
         chart(&|c| c.categories[0] = "x".repeat(MAX_STRING + 1)),
         Err(ViewError::StringTooLong { .. })
     ));
@@ -1728,6 +1749,7 @@ fn view_ts() -> String {
         Link::decl(),
         Table::decl(),
         Column::decl(),
+        Align::decl(),
         Sort::decl(),
         Cell::decl(),
         RowSource::decl(),

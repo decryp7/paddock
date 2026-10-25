@@ -2405,6 +2405,9 @@
       <trans-unit id="pd.view.error" datatype="html">
         <source>This view cannot be shown</source>
       </trans-unit>
+      <trans-unit id="pd.view.error-plugin" datatype="html">
+        <source><x id="plugin"/> sent a view this app cannot show</source>
+      </trans-unit>
       <trans-unit id="pd.view.form.choose-file" datatype="html">
         <source>Choose a file…</source>
       </trans-unit>
@@ -2449,6 +2452,9 @@
       </trans-unit>
       <trans-unit id="pd.view.host.secret" datatype="html">
         <source>choose a secret</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.align" datatype="html">
+        <source>&quot;start&quot; or &quot;end&quot; was expected</source>
       </trans-unit>
       <trans-unit id="pd.view.issue.args" datatype="html">
         <source>arguments larger than <x id="max"/> bytes</source>
@@ -2573,11 +2579,17 @@
       <trans-unit id="pd.view.loading" datatype="html">
         <source>Loading…</source>
       </trans-unit>
+      <trans-unit id="pd.view.logs" datatype="html">
+        <source>Open logs</source>
+      </trans-unit>
       <trans-unit id="pd.view.matrix.label" datatype="html">
         <source>Matrix</source>
       </trans-unit>
       <trans-unit id="pd.view.needs-ai" datatype="html">
         <source>This needs local AI, which is not ready.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.needs-ai.title" datatype="html">
+        <source><x id="feature"/> needs local AI</source>
       </trans-unit>
       <trans-unit id="pd.view.open-failed" datatype="html">
         <source>The page could not be opened.</source>
@@ -2605,6 +2617,9 @@
       </trans-unit>
       <trans-unit id="pd.view.progress" datatype="html">
         <source>Progress</source>
+      </trans-unit>
+      <trans-unit id="pd.view.reload" datatype="html">
+        <source>Reload</source>
       </trans-unit>
       <trans-unit id="pd.view.retry" datatype="html">
         <source>Retry</source>
@@ -2695,6 +2710,9 @@
       </trans-unit>
       <trans-unit id="pd.view.unknown" datatype="html">
         <source>Update the app to view this</source>
+      </trans-unit>
+      <trans-unit id="pd.view.working" datatype="html">
+        <source>Working…</source>
       </trans-unit>
       <trans-unit id="pd.view.writes" datatype="html">
         <source>Changes data</source>
