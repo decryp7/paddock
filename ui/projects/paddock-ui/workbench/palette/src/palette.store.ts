@@ -177,14 +177,17 @@ export const PaletteStore = signalStore(
       suggesting: computed(() => suggestions().length > 0),
       rows: computed<readonly PaletteRow[]>(() => (store.source().kind === 'commands' ? commandRows() : store.providerRows())),
       provider,
-      /** The prefixes the palette answers, for the hint line: the commands' and each offered provider's. */
-      prefixes: computed(() => [
-        { prefix: COMMANDS_PREFIX, title: $localize`:@@pd.wb.palette.prefix.commands:Commands` },
-        ...store._registry
-          .availablePaletteProviders()
-          .filter((p) => p.prefix)
-          .map((p) => ({ prefix: p.prefix, title: p.title.text })),
-      ]),
+      /** The prefixes the palette answers, for the hint line: the commands' and each offered provider's; `active` marks the mode in use. */
+      prefixes: computed(() => {
+        const s = store.source();
+        return [
+          { prefix: COMMANDS_PREFIX, title: $localize`:@@pd.wb.palette.prefix.commands:Commands`, active: s.kind === 'commands' },
+          ...store._registry
+            .availablePaletteProviders()
+            .filter((p) => p.prefix)
+            .map((p) => ({ prefix: p.prefix, title: p.title.text, active: s.kind === 'provider' && s.id === p.id })),
+        ];
+      }),
       placeholder: computed(() => provider()?.placeholder?.text ?? $localize`:@@pd.wb.palette.placeholder:Type a command or search…`),
     };
   }),
