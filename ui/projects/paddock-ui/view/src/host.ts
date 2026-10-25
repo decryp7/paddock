@@ -79,6 +79,6 @@ export const VIEW_NEEDS_AI = new InjectionToken<Type<unknown> | null>('PADDOCK_V
  * The app's "Open AI settings" (rule 19): what the plugin-less fallback card of a `needsAi` node offers as its only action when the
  * host has no Pitwall state (no {@link VIEW_NEEDS_AI}). It is the app's own repair, never routed through the plugin: the plugin's
  * `setup` action of a `needsAi` node is not sent to it. `null` (the default): the card shows the plugin's reason and a plain line
- * that where to set up local AI is up to the app, with no button.
+ * "Set up local AI in this app's settings." with no button. Every host that shows views provides this or `VIEW_NEEDS_AI` (rule 19); `pd-view` reports a `needsAi` node drawn with neither, in dev mode.
  */
 export const VIEW_OPEN_AI_SETTINGS = new InjectionToken<(() => void) | null>('PADDOCK_VIEW_OPEN_AI_SETTINGS', { providedIn: 'root', factory: () => null });

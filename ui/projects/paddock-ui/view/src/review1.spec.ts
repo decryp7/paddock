@@ -1,10 +1,11 @@
-import { Component, ElementRef, provideZonelessChangeDetection, signal, viewChild, ChangeDetectionStrategy, input } from '@angular/core';
+import { Component, ElementRef, ErrorHandler, provideZonelessChangeDetection, signal, viewChild, ChangeDetectionStrategy, input } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { PD_ECHARTS, fakeEchartsLoader } from '@decryp7/paddock-ui/chart';
 import { FakeECharts, all, buttonByText, one, text } from '@decryp7/paddock-ui/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Node, NodeKind, ViewAction, ViewDoc } from '../generated/view';
 import { VIEW_HOST, VIEW_NEEDS_AI, VIEW_OPEN_AI_SETTINGS, type ViewHost, type ViewPicked } from './host';
+import { NEEDS_AI_WITHOUT_REPAIR } from './node';
 import { primaryNode, unknownKindName } from './model';
 import { sampleViewDoc } from './sample';
 import { PdViewScroll } from './scroll';
@@ -57,7 +58,7 @@ const without = (doc: ViewDoc, ...ids: string[]): ViewDoc => {
 describe('pd-view review 1 fixes', () => {
   async function setup(doc: unknown = sampleViewDoc(), extra: { provide: unknown; useValue: unknown }[] = []): Promise<ComponentFixture<Host>> {
     TestBed.configureTestingModule({
-      providers: [provideZonelessChangeDetection(), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(new FakeECharts().init) }, { provide: VIEW_HOST, useValue: noHost }, ...extra],
+      providers: [provideZonelessChangeDetection(), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(new FakeECharts().init) }, { provide: VIEW_HOST, useValue: noHost }, { provide: VIEW_OPEN_AI_SETTINGS, useValue: () => undefined }, ...extra],
     });
     const f = TestBed.createComponent(Host);
     f.componentInstance.doc.set(doc);
@@ -97,15 +98,34 @@ describe('pd-view review 1 fixes', () => {
 
   describe('P1-3: one "needs local AI" look and a repair the app owns', () => {
     it('draws the family card with the plugin reason and no button when the host has neither Pitwall state nor a settings opener', async () => {
-      const f = await setup();
+      const errors: unknown[] = [];
+      const f = await setup(sampleViewDoc(), [
+        { provide: VIEW_OPEN_AI_SETTINGS, useValue: null },
+        { provide: ErrorHandler, useValue: { handleError: (e: unknown) => errors.push(e) } },
+      ]);
       const card = one(node(f, 'ai'), '[data-testid=view-needs-ai]');
       expect(text(card)).toContain('Explain the failing check needs local AI');
       expect(text(card)).toContain('Pitwall is not running.');
       expect(card.closest('pd-needs-ai-card')).not.toBeNull();
       expect(card.getAttribute('aria-labelledby')).toBeTruthy();
       expect(card.querySelector('button')).toBeNull();
-      expect(text(one(card, '[data-testid=needs-ai-on-builtin]'))).toContain('up to the app');
+      expect(text(one(card, '[data-testid=needs-ai-on-builtin]'))).toContain("Set up local AI in this app's settings.");
       expect(text(card)).not.toContain('Set up Pitwall');
+      // Rule 19, dev mode: the host that shows views must provide a way to set up AI, so this wiring gap is reported once.
+      expect(errors).toHaveLength(1);
+      expect(String(errors[0])).toBe(`Error: ${NEEDS_AI_WITHOUT_REPAIR}`);
+    });
+    it('reports nothing when the host provides the opener or the live component, or when no needsAi node is drawn', async () => {
+      const seen = async (extra: { provide: unknown; useValue: unknown }[], doc: unknown = sampleViewDoc()): Promise<unknown[]> => {
+        const errors: unknown[] = [];
+        await setup(doc, [...extra, { provide: ErrorHandler, useValue: { handleError: (e: unknown) => errors.push(e) } }]);
+        TestBed.resetTestingModule();
+        document.body.replaceChildren();
+        return errors;
+      };
+      expect(await seen([{ provide: VIEW_OPEN_AI_SETTINGS, useValue: () => undefined }])).toEqual([]);
+      expect(await seen([{ provide: VIEW_OPEN_AI_SETTINGS, useValue: null }, { provide: VIEW_NEEDS_AI, useValue: LiveNeedsAi }])).toEqual([]);
+      expect(await seen([{ provide: VIEW_OPEN_AI_SETTINGS, useValue: null }], without(sampleViewDoc(), 'ai'))).toEqual([]);
     });
     it('offers only the app\'s Open AI settings when the host provides it, and never sends the plugin\'s setup action', async () => {
       const open = vi.fn();
