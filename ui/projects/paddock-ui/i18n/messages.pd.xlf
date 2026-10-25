@@ -2594,6 +2594,12 @@
       <trans-unit id="pd.view.needs-ai" datatype="html">
         <source>This needs local AI, which is not ready.</source>
       </trans-unit>
+      <trans-unit id="pd.view.needs-ai.elsewhere" datatype="html">
+        <source>Set up local AI in this app's settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.needs-ai.settings" datatype="html">
+        <source>Open AI settings</source>
+      </trans-unit>
       <trans-unit id="pd.view.needs-ai.title" datatype="html">
         <source><x id="feature"/> needs local AI</source>
       </trans-unit>
@@ -2722,6 +2728,9 @@
       </trans-unit>
       <trans-unit id="pd.view.writes" datatype="html">
         <source>Changes data</source>
+      </trans-unit>
+      <trans-unit id="pd.view.writes.short" datatype="html">
+        <source>Edits</source>
       </trans-unit>
       <trans-unit id="pd.wb.activity.empty" datatype="html">
         <source>Nothing here</source>

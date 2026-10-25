@@ -5,7 +5,8 @@
  * review list, matrix, chart, badge, progress, empty, needs-AI, link), binds all text as text and maps tones to the design
  * tokens. What the user does leaves as a `ViewAction`; the host answers with a patch. Confirmations, the OS browser and the path and
  * secret pickers are the host's (`VIEW_HOST`); the view opens nothing itself. An app that has the window's Pitwall state gives a
- * `needsAi` node its own live component with `VIEW_NEEDS_AI`.
+ * `needsAi` node its own live component with `VIEW_NEEDS_AI`; without it the node shows the plugin's reason and the app's
+ * `VIEW_OPEN_AI_SETTINGS` button (never the plugin's own `setup` action, rule 19).
  *
  * ```ts
  * providers: [{ provide: VIEW_HOST, useValue: myHost }]              // confirm, openInBrowser, pickPath, pickSecret
@@ -15,7 +16,7 @@
  * ```
  */
 export { PdView } from './src/view';
-export { PdViewNode } from './src/node';
+export { NEEDS_AI_WITHOUT_REPAIR, PdViewNode } from './src/node';
 export { PdViewButton, PdViewLink } from './src/button';
 export { PdViewWrites, writesText } from './src/writes';
 export { PdViewTable, tableWindow, type TableWindow } from './src/table';
@@ -28,7 +29,7 @@ export { PdViewChart, chartSpecOf, chartWords, scatterOption } from './src/chart
 export { PdViewTone, TONE_CSS, toneClass } from './src/tone';
 export { ViewStore, type ViewFailure, type ViewStoreType } from './src/view.store';
 export { ViewRuntime, type ViewRuntimeContext } from './src/runtime';
-export { NO_VIEW_HOST, VIEW_HOST, VIEW_NEEDS_AI, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPickRequest, type ViewPicked } from './src/host';
+export { NO_VIEW_HOST, VIEW_HOST, VIEW_NEEDS_AI, VIEW_OPEN_AI_SETTINGS, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPickRequest, type ViewPicked } from './src/host';
 export { applyViewPatch, type PatchProblem, type PatchResult } from './src/patch';
 export { VIEW_EXTRA_LIMITS, isWebUrl, validateViewAction, validateViewDoc, type ViewIssue } from './src/limits';
 export { sampleViewDoc } from './src/sample';

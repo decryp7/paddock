@@ -70,7 +70,15 @@ export const VIEW_HOST = new InjectionToken<ViewHost>('PADDOCK_VIEW_HOST', { pro
 
 /**
  * The app's own "needs local AI" component, when it has the window's Pitwall state (a wrapper over `<pd-needs-ai>` with a `feature`
- * input, which handles its own `(step)`). A `needsAi` node draws it instead of the plugin's reason and action, so the repair is the
+ * input, which handles its own `(step)`). A `needsAi` node draws it instead of the plugin's reason, so the repair is the
  * app's (rule 19) and the state is the one the rest of the window shows. `null` (the default): the node draws the plugin's reason.
  */
 export const VIEW_NEEDS_AI = new InjectionToken<Type<unknown> | null>('PADDOCK_VIEW_NEEDS_AI', { providedIn: 'root', factory: () => null });
+
+/**
+ * The app's "Open AI settings" (rule 19): what the plugin-less fallback card of a `needsAi` node offers as its only action when the
+ * host has no Pitwall state (no {@link VIEW_NEEDS_AI}). It is the app's own repair, never routed through the plugin: the plugin's
+ * `setup` action of a `needsAi` node is not sent to it. `null` (the default): the card shows the plugin's reason and a plain line
+ * "Set up local AI in this app's settings." with no button. Every host that shows views provides this or `VIEW_NEEDS_AI` (rule 19); `pd-view` reports a `needsAi` node drawn with neither, in dev mode.
+ */
+export const VIEW_OPEN_AI_SETTINGS = new InjectionToken<(() => void) | null>('PADDOCK_VIEW_OPEN_AI_SETTINGS', { providedIn: 'root', factory: () => null });

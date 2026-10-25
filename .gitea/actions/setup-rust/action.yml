@@ -93,6 +93,7 @@ runs:
         BACKEND: ${{ inputs.sccache-backend }}
         REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
         REDIS_DB: ${{ inputs.sccache-redis-db }}
+        ACTION_DIR: ${{ github.action_path }}
       run: |
         set -euo pipefail
         # The Install step added the pinned copy to PATH for later steps only; this step finds it by its folder.
@@ -103,8 +104,15 @@ runs:
           exit 0
         fi
         case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis or local (got '$BACKEND')"; exit 1 ;; esac
+        # sccache puts every CARGO_* variable into its cache key, CARGO_TARGET_DIR included. A job that sets it to a folder next
+        # to its checkout (host runners: a per-job hashed work folder) would never hit; the wrapper drops it before sccache sees it.
+        WRAPPER=sccache
+        if [ -n "${CARGO_TARGET_DIR:-}${CARGO_BUILD_TARGET_DIR:-}" ]; then
+          if [ "$RUNNER_OS" = Windows ]; then WRAPPER="$(cygpath -w "$(cygpath -u "$ACTION_DIR")/rustc-wrapper.cmd")"
+          else WRAPPER="$ACTION_DIR/rustc-wrapper.sh"; chmod +x "$WRAPPER" 2>/dev/null || true; fi
+        fi
         {
-          echo "RUSTC_WRAPPER=sccache"
+          echo "RUSTC_WRAPPER=$WRAPPER"
           # Cached builds are not incremental; an unreachable cache must slow a build down, never fail it.
           echo "CARGO_INCREMENTAL=0"
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"

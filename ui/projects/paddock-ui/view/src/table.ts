@@ -4,8 +4,8 @@ import type { Cell, Column, Table } from '../generated/view';
 import { PdViewButton, PdViewLink } from './button';
 import { toneOf } from './model';
 import { ViewRuntime } from './runtime';
-import { PdViewScroll } from './scroll';
-import { PdViewTone, TONE_CSS, toneClass } from './tone';
+import { PdViewScroll, SCROLL_CSS } from './scroll';
+import { PdViewTone, TONE_CSS, toneClass, VIEW_HOVER } from './tone';
 
 let nextId = 0;
 
@@ -100,7 +100,7 @@ export function tableWindow(t: Table): TableWindow {
     :host { display: block; min-width: 0; }
     .pd-view-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .pd-view-table__scroll { overflow: auto; max-width: 100%; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
-    .pd-view-table__scroll:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    ${SCROLL_CSS}
     .pd-view-table__table { width: 100%; border-collapse: collapse; font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
     th { position: sticky; top: 0; z-index: 1; background: var(--pd-surface-2); text-align: start; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; padding: 0 var(--pd-space-3); height: var(--pd-row-height); border-bottom: 1px solid var(--pd-hairline); }
     td { padding: var(--pd-space-1) var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); min-height: var(--pd-row-height); vertical-align: middle; font-variant-numeric: tabular-nums; color: var(--pd-view-tone, var(--pd-text)); }
@@ -112,14 +112,15 @@ export function tableWindow(t: Table): TableWindow {
     th.pd-view-table__num .pd-view-table__sort { justify-content: flex-end; }
     .pd-view-table__unit { font-weight: var(--pd-weight-regular); }
     td > * { vertical-align: middle; }
+    td > pd-view-tone { margin-inline-end: var(--pd-space-1); }
     tbody tr:last-child td { border-bottom: 0; }
     .pd-view-table__row--act { cursor: pointer; }
-    .pd-view-table__row--act:hover { background: var(--pd-hover); }
+    .pd-view-table__row--act:hover { background: ${VIEW_HOVER}; }
     .pd-view-table__text { overflow-wrap: break-word; }
     .pd-view-table__act { width: 1%; white-space: nowrap; text-align: end; }
     .pd-view-table__sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: 100%; min-height: 24px; padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
     .pd-view-table__sort:hover:not(:disabled) { color: var(--pd-text); }
-    .pd-view-table__sort:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; border-radius: 2px; }
+    .pd-view-table__sort:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; border-radius: 2px; }
     .pd-view-table__none { color: var(--pd-text-muted); text-align: center; padding: var(--pd-space-4); }
     .pd-view-table__pager { display: flex; align-items: center; justify-content: flex-end; gap: var(--pd-space-2); padding-top: var(--pd-space-2); flex-wrap: wrap; }
     .pd-view-table__range { margin-inline-end: auto; color: var(--pd-text-muted); font-size: var(--pd-text-label); font-variant-numeric: tabular-nums; }

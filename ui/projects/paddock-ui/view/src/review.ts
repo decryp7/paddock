@@ -98,8 +98,10 @@ export function reviewCounts(list: ReviewList): ReadonlyMap<string, number> {
   styles: `
     ${TONE_CSS}
     :host { display: block; min-width: 0; }
-    .pd-view-review__filter { flex-wrap: wrap; max-width: 100%; margin-bottom: var(--pd-space-2); }
+    .pd-view-review__filter { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: thin; margin-bottom: var(--pd-space-2); }
     .pd-view-review__filter > button { white-space: nowrap; }
+    /* The filter scrolls on its own at a narrow width, which would cut a ring drawn outside the segment: draw it inside. */
+    .pd-view-review__filter > button:focus-visible { outline-offset: -2px; }
     .pd-view-review { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
     .pd-view-review__item > * { min-width: 0; }
     .pd-view-review__item { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: var(--pd-space-1); padding: var(--pd-space-3); border-bottom: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-view-tone); }

@@ -10,8 +10,8 @@ use paddock_jobs::time::{Clock, Deadline, SystemClock};
 use paddock_proc::{MemoryCap, Sampler, Supervised};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// The page the browser opens with; always the last argument of its command line.
@@ -376,7 +376,8 @@ pub enum EndedBy {
 pub struct Chromium {
     // Field order matters: the connection closes before the process is ended and the profile removed.
     conn: Arc<Connection>,
-    process: Supervised,
+    /// Shared with the time-limit watchdog, which ends the tree through it (on Windows that closes the kill-on-close job).
+    process: Arc<Mutex<Supervised>>,
     dir: PathBuf,
     throwaway: bool,
     /// Cancelled when the browser ends on purpose: stops the time-limit watchdog.
@@ -425,8 +426,8 @@ impl Chromium {
             }
             None => Supervised::spawn(cmd),
         };
-        let mut process = match spawned {
-            Ok(p) => p,
+        let process = match spawned {
+            Ok(p) => Arc::new(Mutex::new(p)),
             Err(e) => {
                 cleanup(&dir, throwaway);
                 return Err(Error::Launch(e.to_string()));
@@ -436,16 +437,16 @@ impl Chromium {
         let timed_out = Arc::new(AtomicBool::new(false));
         // The limit runs from the process start, also while it starts.
         watchdog(
-            process.id(),
+            process.clone(),
             opts.clock.clone(),
             opts.max_lifetime,
             stop.clone(),
             timed_out.clone(),
         );
-        let started = connect(&dir, &mut process, &opts.clock, opts.start_limit).and_then(|conn| {
+        let started = connect(&dir, &process, &opts.clock, opts.start_limit).and_then(|conn| {
             // The memory watcher looks every 200 ms, so a browser that is quick to start can be connected before its first
             // look: one look now, with the same cap and sampler, so "over the cap while it starts" does not depend on timing.
-            over_cap_at_start(opts, process.id()).map_or(Ok(conn), Err)
+            over_cap_at_start(opts, lock(&process).id()).map_or(Ok(conn), Err)
         });
         match started {
             Ok(conn) => Ok(Chromium {
@@ -460,11 +461,15 @@ impl Chromium {
             }),
             Err(e) => {
                 stop.cancel();
-                process.kill();
+                lock(&process).kill();
                 cleanup(&dir, throwaway);
                 Err(e)
             }
         }
+    }
+
+    fn proc(&self) -> MutexGuard<'_, Supervised> {
+        lock(&self.process)
     }
 
     /// The executable that runs.
@@ -474,12 +479,12 @@ impl Chromium {
 
     /// The process id (while running).
     pub fn pid(&self) -> Option<u32> {
-        self.process.id()
+        self.proc().id()
     }
 
     /// Whether the browser runs and the connection is open.
     pub fn is_running(&mut self) -> bool {
-        self.process.is_running() && !self.conn.is_closed()
+        self.proc().is_running() && !self.conn.is_closed()
     }
 
     /// The profile folder.
@@ -489,7 +494,7 @@ impl Chromium {
 
     /// Whether the time limit or the memory cap ended the browser.
     pub fn ended_by(&self) -> EndedBy {
-        if self.process.stopped_over_memory().is_some() {
+        if self.proc().stopped_over_memory().is_some() {
             EndedBy::MemoryCap
         } else if self.timed_out.load(Ordering::Acquire) {
             EndedBy::TimeLimit
@@ -500,7 +505,7 @@ impl Chromium {
 
     /// Why the browser and its `page` can no longer be used, if so. No round trip to the browser (see [`Page::exists`]).
     pub fn gone(&mut self, page: &Page) -> Option<Gone> {
-        if !self.process.is_running() {
+        if !self.proc().is_running() {
             Some(Gone::Exited)
         } else if self.conn.is_closed() {
             Some(Gone::Disconnected)
@@ -570,7 +575,7 @@ impl Chromium {
     /// Idempotent.
     pub fn close_gracefully(&mut self, grace: Duration) -> bool {
         self.stop.cancel();
-        let mut exited = !self.process.is_running();
+        let mut exited = !self.proc().is_running();
         if !exited && !self.conn.is_closed() {
             let _ = self.conn.call(
                 None,
@@ -581,10 +586,10 @@ impl Chromium {
             let end = Instant::now() + grace;
             while !exited && Instant::now() < end {
                 std::thread::sleep(Duration::from_millis(25));
-                exited = !self.process.is_running();
+                exited = !self.proc().is_running();
             }
         }
-        self.process.kill();
+        self.proc().kill();
         if self.throwaway {
             end_leftovers(&self.dir);
         }
@@ -600,7 +605,7 @@ impl Chromium {
     /// Ends the browser tree at once.
     pub fn kill(&mut self) {
         self.stop.cancel();
-        self.process.kill();
+        self.proc().kill();
     }
 }
 
@@ -621,22 +626,27 @@ fn over_cap_at_start(opts: &LaunchOptions, pid: Option<u32>) -> Option<Error> {
         .then(|| Error::Launch("the browser used more memory than allowed while it started".into()))
 }
 
+/// The supervised browser; a panic elsewhere while it was held does not stop it from being ended.
+fn lock(p: &Mutex<Supervised>) -> MutexGuard<'_, Supervised> {
+    p.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Ends the tree when `max` passed on `clock`, even if nobody calls anything. Stops when `stop` is cancelled.
 fn watchdog(
-    pid: Option<u32>,
+    process: Arc<Mutex<Supervised>>,
     clock: Arc<dyn Clock>,
     max: Duration,
     stop: CancelToken,
     timed_out: Arc<AtomicBool>,
 ) {
-    let Some(pid) = pid else { return };
     let _ = std::thread::Builder::new()
         .name("chromium-watchdog".into())
         .spawn(move || {
             if clock.wait(max, &stop).is_ok() && !stop.is_cancelled() {
                 log::warn!("The browser reached its time limit ({max:?}) and is ended");
                 timed_out.store(true, Ordering::Release);
-                paddock_proc::kill_tree(pid);
+                // Through the Supervised: the tree and, on Windows, its kill-on-close job.
+                lock(&process).kill();
             }
         });
 }
@@ -677,7 +687,7 @@ fn cleanup_with(dir: &Path, remove: &dyn Fn(&Path) -> std::io::Result<()>) -> bo
 /// Polls on `clock`, so a test drives the start-up wait with a fake clock.
 fn connect(
     dir: &Path,
-    process: &mut Supervised,
+    process: &Mutex<Supervised>,
     clock: &Arc<dyn Clock>,
     limit: Duration,
 ) -> Result<Connection> {
@@ -698,8 +708,8 @@ fn connect(
                 }
             }
         }
-        if !process.is_running() {
-            if process.stopped_over_memory().is_some() {
+        if !lock(process).is_running() {
+            if lock(process).stopped_over_memory().is_some() {
                 return Err(Error::Launch(
                     "the browser used more memory than allowed while it started".into(),
                 ));

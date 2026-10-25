@@ -1,12 +1,12 @@
 import { NgComponentOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, ErrorHandler, inject, input, isDevMode } from '@angular/core';
 import { PdNeedsAiCard } from '@decryp7/paddock-ui/states';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import type { Node } from '../generated/view';
 import { PdViewButton, PdViewLink } from './button';
 import { PdViewChart } from './chart';
 import { PdViewForm } from './form';
-import { VIEW_NEEDS_AI } from './host';
+import { VIEW_NEEDS_AI, VIEW_OPEN_AI_SETTINGS } from './host';
 import { diagramScene, graphScene, PdViewScene } from './scene';
 import { childKey, glyphFor, shapeOf, toneOf, unknownKindName } from './model';
 import { PdViewMatrix } from './matrix';
@@ -15,6 +15,10 @@ import { PdViewTable } from './table';
 import { ViewRuntime } from './runtime';
 import { PdViewTone, TONE_CSS, toneClass } from './tone';
 import { PdViewTree } from './tree';
+
+/** The dev-mode message when a host shows views and provides neither `VIEW_NEEDS_AI` nor `VIEW_OPEN_AI_SETTINGS` (rule 19). */
+export const NEEDS_AI_WITHOUT_REPAIR =
+  'pd-view drew a needsAi node but this app provides neither VIEW_NEEDS_AI nor VIEW_OPEN_AI_SETTINGS (rule 19: "needs local AI" must have a working repair). Provide one in the window that shows views.';
 
 /**
  * One node of a view and everything under it: it picks the component for the node's kind (`shapeOf`) and draws it, and a stack draws
@@ -95,8 +99,10 @@ import { PdViewTree } from './tree';
         @if (appNeedsAi; as live) {
           <ng-container *ngComponentOutlet="live; inputs: { feature: s.v.feature }" />
         } @else {
-          <pd-needs-ai-card [title]="needsAiTitle(s.v.feature)" [message]="s.v.reason || needsAiDefault" icon="info" testid="view-needs-ai">
-            <pd-view-button [action]="s.v.setup" [variant]="isPrimary() ? 'primary' : 'default'" />
+          <pd-needs-ai-card [title]="needsAiTitle(s.v.feature)" [message]="s.v.reason || needsAiDefault" icon="info" testid="view-needs-ai" [hint]="openAiSettings ? '' : needsAiElsewhere">
+            @if (openAiSettings; as open) {
+              <button type="button" class="pd-btn" [class.pd-btn--primary]="isPrimary()" data-testid="view-needs-ai-settings" [disabled]="runtime.disabled()" (click)="open()">{{ needsAiSettings }}</button>
+            }
           </pd-needs-ai-card>
         }
       }
@@ -143,7 +149,7 @@ import { PdViewTree } from './tree';
 })
 export class PdViewNode {
   readonly node = input.required<Node>();
-  private readonly runtime = inject(ViewRuntime);
+  protected readonly runtime = inject(ViewRuntime);
   /** The view's title: the accessible name of the table, tree, list and drawing nodes. */
   protected readonly title = this.runtime.title;
   protected readonly shape = computed(() => shapeOf(this.node()));
@@ -156,8 +162,23 @@ export class PdViewNode {
   protected readonly progressName = $localize`:@@pd.view.progress:Progress`;
   /** The app's own live "needs local AI" component (it has the window's Pitwall state), or null. */
   protected readonly appNeedsAi = inject(VIEW_NEEDS_AI);
+  /** The app's "Open AI settings", or null (the card then says to set up local AI in the app's settings, and dev mode reports the missing wiring). The plugin's `setup` is never sent. */
+  protected readonly openAiSettings = inject(VIEW_OPEN_AI_SETTINGS);
+  protected readonly needsAiSettings = $localize`:@@pd.view.needs-ai.settings:Open AI settings`;
+  protected readonly needsAiElsewhere = $localize`:@@pd.view.needs-ai.elsewhere:Set up local AI in this app's settings.`;
   protected readonly needsAiDefault = $localize`:@@pd.view.needs-ai:This needs local AI, which is not ready.`;
   protected readonly updateApp = $localize`:@@pd.view.unknown:Update the app to view this`;
+  /**
+   * Rule 19: every host that shows views provides `VIEW_NEEDS_AI` or `VIEW_OPEN_AI_SETTINGS`, so a "needs local AI" card always has
+   * a working repair. In dev mode a `needsAi` node drawn with neither is reported (to the app's `ErrorHandler`, once per node) so the
+   * missing host wiring is found while building, not by a user who sees a "not running" message with no button.
+   */
+  private readonly ruleNineteen = effect(() => {
+    // Reporting to the error handler is a side effect on something outside the signal graph.
+    if (this.shape().tag !== 'needsAi' || this.appNeedsAi || this.openAiSettings || !isDevMode()) return;
+    this.errors.handleError(new Error(NEEDS_AI_WITHOUT_REPAIR));
+  });
+  private readonly errors = inject(ErrorHandler);
   private static next = 0;
   private readonly uid = ++PdViewNode.next;
   protected readonly progressId = () => `pd-view-progress-${this.uid}`;

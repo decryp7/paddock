@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ActionRef, GrantRef, Node, NodeKind, SecretRef, ViewAction, ViewDoc } from '../generated/view';
 import { VIEW_EXTRA_LIMITS } from './limits';
 import { KNOWN_KINDS, shapeOf } from './model';
-import { NO_VIEW_HOST, VIEW_HOST, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from './host';
+import { NO_VIEW_HOST, VIEW_HOST, VIEW_OPEN_AI_SETTINGS, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from './host';
 import { sampleViewDoc } from './sample';
 import { fieldProblem, initialValues } from './form';
 import { PdView } from './view';
@@ -82,7 +82,7 @@ describe('pd-view', () => {
     host = new FakeHost();
     fake = new FakeECharts();
     TestBed.configureTestingModule({
-      providers: [provideZonelessChangeDetection(), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(fake.init) }, ...(provideHost ? [{ provide: VIEW_HOST, useValue: host }] : [])],
+      providers: [provideZonelessChangeDetection(), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(fake.init) }, { provide: VIEW_OPEN_AI_SETTINGS, useValue: () => undefined }, ...(provideHost ? [{ provide: VIEW_HOST, useValue: host }] : [])],
     });
     const f = TestBed.createComponent(Host);
     f.componentInstance.doc.set(doc);
@@ -385,14 +385,14 @@ describe('pd-view', () => {
       expect(text(one(el(f), '[data-testid=view-notice]'))).toBe('No browser.');
     });
 
-    it('sends the needs-AI setup action and the empty action', async () => {
+    it('shows the needs-AI reason without routing the plugin\'s setup action', async () => {
       const f = await setup();
       const ai = one(el(f), '[data-testid=view-needs-ai]');
       expect(text(ai)).toContain('Explain the failing check');
       expect(text(ai)).toContain('Pitwall is not running.');
-      buttonByText(ai, 'Set up Pitwall').click();
-      await settle(f);
-      expect(last(f).action).toBe('setup-ai');
+      // The only button is the app's own "Open AI settings" (the host of this test provides one); the plugin's setup is not drawn.
+      expect(all(ai, 'button').map((b) => text(b))).toEqual(['Open AI settings']);
+      expect(f.componentInstance.actions.map((a) => a.action)).not.toContain('setup-ai');
     });
 
     it('says why in the needs-AI state when the plugin gave no reason', async () => {
