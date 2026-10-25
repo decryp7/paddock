@@ -563,7 +563,11 @@ async fn a_start_whose_port_is_taken_at_the_real_bind_is_still_one_model_load() 
         .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])
         .await;
     assert_eq!(r.status, 200, "{}", r.body);
-    assert_eq!(h.attempts.load(Ordering::SeqCst), 2, "the first bind lost the port, the retry won it");
+    assert_eq!(
+        h.attempts.load(Ordering::SeqCst),
+        2,
+        "the first bind lost the port, the retry won it"
+    );
     assert_eq!(h.starts.load(Ordering::SeqCst), 1, "one load");
 }
 

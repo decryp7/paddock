@@ -172,10 +172,24 @@ impl Engine for FakeEngine {
                     }),
                 );
             // Another listener on the port at the real bind (bind_stolen): held across the bind, so it fails as the race does.
-            let thief = (self.bind_stolen.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok())
-                .then(|| std::net::TcpListener::bind(("127.0.0.1", l.port)))
-                .transpose()
-                .map_err(|e| EngineError::Start(e.to_string()))?;
+            let steal = loop {
+                let n = self.bind_stolen.load(Ordering::SeqCst);
+                if n == 0 {
+                    break false;
+                }
+                if self
+                    .bind_stolen
+                    .compare_exchange(n, n - 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    break true;
+                }
+            };
+            let thief = if steal {
+                Some(std::net::TcpListener::bind(("127.0.0.1", l.port)).map_err(|e| EngineError::Start(e.to_string()))?)
+            } else {
+                None
+            };
             let listener = tokio::net::TcpListener::bind(("127.0.0.1", l.port))
                 .await
                 .map_err(|e| EngineError::Start(e.to_string()))?;
