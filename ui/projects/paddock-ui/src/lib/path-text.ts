@@ -25,8 +25,8 @@ import { copyText } from './clipboard';
     :host { display: flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; }
     .pd-text { display: flex; min-width: 0; flex: 0 1 auto; overflow: hidden; white-space: nowrap; font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
     .pd-text.pd-plain { font-family: inherit; font-size: inherit; }
-    /* Shrink order: the directory first (weight 100000, so the name loses less than a layout unit until the directory is at its minimum, never below 2ch so its ellipsis stays), then the start of the name; the tail never. */
-    .pd-head { flex: 0 100000 auto; min-width: 2ch; overflow: hidden; text-overflow: ellipsis; }
+    /* Shrink order: the directory first (weight 100000, so the name loses less than a layout unit until the directory is gone), then the start of the name; the tail never. So at most one ellipsis shows: the directory's, or the name's once the directory has nothing left to give. */
+    .pd-head { flex: 0 100000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .pd-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
     .pd-tail { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
     .pd-copy { flex: none; display: inline-flex; padding: 2px; border: 0; border-radius: var(--pd-radius-tag); background: transparent; color: var(--pd-text-muted); cursor: pointer; opacity: 0; }

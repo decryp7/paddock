@@ -5,6 +5,14 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Fixed
+- Findings of the independent screenshot review (`ui/docs/screenshots/REVIEW.md`): the menu bar never wraps (it stays one line and
+  the app name gives way first; the title bar clips nothing at 320 px); the demo's runner names truncate with an ellipsis and a
+  tooltip, and State and the counts give way before the name; `pd-path-text` shows at most one ellipsis; `pd-job` shows an icon
+  beside Done and Failed, a Retry on a failed job when the host offers one, and a Cancel that is never disabled (a step that
+  cannot be interrupted says so, and that Cancel acts when it ends; rule 11); the jobs status item counts the same elapsed time as
+  the job card; a status chip whose state is unknown is neutral, not danger; `pd-segmented-control` groups its counts. The gallery
+  keeps its click counters out of sight, names the tray popover after the accent's app, labels the metrics, and the README points
+  at images that exist (14 sections, seven accents).
 - UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
   injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell
   demo's menu bar test expects Edit (undo, X44); the channels retry test steps the demo engine by hand (`?channels-step=manual`)

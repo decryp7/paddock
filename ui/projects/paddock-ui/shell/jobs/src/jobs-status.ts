@@ -86,7 +86,10 @@ export class PdJobsStatus {
   /** The lead job's view while it runs (null otherwise). */
   private readonly leadView = computed(() => {
     const lead = this.store.lead();
-    return lead?.state === 'running' && lead.phase ? jobView(lead, this.stalled()) : null;
+    if (lead?.state !== 'running' || !lead.phase) return null;
+    // The running time now, as the job card counts it (the snapshot's plus the time since it arrived), so both agree.
+    const heard = this.store.heardAt()[lead.id];
+    return jobView(lead, this.stalled(), lead.elapsedMs + (heard === undefined ? 0 : Math.max(0, this.store.now() - heard)));
   });
   /** The lead's share on a known scale (0..100), for the ring; null for the spinner. */
   protected readonly percent = computed(() => this.leadView()?.percent ?? null);

@@ -3,7 +3,7 @@
 The shared design system of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter, Pacenotes, Sighter): design tokens, base styles,
 Angular components and an ECharts theme. Part of [paddock](../README.md); versioned with the repo.
 
-![Gallery, dark](docs/screenshots/gallery-dark-debrief.png)
+![Gallery, dark](docs/screenshots/gallery-debrief-dark.png)
 
 ## Install
 
@@ -513,7 +513,8 @@ provideThemes(CONSOLE_THEME),                                                   
 Screenshots for review: [dark](docs/screenshots/shell-demo/theme-dark.png), [light](docs/screenshots/shell-demo/theme-light.png),
 [high contrast dark](docs/screenshots/shell-demo/theme-high-contrast-dark.png),
 [high contrast light](docs/screenshots/shell-demo/theme-high-contrast-light.png),
-[pseudo-locale](docs/screenshots/shell-demo/theme-pseudo-locale-dark.png) (`npm run screenshots`: `e2e/screenshots.spec.ts`, the kit's `captureDocScreens`).
+[pseudo-locale](docs/screenshots/shell-demo/theme-pseudo-locale-dark.png) (`npm run screenshots`: `e2e/screenshots.spec.ts`, the kit's `captureDocScreens`). The pseudo-locale shot translates the shell's own text and
+commands; the demo page's body text is the app's content and stays English.
 
 ## Tokens
 
@@ -581,7 +582,7 @@ Diverging scale now reuses series 1 and 2.
 
 `npm run gallery` serves a demo app at http://localhost:4300 with every component and the chart theme; the toolbar switches
 theme, accent and density, or use `?theme=light&accent=dyno&density=compact`. Playwright screenshots of every component
-(10 sections) in both themes and each of the five accents are in [`docs/screenshots/<theme>/<accent>/<component>.png`](docs/screenshots),
+(14 sections) in both themes and each of the seven accents are in [`docs/screenshots/<theme>/<accent>/<component>.png`](docs/screenshots),
 plus `gallery-*.png` overviews and `density/`.
 
 ![Card, light, Pitcrew](docs/screenshots/light/pitcrew/card.png)

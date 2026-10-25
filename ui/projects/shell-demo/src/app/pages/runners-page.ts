@@ -16,7 +16,7 @@ const STATE_WORD = { online: 'Online', updating: 'Updating', offline: 'Offline' 
   template: `
     <sd-page heading="Runners" subtitle="Build machines registered with this workspace.">
       <pd-table label="Runners" [rows]="state.rows()" [columns]="columns" [rowKey]="key" [filterable]="false" [rowHeight]="48" [rowActions]="actions" (action)="lastAction.set($event.id + ' ' + $event.row.name)">
-        <ng-template pdCell="name" let-r><span class="who"><span class="name">{{ r.name }}</span><span class="host">{{ r.host }}</span></span></ng-template>
+        <ng-template pdCell="name" let-r><span class="who"><span class="name" [attr.title]="r.name">{{ r.name }}</span><span class="host" [attr.title]="r.host">{{ r.host }}</span></span></ng-template>
         <ng-template pdCell="state" let-r><span class="state" [attr.data-state]="r.state"><span class="dot" aria-hidden="true"></span>{{ stateWord(r) }}</span></ng-template>
       </pd-table>
       <p class="sr" aria-live="polite" data-testid="runner-action">{{ lastAction() }}</p>
@@ -30,8 +30,9 @@ const STATE_WORD = { online: 'Online', updating: 'Updating', offline: 'Offline' 
     SECTION_STYLES +
     `
     .who { display: grid; min-width: 0; }
-    .name { display: block; font-weight: var(--pd-weight-medium); }
-    .host { display: block; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .name, .host { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .name { font-weight: var(--pd-weight-medium); }
+    .host { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .state { display: inline-flex; align-items: center; gap: var(--pd-space-1); }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pd-text-muted); }
     .state[data-state='online'] .dot { background: var(--pd-success); }
@@ -51,9 +52,9 @@ export class RunnersPage {
   /** Narrow page areas keep the runner and its state; the counts and times are on wider ones (the table drops them by its own width). */
   protected readonly columns: PdColumn<Runner>[] = [
     { key: 'name', header: 'Runner', value: (r) => r.name, required: true, width: 'minmax(0, 2fr)' },
-    { key: 'state', header: 'State', value: (r) => r.state, width: '110px' },
+    { key: 'state', header: 'State', value: (r) => r.state, width: '92px' },
     { key: 'jobs', header: 'Jobs today', value: (r) => r.jobsToday, align: 'end', width: '96px', hideBelow: 400 },
-    { key: 'when', header: 'Last job', value: (r) => r.lastJob, width: 'minmax(0, 1fr)', hideBelow: 520 },
+    { key: 'when', header: 'Last job', value: (r) => r.lastJob, width: 'minmax(7.5rem, 1fr)', hideBelow: 520 },
   ];
   protected readonly actions = (r: Runner): readonly PdRowAction[] => [
     { id: 'restart', label: 'Restart runner', icon: 'refresh', inline: true },

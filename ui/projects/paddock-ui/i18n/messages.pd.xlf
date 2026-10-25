@@ -2148,10 +2148,13 @@
         <source>In progress</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.not-cancellable" datatype="html">
-        <source>This step cannot be stopped</source>
+        <source>This step cannot be stopped; Cancel takes effect when it ends.</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.of" datatype="html">
         <source><x id="done"/> of <x id="total"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.retry" datatype="html">
+        <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.so-far" datatype="html">
         <source><x id="done"/> so far</source>
@@ -2161,6 +2164,9 @@
       </trans-unit>
       <trans-unit id="pd.ui.job.starting" datatype="html">
         <source>Starting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.stops-after" datatype="html">
+        <source><x id="reason"/>: Cancel takes effect when this step ends.</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.user-cancelled" datatype="html">
         <source>Stopped at your request.</source>
