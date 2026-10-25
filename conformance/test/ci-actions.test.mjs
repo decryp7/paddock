@@ -292,7 +292,7 @@ function runStableWorkspace(os, root, over = {}) {
   const script = join(root, 'step.sh');
   writeFileSync(script, body);
   return spawnSync('bash', ['-e', '-o', 'pipefail', script], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), NAME: 'decryp7/paddock-crate', ...over },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), GITHUB_ENV: join(root, 'github-env'), NAME: 'decryp7/paddock-crate', ...over },
     encoding: 'utf8',
     cwd: join(root, 'work', 'abc', 'hostexecutor'),
   });
@@ -315,6 +315,7 @@ test('stable-workspace gives every run of a host job the same physical checkout 
   assert.ok(lstatSync(link).isSymbolicLink());
   assert.equal(realpathSync(link), stable, 'the old path resolves to the stable folder (what cargo and rustc see as their working folder)');
   assert.equal(readFileSync(join(link, 'Cargo.toml'), 'utf8'), 'x');
+  assert.match(readFileSync(join(root, 'github-env'), 'utf8'), new RegExp(`^PADDOCK_WORKSPACE=${stable}$`, 'm'), 'later steps build from the stable folder');
   assert.equal(runStableWorkspace('macOS', root).status, 0, 'a second run on the linked workspace is a no-op');
   // The next job: a new hashed work folder with a fresh checkout replaces the previous stable folder.
   mkdirSync(join(root, 'work', 'def', 'hostexecutor'), { recursive: true });
@@ -323,6 +324,39 @@ test('stable-workspace gives every run of a host job the same physical checkout 
   assert.equal(again.status, 0, again.stderr);
   assert.equal(realpathSync(join(root, 'work', 'def', 'hostexecutor')), stable, 'same physical path as the job before');
   assert.equal(readFileSync(join(stable, 'Cargo.toml'), 'utf8'), 'y');
+});
+
+test('stable-workspace keeps a clone at the stable path at the checkout\'s commit where the work folder cannot move (Windows)', () => {
+  const root = stableFixture();
+  const ws = join(root, 'work', 'abc', 'hostexecutor');
+  const git = (cwd, ...args) => {
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', ...args], { cwd, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home') } });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  git(ws, 'init', '-q');
+  git(ws, 'add', 'Cargo.toml');
+  git(ws, 'commit', '-qm', 'one');
+  // `mv` fails as it does on the Windows runner, which keeps a handle on the work folder.
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'mv'), '#!/bin/sh\necho "Device or resource busy" >&2\nexit 1\n', { mode: 0o755 });
+  const run = () => runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin` });
+  const stable = join(root, 'home', '.paddock-ci', 'src', 'decryp7_paddock-crate');
+  const r = run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(!lstatSync(ws).isSymbolicLink(), 'the checkout stays where it was');
+  assert.equal(readFileSync(join(stable, 'Cargo.toml'), 'utf8'), 'x');
+  assert.equal(git(stable, 'rev-parse', 'HEAD'), git(ws, 'rev-parse', 'HEAD'));
+  assert.match(readFileSync(join(root, 'github-env'), 'utf8'), new RegExp(`^PADDOCK_WORKSPACE=${stable}$`, 'm'));
+  // The next run: a new commit, and a file the last build left in the clone is gone.
+  writeFileSync(join(ws, 'Cargo.toml'), 'y');
+  git(ws, 'commit', '-qam', 'two');
+  writeFileSync(join(stable, 'left-over.rs'), '');
+  assert.equal(run().status, 0);
+  assert.equal(readFileSync(join(stable, 'Cargo.toml'), 'utf8'), 'y');
+  assert.equal(git(stable, 'rev-parse', 'HEAD'), git(ws, 'rev-parse', 'HEAD'));
+  assert.ok(!existsSync(join(stable, 'left-over.rs')));
 });
 
 test('stable-workspace leaves Linux containers alone and never fails a job it cannot help', () => {
@@ -334,6 +368,7 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
   const r = runStableWorkspace('macOS', root, { PADDOCK_CI_HOME: join(root, 'blocked') });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /::warning::stable-workspace: could not move/);
+  assert.ok(!existsSync(join(root, 'github-env')) || !/PADDOCK_WORKSPACE/.test(readFileSync(join(root, 'github-env'), 'utf8')), 'later steps build in the work folder');
   assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink(), 'the checkout stays where it was');
   assert.equal(readFileSync(join(root, 'work', 'abc', 'hostexecutor', 'Cargo.toml'), 'utf8'), 'x');
 });

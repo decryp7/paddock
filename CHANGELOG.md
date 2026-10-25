@@ -5,6 +5,10 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Fixed
+- paddock-mcp: stopping the loopback server ends connections whose client stays connected at once on Windows too (reads are cut into 100 ms
+  slices that notice the stop; shutting a socket down does not wake a blocked read there, so `Serving::stop` waited about two minutes).
+  paddock-pitwall's `FakePitwall::kill` wakes its accept loop once and joins it instead of connecting again (each refused connection costs
+  about two seconds on Windows).
 - WebKit (macOS WKWebView): every rule that sets `user-select` sets `-webkit-user-select` too (notification text, service-status code, pop-out title bar,
   drag ghost); reduced motion turns transitions off (`0s`) instead of 0.01 ms, which WebKit ran as real transitions and painted inherited colours late; the
   shell demo's key recorder focuses its button on click (WebKit does not). The test kit's `pressTab`/`tabKey` press Option+Tab in WebKit on macOS (full

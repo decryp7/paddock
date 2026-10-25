@@ -284,8 +284,10 @@ jobs:
           echo "PADDOCK_TEST_BROWSER_DIR=$GITHUB_WORKSPACE/../.paddock-ci-test-browser" >> "$GITHUB_ENV"
 
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
-      # on every run. Run from the same physical path every time (the old path stays as a link). On Windows the
-      # step comes after the one that puts Git's bash on PATH (before it, `shell: bash` finds WSL's bash.exe); the link there is a junction.
+      # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the cargo steps' working-directory
+      # (macOS: the checkout moved there, the old path a link; Windows, where act keeps the work folder open: a clone there
+      # at the same commit). On Windows the step comes after the one that puts Git's bash on PATH (before it, `shell: bash`
+      # finds WSL's bash.exe).
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
         with:
@@ -314,6 +316,7 @@ jobs:
       # the crate of every failure. scripts/publish.test.mjs and conformance C37 fail when a workspace member is left out.
       - name: Clippy (workspace, every feature)
         if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       # The build chromium.toml pins, on the host runners (the Linux image has it): checked against its SHA-256 and kept in a
@@ -332,6 +335,7 @@ jobs:
       # exactly this run under llvm-cov, so this leg does not run it twice.
       - name: Tests (workspace, every feature)
         if: ${{ !cancelled() && runner.os != 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: cargo nextest run --workspace --all-features --profile ci
@@ -342,6 +346,7 @@ jobs:
       # and paddock-updater's `tauri`, and paddock-updater turns on paddock-download's default `http`.
       - name: Tests with the optional features off
         if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: |
           cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
           cargo nextest run -p paddock-diag -p paddock-updater --profile ci
@@ -350,6 +355,7 @@ jobs:
       # nextest (and so the coverage job) does not run doc tests.
       - name: Doc tests (workspace, every feature)
         if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo test --workspace --all-features --doc
 
       - uses: ./.gitea/actions/sccache-stats
