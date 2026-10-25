@@ -444,3 +444,44 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+  # TEMP (branch shell/ci-speed only, removed before merge): the shell demo's Windows installer links with rust-lld.
+  tmp-lld-shell-demo:
+    name: TEMP shell demo with rust-lld (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        shell: cmd
+        run: |
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-shell-demo-lld>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+      - uses: ./.gitea/actions/build-env
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          windows-linker: rust-lld
+          sccache-backend: local
+      - name: Build the installer with rust-lld
+        env:
+          CI: "true"
+        run: |
+          echo "linker: ${CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER:-link.exe}"
+          bash scripts/demo/bundle.sh shell-demo nsis
+      # MSVC's link.exe writes a "Rich" header into every PE file; lld-link does not.
+      - name: The executables were linked by lld-link
+        run: |
+          dir="$(cygpath -u "$CARGO_TARGET_DIR")/release"
+          ls "$dir"/*.exe
+          for f in "$dir"/*.exe apps/shell-demo/src-tauri/binaries/*.exe; do
+            if head -c 1024 "$f" | grep -aq Rich; then echo "::error::$f was linked by link.exe"; exit 1; fi
+            echo "$f: lld-link"
+          done
+      - name: The bundled agent starts (Windows)
+        uses: ./.gitea/actions/sidecar-self-test
+        with:
+          dir: apps/shell-demo/src-tauri/binaries
+          sidecars: shell-demo-agent
