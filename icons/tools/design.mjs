@@ -638,7 +638,7 @@ function renderGlyph(layers, paint, uid) {
       body[i] = `<path d="${L.d}" fill="none" stroke="${fill}" stroke-width="${L.w}" stroke-linecap="${L.cap ?? 'round'}" stroke-linejoin="round"${maskAttr}/>`;
     } else {
       const soft = L.round ? ` stroke="${fill}" stroke-width="${L.round * 2}" stroke-linejoin="round"` : '';
-      body[i] = `<path d="${L.d}" fill="${fill}"${soft}${maskAttr}/>`;
+      body[i] = `<path d="${L.d}" fill="${fill}"${soft}${maskAttr}${L.crisp ? ' shape-rendering="crispEdges"' : ''}/>`;
     }
   });
   // Consecutive secondary layers share one translucent group so overlaps don't double up.
@@ -678,14 +678,16 @@ function inkPaint(app, concept, uid, palette) {
  * platform 'windows': near full-bleed rounded square (margin 40, circular corners), no outer shadow.
  */
 /** `bare` leaves out the glyph and the livery: the tile background alone, for the seam scan (tools/scan.mjs). */
-export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false, glyph: override, title, palette } = {}) {
+export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false, glyph: override, title, palette, art: artFn } = {}) {
   const p = palette ?? PALETTE[app];
+  // `art`: (uid) => { defs, body }, a fully rendered glyph (its own light, shading and shadow) in place of the layer glyph.
+  const art = artFn ? artFn(uid) : null;
   const mac = platform === 'macos';
   const x = mac ? 100 : 40, s = mac ? 824 : 944;
   const shape = mac ? squircle(x, x, s, s, 185.4) : rr(x, x, s, s, 200);
   const scale = s / 824;
   const carbon = concept === 'carbon';
-  const g = override ?? GLYPH_1024[app]();
+  const g = art ? [] : override ?? GLYPH_1024[app]();
   const ink = inkPaint(app, concept, uid, palette);
   const glyph = renderGlyph(g, ink.paint, uid);
   const top = carbon ? CARBON.top : p.top, bottom = carbon ? CARBON.bottom : p.bottom, mid = carbon ? '#22252B' : p.base;
@@ -709,7 +711,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     <clipPath id="${uid}clip"><path d="${shape}"/></clipPath>
     <filter id="${uid}gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="${f(10 * scale)}" stdDeviation="${f(12 * scale)}" flood-color="${glyphShadow}" flood-opacity="${shadowOp}"/></filter>
     ${mac ? `<filter id="${uid}ts" color-interpolation-filters="sRGB" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>` : ''}
-    ${ink.defs}${glyph.defs}
+    ${ink.defs}${glyph.defs}${art ? art.defs : ''}
   </defs>
   <path d="${shape}" fill="url(#${uid}bg)"${mac ? ` filter="url(#${uid}ts)"` : ''}/>
   <g clip-path="url(#${uid}clip)">
@@ -719,7 +721,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>
     ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="${p.rimMaster ?? 0.14}" stroke-width="${f(4 * scale)}"/>` : ''}${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
   </g>
-  ${bare ? '' : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
+  ${bare ? '' : art ? `<g transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${art.body}</g>` : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
 </svg>
 `;
 }

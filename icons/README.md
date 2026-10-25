@@ -71,6 +71,36 @@ one bold glyph with at most one translucent secondary, cut-outs in the tile colo
   glyph within x 2 to 14), and the sheet `alternative/paddock-family-sheet.png` (the family row at 128, 32 and 16 on light and dark,
   the row under simulated protanopia, deuteranopia and tritanopia, pixel-exact close-ups and the tray). `icons/paddock` is unchanged.
 
+## Paddock isometric study (2026-10-25, awaiting the user's look)
+
+Where the Paddock mark is shown today: the repo README (`icons/paddock/paddock-macos.svg` at 112 px), the ecosystem diagram
+(`docs/images/src/icons/paddock.svg` at about 60 px, also in the profile repo), the profile README's Paddock heading (`images/paddock.png`
+at 32 px), and the Gitea repo avatar. No Dock, taskbar or tray shows it: no shipped app uses it and the demo apps have their own icons.
+So a richer mark suits it.
+
+`node tools/paddock-iso-sheet.mjs` builds `alternative/paddock-iso-*` from `tools/paddock-iso.mjs` and the sheet
+`alternative/paddock-iso-sheet.png` (the isometric master at 512 and 256 beside the flat mark, Pitwall and Dyno; each version in the
+family row at 128 and hand-tuned 32/16 on light and dark, pixel-exact close-ups and the tray).
+
+- **Master:** a rendered pit building in true 30 degree isometric projection, lit from the top left: a white roof slab with an
+  overhang and a light edge strip, the long wall with four bays (half-open roll-up doors set back in the openings, slatted, dark
+  interiors), darker end walls, a plinth, ambient occlusion under the roof and in the bays, a soft contact shadow. White and cool greys
+  on the graphite tile. `masterSvg` takes it as `art` (a rendered glyph in place of the layer glyph).
+- **128 frame** (`paddock-iso-128`, also the size the README and the diagram show): no slats (they alias to grey), flat doors with a
+  light rail, wider pillars.
+- **Small sizes, two choices:** a hand-drawn 2:1 pixel-isometric block at 32 and 24 with the flat slatted door at 16 and in the tray
+  (`paddock-iso-{16,24,32,48}`, recommended by the review), or isometric down to 16 and in the tray (`paddock-iso-16-isometric`,
+  `paddock-iso-tray-isometric-*`), which blurs.
+
+## Paddock pit building (2026-10-25, round 2 of the isometric study, awaiting the user's look)
+
+`pitBuilding()` in `tools/paddock-iso.mjs`, built by `node tools/paddock-pit-sheet.mjs` into `alternative/paddock-pit-*` and the sheet
+`alternative/paddock-pit-sheet.png`: a motorsport pit building (ground floor with four lit bays and half-raised doors, a cantilevered
+canopy carrying a thin pinstripe in the seven app hues, an upper hospitality floor with dark glass, the roof slab, and in front the
+pit lane and the chequered pit wall), about 72 % of the tile width. A simplified frame (`paddock-pit-128`, also used at 112 and 60:
+three bays, no slats or mullions, a coarser chequer), pixel-isometric frames at 32 and 24 (`PIT_SMALL`), and the flat slatted door
+at 16 and in the tray. The rendering rules are in `STYLE.md`.
+
 ## Seam scan
 
 `node tools/build.mjs` fails when a master has a hard seam in the tile (`tools/scan.mjs`, tests in `tools/scan.test.mjs`, `npm test`).
