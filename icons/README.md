@@ -50,28 +50,26 @@ and dark, beside Debrief and Pitwall). In all three the stripe has a hard stop p
 - **B, `paddock-pit-boxes`:** the pit lane from above: the garage wall, seven coloured pit boxes, the dashed lane line and the pit wall.
 - **C, `paddock-foundation`:** one course of seven coloured blocks with a neutral slab resting on it, a little wider than the base.
 
-## Paddock in the family grammar (2026-10-25, awaiting the user's pick)
+## Paddock in the family grammar (2026-10-25, graphite picked; awaiting the user's sign-off on the symbol)
 
-The candidates above keep the dark tile and the seven-colour stripe, so they still break the family grammar (a saturated single-hue
-tile, one bold glyph with at most one translucent secondary, cut-outs in the tile colour, few parts). `node tools/paddock-family.mjs`
-builds a set from `PADDOCK_FAMILY` in `tools/design.mjs` into `alternative/paddock-family-<hue>-*` (macOS and Windows masters with 1024
-PNGs, hand-tuned 16/24/32/48 frames) plus one tray set (`paddock-family-tray-*`: template SVG and 16/18 pt PNGs, light and dark SVG,
-PNG and .ico), and the sheet `alternative/paddock-family-sheet.png`: each proposal in a row with the seven apps and the current mark at
-128, hand-tuned 32/16 and master 32/16 on light and dark, the 128 row under simulated protanopia, deuteranopia and tritanopia, and
-pixel-exact close-ups.
+The redesign candidates above keep the seven-colour stripe and many small parts, which break the family grammar (a single-hue tile,
+one bold glyph with at most one translucent secondary, cut-outs in the tile colour, few parts). The new mark keeps the graphite tile
+`#2B3038` (white ink 13.3:1; nearest app 19.5 normal, 17.9 protan, 20.1 deutan, 12.2 tritan) with one white glyph.
 
-- **Glyph:** a flat-roof pit garage: a roof slab with a slit under it, a long, low building and two wide door openings cut to the
-  ground (wider than tall, so it reads as bays, not a gate or a table), the roll-up doors half raised in translucent ink (slatted at
-  1024, dropped at 16 px and in the tray).
-- **Jade `#4AC59D`, dark ink `#08332A` (6.5:1):** the only green band that keeps every family CVD minimum against the seven apps
-  on its base (nearest 20.8 normal Spotter, 12.0 protan Spotter, 13.6 deutan Pitcrew, exactly on the floor, 16.2 tritan Sighter), but
-  with no margin: the bottom stop falls to 10.3 deutan (Dyno) and 9.4 tritan (Debrief), and the shell demo's silver is 10.2 protan and
-  12.9 deutan.
-  Saturated mid-tone greens and teals with white ink all fell below the minimums: grass `#00A768` 9.8 deutan (Pitcrew) and 8.5 tritan
-  (Debrief), teal `#00A389` 7.5 deutan (Dyno) and 8.1 tritan (Debrief); no green with white ink scored better than about 9.2.
-- **Graphite `#2B3038`, white ink (13.3:1):** the current tile with the new single glyph; margin everywhere (19.5 normal, 17.9 protan,
-  20.1 deutan, 12.2 tritan; 19.3 from the workbench demo). The independent review recommends it: it marks Paddock as the umbrella
-  rather than an eighth app, and the grammar break of the current mark was the stripe and the many parts, not the tile.
+- **Hue search:** no saturated green or teal with white ink keeps the family CVD minimums (best about 9.2: grass `#00A768` 9.8 deutan
+  against Pitcrew and 8.5 tritan against Debrief; teal `#00A389` 7.5 deutan against Dyno). The only passing green, jade `#4AC59D` with
+  dark ink, sat on the deutan floor with no margin, so graphite was picked.
+- **Symbol:** four options in `PADDOCK_SYMBOLS` (`tools/design.mjs`), compared in `alternative/paddock-symbols-sheet.png`
+  (`node tools/paddock-symbols.mjs`): A a slatted roll-up door in one bay, B a raised door over a car nose, C a raised door over a tyre,
+  D two slatted bays. An independent review ranked A first: it is the only one crisp at 16 px and in the tray (the car and the tyre
+  blur at 16, two bays read as a grid). The roof is flush with the pillars (an overhang read as a table or a Pi) and the shutter hangs
+  from it with the open gap at the bottom (a gap at the top made the slats float like a list). Ink coverage 21 % at 16.
+- **Rim:** raised at small sizes so the tile's base holds on a dark Dock or taskbar: a full-pixel rim at 40 % at 16, 45 % at 24 to
+  48, 20 % on the master.
+- **Set:** `node tools/paddock-family.mjs` writes `alternative/paddock-family-graphite-*` (macOS and Windows masters with 1024 PNGs,
+  hand-tuned 16/24/32/48) and `alternative/paddock-family-tray-*` (template SVG with 16/18 pt PNGs, light and dark SVG, PNG and .ico,
+  glyph within x 2 to 14), and the sheet `alternative/paddock-family-sheet.png` (the family row at 128, 32 and 16 on light and dark,
+  the row under simulated protanopia, deuteranopia and tritanopia, pixel-exact close-ups and the tray). `icons/paddock` is unchanged.
 
 ## Seam scan
 

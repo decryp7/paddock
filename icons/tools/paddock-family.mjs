@@ -6,7 +6,7 @@
 import { Resvg } from '@resvg/resvg-js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { APPS, NAMES, PADDOCK_FAMILY, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { APPS, NAMES, PADDOCK_FAMILY, PADDOCK_SYMBOLS, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { check, contrast } from './cvd.mjs';
 import { writeIco } from './ico.mjs';
 
@@ -14,10 +14,11 @@ const ROOT = resolve(import.meta.dirname, '..');
 const ALT = join(ROOT, 'alternative');
 mkdirSync(ALT, { recursive: true });
 const png = (svg, px) => new Resvg(svg, { fitTo: { mode: 'width', value: px }, shapeRendering: 2, textRendering: 0 }).render().asPng();
-const LABEL = { jade: 'Jade', graphite: 'Graphite' };
+const LABEL = { graphite: 'Graphite' };
 const FAMILY_ORDER = ['debrief', 'pitwall', 'sighter', 'dyno', 'pitcrew', 'spotter', 'pacenotes'];
 
-const g = PADDOCK_FAMILY.glyph;
+// The chosen symbol (round 2, independent review): A, the slatted roll-up door in one bay.
+const g = PADDOCK_SYMBOLS.slats;
 const glyphs = { 16: g.g16, 24: g.g24, 32: g.g32 };
 const sets = Object.entries(PADDOCK_FAMILY.palettes).map(([hue, palette]) => {
   const name = `paddock-family-${hue}`, title = `Paddock (${LABEL[hue]})`;

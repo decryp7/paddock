@@ -309,47 +309,102 @@ export const PADDOCK_VARIANTS = {
 };
 
 /**
- * Paddock in the family grammar (2026-10-25 candidates, alternative/paddock-family-*, built by tools/paddock-family.mjs): a tile of its
- * own and one bold glyph with one translucent secondary, like the seven apps; the family link is the grammar, not a stripe of their hues.
- * The glyph is a flat-roof pit garage: a roof slab (flush, or a 1 px overhang on the small grids), a slit under it, and a long, low
- * building with two wide door openings cut to the ground in tile colour (wider than tall, so the row reads as garage bays, not a gate);
- * the secondary is the roll-up doors half raised in the openings, slatted at 1024 (dropped at 16 px and in the tray, where a half-tone
- * part reads as disabled). Pillars are [outer, middle, outer].
+ * Paddock in the family grammar (2026-10-25; the user picked graphite): its own tile and one bold white glyph, like the seven apps; the
+ * family link is the grammar, not a stripe of their hues. The glyph is PADDOCK_SYMBOLS.slats (below), built by tools/paddock-family.mjs
+ * into alternative/paddock-family-graphite-*. A jade tile (#4AC59D, dark ink) was the only green that kept the family CVD minimums, with
+ * no margin (bottom stop 10.3 deutan, 9.4 tritan); saturated greens and teals with white ink all failed (grass #00A768, teal #00A389).
  */
-function pitGarage({ rx0, rx1, ry, rh, rr: rrad = 0, slit, bx0, bx1, pillars: [po, pm], doorTop, bottom, br = 0, dr = 0, roll = 0, slats = [], slatW = 0 }) {
-  const door = (bx1 - bx0 - 2 * po - pm) / 2;
-  const doors = [bx0 + po, bx0 + po + door + pm];
-  const body = ry + rh + slit;
-  return [
-    { kind: 'fill', d: rr(rx0, ry, rx1 - rx0, rh, rrad) + rr(bx0, body, bx1 - bx0, bottom - body, br), tone: 'primary', cut: [doors.map(x => rr(x, doorTop, door, bottom - doorTop + 40, dr)).join('')] },
-    ...(roll ? [{ kind: 'fill', d: doors.map(x => rr(x, doorTop, door, roll, 0)).join(''), tone: 'secondary',
-      ...(slats.length ? { cutStroke: { d: slats.map(y => `M${bx0} ${y}H${bx1}`).join(''), w: slatW, cap: 'butt' } } : {}) }] : []),
-  ];
-}
 export const PADDOCK_FAMILY = {
   palettes: {
-    // Jade, OKLCH ~(0.745, 0.125, 168): the paddock's turf, light enough to take dark ink like Spotter and Sighter. The only green
-    // band that keeps every family CVD minimum against the seven apps (tools/cvd.mjs): nearest 20.8 normal (Spotter), 12.0 protan
-    // (Spotter), 13.6 deutan (Pitcrew, on the floor), 16.2 tritan (Sighter). Margins: the bottom stop #2FAA83 drops to 10.3 deutan (Dyno)
-    // and 9.4 tritan (Debrief), and the shell demo's silver is 10.2 protan, 12.9 deutan. Ink #08332A, 6.5:1 on the base.
-    jade: { top: '#7ADDBA', base: '#4AC59D', bottom: '#2FAA83', deep: '#0B4A38', light: '#B5EEDA', ink: '#08332A' },
-    // Graphite: the current mark's tile (no hue of its own; keeps every CVD minimum), white ink 13.3:1, with the new single glyph.
-    graphite: { top: '#4A525E', base: '#2B3038', bottom: '#1E2228', deep: '#07080A', light: '#8A94A3', rim: '#FFFFFF' },
-  },
-  glyph: {
-    // 1024: roof 264..760 (16 overhang), slit 18, building 280..744 down to 724; pillars 48/64/48, two 152 x 176 openings from 548;
-    // roll-up doors 72 high with two slats.
-    g1024: pitGarage({ rx0: 264, rx1: 760, ry: 300, rh: 68, rr: 20, slit: 18, bx0: 280, bx1: 744, pillars: [48, 64], doorTop: 548, bottom: 724, br: 12, dr: 10, roll: 72, slats: [572, 596], slatW: 8 }),
-    // 32: roof 5..27 (1 px overhang), building 6..26, pillars 2/2/2, two 7 x 6 openings from 19; the roll-up doors 2 px.
-    g32: pitGarage({ rx0: 5, rx1: 27, ry: 7, rh: 3, rr: 0.5, slit: 1, bx0: 6, bx1: 26, pillars: [2, 2], doorTop: 19, bottom: 25, roll: 2 }),
-    // 24: roof 3..21, building 4..20, pillars 1/2/1, two 6 x 5 openings from 14; roll-up doors 2 px.
-    g24: pitGarage({ rx0: 3, rx1: 21, ry: 5, rh: 2, slit: 1, bx0: 4, bx1: 20, pillars: [1, 2], doorTop: 14, bottom: 19, roll: 2 }),
-    // 16: flush roof 2..14 (the slit sets it apart), building down to 13, pillars 1/2/1, two 4 x 3 openings; no roll-up doors.
-    g16: pitGarage({ rx0: 2, rx1: 14, ry: 4, rh: 2, slit: 1, bx0: 2, bx1: 14, pillars: [1, 2], doorTop: 10, bottom: 13 }),
-    // Tray (alpha only): roof 3 px, building 1..15, two 5 x 4 openings, solid.
-    tray: pitGarage({ rx0: 1, rx1: 15, ry: 2, rh: 3, slit: 1, bx0: 1, bx1: 15, pillars: [1, 2], doorTop: 10, bottom: 14 }),
+    // Graphite: the current mark's tile (no hue of its own; keeps every CVD minimum with margin), white ink 13.3:1.
+    graphite: { top: '#4A525E', base: '#2B3038', bottom: '#1E2228', deep: '#07080A', light: '#8A94A3', rim: '#FFFFFF', rimSmall: 0.45, rimMaster: 0.2, rimWidth16: 1, rimOpacity16: 0.4 },
+    // The rim is raised at small sizes so the tile's base holds on a dark Dock or taskbar: at 16 a full-pixel rim at 40 % (bottom edge
+    // #4E5157 on #1E1E1E, was #2E3239), at 24 to 48 a half-pixel rim at 45 %, at 1024 20 % (the current mark uses 22 % and 14 %).
   },
 };
+
+/**
+ * Paddock symbol options (2026-10-25, round 2 on graphite): every option is one garage bay or row under a flat roof, drawn per grid
+ * (16, 24, 32 by hand; 1024 maps the 32 grid around the centre, 24.2 per unit, so x 6..26 lands on 270..754). Options:
+ *  - slats (A): one wide bay, the roll-up door down to a low gap, its horizontal slats as the main feature (3 slats at 16).
+ *  - car (B): one bay, the door raised (translucent secondary), a car nose in the opening.
+ *  - tyre (C): one bay, the door raised (translucent secondary), a tyre in the opening.
+ *  - twin (D): two bays with slatted doors under one roof.
+ * The tray takes the 16 grid without the secondary (a half-tone part reads as disabled in a template image), x 2..14.
+ */
+const FRAME = {
+  16: { roof: [2, 3, 12, 2], pillars: [[3, 1], [12, 1]], top: 5, bottom: 13, door: [5, 6], doorTop: 6 },
+  24: { roof: [3, 4, 18, 3], pillars: [[4, 2], [18, 2]], top: 7, bottom: 20, door: [7, 10], doorTop: 8 },
+  32: { roof: [5, 6, 22, 3], pillars: [[6, 2], [24, 2]], top: 9, bottom: 26, door: [9, 14], doorTop: 10 },
+};
+const rect = ([x, y, w, h], r = 0) => rr(x, y, w, h, r);
+const ring = (cx, cy, r, hole) => ({ d: circle(cx, cy, r), cut: [circle(cx, cy, hole)] });
+const SYMBOLS = {
+  // The roof is flush with the pillars (an overhang read as a table or a Pi) and the shutter hangs from it: its top slat touches the
+  // roof, the open gap is at the bottom only (a door with a gap at the top floated as a list).
+  slats: {
+    16: { roof: [3, 3, 10, 2], strips: [5, 7, 9], h: 1 },
+    24: { roof: [4, 4, 16, 3], strips: [7, 10, 13], h: 2 },
+    32: { roof: [6, 6, 20, 3], strips: [9, 12, 15, 18], h: 2 },
+  },
+  car: {
+    16: { raised: 2, car: [[6, 9, 4, 1], [5, 10, 6, 2], [5, 12, 1, 1], [10, 12, 1, 1]] },
+    24: { raised: 3, car: [[10, 13, 4, 2], [8, 15, 8, 3], [8, 18, 2, 2], [14, 18, 2, 2]] },
+    32: { raised: 4, car: [[12, 15.5, 8, 3.5], [10, 19, 12, 4], [11, 23, 3, 3], [18, 23, 3, 3]], lights: [[12.75, 21, 1], [19.25, 21, 1]], screen: [13.5, 16.5, 5, 2] },
+  },
+  tyre: {
+    16: { raised: 2, tyre: [8, 10.5, 2.5, 1] },
+    24: { raised: 3, tyre: [12, 15.5, 3.5, 1.5] },
+    32: { raised: 4, tyre: [16, 20.5, 5, 2] },
+  },
+  twin: {
+    16: { pillars: [[3, 1], [7, 2], [12, 1]], doors: [[4, 3], [9, 3]], strips: [6, 8, 10], h: 1 },
+    24: { pillars: [[4, 2], [11, 2], [18, 2]], doors: [[6, 5], [13, 5]], strips: [8, 11, 14], h: 2 },
+    32: { pillars: [[6, 2], [15, 2], [24, 2]], doors: [[9, 5], [18, 5]], strips: [10, 13, 16, 19], h: 2 },
+  },
+};
+/** Layers of one symbol option on one grid (16, 24, 32), in grid units. `secondary: false` drops the translucent part (tray). */
+function symbolLayers(id, grid, { secondary = true, radius = 0 } = {}) {
+  const F = FRAME[grid], S = SYMBOLS[id][grid], k = radius;
+  const pillars = (S.pillars ?? F.pillars).map(([x, w]) => rect([x, F.top, w, F.bottom - F.top])).join('');
+  const frame = { kind: 'fill', d: rect(S.roof ?? F.roof, k * 0.6) + pillars, tone: 'primary' };
+  const [dx, dw] = F.door;
+  if (id === 'slats' || id === 'twin') {
+    const doors = S.doors ?? [[dx, dw]];
+    return [frame, { kind: 'fill', d: doors.flatMap(([x, w]) => S.strips.map(y => rect([x, y, w, S.h], k * 0.2))).join(''), tone: 'primary' }];
+  }
+  const raised = secondary ? [{ kind: 'fill', d: rect([dx, F.doorTop, dw, S.raised]), tone: 'secondary' }] : [];
+  if (id === 'car') {
+    const [cab, body, ...wheels] = S.car;
+    const cuts = [...(S.lights ?? []).map(([x, y, r]) => circle(x, y, r)), ...(S.screen ? [rect(S.screen, 0.5)] : [])];
+    return [frame, ...raised, { kind: 'fill', d: rect(cab, k * 0.5) + rect(body, k * 0.5) + wheels.map(w => rect(w, k * 0.3)).join(''), tone: 'primary', ...(cuts.length ? { cut: cuts } : {}) }];
+  }
+  const [cx, cy, r, hole] = S.tyre;
+  const t = ring(cx, cy, r, hole);
+  return [frame, ...raised, { kind: 'fill', d: t.d, tone: 'primary', cut: t.cut }];
+}
+/** Map a path from the 32 grid to the 1024 master (24.2 per unit around the centre). */
+const to1024 = d => d.replace(/([MLHVACZmlhvacz])([^MLHVACZmlhvacz]*)/g, (_, c, args) => {
+  const n = args.trim() ? args.trim().split(/[\s,]+/).map(Number) : [];
+  const X = v => f(512 + (v - 16) * 24.2), L = v => f(v * 24.2);
+  let out;
+  switch (c) {
+    case 'M': case 'L': out = n.map((v, i) => (i % 2 ? X(v) : X(v))); break;
+    case 'H': case 'V': out = n.map(X); break;
+    case 'A': out = [L(n[0]), L(n[1]), n[2], n[3], n[4], X(n[5]), X(n[6])]; break;
+    case 'a': out = [L(n[0]), L(n[1]), n[2], n[3], n[4], L(n[5]), L(n[6])]; break;
+    default: out = n;
+  }
+  return c + out.join(' ');
+});
+const layers1024 = layers => layers.map(L => ({ ...L, d: to1024(L.d), ...(L.cut ? { cut: L.cut.map(to1024) } : {}) }));
+export const PADDOCK_SYMBOLS = Object.fromEntries(Object.keys(SYMBOLS).map(id => [id, {
+  g1024: layers1024(symbolLayers(id, 32, { radius: 1 })),
+  g32: symbolLayers(id, 32),
+  g24: symbolLayers(id, 24),
+  g16: symbolLayers(id, 16),
+  tray: symbolLayers(id, 16, { secondary: false }),
+}]));
 
 export { PACENOTES };
 
@@ -662,7 +717,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     <path d="M${x - 40} ${x + s * 1.19}L${x + s * 1.19} ${x - 40}L${x + s * 1.23} ${x - 40}L${x - 40} ${x + s * 1.23}Z" fill="${liveryCol}" opacity="${liveryOp * 1.1}"/>`}
     <rect x="${x}" y="${x}" width="${s}" height="${s}" fill="url(#${uid}sheen)"/>
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>
-    ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="0.14" stroke-width="${f(4 * scale)}"/>` : ''}${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
+    ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="${p.rimMaster ?? 0.14}" stroke-width="${f(4 * scale)}"/>` : ''}${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
   </g>
   ${bare ? '' : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
 </svg>
@@ -689,7 +744,7 @@ export function smallSvg(app, size, { uid = newUid(idp(app)), glyphs, title, pal
     ${glyph.defs}
   </defs>
   <path d="${t}" fill="url(#${uid}bg)"/>
-  <path d="${rr(inset + 0.25, inset + 0.25, grid - 2 * inset - 0.5, grid - 2 * inset - 0.5, R - 0.25)}" fill="none" stroke="${p.rim ?? p.deep}" stroke-opacity="${p.rim ? 0.22 : LIGHT_TILE.has(app) ? 0.45 : 0.35}" stroke-width="0.5"/>
+  ${(() => { const w = grid === 16 ? (p.rimWidth16 ?? 0.5) : 0.5, o = w / 2, op = grid === 16 ? (p.rimOpacity16 ?? p.rimSmall) : p.rimSmall; return `<path d="${rr(inset + o, inset + o, grid - 2 * inset - w, grid - 2 * inset - w, R - o)}" fill="none" stroke="${p.rim ?? p.deep}" stroke-opacity="${p.rim ? (op ?? 0.22) : LIGHT_TILE.has(app) ? 0.45 : 0.35}" stroke-width="${w}"/>`; })()}
   ${glyph.body}
 </svg>
 `;
