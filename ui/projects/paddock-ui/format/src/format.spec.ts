@@ -20,7 +20,7 @@ import {
   percent,
   share,
 } from './units';
-import { DEFAULT_KEEP_TAIL, ELLIPSIS, middleEllipsis, splitForEllipsis, splitPath } from './middle-ellipsis';
+import { DEFAULT_KEEP_TAIL, ELLIPSIS, fitEnd, fitPath, middleEllipsis, splitForEllipsis, splitPath } from './middle-ellipsis';
 
 afterEach(() => setActiveLocale(SOURCE_LOCALE));
 
@@ -151,5 +151,79 @@ describe('middle ellipsis', () => {
     expect(splitForEllipsis(`${'a'.repeat(30)}${'b'.repeat(25)}`).tail).toBe('b'.repeat(20));
     // A boundary at the very end never empties the tail.
     expect(splitForEllipsis(`${'a'.repeat(30)}-`).tail.length).toBeGreaterThan(0);
+  });
+});
+
+describe('fitPath (screenshot review P2-3, re-review P1)', () => {
+  /** A 12 px mono face: every character is 7.2 px wide, so a box of 240 px holds 33 characters. */
+  const mono = (s: string): number => Array.from(s).length * 7.2;
+  const WIN = 'C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log';
+  const POSIX = '/Users/lin/Library/Application Support/Builder/logs/builder.service.log';
+  const count = (s: string): number => s.split(ELLIPSIS).length - 1;
+
+  it('returns a path that fits unchanged', () => {
+    expect(fitPath(WIN, 1000, mono)).toBe(WIN);
+  });
+  it('collapses the folders into one ellipsis flush against the root and the separator first', () => {
+    expect(fitPath(WIN, 35 * 7.2, mono)).toBe('C:\\…\\Builder.Service.2026-10-24.log');
+    expect(fitPath(POSIX, 240, mono)).toBe('/Users/lin/…/builder.service.log');
+    expect(fitPath(POSIX, 28 * 7.2, mono)).toBe('/Users/…/builder.service.log');
+    expect(fitPath(POSIX, 22 * 7.2, mono)).toBe('/…/builder.service.log');
+    expect(fitPath('\\\\srv\\share\\dir\\sub\\system.log', 24 * 7.2, mono)).toBe('\\\\srv\\share\\…\\system.log');
+    expect(fitPath('logs/app/deep/system.log', 15 * 7.2, mono)).toBe('log…/system.log');
+  });
+  it('never drops the root: when the name does not fit either, the ellipsis stays against the root and the name loses its start (Windows, 240 and 220 px)', () => {
+    expect(fitPath(WIN, 240, mono)).toBe('C:\\…Service.2026-10-24.log');
+    expect(fitPath(WIN, 220, mono)).toBe('C:\\…Service.2026-10-24.log');
+    for (const width of [240, 220, 150, 60, 30]) {
+      const shown = fitPath(WIN, width, mono);
+      expect(shown.startsWith('C:\\' + ELLIPSIS), `${width}: ${shown}`).toBe(true);
+      expect(count(shown)).toBe(1);
+      expect(mono(shown)).toBeLessThanOrEqual(Math.max(width, 4 * 7.2));
+    }
+  });
+  it('does the same for POSIX and UNC paths, keeping the extension', () => {
+    expect(fitPath(POSIX, 150, mono)).toBe('/…service.log');
+    expect(fitPath(POSIX, 12 * 7.2, mono)).toBe('/…log');
+    expect(fitPath('\\\\srv\\share\\dir\\sub\\system.log', 20 * 7.2, mono)).toBe('\\\\srv\\share\\…log');
+    expect(fitPath('/x.log', 3 * 7.2, mono)).toBe('/…g');
+  });
+  it('the tail never starts mid-word: the name is cut after a . - _ or space, or at a lower-to-upper change, and only a name with no boundary that fits is cut at a character (re-review P2)', () => {
+    const boundary = /^[^]*…(?:[A-Z]|(?<=[.\-_ ])|(?<=[a-z])(?=[A-Z]))/;
+    for (const path of [WIN, POSIX, 'C:\\Logs\\BuilderServiceHost2026.log', '/var/log/my service name.log']) {
+      const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+      for (let width = 60; width < 400; width += 7) {
+        const shown = fitPath(path, width, mono);
+        if (!shown.includes(ELLIPSIS) || shown.endsWith(ELLIPSIS) || shown.endsWith(`${ELLIPSIS}\\${name}`) || shown.endsWith(`${ELLIPSIS}/${name}`)) continue;
+        const tail = shown.slice(shown.indexOf(ELLIPSIS) + 1);
+        const at = name.length - tail.length;
+        if (at <= 0 || !name.endsWith(tail)) continue; // a folders-only cut
+        const mid = !/[.\-_ ]/.test(name[at - 1] ?? '') && !(/[a-z]/.test(name[at - 1] ?? '') && /[A-Z]/.test(name[at] ?? ''));
+        // Mid-word only when no word start of the name would have fitted.
+        const fitting = Array.from(name).some((_, i) => i > 0 && i < at && (/[.\-_ ]/.test(name[i - 1] ?? '') || (/[a-z]/.test(name[i - 1] ?? '') && /[A-Z]/.test(name[i] ?? ''))) && mono(shown.slice(0, shown.indexOf(ELLIPSIS) + 1) + name.slice(i)) <= width);
+        expect(mid && fitting, `${width}: ${shown}`).toBe(false);
+      }
+    }
+    expect(boundary.test('C:\\…Service.log')).toBe(true);
+    expect(fitPath('C:\\Logs\\BuilderServiceHost2026.log', 17 * 7.2, mono)).toBe('C:\\…Host2026.log');
+    expect(fitPath('/var/log/my service name.log', 16 * 7.2, mono)).toBe('/…name.log');
+  });
+  it('gives the root and the ellipsis alone when nothing of the name fits', () => {
+    expect(fitPath(WIN, 20, mono)).toBe('C:\\…');
+  });
+  it('shortens a bare name in front of its last words, with one ellipsis and no gap', () => {
+    expect(fitPath('a-rather-long-service-name-2026-10-24-11-30.log', 150, mono)).toBe('…026-10-24-11-30.log');
+    expect(fitPath('short-name.log', 50, mono)).toBe('…e.log');
+    expect(fitPath(POSIX, 0, mono)).toBe('/…');
+  });
+});
+
+describe('fitEnd (screenshot review P3)', () => {
+  const m = (s: string): number => Array.from(s).length * 8;
+  it('returns text that fits and cuts the end with no space before the ellipsis', () => {
+    expect(fitEnd('Paddock Shell Demo', 400, m)).toBe('Paddock Shell Demo');
+    expect(fitEnd('Paddock Shell Demo', 9 * 8, m)).toBe('Paddock…');
+    expect(fitEnd('Paddock Shell Demo', 10 * 8, m)).toBe('Paddock S…');
+    expect(fitEnd('Paddock Shell Demo', 0, m)).toBe('…');
   });
 });
