@@ -1,0 +1,9 @@
+# Cargo settings for every workspace in this repo (crates/, apps/*/src-tauri): Cargo reads this file from any folder below
+# the repo root, merged under a workspace's own .cargo/config.toml.
+
+# Windows: link with the toolchain's own lld-link (rust-lld.exe, shipped with every msvc toolchain; rustc finds it in its
+# sysroot) instead of MSVC's link.exe, which made linking most of a Windows build. It still links against the MSVC and
+# Windows SDK libraries, so Visual Studio's build tools stay required. Developers, CI and release builds use the same linker
+# (docs/dev-setup.md).
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"

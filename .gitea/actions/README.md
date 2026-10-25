@@ -14,7 +14,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `plan` | skip a nightly while main is unchanged since a green nightly; skip a main push whose commit is tagged | Debrief's `plan` job |
 | `nightly-mark` | record a fully green nightly (the marker `plan` looks up) | Debrief's `nightly-mark` job |
 | `cache-restore`, `cache-save` | the restore, then save-always cache pattern: a failing run still warms the cache; saved only when the key had no exact hit | the `actions/cache` blocks in every job |
-| `setup-rust` | toolchain with components and targets, sccache when the runner has it (shared Redis backend on every OS, `vars.SCCACHE_REDIS_ENDPOINT`/`_DB`; a wrapper keeps `CARGO_TARGET_DIR` out of the cache key), rust-lld for Windows MSVC (`windows-linker: rust-lld`), the Tauri Linux libraries | `dtolnay/rust-toolchain` + apt lines |
+| `setup-rust` | toolchain with components and targets, sccache when the runner has it (shared Redis backend on every OS, `vars.SCCACHE_REDIS_ENDPOINT`/`_DB`; a wrapper keeps `CARGO_TARGET_DIR` out of the cache key), the Tauri Linux libraries | `dtolnay/rust-toolchain` + apt lines |
 | `stable-workspace` | host runners: moves the checkout to a fixed folder under `~/.paddock-ci/src` and links the old path to it (where the folder cannot move, as under act on Windows, keeps a clone there at the same commit), and sets `PADDOCK_WORKSPACE` for the cargo steps' `working-directory`, so sccache sees the same working folder every run (the work folder is hashed per job) | new |
 | `sccache-stats` | `sccache --show-stats` in the job log (last step, `if: always()`; composite actions have no post step) | new |
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |

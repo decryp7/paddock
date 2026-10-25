@@ -19,6 +19,17 @@ retries = 0
 failure-output = "immediate-final"
 # A CI job has its runner to itself.
 test-threads = "num-cpus"
+# The time budget of one test (rule 40): reported SLOW after 30 s and stopped, failing the run, after 60 s, so a test
+# that waits on a timeout or a sleep fails CI instead of slowing it down (paddock-mcp's loopback tests waited 120 s on
+# Windows). A test that needs longer is a waiver below: an override with a `# waiver:` line saying why;
+# conformance/test/ci-actions.test.mjs checks both.
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+# waiver: the plugin host's tests start real plugin processes (the test kit's fixture binaries), several per test, and
+# took 30 to 37 s on the macOS runner and under llvm-cov in run 6346/6355 with every crate's tests running beside them.
+[[profile.ci.overrides]]
+filter = "package(paddock-plugin-host)"
+slow-timeout = { period = "60s", terminate-after = 2 }
 
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.

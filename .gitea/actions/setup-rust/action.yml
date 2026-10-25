@@ -1,5 +1,5 @@
 name: setup-rust
-description: Rust toolchain with components and targets, rust-lld on Windows on request, sccache (installed, checksum-verified, when the runner has none) on the shared Redis backend, and the Tauri Linux libraries on request.
+description: Rust toolchain with components and targets, sccache (installed, checksum-verified, when the runner has none) on the shared Redis backend, and the Tauri Linux libraries on request.
 inputs:
   toolchain:
     description: Toolchain channel or version.
@@ -13,9 +13,6 @@ inputs:
   tauri-linux-deps:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
-  windows-linker:
-    description: "rust-lld links x86_64-pc-windows-msvc with the toolchain's own lld-link (much faster than MSVC's link.exe, still with the MSVC libraries); empty keeps link.exe. Only on Windows runners."
-    default: ""
   sccache-backend:
     description: "local (default: sccache's disk cache, SCCACHE_DIR=$HOME/.paddock-ci/sccache on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local) or redis (the endpoint is required)."
     default: local
@@ -57,21 +54,6 @@ runs:
         rustup default "$TOOLCHAIN"
         rustc --version
         cargo --version
-    - name: Windows linker
-      if: runner.os == 'Windows' && inputs.windows-linker != ''
-      shell: bash
-      env:
-        LINKER: ${{ inputs.windows-linker }}
-      run: |
-        set -euo pipefail
-        [ "$LINKER" = rust-lld ] || { echo "::error::windows-linker must be rust-lld or empty (got '$LINKER')"; exit 1; }
-        # rustc finds rust-lld.exe in its own sysroot (lib/rustlib/<host>/bin), and it ships with every msvc toolchain.
-        SYSROOT="$(rustc --print sysroot)"
-        if command -v cygpath >/dev/null 2>&1; then SYSROOT="$(cygpath -u "$SYSROOT")"; fi
-        LLD="$SYSROOT/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe"
-        [ -f "$LLD" ] || { echo "::error::rust-lld.exe is missing from the toolchain ($LLD)"; exit 1; }
-        echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld.exe" >> "$GITHUB_ENV"
-        echo "Linking x86_64-pc-windows-msvc with rust-lld"
     - name: Install sccache
       shell: bash
       run: |

@@ -294,11 +294,9 @@ jobs:
           name: paddock-${{ github.job }}-${{ runner.os }}
 
       # Toolchain and sccache on every OS: sccache's local disk cache (host runners: ~/.paddock-ci/sccache, containers: the /sccache mount).
-      # On Windows the tests link with rust-lld: link.exe was a large part of the leg's build time.
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
-          windows-linker: rust-lld
 
       - name: Toolchain present
         run: |
