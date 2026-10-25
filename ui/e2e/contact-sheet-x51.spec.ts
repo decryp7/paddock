@@ -111,7 +111,7 @@ test.describe('contact sheet: pd-view', () => {
       await s('form', 'Form: every field kind, help under the control, "Changes data" on Publish, the one filled button of the view', 'form', node('form'));
       await s('form', 'Review list: segmented filter, labelled states, actions', 'review', node('review'));
       await s('states', 'Empty state: 32 px muted icon, the action is secondary because the form holds the primary', 'empty', node('empty'));
-      await s('states', "Needs local AI: the family card with the plugin's reason, secondary action", 'needs-ai', node('ai'));
+      await s('states', "Needs local AI: the family card with the plugin's reason and the app's Open AI settings (the plugin's own action is not drawn)", 'needs-ai', node('ai'));
       await s('states', 'Unknown kind: only that node says "Update the app to view this", the kind in a muted suffix', 'unknown', node('future'));
     });
 

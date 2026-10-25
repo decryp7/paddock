@@ -9,7 +9,8 @@ Conventional Commits; one semver tag for the whole repo.
   and the rest on rings that cannot touch, in a canvas fitted to the boxes (a test over every layout: no two boxes overlap); graph
   boxes carry a status glyph and the status word in their name and in "Show as a list", which also lists captions and members;
   `@decryp7/paddock-ui/states` has `pd-needs-ai-card`, `pd-needs-ai` is a container over it, and a `needsAi` node draws the app's own
-  component (`VIEW_NEEDS_AI`) or the same card with the plugin's reason; inline kinds pack in a row, words break only when they must,
+  component (`VIEW_NEEDS_AI`) or the same card with the plugin's reason and, only when the host provides `VIEW_OPEN_AI_SETTINGS`, the app's
+  "Open AI settings" (the plugin's own `setup` action of a `needsAi` node is never sent to the plugin, rule 19); inline kinds pack in a row, words break only when they must,
   headings sit under the view title, stale is a warning with Reload, loading is a skeleton and busy a visible status, one filled
   button per view, one `pd-view-writes` badge, tree status on the mark only, numbers right-aligned with their unit (`Column.align`,
   `Column.unit`, `ChartSpec.unit` in `paddock-view`), chosen paths and secrets shown by name (`ViewHost` pickers resolve `{ value,

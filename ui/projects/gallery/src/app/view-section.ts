@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, Injectable, signal, viewChild } from '@angular/core';
-import { PdView, PdViewWrites, VIEW_HOST, sampleViewDoc, type GrantRef, type SecretRef, type ViewAction, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from '@decryp7/paddock-ui/view';
+import { PdView, PdViewWrites, VIEW_HOST, VIEW_OPEN_AI_SETTINGS, sampleViewDoc, type GrantRef, type SecretRef, type ViewAction, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from '@decryp7/paddock-ui/view';
 
 interface Asking {
   readonly text: string;
@@ -16,6 +16,8 @@ interface Asking {
 export class GalViewHost implements ViewHost {
   readonly asking = signal<Asking | null>(null);
   readonly opened = signal<string[]>([]);
+  /** How many times the sample app's "Open AI settings" was chosen. */
+  readonly aiSettings = signal(0);
 
   private ask(text: string, yes: string, writes = false): Promise<boolean> {
     return new Promise((resolve) => this.asking.set({ text, yes, writes, resolve: (ok) => (this.asking.set(null), resolve(ok)) }));
@@ -39,7 +41,11 @@ export class GalViewHost implements ViewHost {
   selector: 'gal-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdView, PdViewWrites],
-  providers: [GalViewHost, { provide: VIEW_HOST, useExisting: GalViewHost }],
+  providers: [
+    GalViewHost,
+    { provide: VIEW_HOST, useExisting: GalViewHost },
+    { provide: VIEW_OPEN_AI_SETTINGS, useFactory: () => { const h = inject(GalViewHost); return () => h.aiSettings.update((n) => n + 1); } },
+  ],
   template: `
     <section class="gal-section" data-testid="view" aria-labelledby="h-view">
       <h2 id="h-view">Declarative view</h2>
@@ -61,7 +67,7 @@ export class GalViewHost implements ViewHost {
           </div>
         </div>
       }
-      <p data-testid="view-log" aria-live="polite">Last action: {{ last() }}. Opened: {{ host.opened().length ? host.opened().join(', ') : 'nothing' }}.</p>
+      <p data-testid="view-log" aria-live="polite">Last action: {{ last() }}. Opened: {{ host.opened().length ? host.opened().join(', ') : 'nothing' }}. AI settings opened: {{ host.aiSettings() }}.</p>
       <div class="gal-box gal-pad" data-testid="view-box">
         @for (key of [mounted()]; track key) {
           <pd-view view="gallery.release" plugin="Release checks" logsLink [doc]="doc()" [loading]="loading()" [busy]="host.asking() !== null || working()" (action)="record($event)" (retry)="reload()" />
