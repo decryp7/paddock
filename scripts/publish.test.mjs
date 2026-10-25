@@ -84,6 +84,18 @@ describe('workspaceCrates', () => {
       ],
     );
   });
+  test('a dev-dependency with a version is kept by cargo publish, so it orders like a normal one; a path-only one is stripped', () => {
+    const full = workspaceCrates({
+      workspace_members: ['a', 't', 'c'],
+      packages: [
+        pkg('a', 'paddock-a', [{ name: 'paddock-t', kind: 'dev', req: '^0.1.0' }, { name: 'paddock-c', kind: 'dev', req: '*' }]),
+        pkg('t', 'paddock-t', []),
+        pkg('c', 'paddock-c', []),
+      ],
+    });
+    assert.deepEqual(full.find((c) => c.name === 'paddock-a')?.deps, ['paddock-t']);
+    assert.deepEqual(publishOrder(full).map((c) => c.name), ['paddock-c', 'paddock-t', 'paddock-a']);
+  });
   test('the workspace-hack crate is neither a crate to publish nor a dependency', () => {
     const list = workspaceCrates({
       workspace_members: ['a', 'h'],

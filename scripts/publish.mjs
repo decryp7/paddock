@@ -59,7 +59,11 @@ export function indexPath(name) {
 /** cargo-hakari's crate (crates/.config/hakari.toml): never published; `cargo hakari publish` drops the dependency on it. */
 export const WORKSPACE_HACK = 'paddock-workspace-hack';
 
-/** The workspace's crates from `cargo metadata --no-deps`, with their dependencies on each other (dev-dependencies excluded: cargo strips path-only ones). */
+/**
+ * The workspace's crates from `cargo metadata --no-deps`, with their dependencies on each other. A dev-dependency counts
+ * only when it carries a version: cargo publish strips a path-only one but keeps a versioned one, and then needs it in the
+ * registry first (paddock-cli's dev-dependency on paddock-testkit failed the 0.3.0 publish).
+ */
 export function workspaceCrates(metadata) {
   const members = new Set(metadata.workspace_members);
   const pkgs = metadata.packages.filter((p) => members.has(p.id) && p.name !== WORKSPACE_HACK);
@@ -70,7 +74,7 @@ export function workspaceCrates(metadata) {
       version: p.version,
       publish: p.publish,
       scaffold: p.metadata?.paddock?.scaffold === true,
-      deps: [...new Set(p.dependencies.filter((d) => d.kind !== 'dev' && names.has(d.name)).map((d) => d.name))].sort(),
+      deps: [...new Set(p.dependencies.filter((d) => (d.kind !== 'dev' || (d.req ?? '*') !== '*') && names.has(d.name)).map((d) => d.name))].sort(),
       dir: dirname(p.manifest_path),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
