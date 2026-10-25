@@ -25,12 +25,6 @@ test-threads = "num-cpus"
 # conformance/test/ci-actions.test.mjs checks both.
 slow-timeout = { period = "30s", terminate-after = 2 }
 
-# waiver: the plugin host's tests start real plugin processes (the test kit's fixture binaries), several per test, and
-# took 30 to 37 s on the macOS runner and under llvm-cov in run 6346/6355 with every crate's tests running beside them.
-[[profile.ci.overrides]]
-filter = "package(paddock-plugin-host)"
-slow-timeout = { period = "60s", terminate-after = 2 }
-
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.
 path = "junit.xml"
