@@ -351,3 +351,42 @@ sample only: it is how the label placer treats a bowed edge, so real graphs will
 
 ## Overall
 Fix P2-1, recapture `*-graph-radial-bows` in both themes, and I will approve on that shot alone.
+
+---
+
+# Review 5 (2026-10-25, `origin/shell/integrate` 13e6dd0; sheet captured from 3d7184c)
+
+Material: `review-5/*-graph-radial-bows` (both themes), `sheet-drawings.png`, and the single layered, radial, class and sequence
+shots at 100%. I zoomed in 4x on the one tight label.
+
+## Verdict: APPROVED (0 P1, 0 P2, 2 P3)
+
+The review 4 P2 is fixed. In every drawing in both themes, no label touches a box, an edge or another label, and every label
+stays inside its canvas. The spoke-to-spoke edge now bows. The P3s below can be done whenever these files are next touched;
+they need no further review.
+
+## Checked
+
+| Item | Result |
+|---|---|
+| "tokens" label (R4 P2-1) | Fixed. It sits outside the bow of the view→secrets edge, about 6 units left of the curve, clear of every box. The bow itself goes round paddock-chromium on the outside without touching it. |
+| shell→chromium bow (R4 P3-1) | Fixed. It arcs above the hub and the spokes, and lands on chromium's top edge. |
+| Its crossing with view→ipc | **Fine.** It is one crossing, at a right angle, about halfway down the view→ipc edge. It is well away from both arrowheads and from every box, and the two lines plainly continue through it. A single orthogonal crossing in open space is standard and easy to read. Avoiding it would need a longer detour round paddock-view for no gain. |
+| Layered graph labels | "retry" sits clear of its lane. "needs db" touches nothing (see P3-1). |
+| Radial (hub), class, sequence | Unchanged and clean in both themes. |
+
+## P3
+
+1. "needs db" moved from the middle of its edge up to the source end. At 4x it clears the Build box by about 5 units, but the
+   curve under "ne" by only about 1 unit, so it reads as sitting on the line. The previous mid-edge position read better. Prefer
+   the label slot nearest the edge's midpoint that passes the clearance check, and make the minimum clearance 4 units to edges as
+   well as boxes.
+2. `*-graph-radial-bows`: the canvas has about 70 units of empty space above paddock-view and about 15 below the bottom
+   spokes. The top seems to be reserved for a bow that now goes elsewhere. Fit the canvas to the drawn bounds (boxes, paths and
+   labels) plus the usual padding.
+
+## Overall
+Approved. Over five rounds `<pd-view>` has become a renderer that meets the design guide and the family look in both themes and
+at 320 px. Status has glyph and word, with the shared circle-× for errors. There is one primary per view, the writes badge is
+shared, the needs-AI card is the family's own with a rule-19 guard, every state is drawn, and graphs and diagrams read cleanly
+and have a list alternative.
