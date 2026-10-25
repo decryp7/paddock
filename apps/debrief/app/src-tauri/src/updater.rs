@@ -2,8 +2,8 @@
 //!
 //! - **Opt-in.** Settings ▸ Updates ▸ "Check for updates automatically" is off by default; Help ▸
 //!   Check for updates… works regardless. A check is one HTTPS request to the endpoint configured in
-//!   `tauri.conf.json` (`plugins.updater.endpoints`: `latest.json` of this repository's latest Gitea
-//!   release) and nothing else is contacted.
+//!   `tauri.conf.json` (`plugins.updater.endpoints`: `latest.json` of the moving `debrief-latest` release in
+//!   the Paddock repository) and nothing else is contacted.
 //! - **Signatures are mandatory.** The minisign public key is embedded at build time: the
 //!   `TAURI_UPDATER_PUBKEY` environment variable (a CI secret) or `plugins.updater.pubkey` in the
 //!   configuration (CI passes it with `tauri build --config`). Without a valid key the phase is

@@ -37,8 +37,10 @@ publishers' own keys, not with the updater key (see [plugin-sdk.md](plugin-sdk.m
 - **Opt-in.** Debrief never checks on its own unless the user turns on Settings ▸ Updates ▸ "Check for updates
   automatically" (off by default). Help ▸ Check for updates… always works.
 - **One endpoint.** A check is one HTTPS GET of
-  `https://dev.decryptology.net/decryp7/debrief/releases/download/latest/latest.json`
-  (`plugins.updater.endpoints` in `tauri.conf.json`; Gitea ≥ 1.21 resolves `latest`). It carries no
+  `https://dev.decryptology.net/decryp7/paddock/releases/download/debrief-latest/latest.json`
+  (`plugins.updater.endpoints` in `tauri.conf.json`; the moving `debrief-latest` release that every `debrief-v*` tag
+  run replaces). Releases are signed with the Paddock family's updater key only; copies installed before Debrief moved
+  to the monorepo cannot verify it and are reinstalled once by hand (every release's First launch notes say so). It carries no
   identifier or usage data; the server sees the IP address and the user agent `tauri-plugin-updater/<version>`.
 - **Signatures are mandatory.** Every update is verified with the minisign public key built into the app
   before it is installed, and `requireSignedVersion` binds each signature to the version it was made for
