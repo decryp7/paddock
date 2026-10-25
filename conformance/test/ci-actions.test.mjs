@@ -430,3 +430,48 @@ test('the nextest ci profile fails a test over its time budget, and every longer
     assert.match(body, /^filter = "/m, `the override at line ${at + 1} names its tests`);
   }
 });
+
+/** Runs host-tools' script with a PATH of shims; `nextest` is the version the shim `cargo-nextest` reports. */
+function runHostTools(os, { kept = null, onPath = null } = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-host-tools-')));
+  const text = read(join(ACTIONS, 'host-tools', 'action.yml'));
+  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+  const version = /^VERSION=(\S+)$/m.exec(body)[1];
+  const shim = (dir, v) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'cargo-nextest'), `#!/bin/sh\necho "cargo-nextest ${v}"\n`, { mode: 0o755 });
+  };
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  // Any download fails the test: a kept or image copy must not be fetched again.
+  writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho "curl was called" >&2\nexit 7\n', { mode: 0o755 });
+  if (kept) shim(join(root, 'home', '.paddock-ci', 'tools', 'cargo-nextest', version), kept === 'pin' ? version : kept);
+  if (onPath) shim(bin, onPath === 'pin' ? version : onPath);
+  writeFileSync(join(root, 'step.sh'), body);
+  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
+    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_PATH: join(root, 'github-path') },
+    encoding: 'utf8',
+  });
+  return { ...r, root, version };
+}
+
+test('host-tools keeps the pinned cargo-nextest on a host and checks the version on every runner', () => {
+  const kept = runHostTools('macOS', { kept: 'pin' });
+  assert.equal(kept.status, 0, kept.stderr + kept.stdout);
+  assert.match(kept.stdout, /kept in .*tools\/cargo-nextest\//, 'no download when the pinned version is there');
+  assert.match(readFileSync(join(kept.root, 'github-path'), 'utf8'), new RegExp(`tools/cargo-nextest/${kept.version.replace(/\./g, '\\.')}$`, 'm'));
+  const linux = runHostTools('Linux', { onPath: 'pin' });
+  assert.equal(linux.status, 0, linux.stderr + linux.stdout);
+  const other = runHostTools('Linux', { onPath: '0.0.1' });
+  assert.notEqual(other.status, 0);
+  assert.match(other.stdout, /cargo-nextest is 0\.0\.1 on this runner, the pin is/);
+  const missing = runHostTools('macOS');
+  assert.notEqual(missing.status, 0, 'a missing copy is downloaded (the curl shim fails here)');
+  assert.match(missing.stderr, /curl was called/);
+});
+
+test('the host-tools pin is a release version with SHA-256 sums', () => {
+  const pin = /^\s+VERSION=(\S+)$/m.exec(read(join(ACTIONS, 'host-tools', 'action.yml')))[1];
+  assert.match(pin, /^\d+\.\d+\.\d+$/);
+  for (const sum of read(join(ACTIONS, 'host-tools', 'action.yml')).matchAll(/SUM=(\S+);/g)) assert.match(sum[1], /^[0-9a-f]{64}$/);
+});
