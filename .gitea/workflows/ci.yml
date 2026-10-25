@@ -283,7 +283,7 @@ jobs:
         run: |
           echo "CARGO_TARGET_DIR=$HOME/.paddock-ci/target-$GITHUB_JOB" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-          echo "PADDOCK_TEST_BROWSER_DIR=$GITHUB_WORKSPACE/../.paddock-ci-test-browser" >> "$GITHUB_ENV"
+          echo "PADDOCK_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser" >> "$GITHUB_ENV"  # outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it
 
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
       # on every run. Run from the same physical path every time (the old path stays as a link). On Windows the
