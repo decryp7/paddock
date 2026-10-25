@@ -1,6 +1,7 @@
 //! What a running turn tells the windows: the `paddock://assistant` event (deltas, tool calls and results, approvals,
 //! done, error) and the sink that carries it.
 
+use crate::conversation::ToolOutcome;
 use crate::types::Usage;
 use paddock_pitwall::AiState;
 use serde::{Deserialize, Serialize};
@@ -101,6 +102,10 @@ pub enum AssistantEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[cfg_attr(test, ts(optional, type = "unknown"))]
         data: Option<Value>,
+        /// Set when the user's choice ended the call: they declined it, or stopped the turn while it waited.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
+        outcome: Option<ToolOutcome>,
     },
     /// Something the user should know that is not an error (a call that could not be read, a conversation that could not
     /// be saved).
