@@ -1,0 +1,40 @@
+# Rust
+target/
+debug/
+**/*.rs.bk
+*.pdb
+
+# Node / Angular
+node_modules/
+app/dist/
+app/.angular/
+app/coverage/
+*.tsbuildinfo
+.npm
+.eslintcache
+
+# Tauri generated schemas
+app/src-tauri/gen/schemas/
+
+# Logs and local runtime data (never commit logs, tokens or recordings)
+*.log
+/logs/
+*.key
+*.key.pub
+.env
+.env.*
+
+# Editors and OS metadata
+.idea/
+.vscode/
+.claude/
+.serena/cache/
+.serena/project.local.yml
+.DS_Store
+._*
+
+# Tauri sidecar built by scripts/sidecar.mjs
+app/src-tauri/binaries/
+
+# Exported diagram PNGs (2x, for local review); the SVGs are the committed exports
+docs/images/diagrams/png/

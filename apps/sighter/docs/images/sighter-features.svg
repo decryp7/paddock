@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1348" viewBox="0 0 1600 1348" role="img" aria-labelledby="t d">
+<title id="t">Sighter features</title><desc id="d">Find elements from pixels: Boxes, confidence and which layer answered. Review what it is unsure of: A queue for everything not identified automatically. Works with your existing UI tests: Keep UIA where it works; let Sighter see the rest. Across apps: One test, several applications, each with its own model.</desc>
+<style>
+:root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#F1F3F7;--bar:#ECEEF2;--link:#8A93A3;--codebg:#F7F8FA;--acc:#884F92;--acct:#884F92;--accf:#975EA2;--glow:.20;--shadow:.22;--wbg:#FFFFFF}
+@media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#1B1E24;--bar:#20242C;--link:#667085;--codebg:#12151A;--acc:#C488CF;--acct:#C488CF;--glow:.26;--shadow:.55;--wbg:#0E0F12}}
+text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;fill:var(--ink)}
+.lt{display:inline}.dk{display:none}
+@media (prefers-color-scheme: dark){.lt{display:none}.dk{display:inline}}
+.eyebrow{font-size:15px;font-weight:600;letter-spacing:.14em;fill:var(--acct)}
+.h1{font-size:56px;font-weight:600;letter-spacing:-.025em}
+.h2{font-size:42px;font-weight:600;letter-spacing:-.02em}
+.sub{font-size:22px;fill:var(--muted)}
+.small{font-size:20px;fill:var(--muted)}
+.pilltxt{font-size:17px;font-weight:600;fill:var(--acct)}
+.name{font-size:26px;font-weight:600;letter-spacing:-.01em}
+.card{fill:var(--card);stroke:var(--line)}
+.ph{fill:var(--soft);stroke:var(--link);stroke-width:1.5;stroke-dasharray:5 4}
+.mono{font-weight:600;fill:var(--muted)}
+.track{fill:none;stroke:var(--line);stroke-width:1.25;opacity:.8}
+.gl{fill:none;stroke:var(--acct);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.accfill{fill:var(--acc);fill-opacity:.13}.accline{fill:var(--acc)}
+.ptitle{font-size:29px;font-weight:600;letter-spacing:-.01em}
+.pbody{font-size:21px;fill:var(--muted)}
+.stepn{font-size:16px;font-weight:600;letter-spacing:.1em;fill:var(--muted)}
+.stept{font-size:26px;font-weight:600}
+.steps{font-size:21px;fill:var(--muted)}
+.conn{fill:none;stroke:var(--link);stroke-width:1.5;stroke-linecap:round;stroke-dasharray:1 7}
+.chev{fill:none;stroke:var(--link);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.wtit{font-size:17px;font-weight:600;letter-spacing:.14em;fill:var(--muted)}
+.wname{font-size:22px;font-weight:600}.wnote{font-size:20px;fill:var(--muted)}
+.wbar{fill:var(--bar)}.wedge{fill:none;stroke:var(--line)}
+.mbg{fill:var(--soft)}.mc{fill:var(--card);stroke:var(--line)}.mside{fill:var(--bar)}.mrule{fill:var(--line)}.ms{fill:var(--line)}
+.mfield{fill:var(--soft);stroke:var(--line)}.mact{fill:var(--acc);fill-opacity:.14}.maccf{fill:var(--accf)}.mbox{fill:var(--acc);fill-opacity:.12;stroke:var(--acc);stroke-width:2}
+.mt{font-size:14px;font-weight:500;fill:var(--ink)}.mm{font-size:13px;fill:var(--muted)}.mta{font-size:13px;font-weight:600;fill:var(--acct)}.mtw{font-size:12.5px;font-weight:600;fill:#fff}.mh{font-size:20px;font-weight:600;fill:var(--ink)}
+.medge{fill:none;stroke:var(--link);stroke-width:1.5}.mcode{fill:var(--codebg);stroke:var(--line)}.mmono{font:13px ui-monospace,"SF Mono",Menlo,Consolas,monospace;fill:var(--ink)}.mmonoa{font:600 13px ui-monospace,"SF Mono",Menlo,Consolas,monospace;fill:var(--acct)}
+.madd{fill:#2EA043;fill-opacity:.18}.mdel{fill:#F85149;fill-opacity:.16}.mrec{fill:#E5484D}.mcon{fill:var(--card);stroke:var(--acc);stroke-width:2}
+</style><defs></defs><defs><radialGradient id="g1" cx="800" cy="0" r="900" gradientUnits="userSpaceOnUse"><stop offset="0" style="stop-color:var(--acc);stop-opacity:var(--glow)"/><stop offset="1" style="stop-color:var(--acc);stop-opacity:0"/></radialGradient></defs><rect width="1600" height="900" fill="url(#g1)"/>
+<svg x="80" y="64" width="56" height="56" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="s24bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#BFA2EE"/><stop offset="0.55" stop-color="#A686D6"/><stop offset="1" stop-color="#8B6DB5"/>
+    </linearGradient>
+    <radialGradient id="s24sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s24edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="s24clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="s24gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#3C2D52" flood-opacity="0.32"/></filter>
+    <filter id="s24ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#s24bg)" filter="url(#s24ts)"/>
+  <g clip-path="url(#s24clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#s24sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#s24edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#s24gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M727.6 607.99A236 236 0 0 1 607.99 727.6M416.01 727.6A236 236 0 0 1 296.4 607.99M296.4 416.01A236 236 0 0 1 416.01 296.4M607.99 296.4A236 236 0 0 1 727.6 416.01" fill="none" stroke="#2D1D43" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><path d="M728 512L812 512M512 728L512 812M296 512L212 512M512 296L512 212" fill="none" stroke="#2D1D43" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M436 392L436 620L498.32 562.24L543.92 661.04L598.64 638.24L553.04 540.96L639.68 540.96Z" fill="#2D1D43" stroke="#2D1D43" stroke-width="20" stroke-linejoin="round"/></g>
+</svg><text class="name" x="150" y="102">Sighter</text>
+<rect x="274.5" y="75" width="109" height="38" rx="19" class="accfill"/><circle cx="292.5" cy="94" r="4" class="accline"/><text class="pilltxt" x="306.5" y="100">Planned</text>
+<text class="h2" x="80" y="196">Test any interface, even the ones no tool can read.</text>
+<g transform="translate(80 244)"><rect class="card" width="704" height="440" rx="22"/><clipPath id="pc0"><rect x="16" y="16" width="672" height="280" rx="12"/></clipPath><g clip-path="url(#pc0)"><g transform="translate(16 16)"><g transform="scale(1)"><rect class="mbg" x="0" y="0" width="672" height="280" rx="0"/><rect class="mc" x="150" y="22" width="372" height="236" rx="10"/><rect class="mside" x="150" y="22" width="372" height="30" rx="10"/><rect class="ms" x="164" y="33" width="70" height="8" rx="4"/><rect class="ms" x="174" y="78" width="90" height="8" rx="4"/><rect class="mfield" x="174" y="96" width="324" height="30" rx="6"/><rect class="ms" x="174" y="146" width="70" height="8" rx="4"/><rect class="mfield" x="174" y="164" width="324" height="30" rx="6"/><rect class="mfield" x="290" y="202" width="100" height="32" rx="6"/><rect class="maccf" x="402" y="202" width="96" height="32" rx="6"/><rect class="mbox" x="174" y="94" width="324" height="30" rx="5"/><rect class="maccf" x="174" y="72" width="141.8" height="20" rx="5"/><text class="mtw" x="182" y="86">Email field  0.95</text><rect class="mbox" x="422" y="202" width="76" height="32" rx="5"/><rect class="maccf" x="422" y="180" width="90" height="20" rx="5"/><text class="mtw" x="430" y="194">Save  0.97</text><rect class="mact" x="40" y="40" width="90" height="28" rx="14"/><text class="mta" x="85" y="59" text-anchor="middle">OCR</text><rect class="mact" x="40" y="80" width="90" height="28" rx="14"/><text class="mta" x="85" y="99" text-anchor="middle">Template</text><rect class="mact" x="40" y="120" width="90" height="28" rx="14"/><text class="mta" x="85" y="139" text-anchor="middle">Detector</text><rect class="mact" x="542" y="40" width="90" height="28" rx="14"/><text class="mta" x="587" y="59" text-anchor="middle">Vision</text></g></g></g><rect x="16" y="16" width="672" height="280" rx="12" fill="none" stroke="var(--line)"/><text class="ptitle" x="24" y="344">Find elements from pixels</text><text class="pbody" x="24" y="382">Boxes, confidence and which layer answered.</text></g>
+<g transform="translate(816 244)"><rect class="card" width="704" height="440" rx="22"/><clipPath id="pc1"><rect x="16" y="16" width="672" height="280" rx="12"/></clipPath><g clip-path="url(#pc1)"><g transform="translate(16 16)"><g transform="scale(1)"><rect class="mbg" x="0" y="0" width="672" height="280" rx="0"/><rect class="mc" x="40" y="28" width="592" height="68" rx="12"/><rect class="mfield" x="56" y="40" width="76" height="44" rx="6"/><rect class="mbox" x="68" y="50" width="52" height="24" rx="4"/><text class="mt" x="152" y="58">Save button</text><text class="mm" x="152" y="78">suggested by detector, 0.74</text><rect class="maccf" x="472" y="46" width="72" height="32" rx="8"/><text class="mtw" x="508" y="67" text-anchor="middle">Accept</text><rect class="mfield" x="552" y="46" width="64" height="32" rx="8"/><text class="mm" x="584" y="67" text-anchor="middle">Skip</text><rect class="mc" x="40" y="108" width="592" height="68" rx="12"/><rect class="mfield" x="56" y="120" width="76" height="44" rx="6"/><rect class="mbox" x="68" y="130" width="52" height="24" rx="4"/><text class="mt" x="152" y="138">Cancel button</text><text class="mm" x="152" y="158">suggested by detector, 0.68</text><rect class="maccf" x="472" y="126" width="72" height="32" rx="8"/><text class="mtw" x="508" y="147" text-anchor="middle">Accept</text><rect class="mfield" x="552" y="126" width="64" height="32" rx="8"/><text class="mm" x="584" y="147" text-anchor="middle">Skip</text><rect class="mc" x="40" y="188" width="592" height="68" rx="12"/><rect class="mfield" x="56" y="200" width="76" height="44" rx="6"/><rect class="mbox" x="68" y="210" width="52" height="24" rx="4"/><text class="mt" x="152" y="218">Search field</text><text class="mm" x="152" y="238">suggested by detector, 0.62</text><rect class="maccf" x="472" y="206" width="72" height="32" rx="8"/><text class="mtw" x="508" y="227" text-anchor="middle">Accept</text><rect class="mfield" x="552" y="206" width="64" height="32" rx="8"/><text class="mm" x="584" y="227" text-anchor="middle">Skip</text></g></g></g><rect x="16" y="16" width="672" height="280" rx="12" fill="none" stroke="var(--line)"/><text class="ptitle" x="24" y="344">Review what it is unsure of</text><text class="pbody" x="24" y="382">A queue for everything not identified automatically.</text></g>
+<g transform="translate(80 716)"><rect class="card" width="704" height="440" rx="22"/><clipPath id="pc2"><rect x="16" y="16" width="672" height="280" rx="12"/></clipPath><g clip-path="url(#pc2)"><g transform="translate(16 16)"><g transform="scale(1)"><rect class="mbg" x="0" y="0" width="672" height="280" rx="0"/><rect class="mcode" x="40" y="28" width="592" height="224" rx="12"/><text class="mmonoa" x="64" y="58" xml:space="preserve">Your test  (C#)</text><text class="mmono" x="64" y="98" xml:space="preserve">var win = app.GetMainWindow(auto);</text><rect class="mact" x="546" y="80" width="74" height="24" rx="12"/><text class="mta" x="583" y="96.5" text-anchor="middle">UIA</text><text class="mmono" x="64" y="130" xml:space="preserve">win.FindFirstDescendant(ByName("Save"))</text><rect class="mact" x="546" y="112" width="74" height="24" rx="12"/><text class="mta" x="583" y="128.5" text-anchor="middle">UIA</text><text class="mmono" x="64" y="162" xml:space="preserve">chart.Sighter().GetByText("Pump 3")</text><rect class="maccf" x="546" y="144" width="74" height="24" rx="12"/><text class="mtw" x="583" y="160.5" text-anchor="middle">Sighter</text><rect class="mrule" x="64" y="184" width="544" height="1" rx="0"/><text class="mm" x="64" y="214">Auto-waits, exactly one match: 0.96 via detector</text><text class="mm" x="608" y="214" text-anchor="end">then ClickAsync()</text></g></g></g><rect x="16" y="16" width="672" height="280" rx="12" fill="none" stroke="var(--line)"/><text class="ptitle" x="24" y="344">Works with your existing UI tests</text><text class="pbody" x="24" y="382">Keep UIA where it works; let Sighter see the rest.</text></g>
+<g transform="translate(816 716)"><rect class="card" width="704" height="440" rx="22"/><clipPath id="pc3"><rect x="16" y="16" width="672" height="280" rx="12"/></clipPath><g clip-path="url(#pc3)"><g transform="translate(16 16)"><g transform="scale(1)"><rect class="mbg" x="0" y="0" width="672" height="280" rx="0"/><rect class="mcon" x="40" y="32" width="188" height="118" rx="10"/><rect class="mside" x="40" y="32" width="188" height="26" rx="10"/><rect class="ms" x="54" y="41" width="60" height="8" rx="4"/><text class="mt" x="54" y="84">Editor</text><rect class="ms" x="54" y="98" width="120" height="8" rx="4"/><rect class="ms" x="54" y="114" width="88" height="8" rx="4"/><rect class="maccf" x="54" y="130" width="76" height="10" rx="5"/><text class="mm" x="134" y="139"></text><rect class="mact" x="144" y="122" width="74" height="20" rx="10"/><text class="mta" x="181" y="136" text-anchor="middle">editor@3</text><rect class="mc" x="242" y="32" width="188" height="118" rx="10"/><rect class="mside" x="242" y="32" width="188" height="26" rx="10"/><rect class="ms" x="256" y="41" width="60" height="8" rx="4"/><text class="mt" x="256" y="84">Browser</text><rect class="ms" x="256" y="98" width="120" height="8" rx="4"/><rect class="ms" x="256" y="114" width="88" height="8" rx="4"/><rect class="ms" x="256" y="130" width="76" height="10" rx="5"/><text class="mm" x="336" y="139"></text><rect class="mact" x="346" y="122" width="74" height="20" rx="10"/><text class="mta" x="383" y="136" text-anchor="middle">web@2</text><rect class="mc" x="444" y="32" width="188" height="118" rx="10"/><rect class="mside" x="444" y="32" width="188" height="26" rx="10"/><rect class="ms" x="458" y="41" width="60" height="8" rx="4"/><text class="mt" x="458" y="84">Terminal</text><rect class="ms" x="458" y="98" width="120" height="8" rx="4"/><rect class="ms" x="458" y="114" width="88" height="8" rx="4"/><rect class="ms" x="458" y="130" width="76" height="10" rx="5"/><text class="mm" x="538" y="139"></text><rect class="mact" x="548" y="122" width="74" height="20" rx="10"/><text class="mta" x="585" y="136" text-anchor="middle">term@1</text><path class="medge" d="M232 90 L242 90 M434 90 L444 90"/><text class="mm" x="136" y="176" text-anchor="middle">focus verified before each step</text><rect class="mc" x="40" y="196" width="592" height="44" rx="12"/><rect class="maccf" x="54" y="208" width="24" height="20" rx="5"/><text class="mt" x="90" y="223">OS dialogs model, shared by every session</text><text class="mm" x="618" y="223" text-anchor="end">file pickers, prompts</text></g></g></g><rect x="16" y="16" width="672" height="280" rx="12" fill="none" stroke="var(--line)"/><text class="ptitle" x="24" y="344">Across apps</text><text class="pbody" x="24" y="382">One test, several applications, each with its own model.</text></g>
+<line x1="80" x2="1520" y1="1196" y2="1196" stroke="var(--line)"/>
+<text class="wtit" x="80" y="1224">WORKS WITH</text><g transform="translate(80 1248)"><svg x="0" y="0" width="52" height="52" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="p19bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7B46DB"/><stop offset="0.55" stop-color="#5A24B0"/><stop offset="1" stop-color="#43198F"/>
+    </linearGradient>
+    <radialGradient id="p19sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="p19edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="p19clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="p19gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#24094F" flood-opacity="0.32"/></filter>
+    <filter id="p19ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="p19m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M392 448V528M452 404V572M512 364V612M572 404V572M632 448V528" fill="none" stroke="#000" stroke-width="34" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p19bg)" filter="url(#p19ts)"/>
+  <g clip-path="url(#p19clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#p19sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p19edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#p19gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><path d="M398 284H626A136 136 0 0 1 762 420V532A136 136 0 0 1 626 668H398A136 136 0 0 1 262 532V420A136 136 0 0 1 398 284ZM332 620L470 660L300 770Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="36" stroke-linejoin="round" mask="url(#p19m0)"/></g>
+</svg><text class="wname" x="66" y="22">Pitwall</text><text class="wnote" x="66" y="46">Vision models</text></g><g transform="translate(440 1248)"><svg x="0" y="0" width="52" height="52" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="d0bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5590FF"/><stop offset="0.55" stop-color="#2E6BF0"/><stop offset="1" stop-color="#1D4FD3"/>
+    </linearGradient>
+    <radialGradient id="d0sheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="d0edge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="d0clip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="d0gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#10308A" flood-opacity="0.32"/></filter>
+    <filter id="d0ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#d0bg)" filter="url(#d0ts)"/>
+  <g clip-path="url(#d0clip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#d0sheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#d0edge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#d0gs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M300 340H600" fill="none" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/><path d="M300 684H552" fill="none" stroke="#FFFFFF" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M300 512H426L480 424L568 604L620 512H724" fill="none" stroke="#FFFFFF" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/><path d="M668 340a46 46 0 1 1 92 0a46 46 0 1 1 -92 0Z" fill="#FFFFFF"/></g>
+</svg><text class="wname" x="66" y="22">Debrief</text><text class="wnote" x="66" y="46">Run bundles</text></g><g transform="translate(800 1248)"><svg x="0" y="0" width="52" height="52" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="pbbg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF8A4C"/><stop offset="0.55" stop-color="#EF5F1C"/><stop offset="1" stop-color="#D4440D"/>
+    </linearGradient>
+    <radialGradient id="pbsheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="pbedge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="pbclip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="pbgs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#8A2A04" flood-opacity="0.32"/></filter>
+    <filter id="pbts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="pbm2" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M454 512a58 58 0 1 1 116 0a58 58 0 1 1 -116 0Z" fill="#000"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#pbbg)" filter="url(#pbts)"/>
+  <g clip-path="url(#pbclip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#pbsheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#pbedge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#pbgs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M687.31 317.3A262 262 0 1 1 336.69 317.3" fill="none" stroke="#FFFFFF" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/><path d="M405.06 255.74L277.81 251.9L395.57 382.7Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="28" stroke-linejoin="round"/></g><path d="M647.1 590L512 668L376.9 590L376.9 434L512 356L647.1 434Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="52" stroke-linejoin="round" mask="url(#pbm2)"/></g>
+</svg><text class="wname" x="66" y="22">Pitcrew</text><text class="wnote" x="66" y="46">Tests on CI runners</text></g><g transform="translate(1160 1248)"><svg x="0" y="0" width="52" height="52" viewBox="60 60 904 904" overflow="visible">
+  
+  <defs>
+    <linearGradient id="p2fbg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8A7635"/><stop offset="0.55" stop-color="#6D590F"/><stop offset="1" stop-color="#574601"/>
+    </linearGradient>
+    <radialGradient id="p2fsheen" cx="330.72" cy="100" r="700.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="p2fedge" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="p2fclip"><path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z"/></clipPath>
+    <filter id="p2fgs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#302501" flood-opacity="0.32"/></filter>
+    <filter id="p2fts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>
+    <mask id="p2fm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M374 246H674A40 40 0 0 1 714 286V702A40 40 0 0 1 674 742H374A40 40 0 0 1 334 702V286A40 40 0 0 1 374 246Z" fill="#000"/></mask><mask id="p2fm1" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M367 330a21 21 0 1 1 42 0a21 21 0 1 1 -42 0Z" fill="#000"/><path d="M367 494a21 21 0 1 1 42 0a21 21 0 1 1 -42 0Z" fill="#000"/><path d="M367 658a21 21 0 1 1 42 0a21 21 0 1 1 -42 0Z" fill="#000"/><path d="M452 346H664M452 406H600M486 462L456 508L486 554M536 456L516 560M566 462L596 508L566 554M456 700C530 700 520 636 592 636C630 636 650 650 662 676" fill="none" stroke="#000" stroke-width="26" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="url(#p2fbg)" filter="url(#p2fts)"/>
+  <g clip-path="url(#p2fclip)">
+    <path d="M60 907.52L907.52 60L1022.8800000000001 60L60 1022.8800000000001Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M60 1080.56L1080.56 60L1113.52 60L60 1113.52Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#p2fsheen)"/>
+    <path d="M383.41 100H640.59C722.19 100 763 100 806.92 113.89C854.88 131.34 892.66 169.12 910.11 217.08C924 261 924 301.81 924 383.41V640.59C924 722.19 924 763 910.11 806.92C892.66 854.88 854.88 892.66 806.92 910.11C763 924 722.19 924 640.59 924H383.41C301.81 924 261 924 217.08 910.11C169.12 892.66 131.34 854.88 113.89 806.92C100 763 100 722.19 100 640.59V383.41C100 301.81 100 261 113.89 217.08C131.34 169.12 169.12 131.34 217.08 113.89C261 100 301.81 100 383.41 100Z" fill="none" stroke="url(#p2fedge)" stroke-width="6"/>
+    
+  </g>
+  <g filter="url(#p2fgs)" transform="translate(512 512) scale(1) translate(-512 -512)"><g opacity="0.6"><path d="M406 276H706A40 40 0 0 1 746 316V732A40 40 0 0 1 706 772H406A40 40 0 0 1 366 732V316A40 40 0 0 1 406 276Z" fill="#FFFFFF" mask="url(#p2fm0)"/></g><path d="M374 246H674A40 40 0 0 1 714 286V702A40 40 0 0 1 674 742H374A40 40 0 0 1 334 702V286A40 40 0 0 1 374 246Z" fill="#FFFFFF" mask="url(#p2fm1)"/><path d="M300 330H388M300 494H388M300 658H388" fill="none" stroke="#FFFFFF" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/></g>
+</svg><text class="wname" x="66" y="22">Pacenotes</text><text class="wnote" x="66" y="46">Test plans</text></g>
+</svg>
