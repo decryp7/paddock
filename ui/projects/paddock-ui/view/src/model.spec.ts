@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Node } from '../generated/view';
-import { ICON_GLYPH, KNOWN_KINDS, TONE_GLYPH, childKey, glyphFor, isWrite, mergeArgs, shapeOf, toneOf, toneWord } from './model';
+import { ICON_GLYPH, KNOWN_KINDS, TONE_STATUS, childKey, glyphFor, isWrite, mergeArgs, shapeOf, toneGlyph, toneOf, toneWord } from './model';
+import { PD_STATUS_GLYPHS, statusGlyph } from '@decryp7/paddock-ui/icons';
 
 describe('shapeOf', () => {
   it('reads each known kind with its payload', () => {
@@ -22,7 +23,7 @@ describe('tones and icons', () => {
     expect(toneOf('bad')).toBe('bad');
     expect(toneOf('purple')).toBe('neutral');
     expect(toneOf(undefined)).toBe('neutral');
-    expect(new Set(['info', 'good', 'warn', 'bad'].map((t) => TONE_GLYPH[t as 'info']))).toHaveProperty('size', 4);
+    expect(new Set(['info', 'good', 'warn', 'bad'].map((t) => toneGlyph(t as 'info')))).toHaveProperty('size', 4);
     expect(toneWord('neutral')).toBe('');
     expect(['info', 'good', 'warn', 'bad'].map((t) => toneWord(t as 'info')).every(Boolean)).toBe(true);
   });
@@ -52,5 +53,23 @@ describe('mergeArgs', () => {
     expect(isWrite(null)).toBe(false);
     expect(childKey({ id: 'x', kind: { badge: { text: 'a', tone: 'neutral' } } }, 3)).toBe('x');
     expect(childKey({ id: '', kind: { badge: { text: 'a', tone: 'neutral' } } }, 3)).toBe('#3');
+  });
+});
+
+describe('status glyphs', () => {
+  it("has no status glyph map of its own: every status tone and icon resolves through the suite's statusGlyph (rule 40)", () => {
+    expect(toneGlyph('neutral')).toBe('');
+    for (const [tone, status] of Object.entries(TONE_STATUS)) if (status) expect(toneGlyph(tone as 'info')).toBe(PD_STATUS_GLYPHS[status]);
+    expect(toneGlyph('bad')).toBe(statusGlyph('error'));
+    expect(toneGlyph('warn')).toBe(statusGlyph('warning'));
+    expect(toneGlyph('info')).toBe(statusGlyph('info'));
+    expect(toneGlyph('good')).toBe(statusGlyph('success'));
+    expect(glyphFor('error')).toBe(statusGlyph('error'));
+    expect(glyphFor('warning')).toBe(statusGlyph('warning'));
+    expect(glyphFor('info')).toBe(statusGlyph('info'));
+    expect(glyphFor('check')).toBe(statusGlyph('success'));
+    // An error is the circle-x, never the warning triangle.
+    expect(toneGlyph('bad')).not.toBe(toneGlyph('warn'));
+    expect(glyphFor('error')).not.toBe(glyphFor('warning'));
   });
 });

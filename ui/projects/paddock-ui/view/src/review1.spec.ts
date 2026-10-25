@@ -14,6 +14,7 @@ import { PdView } from './view';
 // The independent review of <pd-view> (review 1, docs/review/x51-view/REVIEW.md) as tests: each finding that can be seen in the DOM.
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdView],
   template: `<pd-view view="demo.view" [plugin]="plugin()" [logsLink]="logs()" [doc]="doc()" [busy]="busy()" [loading]="loading()" (action)="actions.push($event)" (retry)="retries = retries + 1" (openLogs)="opened = opened + 1" />`,
 })
@@ -355,7 +356,7 @@ describe('PdViewScroll: a scroll region is a tab stop only while it overflows', 
     TestBed.resetTestingModule();
     vi.unstubAllGlobals();
   });
-  @Component({ imports: [PdViewScroll], template: `<div #r role="region" aria-label="r" pdViewScroll><p>content</p></div>` })
+  @Component({ changeDetection: ChangeDetectionStrategy.OnPush, imports: [PdViewScroll], template: `<div #r role="region" aria-label="r" pdViewScroll><p>content</p></div>` })
   class Region {
     readonly region = viewChild.required<ElementRef<HTMLElement>>('r');
   }

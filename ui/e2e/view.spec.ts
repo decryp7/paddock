@@ -133,12 +133,12 @@ for (const theme of THEMES) {
     const box = await open(page, theme, 320);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
     expect(await box.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(false);
-    // Nothing inside the view is wider than the view except the regions that scroll themselves.
+    // Nothing inside the view is wider than the view except the regions that scroll themselves (the drawings and tables, the review filter).
     const wide = await box.evaluate((root) => {
       const limit = root.getBoundingClientRect().right + 1;
       const out: string[] = [];
       for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
-        if (el.closest('[role=region]') || el.closest('svg') || el.closest('canvas') || el.tagName === 'CANVAS') continue;
+        if (el.closest('[role=region]') || el.closest('.pd-view-review__filter') || el.closest('svg') || el.closest('canvas') || el.tagName === 'CANVAS') continue;
         if (el.getBoundingClientRect().right > limit) out.push(`${el.tagName.toLowerCase()}.${el.className}`);
       }
       return out;
@@ -261,14 +261,14 @@ for (const theme of THEMES) {
     const review = box.locator('[data-node-id="review"]');
     const over = await review.evaluate((root) => {
       const r = root.getBoundingClientRect();
-      return Array.from(root.querySelectorAll<HTMLElement>('*')).filter((e) => e.getBoundingClientRect().right > r.right + 0.5).map((e) => `${e.tagName.toLowerCase()}.${e.className} +${Math.round(e.getBoundingClientRect().right - r.right)} w${Math.round(e.getBoundingClientRect().width)} vs ${Math.round(r.width)}`);
+      return Array.from(root.querySelectorAll<HTMLElement>('*')).filter((e) => e.getBoundingClientRect().right > r.right + 0.5 && !e.closest('.pd-view-review__filter')).map((e) => `${e.tagName.toLowerCase()}.${e.className} +${Math.round(e.getBoundingClientRect().right - r.right)} w${Math.round(e.getBoundingClientRect().width)} vs ${Math.round(r.width)}`);
     });
     expect(over).toEqual([]);
     expect(await review.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
     const list = review.locator('ul.pd-view-review');
     expect(await list.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
-    // The filter wraps instead of overflowing.
-    expect(await review.locator('.pd-view-review__filter').evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+    // The filter is one row that scrolls in its own box (review 2, P3-5), and does not wrap.
+    expect(await review.locator('.pd-view-review__filter').evaluate((e) => e.scrollWidth > e.clientWidth && getComputedStyle(e).overflowX === 'auto' && getComputedStyle(e).flexWrap === 'nowrap')).toBe(true);
     // The form's chosen text does not break in the middle of a word.
     expect(await box.locator('[data-node-id="form"] .pd-view-form__chosen').first().evaluate((e) => getComputedStyle(e).overflowWrap)).toBe('break-word');
   });
@@ -292,7 +292,7 @@ test('P2-4: stale is drawn as a warning, not as the danger of a failure', async 
 
 test('R2 P2-1: no edge of a graph or diagram runs through a box that is not one of its ends', async ({ page }) => {
   const box = await open(page);
-  for (const id of ['g1', 'g2', 'd1']) {
+  for (const id of ['g1', 'g2', 'g3', 'd1']) {
     const crossing = await box.locator(`[data-node-id="${id}"] svg.pd-view-scene__svg`).evaluate((svg) => {
       const rects = Array.from(svg.querySelectorAll<SVGRectElement>('g.pd-view-scene__node rect')).map((r) => ({ x: r.x.baseVal.value, y: r.y.baseVal.value, w: r.width.baseVal.value, h: r.height.baseVal.value }));
       const bad: string[] = [];
@@ -326,7 +326,7 @@ for (const theme of THEMES) {
     }
   });
 
-  test(`R2 P2-3: a focus ring is never clipped by the region that scrolls or hides overflow around it (${theme})`, async ({ page }) => {
+  test(`R2 P2-3 and R3 P2-1: a focus ring is never clipped by the region that scrolls or hides overflow around it, nor drawn over the text it rings (${theme})`, async ({ page }) => {
     const box = await open(page, theme);
     const found = await box.evaluate(async (root) => {
       const bad: string[] = [];
@@ -340,6 +340,16 @@ for (const theme of THEMES) {
         const grow = el instanceof SVGElement ? 0 : (cs.outlineStyle === 'none' ? 0 : parseFloat(cs.outlineWidth) + parseFloat(cs.outlineOffset));
         const r = el.getBoundingClientRect();
         const ring = { left: r.left - grow, top: r.top - grow, right: r.right + grow, bottom: r.bottom + grow };
+        // Review 3, P2-1: an inset ring is a band along the edge of the element; it must not run over the element's own text or glyph.
+        if (!(el instanceof SVGElement) && cs.outlineStyle !== 'none' && parseFloat(cs.outlineOffset) < 0) {
+          const inset = -parseFloat(cs.outlineOffset);
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const t = range.getBoundingClientRect();
+          if (t.width > 0 && (t.left < r.left + inset - 0.01 || t.top < r.top + inset - 0.01 || t.right > r.right - inset + 0.01 || t.bottom > r.bottom - inset + 0.01)) {
+            bad.push(`${el.tagName.toLowerCase()}.${el.getAttribute('class') ?? ''} "${(el.textContent ?? '').trim().slice(0, 24)}" ring band ${inset}px over its text ${JSON.stringify(t.toJSON())} in ${JSON.stringify(r.toJSON())}`);
+          }
+        }
         for (let p = el.parentElement; p && p !== root.parentElement; p = p.parentElement) {
           const o = getComputedStyle(p);
           if (/(hidden|auto|scroll|clip)/.test(o.overflowX + o.overflowY)) {

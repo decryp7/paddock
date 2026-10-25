@@ -2,7 +2,7 @@ import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementR
 import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { Diagram, Graph } from '../generated/view';
 import { layoutGraph, layoutSequence, MARK_W, type LayoutNode, type Scene, type SceneNode } from './layout';
-import { TONE_GLYPH, toneOf, toneWord } from './model';
+import { toneGlyph, toneOf, toneWord } from './model';
 import { ViewRuntime } from './runtime';
 import { PdViewScroll, SCROLL_CSS } from './scroll';
 import { TONE_CSS, toneClass, VIEW_HOVER_FILL } from './tone';
@@ -134,7 +134,7 @@ export function diagramScene(d: Diagram): Scene {
     .pd-view-scene__rule { stroke: var(--pd-border-strong); stroke-width: 1; }
     .pd-view-scene__mark { color: var(--pd-view-tone); }
     .pd-view-scene__list { border-top: 1px solid var(--pd-hairline); padding: 0 var(--pd-space-3); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .pd-view-scene__list summary { display: flex; align-items: center; gap: var(--pd-space-1); cursor: pointer; min-height: 32px; list-style: none; }
+    .pd-view-scene__list summary { display: flex; align-items: center; gap: var(--pd-space-1); cursor: pointer; min-height: 32px; padding-inline: var(--pd-space-1); list-style: none; }
     .pd-view-scene__list summary::-webkit-details-marker { display: none; }
     .pd-view-scene__list summary pd-glyph { transition: transform var(--pd-duration-micro) var(--pd-ease-move); }
     .pd-view-scene__list[open] summary pd-glyph { transform: rotate(90deg); }
@@ -167,7 +167,7 @@ export class PdViewScene {
 
   /** The path data of a node's status glyph (the tone's own shape), or '' for a neutral node. */
   protected mark(n: SceneNode): string {
-    const glyph = TONE_GLYPH[toneOf(n.tone)];
+    const glyph = toneGlyph(toneOf(n.tone));
     return glyph ? ((PD_ICON_PATHS as Readonly<Record<string, string>>)[glyph] ?? '') : '';
   }
   protected markRoom(n: SceneNode): number {

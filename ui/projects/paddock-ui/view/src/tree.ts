@@ -104,7 +104,7 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
     ${TONE_CSS}
     :host { display: block; min-width: 0; }
     .pd-view-tree { list-style: none; margin: 0; padding: 0; }
-    .pd-view-tree__row { display: flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-row-height); padding-inline-start: calc(var(--pd-view-depth, 0) * var(--pd-space-4)); color: var(--pd-text); border-radius: var(--pd-radius-control); }
+    .pd-view-tree__row { display: flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-row-height); padding-inline-start: calc(var(--pd-view-depth, 0) * var(--pd-space-4) + var(--pd-space-1)); color: var(--pd-text); border-radius: var(--pd-radius-control); }
     /* Calm by default: only the mark of a tone is coloured; the label stays in text colour and the word is the row's tooltip. */
     .pd-view-tree__row pd-view-tone { color: var(--pd-view-tone); }
     .pd-view-tree__row:hover { background: ${VIEW_HOVER}; }

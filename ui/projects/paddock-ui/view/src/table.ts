@@ -118,7 +118,8 @@ export function tableWindow(t: Table): TableWindow {
     .pd-view-table__row--act:hover { background: ${VIEW_HOVER}; }
     .pd-view-table__text { overflow-wrap: break-word; }
     .pd-view-table__act { width: 1%; white-space: nowrap; text-align: end; }
-    .pd-view-table__sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: 100%; min-height: 24px; padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+    .pd-view-table__sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: 100%; min-height: 24px; padding: 0 var(--pd-space-1); margin-inline: calc(-1 * var(--pd-space-1)); border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+    /* The padding keeps the inset focus ring clear of the label; the matching negative margin keeps the label aligned with the cells (review 3, P2-1). */
     .pd-view-table__sort:hover:not(:disabled) { color: var(--pd-text); }
     .pd-view-table__sort:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; border-radius: 2px; }
     .pd-view-table__none { color: var(--pd-text-muted); text-align: center; padding: var(--pd-space-4); }

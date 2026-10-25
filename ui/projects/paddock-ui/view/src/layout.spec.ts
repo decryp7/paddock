@@ -43,13 +43,23 @@ describe('edge routing: an edge never crosses a box (review 2, P2-1)', () => {
   it('holds for the graphs and class diagram of the sample document', () => {
     const root = shapeOf(sampleViewDoc().root);
     if (root.tag !== 'stack') throw new Error('stack');
-    for (const id of ['g1', 'g2', 'd1', 'd2']) {
+    for (const id of ['g1', 'g2', 'g3', 'd1', 'd2']) {
       const k = shapeOf(root.v.children.find((c) => c.id === id)!);
       const s = k.tag === 'graph' ? graphScene(k.v) : k.tag === 'diagram' ? diagramScene(k.v) : null;
       if (!s) throw new Error(id);
       expect(crossings(s), id).toEqual([]);
       if (k.tag === 'graph') expect(crossings(graphScene({ ...k.v, layout: k.v.layout === 'radial' ? 'layered' : 'radial' })), `${id} other layout`).toEqual([]);
     }
+  });
+  it('bows the spoke-to-spoke edges of the second radial sample, and they cross no box', () => {
+    const root = shapeOf(sampleViewDoc().root);
+    if (root.tag !== 'stack') throw new Error('stack');
+    const g = shapeOf(root.v.children.find((c) => c.id === 'g3')!);
+    if (g.tag !== 'graph') throw new Error('graph');
+    const s = graphScene(g.v);
+    const across = s.edges.filter((x) => x.path.includes('Q') || x.path.includes('C'));
+    expect(across.length).toBeGreaterThanOrEqual(1);
+    expect(crossings(s)).toEqual([]);
   });
   it('sends the retry edge around the outside: right of every box, with a vertical lane', () => {
     const root = shapeOf(sampleViewDoc().root);
@@ -182,7 +192,7 @@ describe('layoutGraph', () => {
   it('does not overlap the boxes of the sample documents graphs either', () => {
     const root = shapeOf(sampleViewDoc().root);
     if (root.tag !== 'stack') throw new Error('stack');
-    for (const id of ['g1', 'g2', 'd1', 'd2']) {
+    for (const id of ['g1', 'g2', 'g3', 'd1', 'd2']) {
       const k = shapeOf(root.v.children.find((c) => c.id === id)!);
       const s = k.tag === 'graph' ? graphScene(k.v) : k.tag === 'diagram' ? diagramScene(k.v) : null;
       if (!s) throw new Error(id);
