@@ -144,7 +144,7 @@ const SCROLL_STICK_PX = 24;
 
     @if (store.approval(); as ask) {
       <section class="approval" role="alertdialog" aria-labelledby="pd-assistant-approval" data-testid="assistant-approval">
-        <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong> <span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
+        <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong>&#32;<span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
         <details class="details" data-testid="assistant-approval-details">
           <summary><pd-glyph class="chev" name="chevron-right" [size]="14" /> {{ t.details }}</summary>
           <dl>
@@ -171,7 +171,7 @@ const SCROLL_STICK_PX = 24;
       <p class="error" role="alert" data-testid="assistant-failure">{{ failure }} <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" (click)="store.dismissFailure()">{{ t.dismiss }}</button></p>
     }
 
-    <form class="composer" (submit)="$event.preventDefault(); store.send()">
+    <form class="composer" (submit)="$event.preventDefault(); submit()">
       @if (store.chips().length) {
         <ul class="chips" [attr.aria-label]="t.context" data-testid="assistant-chips">
           @for (chip of store.chips(); track chip.id) {
@@ -375,7 +375,8 @@ export class PdAssistant {
       this.store.turns();
       const el = this.log()?.nativeElement;
       if (!el) return;
-      if (this.pinned) el.scrollTop = el.scrollHeight;
+      // After the new turn's DOM is rendered (an effect runs before the view updates), else the last block stays below.
+      if (this.pinned) afterNextRender(() => (el.scrollTop = el.scrollHeight), { injector: this.injector });
       // The pill is state of this effect's scroll decision (the user's position is not a signal): set only, never read.
       else this.unseen.set(true);
     });
@@ -413,6 +414,13 @@ export class PdAssistant {
     if (!el) return;
     this.pinned = el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_STICK_PX;
     if (this.pinned) this.unseen.set(false);
+  }
+
+  /** Sends the question; the log follows it to the end (the user's own message is where they look next). */
+  protected submit(): void {
+    this.pinned = true;
+    this.unseen.set(false);
+    void this.store.send();
   }
 
   protected jumpToLatest(): void {
@@ -489,7 +497,7 @@ export class PdAssistant {
       void this.store.stop();
     } else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
-      if (!this.blocked()) void this.store.send();
+      if (!this.blocked()) this.submit();
     }
   }
 
