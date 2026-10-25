@@ -1,0 +1,35 @@
+# Code owners of the Paddock monorepo (ADR 0014 §9). Gitea reads this file and requests the owners as reviewers of a pull
+# request. Patterns are Go regular expressions over the path from the repo root, not GitHub's globs: `apps/debrief/.*`, and
+# a literal dot is `\.`. scripts/affected.test.mjs checks that every tracked file has an owner and that no pattern is a glob.
+#
+# With one human owner this is not a gate; it is the written form of "each task owns an explicit set of files": an agent's
+# brief names its owned paths from here, and the shared integration points (crates/*/src/lib.rs, the root package.json,
+# .gitea/, renovate.json) are changed by the integrating agent only. An imported app adds its own line.
+
+# Apps, one line each.
+apps/shell-demo/.* @decryp7
+apps/workbench-demo/.* @decryp7
+
+# Shared code.
+crates/.* @decryp7
+ui/.* @decryp7
+eslint/.* @decryp7
+conformance/.* @decryp7
+tsconfig/.* @decryp7
+lint/.* @decryp7
+icons/.* @decryp7
+templates/.* @decryp7
+
+# CI, tools and the image.
+\.gitea/.* @decryp7
+ci-image/.* @decryp7
+scripts/.* @decryp7
+tools/.* @decryp7
+renovate/.* @decryp7
+
+# Family docs and diagrams.
+docs/.* @decryp7
+diagrams/.* @decryp7
+
+# Root configs (the coordinator's).
+(\.cargo/.*|\.editorconfig|\.gitattributes|\.gitignore|\.nvmrc|package\.json|package-lock\.json|renovate\.json|CODEOWNERS|AGENTS\.md|README\.md|CHANGELOG\.md|LICENSE-[A-Z]+|paddock\.conformance\.json|paddock\.waivers\.toml) @decryp7

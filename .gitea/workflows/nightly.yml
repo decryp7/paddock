@@ -1,0 +1,50 @@
+# The safety net of affected CI (ADR 0014 §6): every night, and on a manual run, ci.yml runs everything on main (every
+# project, every app leg, Chromium and WebKit), whatever the change. A wrong filter in scripts/affected.mjs can therefore
+# hide a failure for at most one night, and release workflows always run their app's full gates.
+#
+# The night's run is skipped while main is unchanged since the last fully green nightly (the plan action's marker), and a
+# fully green run records that marker (nightly-mark). Imported apps add their own nightly jobs here (Debrief's bench,
+# corpus, fuzz and mutants, scoped to apps/debrief).
+
+name: nightly
+
+on:
+  schedule:
+    - cron: "43 1 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: gate (main changed since the last green nightly?)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        uses: ./.gitea/actions/plan
+
+  ci:
+    name: everything
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/ci.yml
+    with:
+      webkit: true
+
+  mark:
+    name: mark the green nightly
+    needs: [ci]
+    if: ${{ github.event_name == 'schedule' && success() }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/nightly-mark

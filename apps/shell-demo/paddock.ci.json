@@ -1,0 +1,12 @@
+{
+  "$comment": "The CI contract of this app's matrix leg (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6). Commands run from the repo root, one per line of a step; the Rust gates (fmt, clippy, nextest, doc tests, deny) run in 'cargo'. Its UI is ui/projects/shell-demo, tested by the ui and e2e jobs.",
+  "cargo": "src-tauri",
+  "nextestConfig": "crates/.config/nextest.toml",
+  "prepare": ["npm run shell-demo:build -w ui"],
+  "checks": [
+    "node scripts/demo-release.mjs shell-demo version",
+    "node scripts/demo-release.mjs shell-demo icons",
+    "node scripts/demo-release.mjs shell-demo notes \"$RUNNER_TEMP/notes.md\""
+  ],
+  "ui": []
+}

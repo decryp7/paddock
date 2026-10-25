@@ -1,0 +1,76 @@
+name: app-gates
+description: "One app's matrix leg in the monorepo (ADR 0014 §6): the app's own commands from apps/<app>/paddock.ci.json (prepare, checks, UI checks), and the Rust gates of its Cargo workspace (fmt, clippy, nextest, doc tests, deny), only for the halves the change reaches. The caller checks out, sets up Rust and runs `npm ci` at the root; the inputs come from the plan job's matrix (scripts/affected.mjs)."
+inputs:
+  app:
+    description: The app (its folder under apps/).
+    required: true
+  cargo:
+    description: The app's Cargo workspace folder from the repo root (apps/shell-demo/src-tauri); empty for an app without Rust.
+    default: ""
+  nextest-config:
+    description: A nextest config file from the repo root (crates/.config/nextest.toml); empty uses the workspace's own.
+    default: ""
+  prepare:
+    description: Commands from the repo root before either half, one per line (build the UI the app embeds).
+    default: ""
+  checks:
+    description: Commands from the repo root that always run, one per line (release facts).
+    default: ""
+  ui-checks:
+    description: Commands from the repo root for the UI half, one per line (lint, unit tests, Chromium e2e).
+    default: ""
+  rust:
+    description: "'true' runs the Rust half."
+    default: "true"
+  ui:
+    description: "'true' runs the UI half."
+    default: "true"
+  filter:
+    description: "A nextest filterset for a pull request that reaches only part of the workspace (package(=a) | package(=b)); empty runs every test."
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Prepare (${{ inputs.app }})
+      if: inputs.prepare != '' && (inputs.rust == 'true' || inputs.ui == 'true')
+      shell: bash
+      env:
+        COMMANDS: ${{ inputs.prepare }}
+      run: bash -euo pipefail -c "$COMMANDS"
+
+    - name: Checks (${{ inputs.app }})
+      if: inputs.checks != ''
+      shell: bash
+      env:
+        COMMANDS: ${{ inputs.checks }}
+      run: bash -euo pipefail -c "$COMMANDS"
+
+    # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke).
+    - name: Rust (${{ inputs.app }}; fmt, clippy, tests on the mock runtime, doc tests, deny)
+      if: inputs.rust == 'true' && inputs.cargo != ''
+      shell: bash
+      working-directory: ${{ inputs.cargo }}
+      env:
+        NEXTEST_CONFIG: ${{ inputs.nextest-config }}
+        FILTER: ${{ inputs.filter }}
+      run: |
+        set -uo pipefail
+        status=0
+        step() { echo "::group::$*"; "$@" || { status=1; echo "::error::failed: $*"; }; echo "::endgroup::"; }
+        config=()
+        if [ -n "$NEXTEST_CONFIG" ]; then config=(--config-file "$GITHUB_WORKSPACE/$NEXTEST_CONFIG"); fi
+        filter=()
+        if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the crates this change reaches: $FILTER"; filter=(-E "$FILTER"); fi
+        step cargo fmt --all --check
+        step cargo clippy --workspace --all-targets -- -D warnings
+        step cargo nextest run --workspace "${config[@]}" --profile ci "${filter[@]}"
+        step cargo test --workspace --doc
+        step cargo deny check
+        exit $status
+
+    - name: UI (${{ inputs.app }})
+      if: inputs.ui == 'true' && inputs.ui-checks != ''
+      shell: bash
+      env:
+        COMMANDS: ${{ inputs.ui-checks }}
+      run: bash -euo pipefail -c "$COMMANDS"

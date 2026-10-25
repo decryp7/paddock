@@ -1,0 +1,53 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate for the whole Paddock monorepo (ADR 0014 §8): every Cargo workspace, the one npm workspace and the workflows. One weekly PR for ordinary updates; Angular and Tauri each as one PR across all workspaces; Rust patch updates and lock maintenance per workspace, so an app in release freeze can hold its own; security fixes at any time.",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "schedule": ["before 6am on monday"],
+  "ignorePaths": ["**/node_modules/**", "apps/*/target/**", "**/target/**", "templates/**"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"],
+    "additionalBranchPrefix": "{{packageFileDir}}-",
+    "commitMessageSuffix": "({{packageFileDir}})"
+  },
+  "vulnerabilityAlerts": { "enabled": true, "groupName": null, "schedule": ["at any time"] },
+  "packageRules": [
+    {
+      "description": "One weekly PR for every non-security update that no group below takes",
+      "matchPackageNames": ["*"],
+      "groupName": "weekly dependency updates",
+      "groupSlug": "weekly"
+    },
+    {
+      "description": "Angular in every workspace in one PR: one Angular for the family (rule 39)",
+      "matchPackageNames": ["/^@angular/", "/^@angular-devkit/", "/^@schematics/angular$/", "ng-packagr", "angular-eslint", "/^@angular-eslint/", "/^@ngrx/"],
+      "groupName": "Angular",
+      "groupSlug": "angular"
+    },
+    {
+      "description": "Tauri's Rust crates and its npm packages together, across every workspace",
+      "matchPackageNames": ["tauri", "tauri-build", "/^tauri-plugin-/", "/^tauri-runtime/", "tauri-utils", "/^@tauri-apps\\//"],
+      "groupName": "Tauri",
+      "groupSlug": "tauri"
+    },
+    {
+      "description": "Rust patch updates one PR per Cargo workspace (crates/, each app), so each lands through that workspace's gates",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["patch"],
+      "matchPackageNames": ["*", "!tauri", "!tauri-build", "!tauri-utils", "!/^tauri-plugin-/", "!/^tauri-runtime/"],
+      "groupName": "rust patch updates",
+      "groupSlug": "rust-patch",
+      "additionalBranchPrefix": "{{packageFileDir}}-"
+    },
+    {
+      "description": "Gitea Actions only supports v3 of the artifact actions",
+      "matchPackageNames": ["actions/upload-artifact", "actions/download-artifact"],
+      "allowedVersions": "<4"
+    },
+    {
+      "description": "Node follows .nvmrc, which CI, the paddock-ci image and the host runners must match; bump it by hand",
+      "matchPackageNames": ["node"],
+      "enabled": false
+    }
+  ]
+}

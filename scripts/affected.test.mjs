@@ -1,0 +1,297 @@
+// Tests of scripts/affected.mjs (ADR 0014 §6): the rules on this tree's real graph, the pure parts (lock diff, base choice,
+// matrix legs) and the contracts the script relies on (doc inputs, app CI files, CODEOWNERS, Renovate).
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, posix } from 'node:path';
+import { describe, test } from 'node:test';
+import { affected, cargoGraph, chooseBase, DOC_INPUTS, DOCS, lockDiff, matrix, npmGraph, owners, readApps, ROOT, summary, trackedFiles } from './affected.mjs';
+
+const tracked = trackedFiles();
+const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
+const run = (...files) => affected(files, graph);
+const APPS = [...graph.apps.keys()].sort();
+
+describe('the graph of this tree', () => {
+  test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
+    const r = run('crates/paddock-jobs/src/lib.rs');
+    assert.ok(r.crates && !r.ui);
+    assert.deepEqual(r.apps, ['shell-demo', 'workbench-demo']);
+    assert.deepEqual(r.kinds['shell-demo'], ['rust']);
+    assert.ok(r.packages.crates.includes('paddock-jobs'));
+    assert.ok(r.packages['apps/shell-demo/src-tauri'].includes('paddock-shell-demo'));
+  });
+
+  test('a crate nothing else uses marks only crates', () => {
+    const leaf = [...graph.cargo].find(([d, c]) => c.workspace === 'crates' && ![...graph.cargo.values()].some((o) => o.deps.includes(d)) && d.startsWith('crates/paddock-'));
+    assert.ok(leaf, 'a leaf crate exists');
+    const r = run(`${leaf[0]}/src/lib.rs`);
+    assert.ok(r.crates);
+    assert.deepEqual(r.apps.filter((a) => (r.packages[graph.apps.get(a).dir + '/src-tauri'] ?? []).length), r.apps);
+  });
+
+  test('an app crate marks only its app, with its reverse dependencies as packages', () => {
+    const r = run('apps/shell-demo/src-tauri/agent/src/main.rs');
+    assert.deepEqual([r.apps, r.crates, r.ui], [['shell-demo'], false, false]);
+    assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
+  });
+
+  // Paddock 234f6911: a ui/ shell change broke the shell demo job, which has no npm or Cargo edge to ui/ (spike §2).
+  test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
+    const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
+    assert.ok(r.ui);
+    assert.deepEqual(r.apps, ['shell-demo', 'workbench-demo']);
+    assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
+  });
+
+  test("ui's ESLint config reaches ../eslint, so a preset change runs ui's lint", () => {
+    const r = run('eslint/src/preset.cjs');
+    assert.ok(r.eslint && r.ui);
+  });
+
+  test('docs mark nothing but the link check; doc inputs read by code mark their projects', () => {
+    const d = run('docs/adr/0014-monorepo-under-paddock.md', 'crates/paddock-jobs/README.md', 'README.md', 'diagrams/paddock.xml');
+    assert.deepEqual([d.apps, d.crates, d.ui, d.docs], [[], false, false, true]);
+    const c = run('apps/shell-demo/CHANGELOG.md');
+    assert.deepEqual([c.apps, c.kinds['shell-demo']], [['shell-demo'], ['rust', 'ui']]);
+    const rules = run('docs/rules.md');
+    assert.deepEqual([rules.conformance, rules.tools, rules.docs, rules.apps], [true, true, false, []]);
+  });
+
+  test('global inputs mark everything; an app release workflow marks one app', () => {
+    for (const f of ['.gitea/workflows/ci.yml', '.gitea/actions/setup-rust/action.yml', 'package.json', '.cargo/config.toml', 'scripts/affected.mjs', 'conformance/release/latest-json.mjs']) {
+      const r = run(f);
+      assert.ok(r.all && r.crates && r.ui && r.eslint && r.conformance && r.tools, f);
+      assert.deepEqual(r.apps, APPS, f);
+    }
+    assert.deepEqual(run('.gitea/workflows/shell-demo-release.yml').apps, ['shell-demo']);
+    assert.ok(!run('.gitea/workflows/shell-demo-release.yml').crates);
+  });
+
+  test('an unknown root file marks everything (fail safe); editor metadata marks nothing', () => {
+    assert.ok(run('Makefile').all);
+    const m = run('.gitignore', 'ui/.gitignore', '.editorconfig');
+    assert.deepEqual([m.all, m.apps, m.ui, m.docs], [false, [], false, false]);
+  });
+
+  test("an app's icons mark that app; the icon pipeline marks every app; conformance's scripts mark every app", () => {
+    assert.deepEqual(run('icons/shell-demo/shell-demo-macos-1024.png').apps, ['shell-demo']);
+    assert.deepEqual(run('icons/tools/build.mjs').apps, APPS);
+    assert.deepEqual(run('conformance/src/checks/C03-icons.mjs').apps, APPS);
+    assert.deepEqual(run('conformance/test/core.test.mjs').apps, []);
+  });
+
+  test('scripts mark the tools and ui jobs (test:scripts), the image folder the image and ui jobs', () => {
+    const s = run('scripts/publish.mjs');
+    assert.deepEqual([s.tools, s.ui, s.crates], [true, true, false]);
+    const i = run('ci-image/Dockerfile');
+    assert.deepEqual([i.ciImage, i.ui, i.apps], [true, true, []]);
+  });
+
+  test('every project of a changed file is in the plan, and no app outside apps/ appears', () => {
+    for (const f of tracked) {
+      const own = owners(f);
+      if (!own) continue;
+      const r = run(f);
+      for (const a of r.apps) assert.ok(graph.apps.has(a), `${f} names unknown app ${a}`);
+    }
+  });
+});
+
+describe('lockDiff (the root package-lock.json)', () => {
+  const lock = (x, y = '1.0.0') =>
+    JSON.stringify({
+      packages: {
+        '': { workspaces: ['ui', 'apps/a/app', 'apps/b/app'] },
+        ui: { dependencies: { z: '1' } },
+        'apps/a/app': { dependencies: { x: '1', ui: '*' } },
+        'apps/b/app': { dependencies: { y: '1' } },
+        'apps/b/app/node_modules/x': { version: '2.0.0' },
+        'node_modules/ui': { resolved: 'ui', link: true },
+        'node_modules/x': { version: x },
+        'node_modules/y': { version: y },
+        'node_modules/z': { version: '1.0.0' },
+      },
+    });
+
+  test('only workspaces whose resolved packages changed', () => {
+    assert.deepEqual(lockDiff(lock('1.0.0'), lock('1.0.1')), ['apps/a/app']);
+    assert.deepEqual(lockDiff(lock('1.0.0', '1.0.0'), lock('1.0.0', '1.1.0')), ['apps/b/app']);
+    assert.deepEqual(lockDiff(lock('1.0.0'), lock('1.0.0')), []);
+  });
+
+  test('a nested copy shadows the hoisted one (node lookup order), and a linked workspace is followed', () => {
+    const before = JSON.parse(lock('1.0.0'));
+    const after = structuredClone(before);
+    after.packages['node_modules/z'].version = '1.0.1'; // ui's dependency; app a reaches it through the ui link
+    assert.deepEqual(lockDiff(JSON.stringify(before), JSON.stringify(after)), ['apps/a/app', 'ui']);
+  });
+
+  test('a lock that is new or removed marks every workspace in it', () => {
+    assert.deepEqual(lockDiff(null, lock('1.0.0')), ['apps/a/app', 'apps/b/app', 'ui']);
+  });
+
+  test('a root lock change marks its workspaces through the plan, Rust half untouched', () => {
+    const r = affected(['package-lock.json'], graph, { lockBefore: lock('1.0.0'), lockAfter: lock('1.0.1') });
+    assert.deepEqual([r.ui, r.crates, r.all], [false, false, false]);
+  });
+});
+
+describe('chooseBase', () => {
+  const contains = (sha) => sha !== 'elsewhere';
+  const mergeBase = (b) => (b === 'main' ? 'mb123' : null);
+  const run_ = (over) => ({ id: 1, conclusion: 'success', event: 'push', head_branch: 'main', path: 'ci.yml@refs/heads/main', head_sha: 'green1', ...over });
+
+  test('a pull request diffs from its merge base', () => {
+    assert.equal(chooseBase({ event: 'pull_request', baseRef: 'main', contains, mergeBase }).base, 'mb123');
+    assert.equal(chooseBase({ event: 'pull_request', baseRef: 'gone', contains, mergeBase }).base, null);
+  });
+
+  test('a push to main diffs from the newest green ci push run that HEAD contains', () => {
+    const runs = [
+      run_({ head_sha: 'red', conclusion: 'failure' }),
+      run_({ head_sha: 'other', path: 'canary.yml@refs/heads/main' }),
+      run_({ head_sha: 'disp', event: 'workflow_dispatch' }),
+      run_({ head_sha: 'elsewhere' }),
+      run_({ head_sha: 'green1', id: 7 }),
+      run_({ head_sha: 'green0' }),
+    ];
+    const r = chooseBase({ event: 'push', ref: 'refs/heads/main', runs, contains, mergeBase });
+    assert.equal(r.base, 'green1');
+    assert.match(r.reason, /run 7/);
+  });
+
+  test('a push to main with no green run, or unreadable runs, tests everything', () => {
+    assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs: [run_({ conclusion: 'failure' })], contains, mergeBase }).base, null);
+    assert.equal(chooseBase({ event: 'push', ref: 'refs/heads/main', runs: null, contains, mergeBase }).base, null);
+  });
+
+  test('a manual run uses its base input or tests everything; tags and schedules test everything', () => {
+    assert.equal(chooseBase({ event: 'workflow_dispatch', inputBase: 'abc', contains, mergeBase }).base, 'abc');
+    assert.equal(chooseBase({ event: 'workflow_dispatch', inputBase: '', contains, mergeBase }).base, null);
+    assert.equal(chooseBase({ event: 'push', ref: 'refs/tags/v0.4.0', contains, mergeBase }).base, null);
+    assert.equal(chooseBase({ event: 'schedule', ref: 'refs/heads/main', contains, mergeBase }).base, null);
+  });
+});
+
+describe('matrix legs', () => {
+  test('one leg per affected app with its CI contract and halves', () => {
+    const [leg] = matrix(run('apps/shell-demo/src-tauri/src/lib.rs'), graph);
+    assert.equal(leg.app, 'shell-demo');
+    assert.equal(leg.cargo, 'apps/shell-demo/src-tauri');
+    assert.equal(leg.nextest_config, 'crates/.config/nextest.toml');
+    assert.match(leg.prepare, /npm run shell-demo:build -w ui/);
+    assert.match(leg.checks, /demo-release\.mjs shell-demo version/);
+    assert.deepEqual([leg.rust, leg.ui, leg.filter], [true, false, '']);
+  });
+
+  test('a pull request narrows nextest to the reached crates of the workspace; everything never narrows', () => {
+    const [leg] = matrix(run('apps/shell-demo/src-tauri/agent/src/main.rs'), graph, { narrow: true });
+    assert.equal(leg.filter, '');
+    const lib = matrix(run('apps/shell-demo/src-tauri/src/lib.rs'), graph, { narrow: true })[0];
+    assert.equal(lib.filter, 'package(=paddock-shell-demo)');
+    for (const l of matrix(affected([], graph, { all: true }), graph, { narrow: true })) assert.equal(l.filter, '');
+  });
+
+  test('everything gives every app both halves, and the summary names each leg', () => {
+    const plan = affected([], graph, { all: true });
+    const legs = matrix(plan, graph);
+    assert.deepEqual(legs.map((l) => [l.app, l.rust, l.ui]), APPS.map((a) => [a, true, true]));
+    const md = summary(plan, 'everything', legs);
+    for (const a of APPS) assert.match(md, new RegExp(`app ${a} \\| rust \\+ ui`));
+  });
+});
+
+describe('contracts', () => {
+  test('every folder under apps/ has a paddock.ci.json whose Cargo workspace and commands exist', () => {
+    for (const d of readdirSync(join(ROOT, 'apps'), { withFileTypes: true }).filter((e) => e.isDirectory())) {
+      if (!tracked.some((f) => f.startsWith(`apps/${d.name}/`))) continue;
+      const app = graph.apps.get(d.name);
+      assert.ok(app, `apps/${d.name}/paddock.ci.json is missing (the CI contract of its matrix leg)`);
+      if (app.cargo) assert.ok(existsSync(join(ROOT, app.dir, app.cargo, 'Cargo.toml')), `${d.name}: cargo folder ${app.cargo} has no Cargo.toml`);
+      if (app.nextestConfig) assert.ok(existsSync(join(ROOT, app.nextestConfig)), `${d.name}: ${app.nextestConfig} is missing`);
+      for (const k of ['prepare', 'checks', 'ui']) assert.ok(Array.isArray(app[k] ?? []), `${d.name}: ${k} is a list of commands`);
+    }
+  });
+
+  test('every markdown file that code reads is a declared doc input', () => {
+    // include_str!("rel.md") is resolved from its file; quoted repo paths ('docs/x.md', "apps/a/README.md") are taken as is.
+    const re = String.raw`include_str!\("[^"]+\.md"\)|['"](docs|apps|crates|ui)/[A-Za-z0-9_./-]+\.md['"]`;
+    const hits = execFileSync('git', ['grep', '-E', re, '--', '*.rs', '*.mjs', '*.ts', '*.cjs'], { cwd: ROOT, encoding: 'utf8' });
+    const read = new Set();
+    for (const line of hits.split('\n').filter(Boolean)) {
+      const at = line.indexOf(':');
+      const [file, text] = [line.slice(0, at), line.slice(at + 1)];
+      if (/^\s*(\/\/|\*|#)/.test(text)) continue; // a comment names the file, nothing reads it
+      if (DOCS.some((r) => r.test(file))) continue; // a docs tool (docs/images/src) reading docs is docs
+      if (file === 'scripts/affected.test.mjs') continue; // this file names docs as test data
+      for (const m of text.matchAll(new RegExp(re, 'g'))) {
+        const inc = /include_str!\("([^"]+)"\)/.exec(m[0]);
+        const path = inc ? posix.normalize(posix.join(posix.dirname(file), inc[1])) : m[0].slice(1, -1);
+        if (tracked.includes(path) && DOCS.some((r) => r.test(path))) read.add(path);
+      }
+    }
+    assert.ok(read.has('apps/shell-demo/CHANGELOG.md'), 'the grep finds the shell demo What\'s New');
+    const undeclared = [...read].filter((f) => !DOC_INPUTS.some((d) => d.re.test(f)));
+    assert.deepEqual(undeclared, []);
+    // Read through join(): the rules and blocks that conformance sync, the release notes and new-app read.
+    for (const f of ['docs/rules.md', 'docs/blocks/first-launch.md', 'docs/blocks/readme-skeleton.md']) assert.ok(DOC_INPUTS.some((d) => d.re.test(f)), f);
+  });
+
+  test('CODEOWNERS is in Gitea form (Go regular expressions, dots escaped) and owns every top-level path', () => {
+    const lines = readFileSync(join(ROOT, 'CODEOWNERS'), 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+    const rules = lines.map((l) => {
+      const [pattern, ...who] = l.trim().split(/\s+/);
+      assert.ok(who.length && who.every((w) => w.startsWith('@')), `owners in "${l}"`);
+      assert.ok(!/(^|[^\\])\.(?![*+?])/.test(pattern), `unescaped dot in ${pattern}`);
+      assert.ok(!pattern.includes('**'), `${pattern} is a glob, not a Go regular expression`);
+      return new RegExp(`^${pattern}$`);
+    });
+    for (const f of tracked) assert.ok(rules.some((r) => r.test(f)), `${f} has no owner`);
+    for (const f of ['apps/shell-demo/src-tauri/src/lib.rs', '.gitea/workflows/ci.yml', 'crates/paddock-jobs/src/lib.rs']) assert.ok(rules.some((r) => r.test(f)));
+  });
+
+  test('renovate.json at the root covers every workspace and keeps build output out', () => {
+    const r = JSON.parse(readFileSync(join(ROOT, 'renovate.json'), 'utf8'));
+    assert.ok(r.ignorePaths.includes('**/node_modules/**'));
+    assert.ok(r.ignorePaths.includes('apps/*/target/**'));
+    const groups = r.packageRules.map((p) => p.groupName).filter(Boolean);
+    for (const g of ['Angular', 'Tauri']) assert.ok(groups.includes(g), `group ${g}`);
+    assert.equal(r.lockFileMaintenance?.enabled, true);
+    assert.equal(r.lockFileMaintenance?.additionalBranchPrefix, '{{packageFileDir}}-');
+  });
+
+  test('one npm workspace: no package has a lockfile of its own and the root lists the workspaces', () => {
+    const extra = tracked.filter((f) => f.endsWith('package-lock.json') && f !== 'package-lock.json' && !f.startsWith('templates/'));
+    assert.deepEqual(extra, []);
+    const root = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+    for (const w of ['ui', 'apps/shell-demo', 'apps/*/app']) assert.ok(root.workspaces.includes(w), w);
+    const names = root.workspaces.filter((w) => !w.includes('*')).map((w) => JSON.parse(readFileSync(join(ROOT, w, 'package.json'), 'utf8')).name);
+    assert.equal(new Set(names).size, names.length, 'workspace package names are unique');
+  });
+
+  test('ci.yml passes every field of a matrix leg to app-gates, and app-gates declares each one', () => {
+    const ci = readFileSync(join(ROOT, '.gitea/workflows/ci.yml'), 'utf8');
+    const gates = readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8');
+    const [leg] = matrix(affected([], graph, { all: true }), graph);
+    const job = ci.slice(ci.indexOf('\n  app:\n'));
+    for (const key of Object.keys(leg).filter((k) => k !== 'dir')) {
+      assert.match(job, new RegExp(`\\$\\{\\{ matrix\\.${key} \\}\\}`), `ci.yml passes matrix.${key}`);
+    }
+    for (const input of ['app', 'cargo', 'nextest-config', 'prepare', 'checks', 'ui-checks', 'rust', 'ui', 'filter']) assert.match(gates, new RegExp(`\\n  ${input}:\\n`), input);
+    assert.match(job, /include: \$\{\{ fromJSON\(needs\.plan\.outputs\.apps\) \}\}/);
+  });
+
+  test('the root AGENTS.md links the rules (not a copy) and carries every common doc block verbatim', () => {
+    const agents = readFileSync(join(ROOT, 'AGENTS.md'), 'utf8');
+    assert.match(agents, /\[docs\/rules\.md\]\(docs\/rules\.md\)/);
+    assert.ok(!agents.includes('1. **One app at a time.**'), 'the rules are linked, not copied (ADR 0014 §9)');
+    const blocks = JSON.parse(readFileSync(join(ROOT, 'docs/blocks/blocks.json'), 'utf8'));
+    for (const name of blocks.defaultTargets['AGENTS.md'].filter((n) => n !== 'rules')) {
+      const file = blocks.blocks.find((b) => b.name === name).file;
+      const text = readFileSync(join(ROOT, 'docs/blocks', file), 'utf8').trim();
+      assert.ok(agents.includes(text), `docs/blocks/${file} is in AGENTS.md as it is`);
+    }
+  });
+});
+

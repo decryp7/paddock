@@ -1,4 +1,9 @@
-# Checks the shared UI package, its entry points, the reference apps and the Rust crates on every push and pull request.
+# The monorepo's CI (ADR 0014 §6): a plan job decides which projects a change reaches (scripts/affected.mjs: the Cargo and
+# npm graphs plus the frontendDist and config-path edges), then only those run: the shared UI package and its entry points,
+# the reference apps, the Rust crates, the conformance, tools and ESLint packages, and one matrix leg per affected app
+# (apps/<app>/paddock.ci.json, through .gitea/actions/app-gates). The base of the diff: a pull request's merge base, the last
+# green push run of main for a push to main, the `base` input of a manual run; tags and manual runs without a base run
+# everything. nightly.yml runs everything, Chromium and WebKit, every night (the safety net for a wrong filter).
 # Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.
 #
@@ -13,13 +18,57 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      base:
+        description: "Diff from this commit (empty: run everything)"
+        required: false
+        default: ""
+  # nightly.yml: everything, with WebKit.
+  workflow_call:
+    inputs:
+      webkit:
+        description: "Also run the WebKit job"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
+  # Which projects this run tests. The script's own tests run first: a wrong plan would hide failures.
+  plan:
+    name: plan (affected projects)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    outputs:
+      crates: ${{ steps.plan.outputs.crates }}
+      ui: ${{ steps.plan.outputs.ui }}
+      eslint: ${{ steps.plan.outputs.eslint }}
+      conformance: ${{ steps.plan.outputs.conformance }}
+      tools: ${{ steps.plan.outputs.tools }}
+      apps: ${{ steps.plan.outputs.apps }}
+      any_app: ${{ steps.plan.outputs.any_app }}
+    steps:
+      # The whole history: the base (a merge base, the last green commit of main) can be any older commit.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The plan's tests
+        run: node --test scripts/affected.test.mjs
+
+      - name: Affected projects
+        id: plan
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PLAN_BASE: ${{ github.event.inputs.base }}
+        run: node scripts/affected.mjs --ci
+
   ui:
+    needs: [plan]
+    if: ${{ needs.plan.outputs.ui == 'true' }}
     name: ui (tokens, contrast, components, entry points, publish dry run)
     runs-on: ubuntu-latest
     container:
@@ -32,7 +81,9 @@ jobs:
 
       - uses: ./.gitea/actions/node-caches
 
+      # One npm workspace for the repo (ADR 0014 §1): the root lock installs every package.
       - name: Install
+        working-directory: .
         run: npm ci
 
       # WCAG contrast of every text/background pair and colour-vision separation of the chart palette.
@@ -75,6 +126,8 @@ jobs:
   # The apps compile from source (tsconfig paths), so a shard needs no library build.
   e2e:
     name: reference apps (shard ${{ matrix.shard }}/2)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.ui == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -94,6 +147,7 @@ jobs:
           name: e2e-${{ matrix.shard }}
 
       - name: Install
+        working-directory: .
         run: npm ci
 
       - name: Reference app checks
@@ -105,10 +159,11 @@ jobs:
         run: npx playwright test --shard=${{ matrix.shard }}/2
 
   # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in it on the Mac host runner
-  # (Playwright's own WebKit build), for pushes to main and v* tags only. Branch and pull request runs stay Chromium-only (rule 3).
+  # (Playwright's own WebKit build), for pushes to main, v* tags and nightly.yml only. Branch and pull request runs stay Chromium-only (rule 3).
   e2e-webkit:
     name: reference apps in WebKit (macOS)
-    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    needs: [plan]
+    if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))) }}
     runs-on: macos-latest
     defaults:
       run:
@@ -119,13 +174,14 @@ jobs:
       - uses: ./.gitea/actions/node-caches
 
       - name: Install
+        working-directory: .
         run: npm ci
 
       # A host runner has no image: the browser is installed once per Playwright version into a kept host folder (outside the
       # checkout and the runner user's own caches, rule 7) and only when that folder is missing.
       - name: WebKit
         run: |
-          PW_VERSION=$(node -p "require('./node_modules/playwright-core/package.json').version")
+          PW_VERSION=$(node -p "require('playwright-core/package.json').version")
           BROWSERS="${RUNNER_TOOL_CACHE:-$HOME/.cache}/paddock-playwright/$PW_VERSION"
           echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS" >> "$GITHUB_ENV"
           if [ ! -f "$BROWSERS/.installed-webkit" ]; then
@@ -145,6 +201,8 @@ jobs:
   # tested (latest.json byte-equal to the apps' copy), the shared macOS verify runs against a shimmed bundle. No dependencies.
   conformance:
     name: conformance (checks, release scripts)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.conformance == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -178,6 +236,8 @@ jobs:
   # PATH of shims, so no launchd, systemd, Docker or installed app is touched. New-app templates are covered by scripts/.
   tools:
     name: tools and shared scripts
+    needs: [plan]
+    if: ${{ needs.plan.outputs.tools == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -190,9 +250,15 @@ jobs:
       - name: new-app templates
         run: node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs
 
+      # The plan's rules and the repo contracts it checks (doc inputs, app CI files, CODEOWNERS, Renovate, one npm lock).
+      - name: Affected rules and repo contracts
+        run: node --test scripts/affected.test.mjs
+
   # @decryp7/paddock-eslint (eslint/, plan X11): RuleTester cases per rule and the preset run through ESLint on temp files.
   eslint-preset:
     name: eslint preset (rules 27 to 39)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.eslint == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -206,12 +272,16 @@ jobs:
         with:
           angular-dir: ''
 
-      - run: npm ci
+      - name: Install
+        working-directory: .
+        run: npm ci
 
       - run: npm test
 
   crates:
     name: crates (fmt, workspace hack, unused deps, coverage, deny)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.crates == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -261,6 +331,8 @@ jobs:
   # all-features test run is the coverage job's (crates), so this leg runs only what that job does not.
   crate:
     name: crate (${{ matrix.os }})
+    needs: [plan]
+    if: ${{ needs.plan.outputs.crates == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -379,14 +451,22 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # Paddock Shell Demo (apps/shell-demo, plan S18): the shell plugin in a real app, in its own workspace, with the UI it
-  # embeds. Inside this repo it is the first consumer: a change to a shell crate or to the UI that breaks an app fails
-  # here before a tag. Its installers are built by shell-demo-release.yml (a `shell-demo-v*` tag or a manual run).
-  shell-demo-app:
-    name: shell demo app (fmt, clippy, tests, deny)
+  # One leg per affected app (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through the shared app-gates
+  # action, only the halves the change reaches (rust, ui). The shell demo (plan S18) and the workbench demo (X50 W8) are
+  # the first legs: their UI is ui/projects/<app> (tested by the ui and e2e jobs), built here because Tauri embeds it
+  # (tauri.conf.json frontendDist). A change to a shell crate or to the UI that breaks an app fails here before a tag.
+  # Installers come from <app>-release.yml (an `<app>-v*` tag or a manual run). The legs run in the paddock-ci image.
+  app:
+    name: app ${{ matrix.app }}
+    needs: [plan]
+    if: ${{ needs.plan.outputs.any_app == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.apps) }}
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -394,75 +474,24 @@ jobs:
 
       - uses: ./.gitea/actions/setup-rust
 
-      # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
       - uses: ./.gitea/actions/node-caches
+        with:
+          name: app-${{ matrix.app }}
 
-      - name: The UI the app embeds
-        working-directory: ui
-        run: |
-          npm ci
-          npm run shell-demo:build
+      - name: Install
+        run: npm ci
 
-      # The one release script for both demos (scripts/demo-release.mjs): the version, the icons and the notes are checked
-      # here, not only on a tag.
-      - name: Release facts (version, icons, notes)
-        run: |
-          node scripts/demo-release.mjs shell-demo version
-          node scripts/demo-release.mjs shell-demo icons
-          node scripts/demo-release.mjs shell-demo notes "$RUNNER_TEMP/notes.md"
-
-      - name: App (fmt, clippy, tests on the mock runtime, deny)
-        working-directory: apps/shell-demo/src-tauri
-        run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo nextest run --workspace --config-file ../../../crates/.config/nextest.toml --profile ci
-          cargo test --workspace --doc
-          cargo deny check
-
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
-
-  # Paddock Workbench Demo (apps/workbench-demo, plan X50 W8): the shell and workbench plugins in a real app, in its own workspace, with the UI it
-  # embeds. Inside this repo it is the first consumer: a change to a shell or workbench crate or to the UI that breaks an app fails
-  # here before a tag. Its installers are built by workbench-demo-release.yml (a `workbench-demo-v*` tag or a manual run).
-  workbench-demo-app:
-    name: workbench demo app (fmt, clippy, tests, deny)
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
-    env:
-      CARGO_TERM_COLOR: always
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.gitea/actions/setup-rust
-
-      # Tauri's build embeds the UI (tauri.conf.json `frontendDist`), so it is built first.
-      - uses: ./.gitea/actions/node-caches
-
-      - name: The UI the app embeds
-        working-directory: ui
-        run: |
-          npm ci
-          npm run workbench-demo:build
-
-      # The one release script for both demos (scripts/demo-release.mjs): the version, the icons and the notes are checked
-      # here, not only on a tag.
-      - name: Release facts (version, icons, notes)
-        run: |
-          node scripts/demo-release.mjs workbench-demo version
-          node scripts/demo-release.mjs workbench-demo icons
-          node scripts/demo-release.mjs workbench-demo notes "$RUNNER_TEMP/notes.md"
-
-      - name: App (fmt, clippy, tests on the mock runtime, deny)
-        working-directory: apps/workbench-demo/src-tauri
-        run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo nextest run --workspace --config-file ../../../crates/.config/nextest.toml --profile ci
-          cargo test --workspace --doc
-          cargo deny check
+      - uses: ./.gitea/actions/app-gates
+        with:
+          app: ${{ matrix.app }}
+          cargo: ${{ matrix.cargo }}
+          nextest-config: ${{ matrix.nextest_config }}
+          prepare: ${{ matrix.prepare }}
+          checks: ${{ matrix.checks }}
+          ui-checks: ${{ matrix.ui_checks }}
+          rust: ${{ matrix.rust }}
+          ui: ${{ matrix.ui }}
+          filter: ${{ matrix.filter }}
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()

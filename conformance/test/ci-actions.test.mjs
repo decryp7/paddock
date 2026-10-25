@@ -194,7 +194,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['crates', 'crate', 'shell-demo-app', 'workbench-demo-app'];
+  const rustJobs = ['crates', 'crate', 'app'];
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');

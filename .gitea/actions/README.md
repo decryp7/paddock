@@ -11,6 +11,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 
 | Action | What | Replaces |
 |---|---|---|
+| `app-gates` | one app's matrix leg in the monorepo: its `paddock.ci.json` commands and the Rust gates of its Cargo workspace, only the halves the change reaches (ADR 0014 §6) | the per-app `shell-demo-app`/`workbench-demo-app` jobs and, at import, each app's `build.yml` |
 | `plan` | skip a nightly while main is unchanged since a green nightly; skip a main push whose commit is tagged | Debrief's `plan` job |
 | `nightly-mark` | record a fully green nightly (the marker `plan` looks up) | Debrief's `nightly-mark` job |
 | `cache-restore`, `cache-save` | the restore, then save-always cache pattern: a failing run still warms the cache; saved only when the key had no exact hit | the `actions/cache` blocks in every job |
