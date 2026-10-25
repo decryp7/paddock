@@ -337,7 +337,7 @@ function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[
   const dims = nodes.map(sized);
   const boxes: { x: number; y: number; w: number; h: number }[] = nodes.map((_, i) => ({ x: 0, y: 0, w: dims[i]?.w ?? MIN_W, h: dims[i]?.h ?? 36 }));
   let width = 0;
-  let height = 0;
+  let height: number;
   if (radial) {
     const placed = radialPlace(boxes, pairs);
     boxes.forEach((box, i) => {
@@ -392,7 +392,6 @@ function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[
       const sc: Pt = [s.x + s.w / 2, s.y + s.h / 2];
       const tc: Pt = [t.x + t.w / 2, t.y + t.h / 2];
       const [px, py] = [tc[0] - sc[0], tc[1] - sc[1]];
-      const plen = Math.hypot(px, py) || 1;
       // A straight line unless it would cross another box: then the line bows to one side, then the other, a little more each time.
       const bows = [0, 0.25, -0.25, 0.5, -0.5, 0.8, -0.8, 1.2, -1.2, 1.7, -1.7, 2.4, -2.4];
       let chosen: { path: string; mid: Pt; dir: Pt } | null = null;

@@ -5,6 +5,8 @@ import { afterNextRender, DestroyRef, Directive, ElementRef, inject, signal } fr
  * table, matrix or drawing says that it continues. The focus ring of the region is drawn inside it (a mask clips anything outside).
  */
 export const SCROLL_CSS = `
+  /* The region is the containing block of the visually hidden text inside it, so that text scrolls with the region and cannot widen the page. */
+  [pdViewScroll] { position: relative; }
   [pdViewScroll]:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
   [pdViewScroll][data-more='end'] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
   [pdViewScroll][data-more='start'] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
