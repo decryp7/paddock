@@ -71,10 +71,24 @@ OKLab lightness x 100 (L). Adjacent faces of one solid differ by at least 8 L, s
   front cannot reach 3:1 on orange. Only ends and recesses go darker.
 - **Light tiles (Spotter amber, Sighter lavender): dark ink.** The object is the app's ink colour (`INK[app]`) with the same ladder
   inverted in range: tops L 44 to 39, fronts L 36 to 30, ends L 21 to 18, recesses down to L 12; highlights in a lighter ink (L 56).
+  `darkInk(INK[app])` gives it: `.values` (flat faces, same keys as `VALUES`), `.body` (the ramp for curved surfaces) and `.metal`
+  (satin fittings, L 40 to 72, with a white specular).
 - **Glass and screens:** a dark vertical gradient (`VALUES.glass`), one diagonal sheen (white 28 % falling to 0 over the first
   half), thin mullions or bezels.
 - **Metal:** a narrow bright specular band along the lit edge. **Rubber:** matte, darkest values, no specular.
 - No textures, no noise, no outlines. One 2.5 px white highlight along the topmost front edge.
+
+### Round parts and colour helpers (`tools/iso.mjs`)
+
+- **Cylinders** (barrels, wheels, dials, knobs): `cylinder(kit, name, { axis: 'd' | 's', c, len, r, tone })` draws the side as the
+  hull of both caps with a gradient sampled from the visible normals under the key light, and returns the visible end cap. `tone`
+  maps light intensity to colour: `x => ramp(WHITE_BODY, x)` for white objects, `x => ramp(darkInk(ink).body, x)` on light tiles.
+  `ring`, `disc` and `arcPts` give circles, caps and arcs on any axis frame (`AXES`); `hull` the convex hull.
+- **Light:** `LIGHT` is the key light as a vector, `lit(n)` the intensity on a face with normal `n` (tops 0.78, fronts 0.55, ends 0),
+  `VIEW` the view direction (a face is visible when `dot(n, VIEW) > 0`).
+- **Specular:** `fadeStroke(kit, name, pts, w)` is a highlight that fades in and out along a rim or a lit metal edge.
+- **OKLab:** `Lof(colour)` is the L of section 2; `atL(ref, L, c)` is a colour of `ref`'s hue at lightness L (chroma scaled by c);
+  `oklab` and `fromOklab` convert; `ramp(stops, x)` samples a colour ramp.
 
 ## 4. Shadows and occlusion (1024 grid, `SHADOW` in `tools/iso.mjs`)
 
