@@ -321,26 +321,76 @@ function radialPlace(
  * `force` layout of the wire type is drawn as `layered`, because a force simulation is not reproducible.
  */
 export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[], radial = false): Scene {
-  const first = layoutGraphAt(nodes, edges, radial, 0);
+  const first = layoutGraphAt(nodes, edges, radial, 0, 0);
   if (!radial) return first;
-  // A line that had to bow around a box can swing past the left or top of the canvas: draw again with room for it.
-  let low = 0;
-  for (const edge of first.edges) {
-    for (const p of flattenPath(edge.path)) low = Math.min(low, p[0] - 4, p[1] - 4);
-    // A label may sit past the left or top as well.
-    const r = edge.label ? labelRect(edge.lx, edge.ly, edge.anchor, edge.label) : null;
-    if (r) low = Math.min(low, r.x - 4, r.y - 4);
+  // A line that bows around a box can swing past any side of the boxes, and so can a label: the canvas is the bounds of everything drawn
+  // plus the padding, so draw again shifted to put the top left of the drawing at the padding.
+  const [minX, minY] = drawnMin(first);
+  const [dx, dy] = [PAD - minX, PAD - minY];
+  return Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05 ? first : layoutGraphAt(nodes, edges, radial, dx, dy);
+}
+
+/** The top left corner of everything a graph scene draws: boxes, edge paths (curves flattened) and labels. */
+function drawnMin(s: Scene): Pt {
+  let [x, y] = [Infinity, Infinity];
+  for (const b of s.nodes) [x, y] = [Math.min(x, b.x), Math.min(y, b.y)];
+  for (const edge of s.edges) {
+    for (const p of flattenPath(edge.path)) [x, y] = [Math.min(x, p[0]), Math.min(y, p[1])];
+    if (edge.label) {
+      const r = labelRect(edge.lx, edge.ly, edge.anchor, edge.label);
+      [x, y] = [Math.min(x, r.x), Math.min(y, r.y)];
+    }
   }
-  return low < 0 ? layoutGraphAt(nodes, edges, radial, Math.ceil(-low)) : first;
+  return [x, y];
+}
+
+/** The least free space between a label's rectangle and a box or an edge path. */
+const LABEL_GAP = 4;
+
+/** A place for a label: the text anchor point and how it is anchored. */
+export interface LabelSlot {
+  readonly lx: number;
+  readonly ly: number;
+  readonly anchor: 'start' | 'middle';
 }
 
 /**
- * Puts each edge label where its rectangle touches no box, no edge (its own included) and no label placed before it. The first try is
- * the position the router gave (beside the middle of the line); a bowed edge's label is tried first at the apex of the bow, on the
- * outward side (away from the middle of the drawing), half the label's extent plus 4 units from the line. If that touches something
- * the placer walks, in this order: distance (0, 8, 16 units further out), then the place along the line (middle, then 40/60, 30/70,
- * 20/80 percent), then the side (outward, then the other). The first clear rectangle wins; with none, the one with the fewest hits.
- * A radial label always moves to its apex candidate when that is clear; a layered one keeps the router's position when that is clear.
+ * The slot among `slots` whose rectangle is nearest `mid` (centre to point), the earlier slot on a tie so the result is deterministic;
+ * `null` when there are no slots.
+ */
+export function nearestSlot(slots: readonly LabelSlot[], label: string, mid: Pt): LabelSlot | null {
+  let best: LabelSlot | null = null;
+  let bestD = Infinity;
+  for (const slot of slots) {
+    const r = labelRect(slot.lx, slot.ly, slot.anchor, label);
+    const d = Math.hypot(r.x + r.w / 2 - mid[0], r.y + r.h / 2 - mid[1]);
+    if (d < bestD - 1e-9) {
+      best = slot;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * The slot to use: the nearest to `mid` among those with no hits at the full gap, else among those with none at 1 unit, else the one
+ * with the fewest hits at 1 unit (the first on a tie). `slots` is never empty.
+ */
+export function chooseSlot(slots: readonly LabelSlot[], label: string, mid: Pt, hits: (slot: LabelSlot, gap: number) => number): LabelSlot {
+  return (
+    nearestSlot(slots.filter((s) => hits(s, LABEL_GAP) === 0), label, mid) ??
+    nearestSlot(slots.filter((s) => hits(s, 1) === 0), label, mid) ??
+    slots.reduce((a, s) => (hits(s, 1) < hits(a, 1) ? s : a))
+  );
+}
+
+/**
+ * Puts each edge label where its rectangle keeps 4 units from every box, every edge (its own included) and every label placed before
+ * it. The candidates are the position the router gave (beside the middle of the line) and a walk along the line: distance (2, 8, 16, 24, 32, 44
+ * units further out), the place along the line (middle, then 40/60, 30/70, 20/80 percent) and the side (outward, then the other; outward
+ * is away from the middle of the drawing for a radial one, to the right for a layered one). Of the candidates that are clear the one
+ * nearest the middle of the edge wins (the earlier on a tie). With none clear at 4 units, the nearest one clear at 1 unit, then the one
+ * with the fewest hits.
  */
 function placeLabels(edges: readonly SceneEdge[], boxes: readonly Rect[], radial: boolean): SceneEdge[] {
   let minX = Infinity;
@@ -357,37 +407,35 @@ function placeLabels(edges: readonly SceneEdge[], boxes: readonly Rect[], radial
   const taken: Rect[] = [];
   return edges.map((edge) => {
     if (!edge.label) return edge;
+    const label = edge.label;
     const pts = flattenPath(edge.path);
-    const hits = (lx: number, ly: number, anchor: 'start' | 'middle'): number => {
-      const r = inflate(labelRect(lx, ly, anchor, edge.label), 1);
+    const hits = (slot: LabelSlot, gap: number): number => {
+      const r = inflate(labelRect(slot.lx, slot.ly, slot.anchor, label), gap);
       return boxes.filter((b) => overlap(r, b)).length + edges.filter((o) => pathCrosses(o.path, [r])).length + taken.filter((t) => overlap(r, t)).length;
     };
-    let best = { lx: edge.lx, ly: edge.ly, anchor: edge.anchor, score: hits(edge.lx, edge.ly, edge.anchor) };
-    if (best.score > 0 || radial) {
-      const w = edge.label.length * CHAR_W;
-      search: for (const extra of [0, 8, 16]) {
-        for (const f of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) {
-          const { at, dir } = pointAt(pts, f);
-          const normal: Pt = [-dir[1], dir[0]];
-          // Outward: away from the middle of the drawing for a radial one, to the right (then up) for a layered one.
-          const out = radial ? normal[0] * (at[0] - centre[0]) + normal[1] * (at[1] - centre[1]) : normal[0] || -normal[1];
-          for (const sign of out >= 0 ? [1, -1] : [-1, 1]) {
-            const [nx, ny] = [normal[0] * sign, normal[1] * sign];
-            const gap = (w / 2) * Math.abs(nx) + 7 * Math.abs(ny) + 4 + extra;
-            const [lx, ly] = [at[0] + nx * gap, at[1] + ny * gap + 4];
-            const score = hits(lx, ly, 'middle');
-            if (score < best.score || (score === 0 && radial)) best = { lx, ly, anchor: 'middle', score };
-            if (score === 0) break search;
-          }
+    const w = label.length * CHAR_W;
+    const slots: LabelSlot[] = [{ lx: edge.lx, ly: edge.ly, anchor: edge.anchor }];
+    for (const extra of [2, 8, 16, 24, 32, 44]) {
+      for (const f of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) {
+        const { at, dir } = pointAt(pts, f);
+        const normal: Pt = [-dir[1], dir[0]];
+        const out = radial ? normal[0] * (at[0] - centre[0]) + normal[1] * (at[1] - centre[1]) : normal[0] || -normal[1];
+        for (const sign of out >= 0 ? [1, -1] : [-1, 1]) {
+          const [nx, ny] = [normal[0] * sign, normal[1] * sign];
+          // The rectangle spans y - 11 .. y + 3 around the anchor, so its middle is 4 above ly: ly is lowered by 4 to centre it on the line.
+          const gap = (w / 2) * Math.abs(nx) + 7 * Math.abs(ny) + LABEL_GAP + extra;
+          slots.push({ lx: at[0] + nx * gap, ly: at[1] + ny * gap + 4, anchor: 'middle' });
         }
       }
     }
-    taken.push(labelRect(best.lx, best.ly, best.anchor, edge.label));
+    const mid = pointAt(pts, 0.5).at;
+    const best = chooseSlot(slots, label, mid, hits);
+    taken.push(labelRect(best.lx, best.ly, best.anchor, label));
     return { ...edge, lx: r1(best.lx), ly: r1(best.ly), anchor: best.anchor };
   });
 }
 
-function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[], radial: boolean, extra: number): Scene {
+function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[], radial: boolean, dx: number, dy: number): Scene {
   const index = new Map(nodes.map((n, i) => [n.id, i]));
   const pairs: [number, number][] = [];
   for (const e of edges) {
@@ -408,11 +456,11 @@ function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[
     const placed = radialPlace(boxes, pairs);
     boxes.forEach((box, i) => {
       const p = placed.at[i];
-      box.x = r1((p?.x ?? 0) - box.w / 2 + placed.shiftX + extra);
-      box.y = r1((p?.y ?? 0) - box.h / 2 + placed.shiftY + extra);
+      box.x = r1((p?.x ?? 0) - box.w / 2 + placed.shiftX + dx);
+      box.y = r1((p?.y ?? 0) - box.h / 2 + placed.shiftY + dy);
     });
-    width = placed.width + extra;
-    height = placed.height + extra;
+    width = placed.width;
+    height = placed.height;
   } else {
     const widths = rows.map((row) => row.reduce((sum, n) => sum + (boxes[n]?.w ?? 0), 0) + Math.max(0, row.length - 1) * NODE_GAP);
     width = Math.max(MIN_W, ...widths) + PAD * 2;
@@ -533,7 +581,20 @@ function layoutGraphAt(nodes: readonly LayoutNode[], edges: readonly LayoutEdge[
       reachY = Math.max(reachY, r.y + r.h + 4);
     }
   }
-  return { kind: radial ? 'radial' : 'layered', width: r1(Math.max(width, reach + PAD + 24)), height: r1(Math.max(height, reachY)), nodes: sceneNodes, edges: placed, lifelines: [] };
+  if (radial) {
+    // The canvas ends PAD after the last thing drawn (the shift put the first at PAD): no empty margin.
+    let [maxX, maxY] = [-Infinity, -Infinity];
+    for (const b of sceneNodes) [maxX, maxY] = [Math.max(maxX, b.x + b.w), Math.max(maxY, b.y + b.h)];
+    for (const edge of placed) {
+      for (const p of flattenPath(edge.path)) [maxX, maxY] = [Math.max(maxX, p[0]), Math.max(maxY, p[1])];
+      if (edge.label) {
+        const r = labelRect(edge.lx, edge.ly, edge.anchor, edge.label);
+        [maxX, maxY] = [Math.max(maxX, r.x + r.w), Math.max(maxY, r.y + r.h)];
+      }
+    }
+    return { kind: 'radial', width: r1(maxX + PAD), height: r1(maxY + PAD), nodes: sceneNodes, edges: placed, lifelines: [] };
+  }
+  return { kind: 'layered', width: r1(Math.max(width, reach + PAD + 24)), height: r1(Math.max(height, reachY)), nodes: sceneNodes, edges: placed, lifelines: [] };
 }
 
 /**

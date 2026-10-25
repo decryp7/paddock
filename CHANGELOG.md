@@ -18,6 +18,9 @@ Conventional Commits; one semver tag for the whole repo.
   variables, then sccache) whenever a build folder variable is set.
 
 ### Added
+- X51 review 5 fixes for `<pd-view>` (2 P3). A drawing label keeps 4 units from every box and every edge (its own included) and sits in the clear slot
+  nearest the middle of its edge (`nearestSlot`, `chooseSlot`; "needs db" was 1 unit from its curve). A radial canvas is the bounds of what is drawn
+  (boxes, edge paths, labels) plus the usual 16 padding, with no extra margin.
 - X51 review 4 fixes for `<pd-view>` (1 P2, 1 P3; `ui/docs/review/x51-view/FIXES.md`). Edge labels are placed by one rule (`placeLabels`): a
   bowed edge's label sits at the apex of the bow on the outward side, and every label is checked against every box, every edge path and
   the labels before it, walking distance, place and side deterministically when it collides; the canvas grows to hold a label. A radial

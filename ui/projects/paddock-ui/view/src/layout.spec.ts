@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detailLines, hubOf, labelRect, layers, layoutGraph, layoutSequence, MARK_W, ringsFrom, type LayoutNode } from './layout';
+import { detailLines, hubOf, labelRect, layers, layoutGraph, layoutSequence, MARK_W, chooseSlot, nearestSlot, type LabelSlot, ringsFrom, type LayoutNode } from './layout';
 import { diagramScene, graphScene } from './scene';
 import { sampleViewDoc } from './sample';
 import { shapeOf } from './model';
@@ -165,6 +165,137 @@ describe('edge labels (review 4, P2-1, P3-1)', () => {
   });
 });
 
+/** Distance from a point to a rectangle (0 inside). */
+const pointRect = (p: Pt, r: { x: number; y: number; w: number; h: number }): number => Math.hypot(Math.max(r.x - p[0], 0, p[0] - (r.x + r.w)), Math.max(r.y - p[1], 0, p[1] - (r.y + r.h)));
+/** Distance from a rectangle to a path, sampled every half unit along each segment. */
+function rectPath(r: { x: number; y: number; w: number; h: number }, path: string): number {
+  const pts = flattenPath(path);
+  let best = Infinity;
+  for (let i = 1; i < pts.length; i++) {
+    const [a, b] = [pts[i - 1] as Pt, pts[i] as Pt];
+    const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) * 2));
+    for (let k = 0; k <= steps; k++) best = Math.min(best, pointRect([a[0] + ((b[0] - a[0]) * k) / steps, a[1] + ((b[1] - a[1]) * k) / steps], r));
+  }
+  return best;
+}
+const rectRect = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): number =>
+  Math.hypot(Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), 0), Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h), 0));
+
+/** Labels closer than `gap` units to a box or to any edge path (their own included). */
+function labelGaps(s: Scn, gap: number): string[] {
+  if (s.kind === 'sequence') return [];
+  const bad: string[] = [];
+  for (const edge of s.edges) {
+    if (!edge.label) continue;
+    const r = labelRect(edge.lx, edge.ly, edge.anchor, edge.label);
+    for (const b of s.nodes) if (rectRect(r, b) < gap) bad.push(`${edge.label} is ${rectRect(r, b).toFixed(1)} from box ${b.id}`);
+    for (const o of s.edges) if (rectPath(r, o.path) < gap) bad.push(`${edge.label} is ${rectPath(r, o.path).toFixed(1)} from edge ${o.from}>${o.to}`);
+  }
+  return bad;
+}
+
+function allGraphs(): { id: string; scene: Scn }[] {
+  const ids = (k: number, p = 'n') => Array.from({ length: k }, (_, i) => `${p}${i}`);
+  const graphs = [
+    { nodes: ['a', 'b', 'c', 'd', 'e'].map((id) => n(id, { label: id === 'c' ? 'Integration tests' : id.repeat(5) })), edges: [e('a', 'b'), e('a', 'c', 'needs db'), e('b', 'd'), e('c', 'd'), e('d', 'e'), e('e', 'a', 'retry')] },
+    { nodes: ids(4).map((id) => n(id, { label: id.repeat(8) })), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n2', 'n3'), e('n0', 'n3', 'skip'), e('n0', 'n2', 'skip two')] },
+    { nodes: ['c', ...ids(6, 's')].map((id) => n(id)), edges: [...ids(6, 's').map((id) => e('c', id, `link ${id}`)), e('s0', 's1', 'x'), e('s1', 's3', 'y'), e('s2', 's5', 'z'), e('s4', 's0', 'w')] },
+    { nodes: ['c', ...ids(5, 's')].map((id) => n(id)), edges: [...ids(5, 's').map((id) => e('c', id)), e('s0', 's2', 'across'), e('s1', 's3', 'across too')] },
+  ];
+  const out = sampleScenes();
+  graphs.forEach((g, i) => {
+    for (const radial of [false, true]) out.push({ id: `graph ${i} radial=${radial}`, scene: layoutGraph(g.nodes, g.edges, radial) });
+  });
+  return out;
+}
+
+describe('label gap and slot choice (review 5, P3)', () => {
+  it('keeps every label at least 4 units from every box and every edge, in all graphs and both layouts', () => {
+    for (const { id, scene } of allGraphs()) expect(labelGaps(scene, 4), id).toEqual([]);
+  });
+  it('puts "needs db" more than 4 units from its curve', () => {
+    const s = layoutGraph(['a', 'b', 'c', 'd', 'e'].map((id) => n(id, { label: id === 'c' ? 'Integration tests' : id.repeat(5) })), [e('a', 'b'), e('a', 'c', 'needs db'), e('b', 'd'), e('c', 'd'), e('d', 'e'), e('e', 'a', 'retry')]);
+    const edge = s.kind === 'sequence' ? null : s.edges.find((x) => x.label === 'needs db')!;
+    expect(rectPath(labelRect(edge!.lx, edge!.ly, edge!.anchor, edge!.label), edge!.path)).toBeGreaterThanOrEqual(4);
+  });
+  it('picks the nearer of two clear slots, and the earlier one on a tie', () => {
+    const far = { lx: 100, ly: 50, anchor: 'middle' as const };
+    const near = { lx: 60, ly: 50, anchor: 'middle' as const };
+    expect(nearestSlot([far, near], 'abc', [50, 46])).toBe(near);
+    expect(nearestSlot([near, far], 'abc', [50, 46])).toBe(near);
+    const left = { lx: 40, ly: 50, anchor: 'middle' as const };
+    const right = { lx: 60, ly: 50, anchor: 'middle' as const };
+    expect(nearestSlot([right, left], 'abc', [50, 46])).toBe(right);
+    expect(nearestSlot([], 'abc', [0, 0])).toBeNull();
+  });
+  it('falls back to a slot clear at 1 unit, then to the one with the fewest hits', () => {
+    const [a, b, c] = [60, 100, 140].map((lx): LabelSlot => ({ lx, ly: 50, anchor: 'middle' }));
+    const mid: [number, number] = [100, 46];
+    // None clear at 4, two clear at 1: the nearer of those.
+    expect(chooseSlot([a!, b!, c!], 'abc', mid, (s, gap) => (gap === 4 ? 1 : s === a ? 1 : 0))).toBe(b);
+    // None clear at all: the fewest hits at 1 unit, the first on a tie.
+    const counts = new Map<LabelSlot, number>([[a!, 3], [b!, 2], [c!, 2]]);
+    expect(chooseSlot([a!, b!, c!], 'abc', mid, (s) => counts.get(s)!)).toBe(b);
+  });
+  it('puts the label of a straight edge at the clear slot nearest its middle', () => {
+    const s = layoutGraph([n('a'), n('b')], [e('a', 'b', 'link')], true);
+    if (s.kind === 'sequence') throw new Error('kind');
+    const edge = s.edges[0]!;
+    const pts = flattenPath(edge.path);
+    const mid: Pt = [(pts[0]![0] + pts[1]![0]) / 2, (pts[0]![1] + pts[1]![1]) / 2];
+    const r = labelRect(edge.lx, edge.ly, edge.anchor, edge.label);
+    // Beside the line, 4 units clear: the centre is half the extent across plus 4 (+ rounding) from the middle of the line.
+    const d = Math.hypot(r.x + r.w / 2 - mid[0], r.y + r.h / 2 - mid[1]);
+    expect(d).toBeLessThanOrEqual(Math.max(r.w, r.h) / 2 + 4 + 3);
+  });
+});
+
+describe('the radial canvas fits the drawing (review 5, P3)', () => {
+  /** The bounds of everything drawn: boxes, edge paths (curves flattened) and labels. */
+  function drawn(s: Scn): { minX: number; minY: number; maxX: number; maxY: number } {
+    if (s.kind === 'sequence') throw new Error('kind');
+    const b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    const grow = (x0: number, y0: number, x1: number, y1: number): void => {
+      b.minX = Math.min(b.minX, x0);
+      b.minY = Math.min(b.minY, y0);
+      b.maxX = Math.max(b.maxX, x1);
+      b.maxY = Math.max(b.maxY, y1);
+    };
+    for (const x of s.nodes) grow(x.x, x.y, x.x + x.w, x.y + x.h);
+    for (const edge of s.edges) {
+      for (const p of flattenPath(edge.path)) grow(p[0], p[1], p[0], p[1]);
+      if (edge.label) {
+        const r = labelRect(edge.lx, edge.ly, edge.anchor, edge.label);
+        grow(r.x, r.y, r.x + r.w, r.y + r.h);
+      }
+    }
+    return b;
+  }
+  const radials = (): { id: string; scene: Scn }[] => allGraphs().filter((x) => x.scene.kind === 'radial');
+  it('has as many radial graphs to check as the samples and cases give', () => {
+    expect(radials().length).toBeGreaterThanOrEqual(6);
+  });
+  it('is the drawn bounds plus the padding of the other layouts, with no extra margin', () => {
+    const pad = 16;
+    for (const { id, scene } of radials()) {
+      const b = drawn(scene);
+      expect(Math.abs(b.minX - pad), `${id} left`).toBeLessThanOrEqual(1);
+      expect(Math.abs(b.minY - pad), `${id} top`).toBeLessThanOrEqual(1);
+      expect(Math.abs(scene.width - (b.maxX + pad)), `${id} width`).toBeLessThanOrEqual(1);
+      expect(Math.abs(scene.height - (b.maxY + pad)), `${id} height`).toBeLessThanOrEqual(1);
+    }
+  });
+  it('draws nothing outside the canvas', () => {
+    for (const { id, scene } of radials()) {
+      const b = drawn(scene);
+      expect(b.minX, id).toBeGreaterThanOrEqual(0);
+      expect(b.minY, id).toBeGreaterThanOrEqual(0);
+      expect(b.maxX, id).toBeLessThanOrEqual(scene.width);
+      expect(b.maxY, id).toBeLessThanOrEqual(scene.height);
+    }
+  });
+});
+
 describe('layers', () => {
   it('puts a node below the longest path to it', () => {
     expect(layers(4, [[0, 1], [1, 2], [0, 2], [0, 3]])).toEqual([0, 1, 2, 1]);
@@ -301,8 +432,8 @@ describe('layoutGraph', () => {
   it('keeps the label of an edge beside its line, not on it', () => {
     const s = layoutGraph(['a', 'b'].map((id) => n(id)), [e('a', 'b', 'needs db')]);
     const x1 = s.nodes[0]!.x + s.nodes[0]!.w / 2;
-    expect(s.edges[0]!.anchor).toBe('start');
-    expect(s.edges[0]!.lx).toBeGreaterThan(x1);
+    const r = labelRect(s.edges[0]!.lx, s.edges[0]!.ly, s.edges[0]!.anchor, 'needs db');
+    expect(r.x).toBeGreaterThanOrEqual(x1 + 4);
   });
 
   it('makes room for the status mark of a box', () => {
