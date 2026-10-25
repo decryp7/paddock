@@ -67,12 +67,14 @@ script stops, so a change to the demo that the generator does not know fails `np
 
 Then, in the new app:
 
-1. `cd app && npm install && npx ng build`, then `cd src-tauri && cargo test` (it writes `Cargo.lock`; commit both lock
-   files).
+1. `cd app && npm install && npx ng build && npm test && npm run e2e` (the unit tests start with the contribution lint;
+   the e2e smoke suite checks the window, axe in both themes and 320 px, on its own `PW_PORT`), then
+   `cd src-tauri && cargo test` (it writes `Cargo.lock`; commit both lock files).
 2. Keep `main.ts`'s three window kinds, `app/desktop.ts` (the one seam to Tauri) and the three capability files. Replace the
    sample views, perspectives, Explorer provider and commands in `demo.contributions.ts` with the app's (they are
    contributions: `defineView`, `definePerspective`, ...; nothing else changes), and the sample tool and system prompt in
-   `assistant.rs` with the app's tools (read-only by default; a tool that writes needs the user's approval).
+   `assistant.rs` with the app's tools (read-only by default; a tool that writes needs the user's approval, and one whose
+   change cannot be undone is `Access::Destructive`).
 3. Dialogs: add them to `bootDialogWindow`'s `dialogs` and give the shell `Builder` the app's `dialog_contracts`.
 4. Its icon: add it to `icons/tools/design.mjs` (`DEMOS` or `APPS`), run the pipeline with `ONLY=<id>`, check the CVD
    numbers, copy `icons/<id>/tauri` to `src-tauri/icons`; every drawing gets an independent review (rule 22).

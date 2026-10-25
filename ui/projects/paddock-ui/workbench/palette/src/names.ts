@@ -53,7 +53,8 @@ export interface NamesPaletteOptions<T extends object> {
   readonly prefix?: string;
   readonly placeholder?: Message;
   readonly order: number;
-  readonly icon?: string;
+  /** The rows' icon: one for all, or one per match (a symbol's kind, say), else none. */
+  readonly icon?: string | ((match: NameMatch, ctx: ShellContext<T>) => string | undefined);
   readonly when?: (ctx: ShellContext<T>) => boolean;
   /** Calls the engine's `names_search` (through the app's IPC backend). */
   readonly search: (request: NamesSearchRequest, ctx: ShellContext<T>, signal: AbortSignal) => Promise<NamesSearchReply>;
@@ -66,11 +67,14 @@ export interface NamesPaletteOptions<T extends object> {
 }
 
 /** The palette rows of a reply: a tie's question first (inert), then the matches with why they matched. */
-export function namesToItems(reply: NamesSearchReply, icon?: string, building?: string): NamePaletteItem[] {
+export function namesToItems(reply: NamesSearchReply, icon?: string | ((match: NameMatch) => string | undefined), building?: string): NamePaletteItem[] {
   const items: NamePaletteItem[] = [];
   if (reply.searchable === 0 && building) items.push({ id: 'pd.names.building', label: building, disabled: building, match: null });
   if (reply.clarify?.question) items.push({ id: 'pd.names.clarify', label: reply.clarify.question, disabled: reply.clarify.question, match: null });
-  for (const m of reply.matches.slice(0, NAMES_MAX_MATCHES)) items.push({ id: m.id, label: m.display, detail: m.why, ...(icon ? { icon } : {}), match: m });
+  for (const m of reply.matches.slice(0, NAMES_MAX_MATCHES)) {
+    const glyph = typeof icon === 'function' ? icon(m) : icon;
+    items.push({ id: m.id, label: m.display, detail: m.why, ...(glyph ? { icon: glyph } : {}), match: m });
+  }
   return items;
 }
 
@@ -89,7 +93,8 @@ export function namesPaletteProvider<T extends object = object>(options: NamesPa
       if (!text) return [];
       const reply = await options.search({ query: text, limit: Math.max(1, Math.min(NAMES_MAX_MATCHES, request.limit)) }, ctx, request.signal);
       const building = options.building?.text ?? $localize`:@@pd.wb.palette.names-building:Still indexing names…`;
-      return namesToItems(reply, options.icon, building);
+      const icon = options.icon;
+      return namesToItems(reply, typeof icon === 'function' ? (m) => icon(m, ctx) : icon, building);
     },
     accept: (item, ctx) => (item.match ? options.accept(item.match, ctx) : undefined),
   });

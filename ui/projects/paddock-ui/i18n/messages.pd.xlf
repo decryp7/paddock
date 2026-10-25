@@ -2768,6 +2768,9 @@
       <trans-unit id="pd.wb.assistant.approve.arguments" datatype="html">
         <source>Arguments</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.cannot-undo" datatype="html">
+        <source>This cannot be undone.</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.decline" datatype="html">
         <source>Decline</source>
       </trans-unit>

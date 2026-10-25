@@ -144,7 +144,11 @@ description: string,
 /**
  * It changes things (needs the user's approval per call).
  */
-write: boolean, };
+write: boolean, 
+/**
+ * What it changes cannot be undone (implies `write`): its approval is a danger choice.
+ */
+destructive: boolean, };
 
 export type AssistantInfo = { 
 /**
@@ -208,7 +212,11 @@ summary: string,
 /**
  * The tool changes things.
  */
-write: boolean, } | { "type": "approvalNeeded", 
+write: boolean, 
+/**
+ * What it changes cannot be undone (implies `write`).
+ */
+destructive: boolean, } | { "type": "approvalNeeded", 
 /**
  * The call.
  */
@@ -221,6 +229,10 @@ name: string,
  * What it would do.
  */
 summary: string, 
+/**
+ * What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
+ */
+destructive: boolean, 
 /**
  * The arguments.
  */
@@ -310,7 +322,11 @@ summary: string,
 /**
  * The tool changes things.
  */
-write: boolean, } | { "type": "approvalNeeded", 
+write: boolean, 
+/**
+ * What it changes cannot be undone (implies `write`).
+ */
+destructive: boolean, } | { "type": "approvalNeeded", 
 /**
  * The call.
  */
@@ -323,6 +339,10 @@ name: string,
  * What it would do.
  */
 summary: string, 
+/**
+ * What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
+ */
+destructive: boolean, 
 /**
  * The arguments.
  */

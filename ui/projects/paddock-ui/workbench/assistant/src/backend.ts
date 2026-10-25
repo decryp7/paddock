@@ -162,8 +162,8 @@ export class MemoryAssistantBackend extends AssistantBackend {
         provider: 'Pitwall (demo)',
         hasWrite: true,
         tools: [
-          { name: 'find', description: 'Finds things', write: false },
-          { name: 'erase', description: 'Erases things', write: true },
+          { name: 'find', description: 'Finds things', write: false, destructive: false },
+          { name: 'erase', description: 'Erases things', write: true, destructive: true },
         ],
       },
     );
@@ -236,7 +236,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
     const command = text.split(/\s/, 1)[0] ?? '';
     if (command === '/tool' || command === '/tool-fail' || command === '/tool-slow') {
       const what = text.slice(command.length).trim() || 'everything';
-      this.emit(id, { type: 'toolStarted', callId: 'call_1', name: 'find', summary: what, write: false });
+      this.emit(id, { type: 'toolStarted', callId: 'call_1', name: 'find', summary: what, write: false, destructive: false });
       if (command === '/tool-slow') {
         // The card stays "running" until the user presses Stop.
         await new Promise<void>((resolve) => (run.halt = resolve));
@@ -255,8 +255,8 @@ export class MemoryAssistantBackend extends AssistantBackend {
       }
     } else if (command === '/write' && allowWrite) {
       run.call = 'call_2';
-      this.emit(id, { type: 'toolStarted', callId: 'call_2', name: 'erase', summary: 'Erase everything', write: true });
-      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
+      this.emit(id, { type: 'toolStarted', callId: 'call_2', name: 'erase', summary: 'Erase everything', write: true, destructive: true });
+      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, input: {} });
       const approved = await new Promise<boolean>((resolve) => (run.decision = resolve));
       run.decision = null;
       run.call = null;
