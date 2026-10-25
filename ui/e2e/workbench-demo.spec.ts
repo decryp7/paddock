@@ -263,6 +263,10 @@ test.describe('review 1 (X50)', () => {
       }),
     );
     expect(overflow).toEqual([]);
+    // Review 3 P3-7: the severity glyph sits about 12 px from the problem text.
+    const gap = await table.locator('[role=row].pd-row').first().evaluate((r) => r.querySelector('.text')!.getBoundingClientRect().left - r.querySelector('.sev')!.getBoundingClientRect().right);
+    expect(gap).toBeGreaterThanOrEqual(8);
+    expect(gap).toBeLessThanOrEqual(14);
     await expectNoHorizontalScroll(page);
   });
 

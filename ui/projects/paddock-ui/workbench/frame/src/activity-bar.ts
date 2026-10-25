@@ -165,7 +165,9 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
     .pd-act { position: relative; width: 36px; height: 36px; flex: none; border-radius: var(--pd-radius-card); border: 0; background: transparent; color: var(--pd-text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; }
     .pd-act-icon { transform: scale(1.125); }
     .pd-act:hover, .pd-act.pd-open { color: var(--pd-text); background: var(--pd-hover); }
-    .pd-act:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; color: var(--pd-text); }
+    .pd-act:focus-visible { outline: none; color: var(--pd-text); }
+    /* The focus ring above the badge, so the 2 px ring stays continuous at the corner the badge sits on (review 3 P3-12). */
+    .pd-act:focus-visible::after { content: ''; position: absolute; inset: 0; z-index: 1; border: 2px solid var(--pd-focus-ring); border-radius: inherit; pointer-events: none; }
     .pd-act.pd-on { background: var(--pd-accent-tint); color: var(--pd-text); }
     /* The selected item's indicator: a 2x20 px bar on the bar's inner edge, outside the rounded tile (review P2-5). */
     .pd-act.pd-on::before { content: ''; position: absolute; inset-inline-start: -6px; top: 8px; width: 2px; height: 20px; border-radius: 1px; background: var(--pd-accent-fill); }
