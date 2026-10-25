@@ -443,3 +443,37 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   arrive about 250 ms late after a theme change (axe saw the old scheme's colours); reduced motion sets `0s`. Run the three
   ui projects in WebKit before a build: `PADDOCK_WEBKIT=1 npx playwright test --project=gallery-webkit
   --project=shell-demo-webkit --project=workbench-demo-webkit` (in `ui/`).
+
+
+## A CI job container whose PID 1 is `sleep` never reaps orphans (2026-10-25, Debrief 1.1.1)
+
+Gitea's Linux job containers run `sleep` as PID 1. A process killed after its parent died is reparented to PID 1 and
+stays a zombie for ever, and `kill(pid, 0)` still reports it. A test that checks "the grandchild is gone" passed only
+when the shell happened to reap it first. **Rule:** "process gone" checks treat a zombie as gone (read the state from
+`/proc/<pid>/stat` on Linux, `proc_pidinfo` on macOS); `paddock_proc::is_alive` already does.
+
+## Build a command line in one function (2026-10-25, Debrief 1.1.1)
+
+Chromium's arguments were assembled in three places; after two branches merged, `--no-sandbox` landed after the start
+page on Linux as root (only CI runs as root, so the macOS gate never saw it). **Rule:** one function builds the whole
+command line, puts positional arguments last, and is tested for every combination of options on any OS (inject
+"is root"/sandbox as a value).
+
+## On macOS, an accepted socket inherits a non-blocking listener's flag (2026-10-25, Debrief)
+
+A blocking test fake used a non-blocking listener; on macOS each accepted connection inherited the flag, so a request
+that arrived a moment late read as "would block" and the fake dropped the connection — a client then saw "not
+running". Linux does not inherit the flag, so only the Mac flaked. **Rule:** a blocking fake sets every accepted
+connection back to blocking, and its test sends the request only after the fake has started reading.
+
+## Compare mechanisms in tests, timings in benchmarks (2026-10-25, Debrief)
+
+"Four connections are faster than one" failed 30 of 30 times under load. **Rule:** a test asserts the mechanism (four
+requests held open at once), and the speed comparison lives in a benchmark with a budget (rule 16, `paddock-bench`).
+
+## Many agents waiting on "load below N" start together (2026-10-25)
+
+With a dozen agents each told to build only while the 1-minute load was under 20, they all waited, saw the load drop,
+and started at once — load swung between 10 and 70 all night. **Rule:** heavy steps take a slot from one machine-wide
+semaphore (a few mkdir-lock slots under the shared build volume, stale slots reclaimed by pid) instead of each watching
+the load; the slot count is the rule-41 cap. Load watching stays for deciding how many agents to run, not when to build.
