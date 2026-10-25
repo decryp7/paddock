@@ -4,7 +4,23 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Fixed
+- sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
+  to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
+  variables, then sccache) whenever a build folder variable is set.
+
 ### Added
+- X51 review 1 fixes for `<pd-view>` (3 P1, 13 P2, 12 P3; `ui/docs/review/x51-view/FIXES.md`). The radial graph puts its hub in the middle
+  and the rest on rings that cannot touch, in a canvas fitted to the boxes (a test over every layout: no two boxes overlap); graph
+  boxes carry a status glyph and the status word in their name and in "Show as a list", which also lists captions and members;
+  `@decryp7/paddock-ui/states` has `pd-needs-ai-card`, `pd-needs-ai` is a container over it, and a `needsAi` node draws the app's own
+  component (`VIEW_NEEDS_AI`) or the same card with the plugin's reason and, only when the host provides `VIEW_OPEN_AI_SETTINGS`, the app's
+  "Open AI settings" (the plugin's own `setup` action of a `needsAi` node is never sent to the plugin, rule 19); inline kinds pack in a row, words break only when they must,
+  headings sit under the view title, stale is a warning with Reload, loading is a skeleton and busy a visible status, one filled
+  button per view, one `pd-view-writes` badge, tree status on the mark only, numbers right-aligned with their unit (`Column.align`,
+  `Column.unit`, `ChartSpec.unit` in `paddock-view`), chosen paths and secrets shown by name (`ViewHost` pickers resolve `{ value,
+  name }`), class diagrams with a stereotype and a member compartment, the review list fits 320 px, scroll regions are tab stops
+  only while they overflow. The contact sheet is `ui/docs/review/x51-view/review-2/` as sheets by section.
 - Review 2 verification fixes. `pd-table`: a required column's floor is `min(128px, 40%)`, so in a phone-width pane the rows fit the
   body (no sideways scroll inside the table, the last row action stays inside, header and rows share one edge with a scrolling body).
   Recent files: the file name shortens in the middle (the extension survives) through `pd-path-text`, and a bare name takes no space
@@ -55,6 +71,15 @@ Conventional Commits; one semver tag for the whole repo.
   the Outline and Files follow the active document after a restore, the assistant's declined/failed/approval states, the
   composer clears on send, a streaming cue and the log following the user's own question; save and manage layout dialogs
   are real dialog windows with declared contracts, and pop-outs are saved with the layout.
+- `paddock-assistant`: `Access::Destructive` (a write that cannot be undone); `ToolInfo.destructive` and `destructive` on the
+  `toolStarted`/`approvalNeeded` events (generated TS). The approval of such a tool is a danger choice: danger-tinted card,
+  "This cannot be undone.", Allow as a danger button (never the primary) and Decline the focused default. New shared glyphs
+  `pd:symbol-function`, `pd:symbol-type`, `pd:symbol-module`; `namesPaletteProvider({ icon })` also takes a function per match.
+- `scripts/new-app.mjs`: a new app has an e2e smoke suite on `@decryp7/paddock-e2e` (`playwright.config.ts`,
+  `e2e/smoke.spec.ts`, `npm run e2e`) and, from the workbench demo, its unit tests (a `test` target, `test-setup.ts`, jsdom and
+  the contribution lint); a template without unit tests gets no `test` script. The workbench demo has its own Vitest target
+  (`ng test workbench-demo`, part of `npm test`). Checked end to end once: a generated app's Rust tests, build, unit tests and
+  e2e pass against this repository's crates and packages.
 
 ### Changed
 - BREAKING (X51, unreleased crates): one `ProtocolVersion` and one `GrantRef`. `paddock-plugin-package` drops its own

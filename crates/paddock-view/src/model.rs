@@ -246,6 +246,22 @@ pub struct Column {
     pub label: String,
     /// The user may ask for this order (the host sends the action `sort` with `column` and `descending`).
     pub sortable: bool,
+    /// Where the column's text sits; numbers are [`Align::End`] (right-aligned, tabular).
+    pub align: Align,
+    /// The unit of the column's values ("ms", "lines"), shown beside the header; empty for none.
+    pub unit: String,
+}
+
+/// Where a table column's text sits.
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Align {
+    /// The reading start (left in left-to-right text): the default, for words.
+    #[default]
+    Start,
+    /// The reading end: numbers, so the digits line up.
+    End,
 }
 
 /// The order of a table.
@@ -580,6 +596,8 @@ pub struct ChartSpec {
     /// The x axis (or the slices); every series has one value per category.
     pub categories: Vec<String>,
     pub series: Vec<Series>,
+    /// The unit of the values ("s", "%"), for the value axis and the summary; empty for none.
+    pub unit: String,
 }
 
 /// The kind of a chart.
@@ -612,7 +630,9 @@ pub struct NeedsAi {
     pub feature: String,
     /// Why it cannot run now; may be empty.
     pub reason: String,
-    /// The way forward ("Set up Pitwall").
+    /// The plugin's own wording of a way forward ("Set up Pitwall"). The host does NOT send it to the plugin (rule 19: a repair never
+    /// depends on the thing that is broken): the host shows the reason and its own "Open AI settings", so this is kept only for the
+    /// wire shape.
     pub setup: ActionRef,
 }
 

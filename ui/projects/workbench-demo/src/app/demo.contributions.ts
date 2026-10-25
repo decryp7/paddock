@@ -24,6 +24,8 @@ interface FileNode extends ExplorerNode {
 }
 
 const VIEW = msg('wd.category.view', 'View');
+/** The shared glyph of a symbol's kind (palette rows and the Outline); none for a kind it does not know. */
+const SYMBOL_GLYPHS: Readonly<Record<string, string | undefined>> = { fn: 'pd:symbol-function', struct: 'pd:symbol-type', mod: 'pd:symbol-module' };
 
 export const DEMO_VIEWS = [
   defineView<Ctx>({
@@ -99,7 +101,7 @@ const outline = defineExplorerProvider<Ctx>({
   roots: (ctx) => {
     const path = ctx.selectedPath();
     const symbols = path ? (ctx.repo.file(path)?.symbols ?? []) : [];
-    return Promise.resolve({ nodes: symbols.map((s) => ({ id: `${path}#${s.name}`, label: s.name, description: `${s.kind} · line ${s.line}`, truncate: 'end' as const, expandable: false })) });
+    return Promise.resolve({ nodes: symbols.map((s) => ({ id: `${path}#${s.name}`, label: s.name, description: `${s.kind} · line ${s.line}`, truncate: 'end' as const, expandable: false, ...(SYMBOL_GLYPHS[s.kind] ? { icon: SYMBOL_GLYPHS[s.kind] } : {}) })) });
   },
   open: (node, ctx) => void ctx.openFile(node.id.split('#')[0] as string),
   empty: { text: msg('wd.explorer.symbols.empty', 'No symbols in the selected file.') },
@@ -169,6 +171,7 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
       prefix: '@',
       placeholder: msg('wd.palette.symbols.ph', 'Type a symbol name'),
       order: 200,
+      icon: (match, ctx) => SYMBOL_GLYPHS[ctx.repo.findSymbols(match.display, 50).find((s) => `${s.file.path}#${s.name}` === match.id)?.kind ?? ''],
       search: (request, ctx) =>
         Promise.resolve({
           matches: ctx.repo.findSymbols(request.query, request.limit ?? 10).map((s) => ({ id: `${s.file.path}#${s.name}`, display: s.name, how: 'parts' as const, score: 1, why: s.file.path })),

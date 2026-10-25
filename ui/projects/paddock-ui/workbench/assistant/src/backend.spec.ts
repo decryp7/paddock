@@ -33,7 +33,7 @@ describe('the generated commands', () => {
 });
 
 describe('TauriAssistantBackend', () => {
-  const info: AssistantInfo = { provider: 'Pitwall', tools: [{ name: 'a', description: 'd', write: false }], hasWrite: false };
+  const info: AssistantInfo = { provider: 'Pitwall', tools: [{ name: 'a', description: 'd', write: false, destructive: false }], hasWrite: false };
 
   it('calls the engine with the generated command names and parses what comes back', async () => {
     const { ipc, calls } = fakeIpc({
@@ -173,7 +173,7 @@ describe('MemoryAssistantBackend', () => {
     const slow = await ask(b, '/tool-slow lookup');
     await settle(30);
     expect(slow.events.map((e) => e.type)).toEqual(['started', 'toolStarted']);
-    expect(slow.events[1]).toMatchObject({ summary: 'lookup', write: false });
+    expect(slow.events[1]).toMatchObject({ summary: 'lookup', write: false, destructive: false });
     expect(await b.stop(slow.ack.conversationId)).toBe(true);
     await settle(30);
     expect(slow.events.some((e) => e.type === 'toolFinished' || e.type === 'delta')).toBe(false);

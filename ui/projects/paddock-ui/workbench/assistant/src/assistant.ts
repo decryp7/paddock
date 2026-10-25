@@ -143,8 +143,11 @@ const SCROLL_STICK_PX = 24;
     <p class="sr-only" role="status" aria-live="polite" data-testid="assistant-announce">{{ announcement() }}</p>
 
     @if (store.approval(); as ask) {
-      <section class="approval" role="alertdialog" aria-labelledby="pd-assistant-approval" data-testid="assistant-approval">
-        <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong>&#32;<span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
+      <section class="approval" [class.danger]="ask.destructive" role="alertdialog" aria-labelledby="pd-assistant-approval" [attr.aria-describedby]="ask.destructive ? 'pd-assistant-approval-final' : null" data-testid="assistant-approval">
+        <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong>{{ ' ' }}<span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
+        @if (ask.destructive) {
+          <p class="final" id="pd-assistant-approval-final" data-testid="assistant-approval-final"><pd-glyph name="alert" [size]="14" /> {{ t.cannotUndo }}</p>
+        }
         <details class="details" data-testid="assistant-approval-details">
           <summary><pd-glyph class="chev" name="chevron-right" [size]="14" /> {{ t.details }}</summary>
           <dl>
@@ -161,8 +164,8 @@ const SCROLL_STICK_PX = 24;
           </dl>
         </details>
         <div class="actions">
-          <button type="button" class="pd-btn" data-testid="assistant-allow" (click)="store.approve(ask.callId, true)">{{ allowLabel(ask.name) }}</button>
-          <button type="button" class="pd-btn pd-btn--ghost" data-testid="assistant-decline" (click)="store.approve(ask.callId, false)">{{ t.decline }}</button>
+          <button type="button" class="pd-btn" [class.pd-btn--danger]="ask.destructive" data-testid="assistant-allow" (click)="store.approve(ask.callId, true)">{{ allowLabel(ask.name) }}</button>
+          <button #declineButton type="button" class="pd-btn" [class.pd-btn--ghost]="!ask.destructive" data-testid="assistant-decline" (click)="store.approve(ask.callId, false)">{{ t.decline }}</button>
         </div>
       </section>
     }
@@ -277,6 +280,8 @@ const SCROLL_STICK_PX = 24;
     .failure { display: flex; gap: var(--pd-space-2); align-items: center; color: var(--pd-danger); }
     .approval { margin: 0 var(--pd-space-3); padding: var(--pd-space-3); border: 1px solid var(--pd-warning); background: var(--pd-warning-tint); border-radius: var(--pd-radius-card); }
     .approval p { margin: 0 0 var(--pd-space-2); overflow-wrap: anywhere; }
+    .approval.danger { border-color: var(--pd-danger); background: var(--pd-danger-tint); }
+    .approval .final { display: flex; gap: var(--pd-space-1); align-items: center; color: var(--pd-danger); }
     .actions { display: flex; gap: var(--pd-space-2); flex-wrap: wrap; }
     .composer { display: flex; flex-direction: column; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3) var(--pd-space-3); border-top: 1px solid var(--pd-hairline); }
     .chip { display: inline-flex; align-items: center; gap: var(--pd-space-1); max-width: 100%; min-height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-pill); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
@@ -300,6 +305,7 @@ export class PdAssistant {
   private readonly log = viewChild<ElementRef<HTMLElement>>('log');
   private readonly inputEl = viewChild<ElementRef<HTMLTextAreaElement>>('input');
   private readonly undoButton = viewChild<ElementRef<HTMLButtonElement>>('undoButton');
+  private readonly declineButton = viewChild<ElementRef<HTMLButtonElement>>('declineButton');
   private readonly injector = inject(Injector);
   /** The turn whose error details are open (-1: none). */
   protected readonly details = signal(-1);
@@ -344,6 +350,7 @@ export class PdAssistant {
     tool: $localize`:@@pd.wb.assistant.approve.tool:Tool`,
     arguments: $localize`:@@pd.wb.assistant.approve.arguments:Arguments`,
     noArguments: $localize`:@@pd.wb.assistant.approve.no-arguments:No arguments`,
+    cannotUndo: $localize`:@@pd.wb.assistant.approve.cannot-undo:This cannot be undone.`,
     failedTitle: $localize`:@@pd.wb.assistant.turn-failed.title:The answer did not finish.`,
     failedCause: $localize`:@@pd.wb.assistant.turn-failed.cause:Likely cause: the local model stopped answering. Check that Pitwall is running, then try again.`,
     retryTurn: $localize`:@@pd.wb.assistant.turn-failed.retry:Retry`,
@@ -379,6 +386,12 @@ export class PdAssistant {
       if (this.pinned) afterNextRender(() => (el.scrollTop = el.scrollHeight), { injector: this.injector });
       // The pill is state of this effect's scroll decision (the user's position is not a signal): set only, never read.
       else this.unseen.set(true);
+    });
+    // An action that cannot be undone: Decline is the default, so the focus goes there when it asks (DOM only).
+    effect(() => {
+      const ask = this.store.approval();
+      const button = this.declineButton()?.nativeElement;
+      if (ask?.destructive && button) button.focus();
     });
     // The question box shows the draft. Not a `[value]` binding: that is not re-rendered when typing and Enter happen in one
     // task (the draft goes 'x' then '' before any render), so the sent question would stay in the box (DOM only).

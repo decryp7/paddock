@@ -26,9 +26,9 @@ describe('the wire', () => {
     expect(parseSummaries([good, { id: 'b' }, null])).toEqual([good]);
     expect(parseInfo(null)).toBeNull();
     expect(parseInfo({ provider: 'p', tools: 'x' })).toBeNull();
-    expect(parseInfo({ provider: 'P', tools: [{ name: 'a', description: 'd', write: true }, { name: 1 }], hasWrite: false })).toEqual({
+    expect(parseInfo({ provider: 'P', tools: [{ name: 'a', description: 'd', write: true, destructive: false }, { name: 1 }], hasWrite: false })).toEqual({
       provider: 'P',
-      tools: [{ name: 'a', description: 'd', write: true }],
+      tools: [{ name: 'a', description: 'd', write: true, destructive: false }],
       hasWrite: true,
     });
   });
