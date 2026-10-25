@@ -501,6 +501,8 @@ describe('PdAssistant', () => {
       expect(section.classList.contains('danger')).toBe(true);
       expect(section.getAttribute('aria-describedby')).toBe('pd-assistant-approval-final');
       expect(text(r, 'assistant-approval-final')).toBe('This cannot be undone.');
+      // Regression (review 3 sheet): a whitespace-only node between the label and the action is dropped by the compiler.
+      expect(r.one('#pd-assistant-approval').textContent).toBe('The assistant wants to: Erase everything');
       expect(allow.classList.contains('pd-btn--danger')).toBe(true);
       expect(allow.classList.contains('pd-btn--primary')).toBe(false);
       expect(allow.classList.contains('pd-btn--danger-fill')).toBe(false);

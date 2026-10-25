@@ -144,7 +144,7 @@ const SCROLL_STICK_PX = 24;
 
     @if (store.approval(); as ask) {
       <section class="approval" [class.danger]="ask.destructive" role="alertdialog" aria-labelledby="pd-assistant-approval" [attr.aria-describedby]="ask.destructive ? 'pd-assistant-approval-final' : null" data-testid="assistant-approval">
-        <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong>&#32;<span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
+        <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong>{{ ' ' }}<span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
         @if (ask.destructive) {
           <p class="final" id="pd-assistant-approval-final" data-testid="assistant-approval-final"><pd-glyph name="alert" [size]="14" /> {{ t.cannotUndo }}</p>
         }
