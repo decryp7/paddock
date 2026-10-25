@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal, viewChild } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { PD_ECHARTS, fakeEchartsLoader } from '@decryp7/paddock-ui/chart';
 import { FakeECharts, all, buttonByText, one, press, text, typeInto } from '@decryp7/paddock-ui/testing';
@@ -43,6 +43,7 @@ class FakeHost implements ViewHost {
 }
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdView],
   template: `<pd-view view="demo.view" [doc]="doc()" [busy]="busy()" [loading]="loading()" [showTitle]="showTitle()" (action)="actions.push($event)" (retry)="retries = retries + 1" />`,
 })
