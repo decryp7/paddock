@@ -1,0 +1,38 @@
+[package]
+name = "dyno-helper"
+description = "Dyno's minimal privileged helper: a closed set of reversible system changes, installed on the user's click (ADR 0016)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "dyno_helper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dyno-helper"
+path = "src/main.rs"
+
+[dependencies]
+dyno-core.workspace = true
+dyno-ipc.workspace = true
+dyno-platform.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Runs the daemon under the Service Control Manager (MIT OR Apache-2.0).
+windows-service = "0.8"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

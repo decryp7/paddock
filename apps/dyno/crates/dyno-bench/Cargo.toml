@@ -1,0 +1,23 @@
+[package]
+name = "dyno-bench"
+description = "Dyno's benchmark runner: one short-lived process per benchmark, started by the agent on the user's click"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "dyno-bench"
+path = "src/main.rs"
+
+[dependencies]
+dyno-core.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

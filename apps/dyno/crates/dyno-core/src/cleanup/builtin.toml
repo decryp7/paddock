@@ -1,0 +1,178 @@
+# Dyno's built-in cleanup categories (pack format 1, docs/plugins.md). Roots are named places the agent resolves per OS
+# (see `Root`); `os` lists the systems a category applies to (empty: all). A user pack in the data folder's `packs/`
+# folder uses the same keys but only `paths` templates and the `children` and `installers` selectors.
+format = 1
+
+[[category]]
+id = "userTemp"
+name = "Temporary files"
+description = "Files apps left in your temp folder. Only files older than two days are offered."
+group = "system"
+risk = "safe"
+roots = ["userTemp"]
+min_age_days = 2
+
+[[category]]
+id = "systemTemp"
+name = "System temporary files"
+description = "Windows' own temp folder. Items Windows still uses are skipped and listed."
+group = "system"
+risk = "safe"
+os = ["windows"]
+roots = ["systemTemp"]
+min_age_days = 2
+
+[[category]]
+id = "updateLeftovers"
+name = "Windows Update leftovers"
+description = "Downloaded update packages already installed. Windows downloads them again if needed."
+group = "system"
+risk = "safe"
+os = ["windows"]
+roots = ["updateDownloads"]
+min_age_days = 7
+
+[[category]]
+id = "crashDumps"
+name = "Crash dumps and reports"
+description = "Memory dumps and error reports from apps that crashed. Useful only to send to a developer."
+group = "system"
+risk = "safe"
+os = ["windows", "macos"]
+roots = ["crashDumps", "errorReports"]
+min_age_days = 3
+
+[[category]]
+id = "thumbnails"
+name = "Thumbnail cache"
+description = "Preview images the file manager rebuilds as you browse folders."
+group = "system"
+risk = "safe"
+os = ["windows", "linux"]
+roots = ["thumbnailCache"]
+
+[[category]]
+id = "appCaches"
+name = "App caches"
+description = "Caches apps rebuild on their own. Apps may be a little slower the first time."
+group = "system"
+risk = "review"
+os = ["macos", "linux"]
+roots = ["userCaches"]
+min_age_days = 7
+
+[[category]]
+id = "oldLogs"
+name = "Old logs"
+description = "Log files older than 30 days."
+group = "system"
+risk = "safe"
+os = ["macos"]
+roots = ["userLogs"]
+min_age_days = 30
+
+[[category]]
+id = "chromeCache"
+name = "Chrome cache"
+description = "Pages and images Chrome keeps to load sites faster. Sign-ins and history are kept."
+group = "browser"
+risk = "safe"
+roots = ["chromeCache"]
+
+[[category]]
+id = "edgeCache"
+name = "Edge cache"
+description = "Pages and images Edge keeps to load sites faster. Sign-ins and history are kept."
+group = "browser"
+risk = "safe"
+roots = ["edgeCache"]
+
+[[category]]
+id = "firefoxCache"
+name = "Firefox cache"
+description = "Firefox's page cache. Sign-ins and history are kept."
+group = "browser"
+risk = "safe"
+roots = ["firefoxCache"]
+
+[[category]]
+id = "safariCache"
+name = "Safari cache"
+description = "Safari's page cache. Sign-ins and history are kept."
+group = "browser"
+risk = "safe"
+os = ["macos"]
+roots = ["safariCache"]
+
+[[category]]
+id = "downloadInstallers"
+name = "Installers in Downloads"
+description = "Setup files you downloaded more than 30 days ago. These are your files: Dyno never selects them for you."
+group = "downloads"
+risk = "personal"
+roots = ["downloads"]
+selector = "installers"
+min_age_days = 30
+
+[[category]]
+id = "devArtifacts"
+name = "Build output of idle projects"
+description = "Rust target/ and node_modules folders of projects untouched for a while. The next build recreates them."
+group = "developer"
+risk = "review"
+roots = ["projects"]
+selector = "devArtifacts"
+
+[[category]]
+id = "cargoCache"
+name = "Cargo cache"
+description = "Downloaded crates. Cargo downloads them again when a build needs them."
+group = "developer"
+risk = "review"
+roots = ["cargoCache"]
+min_age_days = 30
+
+[[category]]
+id = "npmCache"
+name = "npm cache"
+description = "Downloaded npm packages. npm downloads them again when needed."
+group = "developer"
+risk = "review"
+roots = ["npmCache"]
+min_age_days = 30
+
+[[category]]
+id = "nugetCache"
+name = "NuGet cache"
+description = "Downloaded NuGet packages. Restores download them again."
+group = "developer"
+risk = "review"
+roots = ["nugetCache"]
+min_age_days = 30
+
+[[category]]
+id = "pipCache"
+name = "pip cache"
+description = "Downloaded Python packages and wheels."
+group = "developer"
+risk = "safe"
+roots = ["pipCache"]
+min_age_days = 14
+
+[[category]]
+id = "rustToolchains"
+name = "Unused Rust toolchains"
+description = "Rust toolchains that are neither the default nor used by a project override."
+group = "developer"
+risk = "review"
+roots = ["rustToolchains"]
+selector = "staleToolchains"
+
+[[category]]
+id = "dockerImages"
+name = "Unused Docker images"
+description = "Dangling images no container or tag uses. Removed through Docker, not as files."
+group = "docker"
+risk = "review"
+roots = ["dockerImages"]
+selector = "dockerImages"

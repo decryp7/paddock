@@ -1,0 +1,18 @@
+[package]
+name = "dyno-plugin-example"
+description = "An example Dyno plugin: an extra sensor and a cleanup category"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+dyno-plugin-api.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

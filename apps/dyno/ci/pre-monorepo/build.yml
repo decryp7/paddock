@@ -1,0 +1,615 @@
+# Checks Dyno on every push and pull request. Installers are built only for v* tags (which also publish a Gitea
+# release with them attached), the nightly run and manual runs (see the bundle job).
+#
+# Runner labels: ubuntu-latest, windows-latest, macos-latest. The Windows and macOS runners are host runners on the
+# owner's machines: one job at a time, so those jobs stay lean. They install nothing system-wide, keep their build
+# output in one folder outside the workspace (pruned when it grows past a cap, scripts/ci-prune.sh) and leave no
+# processes, launch agents or temp folders behind. Dyno's tests act only on dummy processes and temp folders they
+# create themselves (AGENTS.md "Safety"), which matters most on the macOS runner: it is a person's real Mac.
+# Linux jobs run in the garage image (https://dev.decryptology.net/decryp7/garage): Rust, Tauri libraries, Node, Playwright
+# browsers and sccache pre-installed, root, no sudo.
+# Releases need a repository secret RELEASE_TOKEN (a Gitea access token with write:repository scope); signed
+# updates need TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD and TAURI_UPDATER_PUBKEY
+# (docs/releasing.md). Without them everything still builds, unsigned and without update support.
+# Actions are referenced by tag; Renovate (renovate.json, helpers:pinGitHubActionDigests) pins them to digests.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    - cron: "45 0 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+# A newer push to the same branch supersedes the run still going; tags have their own ref, so releases are never
+# cancelled by later pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  rust-lint:
+    name: rust format + clippy
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # Cheap and first: a formatting slip fails in seconds.
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Linux dependencies for Tauri
+        run: |
+          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+
+      - uses: actions/cache/restore@v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/debug/incremental
+          key: clippy-garage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: clippy-garage-${{ runner.os }}-
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - uses: actions/cache/save@v4
+        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            !target/debug/incremental
+          key: clippy-garage-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+  rust-test:
+    name: rust tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    env:
+      RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
+      SCCACHE_DIR: /sccache
+      SCCACHE_CACHE_SIZE: 5G
+    steps:
+      - uses: actions/checkout@v4
+
+      # Host-mode Windows runner: Git's bash on PATH (actions and `shell: bash` need it) and a build folder that
+      # outlives the job, so the next run builds incrementally.
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.dyno-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Linux dependencies for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+
+      # sccache compile cache for the Linux build (docs/development.md: a runner volume is the faster option).
+      - name: Restore the sccache compile cache
+        if: runner.os == 'Linux'
+        id: sccache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /sccache
+          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
+
+      - uses: actions/cache/restore@v4
+        if: runner.os == 'Linux'
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: test-registry-${{ runner.os }}-
+
+      # The Windows adapters are linted where they run: cross-checking them from Linux needs a Windows C toolchain
+      # for the bundled SQLite, which the Linux container does not have.
+      - name: Clippy (Windows)
+        if: runner.os == 'Windows'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --no-fail-fast
+
+      # The Linux adapters against this container's real /proc and /sys (the run above already includes them; this
+      # names them in the log). scripts/linux-verify.sh also runs them as uid 1000 on a developer machine, where
+      # "other users' processes are out of sight" shows.
+      - name: Linux adapter tests (real /proc)
+        if: runner.os == 'Linux'
+        run: "cargo test -p dyno-platform -- linux:: parse::"
+
+      - name: sccache statistics
+        if: always() && runner.os == 'Linux'
+        run: sccache --show-stats
+
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
+        with:
+          path: /sccache
+          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - uses: actions/cache/save@v4
+        if: always() && runner.os == 'Linux' && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      # Nothing may stay behind on the host: cap the persistent build folder, remove test temp folders.
+      - name: Prune the build folder (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          bash scripts/ci-prune.sh "$(cygpath -u "$USERPROFILE")/.dyno-ci" 20 || true
+          rm -rf "$(cygpath -u "${TEMP:-/tmp}")"/dyno-* || true
+
+  # The macOS code for real (launch agent, Unix sockets, SIGSTOP/SIGCONT duty cycles, lsof, codesign): clippy and
+  # the tests on the Mac host runner. The platform tests spawn their own dummy processes and act only on those.
+  macos:
+    name: macOS clippy + tests
+    runs-on: macos-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../.dyno-ci-target
+      CARGO_BUILD_JOBS: "4"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain present
+        run: |
+          rustc --version && cargo --version
+          cargo clippy --version || { echo "::error::clippy is missing on the Mac runner (rustup component add clippy)"; exit 1; }
+
+      - name: Clippy (macOS)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests (macOS)
+        run: cargo test --workspace --no-fail-fast
+
+      # The agent's own CLI on the real machine: one measurement, read-only.
+      - name: Agent measures once (macOS)
+        run: |
+          out="${TMPDIR:-/tmp}/dyno-once-ci.json"
+          cargo run -q -p dyno-agent -- once > "$out"
+          head -c 400 "$out"
+          rm -f "$out"
+
+      - name: Clean up test leftovers
+        if: always()
+        run: |
+          bash scripts/ci-prune.sh "$CARGO_TARGET_DIR" 20 || true
+          rm -rf "${TMPDIR:-/tmp}"/dyno-* || true
+
+  licences:
+    name: licences, scripts + commits
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so pull requests can check every commit message.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: licences-${{ runner.os }}-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Commit messages follow Conventional Commits
+        if: github.event_name == 'pull_request'
+        run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
+
+      - name: Script tests
+        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-capabilities.test.mjs app/scripts/check-index.test.mjs scripts/ci/*.test.mjs
+
+      # Least-privilege capabilities, a CSP without unsafe-eval or remote origins, drag-region permissions for the
+      # frameless title bar, macOS private API in both places (docs/suite-lessons.md).
+      - name: Tauri capabilities and CSP
+        run: node scripts/check-capabilities.mjs
+
+      - name: Licences, advisories and sources
+        run: cargo deny --all-features --workspace check
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/advisory-dbs
+          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+
+  frontend:
+    name: frontend build, lint + unit tests
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npx ng lint
+
+      - name: Frontend build
+        run: npx ng build
+
+      # Tauri adds a nonce to inline <style>/<script>, which makes the webview ignore 'unsafe-inline' and block
+      # Angular's runtime component styles: index.html must have no inline elements (docs/suite-lessons.md).
+      - name: index.html has no inline style or script
+        run: node scripts/check-index.mjs
+
+      # The units/format guard and the coverage guard are specs (format.spec.ts, the coverage-guard spec) that run
+      # with the rest; a raw number in a template fails them.
+      - name: Frontend unit tests (with coverage)
+        run: npx ng test --watch=false --coverage
+
+      - name: Tests are timezone-independent
+        run: TZ=Pacific/Auckland npx ng test --watch=false
+
+  # The browser flows against the mock backend (ng serve): Chromium, and WebKit where the browser installs.
+  e2e:
+    name: playwright (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, webkit]
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+
+      - name: Install
+        run: |
+          npm ci
+          npx playwright install --with-deps ${{ matrix.project }}
+
+      - name: Browser flows
+        env:
+          CI: "true"
+        run: npx playwright test --workers=1 --project=${{ matrix.project }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: |
+            app/playwright-report
+            app/.angular/playwright-results
+          if-no-files-found: ignore
+
+  bundle:
+    name: bundle (${{ matrix.os }})
+    needs: [rust-lint]
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: dmg
+          - os: ubuntu-latest
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    env:
+      RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
+      SCCACHE_DIR: /sccache
+      SCCACHE_CACHE_SIZE: 5G
+    steps:
+      - uses: actions/checkout@v4
+
+      # The WebKitGTK, GTK and appindicator packages the app links against, and what the AppImage bundler needs.
+      - name: Linux dependencies for Tauri and the bundles
+        if: runner.os == 'Linux'
+        run: |
+          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
+          SUDO=$(command -v sudo || true)
+          $SUDO apt-get update
+          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf file xdg-utils binutils
+
+      # sccache compile cache for the Linux build (docs/development.md: a runner volume is the faster option).
+      - name: Restore the sccache compile cache
+        if: runner.os == 'Linux'
+        id: sccache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: /sccache
+          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
+
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Git bash on PATH and a persistent build folder (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_TARGET_DIR=%USERPROFILE%\.dyno-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      # The Mac host runner keeps its own toolchain (nothing is installed there); its build folder lives outside the
+      # workspace so the runner's workspace clean-up never has to walk it.
+      - name: Persistent build folder (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_TARGET_DIR=${{ github.workspace }}/../.dyno-ci-target-bundle" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os != 'macOS'
+
+      # Host runners keep their own Node; fail fast when it is missing or not the major version app/.nvmrc asks for.
+      - name: Host Node matches app/.nvmrc
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
+          if ! command -v node >/dev/null; then
+            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/nodejs:$PATH"
+            else
+              echo "::error::Node.js is not installed on this runner: install Node $want (app/.nvmrc)."
+              exit 1
+            fi
+          fi
+          have=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$have" != "$want" ]; then
+            echo "::error::The runner has Node $(node --version) but app/.nvmrc asks for Node $want."
+            exit 1
+          fi
+
+      # Signed updater artifacts (docs/releasing.md): with the signing secrets set, Tauri writes a .sig next to every
+      # installer and the public key is built into the app. Without them (forks, pull requests) the app reports
+      # "Updates are not available in this build". The macOS bundle is ad-hoc signed (tauri.macos.conf.json,
+      # signingIdentity "-", hardenedRuntime false): SMAppService and launch agents refuse a linker-signed bundle.
+      - name: Build installers
+        working-directory: app
+        shell: bash
+        env:
+          # Tauri's DMG step skips Finder window scripting on CI (no Automation permission prompt on the host).
+          CI: "true"
+          # linuxdeploy runs without FUSE inside a container.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          BUNDLES: ${{ matrix.bundles }}
+        run: |
+          npm ci
+          # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's
+          # (signed) installer can never be collected into this release.
+          target="${CARGO_TARGET_DIR:-../target}"
+          if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
+          rm -rf "$target/dist/bundle"
+          # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
+          export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"
+          export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"
+          bundles="$BUNDLES"
+          # The DMG step removes the .app it packed unless the app bundle is requested too; the bundle check and the
+          # macOS updater both need it.
+          if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
+          # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, Paddock rule 23): ad-hoc code under it
+          # cannot load a vendor-signed library ("different Team IDs"). A real signing identity turns it back on, as
+          # notarization requires.
+          extra=()
+          if [ "$RUNNER_OS" = macOS ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
+            mkdir -p ../target
+            echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
+            extra=(--config ../target/hardened.conf.json)
+          fi
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+            mkdir -p ../target
+            # A secret pasted with a trailing newline is not valid base64: strip all whitespace.
+            node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY.replace(/\s+/g, "") } } }))' > ../target/updater.conf.json
+            npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+          else
+            echo '::warning::No updater signing secrets: this build cannot update itself.'
+            unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+            npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
+          fi
+
+      # Run paths of the packaged binaries, the macOS seal and the executables a package must carry
+      # (scripts/check-bundle.sh; on macOS also scripts/ci/macos-verify-bundle.sh: no hardened runtime while ad hoc, one
+      # TeamIdentifier, every sidecar starts from the built .app and DMG): a layout change cannot ship a binary that fails to start.
+      - name: Packaged binaries have sound run paths and seals (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/check-bundle.sh "${CARGO_TARGET_DIR:-target}/dist/bundle"
+
+      - name: sccache statistics
+        if: always() && runner.os == 'Linux'
+        run: sccache --show-stats
+
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
+        with:
+          path: /sccache
+          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          mkdir -p dist
+          dir="${CARGO_TARGET_DIR:-target}"
+          if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
+          find "$dir/dist/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;
+          ls -la dist
+          # Every versioned installer must carry this build's version (the .app.tar.gz has none in its name).
+          version="$(node -p "require('./app/src-tauri/tauri.conf.json').version")"
+          stale="$(ls dist | grep -E '_[0-9]+\.[0-9]+\.[0-9]+' | grep -v "_${version}_" || true)"
+          if [ -n "$stale" ]; then echo "::error::Installers from another version: $stale"; exit 1; fi
+
+      # Gitea Actions supports upload/download-artifact v3.
+      - uses: actions/upload-artifact@v3
+        with:
+          name: dyno-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+      # Host runners: keep the build folder within its cap; remove bundles that already went into the artifact.
+      - name: Prune the build folder (host runners)
+        if: always() && runner.os != 'Linux'
+        shell: bash
+        run: |
+          dir="${CARGO_TARGET_DIR:-}"
+          if [ -n "$dir" ]; then
+            if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
+            rm -rf "$dir/dist/bundle" || true
+            bash scripts/ci-prune.sh "$dir" 20 || true
+          fi
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [bundle, rust-lint, rust-test, macos, licences, frontend, e2e]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: app/.nvmrc
+
+      - name: Release notes (git-cliff)
+        run: |
+          cargo install git-cliff --locked
+          git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+          # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
+          cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
+
+          ### First launch
+
+          Dyno is not code-signed yet, so your system may warn the first time you open it.
+
+          - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Dyno > **Open Anyway**.
+          - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
+          FIRST_LAUNCH
+
+      # latest.json for the updater: version, notes, pub_date and, per platform, the installer's URL, signature and
+      # size. Installed apps fetch releases/download/latest/latest.json (the latest non-pre-release release).
+      - name: Updater manifest (latest.json)
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          # Public URL, not github.server_url: inside Gitea runners that is the internal http address.
+          BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          node --test scripts/release/latest-json.test.mjs
+          if ! find artifacts -name '*.sig' | grep -q .; then
+            echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
+            exit 0
+          fi
+          node scripts/release/latest-json.mjs --dir artifacts --version "$TAG" --notes artifacts/RELEASE_NOTES.md \
+            --base-url "$BASE_URL" --out artifacts/latest.json
+          find artifacts -name '*.sig' -delete
+          cat artifacts/latest.json
+
+      # Plain API calls instead of gitea.com/actions/release-action, which is a Go action and the runner image has no Go.
+      - name: Publish the release
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          node --test scripts/release/publish.test.mjs
+          node scripts/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" \
+            --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts

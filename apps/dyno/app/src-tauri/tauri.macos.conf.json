@@ -1,0 +1,43 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "Dyno",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "zoomHotkeysEnabled": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 24
+        },
+        "transparent": true,
+        "windowEffects": {
+          "effects": [
+            "sidebar"
+          ],
+          "state": "followsWindowActiveState"
+        }
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["dmg", "app"],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "files": {
+        "Library/LaunchAgents/net.decryptology.dyno.agent.plist": "./macos/net.decryptology.dyno.agent.plist"
+      },
+      "signingIdentity": "-",
+      "hardenedRuntime": false
+    }
+  }
+}

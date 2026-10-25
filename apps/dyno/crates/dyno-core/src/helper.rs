@@ -1,0 +1,530 @@
+//! The privileged helper's closed set of system changes (ADR 0006). Every change has an exact inverse, is validated
+//! here (the helper validates again, it trusts nobody), and is shown to the user as preview lines before it runs.
+
+use serde::{Deserialize, Serialize};
+
+/// The Windows "Balanced" power scheme.
+pub const BALANCED_SCHEME: &str = "381b4222-f694-41f0-9685-ff5bb260df2e";
+/// The Windows "Power saver" scheme.
+pub const POWER_SAVER_SCHEME: &str = "a1841308-3541-4fab-bc81-f71556f20b4a";
+
+/// Where a startup entry the helper changes is registered (all-users locations only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MachineStartup {
+    /// `HKLM\…\Run`.
+    RunKey,
+    /// The all-users Startup folder.
+    StartupFolder,
+    /// A scheduled task that runs at log-on (a top-level task name).
+    ScheduledTask,
+    /// A macOS launch agent in `/Library/LaunchAgents` (by label).
+    LaunchAgent,
+}
+
+impl MachineStartup {
+    /// The helper's location for a startup entry that needs administrator rights, if the helper can change it.
+    pub fn of(location: &crate::startup::StartupLocation) -> Option<MachineStartup> {
+        use crate::startup::StartupLocation as L;
+        match location {
+            L::MachineRunKey => Some(MachineStartup::RunKey),
+            L::CommonStartupFolder => Some(MachineStartup::StartupFolder),
+            L::ScheduledTask => Some(MachineStartup::ScheduledTask),
+            L::SystemLaunchAgent => Some(MachineStartup::LaunchAgent),
+            L::UserRunKey | L::UserStartupFolder | L::UserLaunchAgent | L::LoginItem => None,
+        }
+    }
+}
+
+/// Whether `label` is a launch-agent label Dyno will touch: letters, digits, dots, dashes and underscores, not
+/// starting with a dot.
+pub fn is_agent_label(label: &str) -> bool {
+    !label.is_empty()
+        && !label.starts_with('.')
+        && label.len() <= 200
+        && label.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+}
+
+/// A Linux power profile (power-profiles-daemon).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PowerProfile {
+    /// Saves power.
+    PowerSaver,
+    /// The default.
+    Balanced,
+    /// Favours speed.
+    Performance,
+}
+
+impl PowerProfile {
+    /// The name `powerprofilesctl` uses.
+    pub fn tool_name(self) -> &'static str {
+        match self {
+            PowerProfile::PowerSaver => "power-saver",
+            PowerProfile::Balanced => "balanced",
+            PowerProfile::Performance => "performance",
+        }
+    }
+
+    /// The profile a `powerprofilesctl get` answer names.
+    pub fn from_tool_name(s: &str) -> Option<PowerProfile> {
+        [PowerProfile::PowerSaver, PowerProfile::Balanced, PowerProfile::Performance]
+            .into_iter()
+            .find(|p| p.tool_name() == s.trim())
+    }
+
+    /// The name shown to the user.
+    pub fn label(self) -> &'static str {
+        match self {
+            PowerProfile::PowerSaver => "Power saver",
+            PowerProfile::Balanced => "Balanced",
+            PowerProfile::Performance => "Performance",
+        }
+    }
+}
+
+/// Which power source a sleep timer applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SleepSource {
+    /// Plugged in.
+    Ac,
+    /// On battery.
+    Battery,
+}
+
+/// The operating systems tuning knows how to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TuningHost {
+    /// Windows.
+    Windows,
+    /// macOS.
+    Macos,
+    /// Linux.
+    Linux,
+}
+
+/// One system change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HelperAction {
+    /// Activates a power scheme (Windows, by GUID).
+    SetPowerScheme(String),
+    /// Sets `VisualFXSetting` (0 let Windows choose, 1 appearance, 2 performance, 3 custom).
+    SetVisualEffects(u32),
+    /// Turns background apps off (true) or on for this user.
+    SetBackgroundAppsDisabled(bool),
+    /// Excludes (true) or re-includes folders from content indexing (Windows `NotContentIndexed`; macOS
+    /// `.metadata_never_index`).
+    SetIndexingExcluded {
+        /// Folders.
+        paths: Vec<String>,
+        /// Exclude or include.
+        excluded: bool,
+    },
+    /// Adds (true) or removes Microsoft Defender exclusions for folders (needs administrator rights).
+    SetDefenderExcluded {
+        /// Folders.
+        paths: Vec<String>,
+        /// Add or remove.
+        excluded: bool,
+    },
+    /// Turns macOS Low Power Mode on or off (needs administrator rights).
+    SetLowPowerMode(bool),
+    /// Sets the Linux power profile.
+    SetPowerProfile(PowerProfile),
+    /// Sets after how many minutes of idling the computer sleeps (0 = never) on one power source.
+    SetSleepMinutes {
+        /// Which power source.
+        source: SleepSource,
+        /// Minutes, 0 for never.
+        minutes: u32,
+    },
+    /// Turns hibernation (and its hibernation file) on or off (needs administrator rights).
+    SetHibernate(bool),
+    /// Stops charging the battery at this percentage (needs administrator rights).
+    SetChargeLimit(u8),
+    /// Enables or disables an all-users startup entry by name (needs administrator rights).
+    SetMachineStartupEnabled {
+        /// Where.
+        location: MachineStartup,
+        /// The value or file name.
+        name: String,
+        /// Enable or disable.
+        enabled: bool,
+    },
+}
+
+/// The longest sleep timer one action may set (a day).
+pub const MAX_SLEEP_MINUTES: u32 = 1440;
+
+/// The most folders one action may name.
+pub const MAX_PATHS: usize = 64;
+
+fn is_guid(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5
+        && parts
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+fn check_paths(paths: &[String]) -> Result<(), String> {
+    if paths.is_empty() || paths.len() > MAX_PATHS {
+        return Err(format!("Name 1–{MAX_PATHS} folders."));
+    }
+    for p in paths {
+        let absolute = p.starts_with('/') || (p.len() > 2 && p.as_bytes()[1] == b':' && p.as_bytes()[0].is_ascii_alphabetic());
+        if !absolute || p.contains("..") || p.len() > 1024 || p.contains('\0') {
+            return Err(format!("{p} is not an absolute folder path."));
+        }
+        let n = p.replace('\\', "/").trim_end_matches('/').to_lowercase();
+        if n.len() <= 3 || n == "/system" || n.starts_with("c:/windows") || n == "/users" || n == "c:/users" {
+            return Err(format!("{p} is too broad to change."));
+        }
+    }
+    Ok(())
+}
+
+impl HelperAction {
+    /// Checks the arguments.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            HelperAction::SetPowerScheme(g) if !is_guid(g) => Err(format!("{g} is not a power scheme id.")),
+            HelperAction::SetVisualEffects(v) if *v > 3 => Err("Visual effects setting is 0–3.".into()),
+            HelperAction::SetSleepMinutes { minutes, .. } if *minutes > MAX_SLEEP_MINUTES => {
+                Err(format!("Sleep after at most {MAX_SLEEP_MINUTES} minutes (0 means never)."))
+            }
+            HelperAction::SetChargeLimit(p) if !(50..=100).contains(p) => Err("A charge limit is between 50 and 100 percent.".into()),
+            HelperAction::SetIndexingExcluded { paths, .. } | HelperAction::SetDefenderExcluded { paths, .. } => check_paths(paths),
+            HelperAction::SetMachineStartupEnabled { name, .. }
+                if name.trim().is_empty() || name.len() > 260 || name.contains(['\\', '/', '\0']) =>
+            {
+                Err("That startup entry name is not valid.".into())
+            }
+            HelperAction::SetMachineStartupEnabled {
+                location: MachineStartup::LaunchAgent,
+                name,
+                ..
+            } if !is_agent_label(name) => Err("That launch agent label is not valid.".into()),
+            _ => Ok(()),
+        }
+    }
+
+    /// Whether it needs administrator rights (the helper then runs through a UAC / admin prompt).
+    pub fn needs_admin(&self) -> bool {
+        matches!(
+            self,
+            HelperAction::SetDefenderExcluded { .. }
+                | HelperAction::SetLowPowerMode(_)
+                | HelperAction::SetHibernate(_)
+                | HelperAction::SetChargeLimit(_)
+                | HelperAction::SetMachineStartupEnabled { .. }
+        )
+    }
+
+    /// Whether it needs administrator rights on `host`: [`Self::needs_admin`], plus what only some systems guard
+    /// (macOS `pmset` changes the machine-wide sleep timer; Windows `powercfg /change` edits the user's scheme).
+    pub fn needs_admin_on(&self, host: TuningHost) -> bool {
+        self.needs_admin() || (host == TuningHost::Macos && matches!(self, HelperAction::SetSleepMinutes { .. }))
+    }
+
+    /// The setting this action sets, as (name, value after applying). A read of the same setting after the action ran
+    /// gives the same pair; comparing a later read with it tells whether something else changed the setting since.
+    pub fn setting(&self) -> (String, String) {
+        let on = |b: &bool| if *b { "on" } else { "off" }.to_string();
+        let per_path = |paths: &[String], excluded: bool| vec![if excluded { "excluded" } else { "included" }; paths.len()].join(",");
+        match self {
+            HelperAction::SetPowerScheme(g) => ("powerScheme".into(), g.to_lowercase()),
+            HelperAction::SetVisualEffects(v) => ("visualEffects".into(), v.to_string()),
+            HelperAction::SetBackgroundAppsDisabled(b) => ("backgroundApps".into(), if *b { "1" } else { "0" }.into()),
+            HelperAction::SetIndexingExcluded { paths, excluded } => (format!("indexing:{}", paths.join("|")), per_path(paths, *excluded)),
+            HelperAction::SetDefenderExcluded { paths, excluded } => (format!("defender:{}", paths.join("|")), per_path(paths, *excluded)),
+            HelperAction::SetLowPowerMode(b) => ("lowPowerMode".into(), on(b)),
+            HelperAction::SetPowerProfile(p) => ("powerProfile".into(), p.tool_name().into()),
+            HelperAction::SetSleepMinutes { source, minutes } => (
+                match source {
+                    SleepSource::Ac => "sleep:ac".into(),
+                    SleepSource::Battery => "sleep:battery".into(),
+                },
+                minutes.to_string(),
+            ),
+            HelperAction::SetHibernate(b) => ("hibernate".into(), on(b)),
+            HelperAction::SetChargeLimit(p) => ("chargeLimit".into(), p.to_string()),
+            HelperAction::SetMachineStartupEnabled { name, enabled, .. } => (format!("startup:{name}"), on(enabled)),
+        }
+    }
+
+    /// What it changes, in words, one line per change.
+    pub fn preview(&self) -> Vec<String> {
+        match self {
+            HelperAction::SetPowerScheme(g) => vec![format!("Activate the power plan {}", scheme_name(g))],
+            HelperAction::SetVisualEffects(v) => vec![format!(
+                "Visual effects: {}",
+                match v {
+                    0 => "let Windows choose",
+                    1 => "best appearance",
+                    2 => "best performance (no animations, shadows or transparency)",
+                    _ => "custom",
+                }
+            )],
+            HelperAction::SetBackgroundAppsDisabled(true) => vec!["Stop apps from running in the background".into()],
+            HelperAction::SetBackgroundAppsDisabled(false) => vec!["Let apps run in the background again".into()],
+            HelperAction::SetIndexingExcluded { paths, excluded } => paths
+                .iter()
+                .map(|p| format!("{} search indexing: {p}", if *excluded { "Exclude from" } else { "Include in" }))
+                .collect(),
+            HelperAction::SetDefenderExcluded { paths, excluded } => paths
+                .iter()
+                .map(|p| {
+                    format!(
+                        "{} Microsoft Defender scanning: {p}",
+                        if *excluded { "Exclude from" } else { "Include in" }
+                    )
+                })
+                .collect(),
+            HelperAction::SetLowPowerMode(on) => vec![format!("Turn Low Power Mode {}", if *on { "on" } else { "off" })],
+            HelperAction::SetPowerProfile(p) => vec![format!("Switch the power profile to {}", p.label())],
+            HelperAction::SetSleepMinutes { source, minutes } => {
+                let when = match source {
+                    SleepSource::Ac => "plugged in",
+                    SleepSource::Battery => "on battery",
+                };
+                vec![match minutes {
+                    0 => format!("Never sleep when {when}"),
+                    m => format!("Sleep after {m} minute{} of idling when {when}", if *m == 1 { "" } else { "s" }),
+                }]
+            }
+            HelperAction::SetHibernate(on) => vec![format!(
+                "Turn hibernation {} ({})",
+                if *on { "on" } else { "off" },
+                if *on {
+                    "reserves disk space for the hibernation file"
+                } else {
+                    "frees the hibernation file"
+                }
+            )],
+            HelperAction::SetChargeLimit(p) => vec![format!("Stop charging the battery at {p}%")],
+            HelperAction::SetMachineStartupEnabled { name, enabled, .. } => {
+                vec![format!(
+                    "{} {name} at login for every user",
+                    if *enabled { "Start" } else { "Don't start" }
+                )]
+            }
+        }
+    }
+}
+
+/// A known scheme's name.
+pub fn scheme_name(guid: &str) -> String {
+    match guid.to_lowercase().as_str() {
+        BALANCED_SCHEME => "Balanced".into(),
+        POWER_SAVER_SCHEME => "Power saver".into(),
+        "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c" => "High performance".into(),
+        _ => guid.to_string(),
+    }
+}
+
+/// The helper's answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HelperOutcome {
+    /// Done.
+    Done,
+    /// Some parts failed (each with the reason); the rest was done.
+    Partial(Vec<String>),
+    /// Nothing was done.
+    Failed(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validation() {
+        assert!(HelperAction::SetPowerScheme(BALANCED_SCHEME.into()).validate().is_ok());
+        assert!(HelperAction::SetPowerScheme("nope".into()).validate().is_err());
+        assert!(HelperAction::SetPowerScheme("381b4222-f694-41f0-9685-ff5bb260dfzz".into())
+            .validate()
+            .is_err());
+        assert!(HelperAction::SetVisualEffects(2).validate().is_ok());
+        assert!(HelperAction::SetVisualEffects(9).validate().is_err());
+        let ok = HelperAction::SetIndexingExcluded {
+            paths: vec!["C:\\Users\\me\\src\\app".into(), "/Users/me/src".into()],
+            excluded: true,
+        };
+        assert!(ok.validate().is_ok());
+        for bad in [
+            "relative\\path",
+            "C:\\",
+            "C:\\Windows\\System32",
+            "C:\\Users",
+            "/Users",
+            "C:\\a\\..\\b",
+            "/",
+        ] {
+            let a = HelperAction::SetDefenderExcluded {
+                paths: vec![bad.into()],
+                excluded: true,
+            };
+            assert!(a.validate().is_err(), "{bad}");
+        }
+        assert!(HelperAction::SetDefenderExcluded {
+            paths: vec![],
+            excluded: true
+        }
+        .validate()
+        .is_err());
+        let s = |name: &str| HelperAction::SetMachineStartupEnabled {
+            location: MachineStartup::RunKey,
+            name: name.into(),
+            enabled: false,
+        };
+        assert!(s("Updater").validate().is_ok());
+        assert!(s("a\\b").validate().is_err());
+        assert!(s(" ").validate().is_err());
+        assert!(HelperAction::SetLowPowerMode(true).validate().is_ok());
+    }
+
+    #[test]
+    fn machine_startup_locations_map_and_labels_are_checked() {
+        use crate::startup::StartupLocation as L;
+        for l in [L::MachineRunKey, L::CommonStartupFolder, L::ScheduledTask, L::SystemLaunchAgent] {
+            assert!(l.needs_admin() && MachineStartup::of(&l).is_some(), "{l:?}");
+        }
+        for l in [L::UserRunKey, L::UserStartupFolder, L::UserLaunchAgent, L::LoginItem] {
+            assert_eq!(MachineStartup::of(&l), None);
+        }
+        let agent = |name: &str| HelperAction::SetMachineStartupEnabled {
+            location: MachineStartup::LaunchAgent,
+            name: name.into(),
+            enabled: false,
+        };
+        assert!(agent("com.example.updater-1_x").validate().is_ok());
+        for bad in ["a b", "a;b", "a$(x)", "..", ".hidden", "é", ""] {
+            assert!(agent(bad).validate().is_err(), "{bad}");
+        }
+        assert!(!is_agent_label(&"a".repeat(201)));
+    }
+
+    #[test]
+    fn settings_name_what_an_action_leaves_behind() {
+        assert_eq!(
+            HelperAction::SetPowerScheme("ABC".into()).setting(),
+            ("powerScheme".into(), "abc".into())
+        );
+        let idx = HelperAction::SetIndexingExcluded {
+            paths: vec!["/a".into(), "/b".into()],
+            excluded: true,
+        };
+        assert_eq!(idx.setting(), ("indexing:/a|/b".into(), "excluded,excluded".into()));
+        assert_eq!(HelperAction::SetHibernate(true).setting().1, "on");
+        assert_eq!(HelperAction::SetBackgroundAppsDisabled(true).setting().1, "1");
+        assert_eq!(HelperAction::SetChargeLimit(80).setting(), ("chargeLimit".into(), "80".into()));
+        assert_eq!(HelperAction::SetPowerProfile(PowerProfile::Balanced).setting().1, "balanced");
+        assert_eq!(HelperAction::SetVisualEffects(2).setting().1, "2");
+        assert_eq!(HelperAction::SetLowPowerMode(false).setting().1, "off");
+        assert_eq!(
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Battery,
+                minutes: 9
+            }
+            .setting(),
+            ("sleep:battery".into(), "9".into())
+        );
+        let d = HelperAction::SetDefenderExcluded {
+            paths: vec!["/a".into()],
+            excluded: false,
+        };
+        assert_eq!(d.setting().1, "included");
+        let m = HelperAction::SetMachineStartupEnabled {
+            location: MachineStartup::RunKey,
+            name: "x".into(),
+            enabled: true,
+        };
+        assert_eq!(m.setting(), ("startup:x".into(), "on".into()));
+        assert_eq!(
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Ac,
+                minutes: 0
+            }
+            .setting()
+            .0,
+            "sleep:ac"
+        );
+    }
+
+    #[test]
+    fn new_actions_validate_and_know_their_rights() {
+        let sleep = |minutes| HelperAction::SetSleepMinutes {
+            source: SleepSource::Ac,
+            minutes,
+        };
+        assert!(sleep(0).validate().is_ok() && sleep(MAX_SLEEP_MINUTES).validate().is_ok());
+        assert!(sleep(MAX_SLEEP_MINUTES + 1).validate().is_err());
+        assert!(HelperAction::SetChargeLimit(49).validate().is_err());
+        assert!(HelperAction::SetChargeLimit(101).validate().is_err());
+        assert!(HelperAction::SetChargeLimit(80).validate().is_ok());
+        assert!(!sleep(5).needs_admin_on(TuningHost::Windows));
+        assert!(sleep(5).needs_admin_on(TuningHost::Macos));
+        assert!(HelperAction::SetHibernate(false).needs_admin_on(TuningHost::Linux));
+        assert_eq!(PowerProfile::from_tool_name("power-saver\n"), Some(PowerProfile::PowerSaver));
+        assert_eq!(PowerProfile::from_tool_name("turbo"), None);
+        assert_eq!(PowerProfile::Performance.label(), "Performance");
+    }
+
+    #[test]
+    fn previews_and_rights() {
+        let all = vec![
+            HelperAction::SetPowerScheme(BALANCED_SCHEME.into()),
+            HelperAction::SetVisualEffects(0),
+            HelperAction::SetVisualEffects(1),
+            HelperAction::SetVisualEffects(2),
+            HelperAction::SetVisualEffects(3),
+            HelperAction::SetBackgroundAppsDisabled(true),
+            HelperAction::SetBackgroundAppsDisabled(false),
+            HelperAction::SetIndexingExcluded {
+                paths: vec!["/a/b".into()],
+                excluded: false,
+            },
+            HelperAction::SetDefenderExcluded {
+                paths: vec!["/a/b".into()],
+                excluded: false,
+            },
+            HelperAction::SetLowPowerMode(false),
+            HelperAction::SetPowerProfile(PowerProfile::Balanced),
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Battery,
+                minutes: 0,
+            },
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Ac,
+                minutes: 1,
+            },
+            HelperAction::SetSleepMinutes {
+                source: SleepSource::Ac,
+                minutes: 15,
+            },
+            HelperAction::SetHibernate(true),
+            HelperAction::SetHibernate(false),
+            HelperAction::SetChargeLimit(80),
+            HelperAction::SetMachineStartupEnabled {
+                location: MachineStartup::StartupFolder,
+                name: "x".into(),
+                enabled: true,
+            },
+        ];
+        for a in &all {
+            assert!(!a.preview().is_empty());
+        }
+        assert_eq!(all.iter().filter(|a| a.needs_admin()).count(), 6);
+        assert_eq!(all[0].preview()[0], "Activate the power plan Balanced");
+        assert_eq!(scheme_name(POWER_SAVER_SCHEME), "Power saver");
+        assert_eq!(scheme_name("8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"), "High performance");
+        assert_eq!(scheme_name("x"), "x");
+    }
+}
