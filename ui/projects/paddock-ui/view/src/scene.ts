@@ -2,7 +2,7 @@ import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementR
 import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { Diagram, Graph } from '../generated/view';
 import { layoutGraph, layoutSequence, MARK_W, type LayoutNode, type Scene, type SceneNode } from './layout';
-import { TONE_GLYPH, toneOf, toneWord } from './model';
+import { toneGlyph, toneOf, toneWord } from './model';
 import { ViewRuntime } from './runtime';
 import { PdViewScroll, SCROLL_CSS } from './scroll';
 import { TONE_CSS, toneClass, VIEW_HOVER_FILL } from './tone';
@@ -167,7 +167,7 @@ export class PdViewScene {
 
   /** The path data of a node's status glyph (the tone's own shape), or '' for a neutral node. */
   protected mark(n: SceneNode): string {
-    const glyph = TONE_GLYPH[toneOf(n.tone)];
+    const glyph = toneGlyph(toneOf(n.tone));
     return glyph ? ((PD_ICON_PATHS as Readonly<Record<string, string>>)[glyph] ?? '') : '';
   }
   protected markRoom(n: SceneNode): number {

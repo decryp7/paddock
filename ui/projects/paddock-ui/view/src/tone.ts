@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { Tone } from '../generated/view';
-import { TONE_GLYPH, toneOf, toneWord } from './model';
+import { toneGlyph, toneOf, toneWord } from './model';
 
 /** CSS for the tone classes (`pd-view-tone-good` ...) every view component includes: text colour and tint from the design tokens, never a colour of the plugin's. */
 export const TONE_CSS = `
@@ -37,6 +37,6 @@ export const toneClass = (tone: unknown): string => `pd-view-tone-${toneOf(tone)
 })
 export class PdViewTone {
   readonly tone = input<Tone | string>('neutral');
-  protected readonly glyph = computed(() => TONE_GLYPH[toneOf(this.tone())]);
+  protected readonly glyph = computed(() => toneGlyph(toneOf(this.tone())));
   protected readonly word = computed(() => toneWord(toneOf(this.tone())));
 }
