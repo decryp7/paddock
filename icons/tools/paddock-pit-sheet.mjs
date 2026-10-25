@@ -5,14 +5,17 @@
 import { Resvg } from '@resvg/resvg-js';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { NAMES, PADDOCK_FAMILY, PADDOCK_SYMBOLS, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { NAMES, PADDOCK_FAMILY, PADDOCK_SYMBOLS, STRIPE, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { ISO_SMALL, PIT_SMALL, isoArt, pitBuilding } from './paddock-iso.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..'), ALT = join(ROOT, 'alternative');
 const png = (svg, px) => new Resvg(svg, { fitTo: { mode: 'width', value: px }, shapeRendering: 2, textRendering: 0 }).render().asPng();
 const palette = PADDOCK_FAMILY.palettes.graphite, flat = PADDOCK_SYMBOLS.slats, title = 'Paddock (pit building)';
 // Small sizes: the pit building in pixel isometric at 32 and 24, the flat slatted door at 16 and in the tray.
-const glyphs = { 16: flat.g16, 24: PIT_SMALL[24], 32: PIT_SMALL[32] };
+// At 16 on the tile, a 1 px band of the seven app hues above the door (one pixel each, x 4 to 10, row 2) keeps the family cue; the
+// tray template stays one tone.
+const band16 = STRIPE.map((app, k) => ({ kind: 'fill', d: `M${4 + k} 2h1v1h-1Z`, tone: 'primary', app }));
+const glyphs = { 16: [...flat.g16, ...band16], 24: PIT_SMALL[24], 32: PIT_SMALL[32] };
 const prevGlyphs = { 16: flat.g16, 24: ISO_SMALL[24], 32: ISO_SMALL[32] };
 
 // ---------- the set ----------
@@ -24,7 +27,10 @@ const save = (n, d) => writeFileSync(join(ALT, n), d);
 save('paddock-pit-macos.svg', mac); save('paddock-pit-windows.svg', win); save('paddock-pit-128.svg', mac128);
 save('paddock-pit-macos-1024.png', png(mac, 1024)); save('paddock-pit-windows-1024.png', png(win, 1024));
 for (const s of [512, 256]) save(`paddock-pit-macos-${s}.png`, png(mac, s));
-for (const s of [128, 112, 60]) save(`paddock-pit-${s}.png`, png(mac128, s));
+for (const s of [128, 112]) save(`paddock-pit-${s}.png`, png(mac128, s));
+// 60 (the ecosystem diagram): the tiny frame, no chequer and 8 % larger.
+const mac60 = masterSvg('paddock', { art: pitBuilding({ tiny: true, bays: 3, pillar: 22 }), palette, title });
+save('paddock-pit-60.svg', mac60); save('paddock-pit-60.png', png(mac60, 60));
 for (const s of [16, 24, 32, 48]) { const svg = smallSvg('paddock', s, { glyphs, palette, title }); save(`paddock-pit-${s}.svg`, svg); save(`paddock-pit-${s}.png`, png(svg, s)); }
 // The tray is the flat slatted door (alternative/paddock-family-tray-*).
 
@@ -61,7 +67,7 @@ function block(bg, fg, dim, theme) {
   out.push(txt(PAD, y + 530, 'macOS master at 512', dim, 13), txt(PAD + 540, y + 276, 'Paddock, Pitwall, Dyno at 256', dim, 13));
   // 112 and 60 (the 128 frame) beside Pitwall and Dyno.
   const y2 = y + 300;
-  [[mac128, 'Paddock'], [pw, 'Pitwall'], [dy, 'Dyno']].forEach(([svg], i) => out.push(img(r(svg, 112), PAD + 540 + i * 130, y2, 112), img(r(svg, 60), PAD + 950 + i * 76, y2 + 26, 60)));
+  [[mac128, mac60], [pw, pw], [dy, dy]].forEach(([s112, s60], i) => out.push(img(r(s112, 112), PAD + 540 + i * 130, y2, 112), img(r(s60, 60), PAD + 950 + i * 76, y2 + 26, 60)));
   out.push(txt(PAD + 540, y2 + 134, 'at 112 (README) and 60 (ecosystem diagram): Paddock, Pitwall, Dyno', dim, 13));
   out.push(img(r(win, 128), PAD + 1200, y2 - 8, 128), txt(PAD + 1200, y2 + 134, 'Windows master', dim, 13));
   y += 570;
@@ -74,9 +80,9 @@ function block(bg, fg, dim, theme) {
     row.forEach((it, k) => out.push(img(r(it.small(32), 32), PAD + 150 + k * 52, y + 20, 32), img(r(it.small(16), 16), PAD + 150 + k * 52 + 8, y + 64, 16)));
     if (v === versions[0]) {
       const cx = PAD + 640;
-      out.push(zoom(v.small(16), 16, cx, y - 6, 6), zoom(v.small(24), 24, cx + 112, y - 6, 4), zoom(v.small(32), 32, cx + 220, y - 6, 3), zoom(traySvg('paddock', 'default', 'template', { glyph: flat.tray }), 16, cx + 335, y - 6, 6));
+      out.push(zoom(v.small(16), 16, cx, y - 6, 6), zoom(v.small(24), 24, cx + 112, y - 6, 4), zoom(v.small(32), 32, cx + 220, y - 6, 3), zoom(traySvg('paddock', 'default', theme === 'Dark' ? 'dark' : 'template', { glyph: flat.tray }), 16, cx + 335, y - 6, 6));
       out.push(`<rect x="${cx + 450}" y="${y + 20}" width="120" height="26" fill="${theme === 'Dark' ? '#2B2B2E' : '#E9E9EB'}"/>`, img(r(traySvg('paddock', 'default', theme === 'Dark' ? 'dark' : 'light', { glyph: flat.tray }), 16), cx + 460, y + 25, 16));
-      out.push(txt(cx, y + 112, '16 x6, 24 x4, 32 x3, tray template x6, tray 1x', dim, 12));
+      out.push(txt(cx, y + 112, `16 x6, 24 x4, 32 x3, tray template x6 (${theme === 'Dark' ? 'drawn white, as macOS shows it on a dark menu bar' : 'black'}), tray 1x`, dim, 12));
     }
     y += 140;
   }

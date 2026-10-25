@@ -151,7 +151,9 @@ export const ISO_TRAY = isoSmall({ grid: 16, L: 10, D: 3, H: 4, T: 1.5, ov: 0.5,
  */
 import { PALETTE, STRIPE } from './design.mjs';
 export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H2 = 64, T = 16, ov = 6, bays = 4, margin = 16, pillar = 14,
-  recess = 14, doorDown = 0.62, apron = 80, wallD = 12, wallH = 30, simple = false, box: [bw0, bh0] = [690, 560], dy = 10, dx = -4 } = {}) {
+  recess = 14, doorDown = 0.62, apron = 80, wallD = 12, wallH = 30, simple = false, tiny = false, box: [bw0, bh0] = [690, 560], dy = 10, dx = -4 } = {}) {
+  // tiny (the 60 px frame): the simple frame without the chequer, 8 % larger, so its mass matches Pitwall and Dyno at that size.
+  if (tiny) { simple = true; bw0 *= 1.08; bh0 *= 1.08; }
   if (simple) wallH = 40;
   const wall0 = -apron - wallD; // pit wall from d = wall0 to wall0 + wallD
   const top = H1 + C1 + H2 + T;
@@ -227,8 +229,8 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
     const mullions = Array.from({ length: 7 }, (_, j) => 10 + ((j + 1) * (L - 20)) / 8).map(s => `M${P(s, 0, H1 + C1 + 8).join(' ')}L${P(s, 0, H1 + C1 + H2 - 8).join(' ')}`).join('');
     // Pit wall: chequered top (the master only), the long face and the end.
     const cq = [];
-    {
-      // The chequer is the motorsport cue, so the simple frame keeps it, coarser (two rows of 24 on a taller wall).
+    if (!tiny) {
+      // The chequer is the motorsport cue, so the simple frame keeps it, coarser (two rows of 24 on a taller wall); at 60 it is a grey bar.
       const step = simple ? 24 : 14, rows = 2, dd = wallD / rows;
       for (let s = -ov, i = 0; s < L + ov - 0.1; s += step, i++) for (let r = 0; r < rows; r++) if ((i + r) % 2 === 0)
         cq.push(poly(P(s, wall0 + r * dd, wallH), P(Math.min(s + step, L + ov), wall0 + r * dd, wallH), P(Math.min(s + step, L + ov), wall0 + (r + 1) * dd, wallH), P(s, wall0 + (r + 1) * dd, wallH)));
@@ -259,7 +261,8 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
  * (apron and a white pit-wall line), the ground floor with three bays (doors down, dark below), a canopy lip, the dark glass band of
  * the upper floor and the roof. Bays have whole-pixel widths.
  */
-const PT = { top: '#FFFFFF', lip: '#AEB7C2', front: '#C9D0D8', end: '#7E8895', bay: '#10151B', door: '#9EA8B4', glass: '#1C2531', apron: '#6A7380', wall: '#F4F6F9' };
+// Bays near-black and the glass a step lighter with one light reflection column, so the two dark bands separate at 32.
+const PT = { top: '#FFFFFF', lip: '#AEB7C2', front: '#C9D0D8', end: '#7E8895', bay: '#06080B', door: '#9EA8B4', glass: '#34445A', glassHi: '#6F8399', apron: '#6A7380', wall: '#F4F6F9' };
 function pitSmall({ grid, L, D, H1, H2, apron, bays, margin, pillar, door }) {
   const top = H1 + 1 + H2 + 1;
   const xs = [-apron, L + D], ys = [(0 - D) / 2 - top, (L + apron) / 2];
@@ -278,7 +281,7 @@ function pitSmall({ grid, L, D, H1, H2, apron, bays, margin, pillar, door }) {
     lay(flat(0, L, -apron, 0, 0), PT.apron),
     lay(face(0, L, -apron, 0, 1), PT.wall),
     lay(face(0, L, 0, 0, H1), PT.front), lay(holes, PT.bay), lay(doors, PT.door),
-    ...(H2 ? [lay(face(0, L, 0, H1 + 1, H1 + 1 + H2), PT.glass)] : []),
+    ...(H2 ? [lay(face(0, L, 0, H1 + 1, H1 + 1 + H2), PT.glass), ...(H2 > 1 ? [lay(face(Math.round(L * 0.3), Math.round(L * 0.3) + 1, 0, H1 + 1, H1 + 1 + H2), PT.glassHi)] : [])] : []),
     lay(end(L, 0, D, 0, top), PT.end),
     lay(flat(0, L, -2, 0, H1 + 1), PT.top), lay(face(0, L, -2, H1, H1 + 1), PT.lip),
     lay(face(0, L, 0, top - 1, top), PT.lip), lay(flat(0, L, 0, D, top), PT.top),

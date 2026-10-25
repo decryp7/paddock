@@ -5,9 +5,13 @@ building (`tools/paddock-iso.mjs`, `pitBuilding()`; sheet `alternative/paddock-p
 below are its numbers unless a rule says otherwise. Every app keeps its own tile colour (`PALETTE` in `tools/design.mjs`) and its
 own symbol; only the rendering changes.
 
+**Two forms.** Paddock alone is drawn in isometric (sections 1 to 10), as the umbrella mark: a place, seen from above. The seven apps
+are front-facing symbols drawn as reliefs (section 11): the symbol faces the viewer, extruded to a shallow depth. Both share the
+light, the value steps, the material, the shadows, the detail budget and the checks.
+
 ## 1. Projection and light
 
-- **Masters (1024 down to 64):** true isometric, 30 degrees: a point (s along the long axis, d into depth, t up) lands at
+- **Masters (1024 down to 64), Paddock only:** true isometric, 30 degrees: a point (s along the long axis, d into depth, t up) lands at
   `x = (s + d) cos 30, y = (s - d) / 2 - t`. One projection per icon; no mixed angles, no perspective.
 - **Frames at 32 and 24:** 2:1 pixel isometric (one pixel up or down per two across), `x = s + d, y = (s - d) / 2 - t`, with
   `shape-rendering="crispEdges"`, so the diagonals are clean pixel stairs.
@@ -40,6 +44,11 @@ Values are OKLab lightness x 100 (`L`). Adjacent faces of one solid differ by at
 ## 3. Material
 
 - **The object is white or near-white with greys**, so it stays the family's light glyph on any tile.
+- **On mid-light tiles (Pitcrew orange, Dyno magenta and the like) the lit faces are near-white** (L 90 or more), not grey: a grey
+  face cannot reach 3:1 on orange. Only the shade faces and recesses go darker.
+- **Dark ink on light tiles:** where white cannot reach 3:1 on the tile (Spotter amber, Sighter lavender), the object is the tile's
+  dark ink colour (`INK[app]`) with the same value ladder inverted in range (front lightest of the darks, about L 44 to 39; faces
+  that point down L 36 to 30; faces that point right L 21 to 18), and its holes glow in the app's light hue.
 - **On a coloured tile, tint the greys towards the tile:** mix the lit and shade faces 10 to 15 % towards the tile's `deep` colour,
   and use `deep` (not black) for openings and glass. Paddock's graphite tile is neutral, so its greys are cool neutral.
 - Glass: a dark vertical gradient with one diagonal sheen (white, 28 % falling to 0 over the first half) and thin mullions.
@@ -75,8 +84,9 @@ The family glyph shadow (`feDropShadow` in the tile's `deep` colour) is replaced
 | 1024, 512, 256 | everything: fine repeats (door slats, mullions, lane line), the fine chequer (step 14, two rows), the accent at 8 units |
 | 128 and below to 60 (`simple: true`) | no fine repeats (no slats, mullions or lane lines); fewer, wider repeated parts (three bays, pillars 22); openings fully dark (no lit floor) with doors only 40 % down; the cue that carries the meaning stays, coarser (chequer step 24 on a 40-high wall); the accent 10; door rails 8. README size 112 and diagram size 60 are rendered from this frame |
 | 32, 24 | hand-drawn pixel isometric (`PIT_SMALL`): one pixel per part, whole-pixel widths for repeated parts (three bays of whole pixels), flat tones (no gradients), the same parts as the master in order: ground detail, main face with openings, upper band, roof. Keep the defining bands even at 24 (Paddock keeps a 1-row glass band, taking the row from the ground floor) and end faces at least 3 px |
-| 16 | the flat symbol (Paddock: the slatted door), one tone, whole pixels, coverage 18 to 26 % |
-| Tray | the flat symbol as a template (alpha only, one tone), x 2 to 14; light and dark variants from it |
+| 60 (Paddock) | the 128 frame without the chequer (it greys into a bar) and fitted 8 % larger, so its mass matches Pitwall and Dyno |
+| 16 | the flat symbol (Paddock: the slatted door, with a 1 px band of the seven hues above it on the tile, one pixel each), whole pixels; coverage 18 to 26 % for line glyphs, up to 30 % for filled silhouettes |
+| Tray | the flat symbol as a template (alpha only, one tone), x 2 to 14; light and dark variants from it. Whole pixels only: no partial alpha anywhere, except a deliberate dim of the whole glyph for a state (for example idle) |
 
 Rule: if a part cannot be drawn on whole pixels at a size, it is dropped at that size, never blurred.
 
@@ -102,10 +112,11 @@ Rule: if a part cannot be drawn on whole pixels at a size, it is dropped at that
 | Check | Rule | Tool |
 |---|---|---|
 | Tile CVD distance | every tile at least 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan (OKLab dE x 100) from every other tile | `node tools/cvd.mjs` |
-| Ink contrast | the object's lit face against the tile base at least 3:1 (Paddock `#C9D0D8` on `#2B3038`: 9.6:1) | `contrast()` in `tools/cvd.mjs` |
+| Ink contrast | the object's lit face against the tile base at least 3:1 (Paddock `#C9D0D8` on `#2B3038`: 9.6:1); on mid-light tiles this needs near-white lit faces, on light tiles dark ink | `contrast()` in `tools/cvd.mjs` |
 | Face steps | adjacent faces at least 8 L apart (section 2) | OKLab |
 | Size | visible mass 70 to 75 % of the tile width at 1024 | measure the render |
-| Coverage at 16 | 18 to 26 % ink | `coverage()` in `tools/paddock-symbols.mjs` |
+| Coverage at 16 | 18 to 26 % ink for line glyphs, up to 30 % for filled silhouettes | `coverage()` in `tools/paddock-symbols.mjs` |
+| Tray alpha | every tray pixel fully opaque or fully transparent (except a whole-glyph state dim) | magnify the template |
 | Seams | the tile background has no step over 3 levels | `npm test`, `tools/scan.mjs` |
 | Whole pixels | 32, 24 and 16 frames have no half-tone edges on repeated parts | magnify the frame (sheet close-ups) |
 | Review | every new or changed icon gets an independent review: professional vs amateur at 512, 112 and 60, and meaning | rule 22 |
@@ -118,3 +129,29 @@ pit lane, carrying the pinstripe, with its cast shadow; an upper hospitality flo
 with a 6 overhang; in front, the apron (80 deep, `#6A7380` to `#545D69`) with a lane line and the pit wall (12 deep, 30 high,
 chequered top). Fit box 690 x 560, shift (-4, +10).
 `node tools/paddock-pit-sheet.mjs` renders the set and the sheet.
+
+## 11. Relief: the front-facing app symbols
+
+The apps' symbols face the viewer and are extruded into a shallow relief (`tools/relief.mjs`, first used for Debrief, Pitwall and
+Sighter in `tools/icons-a.mjs`). One recipe for every app:
+
+- **Extrusion:** one depth for the family, about 24 units at 1024 (plus or minus 4), along the direction away from the light,
+  about 7 right and 23 down. The walls are swept along it: walls that face down take the lit tone, walls that face right the shade
+  tone (section 2). No app uses a different depth or direction.
+- **Front face:** the top role (lightest) with a gentle gradient; the one highlight runs along the top or top-left edge of the front
+  face, where the light catches it (white, about 0.9), never along the bottom or right.
+- **Recesses are cut-outs:** a hole through the symbol shows the tile colour at its floor (or the app's light hue where the hole is
+  the accent, a glow), with its inner walls in the recess tones (`head` darkest, `jamb` lighter). This is the standard way to draw
+  any opening, slot or bar inside a symbol; do not paint a darker patch instead.
+- **Shadows (one recipe, the light neutral shadow of Debrief and Pitwall):** black, blurred in sRGB.
+
+  | Layer | 1024 masters | 48 px frame | 32, 24, 16 frames |
+  |---|---|---|---|
+  | Long shadow | the solid swept a further (56, 42) beyond the extrusion, blur 18, opacity 0.45 | sweep (36, 28), blur 14, opacity 0.4 | none |
+  | Contact occlusion | the solid grown by 3 (and half that down), blur 2.5, opacity 0.8 | blur 6, opacity 0.6, grow 3 | a hard 1 px shadow straight down at 0.22 |
+
+- **Size:** the symbol's visible mass is 70 to 75 % of the tile width, as for Paddock (section 5); fit by a scale about the centre
+  when strokes with round caps reach past the box.
+- **Small frames:** 48 is the simple master scaled onto the small tile with the softer shadows; 32, 24 and 16 are flat (no
+  gradients), extruded one pixel along (1, 1) in half-pixel steps, on whole pixels.
+
