@@ -1,6 +1,6 @@
-// Generates Pacenotes' draw.io diagrams with the Paddock diagram kit (expected as a sibling checkout: ../paddock next to pacenotes).
+// Generates Pacenotes' draw.io diagrams with the Paddock diagram kit (diagrams/tools at the monorepo root).
 // Run: node docs/diagrams/src/generate.mjs, then scripts/export-diagrams.sh. Re-running overwrites the generated .drawio files.
-import { Diagram, link, g8 } from '../../../../paddock/diagrams/tools/lib.mjs';
+import { Diagram, link, g8 } from '../../../../../diagrams/tools/lib.mjs';
 import { writeFileSync } from 'node:fs';
 
 const OUT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
