@@ -204,6 +204,110 @@ const PADDOCK = {
   tray: garages({ x: 1, w: 14, roofY: 1.75, rise: 3.5, roofW: 2, roofTone: 'primary', doorY: 7, doorH: 5, gap: 2, inset: 1, slats: [2.5], slatW: 1, r: 0, slab: 13, slabH: 1, seamW: 0, n: 2 }),
 };
 
+
+/**
+ * Paddock redesign candidates (2026-10-25), kept in alternative/ until one is chosen (tools/paddock-variants.mjs builds them).
+ * Every one avoids the gable (it read as a generic home icon) and stacked bars (they read as a list): the family stripe is a set of
+ * set of hard-stop hues on whole pixels at 16, 24 and 32 px (each variant has its own 24 grid), one per app in STRIPE order.
+ *  - flat-garage (A): a flat canopy in the seven hues with a slight overhang, three wide roll-up doors raised a little (a dark
+ *    opening under each), pillars between the bays and the pit-lane line in front.
+ *  - pit-boxes (B): the pit lane from above: the garage wall, seven coloured pit boxes, the dashed lane line and the pit wall.
+ *  - foundation (C): one course of seven coloured blocks, a neutral slab resting on it.
+ */
+const blocks = (rects, r = 0) => rects.map(([x, y, w, h], k) => ({ kind: 'fill', d: rr(x, y, w, h, r), tone: 'primary', app: STRIPE[k] }));
+const evenRow = (x, y, w, h, gap, n = STRIPE.length) => Array.from({ length: n }, (_, k) => [f(x + k * ((w - (n - 1) * gap) / n + gap)), y, f((w - (n - 1) * gap) / n), h]);
+/**
+ * A: the canopy (one continuous band, a hard stop per hue), pillars between the bays, the doors (slats cut through), the dark openings under them and the
+ * lane line, on any grid. Bays come from `bays` ([x, w] per door) or are spread evenly over bx0..bx1 with `pillar` between them;
+ * `pillars: false` leaves the pillars out (tray: a half-tone pillar would read as disabled in a template image).
+ */
+function flatGarage({ cx0, cx1, cy, ch, cr = 0, bx0, bx1, pillar, n = 3, bays, pillars = true, top, doorTop, doorBottom, bottom, slats = [], slatW = 0, dr = 0, lane, laneW }) {
+  const dw = (bx1 - bx0 - (n + 1) * pillar) / n;
+  const bay = bays ?? Array.from({ length: n }, (_, k) => [bx0 + pillar + k * (dw + pillar), dw]);
+  const posts = [[bx0, bay[0][0] - bx0], ...bay.slice(1).map(([x], k) => [bay[k][0] + bay[k][1], x - bay[k][0] - bay[k][1]]), [bay.at(-1)[0] + bay.at(-1)[1], bx1 - bay.at(-1)[0] - bay.at(-1)[1]]];
+  const cuts = slats.map(y => `M${f(bx0)} ${f(y)}H${f(bx1)}`).join('');
+  return [
+    { kind: 'fill', d: rr(cx0, cy, cx1 - cx0, ch, cr), tone: 'family', x0: cx0, x1: cx1 },
+    ...(pillars ? [{ kind: 'fill', d: posts.map(([x, w]) => rr(x, top, w, bottom - top, 0)).join(''), tone: 'secondary' }] : []),
+    { kind: 'fill', d: bay.map(([x, w]) => rr(x, doorBottom, w, bottom - doorBottom, 0)).join(''), tone: 'primary', colour: '#07080A' },
+    { kind: 'fill', d: bay.map(([x, w]) => rr(x, doorTop, w, doorBottom - doorTop, dr)).join(''), tone: 'primary', ...(slats.length ? { cutStroke: { d: cuts, w: slatW, cap: 'butt' } } : {}) },
+    laneW > 4
+      ? { kind: 'stroke', d: `M${cx0 + laneW / 2} ${lane}H${cx1 - laneW / 2}`, w: laneW, tone: 'primary', cap: 'round' }
+      : { kind: 'fill', d: rr(cx0, lane - laneW / 2, cx1 - cx0, laneW, 0), tone: 'primary' },
+  ];
+}
+export const PADDOCK_VARIANTS = {
+  'flat-garage': {
+    g1024: flatGarage({ cx0: 228, cx1: 796, cy: 312, ch: 76, cr: 22, bx0: 248, bx1: 776, pillar: 20, top: 388, doorTop: 408, doorBottom: 592, bottom: 632,
+      slats: [469, 531], slatW: 8, dr: 6, lane: 696, laneW: 32 }),
+    // 32 px: one slat near the top of each door (more read as a table of cells at this size).
+    g32: flatGarage({ cx0: 2, cx1: 30, cy: 6, ch: 5, cr: 1, bx0: 3, bx1: 29, pillar: 2, top: 11, doorTop: 12, doorBottom: 21, bottom: 24, slats: [14.5], slatW: 1, lane: 26, laneW: 2 }),
+    // 24 px: its own grid, three 4 px doors between 1 px pillars; solid doors (a slat plus the opening read as a 3x3 table here).
+    g24: flatGarage({ cx0: 3, cx1: 21, cy: 4, ch: 3, cr: 0.5, bx0: 4, bx1: 20, bays: [[5, 4], [10, 4], [15, 4]], top: 7, doorTop: 8, doorBottom: 14, bottom: 16,
+      lane: 19, laneW: 2 }),
+    // 16 px: two bays on whole pixels (three would land on half pixels), the canopy one pixel wider than the building on each side.
+    g16: flatGarage({ cx0: 2, cx1: 14, cy: 2, ch: 3, bx0: 3, bx1: 13, bays: [[4, 3], [9, 3]], top: 5, doorTop: 6, doorBottom: 10, bottom: 12, lane: 13.5, laneW: 1 }),
+    // Tray: solid doors (a slat cut turned them into list bars); the openings are the cut-out under them.
+    tray: flatGarage({ cx0: 1, cx1: 15, cy: 1, ch: 3, bx0: 2, bx1: 14, bays: [[2, 5], [9, 5]], pillars: false, top: 4, doorTop: 5, doorBottom: 10, bottom: 12,
+      lane: 13.5, laneW: 1 }),
+  },
+  'pit-boxes': {
+    g1024: [
+      { kind: 'fill', d: rr(244, 292, 536, 44, 22), tone: 'primary' },
+      ...blocks(evenRow(244, 364, 536, 204, 14), 12),
+      { kind: 'stroke', d: 'M272 636H344M408 636H480M544 636H616M680 636H752', w: 26, tone: 'secondary', cap: 'round' },
+      { kind: 'fill', d: rr(244, 692, 536, 44, 22), tone: 'primary' },
+    ],
+    g32: [
+      { kind: 'fill', d: rr(2, 5, 27, 2, 0), tone: 'primary' },
+      ...blocks(evenRow(2, 9, 27, 11, 1)),
+      { kind: 'fill', d: 'M3 22H6V23H3ZM9 22H12V23H9ZM15 22H18V23H15ZM21 22H24V23H21ZM27 22H28V23H27Z', tone: 'secondary' },
+      { kind: 'fill', d: rr(2, 25, 27, 2, 0), tone: 'primary' },
+    ],
+    g16: [
+      { kind: 'fill', d: rr(2, 2, 12, 1, 0), tone: 'primary' },
+      ...blocks(evenRow(1, 4, 14, 6, 0)),
+      { kind: 'fill', d: 'M3 11H5V12H3ZM7 11H9V12H7ZM11 11H13V12H11Z', tone: 'secondary' },
+      { kind: 'fill', d: rr(2, 13, 12, 1, 0), tone: 'primary' },
+    ],
+    g24: [
+      { kind: 'fill', d: rr(2, 4, 20, 1, 0), tone: 'primary' },
+      ...blocks(evenRow(2, 6, 20, 9, 1)),
+      { kind: 'fill', d: 'M3 17H5V18H3ZM8 17H10V18H8ZM14 17H16V18H14ZM19 17H21V18H19Z', tone: 'secondary' },
+      { kind: 'fill', d: rr(2, 19, 20, 1, 0), tone: 'primary' },
+    ],
+    tray: [
+      { kind: 'fill', d: rr(1, 2, 13, 1, 0), tone: 'primary' },
+      ...blocks(evenRow(1, 4, 13, 7, 1)),
+      { kind: 'fill', d: 'M2 12H4V13H2ZM6 12H9V13H6ZM11 12H13V13H11Z', tone: 'primary' },
+      { kind: 'fill', d: rr(1, 14, 13, 1, 0), tone: 'primary' },
+    ],
+  },
+  'foundation': {
+    // One course of seven blocks in the stripe order, the neutral slab resting on it as wide as the base plus a little overhang.
+    g1024: [
+      { kind: 'fill', d: rr(232, 360, 560, 72, 24), tone: 'primary' },
+      ...blocks(evenRow(252, 460, 520, 204, 14), 16),
+    ],
+    g32: [
+      { kind: 'fill', d: rr(3, 8, 27, 4, 1), tone: 'primary' },
+      ...blocks(evenRow(3, 13, 27, 10, 1)),
+    ],
+    g24: [
+      { kind: 'fill', d: rr(2, 6, 20, 3, 0.5), tone: 'primary' },
+      ...blocks(evenRow(2, 10, 20, 8, 1)),
+    ],
+    g16: [
+      { kind: 'fill', d: rr(1, 3, 14, 3, 0), tone: 'primary' },
+      ...blocks(evenRow(1, 7, 14, 6, 0)),
+    ],
+    tray: [
+      { kind: 'fill', d: rr(1, 2, 13, 3, 0), tone: 'primary' },
+      ...blocks(evenRow(1, 6, 13, 8, 1)),
+    ],
+  },
+};
+
 export { PACENOTES };
 
 /** Master glyphs on the 1024 grid (optical centre 512,512; live area ~ 270..754). */
@@ -410,7 +514,11 @@ const idp = app => (app === 'paddock' ? 'k' : app[0]);
 function renderGlyph(layers, paint, uid) {
   const defs = [], body = [];
   layers.forEach((L, i) => {
-    let fill = paint[L.tone] ?? paint.primary;
+    // `colour`: a literal colour that only exists in colour renders (e.g. a dark door opening); monochrome renders drop the layer.
+    if (L.colour && !paint.family) return;
+    let fill = L.colour ?? paint[L.tone] ?? paint.primary;
+    // `app`: one family stripe hue (STRIPE_COLOUR); plain ink in monochrome renders.
+    if (L.app && paint.family) fill = STRIPE_COLOUR(L.app);
     if (L.tone === 'family' && paint.family) {
       // Hard-stop gradient: one segment per app hue, left to right in STRIPE order.
       const id = `${uid}fam${i}`, n = STRIPE.length;
@@ -429,10 +537,10 @@ function renderGlyph(layers, paint, uid) {
       maskAttr = ` mask="url(#${id})"`;
     }
     if (L.kind === 'stroke') {
-      body.push(`<path d="${L.d}" fill="none" stroke="${fill}" stroke-width="${L.w}" stroke-linecap="${L.cap ?? 'round'}" stroke-linejoin="round"${maskAttr}/>`);
+      body[i] = `<path d="${L.d}" fill="none" stroke="${fill}" stroke-width="${L.w}" stroke-linecap="${L.cap ?? 'round'}" stroke-linejoin="round"${maskAttr}/>`;
     } else {
       const soft = L.round ? ` stroke="${fill}" stroke-width="${L.round * 2}" stroke-linejoin="round"` : '';
-      body.push(`<path d="${L.d}" fill="${fill}"${soft}${maskAttr}/>`);
+      body[i] = `<path d="${L.d}" fill="${fill}"${soft}${maskAttr}/>`;
     }
   });
   // Consecutive secondary layers share one translucent group so overlaps don't double up.
@@ -441,8 +549,10 @@ function renderGlyph(layers, paint, uid) {
     if (run.length) out += `<g opacity="${paint.secondaryOpacity ?? 1}">${run.join('')}</g>`;
     run = [];
   };
-  body.forEach((b, i) => {
-    if (layers[i].tone === 'secondary') run.push(b);
+  layers.forEach((_, i) => {
+    const b = body[i];
+    if (b === undefined) return;
+    if (layers[i].tone === 'secondary' && !layers[i].app) run.push(b);
     else {
       flush();
       out += b;
@@ -469,14 +579,14 @@ function inkPaint(app, concept, uid) {
  * platform 'windows': near full-bleed rounded square (margin 40, circular corners), no outer shadow.
  */
 /** `bare` leaves out the glyph and the livery: the tile background alone, for the seam scan (tools/scan.mjs). */
-export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false } = {}) {
+export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false, glyph: override, title } = {}) {
   const p = PALETTE[app];
   const mac = platform === 'macos';
   const x = mac ? 100 : 40, s = mac ? 824 : 944;
   const shape = mac ? squircle(x, x, s, s, 185.4) : rr(x, x, s, s, 200);
   const scale = s / 824;
   const carbon = concept === 'carbon';
-  const g = GLYPH_1024[app]();
+  const g = override ?? GLYPH_1024[app]();
   const ink = inkPaint(app, concept, uid);
   const glyph = renderGlyph(g, ink.paint, uid);
   const top = carbon ? CARBON.top : p.top, bottom = carbon ? CARBON.bottom : p.bottom, mid = carbon ? '#22252B' : p.base;
@@ -485,7 +595,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
   const glyphShadow = carbon ? '#000000' : p.deep;
   const shadowOp = carbon ? 0.5 : LIGHT_TILE.has(app) ? 0.18 : 0.32;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <title>${NAMES[app]}${carbon ? ' (Carbon concept)' : ''}</title>
+  <title>${title ?? NAMES[app]}${carbon ? ' (Carbon concept)' : ''}</title>
   <defs>
     <linearGradient id="${uid}bg" x1="0" y1="${x}" x2="0" y2="${x + s}" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="${top}"/><stop offset="0.55" stop-color="${mid}"/><stop offset="1" stop-color="${bottom}"/>
@@ -516,18 +626,20 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
 }
 
 /** Hand-tuned small app icon (Windows-style near full-bleed tile; used for the .ico 16/24/32/48 frames). */
-export function smallSvg(app, size, { uid = newUid(idp(app)) } = {}) {
+export function smallSvg(app, size, { uid = newUid(idp(app)), glyphs, title } = {}) {
+  // `glyphs`: { 16, 32 [, 24] } layer sets that replace GLYPH_SMALL for this render (design variants).
   const p = PALETTE[app];
   // 16 has its own grid; 24 too where an app draws one (GLYPH_SMALL[24]); otherwise 24, 32 and 48 share the 32 grid.
-  const grid = size === 16 ? 16 : size === 24 && GLYPH_SMALL[24]?.[app] ? 24 : 32;
-  const layers = GLYPH_SMALL[grid][app];
+  const set = glyphs ?? { 16: GLYPH_SMALL[16][app], 24: GLYPH_SMALL[24]?.[app], 32: GLYPH_SMALL[32][app] };
+  const grid = size === 16 ? 16 : size === 24 && set[24] ? 24 : 32;
+  const layers = set[grid];
   const ink = inkPaint(app, 'enamel', uid);
   const glyph = renderGlyph(layers, ink.paint, uid);
   const inset = grid === 16 ? 0.5 : 1;
   const R = grid === 16 ? 3.5 : grid === 24 ? 5.25 : 7;
   const t = rr(inset, inset, grid - 2 * inset, grid - 2 * inset, R);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${grid} ${grid}">
-  <title>${NAMES[app]} ${size}px</title>
+  <title>${title ?? NAMES[app]} ${size}px</title>
   <defs>
     <linearGradient id="${uid}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p.top}"/><stop offset="1" stop-color="${p.bottom}"/></linearGradient>
     ${glyph.defs}
@@ -656,16 +768,16 @@ function badge(status, ink, theme) {
  * Tray icon on a 16 grid. theme 'template' = macOS template (black + alpha);
  * 'light' = Windows light taskbar (dark glyph), 'dark' = Windows dark taskbar (white glyph). Badges are coloured on Windows.
  */
-export function traySvg(app, status, theme, { size = 16, uid = newUid('t') } = {}) {
+export function traySvg(app, status, theme, { size = 16, uid = newUid('t'), glyph: override, title } = {}) {
   const ink = theme === 'dark' ? '#FFFFFF' : theme === 'light' ? '#1C1C1E' : '#000000';
-  const layers = trayGlyph(app, status);
+  const layers = override ?? trayGlyph(app, status);
   const b = badge(status, ink, theme);
   const glyph = renderGlyph(layers, { primary: ink, secondary: ink, accent: ink, secondaryOpacity: 0.45 }, uid);
   const knock = b
     ? `<mask id="${uid}k" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#fff"/><path d="${b.knock}" fill="#000"/></mask>`
     : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 16 16">
-  <title>${NAMES[app]} tray${status !== 'default' ? ` (${status})` : ''}</title>
+  <title>${title ?? NAMES[app]} tray${status !== 'default' ? ` (${status})` : ''}</title>
   <defs>${glyph.defs}${knock}</defs>
   <g${b ? ` mask="url(#${uid}k)"` : ''}>${glyph.body}</g>
   ${b ? b.shape.replaceAll('BADGEMASK', `${uid}b`) : ''}

@@ -37,6 +37,19 @@ normal, 19.7 protan, 19.2 deutan, 19.2 tritan; against the shell demo 75.4 or mo
 copy `workbench-demo/tauri/.` to `apps/workbench-demo/src-tauri/icons`. Side-by-side with the shell demo at 16, 32 and 1024 px:
 `ui/docs/review/x50-workbench/demo-icons-compare.png`.
 
+## Paddock redesign candidates (2026-10-25, awaiting the user's pick)
+
+The current mark's gable reads as a generic home icon, its bays as list icons, and the angled stripe turns into a blob at 16 to 32
+px. Three candidates are in `alternative/` as full sets (macOS and Windows masters with 1024 PNGs, hand-tuned 16/24/32/48 frames, tray
+sources), built by `node tools/paddock-variants.mjs` from `PADDOCK_VARIANTS` in `tools/design.mjs`; `icons/paddock` is unchanged
+until one is chosen. Comparison sheet: `alternative/paddock-variants-sheet.png` (current, A, B, C at 1024, 128, 32 and 16 px on light
+and dark, beside Debrief and Pitwall). In all three the stripe has a hard stop per app in the stripe order, on whole pixels at 16, 24 and 32 px (each has its own 24 grid).
+
+- **A, `paddock-flat-garage`:** one continuous flat canopy in the seven hues with a slight overhang, three wide roll-up doors (slatted,
+  raised a little over a dark opening) between pillars, and the pit-lane line. Two bays at 16 px; the tray doors are solid.
+- **B, `paddock-pit-boxes`:** the pit lane from above: the garage wall, seven coloured pit boxes, the dashed lane line and the pit wall.
+- **C, `paddock-foundation`:** one course of seven coloured blocks with a neutral slab resting on it, a little wider than the base.
+
 ## Seam scan
 
 `node tools/build.mjs` fails when a master has a hard seam in the tile (`tools/scan.mjs`, tests in `tools/scan.test.mjs`, `npm test`).
