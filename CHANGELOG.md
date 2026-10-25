@@ -15,6 +15,7 @@ Conventional Commits; one semver tag for the whole repo.
   block of its visually hidden text, so that text can no longer widen the page at 320 px (`SCROLL_CSS`). A second radial sample with
   spoke-to-spoke edges shows the bows (covered by the edge-crossing tests). Contact sheet `review-4/`: the pointer is moved off the view
   before every non-hover shot.
+- `<pd-view>` has no status-to-glyph map of its own (rule 40): tones and icons resolve through `statusGlyph`, so errors draw the circle-x. `TONE_GLYPH` is replaced by `TONE_STATUS` and `toneGlyph`.
 - X51 review 2 fixes for `<pd-view>` (0 P1, 6 P2, 9 P3; `ui/docs/review/x51-view/FIXES.md`). Edges never cross a box: back, sideways and
   long edges run in a lane outside the boxes and between the rows, radial edges bow or go round the outside (`route.ts`, a test over
   every layout and the sample, and over the real SVG paths); matrix headings keep a minimum width at 320 px; focus rings of sort headers,
