@@ -117,3 +117,22 @@ Third-party binaries stay unsupported until external sandbox enforcement exists 
 ## Open questions
 
 See ADR 0006 (list at the end). Specific here: async runtime in `paddock-ipc` (Debrief's is sync core plus thin async; keep).
+
+## Implementation notes (plan X51, 2026-10-25)
+
+Built as described, with these deliberate differences:
+
+- `paddock-plugin-package` owns the manifest model (`Manifest`, `Permission`, `Namespace`, ...) so a package can be read and
+  verified without the API crate; `paddock-plugin-api` depends on it and checks a plugin's `Describe` against the verified manifest
+  (`compat::check_described`). Settings schemas and validation are `paddock-settings`' (`SettingsSection`, `Configurable`), not a
+  second copy.
+- `paddock-ipc` has no `Supervisor` (the table above says it has one): restart with `paddock_jobs::time::Backoff` and the
+  quarantine live in `paddock-plugin-host::Supervisor`, on `paddock-guard`.
+- The host maps manifest and grants to a `SandboxSpec` (pure data); the OS-level sandbox stays in the app. The elevated process (a
+  second process of the plugin's binary with the `elevated` role) is also the app's: the platform offers the role in `serve`, the
+  `HostCall::Elevated` call (allowed per name) and the `ElevatedRunner` port.
+- The version rule exists once: `paddock_ipc::ProtocolVersion` (`accepts`, `skew`, `introduced_in`, `mismatch`), re-exported by
+  `paddock-plugin-package` and `paddock-plugin-api`; `HostInfo` in `paddock-plugin-api::compat` is the host's policy and words the
+  refusals on top of it. `GrantRef` likewise exists once, in `paddock-view`, re-exported by the package.
+- Protocol 1 (Debrief's own) is refused by the version gate; the compatibility shim of ADR 0003 phase 3 is Debrief's.
+

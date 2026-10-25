@@ -1,6 +1,6 @@
 import { toCommandError, type CommandError } from '@decryp7/paddock-ui/ipc';
 import { JOBS_EVENT, parseJobSnapshot } from '@decryp7/paddock-ui/shell/jobs';
-import { STORAGE_EVENT, type CategoryClearResult, type ClearRequest, type StorageCategory, type StorageClearResult, type StorageEvent, type StorageUsage } from '../generated/storage';
+import { STORAGE_EVENT, type CategoryClearResult, type ClearRequest, type SizeNode, type StorageCategory, type StorageClearResult, type StorageEvent, type StorageUsage } from '../generated/storage';
 import type { StorageCommand } from '../generated/storage-commands';
 import { parseStorageEvent, parseStorageUsage } from './wire';
 
@@ -35,6 +35,8 @@ export abstract class StorageBackend {
   abstract scan(): Promise<void>;
   /** Starts clearing; the outcome follows as an event. */
   abstract clear(request: ClearRequest): Promise<void>;
+  /** Starts walking one category's folder into a size tree; the outcome follows as an event. */
+  abstract tree(id: string): Promise<void>;
   /** Cancels the job in progress; whether there was one. */
   abstract cancel(): Promise<boolean>;
   /** Shows a category's folder in the file manager. */
@@ -65,6 +67,10 @@ export class TauriStorageBackend extends StorageBackend {
 
   async clear(request: ClearRequest): Promise<void> {
     await this.ipc.invoke<unknown>('storage_clear', { request });
+  }
+
+  async tree(id: string): Promise<void> {
+    await this.ipc.invoke<unknown>('storage_tree', { id });
   }
 
   async cancel(): Promise<boolean> {
@@ -102,6 +108,8 @@ export interface MemoryStorageOptions {
   readonly categories?: readonly StorageCategory[];
   /** Runs the engine's next step; the default runs it at once. A test queues steps and runs them one at a time to see each phase. */
   readonly schedule?: (step: () => void) => void;
+  /** The size tree each category answers with (default: its items, each with two halves below). */
+  readonly trees?: Readonly<Record<string, SizeNode>>;
   /** Starts with this usage already measured (as if the app measured at start). */
   readonly measured?: boolean;
 }
@@ -110,10 +118,19 @@ export interface MemoryStorageOptions {
 export function sampleCategories(): StorageCategory[] {
   const item = (name: string, bytes: number, protectedBy?: string) => ({ name, bytes, ...(protectedBy ? { protected: protectedBy } : {}) });
   return [
-    { id: 'cache', label: 'Cache', kind: 'cache', path: '/demo/app/cache', exists: true, bytes: 48_000_000, files: 312, clearableBytes: 48_000_000, clearableItems: 3, capped: false, clearable: true, note: 'Rebuilt when the app needs it.', items: [item('thumbnails', 30_000_000), item('previews', 18_000_000)] },
+    { id: 'cache', label: 'Cache', kind: 'cache', path: '/demo/app/cache', exists: true, bytes: 48_000_000, files: 312, clearableBytes: 48_000_000, clearableItems: 3, capped: false, clearable: true, note: 'Thumbnails and previews.', items: [item('thumbnails', 30_000_000), item('previews', 12_000_000)] },
     { id: 'logs', label: 'Logs', kind: 'data', path: '/demo/app/logs', exists: true, bytes: 6_500_000, files: 9, clearableBytes: 5_000_000, clearableItems: 8, capped: false, clearable: true, note: "Today's log is kept.", items: [item('app.2026-10-23.log', 3_000_000), item('app.2026-10-24.log', 1_500_000, 'being written')] },
     { id: 'models', label: 'Models', kind: 'data', path: '/demo/app/models', exists: true, bytes: 4_200_000_000, files: 2, clearableBytes: 2_100_000_000, clearableItems: 1, capped: true, clearable: true, note: 'The active model is kept.', items: [item('small.gguf', 2_100_000_000), item('large.gguf', 2_100_000_000, 'the active model')] },
   ];
+}
+
+/** A tree for a category: its items as folders with two halves below each, and the rest folded (fictional, deterministic). */
+export function sampleTree(c: StorageCategory): SizeNode {
+  const half = (bytes: number, name: string): SizeNode => ({ name, bytes, folded: 0, children: [] });
+  const children = c.items.map((it) => ({ name: it.name, bytes: it.bytes, folded: 0, children: [half(Math.ceil(it.bytes / 2), 'data'), half(Math.floor(it.bytes / 2), 'index')] }));
+  const rest = Math.max(0, c.bytes - children.reduce((n, x) => n + x.bytes, 0));
+  if (rest > 0) children.push({ name: '', bytes: rest, folded: 7, children: [] });
+  return { name: c.label, bytes: c.bytes, folded: 0, children };
 }
 
 /**
@@ -129,9 +146,10 @@ export class MemoryStorageBackend extends StorageBackend {
   private categories: StorageCategory[];
   private usage: StorageUsage | null;
   private previewed = false;
-  private job: 'scan' | 'clear' | null = null;
+  private job: 'scan' | 'clear' | 'tree' | null = null;
   private cancelled = false;
   private readonly schedule: (step: () => void) => void;
+  private readonly trees: Readonly<Record<string, SizeNode>>;
   private readonly events = new Set<(e: StorageEvent) => void>();
   private readonly progress = new Set<(p: StorageProgress | null) => void>();
 
@@ -139,6 +157,7 @@ export class MemoryStorageBackend extends StorageBackend {
     super();
     this.categories = (options.categories ?? sampleCategories()).map((c) => ({ ...c }));
     this.schedule = options.schedule ?? ((step) => step());
+    this.trees = options.trees ?? {};
     this.usage = options.measured ? this.measure() : null;
     this.previewed = options.measured === true;
   }
@@ -225,6 +244,20 @@ export class MemoryStorageBackend extends StorageBackend {
     });
   }
 
+  tree(id: string): Promise<void> {
+    return this.run(() => {
+      this.call('storage_tree', { id });
+      const c = this.categories.find((x) => x.id === id);
+      if (!c) this.refuse('notFound', `"${id}" is not something this app keeps on disk.`);
+      if (!c.exists) this.refuse('unavailable', 'This folder does not exist yet');
+      this.begin('tree');
+      this.play([() => this.report({ label: `Measuring ${c.label}`, done: 0, total: null })], () => {
+        if (this.cancelled) return this.end({ state: 'cancelled' });
+        this.end({ state: 'tree', tree: { id, root: this.trees[id] ?? sampleTree(c), capped: false } });
+      });
+    });
+  }
+
   cancel(): Promise<boolean> {
     return this.run(() => {
       this.call('storage_cancel');
@@ -253,7 +286,7 @@ export class MemoryStorageBackend extends StorageBackend {
     return Promise.resolve(() => void this.progress.delete(handler));
   }
 
-  private begin(job: 'scan' | 'clear'): void {
+  private begin(job: 'scan' | 'clear' | 'tree'): void {
     if (this.job) this.refuse('busy', 'Storage is being measured or cleared already');
     this.job = job;
     this.cancelled = false;

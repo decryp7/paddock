@@ -457,6 +457,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-paddock-plugin"
+version = "0.1.0"
+dependencies = [
+ "paddock-cli",
+ "paddock-plugin-api",
+ "paddock-plugin-package",
+ "paddock-plugin-test",
+ "paddock-proc",
+ "paddock-workspace-hack",
+ "serde_json",
+ "tempfile",
+ "toml 0.9.12+spec-1.1.0",
+ "zip",
+]
+
+[[package]]
 name = "cargo-platform"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1114,6 +1130,12 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "ed25519-compact"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
 
 [[package]]
 name = "email-encoding"
@@ -3321,6 +3343,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-guard"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-health"
 version = "0.1.0"
 dependencies = [
@@ -3538,6 +3573,78 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "paddock-ipc",
+ "paddock-plugin-package",
+ "paddock-settings",
+ "paddock-view",
+ "paddock-workspace-hack",
+ "postcard",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "paddock-plugin-host"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-env",
+ "paddock-guard",
+ "paddock-ipc",
+ "paddock-jobs",
+ "paddock-plugin-api",
+ "paddock-plugin-package",
+ "paddock-plugin-test",
+ "paddock-settings",
+ "paddock-view",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "paddock-plugin-package"
+version = "0.1.0"
+dependencies = [
+ "ed25519-compact",
+ "getrandom 0.3.4",
+ "paddock-env",
+ "paddock-ipc",
+ "paddock-view",
+ "paddock-workspace-hack",
+ "postcard",
+ "proptest",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 0.9.12+spec-1.1.0",
+ "zip",
+]
+
+[[package]]
+name = "paddock-plugin-test"
+version = "0.1.0"
+dependencies = [
+ "paddock-ipc",
+ "paddock-plugin-api",
+ "paddock-plugin-package",
+ "paddock-settings",
+ "paddock-testkit",
+ "paddock-view",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
@@ -3699,11 +3806,11 @@ dependencies = [
 name = "paddock-storage"
 version = "0.1.0"
 dependencies = [
- "log",
  "paddock-commands",
  "paddock-env",
  "paddock-files",
  "paddock-jobs",
+ "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
@@ -3749,6 +3856,20 @@ dependencies = [
  "tauri",
  "tauri-plugin-updater",
  "tempfile",
+ "ts-rs",
+]
+
+[[package]]
+name = "paddock-view"
+version = "0.1.0"
+dependencies = [
+ "paddock-commands",
+ "paddock-ipc",
+ "paddock-workspace-hack",
+ "postcard",
+ "proptest",
+ "serde",
+ "serde_json",
  "ts-rs",
 ]
 

@@ -1,6 +1,7 @@
 //! The driver against a real browser: only the pinned Chrome for Testing named by `CHROMIUM_TEST_PATH` (rule 7), headless
 //! (no window on the desktop), closed with `Browser.close` so no code-sign clone or process is left behind. Without the
-//! variable the tests pass without doing anything (the fake browser covers the driver everywhere else).
+//! variable the tests pass without doing anything (the fake browser covers the driver everywhere else), unless
+//! `PADDOCK_REQUIRE_TEST_BROWSER` is set (Paddock's Linux CI job, whose image has the pinned build): then they fail.
 
 use paddock_chromium::discover::find_for_tests;
 use paddock_chromium::{Chromium, LaunchOptions, Outcome, Profile, Window};
@@ -15,6 +16,11 @@ fn options(base: &std::path::Path) -> LaunchOptions {
 #[test]
 fn a_real_browser_reads_a_page_and_closes_cleanly() {
     let Some(exe) = find_for_tests() else {
+        let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
+        assert!(
+            !required,
+            "PADDOCK_REQUIRE_TEST_BROWSER is set but CHROMIUM_TEST_PATH names no Chrome for Testing"
+        );
         eprintln!("CHROMIUM_TEST_PATH is not set: skipped");
         return;
     };
@@ -60,8 +66,11 @@ fn a_real_browser_reads_a_page_and_closes_cleanly() {
     assert!(b.close(), "Browser.close ends it by itself");
     assert!(!dir.exists());
     assert!(!paddock_proc::is_alive(pid), "nothing is left behind");
-    assert!(
-        paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty(),
-        "no helper is left behind"
-    );
+    // Helpers end a moment after the browser; a bounded wait, not an immediate check (rule 40).
+    let end = std::time::Instant::now() + Duration::from_secs(20);
+    while !paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty() {
+        // conformance: hang-guard — a helper that never ends fails the test instead of hanging it
+        assert!(std::time::Instant::now() < end, "no helper is left behind");
+        std::thread::yield_now();
+    }
 }

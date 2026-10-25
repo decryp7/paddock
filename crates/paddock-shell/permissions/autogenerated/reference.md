@@ -538,6 +538,32 @@ Denies the files_open_app_folder command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-files-open-at-line`
+
+</td>
+<td>
+
+Enables the files_open_at_line command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-files-open-at-line`
+
+</td>
+<td>
+
+Denies the files_open_at_line command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-files-open-url`
 
 </td>
@@ -1831,6 +1857,32 @@ Enables the storage_scan command without any pre-configured scope.
 <td>
 
 Denies the storage_scan command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:allow-storage-tree`
+
+</td>
+<td>
+
+Enables the storage_tree command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-storage-tree`
+
+</td>
+<td>
+
+Denies the storage_tree command without any pre-configured scope.
 
 </td>
 </tr>
