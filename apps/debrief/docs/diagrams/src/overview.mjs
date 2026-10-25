@@ -1,7 +1,7 @@
 // Debrief's overview SVG (debrief-overview.svg), drawn with the Paddock kit's palette: one file, theme-aware through a
 // prefers-color-scheme style block. Usage: node docs/diagrams/src/overview.mjs
-import { theme } from '../../../../paddock/diagrams/tools/themes.mjs';
-import { tw, wrap } from '../../../../paddock/diagrams/tools/lib.mjs';
+import { theme } from '../../../../../diagrams/tools/themes.mjs';
+import { tw, wrap } from '../../../../../diagrams/tools/lib.mjs';
 import { writeFileSync } from 'node:fs';
 import { OUT, DATE } from './common.mjs';
 

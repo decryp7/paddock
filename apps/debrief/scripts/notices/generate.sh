@@ -12,8 +12,9 @@ if ! command -v cargo-about >/dev/null; then
   echo "installing cargo-about..." >&2
   cargo install cargo-about --locked --features cli
 fi
-if [ ! -d app/node_modules ]; then
-  (cd app && npm ci --omit=dev --ignore-scripts)
+# One npm workspace for the Paddock monorepo (ADR 0014 §1): the root lock and node_modules hold the app's packages.
+if [ ! -d ../../node_modules ]; then
+  (cd ../.. && npm ci --ignore-scripts)
 fi
 
 rust=()

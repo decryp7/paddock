@@ -7,7 +7,7 @@
 //        node generate.mjs --check-only ... (prints the summary only)
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -44,12 +44,51 @@ export function lockProduction(lock) {
     .map(([path, p]) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: p.version, license: p.license ?? null }));
 }
 
+/**
+ * The production closure of one workspace of a root npm workspace lock (Paddock's monorepo, ADR 0014 §1): its
+ * dependencies, optional and peer dependencies and theirs, resolved in node's lookup order (nested first, then up to the
+ * root's node_modules). The root lock's dev flags describe all workspaces together, so they cannot be used here.
+ */
+export function workspaceProduction(lock, ws) {
+  const pk = lock.packages;
+  const entry = pk[ws];
+  if (!entry) throw new Error(`the lock has no workspace ${ws}`);
+  const resolveFrom = (at, name) => {
+    for (let base = at; ; base = base.includes('/node_modules/') ? base.slice(0, base.lastIndexOf('/node_modules/')) : '') {
+      const cand = base ? `${base}/node_modules/${name}` : `node_modules/${name}`;
+      if (pk[cand]) return pk[cand].link ? null : cand;
+      if (!base) return null;
+    }
+  };
+  const deps = (e) => [...Object.keys(e.dependencies ?? {}), ...Object.keys(e.optionalDependencies ?? {}), ...Object.keys(e.peerDependencies ?? {}).filter((n) => !e.peerDependenciesMeta?.[n]?.optional)];
+  const seen = new Set();
+  const todo = deps(entry).map((n) => resolveFrom(ws, n));
+  while (todo.length) {
+    const at = todo.pop();
+    if (!at || seen.has(at)) continue;
+    seen.add(at);
+    for (const n of deps(pk[at])) todo.push(resolveFrom(at, n));
+  }
+  return [...seen].sort().map((path) => ({ path, name: path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), version: pk[path].version, license: pk[path].license ?? null }));
+}
+
+/** The folder with the package-lock.json that covers `dir`: `dir` itself, or the npm workspace root above it. */
+function lockRoot(dir) {
+  for (let d = dir; ; d = dirname(d)) {
+    if (existsSync(join(d, 'package-lock.json'))) return d;
+    if (dirname(d) === d) throw new Error(`no package-lock.json in ${dir} or above`);
+  }
+}
+
 function npmPackages(appDir) {
-  const lock = JSON.parse(readFileSync(join(appDir, 'package-lock.json'), 'utf8'));
+  const root = lockRoot(appDir);
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+  const ws = relative(root, appDir).split(sep).join('/');
+  const list = ws ? workspaceProduction(lock, ws) : lockProduction(lock);
   const warnings = [];
   const seen = new Set();
-  const out = lockProduction(lock).filter((p) => !seen.has(`${p.name}@${p.version}`) && seen.add(`${p.name}@${p.version}`)).map((p) => {
-    const dir = join(appDir, p.path);
+  const out = list.filter((p) => !seen.has(`${p.name}@${p.version}`) && seen.add(`${p.name}@${p.version}`)).map((p) => {
+    const dir = join(root, p.path);
     const pkgJson = existsSync(join(dir, 'package.json')) ? JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) : {};
     let license = p.license ?? (typeof pkgJson.license === 'string' ? pkgJson.license : pkgJson.license?.type) ?? 'UNKNOWN';
     const files = existsSync(dir) ? readdirSync(dir).filter((f) => LICENCE_FILE.test(f) && !/\.(js|ts|json|css)$/.test(f)).sort() : [];

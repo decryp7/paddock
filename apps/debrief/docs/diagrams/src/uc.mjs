@@ -1,5 +1,5 @@
 import { P, save, link, restyle, comp, Y0 } from './common.mjs';
-import { ld } from '../../../../paddock/diagrams/tools/lib.mjs';
+import { ld } from '../../../../../diagrams/tools/lib.mjs';
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 function ellipse(d, id, x, y, w, h, text) {

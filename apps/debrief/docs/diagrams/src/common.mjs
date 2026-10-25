@@ -1,7 +1,7 @@
 // Shared helpers for the Debrief diagram generators. The Paddock diagram kit is expected as a sibling checkout
 // (../paddock next to the debrief checkout); see README.md in this folder.
-import { Diagram, link, g8, tw, wrap } from '../../../../paddock/diagrams/tools/lib.mjs';
-import { sequence, dot, cls } from '../../../../paddock/diagrams/tools/uml.mjs';
+import { Diagram, link, g8, tw, wrap } from '../../../../../diagrams/tools/lib.mjs';
+import { sequence, dot, cls } from '../../../../../diagrams/tools/uml.mjs';
 import { writeFileSync } from 'node:fs';
 export { link, g8, tw, wrap, sequence, dot, cls };
 
@@ -76,7 +76,7 @@ export function realize(d, a, sa, b, sb, opts = {}) {
   return id;
 }
 /** Class box that warns when a member is wider than the box (monospace 12 px is about 7.3 px a character). */
-import { cls as clsBase } from '../../../../paddock/diagrams/tools/uml.mjs';
+import { cls as clsBase } from '../../../../../diagrams/tools/uml.mjs';
 export function klass(d, id, x, y, w, spec) {
   const max = Math.floor((w - 24) / 7.3);
   for (const m of [...(spec.attrs ?? []), ...(spec.ops ?? [])]) if (m.length > max) console.warn(`${id}: "${m}" is ${m.length} chars, box fits ${max}`);

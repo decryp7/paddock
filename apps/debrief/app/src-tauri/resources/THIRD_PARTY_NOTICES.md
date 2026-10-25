@@ -822,7 +822,7 @@ Licence expressions (packages):
 
 ## npm packages (92)
 
-- @angular/cdk 22.2.3 — MIT [MIT-262]
+- @angular/cdk 22.2.4 — MIT [MIT-262]
 - @angular/common 22.2.3 — MIT [MIT-98]
 - @angular/compiler 22.2.3 — MIT [MIT-98]
 - @angular/compiler-cli 22.2.3 — MIT [no text]
@@ -865,17 +865,17 @@ Licence expressions (packages):
 - @types/jsesc 2.5.1 — MIT [MIT-307]
 - ansi-regex 6.4.0 — MIT [MIT-26]
 - ansi-styles 6.2.3 — MIT [MIT-26]
-- baseline-browser-mapping 2.11.29 — Apache-2.0 [Apache-2.0-1]
-- browserslist 4.29.3 — MIT [MIT-56]
-- caniuse-lite 1.0.30001816 — CC-BY-4.0 [CC-BY-4.0-1]
+- baseline-browser-mapping 2.11.30 — Apache-2.0 [Apache-2.0-1]
+- browserslist 4.29.4 — MIT [MIT-56]
+- caniuse-lite 1.0.30001819 — CC-BY-4.0 [CC-BY-4.0-1]
 - chokidar 5.0.0 — MIT [MIT-229]
 - cliui 9.0.1 — ISC [ISC-19]
 - convert-source-map 1.9.0 — MIT [MIT-279]
 - convert-source-map 2.0.0 — MIT [MIT-279]
 - dockview 8.6.0 — MIT [MIT-223]
-- dockview-core 8.6.0 — MIT [MIT-223]
+- dockview-core 8.6.1 — MIT [MIT-223]
 - echarts 6.1.0 — Apache-2.0 [Apache-2.0-7, NOTICE-1]
-- electron-to-chromium 1.5.458 — ISC [ISC-17]
+- electron-to-chromium 1.5.463 — ISC [ISC-17]
 - emoji-regex 10.6.0 — MIT [MIT-282]
 - empathic 2.1.0 — MIT [MIT-87]
 - entities 8.1.0 — BSD-2-Clause [BSD-2-Clause-1]
@@ -889,7 +889,7 @@ Licence expressions (packages):
 - js-tokens 10.0.0 — MIT [MIT-194]
 - jsesc 3.1.0 — MIT [MIT-282]
 - json5 2.2.3 — MIT [MIT-123]
-- node-releases 2.0.59 — MIT [MIT-217]
+- node-releases 2.0.60 — MIT [MIT-217]
 - obug 2.2.1 — MIT [MIT-276]
 - obug 3.0.0 — MIT [MIT-276]
 - parse5 8.0.1 — MIT [MIT-57]
@@ -940,7 +940,7 @@ Used by (2):
 Used by (17):
   arrow 58.4.0, arrow-arith 58.4.0, arrow-array 58.4.0, arrow-buffer 58.4.0, arrow-cast 58.4.0,
   arrow-data 58.4.0, arrow-ipc 58.4.0, arrow-ord 58.4.0, arrow-row 58.4.0, arrow-schema 58.4.0,
-  arrow-select 58.4.0, arrow-string 58.4.0, baseline-browser-mapping 2.11.29, parquet 58.4.0,
+  arrow-select 58.4.0, arrow-string 58.4.0, baseline-browser-mapping 2.11.30, parquet 58.4.0,
   sonic-number 0.1.3, sonic-rs 0.5.10, sonic-simd 0.1.4
 
     Apache License
@@ -4091,7 +4091,7 @@ Used by (2):
 ### CC-BY-4.0-1
 
 Used by (1):
-  caniuse-lite 1.0.30001816
+  caniuse-lite 1.0.30001819
 
     Attribution 4.0 International
 
@@ -5216,7 +5216,7 @@ Used by (1):
 ### ISC-17
 
 Used by (1):
-  electron-to-chromium 1.5.458
+  electron-to-chromium 1.5.463
 
     Copyright 2018 Kilian Valkhof
 
@@ -6954,7 +6954,7 @@ Used by (1):
 ### MIT-56
 
 Used by (1):
-  browserslist 4.29.3
+  browserslist 4.29.4
 
     The MIT License (MIT)
 
@@ -11543,7 +11543,7 @@ Used by (1):
 ### MIT-217
 
 Used by (1):
-  node-releases 2.0.59
+  node-releases 2.0.60
 
     The MIT License
 
@@ -11725,7 +11725,7 @@ Used by (1):
 ### MIT-223
 
 Used by (2):
-  dockview 8.6.0, dockview-core 8.6.0
+  dockview 8.6.0, dockview-core 8.6.1
 
     MIT License
 
@@ -12728,7 +12728,7 @@ Used by (1):
 ### MIT-262
 
 Used by (2):
-  @angular/cdk 22.2.3, @angular/material 22.2.3
+  @angular/cdk 22.2.4, @angular/material 22.2.3
 
     The MIT License
 
