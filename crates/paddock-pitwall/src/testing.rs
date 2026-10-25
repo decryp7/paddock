@@ -277,9 +277,12 @@ impl FakePitwall {
     pub fn kill(&self) {
         self.shared.stop.store(true, Ordering::Relaxed);
         self.release();
-        // Wake the accept loop until it has ended: once it drops the listener the port refuses connections, so a request
-        // made after `kill` returns never reaches a half-closed server (it would read as "stopped answering", not "not
-        // running"). A wake-up that is lost (a full backlog) is repeated; the wait is bounded.
+        // Wake the accept loop and wait for it to end: once it drops the listener the port refuses connections, so a
+        // request made after `kill` returns never reaches a half-closed server (it would read as "stopped answering", not
+        // "not running"). One accepted wake-up connection is enough, since the loop takes it from the backlog and sees
+        // the stop flag; only a refused one (a full backlog) is repeated, and the wait is bounded. Connecting again after
+        // a wake-up was accepted would race the closing listener, and a refused connection costs about two seconds on
+        // Windows, which made every kill slow there.
         let acceptor = self
             .acceptor
             .lock()
@@ -287,11 +290,11 @@ impl FakePitwall {
             .take();
         if let Some(acceptor) = acceptor {
             let give_up = std::time::Instant::now() + Duration::from_secs(10);
-            while !acceptor.is_finished() && std::time::Instant::now() < give_up {
-                let _ = TcpStream::connect(("127.0.0.1", self.port));
-                std::thread::yield_now();
+            let mut woken = false;
+            while !woken && !acceptor.is_finished() && std::time::Instant::now() < give_up {
+                woken = TcpStream::connect(("127.0.0.1", self.port)).is_ok();
             }
-            if acceptor.is_finished() {
+            if woken || acceptor.is_finished() {
                 let _ = acceptor.join();
             }
         }
