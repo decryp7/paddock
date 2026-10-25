@@ -96,6 +96,7 @@ export const ACTIVITY_ITEMS = defineContributionKind<ActivityItemDef>({
       ...targetProblems(a.run, lookup),
       optionalFn(a.when, 'when'),
       optionalFn(a.badge, 'badge'),
+      optionalFn(a.badgeTone, 'badgeTone'),
       optionalFn(a.active, 'active'),
       optionalFn(a.pulse, 'pulse'),
       optionalFn(a.disabled, 'disabled'),

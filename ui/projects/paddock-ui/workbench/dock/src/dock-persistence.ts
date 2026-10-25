@@ -36,6 +36,7 @@ export class DockPersistence {
         ...(Object.keys(this.ctx.autoHideSides()).length ? { autoHideSides: { ...this.ctx.autoHideSides() } } : {}),
         ...(this.ctx.displaced.size ? { displaced: [...this.ctx.displaced.values()] } : {}),
         ...(Object.keys(this.ctx.userSizes).length ? { sizes: { ...this.ctx.userSizes } } : {}),
+        ...(this.ctx.poppedSlots.size ? { poppedOut: [...this.ctx.poppedSlots].map(([id, slot]) => ({ id, slot })) } : {}),
       },
     };
   }
@@ -60,15 +61,25 @@ export class DockPersistence {
   schedule(): void {
     if (this.ctx.restoring || !this.ctx.api) return;
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => {
-      const layout = this.current();
-      if (!layout) return;
-      this.saved.set(layout);
-      void this.store.save(this.key, toEnvelope(layout) as unknown as Record<string, unknown>).catch(() => undefined);
-    }, this.options.saveDelayMs ?? DEFAULT_DELAY_MS);
+    this.timer = setTimeout(() => void this.write(), this.options.saveDelayMs ?? DEFAULT_DELAY_MS);
+  }
+
+  /** Writes a scheduled save now instead of when its delay ends; resolves once the store has it (at once when none waits). */
+  flush(): Promise<void> {
+    if (this.timer === undefined) return Promise.resolve();
+    return this.write();
   }
 
   cancel(): void {
     clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
+  private write(): Promise<void> {
+    this.cancel();
+    const layout = this.current();
+    if (!layout) return Promise.resolve();
+    this.saved.set(layout);
+    return this.store.save(this.key, toEnvelope(layout) as unknown as Record<string, unknown>).catch(() => undefined);
   }
 }

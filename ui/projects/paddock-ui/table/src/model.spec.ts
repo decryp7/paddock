@@ -99,6 +99,9 @@ describe('table model', () => {
     expect(folded.filter((i) => i.kind === 'row')).toHaveLength(2);
     expect(folded[0]).toMatchObject({ kind: 'group', collapsed: true });
     expect(groupItems(rows, undefined, new Set()).every((i) => i.kind === 'row')).toBe(true);
+    const summed = groupItems(rows, columns[2], new Set(), (list) => ({ n: String(list.length) }));
+    expect(summed.filter((i) => i.kind === 'group').map((g) => (g.kind === 'group' ? g.cells?.['n'] : ''))).toEqual(['2', '2']);
+    expect(open.every((i) => i.kind === 'row' || i.cells === undefined)).toBe(true);
   });
 
   it('moves between lines for the navigation keys and nothing else', () => {
@@ -141,8 +144,8 @@ describe('table model', () => {
   });
 
   it('gives a required column a floor in its grid track', () => {
-    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true })).toBe('minmax(128px, 2fr)');
-    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true, width: 'minmax(0, 3fr)' })).toBe('minmax(128px, 3fr)');
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true })).toBe('minmax(min(128px, 40%), 2fr)');
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true, width: 'minmax(0, 3fr)' })).toBe('minmax(min(128px, 40%), 3fr)');
     expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true, width: '200px' })).toBe('200px');
     expect(columnTrack({ key: 'a', header: 'A', value: () => 1 })).toBe('minmax(0, 1fr)');
     expect(columnTrack({ key: 'a', header: 'A', value: () => 1, width: '96px' })).toBe('96px');

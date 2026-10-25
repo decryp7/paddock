@@ -1005,7 +1005,7 @@ components. Depends on `paddock-ipc` (for `Json`, the arguments of an action) an
 - Host-added action arguments: `row` (table row), `page`, `node` (tree/graph node, `expand`), `finding` (and `reason`), `values`
   (form), `column`/`descending` (`sort`).
 - Generated TypeScript: `ui/projects/paddock-ui/view/generated/view.ts` (`PADDOCK_WRITE_TS=1 cargo test -p paddock-view --lib
-  generated`; a test fails on a stale file). The Angular `<pd-view>` renderer is not built yet.
+  generated`; a test fails on a stale file). The Angular `<pd-view>` renderer is `@decryp7/paddock-ui/view` (`ui/projects/paddock-ui/view`).
 - Fuzz: `crates/paddock-view/fuzz` (`cargo +nightly fuzz run decode` from `crates/paddock-view`).
 
 ## `paddock-ipc` (plan X13, ADR 0001 step 1)

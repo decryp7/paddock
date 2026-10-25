@@ -22,8 +22,9 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
     :host { display: flex; align-items: center; gap: var(--pd-space-2); min-width: 0; height: var(--pd-titlebar-height, 40px); padding: 0 var(--pd-space-2) 0 calc(var(--pd-space-2) + var(--pd-titlebar-inset-start, 0px)); }
     .pd-lead, .pd-end { display: flex; align-items: center; gap: var(--pd-space-1); flex: none; }
     .pd-lead:empty, .pd-end:empty { display: none; }
-    .pd-name { flex: 0 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; font-weight: var(--pd-weight-semibold); white-space: nowrap; }
-    .pd-menus { display: flex; align-items: center; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    /* The name gives way first (it shrinks 100 times as fast as the menus), so every menu stays whole while the name is cut to its ellipsis. */
+    .pd-name { flex: 0 100 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; font-weight: var(--pd-weight-semibold); white-space: nowrap; }
+    .pd-menus { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
     .pd-drag { flex: 1; align-self: stretch; min-width: 0; }
   `,
 })

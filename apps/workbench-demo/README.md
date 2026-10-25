@@ -35,8 +35,8 @@ does not touch the user's credential store.
 cd ui && npm ci && npx ng build workbench-demo                 # the UI the app embeds (tauri.conf.json frontendDist)
 cd apps/workbench-demo/src-tauri && cargo test                  # the app on the mock runtime (no window, no user folders)
 cd ui && npx playwright test --project=workbench-demo           # the UI in the browser (mock backends)
-scripts/workbench-demo/bundle.sh app,dmg                        # a local DMG to try (never published)
-scripts/workbench-demo/verify-macos.sh                          # the ad-hoc seal, `codesign --verify --deep --strict`, the app inside the DMG
+scripts/demo/bundle.sh workbench-demo app,dmg                     # a local DMG to try (never published)
+scripts/demo/verify-macos.sh workbench-demo                       # the ad-hoc seal, `codesign --verify --deep --strict`, the app inside the DMG
 ```
 
 `cd apps/workbench-demo && npm ci && npx tauri dev` runs it against `ng serve workbench-demo`.
@@ -48,23 +48,35 @@ packages' `v*` tags and the shell demo's: the gates, then a DMG (sealed ad-hoc, 
 NSIS installer and Linux deb and AppImage, and the Gitea release with the version's CHANGELOG section and the First launch
 notes. Before tagging: bump `src-tauri/Cargo.toml` and add the CHANGELOG section, `cargo deny check advisories` in
 `src-tauri`, one manual run of the workflow (it builds the installers without releasing), the icon check
-(`node scripts/workbench-demo-release.mjs icons`).
+(`node scripts/demo-release.mjs workbench-demo icons`).
 
 ## Start a new app from the workbench demo
 
-An IDE-style app (Pacenotes, Sighter) starts from this demo plus the shell demo's generator for the shell parts. Until a
-generator knows this layout, copy by hand; each step is small:
+An IDE-style app (Pacenotes, Sighter) starts from this demo with the generator:
 
-1. Copy `apps/workbench-demo` and `ui/projects/workbench-demo` into the new app (`app/src-tauri`, `app/src`), rename the
-   crate, product name, app id (`APP_ID`, `APP_NAME`), bundle identifier and the folder names, and take the crates and
-   `@decryp7/paddock-ui` from the registries (`node scripts/new-app.mjs` does that for the shell demo; its rewrites are the
-   model).
+```sh
+node scripts/new-app.mjs sightr "Sightr" --template workbench-demo --accent sighter [--dest <dir>] [--identifier <id>]
+```
+
+It copies `ui/projects/workbench-demo` to `app/` and `apps/workbench-demo/src-tauri` to `app/src-tauri/` in a new
+repository (the family layout), renames the crate, product name, app id (`APP_ID`, `APP_NAME`, the `<ID>_HOME` override),
+bundle identifier, window titles and the sample texts, sets the window accent (`--accent`, one of the app accents; default
+graphite), takes the crates and `@decryp7/paddock-ui` from the registries, and writes the repo root files (AGENTS.md, CI
+baseline, CHANGELOG). The icons are the demo's: they are the placeholders until step 4. Every rewrite must match or the
+script stops, so a change to the demo that the generator does not know fails `npm run test:scripts` here, not in a new app.
+
+Then, in the new app:
+
+1. `cd app && npm install && npx ng build && npm test && npm run e2e` (the unit tests start with the contribution lint;
+   the e2e smoke suite checks the window, axe in both themes and 320 px, on its own `PW_PORT`), then
+   `cd src-tauri && cargo test` (it writes `Cargo.lock`; commit both lock files).
 2. Keep `main.ts`'s three window kinds, `app/desktop.ts` (the one seam to Tauri) and the three capability files. Replace the
    sample views, perspectives, Explorer provider and commands in `demo.contributions.ts` with the app's (they are
    contributions: `defineView`, `definePerspective`, ...; nothing else changes), and the sample tool and system prompt in
-   `assistant.rs` with the app's tools (read-only by default; a tool that writes needs the user's approval).
+   `assistant.rs` with the app's tools (read-only by default; a tool that writes needs the user's approval, and one whose
+   change cannot be undone is `Access::Destructive`).
 3. Dialogs: add them to `bootDialogWindow`'s `dialogs` and give the shell `Builder` the app's `dialog_contracts`.
 4. Its icon: add it to `icons/tools/design.mjs` (`DEMOS` or `APPS`), run the pipeline with `ONLY=<id>`, check the CVD
    numbers, copy `icons/<id>/tauri` to `src-tauri/icons`; every drawing gets an independent review (rule 22).
-5. CI and releases: copy `.gitea/workflows/workbench-demo-release.yml`, `scripts/workbench-demo/` and
-   `scripts/workbench-demo-release.mjs` and rename the tag prefix.
+5. CI and releases: copy `.gitea/workflows/workbench-demo-release.yml` and rename the tag prefix; the new app's row in `APPS` of
+   `scripts/demo-release.mjs` is all the scripts need (`scripts/demo/` takes the app as its first argument).

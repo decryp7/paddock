@@ -195,3 +195,13 @@ export function didYouMean<T>(items: readonly T[], query: string, label: (item: 
     .slice(0, limit)
     .map((x) => x.item);
 }
+
+/**
+ * The characters of `label` a query's words point at, for a result whose provider gave no highlight ranges (review 2 P2-J).
+ * Presentation only: the provider (the engine) decided the result matched; this only shows where.
+ */
+export function queryMarks(query: string, label: string): ReadonlySet<number> {
+  const marks = new Set<number>();
+  for (const token of query.trim().split(/[\s_./-]+/).filter(Boolean)) for (const i of matchWord(token, label)?.indices ?? []) marks.add(i);
+  return marks;
+}

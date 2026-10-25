@@ -21,6 +21,23 @@ export function cleanLayoutName(name: string): string | null {
   return n || null;
 }
 
+/** Why a name cannot be used for a layout. */
+export type LayoutNameProblem = 'empty' | 'duplicate' | 'too-long';
+
+/**
+ * Whether `name` can name a layout: not empty (nothing but blanks and control characters), at most `MAX_LAYOUT_NAME` characters
+ * as typed (after trimming) and not taken by another layout (case-insensitive; `taken` are the existing names, `own` the one
+ * being renamed, which may keep its name). Pure.
+ */
+export function layoutNameProblem(name: string, taken: readonly string[], own = ''): LayoutNameProblem | null {
+  // eslint-disable-next-line no-control-regex
+  const typed = name.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  if (!typed) return 'empty';
+  if (typed.length > MAX_LAYOUT_NAME) return 'too-long';
+  const key = typed.toLowerCase();
+  return taken.some((t) => t !== own && t.toLowerCase() === key) ? 'duplicate' : null;
+}
+
 /** Adds or replaces (same name, case-insensitive) a layout; the oldest go past the limit. */
 export function upsertLayout(list: readonly NamedLayout[], layout: NamedLayout): NamedLayout[] {
   const key = layout.name.toLowerCase();
@@ -93,6 +110,15 @@ export class NamedLayouts {
       },
       () => undefined,
     );
+  }
+
+  /** Reads the stored list again (another window, such as the manage dialog, changed it); resolves when it is replaced. */
+  async reload(): Promise<void> {
+    try {
+      this.list.set(parseNamedLayouts(await this.store.load(this.key)));
+    } catch {
+      /* the store is away: the list in memory stays */
+    }
   }
 
   private set(list: readonly NamedLayout[]): void {

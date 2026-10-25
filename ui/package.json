@@ -8,7 +8,7 @@
     "ng": "ng",
     "build:css": "node scripts/build-css.mjs",
     "build": "npm run build:css && ng build paddock-ui",
-    "test": "npm run build:css && ng test paddock-ui --watch=false",
+    "test": "npm run build:css && ng test paddock-ui --watch=false && ng test workbench-demo --watch=false",
     "test:tokens": "vitest run --config vitest.tokens.config.ts",
     "gallery": "npm run build:css && ng serve gallery --port 4300",
     "gallery:build": "npm run build:css && ng build gallery",

@@ -1,5 +1,5 @@
 import { panelTitle } from '@decryp7/paddock-ui/workbench';
-import { afterNextRender, ApplicationRef, computed, createComponent, DestroyRef, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
+import { afterNextRender, ApplicationRef, computed, createComponent, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
 import { panelId as makePanelId, parsePanelId, WorkbenchRegistry, type PerspectiveDef, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
@@ -8,7 +8,7 @@ import { AngularContentRenderer, MissingViewRenderer } from './angular-panel';
 import { AutoHideEvent, autoHideReduce, EMPTY_AUTO_HIDE } from './auto-hide';
 import { DockAutoHide } from './dock-auto-hide';
 import { DockContext } from './dock-context';
-import { keepGroupsUnscrolled, labelTabOverflow, observeFloatingAria } from './dock-dom';
+import { keepActiveTabVisible, keepGroupsUnscrolled, labelTabOverflow, observeFloatingAria } from './dock-dom';
 import { DockSlot, isLayoutTarget, Point, Rect, resolveGuideDrop, Side } from './dock-geometry';
 import { DockLayout } from './dock-layout';
 import { DockMenu } from './dock-menu';
@@ -22,20 +22,13 @@ import { TabDragOut } from './tab-drag-out';
 import { DragOutCue } from './drag-out-cue';
 import { DropGuides } from './drop-guides';
 import { GroupActions } from './group-actions';
-import { DockExtras, readLayout, SavedLayout, toEnvelope } from './layout-store';
+import { DockExtras, PoppedOutPanel, readLayout, SavedLayout, toEnvelope } from './layout-store';
 import { PanelAction, panelMenu, panelsToClose, pinnedIndex } from './panel-menu';
 import { PanelTab, TAB_COMPONENT, tabPanelId } from './panel-tab';
 import { cycle, openSwitcher, selected, SwitcherState, switcherItems, touchMru } from './switcher';
 import { viewKind, ViewKind } from './view-kind';
 import { Perspectives } from './perspectives';
 import { WindowLayouts } from './window-layouts';
-
-let liveDock: WorkbenchDock | null = null;
-
-/** The dock of this window, for the contributed commands (null before the frame provides one). */
-export function currentDock(): WorkbenchDock | null {
-  return liveDock;
-}
 
 export { keepGroupsUnscrolled, observeFloatingAria } from './dock-dom';
 
@@ -117,10 +110,6 @@ export class WorkbenchDock {
 
   constructor() {
     inject(DockPolicy).start({ ready: this.ctx.apiReady, syncConditionalViews: () => this.syncConditionalViews() });
-    liveDock = this;
-    inject(DestroyRef).onDestroy(() => {
-      if (liveDock === this) liveDock = null;
-    });
   }
 
   /** The dockview instance (null before attach). */
@@ -271,6 +260,7 @@ export class WorkbenchDock {
       observeFloatingAria(container),
       keepGroupsUnscrolled(container),
       labelTabOverflow(container),
+      keepActiveTabVisible(container),
       api.onDidAddPanel(() => this.ctx.refreshOpen()),
       api.onDidRemovePanel(() => this.ctx.refreshOpen()),
       api.onDidLayoutFromJSON(() => this.ctx.refreshOpen()),
@@ -290,6 +280,8 @@ export class WorkbenchDock {
     void this.persistence.load().then((saved) => {
       if (token !== this.attachment || this.ctx.api !== api) return;
       this.start(api, saved);
+      // A restored layout raises no activation: the panel in front is the active one from the start (review 2 P2-F).
+      this.activeView.set(api.activePanel?.id ?? null);
     });
     this.unreturned = this.ctx.windows()?.onReturned((panel) => this.returned(panel)) ?? null;
   }
@@ -320,6 +312,7 @@ export class WorkbenchDock {
     } finally {
       this.ctx.restoring = false;
     }
+    this.restorePoppedOut(extras.poppedOut ?? []);
     this.ctx.refreshOpen();
     this.evaluated = false;
     this.wasAvailable.clear();
@@ -467,7 +460,10 @@ export class WorkbenchDock {
 
   close(id: string): void {
     this.ctx.displaced.delete(id);
-    if (this.ctx.poppedSlots.delete(id)) return;
+    if (this.ctx.poppedSlots.delete(id)) {
+      this.persistence.schedule();
+      return;
+    }
     if (this.ctx.isAutoHidden(id)) {
       this.autoHider.remove(id);
       return;
@@ -563,6 +559,36 @@ export class WorkbenchDock {
     this.ctx.poppedSlots.set(id, slot);
     this.takeOut(id);
     return true;
+  }
+
+  /**
+   * Panels that were popped out when the layout was saved open in their windows again, at the place the engine remembers for
+   * the view. Without a pop-out service (or when a window cannot open) the panel is docked where it was; the saved slots stay
+   * in the layout meanwhile, so quitting before the windows are up loses nothing.
+   */
+  private restorePoppedOut(entries: readonly PoppedOutPanel[]): void {
+    const windows = this.ctx.windows();
+    const token = this.attachment;
+    for (const { id, slot } of entries) {
+      if (!this.views.find(id) || this.api?.getPanel(id)) continue;
+      if (!windows || !this.ctx.canPopOut(id)) {
+        this.placement.restoreSlot(id, slot);
+        continue;
+      }
+      this.ctx.poppedSlots.set(id, slot);
+      const dockIt = () => {
+        if (token !== this.attachment || !this.ctx.poppedSlots.delete(id) || !this.api) return;
+        this.placement.restoreSlot(id, slot);
+        this.ctx.refreshOpen();
+        this.persistence.schedule();
+      };
+      void windows.popOut(id).then(
+        (ok) => {
+          if (!ok) dockIt();
+        },
+        dockIt,
+      );
+    }
   }
 
   /** A popped-out panel's window closed or docked back: the panel returns where it was. */

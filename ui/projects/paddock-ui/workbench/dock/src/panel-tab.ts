@@ -28,6 +28,10 @@ export class PanelTab implements ITabRenderer {
     private readonly closable: (id: string) => boolean = () => true,
   ) {
     this.element.className = 'pd-dock-tab';
+    // The focus ring belongs to the element that carries role=tab (dockview's `.dv-tab`): focusing the label (a script, a
+    // click) hands the focus to it, so no tab is ever "focused" without a visible ring.
+    this.element.tabIndex = -1;
+    this.element.addEventListener('focus', () => this.element.closest<HTMLElement>('[role="tab"]')?.focus());
     this.pin.className = 'pd-dock-tab-pin';
     this.pin.setAttribute('aria-hidden', 'true');
     this.pin.appendChild(pinGlyph());

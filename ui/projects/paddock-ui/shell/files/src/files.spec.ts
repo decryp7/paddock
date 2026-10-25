@@ -8,6 +8,7 @@ import { FilesBackend, MemoryFilesBackend, TauriFilesBackend, notGranted, type F
 import { FilesStore } from './files.store';
 import { provideShellFiles } from './provide-files';
 import { fileIcon } from './file-icon';
+import { baseName, parentPath } from './path-parts';
 import { PdRecentFiles } from './recent-files';
 import { APP_FOLDERS, entriesOf, parseDroppedFiles, parseRecentLists } from './wire';
 
@@ -357,5 +358,44 @@ describe('file-type icons', () => {
     for (const i of icons) expect(i.querySelector('svg')?.getAttribute('width')).toBe('16');
     const paths = icons.map((i) => i.querySelector('path')?.getAttribute('d'));
     expect(paths).toEqual([PD_ICON_PATHS['file-text'], PD_ICON_PATHS.folder, PD_ICON_PATHS.archive]);
+  });
+});
+
+describe('recent entries lead with the name', () => {
+  it('splits a path into its name and its folder, for either separator', () => {
+    expect(baseName('/logs/app/a.log')).toBe('a.log');
+    expect(baseName('C:\\logs\\a.log')).toBe('a.log');
+    expect(baseName('/logs/folder/')).toBe('folder');
+    expect(baseName('/')).toBe('/');
+    expect(parentPath('/logs/app/a.log')).toBe('/logs/app');
+    expect(parentPath('C:\\logs\\a.log')).toBe('C:\\logs');
+    expect(parentPath('/a.log')).toBe('/');
+    expect(parentPath('a.log')).toBe('');
+  });
+
+  it('shows the file name as the title and the folder as a muted second line, with the full path as the tooltip', async () => {
+    const m = new MemoryFilesBackend({ lists: { lists: [{ id: 'files', entries: [{ path: '/logs/app/service-2026.log', openedAt: 1 }, { path: '/work/a.proj', name: 'Alpha', openedAt: 0 }, { path: '/logs/app/service-2026-10-24-11-30.log', openedAt: 0 }] }] } });
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellFiles({ backend: () => m })] });
+    const fixture = TestBed.createComponent(PdRecentFiles);
+    await fixture.whenStable();
+    await settle();
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const rows = Array.from(el.querySelectorAll('[data-testid="recent-entry"]'));
+    expect(rows.map((r) => r.querySelector('.pd-name')?.textContent)).toEqual(['service-2026.log', 'Alpha', 'service-2026-10-24-11-30.log']);
+    // A file name shortens in the middle (rule 18), so the extension survives; the full path is its tooltip.
+    expect(rows[0]?.querySelector('.pd-name [data-testid="path-text"]')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
+    const name = rows[0]?.querySelector('.pd-name') as HTMLElement;
+    expect(name.querySelector('.pd-tail')?.textContent).toMatch(/\.log$/);
+    // A long name keeps its end whole (the part the layout never cuts) and shortens in front of it, not at its end.
+    const long = rows[2]?.querySelector('.pd-name') as HTMLElement;
+    expect(long.querySelector('.pd-tail')?.textContent).toMatch(/11-30\.log$/);
+    expect(long.querySelector('.pd-name')).not.toBeNull();
+    expect(rows[0]?.querySelector('pd-path-text.pd-dir')?.textContent?.replace(/\s+/g, '')).toContain('/logs/app');
+    expect(rows[0]?.querySelector('pd-path-text.pd-dir [data-testid="path-text"]')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
+    // Reveal has its own glyph, so a folder entry's kind and the action never look the same.
+    const reveal = rows[0]?.querySelector('.pd-icon pd-glyph path')?.getAttribute('d');
+    expect(reveal).toBe(PD_ICON_PATHS.reveal);
+    expect(reveal).not.toBe(PD_ICON_PATHS.folder);
   });
 });

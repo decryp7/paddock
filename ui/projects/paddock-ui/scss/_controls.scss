@@ -564,7 +564,17 @@
 // ---- Popup menus (the data table's row and column menus, any CDK menu): surface-3 with shadow-2 (design guide §8). Items keep the
 // pointer's 5 % hover fill, but the keyboard's focus is the family's 2 px ring inset in the item, 3:1 or better (SC 2.4.11), so the
 // item Enter will run is always visible. When some item has an icon, every item reserves the 14 px slot (`.pd-popmenu__icon`).
+/*
+ * A menu is never seen before its overlay is positioned: CDK applies the position a frame after attaching it, and a first
+ * frame at the window's origin would flash there (X50 review 2). Hidden for two frames, then shown in place.
+ */
+@keyframes pd-popmenu-reveal {
+  from { visibility: hidden; }
+  to { visibility: visible; }
+}
+
 .pd-popmenu {
+  animation: pd-popmenu-reveal 34ms step-end both;
   display: flex;
   flex-direction: column;
   min-width: 160px;

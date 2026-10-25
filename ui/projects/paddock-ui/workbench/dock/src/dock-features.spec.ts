@@ -105,11 +105,12 @@ describe('named layouts', () => {
     const commands = TestBed.inject(CommandService);
     await dock.showView('a.one');
     expect(await commands.run(DOCK_COMMANDS.layoutSave, { name: 'X' })).toBe(true);
+    // Without a name the command asks the Save layout dialog (see dock-review2.spec.ts); a cancelled dialog saves nothing.
     expect(await commands.run(DOCK_COMMANDS.layoutSave)).toBe(true);
-    expect(dock.namedLayouts().map((l) => l.name)).toEqual(['X', 'Layout 2']);
+    expect(dock.namedLayouts().map((l) => l.name)).toEqual(['X']);
     expect(await commands.run(DOCK_COMMANDS.layoutApply, { name: 'X' })).toBe(true);
     expect(await commands.run(DOCK_COMMANDS.layoutDelete, { name: 'X' })).toBe(true);
-    expect(dock.namedLayouts().map((l) => l.name)).toEqual(['Layout 2']);
+    expect(dock.namedLayouts().map((l) => l.name)).toEqual([]);
     await settle(rendered.fixture);
   });
 });

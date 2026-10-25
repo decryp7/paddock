@@ -549,3 +549,23 @@ Closed after X54 (2026-10-25):
 Gaps left:
 - The fake browser is Unix only, so the fake-driven launch tests run on Linux and macOS; Windows runs the pure tests and the
   real browser.
+
+## X51 `<pd-view>` (ADR 0002): review 1 fixes and decisions
+
+`@decryp7/paddock-ui/view` renders the `paddock-view` documents plugins return; review 1 (`ui/docs/review/x51-view/REVIEW.md`) was
+not approved, and every finding is fixed in `ui/docs/review/x51-view/FIXES.md`. Decisions that outlive the review:
+
+- **Signal Forms exception (rule 37).** `pd-view-form` keeps `pd-field` over a `PdFieldStateLike` and one `linkedSignal` of values
+  keyed by the document, not Signal Forms: the field set comes from data (a plugin's `Form`), so there is no static model type, and
+  a form is rebuilt whenever the plugin sends a different one. A schema built from the field list over a `Record<string, unknown>`
+  could replace it at little cost; a short spike is due before Pacenotes adds bigger forms. `fieldProblem` stays a convenience
+  mirror of the engine's checks (the engine re-validates). Path, secret and toggle fields are now marked touched.
+- **One "needs local AI" look.** `pd-needs-ai-card` (`@decryp7/paddock-ui/states`) is presentational; `pd-needs-ai` fills it from
+  `PitwallStore`. A `needsAi` node draws the app's live component when the host provides one (`VIEW_NEEDS_AI`; the repair is the
+  app's, rule 19) and the same card with the plugin's reason otherwise.
+- **One primary per view.** The first node with a main action in document order (`primaryNode`: form submit, empty-state action,
+  needs-AI setup) is filled; every other action is secondary. `ActionRef` has no prominence on the wire.
+- **Schema.** `Column` gains `align` (`start`|`end`) and `unit`, `ChartSpec` gains `unit`; numbers are `end`-aligned with the unit in
+  the header. Both are required fields (no compatibility before v1).
+- **Pickers return a name.** `ViewHost.pickPath` and `pickSecret` resolve `{ value, name }`; the form shows the name (a path cut in
+  the middle, the full value as tooltip), never the reference.
