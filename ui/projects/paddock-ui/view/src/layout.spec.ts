@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { detailLines, hubOf, layers, layoutGraph, layoutSequence, MARK_W, ringsFrom, type LayoutNode } from './layout';
+import { detailLines, hubOf, labelRect, layers, layoutGraph, layoutSequence, MARK_W, ringsFrom, type LayoutNode } from './layout';
 import { diagramScene, graphScene } from './scene';
 import { sampleViewDoc } from './sample';
 import { shapeOf } from './model';
-import { flattenPath, pathCrosses } from './route';
+import { flattenPath, inflate, pathCrosses, type Pt } from './route';
 
 const n = (id: string, over: Partial<LayoutNode> = {}): LayoutNode => ({ id, label: id, ...over });
 const e = (from: string, to: string, label = '') => ({ from, to, label });
@@ -59,6 +59,8 @@ describe('edge routing: an edge never crosses a box (review 2, P2-1)', () => {
     const s = graphScene(g.v);
     const across = s.edges.filter((x) => x.path.includes('Q') || x.path.includes('C'));
     expect(across.length).toBeGreaterThanOrEqual(1);
+    // The shell to chromium edge bows too (review 4, P3-1), so it does not cross a spoke into the hub.
+    expect(s.edges.find((x) => x.from === 'p2' && x.to === 'p5')!.path).toContain(' Q ');
     expect(crossings(s)).toEqual([]);
   });
   it('sends the retry edge around the outside: right of every box, with a vertical lane', () => {
@@ -71,6 +73,94 @@ describe('edge routing: an edge never crosses a box (review 2, P2-1)', () => {
     const right = Math.max(...s.nodes.map((b) => b.x + b.w));
     expect(Math.max(...flattenPath(retry.path).map((p) => p[0]))).toBeGreaterThan(right);
     expect(retry.lx).toBeGreaterThan(right);
+  });
+});
+
+type Scn = ReturnType<typeof layoutGraph>;
+
+/** Labels that touch a box or any edge path (their own included), with 1 unit of clearance. */
+function labelHits(s: Scn): string[] {
+  if (s.kind === 'sequence') return [];
+  const bad: string[] = [];
+  for (const edge of s.edges) {
+    if (!edge.label) continue;
+    const r = inflate(labelRect(edge.lx, edge.ly, edge.anchor, edge.label), 1);
+    for (const b of s.nodes) if (overlap(r, b)) bad.push(`${edge.label} touches box ${b.id}`);
+    for (const o of s.edges) if (pathCrosses(o.path, [r])) bad.push(`${edge.label} touches edge ${o.from}>${o.to}`);
+  }
+  return bad;
+}
+
+/** Whether two segments properly cross (a shared end point does not count). */
+function cross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const o = (p: Pt, q: Pt, r: Pt): number => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+  return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+}
+
+/** Edges that cross another edge within their last 40 units (the arrowhead). */
+function arrowCrossings(s: Scn): string[] {
+  const bad: string[] = [];
+  for (const e1 of s.edges) {
+    const pts = flattenPath(e1.path);
+    const tail: Pt[] = [];
+    let len = 0;
+    for (let i = pts.length - 1; i > 0 && len < 40; i--) {
+      tail.push(pts[i] as Pt);
+      len += Math.hypot(pts[i]![0] - pts[i - 1]![0], pts[i]![1] - pts[i - 1]![1]);
+      if (len >= 40 || i === 1) tail.push(pts[i - 1] as Pt);
+    }
+    for (const e2 of s.edges) {
+      if (e1 === e2) continue;
+      const q = flattenPath(e2.path);
+      for (let i = 1; i < tail.length; i++) for (let j = 1; j < q.length; j++) if (cross(tail[i - 1] as Pt, tail[i] as Pt, q[j - 1] as Pt, q[j] as Pt)) bad.push(`${e1.from}>${e1.to} crosses ${e2.from}>${e2.to} near its arrowhead`);
+    }
+  }
+  return [...new Set(bad)];
+}
+
+function sampleScenes(): { id: string; scene: Scn }[] {
+  const root = shapeOf(sampleViewDoc().root);
+  if (root.tag !== 'stack') throw new Error('stack');
+  const out: { id: string; scene: Scn }[] = [];
+  for (const id of ['g1', 'g2', 'g3', 'd1', 'd2']) {
+    const k = shapeOf(root.v.children.find((c) => c.id === id)!);
+    if (k.tag === 'graph') {
+      out.push({ id, scene: graphScene(k.v) }, { id: `${id} other layout`, scene: graphScene({ ...k.v, layout: k.v.layout === 'radial' ? 'layered' : 'radial' }) });
+    } else if (k.tag === 'diagram') out.push({ id, scene: diagramScene(k.v) });
+  }
+  return out;
+}
+
+describe('edge labels (review 4, P2-1, P3-1)', () => {
+  const cases = [
+    { name: 'two spokes joined by a labelled edge', nodes: ['c', 'a', 'b', 'd'].map((id) => n(id)), edges: [e('a', 'c'), e('b', 'c'), e('d', 'c'), e('a', 'b', 'tokens')] },
+    { name: 'a labelled spoke across the hub', nodes: ['c', 'a', 'b', 'd', 'f', 'g'].map((id) => n(id)), edges: [e('a', 'c'), e('b', 'c'), e('d', 'c'), e('f', 'c'), e('g', 'c'), e('a', 'f', 'across the hub')] },
+    { name: 'labels on every edge of a ring', nodes: ['c', ...Array.from({ length: 6 }, (_, i) => `s${i}`)].map((id) => n(id)), edges: [...Array.from({ length: 6 }, (_, i) => e('c', `s${i}`, `link ${i}`)), e('s0', 's1', 'next'), e('s2', 's5', 'far')] },
+  ];
+  for (const c of cases) {
+    for (const radial of [false, true]) {
+      it(`no label touches a box or an edge: ${c.name}, radial=${radial}`, () => {
+        expect(labelHits(layoutGraph(c.nodes, c.edges, radial))).toEqual([]);
+      });
+    }
+  }
+  it('no label touches a box or an edge in the sample graphs, in both layouts', () => {
+    for (const { id, scene } of sampleScenes()) expect(labelHits(scene), id).toEqual([]);
+  });
+  it('no label touches a box or an edge in the graphs of the routing cases', () => {
+    const ids = (k: number, p = 'n') => Array.from({ length: k }, (_, i) => `${p}${i}`);
+    const graphs = [
+      { nodes: ['a', 'b', 'c', 'd', 'e'].map((id) => n(id, { label: id === 'c' ? 'Integration tests' : id.repeat(5) })), edges: [e('a', 'b'), e('a', 'c', 'needs db'), e('b', 'd'), e('c', 'd'), e('d', 'e'), e('e', 'a', 'retry')] },
+      { nodes: ids(4).map((id) => n(id, { label: id.repeat(8) })), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n2', 'n3'), e('n0', 'n3', 'skip'), e('n0', 'n2', 'skip two')] },
+      { nodes: ['c', ...ids(6, 's')].map((id) => n(id)), edges: [...ids(6, 's').map((id) => e('c', id)), e('s0', 's1', 'x'), e('s1', 's3', 'y'), e('s2', 's5', 'z'), e('s4', 's0', 'w')] },
+      { nodes: ['c', ...ids(5, 's')].map((id) => n(id)), edges: [...ids(5, 's').map((id) => e('c', id)), e('s0', 's2', 'across'), e('s1', 's3', 'across too')] },
+    ];
+    graphs.forEach((g, i) => {
+      for (const radial of [false, true]) expect(labelHits(layoutGraph(g.nodes, g.edges, radial)), `graph ${i} radial=${radial}`).toEqual([]);
+    });
+  });
+  it('no edge of the radial sample graphs crosses another within its last segment (the arrowhead)', () => {
+    for (const { id, scene } of sampleScenes().filter((x) => x.scene.kind === 'radial')) expect(arrowCrossings(scene), id).toEqual([]);
   });
 });
 

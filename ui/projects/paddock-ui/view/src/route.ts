@@ -102,3 +102,48 @@ export function roundedPath(points: readonly Pt[], radius = 8): string {
   const last = points[points.length - 1] as Pt;
   return `${d} L ${r1(last[0])} ${r1(last[1])}`;
 }
+
+/** Whether the segments a-b and c-d properly cross (touching at an end point does not count). */
+export function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const side = (p: Pt, q: Pt, r: Pt): number => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+  return side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0;
+}
+
+/** The last `length` units of a polyline (at least its last segment), in path order. */
+export function tailOf(points: readonly Pt[], length: number): Pt[] {
+  const out: Pt[] = [points[points.length - 1] as Pt];
+  let len = 0;
+  for (let i = points.length - 1; i > 0 && len < length; i--) {
+    const [p, q] = [points[i - 1] as Pt, points[i] as Pt];
+    len += Math.hypot(q[0] - p[0], q[1] - p[1]);
+    out.unshift(p);
+  }
+  return out;
+}
+
+/** Whether two paths cross within the last `length` units of either (where the arrowheads are). */
+export function crossNearArrow(a: string, b: string, length = 40): boolean {
+  const [pa, pb] = [flattenPath(a), flattenPath(b)];
+  const hit = (x: readonly Pt[], y: readonly Pt[]): boolean => {
+    for (let i = 1; i < x.length; i++) for (let j = 1; j < y.length; j++) if (segmentsCross(x[i - 1] as Pt, x[i] as Pt, y[j - 1] as Pt, y[j] as Pt)) return true;
+    return false;
+  };
+  return hit(tailOf(pa, length), pb) || hit(tailOf(pb, length), pa);
+}
+
+/** The point at `fraction` of a polyline's length, with the unit direction of the segment it falls on. */
+export function pointAt(points: readonly Pt[], fraction: number): { at: Pt; dir: Pt } {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += Math.hypot((points[i] as Pt)[0] - (points[i - 1] as Pt)[0], (points[i] as Pt)[1] - (points[i - 1] as Pt)[1]);
+  let want = total * fraction;
+  for (let i = 1; i < points.length; i++) {
+    const [p, q] = [points[i - 1] as Pt, points[i] as Pt];
+    const l = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (want <= l || i === points.length - 1) {
+      const u = l === 0 ? 0 : Math.min(1, want / l);
+      return { at: [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u], dir: l === 0 ? [1, 0] : [(q[0] - p[0]) / l, (q[1] - p[1]) / l] };
+    }
+    want -= l;
+  }
+  return { at: points[0] as Pt, dir: [1, 0] };
+}
