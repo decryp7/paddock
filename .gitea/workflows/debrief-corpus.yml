@@ -3,7 +3,7 @@
 # real IPC: no panic, no plugin crash or memory-cap stop, events with timestamps. Failures name the file only.
 # See crates/debrief-plugins/tests/it/evtx_corpus.rs. Never runs on push: it needs the network and takes minutes.
 
-name: corpus
+name: debrief-corpus
 
 on:
   schedule:
@@ -16,6 +16,11 @@ env:
   DEBRIEF_EVTX_CORPUS: "1"
   DEBRIEF_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache
 
+# Every step runs in the app's folder (ADR 0014: Debrief lives in apps/debrief) unless its job says otherwise.
+defaults:
+  run:
+    working-directory: apps/debrief
+
 jobs:
   # Decides whether this run is needed at all:
   # the nightly run is skipped while main is unchanged since the last green one.
@@ -26,6 +31,9 @@ jobs:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     outputs:
       run: ${{ steps.plan.outputs.run }}
+    defaults:
+      run:
+        working-directory: .
     steps:
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.
       - uses: actions/cache/restore@v4
@@ -33,7 +41,7 @@ jobs:
         if: github.event_name == 'schedule'
         with:
           path: .nightly-green
-          key: corpus-nightly-green-${{ github.sha }}
+          key: debrief-corpus-nightly-green-${{ github.sha }}
           lookup-only: true
 
       - name: Decide
@@ -70,18 +78,19 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-            !target/debug/incremental
-          key: corpus-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            apps/debrief/target
+            !apps/debrief/target/debug/incremental
+          key: corpus-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: corpus-${{ runner.os }}-
 
       - uses: actions/cache@v4
         with:
-          path: .corpus-cache
+          path: apps/debrief/.corpus-cache
           key: evtx-attack-samples-4ceed2f4706daf601c212a8f91c113dd85349a2c
 
       - name: EVTX-ATTACK-SAMPLES through the EVTX importer
-        run: cargo test -p debrief-plugins --test it evtx_corpus::
+        run: |
+          cargo test -p debrief-plugins --test it evtx_corpus::
 
   # Records a fully green scheduled run for this commit; `plan` skips the next scheduled run while main is unchanged.
   # Never runs when anything failed, so a red commit is retried every night.
@@ -92,6 +101,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Marker file
         run: |
@@ -101,4 +113,4 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: .nightly-green
-          key: corpus-nightly-green-${{ github.sha }}
+          key: debrief-corpus-nightly-green-${{ github.sha }}

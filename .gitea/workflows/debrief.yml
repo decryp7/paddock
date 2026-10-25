@@ -1,5 +1,9 @@
-# Checks Debrief on every push and pull request. Installers are built only for v* tags (which also publish a
-# Gitea release with them attached), the nightly run and manual runs (see the bundle job).
+# Debrief's CI and release in the Paddock monorepo (ADR 0014, imported from decryp7/debrief's build.yml): every job runs in
+# apps/debrief. The plan job runs only when the change reaches Debrief (scripts/affected.mjs: Debrief's own files, a shared
+# input, or a global one); Debrief is not a leg of ci.yml because its gates span three OS, real-app smoke tests and the
+# installers. Installers are built only for debrief-v* tags (which also publish the Gitea release, the moving
+# debrief-latest release the app's updater reads, and the bridge latest.json in the old repo), the nightly run and
+# manual runs (see the bundle job).
 #
 # Runner labels: ubuntu-latest, windows-latest, macos-latest. Adjust `runs-on`
 # if your act_runner instances use other labels.
@@ -8,12 +12,12 @@
 # Releases need a repository secret RELEASE_TOKEN (a Gitea access token with
 # write:repository scope).
 
-name: build
+name: debrief
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["debrief-v*"]
   pull_request:
   # Nightly on the default branch (main), with the installers; after midnight UTC so it does not compete
   # with the fuzz (02:17) and bench (03:47) runs for the Linux runners.
@@ -34,23 +38,31 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
+# Every step runs in the app's folder unless it says otherwise.
+defaults:
+  run:
+    working-directory: apps/debrief
+
 jobs:
   # Decides whether this run is needed at all:
-  # a push to main whose commit carries a v* tag is covered by the tag run;
+  # the change does not reach Debrief (scripts/affected.mjs, the same plan as ci.yml);
+  # a push to main whose commit carries a debrief-v* tag is covered by the tag run;
   # a nightly run is skipped while main is unchanged since the last green one.
   plan:
     name: plan
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: .
     outputs:
       run: ${{ steps.plan.outputs.run }}
     steps:
-      # The checkout is only for `git ls-remote` (credentials and remote URL); it fetches no history.
+      # The whole history: the plan's base can be any older commit.
       - uses: actions/checkout@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.
       - uses: actions/cache/restore@v4
@@ -58,7 +70,7 @@ jobs:
         if: github.event_name == 'schedule'
         with:
           path: .nightly-green
-          key: nightly-green-${{ github.sha }}
+          key: debrief-nightly-green-${{ github.sha }}
           lookup-only: true
 
       - name: Decide
@@ -69,15 +81,16 @@ jobs:
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
           GREEN: ${{ steps.green.outputs.cache-hit }}
+          PLAN_TOKEN: ${{ github.token }}
         run: |
-          run=true
+          run=$(node scripts/affected.mjs --ci --app debrief)
           if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
             run=false
             echo "::notice::main has not changed since the last green run ($SHA); skipping."
           fi
           if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
             # Lightweight tags list the commit itself, annotated ones list the tag object and the peeled commit (^{}).
-            tag=$(git ls-remote --tags origin 'refs/tags/v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
+            tag=$(git ls-remote --tags origin 'refs/tags/debrief-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
             if [ -n "$tag" ]; then
               run=false
               echo "::notice::commit is tagged $tag; the tag run is the gate."
@@ -120,9 +133,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-            !target/debug/incremental
-          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            apps/debrief/target
+            !apps/debrief/target/debug/incremental
+          key: clippy-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: clippy-${{ runner.os }}-
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
@@ -131,7 +144,7 @@ jobs:
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -157,9 +170,9 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-            !target/debug/incremental
-          key: clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            apps/debrief/target
+            !apps/debrief/target/debug/incremental
+          key: clippy-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
 
   rust-test:
     name: rust tests
@@ -194,7 +207,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: test-registry-${{ runner.os }}-
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
@@ -203,7 +216,7 @@ jobs:
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -245,7 +258,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: rust-tests-junit
-          path: target/nextest/ci/junit.xml
+          path: apps/debrief/target/nextest/ci/junit.xml
           if-no-files-found: ignore
 
       # nextest does not run doc tests.
@@ -270,7 +283,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
 
   # The same tests on the macOS host runner: the contained-plugin sandbox (sandbox-exec profiles, the private socket,
   # symlinked temp paths) and other platform code only run here; a macOS-only bug once passed the Linux-only suite.
@@ -301,7 +314,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -357,7 +370,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: test-registry-${{ runner.os }}-
 
       - name: Install cargo debrief-plugin
@@ -408,14 +421,14 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: licences-${{ runner.os }}-
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: apps/debrief/app/.nvmrc
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Commit messages follow Conventional Commits
         if: github.event_name == 'pull_request'
@@ -442,7 +455,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+          key: licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}-${{ github.run_id }}
 
   frontend:
     name: frontend build, lint + unit tests
@@ -453,19 +466,20 @@ jobs:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     defaults:
       run:
-        working-directory: app
+        working-directory: apps/debrief/app
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: apps/debrief/app/.nvmrc
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: package-lock.json
 
+      # One npm workspace for the monorepo (ADR 0014 §1): the root lock installs every package.
       - name: Install
         run: |
-          npm ci
+          (cd ../../.. && npm ci)
           npm audit --omit=dev --audit-level=high
 
       - name: Lint
@@ -518,24 +532,24 @@ jobs:
         shard: [1, 2]
     defaults:
       run:
-        working-directory: app
+        working-directory: apps/debrief/app
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: apps/debrief/app/.nvmrc
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install
         run: |
-          npm ci
+          (cd ../../.. && npm ci)
           npx playwright install --with-deps chromium webkit
 
       # One production build serves every project (Chromium, WebKit) of this shard, under the Tauri CSP.
@@ -555,7 +569,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: playwright-report-${{ matrix.shard }}
-          path: app/playwright-report
+          path: apps/debrief/app/playwright-report
           if-no-files-found: ignore
 
   # A few WebdriverIO smoke tests of the real app (engine + shell + production UI, no mock), through
@@ -631,8 +645,8 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin/tauri-driver
             ~/.cargo/bin/tauri-driver.exe
-            target
-          key: smoke-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            apps/debrief/target
+          key: smoke-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: smoke-${{ runner.os }}-
 
       # Windows runs on the host, which keeps its own Node: setup-node downloaded Node again on every job and its
@@ -662,9 +676,9 @@ jobs:
       - uses: actions/setup-node@v4
         if: runner.os != 'Windows'
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: apps/debrief/app/.nvmrc
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
       # so every job that builds the workspace links it (a test that is skipped still has to link).
@@ -672,7 +686,7 @@ jobs:
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -697,7 +711,7 @@ jobs:
       # https://msedgedriver.microsoft.com/<version>/edgedriver_win64.zip into app/e2e-tauri/.drivers/.
       - name: Edge WebDriver matching WebView2
         if: runner.os == 'Windows'
-        working-directory: app
+        working-directory: apps/debrief/app
         shell: bash
         run: node e2e-tauri/scripts/fetch-msedgedriver.mjs
 
@@ -709,8 +723,10 @@ jobs:
       - name: Reuse node_modules for this lockfile (Windows)
         if: runner.os == 'Windows'
         shell: bash
+        working-directory: .
         run: |
-          key=$(sha256sum app/package-lock.json | cut -c1-16)
+          # The monorepo's one lock and node_modules at the repo root (ADR 0014 §1).
+          key=$(sha256sum package-lock.json | cut -c1-16)
           base="$USERPROFILE/.debrief-ci"
           # <hash>/node_modules, not node_modules-<hash>: Node resolves packages from the junction's real path, so it
           # must still contain a folder named node_modules (else e.g. @tauri-apps/cli cannot find its native binary).
@@ -718,33 +734,33 @@ jobs:
           mkdir -p "$base/node-cache/$key"
           if [ ! -f "$cached/.complete" ]; then
             rm -rf "$cached"
-            (cd app && npm ci)
-            mv app/node_modules "$cached"
+            npm ci
+            mv node_modules "$cached"
             touch "$cached/.complete"
           fi
-          powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '$(cygpath -w "$PWD/app/node_modules")' -Target '$(cygpath -w "$cached")' | Out-Null"
+          powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '$(cygpath -w "$PWD/node_modules")' -Target '$(cygpath -w "$cached")' | Out-Null"
           # Older lockfiles' copies go (and the first layout's node_modules-<hash> folders).
           for old in "$base"/node-cache/*; do [ "$old" = "$base/node-cache/$key" ] || rm -rf "$old"; done
           rm -rf "$base"/node_modules-*
 
       - name: Debug app binary
         if: runner.os != 'macOS'
-        working-directory: app
+        working-directory: apps/debrief/app
         shell: bash
         run: |
-          [ -d node_modules ] || npm ci
+          [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
           npm run e2e:tauri:build
 
       # macOS: a real debug .app (ad-hoc sealed by tauri.macos.conf.json) with the sidecars and libduckdb inside, the same
       # layout the installer ships; then the signature/Team-ID/load checks and the launch-and-quit smoke.
       - name: Debug .app (macOS)
         if: runner.os == 'macOS'
-        working-directory: app
+        working-directory: apps/debrief/app
         shell: bash
         env:
           DEBRIEF_CARGO_PROFILE: debug
         run: |
-          npm ci
+          (cd ../../.. && npm ci)
           npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json
 
       - name: Smoke test, sidecars and quit within 10 s (macOS)
@@ -759,7 +775,7 @@ jobs:
 
       - name: Smoke tests (Windows)
         if: runner.os == 'Windows'
-        working-directory: app
+        working-directory: apps/debrief/app
         shell: bash
         # Keep Debrief's folders so a failure can show the app's own logs (next step).
         env:
@@ -768,7 +784,7 @@ jobs:
 
       - name: Debrief logs of the failed smoke run (Windows)
         if: failure() && runner.os == 'Windows'
-        working-directory: app
+        working-directory: apps/debrief/app
         shell: bash
         run: |
           for f in $(find e2e-tauri/.tmp -path '*debrief-e2e-*' -name '*.log' 2>/dev/null | sort); do
@@ -779,7 +795,7 @@ jobs:
       # A session bus for the single-instance plugin and notifications, and a virtual display for WebKitGTK.
       - name: Smoke tests (Linux)
         if: runner.os == 'Linux'
-        working-directory: app
+        working-directory: apps/debrief/app
         # WebKitGTK in a CI container: its web-process sandbox (bubblewrap) cannot start as root inside Docker, and
         # there is no GPU. These switches apply to this throwaway test container only, never to Debrief itself.
         env:
@@ -805,7 +821,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: tauri-smoke-${{ runner.os }}
-          path: app/e2e-tauri/.artifacts
+          path: apps/debrief/app/e2e-tauri/.artifacts
           if-no-files-found: ignore
 
       # The live search test (docs/development.md, "Live search test"): research against the real Google, Bing and
@@ -863,7 +879,8 @@ jobs:
       - name: Unlink the shared node_modules (Windows)
         if: always() && runner.os == 'Windows'
         shell: cmd
-        run: if exist app\node_modules rmdir app\node_modules
+        working-directory: .
+        run: if exist node_modules rmdir node_modules
 
   # Installers only for v* tags, the nightly run and manual runs (workflow_dispatch), never for pushes or pull
   # requests: they are the slowest jobs and the Windows leg runs on a developer PC. A change that breaks the
@@ -932,8 +949,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: bundle-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            apps/debrief/target
+          key: bundle-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: bundle-${{ runner.os }}-
 
       # Windows runs on the host, which keeps its own Node: setup-node downloaded Node again on every job and its
@@ -963,9 +980,9 @@ jobs:
       - uses: actions/setup-node@v4
         if: runner.os != 'Windows'
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: apps/debrief/app/.nvmrc
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
       # so every job that builds the workspace links it (a test that is skipped still has to link).
@@ -973,7 +990,7 @@ jobs:
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -996,16 +1013,20 @@ jobs:
       # v1 zips) and the public key is built into the app. Without them (forks, pull requests) the app has no
       # update key and reports "updates are not available in this build".
       - name: Build installers
-        working-directory: app
+        working-directory: apps/debrief/app
         shell: bash
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          # One updater key for the family (ADR 0014, amendment): the app is built with the shared public key. The first
+          # monorepo release is the transition release: signed with Debrief's old key (DEBRIEF_TRANSITION_SIGNING_KEY,
+          # copied from decryp7/debrief's secrets), so installed copies accept it; delete that secret after it shipped and
+          # every later release is signed with the shared key.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.DEBRIEF_TRANSITION_SIGNING_KEY || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.DEBRIEF_TRANSITION_SIGNING_KEY && secrets.DEBRIEF_TRANSITION_SIGNING_KEY_PASSWORD || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
           # Installers use the size-optimised `dist` profile (thin LTO, one codegen unit, stripped); the sidecars match.
           DEBRIEF_CARGO_PROFILE: dist
         run: |
-          npm ci
+          (cd ../../.. && npm ci)
           # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's
           # (signed) installer can never be collected into this release.
           target="${CARGO_TARGET_DIR:-../target}"
@@ -1096,12 +1117,12 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: debrief-${{ runner.os }}
-          path: dist/*
+          path: apps/debrief/dist/*
           if-no-files-found: error
 
   release:
     name: release
-    if: needs.plan.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/v')
+    if: needs.plan.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/debrief-v')
     needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e]
     runs-on: ubuntu-latest
     container:
@@ -1113,18 +1134,20 @@ jobs:
 
       - uses: actions/download-artifact@v3
         with:
-          path: artifacts
+          path: apps/debrief/artifacts
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: actions/setup-node@v4
         with:
-          node-version-file: app/.nvmrc
+          node-version-file: apps/debrief/app/.nvmrc
 
       - name: Release notes (git-cliff)
         run: |
           cargo install git-cliff --locked
-          git cliff --latest --strip header -o artifacts/RELEASE_NOTES.md
+          # Debrief's commits and the shared ones it ships (ADR 0014 §4), between its own debrief-v* tags.
+          git cliff -r ../.. --config cliff.toml --tag-pattern 'debrief-v.*' --include-path 'apps/debrief/**' \
+            --include-path 'crates/**' --include-path 'ui/**' --latest --strip header -o artifacts/RELEASE_NOTES.md
           # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
           cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
 
@@ -1141,7 +1164,7 @@ jobs:
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --manifest-path app/src-tauri/Cargo.toml --format json --override-filename debrief-rust.cdx
           cp app/src-tauri/debrief-rust.cdx.json artifacts/
-          (cd app && npm ci && npx --yes @cyclonedx/cyclonedx-npm --omit dev --output-file ../artifacts/debrief-ui.cdx.json)
+          (cd ../.. && npm ci && npx --yes @cyclonedx/cyclonedx-npm --workspace debrief-app --omit dev --output-file apps/debrief/artifacts/debrief-ui.cdx.json)
 
       # latest.json for the updater: version, notes from RELEASE_NOTES.md, pub_date and, per platform, the
       # installer's URL in this release, its signature (.sig) and size. Installed apps fetch
@@ -1159,7 +1182,7 @@ jobs:
             exit 0
           fi
           tag='${{ github.ref_name }}'
-          node scripts/release/latest-json.mjs --dir artifacts --version "$tag" --notes artifacts/RELEASE_NOTES.md \
+          node scripts/release/latest-json.mjs --dir artifacts --version "${tag#debrief-}" --notes artifacts/RELEASE_NOTES.md \
             --base-url "$BASE_URL" --out artifacts/latest.json
           # The signatures are in latest.json; the .sig files are not release assets.
           find artifacts -name '*.sig' -delete
@@ -1170,10 +1193,22 @@ jobs:
         shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          OLD_REPO: decryp7/debrief
         run: |
-          node --test scripts/release/publish.test.mjs
-          node scripts/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" \
-            --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
+          publish=../../conformance/release/publish.mjs
+          api="${{ github.server_url }}/api/v1"
+          node "$publish" --api "$api" --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" \
+            --notes artifacts/RELEASE_NOTES.md --dir artifacts
+          if [ ! -f artifacts/latest.json ]; then exit 0; fi
+          # The updater's two endpoints (ADR 0014 §4): the moving debrief-latest release in this repo, which installed
+          # copies read from now on, and the bridge, the old repo's newest release, which copies installed before the
+          # move read (Gitea resolves its releases/download/latest/ to the newest release). Both get only latest.json,
+          # which points at the installers here.
+          mkdir -p "$RUNNER_TEMP/latest" && cp artifacts/latest.json "$RUNNER_TEMP/latest/"
+          node "$publish" --api "$api" --repo "${{ github.repository }}" --tag debrief-latest \
+            --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace
+          node "$publish" --api "$api" --repo "$OLD_REPO" --newest \
+            --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace
 
   # Records a fully green scheduled run for this commit; `plan` skips the next scheduled run while main is unchanged.
   # Never runs when anything failed, so a red commit is retried every night.
@@ -1184,6 +1219,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Marker file
         run: |
@@ -1193,4 +1231,4 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: .nightly-green
-          key: nightly-green-${{ github.sha }}
+          key: debrief-nightly-green-${{ github.sha }}

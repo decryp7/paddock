@@ -2,13 +2,13 @@
 # Weekly over all of debrief-core; on pull requests only the mutants in the changed lines (--in-diff).
 # Surviving mutants are listed in mutants.out (uploaded); they point at untested behaviour.
 
-name: mutants
+name: debrief-mutants
 
 on:
   schedule:
     - cron: "41 3 * * 0"
   pull_request:
-    paths: ["crates/debrief-core/**"]
+    paths: ["apps/debrief/crates/debrief-core/**"]
   workflow_dispatch:
 
 # A newer push to the same branch supersedes a running pull request run (the weekly run has its own group).
@@ -18,6 +18,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+
+# Every step runs in the app's folder (ADR 0014: Debrief lives in apps/debrief) unless its job says otherwise.
+defaults:
+  run:
+    working-directory: apps/debrief
 
 jobs:
   # Decides whether this run is needed at all:
@@ -29,6 +34,9 @@ jobs:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     outputs:
       run: ${{ steps.plan.outputs.run }}
+    defaults:
+      run:
+        working-directory: .
     steps:
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the weekly-mark job after a fully green run.
       - uses: actions/cache/restore@v4
@@ -36,7 +44,7 @@ jobs:
         if: github.event_name == 'schedule'
         with:
           path: .nightly-green
-          key: mutants-weekly-green-${{ github.sha }}
+          key: debrief-mutants-weekly-green-${{ github.sha }}
           lookup-only: true
 
       - name: Decide
@@ -74,7 +82,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/cargo-mutants
-          key: mutants-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: mutants-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: mutants-${{ runner.os }}-
 
       - name: Install cargo-mutants
@@ -83,7 +91,7 @@ jobs:
       - name: Mutants in the changed lines
         if: github.event_name == 'pull_request'
         run: |
-          git diff "origin/${{ github.base_ref }}...HEAD" -- crates/debrief-core > pr.diff
+          git diff --relative "origin/${{ github.base_ref }}...HEAD" -- crates/debrief-core > pr.diff
           cargo mutants -p debrief-core --in-diff pr.diff --timeout-multiplier 3 --no-shuffle
 
       - name: Mutants in debrief-core
@@ -95,7 +103,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: mutants-out
-          path: mutants.out/
+          path: apps/debrief/mutants.out/
           if-no-files-found: ignore
 
   # Records a fully green scheduled run for this commit; `plan` skips the next scheduled run while main is unchanged.
@@ -107,6 +115,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Marker file
         run: |
@@ -116,4 +127,4 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: .nightly-green
-          key: mutants-weekly-green-${{ github.sha }}
+          key: debrief-mutants-weekly-green-${{ github.sha }}

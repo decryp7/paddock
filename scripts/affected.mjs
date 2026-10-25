@@ -39,7 +39,7 @@ const git = (args, cwd = ROOT) => execFileSync('git', args, { cwd, encoding: 'ut
 
 /** Inputs that every project's build or tests read: a change re-runs everything. */
 export const GLOBAL = [
-  /^\.gitea\//, // workflows (but see APP_WORKFLOW) and the shared actions every leg runs
+  /^\.gitea\//, // workflows (but see appOfWorkflow) and the shared actions every leg runs
   /^\.cargo\//,
   /^rust-toolchain(\.toml)?$/,
   /^package\.json$/,
@@ -52,8 +52,17 @@ export const GLOBAL = [
   /^conformance\/(ci|release)\//, // the release and CI scripts the shared actions run (ADR 0014's scripts/release)
 ];
 
-/** One app's release workflow (`release-<app>.yml` or `<app>-release.yml`): marks only that app. */
-export const APP_WORKFLOW = /^\.gitea\/workflows\/(?:release-([a-z0-9-]+)|([a-z0-9-]+)-release)\.ya?ml$/;
+/**
+ * The app a workflow belongs to, or null: `release-<app>.yml`, `<app>.yml` or `<app>-<anything>.yml` for a known app
+ * (`debrief.yml`, `debrief-fuzz.yml`, `shell-demo-release.yml`). Such a workflow marks only its app.
+ */
+export function appOfWorkflow(path, appNames) {
+  const m = /^\.gitea\/workflows\/([a-z0-9-]+)\.ya?ml$/.exec(path);
+  if (!m) return null;
+  const name = m[1].startsWith('release-') ? m[1].slice('release-'.length) : m[1];
+  const hits = [...appNames].filter((a) => name === a || name.startsWith(`${a}-`)).sort((a, b) => b.length - a.length);
+  return hits[0] ?? null;
+}
 
 /** Editor and VCS metadata: marks nothing. */
 export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/];
@@ -267,13 +276,10 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
   if (all) markAll('everything (no base)');
 
   for (const f of all ? [] : files) {
-    const wf = APP_WORKFLOW.exec(f);
+    const wf = appOfWorkflow(f, apps.keys());
     if (wf) {
-      const p = `app:${wf[1] ?? wf[2]}`;
-      if (apps.has(p.slice(4))) {
-        mark(p, `release workflow ${f}`);
-        kind(p, 'all');
-      } else markAll(`workflow ${f} of no app`);
+      mark(`app:${wf}`, `its workflow ${f}`);
+      kind(`app:${wf}`, 'all');
       continue;
     }
     if (META.some((r) => r.test(f))) continue;
@@ -374,7 +380,8 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
  * filter (only when `narrow`: a pull request whose change reaches part of the app's Cargo workspace; '' runs it all).
  */
 export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
-  return plan.apps.map((name) => {
+  // An app with a workflow of its own (paddock.ci.json `workflow`) is not a leg: its workflow asks `--ci --app`.
+  return plan.apps.filter((name) => !apps.get(name).workflow).map((name) => {
     const app = apps.get(name);
     const cargoDir = app.cargo ? `${app.dir}/${app.cargo}` : '';
     const members = [...cargo.values()].filter((c) => c.workspace === cargoDir).map((c) => c.name);
@@ -481,7 +488,12 @@ export function summary(plan, reason, legs) {
   return `${lines.join('\n')}\n`;
 }
 
-async function ci(env, log = console.log) {
+/**
+ * CI: the plan for this event. Without `app`, the ci.yml job outputs and summary; with `app` (an app's own workflow,
+ * `--ci --app debrief`), `true` or `false` on stdout for whether the change reaches that app, the log on stderr.
+ */
+async function ci(env, { app = null } = {}) {
+  const log = app ? (l) => console.error(l) : (l) => console.log(l);
   const contains = (sha) => {
     try {
       git(['merge-base', '--is-ancestor', sha, 'HEAD']);
@@ -505,6 +517,14 @@ async function ci(env, log = console.log) {
   const legs = matrix(plan, graph, { narrow: event === 'pull_request' });
   log(`base: ${reason}`);
   log(JSON.stringify(plan, null, 2));
+  if (app) {
+    if (!graph.apps.has(app)) throw new Error(`unknown app ${app} (no apps/${app}/paddock.ci.json)`);
+    const run = plan.apps.includes(app);
+    log(run ? `${app}: affected (${(plan.kinds[app] ?? []).join(', ')})` : `${app}: not affected by this change`);
+    if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, `### ${app}\n\nBase: ${reason}\n\n${run ? 'Affected: every job runs.' : 'Not affected: nothing to run.'}\n`);
+    console.log(String(run));
+    return;
+  }
   const outputs = {
     crates: plan.crates,
     ui: plan.ui,
@@ -522,7 +542,7 @@ if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const flag = (n) => args.includes(n);
   try {
-    if (flag('--ci')) await ci(process.env);
+    if (flag('--ci')) await ci(process.env, { app: args.includes('--app') ? args[args.indexOf('--app') + 1] : null });
     else {
       const fi = args.indexOf('--files');
       const files = fi >= 0 ? (args[fi + 1] ?? '').split(',').filter(Boolean) : null;

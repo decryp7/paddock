@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { filesUnder, parseArgs, publish } from '../release/publish.mjs';
+import { filesUnder, isPrerelease, parseArgs, publish } from '../release/publish.mjs';
 
 const args = ['--api', 'https://h/api/v1/', '--repo', 'o/r', '--tag', 'v1.2.0', '--notes', 'n.md', '--dir', 'a'];
 
@@ -12,6 +12,13 @@ test('arguments are parsed and checked', () => {
   assert.deepEqual(parseArgs(args), { api: 'https://h/api/v1', repo: 'o/r', tag: 'v1.2.0', notes: 'n.md', dir: 'a' });
   assert.throws(() => parseArgs(args.slice(0, 8)), /--dir is required/);
   assert.throws(() => parseArgs([...args.slice(0, 4), '--tag', 'latest', ...args.slice(6)]), /vX.Y.Z/);
+  // The monorepo's tags (ADR 0014 §4): an app's version tag and its moving latest release.
+  assert.equal(parseArgs([...args.slice(0, 4), '--tag', 'debrief-v1.2.0', ...args.slice(6)]).tag, 'debrief-v1.2.0');
+  assert.equal(parseArgs([...args.slice(0, 4), '--tag', 'debrief-latest', ...args.slice(6), '--replace']).replace, true);
+  const newest = parseArgs([...args.slice(0, 4), '--newest', ...args.slice(6)]);
+  assert.deepEqual([newest.newest, newest.tag], [true, undefined]);
+  assert.throws(() => parseArgs([...args, '--newest']), /--tag or --newest/);
+  assert.throws(() => parseArgs([...args.slice(0, 4), ...args.slice(6)]), /--tag or --newest/);
   assert.throws(() => parseArgs(['--bogus', 'x']), /unknown/);
 });
 
@@ -70,3 +77,39 @@ test('an API error names the call, not the token', async () => {
     (e) => /POST https:\/\/h\/api\/v1\/repos\/o\/r\/releases: HTTP 403 forbidden/.test(e.message) && !e.message.includes('secret-token'),
   );
 });
+
+test('a pre-release is a semver suffix, never the app prefix of a monorepo tag', () => {
+  assert.deepEqual(['v1.2.0', 'debrief-v1.2.0', 'debrief-latest', 'v1.2.0-rc.1', 'debrief-v1.2.0-rc.1'].map(isPrerelease), [false, false, false, true, true]);
+});
+
+test('--replace deletes and uploads again a file the release has (the moving <app>-latest release)', async () => {
+  const dir = fixture();
+  const { calls, fetchImpl } = fakeApi({ id: 9, html_url: 'u', assets: [{ name: 'latest.json', id: 41 }] });
+  await publish({ api: 'https://h/api/v1', repo: 'o/r', tag: 'debrief-latest', notes: join(dir, 'n.md'), dir: join(dir, 'a'), replace: true }, 't', fetchImpl, () => {});
+  assert.deepEqual(calls.slice(1), [
+    'DELETE https://h/api/v1/repos/o/r/releases/9/assets/41',
+    'POST https://h/api/v1/repos/o/r/releases/9/assets?name=latest.json',
+    'POST https://h/api/v1/repos/o/r/releases/9/assets?name=App_1.2.0_x64-setup.exe',
+  ]);
+});
+
+test('--newest writes to the newest published release of an old repo (the update bridge), and never creates one', async () => {
+  const dir = fixture();
+  const calls = [];
+  const json = (status, body) => ({ status, ok: status < 300, json: async () => body, text: async () => JSON.stringify(body) });
+  const fetchImpl = async (url, init) => {
+    calls.push(`${init.method} ${url}`);
+    if (init.method === 'GET') return json(200, [{ id: 3, tag_name: 'v1.1.1', html_url: 'old', assets: [{ name: 'latest.json', id: 5 }] }]);
+    return init.method === 'DELETE' ? json(204, null) : json(201, {});
+  };
+  const url = await publish({ api: 'https://h/api/v1', repo: 'o/old', notes: join(dir, 'n.md'), dir: join(dir, 'a'), replace: true, newest: true }, 't', fetchImpl, () => {});
+  assert.equal(url, 'old');
+  assert.deepEqual(calls.slice(0, 3), [
+    'GET https://h/api/v1/repos/o/old/releases?draft=false&pre-release=false&limit=1',
+    'DELETE https://h/api/v1/repos/o/old/releases/3/assets/5',
+    'POST https://h/api/v1/repos/o/old/releases/3/assets?name=latest.json',
+  ]);
+  const none = async () => json(200, []);
+  await assert.rejects(publish({ api: 'https://h/api/v1', repo: 'o/old', notes: join(dir, 'n.md'), dir: join(dir, 'a'), newest: true }, 't', none, () => {}), /no published release/);
+});
+

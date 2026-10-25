@@ -7,6 +7,7 @@
 # .gitea/, renovate.json) are changed by the integrating agent only. An imported app adds its own line.
 
 # Apps, one line each.
+apps/debrief/.* @decryp7
 apps/shell-demo/.* @decryp7
 apps/workbench-demo/.* @decryp7
 

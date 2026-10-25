@@ -5,12 +5,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, cargoGraph, chooseBase, DOC_INPUTS, DOCS, lockDiff, matrix, npmGraph, owners, readApps, ROOT, summary, trackedFiles } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, lockDiff, matrix, npmGraph, owners, readApps, ROOT, summary, trackedFiles } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
 const run = (...files) => affected(files, graph);
 const APPS = [...graph.apps.keys()].sort();
+/** The apps that are legs of ci.yml (not those with a workflow of their own, such as Debrief). */
+const LEGS = APPS.filter((a) => !graph.apps.get(a).workflow);
 
 describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
@@ -196,9 +198,9 @@ describe('matrix legs', () => {
   test('everything gives every app both halves, and the summary names each leg', () => {
     const plan = affected([], graph, { all: true });
     const legs = matrix(plan, graph);
-    assert.deepEqual(legs.map((l) => [l.app, l.rust, l.ui]), APPS.map((a) => [a, true, true]));
+    assert.deepEqual(legs.map((l) => [l.app, l.rust, l.ui]), LEGS.map((a) => [a, true, true]));
     const md = summary(plan, 'everything', legs);
-    for (const a of APPS) assert.match(md, new RegExp(`app ${a} \\| rust \\+ ui`));
+    for (const a of LEGS) assert.match(md, new RegExp(`app ${a} \\| rust \\+ ui`));
   });
 });
 
@@ -292,6 +294,34 @@ describe('contracts', () => {
       const text = readFileSync(join(ROOT, 'docs/blocks', file), 'utf8').trim();
       assert.ok(agents.includes(text), `docs/blocks/${file} is in AGENTS.md as it is`);
     }
+  });
+
+  test("an app's own workflows mark only that app, and an app with a workflow of its own is no leg of ci.yml", () => {
+    const names = ['debrief', 'shell-demo', 'shell'];
+    assert.equal(appOfWorkflow('.gitea/workflows/debrief.yml', names), 'debrief');
+    assert.equal(appOfWorkflow('.gitea/workflows/debrief-fuzz.yml', names), 'debrief');
+    assert.equal(appOfWorkflow('.gitea/workflows/release-debrief.yml', names), 'debrief');
+    assert.equal(appOfWorkflow('.gitea/workflows/shell-demo-release.yml', names), 'shell-demo', 'the longest app name wins');
+    assert.equal(appOfWorkflow('.gitea/workflows/ci.yml', names), null);
+    assert.equal(appOfWorkflow('.gitea/actions/x/action.yml', names), null);
+    const d = run('.gitea/workflows/debrief.yml');
+    assert.deepEqual([d.apps, d.crates, d.ui, d.all], [['debrief'], false, false, false]);
+    for (const [name, app] of graph.apps) {
+      if (!app.workflow) continue;
+      assert.ok(existsSync(join(ROOT, '.gitea/workflows', app.workflow)), `${name}: ${app.workflow} exists`);
+      assert.match(readFileSync(join(ROOT, '.gitea/workflows', app.workflow), 'utf8'), new RegExp(`affected\\.mjs --ci --app ${name}`), `${app.workflow} asks the plan`);
+      assert.ok(!matrix(affected([], graph, { all: true }), graph).some((l) => l.app === name), `${name} is no leg of ci.yml`);
+    }
+  });
+
+  test('Debrief: its crates mark only Debrief, its UI only the UI half, and a shared crate does not reach it yet', () => {
+    const core = run('apps/debrief/crates/debrief-core/src/lib.rs');
+    assert.deepEqual([core.apps, core.kinds.debrief, core.crates], [['debrief'], ['rust'], false]);
+    assert.ok(core.packages.apps_debrief === undefined && core.packages['apps/debrief'].includes('debrief-app'));
+    assert.deepEqual(run('apps/debrief/app/src/main.ts').kinds.debrief, ['ui']);
+    assert.ok(!run('crates/paddock-jobs/src/lib.rs').apps.includes('debrief'), 'Debrief uses no shared crate by path today');
+    assert.deepEqual(run('apps/debrief/docs/ai/sql-views.md').apps, ['debrief']);
+    assert.deepEqual(run('apps/debrief/docs/adr/0001-x.md').apps, []);
   });
 });
 

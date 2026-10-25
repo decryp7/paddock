@@ -3,7 +3,7 @@
 # HTML report is uploaded as an artifact so runs can be compared. Raise the input sizes locally with
 # DEBRIEF_BENCH_IMPORT_LINES / DEBRIEF_BENCH_WORKSPACE_LINES.
 
-name: bench
+name: debrief-bench
 
 on:
   # Pushes run only when the engine changes (most pushes are UI or shell work and cannot move these numbers);
@@ -11,9 +11,9 @@ on:
   push:
     branches: [main]
     paths:
-      - "crates/debrief-core/**"
-      - "crates/debrief-store-duck/**"
-      - "crates/debrief-store-worker/**"
+      - "apps/debrief/crates/debrief-core/**"
+      - "apps/debrief/crates/debrief-store-duck/**"
+      - "apps/debrief/crates/debrief-store-worker/**"
   schedule:
     - cron: "47 3 * * *"
   workflow_dispatch:
@@ -27,6 +27,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Every step runs in the app's folder (ADR 0014: Debrief lives in apps/debrief) unless its job says otherwise.
+defaults:
+  run:
+    working-directory: apps/debrief
+
 jobs:
   # Decides whether this run is needed at all:
   # the nightly run is skipped while main is unchanged since the last green one.
@@ -37,6 +42,9 @@ jobs:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     outputs:
       run: ${{ steps.plan.outputs.run }}
+    defaults:
+      run:
+        working-directory: .
     steps:
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.
       - uses: actions/cache/restore@v4
@@ -44,7 +52,7 @@ jobs:
         if: github.event_name == 'schedule'
         with:
           path: .nightly-green
-          key: bench-nightly-green-${{ github.sha }}
+          key: debrief-bench-nightly-green-${{ github.sha }}
           lookup-only: true
 
       - name: Decide
@@ -82,8 +90,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: bench-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+            apps/debrief/target
+          key: bench-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: bench-${{ runner.os }}-
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
@@ -92,7 +100,7 @@ jobs:
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -116,15 +124,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: bench-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+            apps/debrief/target
+          key: bench-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}-${{ github.run_id }}
 
       - name: Upload criterion report
         if: always()
         uses: actions/upload-artifact@v3
         with:
           name: criterion-report
-          path: target/criterion
+          path: apps/debrief/target/criterion
           if-no-files-found: warn
 
   # The store at 10M events (ADR 0014 budgets): import, indexing, reads and the worker's memory. Nightly and on
@@ -148,7 +156,7 @@ jobs:
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -181,7 +189,8 @@ jobs:
       - name: The worker's memory budgets (20 copies of the samples)
         env:
           DEBRIEF_BENCH_COPIES: "20"
-        run: cargo test --release -p debrief-store-worker --test it worker:: -- --nocapture
+        run: |
+          cargo test --release -p debrief-store-worker --test it worker:: -- --nocapture
 
   # Records a fully green scheduled run for this commit; `plan` skips the next scheduled run while main is unchanged.
   # Never runs when anything failed, so a red commit is retried every night.
@@ -192,6 +201,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Marker file
         run: |
@@ -201,4 +213,4 @@ jobs:
       - uses: actions/cache/save@v4
         with:
           path: .nightly-green
-          key: bench-nightly-green-${{ github.sha }}
+          key: debrief-bench-nightly-green-${{ github.sha }}

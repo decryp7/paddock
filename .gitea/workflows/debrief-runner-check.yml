@@ -1,9 +1,14 @@
 # A quick check that each host runner is online and has the tools the build jobs expect. Run it by hand
 # (Actions > runner-check > Run workflow) after setting up or changing a runner.
-name: runner-check
+name: debrief-runner-check
 
 on:
   workflow_dispatch:
+
+# Every step runs in the app's folder (ADR 0014: Debrief lives in apps/debrief) unless its job says otherwise.
+defaults:
+  run:
+    working-directory: apps/debrief
 
 jobs:
   host:
@@ -14,6 +19,9 @@ jobs:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: .
     steps:
       # On Windows `bash` may resolve to WSL's, which can't see the job's script; put Git's bash first, as build.yml does.
       - name: Git bash on PATH (Windows)
