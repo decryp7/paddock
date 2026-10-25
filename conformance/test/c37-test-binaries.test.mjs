@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hakariPackage, namesPackage, packageName, workspaceMembers } from '../src/checks/C37-test-binaries.mjs';
+import { hakariPackage, namesPackage, packageName, workspaceMembers, workspaceTests } from '../src/checks/C37-test-binaries.mjs';
 import { findingsOf, makeApp, messages } from './helpers.mjs';
 
 const pkg = (name, deps = '') => `[package]\nname = "${name}"\nversion = "0.1.0"\n\n[dependencies]\n${deps}`;
@@ -74,6 +74,17 @@ test('C37: a --workspace test step covers every member unless the workspace is i
   assert.deepEqual(await findingsOf('C37', makeApp(wide)), []);
   const strict = workspace(ci(step('cargo nextest run --workspace --profile ci')));
   assert.equal((await findingsOf('C37', makeApp(strict))).length, 2, 'perCrateSteps: crates needs a step per member');
+});
+
+test('C37: a --workspace step does not cover a member it excludes', async () => {
+  assert.ok(workspaceTests('cargo nextest run --workspace --all-features', 'beta'));
+  assert.ok(!workspaceTests('cargo nextest run --workspace --exclude beta', 'beta'));
+  assert.ok(!workspaceTests('cargo nextest run --workspace --exclude=beta', 'beta'));
+  assert.ok(workspaceTests('cargo nextest run --workspace --exclude beta-extra', 'beta'));
+  assert.ok(!workspaceTests('cargo nextest run -p beta', 'beta'));
+  const excluded = await findingsOf('C37', makeApp(workspace({ ...ci(step('cargo nextest run --workspace --exclude beta --profile ci')), ...config({}) })));
+  assert.equal(excluded.length, 1);
+  assert.match(excluded[0].message, /beta is a workspace member that no workflow tests/);
 });
 
 test('C37: globbed members, a workspace without hakari, the hack crate itself, and a single crate at the root', async () => {

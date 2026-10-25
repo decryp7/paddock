@@ -191,6 +191,14 @@ describe('crateStepsMissing', () => {
   test('a prefix does not count for a longer name', () => {
     assert.deepEqual(crateStepsMissing(yaml('paddock-a'), ['paddock-ab']), ['paddock-ab']);
   });
+  test('a --workspace step covers every crate it does not exclude', () => {
+    const ws = '        run: cargo clippy --workspace --all-targets --all-features -- -D warnings\n        run: cargo nextest run --workspace --all-features --profile ci --exclude paddock-b\n';
+    assert.deepEqual(crateStepsMissing(ws, ['paddock-a', 'paddock-b']), ['paddock-b']);
+    const cov = '        run: cargo clippy --workspace --all-targets --all-features -- -D warnings\n          cargo llvm-cov nextest --profile ci --workspace --all-features --lcov\n';
+    assert.deepEqual(crateStepsMissing(cov, ['paddock-a']), []);
+    const noFeatures = '        run: cargo clippy --workspace --all-targets -- -D warnings\n        run: cargo nextest run --workspace --profile ci\n';
+    assert.deepEqual(crateStepsMissing(noFeatures, ['paddock-a']), ['paddock-a'], 'without --all-features the adapters are not built');
+  });
   test('the real ci.yml has a step for every workspace member', () => {
     const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps'], { cwd: join(root, 'crates'), encoding: 'utf8' }));
     const names = workspaceCrates(metadata).map((c) => c.name);

@@ -162,12 +162,20 @@ export function tagProblems(env, version) {
   return problems;
 }
 
-/** Workspace crates that have no clippy and test (nextest) step in ci.yml's per-crate job. */
+/**
+ * Workspace crates that ci.yml does not clippy and test (nextest) with every feature: neither a `-p <crate>` command nor a
+ * `--workspace` one that leaves it out with `--exclude`.
+ */
 export function crateStepsMissing(ciYaml, names) {
-  return names.filter((n) => {
+  const lines = (re) => ciYaml.split('\n').filter((l) => re.test(l));
+  const clippy = lines(/cargo clippy .*--all-features/);
+  const nextest = lines(/cargo (?:llvm-cov )?nextest(?: run)? .*--all-features/);
+  const covers = (line, n) => {
     const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return !new RegExp(`cargo clippy -p ${esc} [^\\n]*--all-features`).test(ciYaml) || !new RegExp(`cargo nextest run -p ${esc} --all-features`).test(ciYaml);
-  });
+    if (new RegExp(`(?:^|\\s)-p ${esc}(?=\\s|$)`).test(line)) return true;
+    return /\s--workspace\b/.test(line) && !new RegExp(`\\s--exclude(?:\\s+|=)${esc}(?=\\s|$)`).test(line);
+  };
+  return names.filter((n) => !clippy.some((l) => covers(l, n)) || !nextest.some((l) => covers(l, n)));
 }
 
 /** What a run does with each crate and npm package. `published` maps a name to the versions the registry has, or is null (not asked). */
@@ -332,7 +340,7 @@ async function main() {
     ...crateProblems(crateList),
     ...lockstepProblems(packages),
     ...shellVersionProblems(crateList, packages),
-    ...crateStepsMissing(ciYaml, crateList.map((c) => c.name)).map((n) => `${n} has no clippy and test step in .gitea/workflows/ci.yml (job crate)`),
+    ...crateStepsMissing(ciYaml, crateList.map((c) => c.name)).map((n) => `${n} is not linted and tested with every feature in .gitea/workflows/ci.yml (job crate)`),
     ...(opts.publish ? tagProblems(env, lead?.version) : []),
   ];
   if (problems.length) throw new Error(`refusing to continue:\n  ${problems.join('\n  ')}`);
