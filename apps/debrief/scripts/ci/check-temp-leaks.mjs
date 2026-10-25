@@ -26,6 +26,34 @@ export function newLeaks(current, baseline = []) {
   return current.filter((n) => !known.has(n));
 }
 
+/** One name's trailing segment is per-run noise: a pid, a counter, a random hex id or a tempfile suffix. */
+function isNoise(segment) {
+  return /\d/.test(segment) || (/^[A-Za-z0-9]{6}$/.test(segment) && /[A-Z]/.test(segment));
+}
+
+/**
+ * The fixture a leaked name comes from: the name without its per-run suffixes (`debrief-ai-find-36441-0` ->
+ * `debrief-ai-find-*`), so a long list reads as a few offenders to fix.
+ */
+export function leakPattern(name) {
+  const parts = name.split('-');
+  let keep = parts.length;
+  while (keep > 1 && isNoise(parts[keep - 1])) keep--;
+  return keep === parts.length ? name : `${parts.slice(0, keep).join('-')}-*`;
+}
+
+/** The offenders: each pattern with how many folders it left, most first (ties by name). */
+export function groupLeaks(names) {
+  const counts = new Map();
+  for (const n of names) {
+    const p = leakPattern(n);
+    counts.set(p, (counts.get(p) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([pattern, count]) => ({ pattern, count }))
+    .sort((a, b) => b.count - a.count || a.pattern.localeCompare(b.pattern));
+}
+
 function readBaseline(file) {
   try {
     const v = JSON.parse(readFileSync(file, 'utf8'));
@@ -54,7 +82,10 @@ export function main(argv, log = console) {
     log.log(`no debrief-*/imt-* folders left in ${dir}`);
     return 0;
   }
-  log.error(`${leaked.length} test folder(s) left in ${dir} (tests must use tempfile::TempDir or a guard that cleans on panic):`);
+  log.error(`${leaked.length} test folder(s) left in ${dir} (tests must use tempfile::TempDir or a guard that cleans on panic).`);
+  log.error('Offenders (grep the tests for the name before the *):');
+  for (const { pattern, count } of groupLeaks(leaked)) log.error(`  ${String(count).padStart(5)}  ${pattern}`);
+  log.error('Folders:');
   for (const n of leaked) log.error(`  ${n}`);
   return 1;
 }
