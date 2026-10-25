@@ -5,6 +5,10 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Added
+- Review 2 verification fixes. `pd-table`: a required column's floor is `min(128px, 40%)`, so in a phone-width pane the rows fit the
+  body (no sideways scroll inside the table, the last row action stays inside, header and rows share one edge with a scrolling body).
+  Recent files: the file name shortens in the middle (the extension survives) through `pd-path-text`, and a bare name takes no space
+  for an empty directory part.
 - Review 2 of the files and storage UI. The clear confirmation no longer repeats its title and is sentence case ("Clear logs?",
   "Up to 4.8 MB is removed."); loose entries and the folded smallest items of a tree share one "Other items" group (no group of one that
   repeats its row, no glyph that looks like a menu); `pd-table`'s `groupMono` takes a predicate, a column track in `em` is documented as

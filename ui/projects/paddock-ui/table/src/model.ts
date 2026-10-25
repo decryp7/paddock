@@ -194,9 +194,13 @@ function minPx<T>(c: PdColumn<T>): number {
   return px ? Number(px[1]) : 64;
 }
 
-/** The grid track of a column: required ones never shrink under {@link PD_PRIMARY_MIN_PX}. */
+/**
+ * The grid track of a column: required ones do not shrink under {@link PD_PRIMARY_MIN_PX}, except in a table so narrow that the
+ * floor plus the other columns would not fit (a phone-width pane): then the floor is 40 % of the grid, so the row never grows wider
+ * than the body and the last action stays inside the table.
+ */
 export function columnTrack<T>(c: PdColumn<T>): string {
-  const floor = `${PD_PRIMARY_MIN_PX}px`;
+  const floor = `min(${PD_PRIMARY_MIN_PX}px, 40%)`;
   if (!c.required) return c.width ?? 'minmax(0, 1fr)';
   if (!c.width) return `minmax(${floor}, 2fr)`;
   return c.width.replace(/^minmax\(\s*0(px)?\s*,/, `minmax(${floor},`);

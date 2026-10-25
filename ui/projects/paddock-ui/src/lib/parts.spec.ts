@@ -104,7 +104,10 @@ describe('PdPathText', () => {
     const win = make({ value: 'C:\\logs\\app\\system.log' });
     expect(win.querySelector('.pd-sep')?.textContent).toBe('\\');
     expect(win.querySelector('.pd-head')?.textContent).toBe('C:\\logs\\app');
-    expect(make({ value: 'system.log' }).querySelector('.pd-sep')?.textContent).toBe('');
+    // A bare name has no directory part at all, so it takes no space before the name.
+    const bare = make({ value: 'system.log' });
+    expect(bare.querySelector('.pd-sep')).toBeNull();
+    expect(bare.querySelector('.pd-head')).toBeNull();
   });
 
   it('shows what it is given but copies and titles the full value', async () => {

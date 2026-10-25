@@ -15,7 +15,7 @@ import { copyText } from './clipboard';
   selector: 'pd-path-text',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph],
-  template: `<span class="pd-text" [class.pd-plain]="plain()" [attr.title]="whole()" data-testid="path-text"><span class="pd-head">{{ dirText() }}</span><span class="pd-sep">{{ sepText() }}</span><span class="pd-name">{{ parts().name }}</span><span class="pd-tail">{{ parts().tail }}</span></span>
+  template: `<span class="pd-text" [class.pd-plain]="plain()" [attr.title]="whole()" data-testid="path-text">@if (dirText() || sepText()) {<span class="pd-head">{{ dirText() }}</span><span class="pd-sep">{{ sepText() }}</span>}<span class="pd-name">{{ parts().name }}</span><span class="pd-tail">{{ parts().tail }}</span></span>
     @if (copy()) {
       <button class="pd-copy" type="button" [attr.aria-label]="copied() ? copiedLabel : copyLabel" [attr.title]="copied() ? copiedLabel : copyLabel" (click)="doCopy($event)">
         <pd-glyph [name]="copied() ? 'check' : 'copy'" [size]="14" />

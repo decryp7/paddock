@@ -82,6 +82,16 @@ test.describe('storage (plan X32)', () => {
     // No sideways scroll and every row still one line with its actions reachable (hover icons and the "…" menu).
     const row = page.locator('.pd-row[data-key="cache"]');
     await row.hover();
+    // The rows fit the body (nothing scrolls sideways inside the table) and the last action stays inside the table, even though the
+    // body scrolls vertically.
+    const fit = await page.getByTestId('storage-table').evaluate((t) => {
+      const body = t.querySelector('.pd-body') as HTMLElement;
+      const grid = t.querySelector('.pd-grid')!.getBoundingClientRect();
+      const more = t.querySelector('.pd-row[data-key] .pd-more')!.getBoundingClientRect();
+      return { scroll: body.scrollWidth, client: body.clientWidth, inside: more.right <= grid.right + 0.5 && more.left >= grid.left };
+    });
+    expect(fit.scroll).toBeLessThanOrEqual(fit.client);
+    expect(fit.inside).toBe(true);
     // A narrow table keeps one line per row: the actions are behind the "…" menu.
     await expect(row.getByRole('button', { name: 'More actions' })).toBeVisible();
     await row.getByRole('button', { name: 'More actions' }).click();
