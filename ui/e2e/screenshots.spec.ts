@@ -273,8 +273,8 @@ doc({
         await loaded(page);
         await freeze(page);
         await tap(page, page.locator('button.cmd[data-command="sd.job.start"]'));
-        // The View menu (after File).
-        await tap(page, page.getByRole('menubar').getByRole('menuitem').nth(1));
+        // The View menu (File, Edit, View, Help).
+        await tap(page, page.getByRole('menubar').getByRole('menuitem').nth(2));
         await tap(page, page.getByRole('menu').first().locator('[aria-haspopup]').first());
         await settle(page);
       },

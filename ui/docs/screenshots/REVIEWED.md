@@ -47,4 +47,3 @@ A row is valid only while its hash equals the image; a regenerated image that ch
 | light/spotter/empty-state.png | 4a9dfe0cc01599ef201d7fab1539b3cc0acfbde7ed907275714eecc134adfe35 | independent review (Opus) | 2026-10-25 |
 | light/spotter/sparkline.png | 49195fc46ef7aed16e3e4e24d0bff99e083118dddfb20df232fc2e16b5c65c46 | independent review (Opus) | 2026-10-25 |
 | light/spotter/status-pill.png | fb0fda8dc9615112a0983b2d5c613051c9fa71829e34063003d34d88a7289f52 | independent review (Opus) | 2026-10-25 |
-| shell-demo/theme-pseudo-locale-dark.png | df5d91da736d89defefbb010b6f2874048dc72a076529fcb2b5764fdc803f407 | independent review (Opus) | 2026-10-25 |
