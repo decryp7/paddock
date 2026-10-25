@@ -1,5 +1,5 @@
 import { panelTitle } from '@decryp7/paddock-ui/workbench';
-import { afterNextRender, ApplicationRef, computed, createComponent, DestroyRef, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
+import { afterNextRender, ApplicationRef, computed, createComponent, EnvironmentInjector, inject, Injectable, Injector, signal, type Signal } from '@angular/core';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
 import { panelId as makePanelId, parsePanelId, WorkbenchRegistry, type PerspectiveDef, type ShowViewOptions } from '@decryp7/paddock-ui/workbench';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
@@ -29,13 +29,6 @@ import { cycle, openSwitcher, selected, SwitcherState, switcherItems, touchMru }
 import { viewKind, ViewKind } from './view-kind';
 import { Perspectives } from './perspectives';
 import { WindowLayouts } from './window-layouts';
-
-let liveDock: WorkbenchDock | null = null;
-
-/** The dock of this window, for the contributed commands (null before the frame provides one). */
-export function currentDock(): WorkbenchDock | null {
-  return liveDock;
-}
 
 export { keepGroupsUnscrolled, observeFloatingAria } from './dock-dom';
 
@@ -117,10 +110,6 @@ export class WorkbenchDock {
 
   constructor() {
     inject(DockPolicy).start({ ready: this.ctx.apiReady, syncConditionalViews: () => this.syncConditionalViews() });
-    liveDock = this;
-    inject(DestroyRef).onDestroy(() => {
-      if (liveDock === this) liveDock = null;
-    });
   }
 
   /** The dockview instance (null before attach). */
