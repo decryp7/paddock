@@ -332,3 +332,26 @@ is. Rule 18 (binding) says paths **and file names** truncate in the middle. `.pd
 Fix V-1 and V-2, then re-shoot `*-storage-320`, `*-storage-320-menu` and `*-files-320` in both themes. If the `…` sits
 fully inside the table, the header and rows keep one edge with the menu open, and the file name keeps `.log`, this is
 approved.
+
+---
+
+# Review 2 verification, round 2 (2026-10-25, `origin/shell/integrate` at `0ac5baa`, which contains `1eff1b1`)
+
+Same reviewer, read-only. I checked the re-taken `*-files-320`, `*-storage-320` and `*-storage-320-menu` in both themes,
+and the diff `7f39670..0ac5baa` of `table/src/model.ts` and `shell/files/src/recent-files.ts`.
+
+- **V-1 fixed.** At rest the row `…` sits fully inside the table, with about 25 CSS px to spare before the border. With
+  the menu open, header and rows keep one edge: "Kept" and the row names both start at x=77, and "Size" and its values
+  both end at x=443 (device px). Nothing shifts sideways. The menu reads "What is inside", "Show in the file manager",
+  a divider, then "Clear logs" in danger, last.
+- **V-2 fixed.** The name keeps its extension with a middle ellipsis (`ser… 2026-10-24-11-30.log`), and the path line
+  keeps its separator (`/demo/pro… /a-narrow-pane`).
+- **Gap after "…": accepted as is.** The visible slack after the ellipsis is the coordinator's agreed deviation (text-overflow slack at character
+  granularity). It shows in both lines but stays readable. P3 for a later pass: let the head take the slack (or
+  measure the cut at sub-character width), and give the name's head a larger share than 3 characters
+  (`service-20…11-30.log` reads better than `ser… 2026-…`).
+
+**Verdict: approved.** The glyphs (`file`, `file-text`, `file-code`, `archive`, `reveal`), the Files list, Settings >
+Storage, the size tree, both confirm windows and the shared `pd-table` additions (`groupSummary`, `groupMono` with a
+predicate, `countLabel`, the measured scrollbar gutter) meet the bar at 1440 and at 320 in both themes. Open, non-blocking:
+the P3 above, and the shell menu-bar wrap at 320, which another agent owns.
