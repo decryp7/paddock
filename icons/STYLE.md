@@ -91,11 +91,17 @@ defs.
 
 ## 5. Size and placement
 
-- **Fit by mass:** `fitBox(outlinePoints, { mass: 0.72, dx, dy })` scales the object so its outline (all outer corners, including
-  ground details) is 72 % of the tile width (824 on the 1024 grid); the visible mass rule is 70 to 75 %. `maxHeight` (default 560)
-  caps tall objects, which then come out narrower; that is fine as long as the measured mass stays at 70 % or more. Measure the
-  render with `visibleMass(pixels, barePixels)` (`tools/iso.mjs`) and adjust `mass` until it lands in 70 to 75 %. The fixed
-  `box: [690, 560]` mode is kept for the Paddock pit building only: wide, low objects (binoculars, tablet) reach 78 to 80 % in it.
+- **Matched visual weight:** every icon carries the same weight in the row, whatever its proportions. Fit with
+  `fitBox(outlinePoints, { weight: 0.68, dx, dy })`: the outline (all outer corners, including ground details) gets a geometric-mean
+  size sqrt(width x height) of 0.68 of the tile width (824 on the 1024 grid), the Paddock pit building's value. A wide object
+  (binoculars, tablet) comes out wider and lower, a tall one (radio, camera on its tripod) narrower and taller. Caps: at most 80 % of
+  the tile wide and 78 % high; an object that hits a cap comes out slightly lighter.
+- **Measure it:** `visibleBox(pixels, basePixels)` (`tools/iso.mjs`) on the 1024 render against the empty tile
+  (`masterSvg(app, { glyph: [], palette })`) gives width, height, weight and ink area. Target weight 0.68 to 0.78 measured (the
+  measurement includes the contact and long shadows: the pit building measures 0.77), and ink area within about 0.08 of the
+  pit building's 0.31, so a light open object (a tripod) is not too thin beside a solid one. Adjust `weight` until both land.
+- The fixed `box: [690, 560]` mode is kept for the Paddock pit building (it lands on weight 0.68 that way); `mass` is kept for
+  compatibility. Do not use either for new icons.
 - **Clipping:** `masterSvg` clips the art to the tile, so long shadows never spill past the squircle or the Windows square.
 - **Optical centring:** isometric masses lean to the upper right. Shift with `dx` and `dy` (Paddock: -4, +10) and check the icon
   beside the others at 128.
@@ -140,7 +146,7 @@ Rule: a part that cannot be drawn on whole pixels at a size is dropped at that s
 | Tile CVD distance | every tile at least 17.7 normal, 11.6 protan, 13.6 deutan, 10.7 tritan from every other | `node tools/cvd.mjs` |
 | Contrast | the object's front against the tile base at least 3:1 (Paddock `#C9D0D8` on `#2B3038`: 9.6:1) | `contrast()` in `tools/cvd.mjs` |
 | Face steps | adjacent faces at least 8 L apart | OKLab |
-| Size | visible mass 70 to 75 % of the tile width at 1024 | `visibleMass()` in `tools/iso.mjs` |
+| Visual weight | fitted with `weight: 0.68`; measured weight 0.68 to 0.78 and ink area within 0.08 of the pit building's | `visibleBox()` in `tools/iso.mjs` |
 | Coverage at 16 | 18 to 26 % (line glyphs), up to 30 % (filled silhouettes) | `coverage()` in `tools/paddock-symbols.mjs` |
 | Tray alpha | every pixel fully opaque or fully transparent (except a whole-glyph state dim) | magnify the template |
 | Whole pixels | 32, 24 and 16 frames have no half-tone edges on repeated parts | sheet close-ups |

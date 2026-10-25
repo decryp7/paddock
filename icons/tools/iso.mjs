@@ -31,37 +31,48 @@ export const box = (s0, s1, d0, d1, t0, t1) => ({
 
 // ---------- placement ----------
 /**
- * Fit an object into the family's glyph area. `pts` are [s, d, t] points of its outline (corners of the outermost boxes, including
- * ground details). Two modes:
- *  - `mass` (use this for new icons): the outline's width is set to `mass` x the tile width (824 on the 1024 grid), so the visible
- *    mass lands on the rule (0.70 to 0.75; 0.72 is the family's target) whatever the object's proportions; `maxHeight` (default
- *    560) caps tall objects, which then come out narrower.
- *  - `box` (the Paddock pit building, kept for it): the outline fits a w x h box (690 x 560), whichever side binds first. Wide, low
- *    objects hit 78 to 80 % in a 690 box; do not use it for them.
- * Centred on (512 + dx, 512 + dy). Returns the scale, the origin, the outline's fitted size and the SVG transform for the art group.
+ * Fit an object so every icon carries the same visual weight in the row. `pts` are [s, d, t] points of its outline (corners of the
+ * outermost boxes, including ground details). Modes:
+ *  - `weight` (use this for every new icon; 0.68 is the family's target, the Paddock pit building's value): the outline's
+ *    geometric-mean size sqrt(width x height) is `weight` x the tile width (824 on the 1024 grid), so a wide object and a tall one
+ *    carry the same weight. Caps: the outline is at most `maxWidth` (0.80) of the tile wide and `maxHeight` (0.78) high; an object
+ *    that hits a cap comes out a little lighter, which is accepted.
+ *  - `mass`: the outline's width is `mass` x the tile width, capped by `maxHeight` in units (kept for compatibility; prefer weight).
+ *  - `box` (the Paddock pit building, kept for it): the outline fits a w x h box (690 x 560), whichever side binds first.
+ * Centred on (512 + dx, 512 + dy). Returns the scale, the origin, the outline's fitted size and weight (as tile fractions), and the SVG
+ * transform for the art group.
  */
-export function fitBox(pts, { box, mass, maxHeight = 560, tile = 824, dx = 0, dy = 0 } = {}) {
+export function fitBox(pts, { box, mass, weight, maxWidth = 0.8, maxHeight, tile = 824, dx = 0, dy = 0 } = {}) {
   const xs = pts.map(([s, d]) => (s + d) * C), ys = pts.map(([s, d, t]) => (s - d) / 2 - t);
   const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
-  const [bw, bh] = mass ? [mass * tile, maxHeight] : box ?? [690, 560];
-  const k = Math.min(bw / w, bh / h);
+  let k;
+  if (weight) k = Math.min((weight * tile) / Math.sqrt(w * h), (maxWidth * tile) / w, ((maxHeight ?? 0.78) * tile) / h);
+  else if (mass) k = Math.min((mass * tile) / w, (maxHeight ?? 560) / h);
+  else { const [bw, bh] = box ?? [690, 560]; k = Math.min(bw / w, bh / h); }
   const ox = 512 + dx - k * (Math.max(...xs) + Math.min(...xs)) / 2, oy = 512 + dy - k * (Math.max(...ys) + Math.min(...ys)) / 2;
-  return { k, ox, oy, width: k * w, height: k * h, transform: `translate(${f(ox)} ${f(oy)}) scale(${f(k)})` };
+  return { k, ox, oy, width: (k * w) / tile, height: (k * h) / tile, weight: (k * Math.sqrt(w * h)) / tile, transform: `translate(${f(ox)} ${f(oy)}) scale(${f(k)})` };
 }
 
 /**
- * Measure the visible mass of a rendered master: the share of the tile width (824 of 1024 on macOS) in which the art changes the
- * bare tile by more than `threshold` levels (the faint long shadow below it does not count). Pass RGBA pixel buffers of the master and
- * of the same master with `bare: true`, both rendered at 1024 (resvg `render().pixels`).
+ * Measure a rendered master: the bounding box of the pixels where the art changes the empty tile by more than `threshold` levels,
+ * as fractions of the tile width (824 of 1024 on macOS), its visual weight sqrt(width x height) and its ink area (share of the tile
+ * area). Pass RGBA buffers (resvg `render().pixels`) of the master and of the same tile without the glyph
+ * (`masterSvg(app, { glyph: [] , palette })`), both at 1024. Strong shadows count; the faint long-shadow fringe does not.
  */
-export function visibleMass(pixels, barePixels, { px = 1024, tile = 824, threshold = 40 } = {}) {
-  let x0 = px, x1 = -1;
-  for (let x = 0; x < px; x++) for (let y = 0; y < px; y++) {
+export function visibleBox(pixels, basePixels, { px = 1024, tile = 824, threshold = 40 } = {}) {
+  let x0 = px, x1 = -1, y0 = px, y1 = -1, n = 0;
+  for (let y = 0; y < px; y++) for (let x = 0; x < px; x++) {
     const i = 4 * (y * px + x);
-    if (Math.abs(pixels[i] - barePixels[i]) + Math.abs(pixels[i + 1] - barePixels[i + 1]) + Math.abs(pixels[i + 2] - barePixels[i + 2]) > threshold) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); break; }
+    if (Math.abs(pixels[i] - basePixels[i]) + Math.abs(pixels[i + 1] - basePixels[i + 1]) + Math.abs(pixels[i + 2] - basePixels[i + 2]) > threshold) {
+      n++; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
   }
-  return x1 < 0 ? 0 : (x1 - x0 + 1) / tile;
+  if (x1 < 0) return { width: 0, height: 0, weight: 0, area: 0 };
+  const width = (x1 - x0 + 1) / tile, height = (y1 - y0 + 1) / tile;
+  return { width, height, weight: Math.sqrt(width * height), area: n / (tile * tile) };
 }
+/** The visible width alone (the old mass rule), from visibleBox. */
+export const visibleMass = (pixels, basePixels, opts) => visibleBox(pixels, basePixels, opts).width;
 
 // ---------- shading ----------
 /**
