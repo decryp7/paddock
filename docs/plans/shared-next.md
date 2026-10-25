@@ -584,3 +584,10 @@ Consumers, in order: **Debrief** first (semantic search over message templates f
 36-query set; a constrained Pitwall rewrite comes later), then **Pacenotes** (code search per its ADR 0001). Candidates,
 only if their designs need it: Sighter (label matching by meaning), Spotter (release-note search), Dyno (knowledge-pack
 lookup). fastembed is rejected (ONNX Runtime weight, build-time download, no Intel macOS build).
+
+To measure in X55 (user, 2026-10-25), each adopted only if it clears the bar on the stored query sets:
+- **Domain-tuned Model2Vec:** distil or fine-tune the static model on our own log templates and code (Tokenlearn or
+  fine-tuning in model2vec), so terms such as `ENOSPC` sit near "disk full". Static vectors lose context, order and
+  negation; training on our vocabulary recovers part of that at the same speed.
+- **Qwen rerank:** Model2Vec (fused with BM25) picks the top 50 fast; when Pitwall runs, Qwen3-Embedding re-scores only
+  those 50. Report quality and added latency against Qwen over the whole index.
