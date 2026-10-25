@@ -265,6 +265,10 @@ export function workbenchUiRewrites({ name, accent }) {
       ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],
       ['"outDir": "../../out-tsc/workbench-demo"', '"outDir": "./out-tsc/app"'],
     ],
+    'tsconfig.spec.json': [
+      ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],
+      ['"outDir": "../../out-tsc/workbench-demo-spec"', '"outDir": "./out-tsc/spec"'],
+    ],
   };
 }
 
@@ -285,10 +289,11 @@ export function rewrite(file, text, rules) {
 }
 
 /** The new app's Angular workspace (`app/package.json`) with the demo's dependencies and the Paddock packages. */
-export function appPackageJson({ id, name, template = 'shell-demo' }, uiPackage, paddockVersion, tauriCli) {
+export function appPackageJson({ id, name, template = 'shell-demo' }, uiPackage, paddockVersion, tauriCli, hasUnitTests = true) {
   const deps = { ...uiPackage.dependencies, '@decryp7/paddock-ui': `^${paddockVersion}` };
   const dev = Object.fromEntries(
-    Object.entries(uiPackage.devDependencies).filter(([k]) => !['ng-packagr', 'sass', 'jsdom', '@vitest/coverage-v8'].includes(k)),
+    // The unit tests' DOM (jsdom) stays when the app has unit tests.
+    Object.entries(uiPackage.devDependencies).filter(([k]) => !['ng-packagr', 'sass', '@vitest/coverage-v8', ...(hasUnitTests ? [] : ['jsdom'])].includes(k)),
   );
   return {
     name: `${id}-app`,
@@ -298,7 +303,8 @@ export function appPackageJson({ id, name, template = 'shell-demo' }, uiPackage,
     scripts: {
       start: 'ng serve --port 4200',
       build: 'ng build',
-      test: 'ng test --watch=false',
+      ...(hasUnitTests ? { test: 'ng test --watch=false' } : {}),
+      e2e: 'playwright test --project=chromium',
       tauri: 'tauri',
     },
     dependencies: Object.fromEntries(Object.entries(deps).sort(([a], [b]) => a.localeCompare(b))),
@@ -306,6 +312,49 @@ export function appPackageJson({ id, name, template = 'shell-demo' }, uiPackage,
       Object.entries({ ...dev, '@decryp7/paddock-conformance': `^${paddockVersion}`, '@decryp7/paddock-e2e': `^${paddockVersion}`, '@tauri-apps/cli': tauriCli }).sort(([a], [b]) => a.localeCompare(b)),
     ),
   };
+}
+
+/**
+ * The new app's end-to-end smoke suite (`app/playwright.config.ts`, `app/e2e/smoke.spec.ts`) on `@decryp7/paddock-e2e`:
+ * the window starts without page errors, is axe-clean in both themes and has no horizontal scroll at 320 px (rule 18); a
+ * workbench app also shows its dock and opens the command palette. The port comes from `PW_PORT` (one per worktree).
+ */
+export function e2eSmoke({ id, name, template = 'shell-demo' }) {
+  const workbench = template === 'workbench-demo';
+  const config = `import { paddockConfig } from '@decryp7/paddock-e2e';
+
+// ${name}'s end-to-end specs (plan X39): Chromium in a branch (\`npm run e2e\`), WebKit too on the combined result and in CI.
+export default paddockConfig({ app: '${id}', defaultPort: 4200, serve: (port) => \`npx ng serve --port \${port}\` });
+`;
+  const ready = workbench ? "page.locator('pd-dock [role=tab]').first()" : "page.locator('#pd-main')";
+  const extra = workbench
+    ? `
+  // The command palette opens from the keyboard and lists the commands.
+  const workbench = new WorkbenchApp(page);
+  await workbench.palette.open();
+  await expect(workbench.palette.options.first()).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(workbench.palette.dialog).toBeHidden();
+`
+    : '';
+  const spec = `import { axeInThemes, expect, expectNoHorizontalScroll, test${workbench ? ', WorkbenchApp' : ''} } from '@decryp7/paddock-e2e';
+
+// The smoke suite every app starts with (scripts/new-app.mjs): replace and extend it as the app grows.
+test('starts without errors and is accessible in both themes', async ({ page, pageErrors }) => {
+  await page.goto('/');
+  await expect(${ready}).toBeVisible();
+${extra}  expect(await axeInThemes(page)).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test('has no horizontal scroll at 320 px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto('/');
+  await expect(${ready}).toBeVisible();
+  await expectNoHorizontalScroll(page, '320 px');
+});
+`;
+  return { 'app/playwright.config.ts': config, 'app/e2e/smoke.spec.ts': spec };
 }
 
 /** The new app's `angular.json`: one application, built from the demo's settings, with the package's stylesheet. */
@@ -337,6 +386,10 @@ export function angularJson(demoProject, template = 'shell-demo') {
             configurations: { production: { buildTarget: 'app:build:production' }, development: { buildTarget: 'app:build:development' } },
             defaultConfiguration: 'development',
           },
+          // The demo's unit tests (Vitest), when it has them: the app keeps them and adds its own.
+          ...(demoProject.architect.test
+            ? { test: { ...structuredClone(demoProject.architect.test), options: { ...demoProject.architect.test.options, tsConfig: 'tsconfig.spec.json', setupFiles: ['src/test-setup.ts'] } } }
+            : {}),
         },
       },
     },
@@ -468,14 +521,16 @@ export function createApp(input, today = new Date().toISOString().slice(0, 10)) 
       for (const f of readdirSync(trayDir)) if (f.startsWith('shell-demo-')) rmSync(join(trayDir, f));
     }
     const json = (p, v) => writeFileSync(join(dest, p), `${JSON.stringify(v, null, 2)}\n`);
-    json('app/package.json', appPackageJson(args, uiPackage, paddockVersion, tauriCli));
+    json('app/package.json', appPackageJson(args, uiPackage, paddockVersion, tauriCli, !!angular.projects[t.id].architect.test));
     json('app/angular.json', angularJson(angular.projects[t.id], args.template));
     json('app/tsconfig.json', tsconfigJson(uiTsconfig));
+    mkdirSync(join(app, 'e2e'), { recursive: true });
+    for (const [f, text] of Object.entries(e2eSmoke(args))) writeFileSync(join(dest, f), text);
     writeFileSync(join(dest, 'CHANGELOG.md'), changelog(args.name, today, args.template));
     writeRepoRoot(dest, args);
     writeFileSync(
       join(dest, '.gitignore'),
-      '/app/node_modules/\n/app/dist/\n/app/.angular/\n/app/out-tsc/\n/app/src-tauri/target/\n/app/src-tauri/gen/\n.DS_Store\n',
+      '/app/node_modules/\n/app/dist/\n/app/.angular/\n/app/out-tsc/\n/app/src-tauri/target/\n/app/src-tauri/gen/\n/app/playwright-report/\n/app/blob-report/\n.DS_Store\n',
     );
     const found = leftovers(files, args.template);
     if (found.length) throw new Error(`the copy still names the demo:\n${found.join('\n')}`);
