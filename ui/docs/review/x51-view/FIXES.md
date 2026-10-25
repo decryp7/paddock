@@ -75,3 +75,15 @@ The new contact sheet is `review-4/` (one run from one commit, named in its READ
 Found while fixing, not in the review: `SCROLL_CSS` makes every scroll region `position: relative`, because the visually hidden text of a table or matrix (`position: absolute`) escaped the region and widened the whole page by 3 px at 320 px (the e2e "no horizontal scroll at 320 px" test was red on the integration branch); that test and P2-12 now treat the review filter as a region that scrolls by design. Known, for the next review: in the new radial sample the label "tokens" touches the right edge of the hub box (`graph-radial-bows`).
 
 Rule 40 (from the workbench review 4): `model.ts` no longer has a status to glyph map. `TONE_STATUS` names the status of a tone and `toneGlyph` / `ICON_GLYPH` take the glyph from `statusGlyph` (`@decryp7/paddock-ui/icons`), so a `bad` tone and the `error` icon draw the circle-x and `warn` / `warning` the triangle. Test: `model.spec.ts` "has no status glyph map of its own", and the icons lint (`status.spec.ts`) over every template. `TONE_GLYPH` is gone from the public API (`TONE_STATUS`, `toneGlyph` replace it). Recaptured in `review-4/`, both themes.
+
+## Review 4 (0 P1, 1 P2, 1 P3) to fixes
+
+The new contact sheet is `review-5/` (one run from one commit, named in its README): NOT self-approved. Tests: Vitest `layout.spec.ts` ("edge labels"), `route.spec.ts`.
+
+| Id | Change | Test |
+|---|---|---|
+| P2-1 | One label placer (`placeLabels` in `layout.ts`): a bowed edge's label starts at the apex of the bow, on the outward side (away from the middle of the drawing), half its extent plus 4 units from the line; the label rectangle must touch no box, no edge path (its own included), no earlier label and stay inside the canvas, else the placer walks distance (0, 8, 16 more), place along the line (50, 40/60, 30/70, 20/80 %) and side, deterministically; the canvas (and the radial left/top shift) holds the label | `layout.spec.ts` "no label touches a box or an edge" over the sample graphs (both layouts), the routing cases and three label cases; it failed first on the old placer (9 cases: "tokens touches edge", "needs db touches edge a>c", the ring labels touching boxes and their own edges, "across the hub touches box c") |
+| P3-1 | A radial edge takes the first bow that clears the boxes and crosses no earlier edge within its last 40 units; the shell to chromium edge now bows over the hub | `layout.spec.ts` "no edge of the radial sample graphs crosses another within its last segment", and the edge has a `Q` curve; `route.spec.ts` for the geometry helpers |
+
+Found while fixing: the label of the new bowed edge was outside the canvas at x = -21 (the radial left shift only looked at edge paths); the shift now includes labels, and the label test asserts it stays inside the canvas.
+

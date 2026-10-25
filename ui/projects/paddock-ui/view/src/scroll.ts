@@ -18,21 +18,24 @@ export const SCROLL_CSS = `
  * scroll it, and a table that fits adds no stop. Watches the region and its first child (the table or drawing) for size changes, and
  * says which side has more to show (`data-more`, see {@link SCROLL_CSS}).
  */
-@Directive({ selector: '[pdViewScroll]', host: { '[attr.tabindex]': 'overflowing() ? 0 : null', '[attr.data-more]': 'more()', '(scroll)': 'measure()' } })
+@Directive({ selector: '[pdViewScroll]', host: { '[attr.tabindex]': 'overflowing() ? 0 : null', '[attr.data-more]': 'more()', '[attr.data-layout]': "settled() ? 'done' : 'pending'", '(scroll)': 'measure()' } })
 export class PdViewScroll {
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly destroyRef = inject(DestroyRef);
   protected readonly overflowing = signal(false);
+  /** True once the region has been measured after its first render (`data-layout="done"`): the signal tests wait for before they measure. */
+  protected readonly settled = signal(false);
   /** Which side continues: `start`, `end`, `both`, or null when everything is in view. */
   protected readonly more = signal<'start' | 'end' | 'both' | null>(null);
 
   constructor() {
     afterNextRender(() => {
-      if (typeof ResizeObserver === 'undefined') return;
+      if (typeof ResizeObserver === 'undefined') return this.settled.set(true);
       const watch = new ResizeObserver(() => this.measure());
       watch.observe(this.element);
       if (this.element.firstElementChild) watch.observe(this.element.firstElementChild);
       this.measure();
+      this.settled.set(true);
       this.destroyRef.onDestroy(() => watch.disconnect());
     });
   }
