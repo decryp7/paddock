@@ -389,6 +389,17 @@ export class PdAssistant {
       const button = this.declineButton()?.nativeElement;
       if (ask?.destructive && button) button.focus();
     });
+    // Keeps the latest item in view when the log itself gets shorter under a user at the bottom (an approval appears or opens
+    // its Details below it): the browser keeps the scroll position, which would hide the waiting card (review 4 P3-1; DOM only).
+    effect((onCleanup) => {
+      const el = this.log()?.nativeElement;
+      if (!el || typeof ResizeObserver === 'undefined') return;
+      const watch = new ResizeObserver(() => {
+        if (this.pinned) el.scrollTop = el.scrollHeight;
+      });
+      watch.observe(el);
+      onCleanup(() => watch.disconnect());
+    });
     // The question box shows the draft. Not a `[value]` binding: that is not re-rendered when typing and Enter happen in one
     // task (the draft goes 'x' then '' before any render), so the sent question would stay in the box (DOM only).
     effect(() => {
