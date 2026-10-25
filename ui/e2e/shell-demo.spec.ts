@@ -35,6 +35,22 @@ test('the menu bar is one line at 320 px and the title bar clips nothing (screen
   expect(last && last.x + last.width, 'the last menu is not cut at the window edge').toBeLessThanOrEqual(320);
 });
 
+test('the app name is cut to one ellipsis with no space before it at any narrow width (screenshot review P3)', async ({ app, page }) => {
+  await app.frame.open();
+  for (let width = 320; width <= 560; width += 8) {
+    await page.setViewportSize({ width, height: 640 });
+    // Wait for the layout to settle on the new width: the shown text follows the measured box.
+    await expect.poll(() => page.getByTestId('app-name').evaluate((e) => e.getBoundingClientRect().width > 0)).toBe(true);
+    const shown = (await page.getByTestId('app-name').textContent()) ?? '';
+    expect(shown, `at ${width} px`).not.toMatch(/\s…/);
+    expect(shown.split('…').length - 1, `at ${width} px`).toBeLessThanOrEqual(1);
+    await expect(page.getByTestId('app-name')).toHaveAttribute('title', 'Paddock Shell Demo');
+    // The text itself is shortened (not clipped by CSS, whose cut can fall after a space), so nothing overflows its box.
+    const clipped = await page.getByTestId('app-name').evaluate((e) => e.scrollWidth > Math.ceil(e.getBoundingClientRect().width));
+    expect(clipped, `${shown} is clipped at ${width} px`).toBe(false);
+  }
+});
+
 test('runner names end in an ellipsis with the full value as the tooltip at 320 px (rule 18; screenshot review P1-2)', async ({ app, page }) => {
   await page.setViewportSize({ width: 320, height: 640 });
   await app.frame.open('#/runners');
@@ -45,6 +61,25 @@ test('runner names end in an ellipsis with the full value as the tooltip at 320 
   expect(await name.evaluate((e) => getComputedStyle(e).textOverflow)).toBe('ellipsis');
   await expect(name).toHaveAttribute('title', /\S/);
 });
+
+for (const width of [1280, 320]) {
+  test(`every cell's content stays inside its table row at ${width} px (screenshot review F1)`, async ({ app, page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await app.frame.open('#/runners');
+    await expect(page.locator('sd-runners-page .name').first()).toBeVisible();
+    const outside = await page.locator('sd-runners-page [role="row"]').evaluateAll((rows) =>
+      rows.flatMap((row) => {
+        const r = row.getBoundingClientRect();
+        // A cell's content box: everything it draws, each descendant on its own (text spilling out of a fixed-height row).
+        return Array.from(row.querySelectorAll('[role="gridcell"] *')).filter((e) => {
+          const b = e.getBoundingClientRect();
+          return b.height > 0 && (b.top < r.top - 0.5 || b.bottom > r.bottom + 0.5);
+        }).map((e) => `${e.className || e.tagName}: ${e.textContent?.trim()}`);
+      }),
+    );
+    expect(outside).toEqual([]);
+  });
+}
 
 test.describe('contributions (plan S2)', () => {
   test('a contributed command runs with the lazily loaded app context', async ({ app, page }) => {

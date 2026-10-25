@@ -165,6 +165,11 @@ describe('pd-jobs-status', () => {
     await fixture.whenStable();
     expect(ring.classList.contains('pd-ring')).toBe(false);
     expect(el.querySelector('button.pd-pill')!.textContent?.trim()).toBe('1 running: Import · Finding files 1,240 so far');
+    // A step with nothing to count states its time: the phase and the time are separated (screenshot review P3), a count is not.
+    backend.emit(snap(1, 3, 'running', { title: 'Import', phase: phase('Waiting for the device', 0) }));
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('button.pd-pill')!.textContent?.trim()).toMatch(/^1 running: Import · Waiting for the device · \d+ s elapsed$/);
     fixture.nativeElement.remove();
   });
 

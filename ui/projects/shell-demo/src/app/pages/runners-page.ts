@@ -15,7 +15,7 @@ const STATE_WORD = { online: 'Online', updating: 'Updating', offline: 'Offline' 
   host: { '[attr.data-visit]': 'state.visit' },
   template: `
     <sd-page heading="Runners" subtitle="Build machines registered with this workspace.">
-      <pd-table label="Runners" [rows]="state.rows()" [columns]="columns" [rowKey]="key" [filterable]="false" [rowHeight]="48" [rowActions]="actions" (action)="lastAction.set($event.id + ' ' + $event.row.name)">
+      <pd-table label="Runners" [rows]="state.rows()" [columns]="columns" [rowKey]="key" [filterable]="false" [rowActions]="actions" (action)="lastAction.set($event.id + ' ' + $event.row.name)">
         <ng-template pdCell="name" let-r><span class="who"><span class="name" [attr.title]="r.name">{{ r.name }}</span><span class="host" [attr.title]="r.host">{{ r.host }}</span></span></ng-template>
         <ng-template pdCell="state" let-r><span class="state" [attr.data-state]="r.state"><span class="dot" aria-hidden="true"></span>{{ stateWord(r) }}</span></ng-template>
       </pd-table>
@@ -29,8 +29,11 @@ const STATE_WORD = { online: 'Online', updating: 'Updating', offline: 'Offline' 
   styles:
     SECTION_STYLES +
     `
-    .who { display: grid; min-width: 0; }
+    /* One line: the table's rows have the family's fixed heights, so the host is secondary text beside the name, and it is the host that gives way first. */
+    .who { display: flex; align-items: baseline; gap: var(--pd-space-2); min-width: 0; }
     .name, .host { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .name { flex: 0 1 auto; }
+    .host { flex: 0 100000 auto; min-width: 0; }
     .name { font-weight: var(--pd-weight-medium); }
     .host { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .state { display: inline-flex; align-items: center; gap: var(--pd-space-1); }

@@ -20,7 +20,7 @@ import {
   percent,
   share,
 } from './units';
-import { DEFAULT_KEEP_TAIL, ELLIPSIS, middleEllipsis, splitForEllipsis, splitPath } from './middle-ellipsis';
+import { DEFAULT_KEEP_TAIL, ELLIPSIS, fitEnd, fitPath, middleEllipsis, splitForEllipsis, splitPath } from './middle-ellipsis';
 
 afterEach(() => setActiveLocale(SOURCE_LOCALE));
 
@@ -151,5 +151,57 @@ describe('middle ellipsis', () => {
     expect(splitForEllipsis(`${'a'.repeat(30)}${'b'.repeat(25)}`).tail).toBe('b'.repeat(20));
     // A boundary at the very end never empties the tail.
     expect(splitForEllipsis(`${'a'.repeat(30)}-`).tail.length).toBeGreaterThan(0);
+  });
+});
+
+describe('fitPath (screenshot review P2-3)', () => {
+  /** A 12 px mono face: every character is 7.2 px wide, so a box of 240 px holds 33 characters. */
+  const mono = (s: string): number => Array.from(s).length * 7.2;
+  const WIN = 'C:\\ProgramData\\Builder\\Logs\\Builder.Service.2026-10-24.log';
+  const POSIX = '/Users/lin/Library/Application Support/Builder/logs/builder.service.log';
+  const count = (s: string): number => s.split(ELLIPSIS).length - 1;
+
+  it('returns a path that fits unchanged', () => {
+    expect(fitPath(WIN, 1000, mono)).toBe(WIN);
+  });
+  it('keeps the root and the separator flush against one ellipsis when the directory is what shrinks', () => {
+    // 35 characters: just room for "C:\…\" and the whole name.
+    expect(fitPath(WIN, 35 * 7.2, mono)).toBe('C:\\…\\Builder.Service.2026-10-24.log');
+    expect(fitPath(POSIX, 240, mono)).toBe('/Users/lin/…/builder.service.log');
+    expect(fitPath(POSIX, 28 * 7.2, mono)).toBe('/Users/…/builder.service.log');
+    expect(fitPath(POSIX, 22 * 7.2, mono)).toBe('/…/builder.service.log');
+    expect(fitPath('\\\\srv\\share\\dir\\sub\\system.log', 24 * 7.2, mono)).toBe('\\\\srv\\share\\…\\system.log');
+    expect(fitPath('logs/app/deep/system.log', 15 * 7.2, mono)).toBe('log…/system.log');
+  });
+  it('shortens the name itself with one ellipsis and no gap when the box is too narrow for the directory (240 px, Windows)', () => {
+    const win = fitPath(WIN, 240, mono);
+    expect(win).toBe('Builder.Service.…2026-10-24.log');
+    expect(count(win)).toBe(1);
+    expect(mono(win)).toBeLessThanOrEqual(240);
+  });
+  it('keeps the extension and the last word in the narrow box, with one ellipsis and no gap', () => {
+    const win = fitPath(WIN, 150, mono);
+    expect(win).toBe('Build…2026-10-24.log');
+    expect(win).not.toMatch(/\s…|…\s/);
+    expect(fitPath(POSIX, 150, mono)).toBe('…builder.service.log');
+    expect(mono(fitPath(POSIX, 150, mono))).toBeLessThanOrEqual(150);
+  });
+  it('keeps only the end of a name that is wider than the box on its own', () => {
+    expect(fitPath(WIN, 60, mono)).toBe('…-24.log');
+    expect(fitPath(POSIX, 0, mono)).toBe(ELLIPSIS);
+    expect(fitPath('short-name.log', 50, mono)).toBe('…e.log');
+  });
+  it('shortens a bare name in front of its last words', () => {
+    expect(fitPath('a-rather-long-service-name-2026-10-24-11-30.log', 150, mono)).toBe('…026-10-24-11-30.log');
+  });
+});
+
+describe('fitEnd (screenshot review P3)', () => {
+  const m = (s: string): number => Array.from(s).length * 8;
+  it('returns text that fits and cuts the end with no space before the ellipsis', () => {
+    expect(fitEnd('Paddock Shell Demo', 400, m)).toBe('Paddock Shell Demo');
+    expect(fitEnd('Paddock Shell Demo', 9 * 8, m)).toBe('Paddock…');
+    expect(fitEnd('Paddock Shell Demo', 10 * 8, m)).toBe('Paddock S…');
+    expect(fitEnd('Paddock Shell Demo', 0, m)).toBe('…');
   });
 });

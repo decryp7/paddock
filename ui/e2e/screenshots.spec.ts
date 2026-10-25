@@ -115,7 +115,7 @@ async function scene(page: Page, size: { readonly width: number; readonly height
   const app = new ShellApp(page);
   await page.setViewportSize(size);
   await loaded(page);
-  // The desktop scene's engine is a fake that answers nothing: it shows the same frame at rest, so no job or outage is staged.
+  // The desktop scene's engine is a fake that already answers with the staged job and outage, so nothing is clicked.
   if (!desktop) {
     await page.getByRole('button', { name: 'Start quiet job' }).click();
     await page.getByRole('button', { name: 'Break the search index' }).click();
@@ -126,7 +126,7 @@ async function scene(page: Page, size: { readonly width: number; readonly height
   await expect(app.sidebar.link('Dialogs')).toHaveCount(0);
   await page.clock.runFor(14_000);
   await page.mouse.move(size.width / 2, size.height - 60);
-  if (!desktop) await expect(app.statusBar.item('pd.jobs')).not.toHaveClass(/hidden/);
+  await expect(app.statusBar.item('pd.jobs')).not.toHaveClass(/hidden/);
   await settle(page);
   return app;
 }
@@ -197,10 +197,24 @@ doc({
   appSelector: 'pd-shell-frame',
   prepare: async (page) => {
     await developerOff(page);
+    // The fake answers the job and health calls with the scene the browser shots stage by hand (a running job, the search index down), so this shot differs only in its title bar.
+    const cause = { message: 'The search index stopped: a segment is damaged.', hint: 'Search is unavailable until it is reset; resetting rebuilds it from the logs.', detail: 'index: checksum mismatch in segment 3', code: null, raiseCap: null, settings: null };
+    const job = { id: 1, kind: 'demo', title: 'Update runner', subject: 'build-mac-2', seq: 2, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'wait', label: 'Waiting for the device', unit: 'items', total: null, done: 0 } };
     await installTauriFake(page, {
       platform: 'mac',
       otherwise: 'null',
-      replies: { health_snapshot: { revision: 1, services: [{ service: 'sd.engine', label: 'the demo engine', state: 'ok', cause: null, repair: null }, { service: 'sd.index', label: 'the search index', state: 'ok', cause: null, repair: null }] }, notifications_list: { revision: 1, notices: [], unread: 0 }, jobs_snapshot: [] },
+      replies: {
+        health_snapshot: {
+          revision: 2,
+          services: [
+            { service: 'sd.engine', label: 'the demo engine', state: 'ok', cause: null, repair: null },
+            { service: 'sd.index', label: 'the search index', state: 'down', cause, repair: 'reset' },
+            { service: 'sd.agent', label: 'the demo agent', state: 'ok', cause: null, repair: null },
+          ],
+        },
+        notifications_list: { revision: 1, notices: [], unread: 0 },
+        jobs_snapshot: [job],
+      },
     });
   },
   screens: [pages('macos', 'wide', undefined, true)],

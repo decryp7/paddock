@@ -155,20 +155,18 @@ test.describe('UI basics review fixes (regressions)', () => {
     }
   });
 
-  for (const sel of ['[data-testid="path-240"]', '.gal-path--narrow']) {
-    test(`path text keeps the whole file name and its extension, middle ellipsis only in the start, ${sel} (P1-7)`, async ({ page }) => {
+  for (const sel of ['[data-testid="path-240"]', '.gal-path--narrow', '[data-testid="path-win-240"]']) {
+    test(`path text has one ellipsis with no gap, the extension whole and nothing clipped, ${sel} (P1-7, screenshot review P2-3)`, async ({ page }) => {
       await open(page, 'dark', 'debrief');
       const r = await page.locator(`${sel} pd-path-text`).evaluate((host) => {
-        const head = host.querySelector('.pd-head') as HTMLElement;
-        const tail = host.querySelector('.pd-tail') as HTMLElement;
-        return { tail: tail.textContent ?? '', tailClipped: tail.scrollWidth > tail.clientWidth, headClipped: head.scrollWidth > head.clientWidth, font: getComputedStyle(host.querySelector('.pd-text') as Element).fontFamily };
+        const text = host.querySelector('.pd-text') as HTMLElement;
+        const shown = host.querySelector('.pd-shown') as HTMLElement;
+        return { shown: shown.textContent ?? '', clipped: shown.scrollWidth > text.clientWidth, font: getComputedStyle(text).fontFamily };
       });
-      expect(r.headClipped).toBe(true);
-      expect(r.tailClipped).toBe(false);
-      // One ellipsis only: the name is not cut as long as the directory still shows something.
-      const cuts = await page.locator(`${sel} pd-path-text`).evaluate((host) => ['.pd-head', '.pd-name', '.pd-tail'].filter((c) => { const e = host.querySelector(c) as HTMLElement; return e.clientWidth > 0 && e.scrollWidth > e.clientWidth; }));
-      expect(cuts.length, cuts.join(', ')).toBeLessThanOrEqual(1);
-      expect(r.tail.endsWith('.log')).toBe(true);
+      expect(r.shown.split('…').length - 1, r.shown).toBe(1);
+      expect(r.shown, 'no space beside the ellipsis').not.toMatch(/\s…|…\s/);
+      expect(r.shown.endsWith('.log')).toBe(true);
+      expect(r.clipped, r.shown).toBe(false);
       expect(r.font).toMatch(/mono|Mono|Menlo|Consolas/i);
     });
   }
@@ -214,20 +212,13 @@ test.describe('UI basics review fixes (regressions)', () => {
     expect(Math.abs((await centre('.pd-field--check input')) - (await centre('#g-name')))).toBeLessThanOrEqual(1);
   });
 
-  test('a long path in a 240 px box shortens the directory first and keeps the start of the name, the extension and the last word (review 2, N-P2-4)', async ({ page }) => {
+  test('a long Windows path in a 240 px box keeps its name whole in front of its last words and never drops the root colon (review 2, N-P2-4; screenshot review P2-3)', async ({ page }) => {
     await open(page, 'dark', 'debrief');
-    const r = await page.locator('[data-testid="path-win-240"] pd-path-text').evaluate((host) => {
-      const part = (c: string) => host.querySelector(c) as HTMLElement;
-      const clipped = (e: HTMLElement) => e.scrollWidth > e.clientWidth;
-      return { nameOverflow: part('.pd-name').scrollWidth - part('.pd-name').getBoundingClientRect().width, dirClipped: clipped(part('.pd-head')), nameClipped: clipped(part('.pd-name')), tailClipped: clipped(part('.pd-tail')), shown: part('.pd-name').textContent! + part('.pd-tail').textContent! };
-    });
-    expect(r.dirClipped).toBe(true);
-    expect(r.nameClipped).toBe(false);
-    expect(r.tailClipped).toBe(false);
-    expect(r.shown).toContain('Service.2026-10-24.log');
-    // Nothing of the name is replaced by an ellipsis: the displayed text is the whole value of both spans. Font metrics differ by a fraction of a pixel between
-    // platforms (0.4 px on Linux), and the integer scrollWidth check above is what the ellipsis follows.
-    expect(r.nameOverflow).toBeLessThan(1);
+    const shown = await page.locator('[data-testid="path-win-240"] .pd-shown').textContent();
+    expect(shown).toContain('Service.');
+    expect(shown).toContain('2026-10-24.log');
+    // Either the root and the separator stay beside the ellipsis, or the directory is gone and only the name is shortened.
+    expect(shown).toMatch(/^(C:\\…\\|[^\\:]+…)/);
   });
 
   test('keycaps do not touch (P2-12)', async ({ page }) => {

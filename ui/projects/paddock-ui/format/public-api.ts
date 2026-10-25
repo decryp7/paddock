@@ -25,4 +25,4 @@ export {
   unitLabels,
   type Units,
 } from './src/units';
-export { DEFAULT_KEEP_TAIL, ELLIPSIS, middleEllipsis, splitForEllipsis, splitPath, type SplitPath, type SplitText } from './src/middle-ellipsis';
+export { DEFAULT_KEEP_TAIL, ELLIPSIS, fitEnd, fitPath, middleEllipsis, splitForEllipsis, splitPath, type SplitPath, type SplitText } from './src/middle-ellipsis';

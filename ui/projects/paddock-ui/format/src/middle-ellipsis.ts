@@ -92,3 +92,73 @@ export function middleEllipsis(text: string, max: number): string {
   const head = budget - tail;
   return chars.slice(0, head).join('') + ELLIPSIS + chars.slice(chars.length - tail).join('');
 }
+
+/** The leading root of a path that always stays: a drive ("C:\"), a UNC or POSIX root ("\\", "/"); empty for a relative path. */
+const ROOT = /^(?:[A-Za-z]:[\\/]?|[\\/]{1,2})/;
+
+/** Largest `n` in `[0, max]` for which `fits(n)` holds, given that `fits` is true for small `n` and stays false from some point on. */
+function largest(max: number, fits: (n: number) => boolean): number {
+  let lo = 0;
+  let hi = max;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(mid)) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/**
+ * Shortens a path to the width `maxWidth` (in whatever unit `measure` returns, normally pixels) with at most one ellipsis and
+ * no gap beside it. The root ("C:\" or "/") and the separator before the file name stay flush against the ellipsis
+ * ("C:\…\Builder.Service.2026-10-24.log", "/Users/…/builder.service.log"); the drive colon is never dropped. When even the
+ * file name alone is too wide, the directory is dropped and the name itself shortens in the middle with one ellipsis,
+ * keeping its last `keepTail` characters (from a word start). Text that fits is returned unchanged.
+ */
+export function fitPath(text: string, maxWidth: number, measure: (s: string) => number, keepTail = DEFAULT_KEEP_TAIL): string {
+  if (measure(text) <= maxWidth) return text;
+  const chars = Array.from(text);
+  const cut = lastSeparatorIndex(chars) + 1; // the directory with its last separator
+  const rootLength = Array.from(ROOT.exec(text)?.[0] ?? '').length;
+  if (cut > rootLength) {
+    const sep = chars[cut - 1] ?? '/';
+    const root = chars.slice(0, rootLength).join('');
+    const middle = chars.slice(rootLength, cut - 1); // the directories between the root and the name
+    const name = chars.slice(cut).join('');
+    const build = (n: number): string => root + middle.slice(0, n).join('') + ELLIPSIS + sep + name;
+    if (measure(build(0)) <= maxWidth) {
+      let n = largest(middle.length, (k) => measure(build(k)) <= maxWidth);
+      // End the kept start on a separator when that keeps most of it ("/Users/" rather than "/Users/l").
+      const stop = middle.slice(0, n).lastIndexOf(sep);
+      if (n < middle.length && stop >= 0 && stop + 1 >= n / 2) n = stop + 1;
+      return build(n);
+    }
+    return fitName(name, maxWidth, measure, keepTail);
+  }
+  return fitName(text, maxWidth, measure, keepTail);
+}
+
+/** One ellipsis in the middle of a name: its start and its last `keepTail` characters; only the end when that alone is too wide. */
+function fitName(name: string, maxWidth: number, measure: (s: string) => number, keepTail: number): string {
+  const chars = Array.from(name);
+  const { head, tail } = splitForEllipsis(name, keepTail);
+  const tailChars = Array.from(tail);
+  const headChars = Array.from(head);
+  if (headChars.length > 0 && measure(ELLIPSIS + tail) <= maxWidth) {
+    const n = largest(headChars.length, (k) => measure(headChars.slice(0, k).join('') + ELLIPSIS + tail) <= maxWidth);
+    return headChars.slice(0, n).join('') + ELLIPSIS + tail;
+  }
+  const k = largest(tailChars.length, (j) => measure(ELLIPSIS + chars.slice(chars.length - j).join('')) <= maxWidth);
+  return ELLIPSIS + chars.slice(chars.length - k).join('');
+}
+
+/**
+ * Shortens ordinary text (a title) to `maxWidth` by cutting its end: the start and one ellipsis, never a space before the
+ * ellipsis ("Paddock Sh…", not "Paddock …"). Text that fits is returned unchanged; with no room for a letter, the ellipsis alone.
+ */
+export function fitEnd(text: string, maxWidth: number, measure: (s: string) => number): string {
+  if (measure(text) <= maxWidth) return text;
+  const chars = Array.from(text);
+  const n = largest(chars.length, (k) => measure(chars.slice(0, k).join('').trimEnd() + ELLIPSIS) <= maxWidth);
+  return chars.slice(0, n).join('').trimEnd() + ELLIPSIS;
+}
