@@ -142,7 +142,8 @@ describe('keepActiveTabVisible', () => {
   it('scrolls the strip so an active tab beyond its right edge shows, and one beyond its left edge shows', () => {
     const right = strip([0, 100], [90, 180]);
     const watch = keepActiveTabVisible(right.root);
-    expect(right.left()).toBe(80);
+    // To the tab's own start (a tab boundary), not just far enough to show its right edge (review 3 P3-2).
+    expect(right.left()).toBe(90);
     watch.dispose();
     const left = strip([100, 200], [60, 140]);
     const watch2 = keepActiveTabVisible(left.root);
@@ -150,6 +151,28 @@ describe('keepActiveTabVisible', () => {
     watch2.dispose();
     right.root.remove();
     left.root.remove();
+  });
+
+  it('scrolls only to a tab boundary, so no sliver of a tab shows at the start (review 3 P3-2)', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<div class="dv-tabs-container"><div class="dv-tab"></div><div class="dv-tab"></div><div class="dv-tab dv-active-tab"></div></div>';
+    document.body.appendChild(root);
+    const el = root.querySelector<HTMLElement>('.dv-tabs-container')!;
+    let left = 0;
+    Object.defineProperty(el, 'scrollLeft', { get: () => left, set: (v: number) => (left = v) });
+    el.getBoundingClientRect = rect(0, 100);
+    const at = [[0, 60], [60, 120], [120, 180]] as const;
+    root.querySelectorAll<HTMLElement>('.dv-tab').forEach((t, i) => (t.getBoundingClientRect = () => rect((at[i]![0]) - left, (at[i]![1]) - left)()));
+    const watch = keepActiveTabVisible(root);
+    // Not 80 (a 40 px sliver of the second tab at the start): the strip starts at the active tab.
+    expect(left).toBe(120);
+    // The first tab active again: back to the start.
+    root.querySelectorAll('.dv-tab')[2]!.classList.remove('dv-active-tab');
+    root.querySelectorAll('.dv-tab')[0]!.classList.add('dv-active-tab');
+    watch.refresh();
+    expect(left).toBe(0);
+    watch.dispose();
+    root.remove();
   });
 
   it('never moves a tab whose left edge would leave the strip when the tab is wider than the strip', () => {
@@ -178,15 +201,16 @@ describe('keepActiveTabVisible', () => {
     m.moveTo(120, 190);
     m.tab.classList.add('another');
     await Promise.resolve();
-    expect(m.left()).toBe(90);
+    // Snapped to the tab's start (review 3 P3-2).
+    expect(m.left()).toBe(120);
     m.moveTo(340, 400);
     watch.refresh();
-    expect(m.left()).toBe(300);
+    expect(m.left()).toBe(340);
     watch.dispose();
     m.moveTo(900, 990);
     m.tab.classList.add('after-dispose');
     await Promise.resolve();
-    expect(m.left()).toBe(300);
+    expect(m.left()).toBe(340);
     m.root.remove();
   });
 });
