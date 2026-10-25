@@ -271,3 +271,64 @@ Keep is the default, and the dark scrim works.
 Recapture `*-files-320.png` and `*-storage-320.png` per P2-R1. If the Storage table is still one line per row with
 nothing scrolling sideways and the Files list keeps the name and the `…/name` ellipsis, this is approved. P2-R2 and the
 P3s can follow in the next shell batch.
+
+---
+
+# Review 2 verification (2026-10-25, `origin/shell/integrate` at `7f39670`)
+
+Same reviewer, read-only. I checked the six 320 px shots (`*-files-320`, `*-storage-320`, `*-storage-320-menu`), the
+recaptured confirm and tree shots, and the diff `3bfeffc..7f39670` of `table/`, `shell/storage/`, `shell/files/`,
+`icons/src/paths.ts` and `e2e/contact-sheet-x3x.spec.ts`. As asked, I left out the shell menu-bar wrap at 320.
+
+**Verdict: not approved. Two small 320 px defects remain (V-1, V-2).** Everything else from review 2 is fixed in the
+pixels. Both defects are narrow fixes, and I expect to approve once both are re-shot.
+
+## Fixed (checked)
+
+- **P2-R1, the 320 shots show their subjects.** `about:blank` before each shot means Files is no longer covered by Settings,
+  and the Storage table is scrolled into view, with a separate row-menu shot.
+- **P2-R2, the confirm window.** The title is "Clear cache?" / "Clear logs?" in sentence case, and the body starts with
+  the facts ("Up to 46 MB is removed. The app rebuilds it when it needs it."). The menu item reads "Clear logs".
+- **P3-R1.** The Cache note now says "Thumbnails and previews." instead of echoing the group. The fold row is
+  "Other items · 1 / 7 smaller items" with no glyph. It is still a group of one, but its two lines now say different
+  things, so I accept it.
+- **P3-R2.** The tree's Size header and values share one right edge (x 1802 in the dark tree shot). The new measured
+  scrollbar gutter (`--pd-gutter`) is the right general fix.
+- **P3-R3.** `groupMono` takes a predicate; "Other items" is in the sans face and folder names are in mono.
+- **P3-R4.** "3 kinds of data".
+- **P3-R5.** No `···` glyph on the fold row.
+- **P3-R6.** The `reveal` arrow now ends at x = 20, inside the safe margin.
+- **Files at 320:** the name leads, the folder line keeps its separator (`/demo/pro… /a-narrow-pane`), and nothing
+  scrolls sideways at page level.
+
+## V-1 (P2, blocks): at 320 the Storage table's rows are wider than the table
+- **At rest** (`*-storage-320.png`, both themes), the row `…` button is cut off by the table's right border: only two
+  and a half dots show at x≈528-548 (device px).
+- **When the row menu opens** (`*-storage-320-menu.png`), focusing the button scrolls the body sideways by about 8 CSS px.
+  The rows move left ("Cache" starts at x=61 and the group chevrons at 74), but the header stays where it was ("Kept"
+  at 77). Size values now end at 467 under a header that ends at 483. The body is `overflow-x: hidden`, so a user
+  cannot scroll it, but focus can. That is sideways scroll in effect, and header and columns fall out of line.
+
+**Fix.** The row grid has to fit the body's client width, not the grid's. At 320 the body shows a vertical scrollbar,
+and the rows appear to keep the full width. Lay the rows out at `width: 100%` of `.pd-body`, or apply the measured
+`--pd-gutter` to the rows as well as the header. Add a unit or e2e assertion that, at 320 with a scrolling body,
+`body.scrollWidth <= body.clientWidth` and the last action button lies inside the grid's box. This is in the shared
+`pd-table`, so every app gets the fix.
+
+## V-2 (P2, blocks): file names truncate at the end
+At 320, the recent entry reads `service-2026-10-24-11-3…`, which drops the extension, the part that says what the file
+is. Rule 18 (binding) says paths **and file names** truncate in the middle. `.pd-name` in `recent-files.ts` is a plain
+`text-overflow: ellipsis`. **Fix:** render the name with `pd-path-text` (or its middle-ellipsis part) so it reads
+`service-2026-…-11-30.log`, with the full path still as the title. Add a test at a narrow width.
+
+## P3
+
+- The folder line shows a visible gap between the ellipsis and the kept separator (`pro… /a-narrow-pane`). The `/` is
+  kept, which was the point, but there should be no space: it is either whitespace between the `pd-head` and `pd-sep`
+  spans in the template, or a flex gap. Join them.
+
+## To approve
+
+Fix V-1 and V-2, then re-shoot `*-storage-320`, `*-storage-320-menu` and `*-files-320` in both themes. If the `…` sits
+fully inside the table, the header and rows keep one edge with the menu open, and the file name keeps `.log`, this is
+approved.
