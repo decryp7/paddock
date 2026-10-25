@@ -10,6 +10,8 @@ export interface ToolCard {
   /** The call as the user reads it. */
   readonly summary: string;
   readonly write: boolean;
+  /** What it changes cannot be undone: its approval is a danger choice with Decline as the default. */
+  readonly destructive: boolean;
   /** `awaiting`: a write waits for the user's decision. */
   readonly state: 'running' | 'awaiting' | 'ok' | 'failed';
   /** The card's line once finished. */
@@ -86,11 +88,11 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
       return { ...t, parts: [...t.parts, { kind: 'text', text: e.text }] };
     }
     case 'toolStarted': {
-      const card: ToolCard = { callId: e.callId, name: e.name, summary: e.summary, write: e.write, state: 'running', result: null, data: undefined };
+      const card: ToolCard = { callId: e.callId, name: e.name, summary: e.summary, write: e.write, destructive: e.destructive, state: 'running', result: null, data: undefined };
       return { ...t, parts: [...t.parts, { kind: 'tool', card }] };
     }
     case 'approvalNeeded':
-      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input }));
+      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input, destructive: e.destructive }));
     case 'toolFinished': {
       const cites = citationsOf(e.data);
       const next = setCard(t, e.callId, (c) => ({ ...c, state: e.ok ? 'ok' : 'failed', result: e.summary, data: e.data }));
@@ -125,7 +127,7 @@ export function turnsOf(c: Conversation): TurnView[] {
       const parts: TurnPart[] = [...t.parts];
       if (m.text) parts.push({ kind: 'text', text: m.text });
       for (const call of m.toolCalls ?? []) {
-        parts.push({ kind: 'tool', card: { callId: call.id, name: call.name, summary: '', write: false, state: 'failed', result: null, data: undefined } });
+        parts.push({ kind: 'tool', card: { callId: call.id, name: call.name, summary: '', write: false, destructive: false, state: 'failed', result: null, data: undefined } });
       }
       put({ ...t, parts, end: m.end ?? t.end });
     } else {

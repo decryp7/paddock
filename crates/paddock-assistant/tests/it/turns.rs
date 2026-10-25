@@ -261,8 +261,9 @@ fn a_tool_that_writes_is_offered_only_after_the_click_and_needs_an_approval() {
         matches!(e, AssistantEvent::ApprovalNeeded { .. })
     });
     assert!(
-        matches!(seen.last().unwrap(), AssistantEvent::ApprovalNeeded { summary, input, .. } if summary == "Erase everything" && input["all"] == true)
+        matches!(seen.last().unwrap(), AssistantEvent::ApprovalNeeded { summary, input, destructive: true, .. } if summary == "Erase everything" && input["all"] == true)
     );
+    assert!(seen.iter().any(|e| matches!(e, AssistantEvent::ToolStarted { write: true, destructive: true, .. })));
     assert_eq!(
         runs.load(Ordering::SeqCst),
         0,
@@ -282,6 +283,56 @@ fn a_tool_that_writes_is_offered_only_after_the_click_and_needs_an_approval() {
         r.assistant.approve(&ack.conversation_id, "c1", true),
         Err(AssistantError::NotWaiting)
     );
+}
+
+#[test]
+fn a_write_that_can_be_undone_asks_without_the_danger_flag_and_the_tools_say_which_is_which() {
+    let notes = counter();
+    let tools: Vec<Arc<dyn AssistantTool>> = vec![
+        Arc::new(Echo(counter())),
+        Arc::new(Note(notes.clone())),
+        Arc::new(Erase(counter())),
+    ];
+    let r = rig_with(
+        vec![
+            Step::Reply(vec![], calls("", vec![call("c1", "note", json!({}))])),
+            Step::Reply(vec![], text("noted it")),
+        ],
+        tools,
+        |_| {},
+    );
+    let mut infos: Vec<(String, bool, bool)> = r
+        .assistant
+        .info()
+        .tools
+        .into_iter()
+        .map(|t| (t.name, t.write, t.destructive))
+        .collect();
+    infos.sort();
+    assert_eq!(
+        infos,
+        [
+            ("echo".to_string(), false, false),
+            ("erase".to_string(), true, true),
+            ("note".to_string(), true, false)
+        ]
+    );
+    let ack = r
+        .send(SendRequest {
+            allow_write: true,
+            ..ask("note")
+        })
+        .unwrap();
+    let seen = until(&r.rx, |e| {
+        matches!(e, AssistantEvent::ApprovalNeeded { .. })
+    });
+    assert!(matches!(seen.last().unwrap(), AssistantEvent::ApprovalNeeded { destructive: false, .. }));
+    assert!(seen.iter().any(|e| matches!(e, AssistantEvent::ToolStarted { write: true, destructive: false, .. })));
+    r.assistant
+        .approve(&ack.conversation_id, "c1", true)
+        .unwrap();
+    assert_eq!(done(&until_end(&r.rx)).0, "noted it");
+    assert_eq!(notes.load(Ordering::SeqCst), 1);
 }
 
 #[test]

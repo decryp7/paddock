@@ -93,7 +93,7 @@ describe('tool renderers', () => {
     expect(TestBed.inject(ASSISTANT_CITATIONS)).toBeNull();
   });
 
-  const card = (over: Partial<ToolCard>): ToolCard => ({ callId: 'c', name: 'find', summary: 'things', write: false, state: 'ok', result: null, data: undefined, ...over });
+  const card = (over: Partial<ToolCard>): ToolCard => ({ callId: 'c', name: 'find', summary: 'things', write: false, destructive: false, state: 'ok', result: null, data: undefined, ...over });
 
   it('the default card says what happened in every state', async () => {
     TestBed.resetTestingModule();

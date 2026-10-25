@@ -114,6 +114,7 @@ fn fixtures() -> String {
             name: "find_events".into(),
             summary: "build failed".into(),
             write: false,
+            destructive: false,
         },
         AssistantEvent::ToolFinished {
             call_id: "call_1".into(),
