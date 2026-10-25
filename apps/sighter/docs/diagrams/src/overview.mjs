@@ -1,16 +1,16 @@
 // Sighter overview hero (theme-aware SVG, ecosystem style). Writes docs/images/sighter-overview.svg.
 //   node docs/diagrams/src/overview.mjs [--png]      (--png also renders light and dark 2x PNGs with headless Chrome)
-// Needs the Paddock checkout next to this repo (icons, glyphs, kit font metrics).
+// Uses the monorepo's diagrams/tools and docs/images/src (icons, glyphs, kit font metrics).
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { tw } from '../../../../paddock/diagrams/tools/lib.mjs';
-import { GLYPHS } from '../../../../paddock/docs/images/src/glyphs.mjs';
+import { tw } from '../../../../../diagrams/tools/lib.mjs';
+import { GLYPHS } from '../../../../../docs/images/src/glyphs.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, '../../images');
-const ICONS = join(here, '../../../../paddock/docs/images/src/icons');
+const ICONS = join(here, '../../../../../docs/images/src/icons');
 const W = 1600;
 const X0 = 48, CW = 214, GAP = 44, CT = 352, CHT = 344;
 const colX = (i) => X0 + i * (CW + GAP);
