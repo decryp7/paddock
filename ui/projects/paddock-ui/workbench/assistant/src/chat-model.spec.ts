@@ -27,11 +27,20 @@ describe('reduceTurn', () => {
     expect(answerText(run([{ type: 'done', text: '', usage, end: 'cancelled' }]))).toBe('');
   });
 
+  it('marks a card destructive from its start or from the approval it asks', () => {
+    const started = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: true }]);
+    const asked = run([
+      { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false },
+      { type: 'approvalNeeded', destructive: true, callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
+    ]);
+    for (const t of [started, asked]) expect(t.parts.map((p) => p.kind === 'tool' && p.card.destructive)).toEqual([true]);
+  });
+
   it('waits for a write, collects citations without duplicates, and closes dangling cards when the turn ends', () => {
     let t = run([
-      { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true },
-      { type: 'approvalNeeded', callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
-      { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'x', write: false },
+      { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false },
+      { type: 'approvalNeeded', destructive: false, callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
+      { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'x', write: false, destructive: false },
     ]);
     expect(t.parts.map((p) => (p.kind === 'tool' ? p.card.state : 'text'))).toEqual(['awaiting', 'running']);
     const cite = { text: 'item 7', target: 'record:7' };
@@ -91,7 +100,7 @@ describe('conversationTitle', () => {
 
 describe('setDeclined', () => {
   it('marks a call declined and keeps the mark when the engine reports it did not run', () => {
-    const base = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true }]);
+    const base = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false }]);
     const declined = reduceTurn(setDeclined(base, 'c1', true), { type: 'toolFinished', callId: 'c1', name: 'erase', ok: false, summary: 'Declined by the user' });
     expect(declined.parts[0]).toMatchObject({ kind: 'tool', card: { state: 'failed', declined: true } });
     expect(setDeclined(setDeclined(base, 'c1', true), 'c1', false).parts[0]).toMatchObject({ card: { declined: false } });

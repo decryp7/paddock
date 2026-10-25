@@ -431,13 +431,13 @@ describe('PdAssistant', () => {
       expect(text(r, 'assistant-approval-args')).toBe('No arguments');
       expect(r.one('[data-testid=assistant-allow]').classList.contains('pd-btn--sm')).toBe(false);
       expect(r.one('[data-testid=assistant-decline]').classList.contains('pd-btn--sm')).toBe(false);
-      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toContain('"path": "/x"');
-      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args').endsWith('…')).toBe(true);
-      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: undefined });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: undefined });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toBe('No arguments');
     });
@@ -471,17 +471,41 @@ describe('PdAssistant', () => {
       expect(r.all('[data-testid=assistant-streaming]')).toHaveLength(0);
     });
 
-    it('makes Allow neutral and Decline the secondary on the right, and names the tool (P2-C)', async () => {
-      const { r } = await open();
+    it('makes Allow neutral and Decline the secondary on the right for a write that can be undone, and names the tool (P2-C)', async () => {
+      const { r, backend } = await open();
       r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
       await press(r, await type(r, '/write'), { key: 'Enter' });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
+      await settle(r.fixture);
       const allow = r.one('[data-testid=assistant-allow]');
       const decline = r.one('[data-testid=assistant-decline]');
       expect(allow.classList.contains('pd-btn--primary')).toBe(false);
+      expect(allow.classList.contains('pd-btn--danger')).toBe(false);
       expect(allow.textContent?.trim()).toBe('Allow erase');
       expect(decline.classList.contains('pd-btn--ghost')).toBe(true);
       expect(allow.compareDocumentPosition(decline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(text(r, 'assistant-approval-consequence')).toBe('Erase everything');
+      expect(r.one('[data-testid=assistant-approval]').classList.contains('danger')).toBe(false);
+      expect(r.all('[data-testid=assistant-approval-final]')).toHaveLength(0);
+      expect(r.element.querySelectorAll('[data-testid=assistant-approval] .pd-btn--primary')).toHaveLength(0);
+    });
+
+    it('makes a destructive approval a danger choice: Decline is the focused default, Allow a danger button, never the primary (P2-C)', async () => {
+      const { r } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      await settle(r.fixture);
+      const section = r.one('[data-testid=assistant-approval]');
+      const allow = r.one('[data-testid=assistant-allow]');
+      const decline = r.one('[data-testid=assistant-decline]');
+      expect(section.classList.contains('danger')).toBe(true);
+      expect(section.getAttribute('aria-describedby')).toBe('pd-assistant-approval-final');
+      expect(text(r, 'assistant-approval-final')).toBe('This cannot be undone.');
+      expect(allow.classList.contains('pd-btn--danger')).toBe(true);
+      expect(allow.classList.contains('pd-btn--primary')).toBe(false);
+      expect(allow.classList.contains('pd-btn--danger-fill')).toBe(false);
+      expect(decline.classList.contains('pd-btn--ghost')).toBe(false);
+      expect(document.activeElement).toBe(decline);
       expect(r.element.querySelectorAll('[data-testid=assistant-approval] .pd-btn--primary')).toHaveLength(0);
     });
 

@@ -75,7 +75,8 @@ export const FIXTURE_EVENTS: Envelope[] = [
     "callId": "call_1",
     "name": "find_events",
     "summary": "build failed",
-    "write": false
+    "write": false,
+    "destructive": false
   },
   {
     "conversationId": "c1-1",

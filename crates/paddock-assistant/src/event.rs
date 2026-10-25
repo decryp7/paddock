@@ -70,6 +70,8 @@ pub enum AssistantEvent {
         summary: String,
         /// The tool changes things.
         write: bool,
+        /// What it changes cannot be undone (implies `write`).
+        destructive: bool,
     },
     /// A tool that writes waits for the user's decision (`assistant_approve_tool`).
     ApprovalNeeded {
@@ -79,6 +81,8 @@ pub enum AssistantEvent {
         name: String,
         /// What it would do.
         summary: String,
+        /// What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
+        destructive: bool,
         /// The arguments.
         #[cfg_attr(test, ts(type = "unknown"))]
         input: Value,

@@ -915,6 +915,7 @@
     "pd.wb.assistant.approve.allow": "⟦ÅÅļļööŵ⟧",
     "pd.wb.assistant.approve.allow-tool": "⟦ÅÅļļööŵ {$tool}⟧",
     "pd.wb.assistant.approve.arguments": "⟦ÅÅŕĝûûɱééñţš⟧",
+    "pd.wb.assistant.approve.cannot-undo": "⟦Ţĥîîš çááññööţ ƀé ûûñðööñéé.⟧",
     "pd.wb.assistant.approve.decline": "⟦Ðééçļîîñéé⟧",
     "pd.wb.assistant.approve.details": "⟦Ðééţááîîļš⟧",
     "pd.wb.assistant.approve.no-arguments": "⟦Ñöö ááŕĝûûɱéñţš⟧",

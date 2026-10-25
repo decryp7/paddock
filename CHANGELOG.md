@@ -55,6 +55,10 @@ Conventional Commits; one semver tag for the whole repo.
   the Outline and Files follow the active document after a restore, the assistant's declined/failed/approval states, the
   composer clears on send, a streaming cue and the log following the user's own question; save and manage layout dialogs
   are real dialog windows with declared contracts, and pop-outs are saved with the layout.
+- `paddock-assistant`: `Access::Destructive` (a write that cannot be undone); `ToolInfo.destructive` and `destructive` on the
+  `toolStarted`/`approvalNeeded` events (generated TS). The approval of such a tool is a danger choice: danger-tinted card,
+  "This cannot be undone.", Allow as a danger button (never the primary) and Decline the focused default. New shared glyphs
+  `pd:symbol-function`, `pd:symbol-type`, `pd:symbol-module`; `namesPaletteProvider({ icon })` also takes a function per match.
 
 ### Changed
 - BREAKING (X51, unreleased crates): one `ProtocolVersion` and one `GrantRef`. `paddock-plugin-package` drops its own
