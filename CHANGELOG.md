@@ -59,6 +59,11 @@ Conventional Commits; one semver tag for the whole repo.
   `toolStarted`/`approvalNeeded` events (generated TS). The approval of such a tool is a danger choice: danger-tinted card,
   "This cannot be undone.", Allow as a danger button (never the primary) and Decline the focused default. New shared glyphs
   `pd:symbol-function`, `pd:symbol-type`, `pd:symbol-module`; `namesPaletteProvider({ icon })` also takes a function per match.
+- `scripts/new-app.mjs`: a new app has an e2e smoke suite on `@decryp7/paddock-e2e` (`playwright.config.ts`,
+  `e2e/smoke.spec.ts`, `npm run e2e`) and, from the workbench demo, its unit tests (a `test` target, `test-setup.ts`, jsdom and
+  the contribution lint); a template without unit tests gets no `test` script. The workbench demo has its own Vitest target
+  (`ng test workbench-demo`, part of `npm test`). Checked end to end once: a generated app's Rust tests, build, unit tests and
+  e2e pass against this repository's crates and packages.
 
 ### Changed
 - BREAKING (X51, unreleased crates): one `ProtocolVersion` and one `GrantRef`. `paddock-plugin-package` drops its own
