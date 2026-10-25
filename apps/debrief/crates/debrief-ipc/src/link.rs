@@ -107,7 +107,9 @@ impl Listener {
 
     /// Waits (at most `window`) for the child to connect and authenticate, then starts the peer. `expected_pid`
     /// is the process the host started (checked where the platform reports the peer's pid); `exited` is asked
-    /// while waiting and ends the wait with its description when the child died first.
+    /// while waiting and ends the wait with its description when the child died first. The endpoint (on Unix its
+    /// private folder) is removed when this returns, connected or not: an established connection needs no address,
+    /// and a host that ends without dropping its children (a crash, `exit`) leaves nothing behind in the temp folder.
     pub async fn accept(
         self,
         expected_pid: Option<u32>,
@@ -115,7 +117,7 @@ impl Listener {
         mut exited: impl FnMut() -> Option<String>,
         handler: Arc<dyn Handler>,
         opts: PeerOptions,
-    ) -> Result<(Peer, PrivateEndpoint), IpcError> {
+    ) -> Result<Peer, IpcError> {
         let label = opts.label.clone();
         let started = Instant::now();
         let mut accepting = std::pin::pin!(self.inner.accept());
@@ -169,8 +171,8 @@ impl Listener {
         frame::write_frame(&mut stream.io, &welcome, HANDSHAKE_MAX)
             .await
             .map_err(|e| handshake_error(&label, e))?;
-        let peer = Peer::start(stream.io, handler, opts, &tokio::runtime::Handle::current());
-        Ok((peer, self.endpoint))
+        drop(self.endpoint);
+        Ok(Peer::start(stream.io, handler, opts, &tokio::runtime::Handle::current()))
     }
 }
 

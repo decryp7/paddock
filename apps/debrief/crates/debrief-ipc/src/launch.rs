@@ -5,7 +5,6 @@
 //! The child side of the same contract is [`crate::child::child_main`].
 
 use crate::child_log::ChildLog;
-use crate::endpoint::PrivateEndpoint;
 use crate::link::{Access, Listener};
 use crate::peer::{Handler, Peer, PeerOptions};
 use crate::process::{ChildProcess, SpawnSpec};
@@ -75,8 +74,6 @@ pub(crate) enum Process {
 pub struct Child {
     process: Process,
     peer: Peer,
-    /// Kept so the private directory lives as long as the connection.
-    _endpoint: PrivateEndpoint,
 }
 
 impl Child {
@@ -224,11 +221,7 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
         .map_err(IpcError::Spawn)
         .and_then(|r| r);
     match accepted {
-        Ok((peer, endpoint)) => Ok(Child {
-            process,
-            peer,
-            _endpoint: endpoint,
-        }),
+        Ok(peer) => Ok(Child { process, peer }),
         Err(e) => {
             match &process {
                 Process::Spawned(p) => p.kill(),
