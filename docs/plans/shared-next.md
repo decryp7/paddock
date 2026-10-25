@@ -569,3 +569,18 @@ not approved, and every finding is fixed in `ui/docs/review/x51-view/FIXES.md`. 
   the header. Both are required fields (no compatibility before v1).
 - **Pickers return a name.** `ViewHost.pickPath` and `pickSecret` resolve `{ value, name }`; the form shows the name (a path cut in
   the middle, the full value as tooltip), never the reference.
+
+## X55 `paddock-embed` (after 0.3.0, user 2026-10-25)
+
+Two apps need local embeddings, so there is one shared crate (rules 39 and 42), not an app copy. Measurements and the
+choice of models: [research/2026-10-embeddings-for-logs.md](../research/2026-10-embeddings-for-logs.md) and Pacenotes
+ADR 0001 (accepted 2026-10-25).
+
+| WP | Scope | Owned | Depends | Acceptance | Effort |
+|---|---|---|---|---|---|
+| **X55** `paddock-embed` | `Embedder` port with two adapters: built-in Model2Vec (`model2vec-rs`, pure Rust, run in a guarded worker because it panics on tokenizer errors) and Qwen3-Embedding through `paddock-pitwall` when Pitwall runs; index metadata (engine, model id and hash, dimension) with a full re-embed built beside the old index and swapped in; brute-force cosine top-k; RRF fusion with BM25 with tunable weights; the benchmark harness (recall@k, hit@k, MRR) and its query sets | `crates/paddock-embed/` | `paddock-pitwall`, X3 (guard), X15 (model packs if needed) | a tokenizer panic fails one call, not the app; changing model or dimension triggers one rebuild and the old index serves until the swap; Pitwall down falls back to Model2Vec with a health entry; fusion weights are settings; benchmark reproduces the research numbers within ±0.02 on the stored sets; `cargo deny` passes (model2vec-rs licence clarified) | 3 |
+
+Consumers, in order: **Debrief** first (semantic search over message templates fused with BM25; target hit@5 ≥ 0.85 on the
+36-query set; a constrained Pitwall rewrite comes later), then **Pacenotes** (code search per its ADR 0001). Candidates,
+only if their designs need it: Sighter (label matching by meaning), Spotter (release-note search), Dyno (knowledge-pack
+lookup). fastembed is rejected (ONNX Runtime weight, build-time download, no Intel macOS build).
