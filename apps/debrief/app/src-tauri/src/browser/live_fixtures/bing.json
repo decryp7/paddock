@@ -1,0 +1,15 @@
+{
+  "url": "https://www.bing.com/search?q=System.TimeoutException",
+  "title": "System.TimeoutException - Search",
+  "readyState": "complete",
+  "quietMs": 1200,
+  "regionFound": true,
+  "total": 6,
+  "text": "About 98,000 results",
+  "links": [
+    { "href": "https://www.bing.com/images/search?q=System.TimeoutException", "text": "Images", "region": false, "heading": false },
+    { "href": "https://tracker.example.com/runtime/issues/101", "text": "Timeouts after 100 seconds", "region": true, "heading": true },
+    { "href": "https://www.bing.com/ck/a?!&&p=abc&u=a1aHR0cHM6Ly9xYS5leGFtcGxlLm5ldC9xLzQyNDI&ntb=1", "text": "Why does my request throw System.TimeoutException?", "region": true, "heading": true },
+    { "href": "https://docs.example.org/api/system.timeoutexception", "text": "TimeoutException Class (System)", "region": true, "heading": true }
+  ]
+}

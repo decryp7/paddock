@@ -1,0 +1,13 @@
+{
+  "url": "https://consent.google.com/ml?continue=https://www.google.com/search",
+  "title": "Before you continue to Google",
+  "readyState": "complete",
+  "quietMs": 3000,
+  "regionFound": false,
+  "total": 3,
+  "text": "Before you continue to Google. We use cookies and data to deliver and maintain Google services.",
+  "links": [
+    { "href": "https://policies.google.com/privacy", "text": "Privacy Policy", "region": false, "heading": false },
+    { "href": "https://policies.google.com/terms", "text": "Terms of Service", "region": false, "heading": false }
+  ]
+}

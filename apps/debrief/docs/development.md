@@ -254,7 +254,8 @@ the CI job's packages, and the x86 CI image only to confirm.
 - **Benchmarks (criterion)** for the engine live in `crates/debrief-core/benches` (`cargo bench -p debrief-core`);
   the plugin tests over the real IPC are in `crates/debrief-plugins/tests`.
 - **Mutation testing (cargo-mutants)** measures how many injected bugs the engine tests catch.
-- **Live search test** of AI research against the real engines: see below. Nightly and manual CI runs only.
+- **Live search test** of AI research against the real engines: see below. Manual runs only; CI runs the same probe over
+  recorded engine pages.
 
 ### Fast test runs
 
@@ -297,8 +298,13 @@ DEBRIEF_LIVE_SEARCH=1 DEBRIEF_E2E_LIVE_SEARCH_OUT=/tmp/live-search cargo test -p
 
 The report (`live-search.json`) and screenshots land in the folder `DEBRIEF_E2E_LIVE_SEARCH_OUT` names.
 `DEBRIEF_E2E_LIVE_SEARCH_QUERY` replaces the default query (`System.TimeoutException`) and `DEBRIEF_E2E_LIVE_SEARCH_ENGINES`
-limits the engines (`google,bing`); use neutral text only, never anything from real logs. CI runs it on the nightly
-schedule and on manual runs, never on pushes or pull requests: engines rate-limit automated traffic, so keep runs rare.
+limits the engines (`google,bing`); use neutral text only, never anything from real logs. Engines rate-limit automated
+traffic, so keep runs rare.
+
+CI never runs it: tests do not depend on the real network. CI runs the same probe (steps, verdicts, report) over
+recorded engine pages instead (`browser::live::tests`, fixtures in `app/src-tauri/src/browser/live_fixtures/`: what the
+results-page collector returns on each engine's results page, with invented results) with a fake clock. When a live run
+shows an engine changed its page, record the new shape there (invented results, never a real page's content).
 
 ### Allocator and memory budgets
 
