@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 // The contact sheet of <pd-view> (plan X51, ADR 0002) for the independent review (rule 22), review 2: every node kind of the sample
@@ -7,11 +8,17 @@ import { join } from 'node:path';
 // loading and busy states, keyboard focus and hover, and the whole view at 320 px. Tall subjects are shot in slices of at most 1,800
 // CSS px (a single bitmap taller than the GPU texture limit paints blank), and the images are composed into sheets by section, each
 // no taller than about 3,000 CSS px, so every sheet opens at 100%. `CONTACT_SHEET=1 npx playwright test --project=review
-// contact-sheet-x51` rewrites docs/review/x51-view/review-2/. The reviewer looks at the sheets; this test only proves they were
+// contact-sheet-x51` rewrites docs/review/x51-view/review-3/. The reviewer looks at the sheets; this test only proves they were
 // made from the real components.
 
 const GALLERY = `http://localhost:${process.env['PW_PORT'] ?? 4300}`;
-const OUT = join(__dirname, '..', 'docs', 'review', 'x51-view', 'review-2');
+// The commit every shot of this run was taken from (the sources are committed before the sheet is made, so it names the code on screen).
+const commit = ((): string => {
+  const git = (...args: string[]): string => execFileSync('git', args, { cwd: __dirname, encoding: 'utf8' }).trim();
+  const dirty = git('status', '--porcelain', '--', '../projects', '../e2e/view.spec.ts').length > 0;
+  return `${git('rev-parse', '--short=10', 'HEAD')}${dirty ? ' + uncommitted changes' : ''}`;
+})();
+const OUT = join(__dirname, '..', 'docs', 'review', 'x51-view', 'review-3');
 const THEMES = ['dark', 'light'] as const;
 const SLICE = 1800;
 const SHEET_MAX = 3000;
@@ -26,7 +33,7 @@ interface Shot {
 }
 
 test.describe('contact sheet: pd-view', () => {
-  test.skip(!process.env['CONTACT_SHEET'], 'set CONTACT_SHEET=1 to rewrite docs/review/x51-view/review-2');
+  test.skip(!process.env['CONTACT_SHEET'], 'set CONTACT_SHEET=1 to rewrite docs/review/x51-view/review-3');
   test.describe.configure({ timeout: 300_000 });
   test.use({ viewport: { width: 1100, height: 900 }, deviceScaleFactor: 2 });
 
@@ -44,7 +51,7 @@ test.describe('contact sheet: pd-view', () => {
   }
 
   /** Shoots `target` (padded by `pad` CSS px, for a focus ring or a shadow) in slices of at most SLICE px. */
-  async function shoot(page: Page, theme: string, section: string, title: string, name: string, target: Locator, pad = 0, limit = Infinity): Promise<void> {
+  async function shoot(page: Page, theme: string, section: string, title: string, name: string, target: Locator, pad = 0, limit = Infinity, hover?: Locator): Promise<void> {
     mkdirSync(OUT, { recursive: true });
     // The gallery scrolls inside one of its own containers, so a clip below the fold would paint blank: the window is made tall enough
     // for a whole slice, the container is scrolled until the slice starts at the top, and the clip is taken in window coordinates.
@@ -72,6 +79,19 @@ test.describe('contact sheet: pd-view', () => {
         },
         [pad, top] as [number, number],
       );
+      // The pointer must be on the target when the picture is taken: scrolling moved the page under it, so it is put back, and the
+      // focus is taken off whatever the earlier steps focused, so a hover shows the hover and not a ring.
+      if (hover) {
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        await hover.hover();
+        await expect(hover).toBeVisible();
+        const moved = await target.evaluate((e, [pad, offset]) => {
+          const r = e.getBoundingClientRect();
+          return { x: Math.max(0, r.left - pad), y: Math.max(0, r.top - pad + offset), width: r.width + 2 * pad };
+        }, [pad, 0] as [number, number]);
+        clip.x = moved.x;
+        clip.y = moved.y;
+      }
       const height = Math.min(SLICE, total - top, SLICE + 120 - clip.y);
       const file = join(OUT, `${theme}-${name}${total > SLICE ? `-${k}` : ''}.png`);
       await page.screenshot({ path: file, animations: 'disabled', caret: 'hide', clip: { x: clip.x, y: clip.y, width: Math.min(clip.width, viewport.width - clip.x), height } });
@@ -139,7 +159,7 @@ test.describe('contact sheet: pd-view', () => {
       await page.getByTestId('view-bad').click();
       await expect(box.getByTestId('view-error')).toHaveAttribute('data-kind', 'failed');
       await expect(box.locator('article')).toHaveCount(0);
-      await s('states', 'Invalid view: error icon in danger, the plugin named, Retry and Open logs, nothing of the view is drawn', 'invalid', box);
+      await s('states', 'Invalid view: error icon in danger, the plugin named, Retry and Open logs, nothing of the view is drawn', 'invalid', box.locator('pd-view'));
       await page.getByTestId('view-reload').click();
       await box.locator('article').waitFor();
       await page.getByTestId('view-busy-demo').click();
@@ -148,13 +168,13 @@ test.describe('contact sheet: pd-view', () => {
       await page.getByTestId('view-busy-demo').click();
       await page.getByTestId('view-load-demo').click();
       await expect(box.getByTestId('view-loading')).toBeVisible();
-      await s('states', 'Loading: a skeleton in the geometry of a view', 'loading', box);
+      await s('states', 'Loading: a skeleton in the geometry of a view', 'loading', box.locator('pd-view'));
       await page.getByTestId('view-reload').click();
     });
 
     test(`focus and hover ${theme}`, async ({ page }) => {
       const box = await open(page, theme);
-      const s = (title: string, name: string, target: Locator, pad = 6) => shoot(page, theme, 'interaction', title, name, target, pad);
+      const s = (title: string, name: string, target: Locator, pad = 6, hover?: Locator) => shoot(page, theme, 'interaction', title, name, target, pad, Infinity, hover);
       const form = box.locator('[data-node-id="form"]');
       await form.getByLabel('Release name').focus();
       await s('Keyboard focus in a text field', 'focus-field', form.getByLabel('Release name'));
@@ -164,18 +184,16 @@ test.describe('contact sheet: pd-view', () => {
       await tree.getByRole('treeitem').first().focus();
       await s('Keyboard focus on a tree row (ring inside the row, over the hover fill)', 'focus-tree', tree);
       await tree.getByRole('treeitem').nth(1).hover();
-      await s('Hover on a tree row', 'hover-tree', tree);
+      await s('Hover on a tree row (pointer only, no focus ring)', 'hover-tree', tree, 6, tree.getByRole('treeitem').nth(1));
       const graph = box.locator('[data-node-id="g1"]');
       await graph.locator('summary').focus();
       await s('Keyboard focus on the "Show as a list" disclosure', 'focus-list', graph.locator('details'));
       const act = graph.locator('g[role=button]').first();
       await act.focus();
       await s('Keyboard focus on a drawing box that has an action', 'focus-node', graph);
-      await act.hover();
-      await s('Hover on a drawing box that has an action', 'hover-node', graph);
+      await s('Hover on a drawing box that has an action (pointer only, no focus ring)', 'hover-node', graph, 6, act);
       const table = box.locator('[data-node-id="t1"]');
-      await table.locator('tbody tr').nth(1).hover();
-      await s('Hover on a table row that has a row action', 'hover-row', table);
+      await s('Hover on a table row that has a row action (pointer only, no focus ring)', 'hover-row', table, 6, table.locator('tbody tr').nth(1));
       await table.getByRole('button', { name: 'Sort by State, ascending' }).focus();
       await s('Keyboard focus on a sortable header', 'focus-sort', table);
       const review = box.locator('[data-node-id="review"]');
@@ -247,7 +265,7 @@ test.describe('contact sheet: pd-view', () => {
         figure{margin:0;background:#fff;padding:6px;border-radius:6px}
         figure img{display:block;max-width:100%;height:auto}
         figcaption{font-size:11px;color:#444;margin-bottom:4px}
-      </style><h1>${esc(sheet.label)}: review 2, not self-approved (left dark, right light)</h1>
+      </style><h1>${esc(sheet.label)}: review 3, not self-approved (left dark, right light)</h1>
       ${sheet.rows
         .map(
           (r) =>
@@ -263,9 +281,9 @@ test.describe('contact sheet: pd-view', () => {
     writeFileSync(
       join(OUT, 'README.md'),
       [
-        '# Contact sheet of `<pd-view>`: review 2 (NOT self-approved)',
+        '# Contact sheet of `<pd-view>`: review 3 (NOT self-approved)',
         '',
-        'Plan X51, ADR 0002. Made from the real components after the fixes for review 1 (`../REVIEW.md`, `../FIXES.md`). Awaiting the independent reviewer (rule 22).',
+        `Plan X51, ADR 0002. Made from the real components after the fixes for review 2 (\`../REVIEW.md\`, \`../FIXES.md\`). Every section (kinds, states, interaction, 320 px) was captured in one run from one commit: \`${commit}\`. Awaiting the independent reviewer (rule 22).`,
         '',
         'Open the `sheet-*.png` files: each is one section, dark on the left and light on the right, no taller than about 3,000 px (6,000 px of bitmap), readable at 100%.',
         'The single images (`dark-*.png`, `light-*.png`) are the same shots at 2x; a subject taller than 1,800 px is cut into numbered slices (`-1`, `-2`).',

@@ -1,11 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementRef, inject, input } from '@angular/core';
 import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { Diagram, Graph } from '../generated/view';
 import { layoutGraph, layoutSequence, MARK_W, type LayoutNode, type Scene, type SceneNode } from './layout';
 import { TONE_GLYPH, toneOf, toneWord } from './model';
 import { ViewRuntime } from './runtime';
-import { PdViewScroll } from './scroll';
-import { TONE_CSS, toneClass } from './tone';
+import { PdViewScroll, SCROLL_CSS } from './scroll';
+import { TONE_CSS, toneClass, VIEW_HOVER_FILL } from './tone';
 
 let nextId = 0;
 
@@ -78,7 +78,7 @@ export function diagramScene(d: Diagram): Scene {
               <line class="pd-view-scene__rule" [attr.x1]="n.x" [attr.x2]="n.x + n.w" [attr.y1]="n.y + (n.caption ? 38 : 30)" [attr.y2]="n.y + (n.caption ? 38 : 30)" />
             }
             @for (d of n.detail; track $index) {
-              <text class="pd-view-scene__detail" [attr.x]="n.compartment ? n.x + 10 : n.x + n.w / 2" [attr.y]="n.y + (n.caption ? 48 : 40) + $index * 16" [attr.text-anchor]="n.compartment ? 'start' : 'middle'">{{ clip(d, n.w - (n.compartment ? 4 : 0)) }}</text>
+              <text class="pd-view-scene__detail" [attr.x]="n.compartment ? n.x + 10 : n.x + n.w / 2" [attr.y]="n.y + (n.compartment ? (n.caption ? 55 : 47) : n.caption ? 48 : 40) + $index * 16" [attr.text-anchor]="n.compartment ? 'start' : 'middle'">{{ clip(d, n.w - (n.compartment ? 4 : 0)) }}</text>
             }
           </g>
         }
@@ -116,12 +116,12 @@ export function diagramScene(d: Diagram): Scene {
     :host { display: block; min-width: 0; }
     .pd-view-scene__frame { border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); overflow: hidden; max-width: 100%; }
     .pd-view-scene__scroll { overflow: auto; max-width: 100%; max-height: 70vh; }
-    .pd-view-scene__scroll:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
+    ${SCROLL_CSS}
     .pd-view-scene__svg { display: block; max-width: none; margin-inline: auto; font-family: var(--pd-font-sans); }
     .pd-view-scene__node rect { fill: var(--pd-surface-2); stroke: var(--pd-view-tone, var(--pd-border-strong)); stroke-width: 1.5; }
     .pd-view-scene__node.pd-view-tone-neutral rect { stroke: var(--pd-border-strong); }
     .pd-view-scene__node--act { cursor: pointer; }
-    .pd-view-scene__node--act:hover rect { fill: var(--pd-hover); }
+    .pd-view-scene__node--act:hover rect { fill: ${VIEW_HOVER_FILL}; }
     .pd-view-scene__node--act:focus-visible { outline: none; }
     .pd-view-scene__node--act:focus-visible rect { stroke: var(--pd-focus-ring); stroke-width: 3; }
     .pd-view-scene__label { fill: var(--pd-text); font-size: 13px; font-weight: 500; }
@@ -139,7 +139,7 @@ export function diagramScene(d: Diagram): Scene {
     .pd-view-scene__list summary pd-glyph { transition: transform var(--pd-duration-micro) var(--pd-ease-move); }
     .pd-view-scene__list[open] summary pd-glyph { transform: rotate(90deg); }
     @media (prefers-reduced-motion: reduce) { .pd-view-scene__list summary pd-glyph { transition: none; } }
-    .pd-view-scene__list summary:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; border-radius: 2px; }
+    .pd-view-scene__list summary:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; border-radius: 4px; }
     .pd-view-scene__list ul { margin: var(--pd-space-1) 0; padding-inline-start: var(--pd-space-4); overflow-wrap: break-word; }
     .pd-view-scene__list ul ul.pd-view-scene__details { margin: 0; color: var(--pd-text-subtle); }
   `,
@@ -150,6 +150,15 @@ export class PdViewScene {
   /** The accessible name of the drawing. */
   readonly label = input.required<string>();
   protected readonly arrowId = `pd-view-arrow-${++nextId}`;
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+
+  constructor() {
+    // A drawing wider than the pane opens at its middle (the hub of a radial graph), not cut at the far left.
+    afterNextRender(() => {
+      const scroller = this.element.querySelector<HTMLElement>('.pd-view-scene__scroll');
+      if (scroller && scroller.scrollWidth > scroller.clientWidth) scroller.scrollLeft = (scroller.scrollWidth - scroller.clientWidth) / 2;
+    });
+  }
   protected readonly asList = $localize`:@@pd.view.scene.list:Show as a list`;
   protected readonly summary = computed(() => {
     const s = this.scene();

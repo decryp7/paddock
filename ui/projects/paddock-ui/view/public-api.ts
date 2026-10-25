@@ -16,7 +16,7 @@
  * ```
  */
 export { PdView } from './src/view';
-export { PdViewNode } from './src/node';
+export { NEEDS_AI_WITHOUT_REPAIR, PdViewNode } from './src/node';
 export { PdViewButton, PdViewLink } from './src/button';
 export { PdViewWrites, writesText } from './src/writes';
 export { PdViewTable, tableWindow, type TableWindow } from './src/table';

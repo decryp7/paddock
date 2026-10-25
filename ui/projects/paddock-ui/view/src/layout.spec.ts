@@ -3,11 +3,66 @@ import { detailLines, hubOf, layers, layoutGraph, layoutSequence, MARK_W, ringsF
 import { diagramScene, graphScene } from './scene';
 import { sampleViewDoc } from './sample';
 import { shapeOf } from './model';
+import { flattenPath, pathCrosses } from './route';
 
 const n = (id: string, over: Partial<LayoutNode> = {}): LayoutNode => ({ id, label: id, ...over });
 const e = (from: string, to: string, label = '') => ({ from, to, label });
 const overlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean =>
   a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/** Every edge of a scene against every box that is not one of its two ends (a self loop: its own box is fine too). */
+function crossings(s: ReturnType<typeof layoutGraph>): string[] {
+  if (s.kind === 'sequence') return [];
+  const bad: string[] = [];
+  for (const edge of s.edges) {
+    const others = s.nodes.filter((b) => b.id !== edge.from && b.id !== edge.to);
+    if (pathCrosses(edge.path, others)) bad.push(`${edge.from}>${edge.to} (${edge.label})`);
+    const pts = flattenPath(edge.path);
+    for (const p of pts) if (p[0] < 0 || p[1] < 0 || p[0] > s.width || p[1] > s.height) bad.push(`${edge.from}>${edge.to} leaves the canvas at ${p}`);
+  }
+  return bad;
+}
+
+describe('edge routing: an edge never crosses a box (review 2, P2-1)', () => {
+  const ids = (k: number, p = 'n') => Array.from({ length: k }, (_, i) => `${p}${i}`);
+  const cases: { name: string; nodes: LayoutNode[]; edges: ReturnType<typeof e>[] }[] = [
+    { name: 'the sample CI graph with its retry', nodes: ['a', 'b', 'c', 'd', 'e'].map((id) => n(id, { label: id === 'c' ? 'Integration tests' : id.repeat(5) })), edges: [e('a', 'b'), e('a', 'c', 'needs db'), e('b', 'd'), e('c', 'd'), e('d', 'e'), e('e', 'a', 'retry')] },
+    { name: 'a long edge over a middle layer', nodes: ids(4).map((id) => n(id, { label: id.repeat(8) })), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n2', 'n3'), e('n0', 'n3', 'skip'), e('n0', 'n2', 'skip two')] },
+    { name: 'back edges to every layer', nodes: ids(5).map((id) => n(id, { label: id.repeat(7) })), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n2', 'n3'), e('n3', 'n4'), e('n4', 'n0', 'a'), e('n4', 'n1', 'b'), e('n3', 'n0', 'c'), e('n2', 'n0', 'd'), e('n4', 'n2', 'e')] },
+    { name: 'a wide row with an edge sideways inside it', nodes: ids(5).map((id) => n(id)), edges: [e('n0', 'n1'), e('n0', 'n2'), e('n0', 'n3'), e('n0', 'n4'), e('n1', 'n3'), e('n3', 'n1', 'sideways'), e('n4', 'n2')] },
+    { name: 'a radial ring where neighbours on the ring link', nodes: ['c', ...ids(6, 's')].map((id) => n(id)), edges: [...ids(6, 's').map((id) => e('c', id)), e('s0', 's1'), e('s1', 's3'), e('s2', 's5'), e('s4', 's0')] },
+    { name: 'a radial graph with an edge across the hub', nodes: ['c', ...ids(5, 's')].map((id) => n(id)), edges: [...ids(5, 's').map((id) => e('c', id)), e('s0', 's2'), e('s1', 's3')] },
+  ];
+  for (const c of cases) {
+    for (const radial of [false, true]) {
+      it(`${c.name}, radial=${radial}`, () => {
+        expect(crossings(layoutGraph(c.nodes, c.edges, radial))).toEqual([]);
+      });
+    }
+  }
+  it('holds for the graphs and class diagram of the sample document', () => {
+    const root = shapeOf(sampleViewDoc().root);
+    if (root.tag !== 'stack') throw new Error('stack');
+    for (const id of ['g1', 'g2', 'd1', 'd2']) {
+      const k = shapeOf(root.v.children.find((c) => c.id === id)!);
+      const s = k.tag === 'graph' ? graphScene(k.v) : k.tag === 'diagram' ? diagramScene(k.v) : null;
+      if (!s) throw new Error(id);
+      expect(crossings(s), id).toEqual([]);
+      if (k.tag === 'graph') expect(crossings(graphScene({ ...k.v, layout: k.v.layout === 'radial' ? 'layered' : 'radial' })), `${id} other layout`).toEqual([]);
+    }
+  });
+  it('sends the retry edge around the outside: right of every box, with a vertical lane', () => {
+    const root = shapeOf(sampleViewDoc().root);
+    if (root.tag !== 'stack') throw new Error('stack');
+    const g = shapeOf(root.v.children.find((c) => c.id === 'g1')!);
+    if (g.tag !== 'graph') throw new Error('graph');
+    const s = graphScene(g.v);
+    const retry = s.edges.find((x) => x.label === 'retry')!;
+    const right = Math.max(...s.nodes.map((b) => b.x + b.w));
+    expect(Math.max(...flattenPath(retry.path).map((p) => p[0]))).toBeGreaterThan(right);
+    expect(retry.lx).toBeGreaterThan(right);
+  });
+});
 
 describe('layers', () => {
   it('puts a node below the longest path to it', () => {
@@ -42,7 +97,7 @@ describe('layoutGraph', () => {
     expect(s.edges.find((x) => x.label === 'x')).toBeTruthy();
     // The cycle edge runs outside the boxes, on the right.
     const back = s.edges.find((x) => x.from === 'e' && x.to === 'a')!;
-    expect(back.path).toMatch(/^M [\d.]+ [\d.]+ C [\d.]+ [\d.]+, [\d.]+ [\d.]+, [\d.]+ [\d.]+$/);
+    expect(back.path).toMatch(/^M [\d.]+ [\d.]+( L [\d.]+ [\d.]+| Q [\d.]+ [\d.]+ [\d.]+ [\d.]+)+$/);
     expect(Math.min(...back.path.match(/[\d.]+/g)!.filter((_, i) => i % 2 === 0).map(Number))).toBeGreaterThan(0);
     expect(back.lx).toBeLessThanOrEqual(s.width);
     expect(back.anchor).toBe('start');

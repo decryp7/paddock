@@ -13,11 +13,17 @@ export const writesText = (): string => $localize`:@@pd.view.writes:Changes data
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph],
   host: { 'data-testid': 'view-writes' },
-  template: `<pd-glyph name="edit" [size]="14" />{{ text }}`,
+  template: `<pd-glyph name="edit" [size]="14" /><span class="pd-view-writes__text" [attr.data-short]="short">{{ text }}</span>`,
   styles: `
     :host { display: inline-flex; align-items: center; gap: var(--pd-space-1); margin-inline-start: var(--pd-space-2); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-pill); background: var(--pd-surface-1); color: var(--pd-text); border: 1px solid var(--pd-border-strong); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-medium); line-height: 1.5; white-space: nowrap; }
+    /* In a narrow pane the badge is the pencil and a shorter word (the full words stay in the page for assistive technology). */
+    @container (max-width: 360px) {
+      .pd-view-writes__text { font-size: 0; }
+      .pd-view-writes__text::after { content: attr(data-short); font-size: var(--pd-text-caption); }
+    }
   `,
 })
 export class PdViewWrites {
   protected readonly text = writesText();
+  protected readonly short = $localize`:@@pd.view.writes.short:Edits`;
 }
