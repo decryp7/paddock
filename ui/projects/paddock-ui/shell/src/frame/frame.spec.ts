@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, Injectable, InjectionToken, provideZonelessChangeDetection, signal, type Type } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, Injectable, InjectionToken, input, type OnDestroy, provideZonelessChangeDetection, signal, type Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { msg } from '../message';
 import { defineStatusItem, type StatusItemDef } from '../define';
@@ -63,9 +63,9 @@ describe('icons', () => {
   });
 
   it('pd-icon uses the window’s icon component', async () => {
-    @Component({ selector: 'my-icon', template: `my:{{ name }}`, changeDetection: ChangeDetectionStrategy.OnPush, inputs: ['name'] })
+    @Component({ selector: 'my-icon', template: `my:{{ name() }}`, changeDetection: ChangeDetectionStrategy.OnPush })
     class MyIcon {
-      name = '';
+      readonly name = input('');
     }
     TestBed.configureTestingModule({ providers: [provideShellIcon(MyIcon)] });
     const fixture = TestBed.createComponent(PdIcon);
@@ -281,7 +281,7 @@ describe('pd-part-outlet', () => {
     let resolveOld!: (t: Type<unknown>) => void;
     const destroyed: string[] = [];
     @Injectable()
-    class Tracker {
+    class Tracker implements OnDestroy {
       constructor() {
         destroyed.push('created');
       }

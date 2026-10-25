@@ -201,6 +201,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
           @for (n of iconNames; track n) {
             <li class="gal-icon">
               <span class="gal-icon-pair" data-row="glyph"><pd-glyph [name]="n" [size]="16" /><pd-glyph [name]="n" [size]="24" /></span>
+              <!-- eslint-disable-next-line paddock/template-no-inner-html -- fixed SVG literals of this package, bound exactly as <mat-icon svgIcon> inserts them, to compare with pd-glyph -->
               <span class="gal-icon-pair" data-row="literal"><span class="mat-icon gal-mat gal-mat--16" [innerHTML]="literal(n)"></span><span class="mat-icon gal-mat gal-mat--24" [innerHTML]="literal(n)"></span></span>
               <span class="gal-icon-name">{{ n }}</span>
             </li>

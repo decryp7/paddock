@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './table';
@@ -31,6 +31,7 @@ const ACTIONS: PdRowAction[] = [
 ];
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdTable, PdCell, PdTableEmpty],
   template: `
     <pd-table

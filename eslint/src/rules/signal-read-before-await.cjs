@@ -29,9 +29,11 @@ module.exports = {
     const stack = [];
     const check = (fn, signals) => {
       if (!fn.async || !signals.size) return;
+      // The function suspends when its innermost first `await` has evaluated its operand, so a read inside that operand
+      // (`await store.reopen(this.list(), path)`) still happens before the suspension.
       let firstAwait = Infinity;
       walk(fn.body, sc.visitorKeys, (n) => {
-        if (n.type === 'AwaitExpression') firstAwait = Math.min(firstAwait, n.range[0]);
+        if (n.type === 'AwaitExpression') firstAwait = Math.min(firstAwait, n.range[1]);
       });
       if (firstAwait === Infinity) return;
       walk(fn.body, sc.visitorKeys, (n) => {

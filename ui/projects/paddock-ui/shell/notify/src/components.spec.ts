@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ContributionRegistry, defineNotificationKind, msg, provideContributions } from '@decryp7/paddock-ui/shell';
 import { NotificationsStore } from './notifications.store';
@@ -188,6 +188,7 @@ describe('pd-service-status', () => {
 });
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdServiceError, PdWaitingFor],
   template: `
     <pd-service-error summary="Could not load events." service="store" detail="engine said no" (retry)="retries.update((n) => n + 1)" />

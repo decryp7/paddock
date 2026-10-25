@@ -37,6 +37,10 @@ jobs:
       - name: Contrast and CVD checks
         run: npm run test:tokens
 
+      # The Paddock ESLint preset (rules 27 to 39 and the angular-eslint template and accessibility rules) over every ui project.
+      - name: Lint
+        run: npm run lint
+
       - name: Component specs
         run: npm test
 

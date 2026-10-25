@@ -195,6 +195,7 @@ export class Perspectives {
     const present = new Set(this.saved.list().map((l) => SAVED_PREFIX + l.name));
     const gone = (id: string) => id.startsWith(SAVED_PREFIX) && !present.has(id);
     const layouts = Object.fromEntries(Object.entries(this.state.layouts).filter(([id]) => !gone(id)));
+    // after-await: the choice as it is now, after the reload (it may have changed while the layouts were read).
     const active = gone(this.activeId()) ? '' : this.activeId();
     this.activeId.set(active);
     this.persist({ active, layouts });

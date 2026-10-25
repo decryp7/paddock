@@ -533,6 +533,7 @@ densities, high contrast (`data-contrast`) and reduced motion (`data-motion`).
 cd ui
 npm ci
 npm run test:tokens      # WCAG contrast of every pair (standard and high contrast) + colour-vision separation (289 tests)
+npm run lint             # @decryp7/paddock-eslint preset (rules 27 to 39, template a11y) over all projects, 0 findings
 npm test                 # component and helper specs (Vitest via ng test), 100% lines
 npx playwright test      # gallery: axe (both themes), keyboard, native feel, CSP; `npm run screenshots` (the kit's `captureDocScreens`: fixed clock, locale and time zone, 1440x900 at 2x, `hashes.json` for conformance C24) rewrites docs/screenshots
 npm run build            # ng-packagr build to dist/paddock-ui (every entry point)

@@ -15,7 +15,7 @@ import type { ShellCommand } from '../generated/shell-commands';
  *
  * Without the augmentation the app's names fall back to `string`, so nothing changes for an app until it adds it.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-interface, @typescript-eslint/no-empty-object-type
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface ShellTypes {}
 
 /** The app's IPC command names: its generated `AppCommand` union once registered in `ShellTypes.appCommand`, else `string`. */

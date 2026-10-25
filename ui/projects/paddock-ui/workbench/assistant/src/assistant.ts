@@ -374,6 +374,7 @@ export class PdAssistant {
 
   constructor() {
     // Keeps the newest text in view while an answer streams in, but only for a user who is at the bottom (DOM only).
+    // effect-state: `unseen` records the scroll decision of this effect; the user's position is not a signal, so it cannot be derived.
     effect(() => {
       this.store.turns();
       const el = this.log()?.nativeElement;

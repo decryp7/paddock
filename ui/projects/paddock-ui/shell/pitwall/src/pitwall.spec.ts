@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PITWALL_COMMANDS, PITWALL_EVENT, type AiSnapshot, type AiState, type NextStep } from '../generated/pitwall';
 import { MemoryPitwallBackend, PitwallBackend, TauriPitwallBackend, type PitwallIpc } from './backend';
@@ -172,7 +172,7 @@ describe('the memory backend plays the engine', () => {
   });
 });
 
-@Component({ selector: 'pd-test-host', imports: [PdNeedsAi], template: `<pd-needs-ai feature="Ask about this log" [settingsLink]="settings" (step)="steps.push($event)" (openSettings)="opened = opened + 1" />` })
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, selector: 'pd-test-host', imports: [PdNeedsAi], template: `<pd-needs-ai feature="Ask about this log" [settingsLink]="settings" (step)="steps.push($event)" (openSettings)="opened = opened + 1" />` })
 class Host {
   settings = true;
   steps: NextStep[] = [];
