@@ -2,6 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MemoryPacksBackend, memoryKind, provideShellPacks, type PacksBackend } from '@decryp7/paddock-ui/shell/packs';
 import { PdPacksPage } from './packs-page';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 async function settle(rounds = 12): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
@@ -48,6 +49,7 @@ describe('the Knowledge packs page', () => {
     const alert = el.querySelector('[data-testid="packs-problems-cleanup"] [role="alert"]');
     expect(alert?.textContent).toContain('broken.toml');
     expect(alert?.textContent).toContain('line 2, column 3');
+    assertStatusGlyphs(el);
     expect(q('packs-warnings-cleanup')?.textContent).toContain('unknown key "extra"');
     expect(q('packs-reload')?.classList.contains('pd-packs__btn--primary')).toBe(true);
   });

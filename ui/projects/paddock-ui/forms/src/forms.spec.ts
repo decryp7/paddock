@@ -4,6 +4,7 @@ import { form, FormField, maxLength, min, minLength, required, validate } from '
 import { describe, expect, it } from 'vitest';
 import { PdField, PdFieldControl } from './field';
 import { defaultErrorText, errorText, fieldMessage, showErrors, type PdFieldStateLike } from './messages';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 const state = (over: Partial<Record<'touched' | 'disabled' | 'pending', boolean>> & { errors?: { kind: string; message?: string }[] } = {}): PdFieldStateLike => ({
   errors: () => over.errors ?? [{ kind: 'required' }],
@@ -116,6 +117,7 @@ describe('pd-field', () => {
     const error = fields(f)[0]!.querySelector('[data-testid=field-error]')!;
     expect(error.textContent).toContain('Give it a name.');
     expect(error.querySelector('pd-glyph svg')?.getAttribute('width')).toBe('14');
+    assertStatusGlyphs(error);
     expect(input.getAttribute('aria-invalid')).toBe('true');
     expect(input.getAttribute('aria-describedby')).toContain(error.id);
     expect(fields(f)[0]!.classList.contains('pd-field--invalid')).toBe(true);

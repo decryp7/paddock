@@ -11,6 +11,7 @@ import { AssistantBackend, MemoryAssistantBackend, type MemoryAssistantOptions }
 import type { ToolCard } from './chat-model';
 import { provideAssistantRenderers, type AssistantCitationHandler } from './tool-cards';
 import type { CitationOpened } from './rich-text';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 @Component({ selector: 'pd-test-card', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p data-testid="custom-card">{{ card().name }} drawn by the app</p>` })
 class CustomCard {
@@ -594,6 +595,7 @@ describe('PdAssistant', () => {
       for (let i = 0; i < 8; i++) await settle(r.fixture);
       expect(r.one('[data-testid=assistant-tool-card]').getAttribute('data-state')).toBe('failed');
       expect(text(r, 'assistant-tool-result')).toBe('The index is locked by another process.');
+      assertStatusGlyphs(r.one('[data-testid=assistant-tool-card]'));
     });
 
     it('designs a failed turn: icon, plain words, likely cause, Retry that resends and details, in the answer column (P2-H)', async () => {
@@ -616,6 +618,7 @@ describe('PdAssistant', () => {
       expect(r.all('[data-testid=assistant-turn]')).toHaveLength(2);
       // Only the newest failed turn can be retried.
       expect(r.all('[data-testid=assistant-error-retry]')).toHaveLength(1);
+      assertStatusGlyphs(r.one('[data-testid=assistant-error]'));
     });
 
     it('titles a conversation without its leading slash command, in sentence case (P3-11)', async () => {
