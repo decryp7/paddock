@@ -4,7 +4,7 @@
 export const SHELL_PLUGIN = 'paddock-shell';
 
 /** The shell's version: the plugin's `shell_version` must answer it (one version across the boundary). */
-export const SHELL_VERSION = '0.2.0';
+export const SHELL_VERSION = '0.3.0';
 
 export type AppIdentity = { id: string, name: string, version: string, };
 
