@@ -66,6 +66,7 @@
     "updater": {
       "pubkey": "",
       "endpoints": [
+        "https://dev.decryptology.net/decryp7/paddock/releases/download/debrief-latest/latest.json",
         "https://dev.decryptology.net/decryp7/debrief/releases/download/latest/latest.json"
       ],
       "requireSignedVersion": true,

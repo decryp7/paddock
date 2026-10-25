@@ -49,7 +49,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 /// The status after every change, to every window.
 pub const STATUS_EVENT: &str = "debrief://updates";
 /// Where users download installers by hand (the next step of most errors).
-pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/debrief/releases";
+pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=debrief-v";
 /// The update public key given to this build (CI secret `TAURI_UPDATER_PUBKEY`). Cargo rebuilds when it changes.
 const BUILD_PUBKEY: Option<&str> = option_env!("TAURI_UPDATER_PUBKEY");
 /// Progress is sent to the UI at most this often.

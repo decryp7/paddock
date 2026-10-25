@@ -74,7 +74,7 @@ export class MockUpdatesBackend implements UpdatesBackend {
       autoCheck: false,
       channel: 'stable',
       endpointHost: this.scenario === 'unavailable' ? null : 'dev.decryptology.net',
-      releasesPage: 'https://dev.decryptology.net/decryp7/debrief/releases',
+      releasesPage: 'https://dev.decryptology.net/decryp7/paddock/releases?q=debrief-v',
       downloadJob: null,
     };
   }
