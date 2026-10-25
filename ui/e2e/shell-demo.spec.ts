@@ -35,6 +35,40 @@ test('the menu bar is one line at 320 px and the title bar clips nothing (screen
   expect(last && last.x + last.width, 'the last menu is not cut at the window edge').toBeLessThanOrEqual(320);
 });
 
+for (const width of [1440, 640, 320]) {
+  test(`the row actions column is there at ${width} px: a "..." button on every row, inside the table (re-review P2)`, async ({ app, page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await app.frame.open('#/runners');
+    await expect(page.locator('sd-runners-page .name').first()).toBeVisible();
+    const more = page.locator('sd-runners-page .pd-row .pd-more');
+    await expect(more).toHaveCount(4);
+    const table = (await page.locator('sd-runners-page pd-table').boundingBox())!;
+    for (const b of await more.all()) {
+      const box = (await b.boundingBox())!;
+      expect(box.x, 'inside the table, on the right').toBeGreaterThan(table.x + table.width / 2);
+      expect(box.x + box.width, 'inside the table').toBeLessThanOrEqual(table.x + table.width + 0.5);
+    }
+  });
+}
+
+test(`State stays visible at 320 px and the host gives way before any runner name is cut (re-review P3)`, async ({ app, page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await app.frame.open('#/runners');
+  await expect(page.locator('sd-runners-page .state').first()).toBeVisible();
+  const cut = await page.locator('sd-runners-page .name').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth).length);
+  expect(cut).toBe(0);
+});
+
+test('a runner host is never shown cut: it is dropped before it would need an ellipsis (re-review P2)', async ({ app, page }) => {
+  for (const width of [1440, 900, 640, 480, 400, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    await app.frame.open('#/runners');
+    await expect(page.locator('sd-runners-page .name').first()).toBeVisible();
+    const cut = await page.locator('sd-runners-page .host').evaluateAll((els) => els.filter((e) => e.getClientRects().length > 0 && e.scrollWidth > e.clientWidth).length);
+    expect(cut, `hosts cut at ${width} px`).toBe(0);
+  }
+});
+
 test('the app name is cut to one ellipsis with no space before it at any narrow width (screenshot review P3)', async ({ app, page }) => {
   await app.frame.open();
   for (let width = 320; width <= 560; width += 8) {

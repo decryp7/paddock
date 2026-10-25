@@ -93,8 +93,8 @@ export function middleEllipsis(text: string, max: number): string {
   return chars.slice(0, head).join('') + ELLIPSIS + chars.slice(chars.length - tail).join('');
 }
 
-/** The leading root of a path that always stays: a drive ("C:\"), a UNC or POSIX root ("\\", "/"); empty for a relative path. */
-const ROOT = /^(?:[A-Za-z]:[\\/]?|[\\/]{1,2})/;
+/** The leading root of a path that always stays: a UNC share ("\\server\share\"), a drive ("C:\") or a POSIX root ("/"); empty for a relative path. */
+const ROOT = /^(?:[\\/]{2}[^\\/]+[\\/][^\\/]+[\\/]?|[A-Za-z]:[\\/]?|[\\/])/;
 
 /** Largest `n` in `[0, max]` for which `fits(n)` holds, given that `fits` is true for small `n` and stays false from some point on. */
 function largest(max: number, fits: (n: number) => boolean): number {
@@ -110,21 +110,21 @@ function largest(max: number, fits: (n: number) => boolean): number {
 
 /**
  * Shortens a path to the width `maxWidth` (in whatever unit `measure` returns, normally pixels) with at most one ellipsis and
- * no gap beside it. The root ("C:\" or "/") and the separator before the file name stay flush against the ellipsis
- * ("C:\…\Builder.Service.2026-10-24.log", "/Users/…/builder.service.log"); the drive colon is never dropped. When even the
- * file name alone is too wide, the directory is dropped and the name itself shortens in the middle with one ellipsis,
- * keeping its last `keepTail` characters (from a word start). Text that fits is returned unchanged.
+ * no gap beside it. The root ("C:\", "/", "\\server\share\") is never dropped. What gives way, in order: the folders (one ellipsis
+ * for them, flush against the root and the separator: "C:\…\Builder.Service.2026-10-24.log"), then the start of the file name
+ * (the ellipsis flush against the root, the end of the name kept with its extension: "C:\…Service.2026-10-24.log"). A path
+ * with no root shortens its folders the same way and then its name in the middle (`keepTail`). Text that fits is returned unchanged.
  */
 export function fitPath(text: string, maxWidth: number, measure: (s: string) => number, keepTail = DEFAULT_KEEP_TAIL): string {
   if (measure(text) <= maxWidth) return text;
   const chars = Array.from(text);
-  const cut = lastSeparatorIndex(chars) + 1; // the directory with its last separator
   const rootLength = Array.from(ROOT.exec(text)?.[0] ?? '').length;
+  const cut = Math.max(lastSeparatorIndex(chars) + 1, rootLength); // the directory with its last separator, at least the root
+  const root = chars.slice(0, rootLength).join('');
+  const name = chars.slice(cut).join('');
   if (cut > rootLength) {
     const sep = chars[cut - 1] ?? '/';
-    const root = chars.slice(0, rootLength).join('');
-    const middle = chars.slice(rootLength, cut - 1); // the directories between the root and the name
-    const name = chars.slice(cut).join('');
+    const middle = chars.slice(rootLength, cut - 1); // the folders between the root and the name
     const build = (n: number): string => root + middle.slice(0, n).join('') + ELLIPSIS + sep + name;
     if (measure(build(0)) <= maxWidth) {
       let n = largest(middle.length, (k) => measure(build(k)) <= maxWidth);
@@ -133,9 +133,13 @@ export function fitPath(text: string, maxWidth: number, measure: (s: string) => 
       if (n < middle.length && stop >= 0 && stop + 1 >= n / 2) n = stop + 1;
       return build(n);
     }
-    return fitName(name, maxWidth, measure, keepTail);
   }
-  return fitName(text, maxWidth, measure, keepTail);
+  if (rootLength > 0) {
+    const nameChars = Array.from(name);
+    const k = largest(nameChars.length, (j) => measure(root + ELLIPSIS + nameChars.slice(nameChars.length - j).join('')) <= maxWidth);
+    return root + ELLIPSIS + nameChars.slice(nameChars.length - k).join('');
+  }
+  return fitName(name === '' ? text : name, maxWidth, measure, keepTail);
 }
 
 /** One ellipsis in the middle of a name: its start and its last `keepTail` characters; only the end when that alone is too wide. */

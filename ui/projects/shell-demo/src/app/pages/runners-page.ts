@@ -30,10 +30,12 @@ const STATE_WORD = { online: 'Online', updating: 'Updating', offline: 'Offline' 
     SECTION_STYLES +
     `
     /* One line: the table's rows have the family's fixed heights, so the host is secondary text beside the name, and it is the host that gives way first. */
-    .who { display: flex; align-items: baseline; gap: var(--pd-space-2); min-width: 0; }
+    .who { display: flex; flex: 1 1 0; align-items: baseline; gap: var(--pd-space-2); min-width: 0; container-type: inline-size; }
     .name, .host { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .name { flex: 0 1 auto; }
     .host { flex: 0 100000 auto; min-width: 0; }
+    /* The host is dropped, never cut: below the width where the longest name and host fit side by side (about 185 px) the cell shows the name alone. */
+    @container (max-width: 195px) { .host { display: none; } }
     .name { font-weight: var(--pd-weight-medium); }
     .host { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .state { display: inline-flex; align-items: center; gap: var(--pd-space-1); }
@@ -55,7 +57,7 @@ export class RunnersPage {
   /** Narrow page areas keep the runner and its state; the counts and times are on wider ones (the table drops them by its own width). */
   protected readonly columns: PdColumn<Runner>[] = [
     { key: 'name', header: 'Runner', value: (r) => r.name, required: true, width: 'minmax(0, 2fr)' },
-    { key: 'state', header: 'State', value: (r) => r.state, width: '92px' },
+    { key: 'state', header: 'State', value: (r) => r.state, width: '80px' },
     { key: 'jobs', header: 'Jobs today', value: (r) => r.jobsToday, align: 'end', width: '96px', hideBelow: 400 },
     { key: 'when', header: 'Last job', value: (r) => r.lastJob, width: 'minmax(7.5rem, 1fr)', hideBelow: 520 },
   ];

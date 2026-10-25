@@ -217,8 +217,15 @@ test.describe('UI basics review fixes (regressions)', () => {
     const shown = await page.locator('[data-testid="path-win-240"] .pd-shown').textContent();
     expect(shown).toContain('Service.');
     expect(shown).toContain('2026-10-24.log');
-    // Either the root and the separator stay beside the ellipsis, or the directory is gone and only the name is shortened.
-    expect(shown).toMatch(/^(C:\\…\\|[^\\:]+…)/);
+    // The root is never dropped: the folders collapse first, then the start of the name, with the ellipsis flush against "C:\".
+    expect(shown).toMatch(/^C:\\…/);
+  });
+
+  test('the four path samples sit on one line: their text is centred on the same height (re-review P2)', async ({ page }) => {
+    await open(page, 'dark', 'debrief');
+    const centres = await page.locator('[data-testid="path-text"] .pd-text').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; }));
+    expect(centres).toHaveLength(4);
+    expect(Math.max(...centres) - Math.min(...centres), centres.join(', ')).toBeLessThanOrEqual(1);
   });
 
   test('keycaps do not touch (P2-12)', async ({ page }) => {
