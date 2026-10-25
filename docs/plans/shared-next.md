@@ -537,10 +537,18 @@ Closed after the first push (2026-10-25):
 - One pin script for every runtime catalogue: `conformance/ci/pin-runtime.mjs` (replaces Spotter's `pin-chromium.mjs`), and
   `install-test-browser.mjs --catalogue` (replaces Debrief's `install-test-browser.mjs`); tested against a local server.
 
+Closed after X54 (2026-10-25):
+- Windows: the browser runs in `paddock-proc`'s kill-on-close job object; every end (close, kill, the time
+  limit's watchdog, drop) goes through the `Supervised`, so the job closes with it. `taskkill /T /F` stays only inside
+  `paddock-proc` as its documented first step, and `end_leftovers` (processes still naming the throwaway profile) is the
+  fallback for a helper outside the job. Chrome on Windows prints nothing for `--version`: the runtime self-test there checks
+  the `<version>.manifest` beside `chrome.exe` and one headless page dump.
+- The real-browser test runs in all three `crate` legs with `PADDOCK_REQUIRE_TEST_BROWSER=1`: the image's build on Linux, the
+  install action's `catalogue:` input on macOS and Windows (kept in `PADDOCK_TEST_BROWSER_DIR`, downloaded once per pin).
+
 Gaps left:
-- Windows: `taskkill /T /F` ends the browser tree (no job object yet, see `paddock-proc`); the fake browser is Unix only,
-  so the launch tests run on Linux and macOS; the pure command-line tests run everywhere. The real-browser test runs on Linux
-  CI only (macOS and Windows would need the install action with `catalogue:`).
+- The fake browser is Unix only, so the fake-driven launch tests run on Linux and macOS; Windows runs the pure tests and the
+  real browser.
 
 ## X51 `<pd-view>` (ADR 0002): review 1 fixes and decisions
 

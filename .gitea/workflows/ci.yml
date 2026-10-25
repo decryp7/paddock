@@ -239,6 +239,7 @@ jobs:
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
           echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+          echo PADDOCK_TEST_BROWSER_DIR=%USERPROFILE%\.paddock-ci\test-browser>>"%GITHUB_ENV%"
 
       # The Mac host runner: a build folder next to the checkout that outlives the job; the host toolchain as installed.
       - name: Persistent build folder (macOS)
@@ -246,6 +247,7 @@ jobs:
         run: |
           echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+          echo "PADDOCK_TEST_BROWSER_DIR=$GITHUB_WORKSPACE/../.paddock-ci-test-browser" >> "$GITHUB_ENV"
 
       # Toolchain and sccache on every OS: the shared Redis backend (database 5) when the Gitea variables are set. The macOS
       # leg can switch to the local disk with `sccache-backend: local` if the network proves slower than its disk.
@@ -322,12 +324,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo clippy -p paddock-runtime --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-runtime --all-features --profile ci && cargo test -p paddock-runtime --all-features --doc
 
-      # The driver against its fake browser (Unix), and against the image's Chrome for Testing on Linux (CHROMIUM_TEST_PATH, the
-      # build chromium.toml pins; never an installed browser, rule 7). There a missing browser fails instead of skipping.
+      # The build chromium.toml pins, on the host runners (the Linux image has it): checked against its SHA-256 and kept in a
+      # folder that outlives the job, so it is downloaded once per pin. Sets CHROMIUM_TEST_PATH.
+      - name: Chrome for Testing (macOS, Windows)
+        if: ${{ !cancelled() && runner.os != 'Linux' }}
+        uses: ./.gitea/actions/install-test-browser
+        with:
+          catalogue: ${{ github.workspace }}/crates/paddock-chromium/src/chromium.toml
+          env-prefix: PADDOCK
+          dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
+
+      # The driver against its fake browser (Unix), and against Chrome for Testing on every OS (CHROMIUM_TEST_PATH: the image's
+      # on Linux, the step above elsewhere; never an installed browser, rule 7). A missing browser fails instead of skipping.
       - name: paddock-chromium
         if: ${{ !cancelled() }}
         env:
-          PADDOCK_REQUIRE_TEST_BROWSER: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
+          PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: cargo clippy -p paddock-chromium --all-targets --all-features -- -D warnings && cargo nextest run -p paddock-chromium --all-features --profile ci && cargo test -p paddock-chromium --all-features --doc
 
       - name: paddock-mcp
