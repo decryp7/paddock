@@ -43,8 +43,8 @@ its icon in both paths, and "Open" has none in both. Shot 07b is re-shot with th
   warning is triangle, info is circle-i, success is a check), with `statusGlyph()` and `<pd-status-glyph status>`.
   - A lint in `status.spec.ts` scans every template of the library, the demos and the gallery, and refuses a status glyph
     written by name.
-  - It found 15 instances: form, settings, schedule and pause errors, chart, table, view, packs, the recovery notice, the
-    failed turn, tool cards and the demo's Problems. All are converted. Errors now draw the circle-×, and "This cannot be
+  - It found instances in form, settings, schedule and pause errors, the chart, table and view errors, packs, the
+    recovery notice, the failed turn, tool cards, the demo's Problems and the gallery. All are converted. Errors now draw the circle-×, and "This cannot be
     undone." and the recovery notice keep the triangle as warnings.
 - **P2-5** Deleting the open conversation switches at once to the next one, or to a new one. Undo reopens it and makes it
   active again (store and component tests; 13e).
