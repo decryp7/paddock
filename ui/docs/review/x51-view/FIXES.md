@@ -59,3 +59,17 @@ The new contact sheet is `review-3/` (every section captured in one run from one
 | P3-7 | A drawing wider than the pane opens at its middle | e2e R2 P3 |
 | P3-8 | A region that scrolls fades the side that continues (`data-more`, `PdViewScroll`) | e2e R2 P3 |
 | P3-9 | Tree hover is a pointer-only shot | the contact-sheet spec |
+
+## Review 3 (0 P1, 1 P2, 3 P3) to fixes
+
+The new contact sheet is `review-4/` (one run from one commit, named in its README): NOT self-approved. Tests: e2e `view.spec.ts` ("R2 P2-3 and R3 P2-1"), Vitest `layout.spec.ts`.
+
+| Id | Change | Test |
+|---|---|---|
+| P2-1 | The sort button, the "Show as a list" summary and the tree row have 4 units of inline padding, so the inset ring is clear of the text; the sort button has the matching negative margin, so header text stays aligned with the cells | e2e: the ring check also asserts that an inset ring band does not overlap the text box of its element (a Range over the element's contents); it failed on the old CSS for the four sort headers, the list summary and the tree row |
+| P3-1 | The drawings caption says "back edge in an orthogonal lane outside the boxes" | contact-sheet spec |
+| P3-2 | Sample node `g3`: a second radial graph with two spoke-to-spoke edges (they bow); the canvas grows to hold them | `layout.spec.ts` (bows, crossings over `g3`), e2e radial checks |
+| P3-3 | The contact sheet moves the pointer off the view before every shot that is not about hover | the contact-sheet spec |
+| P3-4 | Still open, as planned: the Signal Forms spike for dynamic fields before Pacenotes | none |
+
+Found while fixing, not in the review: `SCROLL_CSS` makes every scroll region `position: relative`, because the visually hidden text of a table or matrix (`position: absolute`) escaped the region and widened the whole page by 3 px at 320 px (the e2e "no horizontal scroll at 320 px" test was red on the integration branch); that test and P2-12 now treat the review filter as a region that scrolls by design. Known, for the next review: in the new radial sample the label "tokens" touches the right edge of the hub box (`graph-radial-bows`).
