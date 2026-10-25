@@ -254,11 +254,10 @@ jobs:
           echo "PADDOCK_TEST_BROWSER_DIR=$GITHUB_WORKSPACE/../.paddock-ci-test-browser" >> "$GITHUB_ENV"
 
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
-      # on every run. Run from the same physical path every time (the old path stays as a link). macOS only: on Windows the
-      # step would run before Git's bash is on PATH (`shell: bash` then finds WSL's bash.exe) and the runner keeps handles open
-      # in its work folder; the Windows build folder already outlives the job.
+      # on every run. Run from the same physical path every time (the old path stays as a link). On Windows the
+      # step comes after the one that puts Git's bash on PATH (before it, `shell: bash` finds WSL's bash.exe); the link there is a junction.
       - uses: ./.gitea/actions/stable-workspace
-        if: runner.os == 'macOS'
+        if: runner.os != 'Linux'
         with:
           name: paddock-${{ github.job }}-${{ runner.os }}
 

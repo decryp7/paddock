@@ -331,11 +331,11 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
   assert.equal(readFileSync(join(root, 'work', 'abc', 'hostexecutor', 'Cargo.toml'), 'utf8'), 'x');
 });
 
-test('CI moves the checkout to a stable path only on macOS, after the persistent build folder step and never before bash is pinned on Windows', () => {
+test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const at = ci.indexOf('uses: ./.gitea/actions/stable-workspace');
   assert.ok(at > 0, 'the crate job uses stable-workspace');
-  assert.match(ci.slice(at, at + 120), /\n\s+if: runner\.os == 'macOS'/, 'macOS only: on Windows `shell: bash` before Git bash is on PATH resolves to WSL');
+  assert.match(ci.slice(at, at + 120), /\n\s+if: runner\.os != 'Linux'/, 'host runners only; on Windows `shell: bash` before Git bash is on PATH resolves to WSL');
   const gitBash = ci.indexOf('Git bash on PATH');
   assert.ok(gitBash > 0 && gitBash < at, 'Git bash is on PATH before any later step needs bash');
   assert.equal(ci.split('uses: ./.gitea/actions/stable-workspace').length - 1, 1);
