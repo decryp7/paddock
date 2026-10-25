@@ -122,7 +122,8 @@ runs:
           # Local disk. A host runner keeps it under the runner's home, so it outlives the job; a container uses the /sccache
           # mount the runner provides, or a folder that dies with the container (with a notice: every job then starts cold).
           if [ "$RUNNER_OS" = Linux ]; then
-            if [ -d /sccache ] && [ -w /sccache ]; then DIR=/sccache
+            MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"  # overridable so the step's test does not depend on the runner's real mount
+            if [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then DIR="$MOUNT"
             else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
           else
             DIR="$HOME/.paddock-ci/sccache"
