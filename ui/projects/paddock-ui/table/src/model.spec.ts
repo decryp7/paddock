@@ -144,8 +144,8 @@ describe('table model', () => {
   });
 
   it('gives a required column a floor in its grid track', () => {
-    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true })).toBe('minmax(128px, 2fr)');
-    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true, width: 'minmax(0, 3fr)' })).toBe('minmax(128px, 3fr)');
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true })).toBe('minmax(min(128px, 40%), 2fr)');
+    expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true, width: 'minmax(0, 3fr)' })).toBe('minmax(min(128px, 40%), 3fr)');
     expect(columnTrack({ key: 'a', header: 'A', value: () => 1, required: true, width: '200px' })).toBe('200px');
     expect(columnTrack({ key: 'a', header: 'A', value: () => 1 })).toBe('minmax(0, 1fr)');
     expect(columnTrack({ key: 'a', header: 'A', value: () => 1, width: '96px' })).toBe('96px');

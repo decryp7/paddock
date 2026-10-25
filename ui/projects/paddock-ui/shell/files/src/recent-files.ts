@@ -25,7 +25,7 @@ import { FilesStore } from './files.store';
             <button type="button" class="pd-entry" (click)="reopen(entry.path)">
               <pd-glyph class="pd-kind" [name]="icon(entry.path, entry.folder)" [size]="16" data-testid="recent-icon" />
               <span class="pd-text">
-                <span class="pd-name" [attr.title]="entry.path">{{ entry.name || base(entry.path) }}</span>
+                <pd-path-text class="pd-name" [value]="entry.name || base(entry.path)" [full]="entry.path" [plain]="true" />
                 @if (parent(entry.path); as dir) {
                   <pd-path-text class="pd-dir" [value]="dir" [full]="entry.path" />
                 }
@@ -62,8 +62,8 @@ import { FilesStore } from './files.store';
     .pd-entry:focus-visible, .pd-icon:focus-visible, .pd-clear:focus-visible { outline: 2px solid var(--pd-focus-ring); }
     .pd-kind { color: var(--pd-text-muted); }
     .pd-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .pd-entry pd-path-text { width: 100%; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
-    .pd-name { font-weight: var(--pd-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-entry pd-path-text.pd-dir { width: 100%; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
+    .pd-name { font-weight: var(--pd-weight-medium); min-width: 0; }
     .pd-actions { display: inline-flex; flex: none; opacity: 0; }
     .pd-row:hover .pd-actions, .pd-row:focus-within .pd-actions { opacity: 1; }
     @media (hover: none) { .pd-actions { opacity: 1; } }
