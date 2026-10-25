@@ -39,7 +39,7 @@
   "plugins": {
     "updater": {
       "pubkey": "",
-      "endpoints": ["https://dev.decryptology.net/decryp7/spotter/releases/download/latest/latest.json"],
+      "endpoints": ["https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json", "https://dev.decryptology.net/decryp7/spotter/releases/download/latest/latest.json"],
       "windows": {
         "installMode": "passive"
       }

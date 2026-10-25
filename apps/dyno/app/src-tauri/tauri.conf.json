@@ -41,7 +41,7 @@
   "plugins": {
     "updater": {
       "pubkey": "",
-      "endpoints": ["https://dev.decryptology.net/decryp7/dyno/releases/download/latest/latest.json"],
+      "endpoints": ["https://dev.decryptology.net/decryp7/paddock/releases/download/dyno-latest/latest.json", "https://dev.decryptology.net/decryp7/dyno/releases/download/latest/latest.json"],
       "windows": {
         "installMode": "passive"
       }
