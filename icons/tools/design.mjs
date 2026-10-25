@@ -316,13 +316,14 @@ export const GLYPH_SMALL = {
     ],
     pacenotes: PACENOTES[PACENOTES_MAIN].g16,
     paddock: PADDOCK.g16,
+    // Everything sits on whole pixels (no anti-aliased grey): a 1 px tab row with a 1 px gap, 1 px gaps between panes.
     'workbench-demo': [
-      { kind: 'fill', d: circle(2.25, 4.5, 1) + circle(2.25, 8, 1) + circle(2.25, 11.5, 1), tone: 'secondary' },
-      { kind: 'fill', d: rr(4.5, 2.5, 4.25, 11, 1), tone: 'primary' },
-      { kind: 'fill', d: rr(9.75, 2.5, 2.25, 2, 0.75), tone: 'primary' },
-      { kind: 'fill', d: rr(12.5, 2.5, 2, 2, 0.75), tone: 'secondary' },
-      { kind: 'fill', d: rr(9.75, 5.5, 4.75, 3, 0.75), tone: 'primary' },
-      { kind: 'fill', d: rr(9.75, 9.5, 4.75, 4, 0.75), tone: 'secondary' },
+      { kind: 'fill', d: 'M2 4H3V5H2ZM2 8H3V9H2ZM2 12H3V13H2Z', tone: 'secondary' },
+      { kind: 'fill', d: rr(4, 3, 4, 10, 0.5), tone: 'primary' },
+      { kind: 'fill', d: 'M9 3H11V4H9Z', tone: 'primary' },
+      { kind: 'fill', d: 'M12 3H14V4H12Z', tone: 'secondary' },
+      { kind: 'fill', d: 'M9 5H14V8H9Z', tone: 'primary' },
+      { kind: 'fill', d: 'M9 9H14V13H9Z', tone: 'secondary' },
     ],
     'shell-demo': [
       { kind: 'stroke', d: rr(2.5, 3, 11, 10, 2), w: 1.5, tone: 'primary' },
@@ -374,12 +375,12 @@ export const GLYPH_SMALL = {
     pacenotes: PACENOTES[PACENOTES_MAIN].g32,
     paddock: PADDOCK.g32,
     'workbench-demo': [
-      { kind: 'fill', d: circle(5, 10, 1.4) + circle(5, 16, 1.4) + circle(5, 22, 1.4), tone: 'secondary' },
-      { kind: 'fill', d: rr(8.5, 6, 8, 20, 2), tone: 'primary' },
-      { kind: 'fill', d: rr(19, 6, 4.5, 4, 1.5), tone: 'primary' },
-      { kind: 'fill', d: rr(24.5, 6, 4, 4, 1.5), tone: 'secondary' },
-      { kind: 'fill', d: rr(19, 11.5, 9.5, 5, 1.5), tone: 'primary' },
-      { kind: 'fill', d: rr(19, 18, 9.5, 8, 1.5), tone: 'secondary' },
+      { kind: 'fill', d: circle(5, 10, 1) + circle(5, 16, 1) + circle(5, 22, 1), tone: 'secondary' },
+      { kind: 'fill', d: rr(8, 6, 8, 20, 2), tone: 'primary' },
+      { kind: 'fill', d: rr(19, 6, 4, 4, 1), tone: 'primary' },
+      { kind: 'fill', d: rr(24, 6, 4, 4, 1), tone: 'secondary' },
+      { kind: 'fill', d: rr(19, 11, 9, 6, 1), tone: 'primary' },
+      { kind: 'fill', d: rr(19, 18, 9, 8, 1), tone: 'secondary' },
     ],
     'shell-demo': [
       { kind: 'stroke', d: rr(5.5, 6.5, 21, 19, 3.5), w: 2.5, tone: 'primary' },
@@ -467,7 +468,8 @@ function inkPaint(app, concept, uid) {
  * 1024 master. platform 'macos': squircle body 824 at (100,100) with drop shadow (Big Sur grid).
  * platform 'windows': near full-bleed rounded square (margin 40, circular corners), no outer shadow.
  */
-export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)) } = {}) {
+/** `bare` leaves out the glyph and the livery: the tile background alone, for the seam scan (tools/scan.mjs). */
+export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false } = {}) {
   const p = PALETTE[app];
   const mac = platform === 'macos';
   const x = mac ? 100 : 40, s = mac ? 824 : 944;
@@ -497,18 +499,18 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     </linearGradient>
     <clipPath id="${uid}clip"><path d="${shape}"/></clipPath>
     <filter id="${uid}gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="${f(10 * scale)}" stdDeviation="${f(12 * scale)}" flood-color="${glyphShadow}" flood-opacity="${shadowOp}"/></filter>
-    ${mac ? `<filter id="${uid}ts" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>` : ''}
+    ${mac ? `<filter id="${uid}ts" color-interpolation-filters="sRGB" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>` : ''}
     ${ink.defs}${glyph.defs}
   </defs>
   <path d="${shape}" fill="url(#${uid}bg)"${mac ? ` filter="url(#${uid}ts)"` : ''}/>
   <g clip-path="url(#${uid}clip)">
-    <path d="M${x - 40} ${x + s * 0.98}L${x + s * 0.98} ${x - 40}L${x + s * 1.12} ${x - 40}L${x - 40} ${x + s * 1.12}Z" fill="${liveryCol}" opacity="${liveryOp}"/>
-    <path d="M${x - 40} ${x + s * 1.19}L${x + s * 1.19} ${x - 40}L${x + s * 1.23} ${x - 40}L${x - 40} ${x + s * 1.23}Z" fill="${liveryCol}" opacity="${liveryOp * 1.1}"/>
+    ${bare ? '' : `<path d="M${x - 40} ${x + s * 0.98}L${x + s * 0.98} ${x - 40}L${x + s * 1.12} ${x - 40}L${x - 40} ${x + s * 1.12}Z" fill="${liveryCol}" opacity="${liveryOp}"/>
+    <path d="M${x - 40} ${x + s * 1.19}L${x + s * 1.19} ${x - 40}L${x + s * 1.23} ${x - 40}L${x - 40} ${x + s * 1.23}Z" fill="${liveryCol}" opacity="${liveryOp * 1.1}"/>`}
     <rect x="${x}" y="${x}" width="${s}" height="${s}" fill="url(#${uid}sheen)"/>
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>
     ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="0.14" stroke-width="${f(4 * scale)}"/>` : ''}${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
   </g>
-  <g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>
+  ${bare ? '' : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
 </svg>
 `;
 }
@@ -588,10 +590,10 @@ function trayGlyph(app, status) {
     // thinner than the frame instead.
     case 'workbench-demo':
       return [
-        { kind: 'fill', d: circle(2.25, 4.5, 1) + circle(2.25, 8, 1) + circle(2.25, 11.5, 1), tone: 'primary' },
-        { kind: 'fill', d: rr(4.5, 2.5, 4.25, 11, 1), tone: 'primary' },
-        { kind: 'fill', d: rr(9.75, 2.5, 2.25, 2, 0.75) + rr(12.5, 2.5, 2, 2, 0.75), tone: 'primary' },
-        { kind: 'fill', d: rr(9.75, 5.5, 4.75, 3, 0.75) + rr(9.75, 9.5, 4.75, 4, 0.75), tone: 'primary' },
+        { kind: 'fill', d: 'M2 4H3V5H2ZM2 8H3V9H2ZM2 12H3V13H2Z', tone: 'primary' },
+        { kind: 'fill', d: rr(4, 3, 4, 10, 0.5), tone: 'primary' },
+        { kind: 'fill', d: 'M9 3H11V4H9ZM12 3H14V4H12Z', tone: 'primary' },
+        { kind: 'fill', d: 'M9 5H14V8H9ZM9 9H14V13H9Z', tone: 'primary' },
       ];
     case 'shell-demo':
       return [

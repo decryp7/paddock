@@ -36,6 +36,8 @@ fn types() -> String {
         EndReason::decl(),
         ErrorKind::decl(),
         ContextItem::decl(),
+        ToolOutcome::decl(),
+        StoredError::decl(),
         StoredMessage::decl(),
         Conversation::decl(),
         ConversationSummary::decl(),
@@ -122,6 +124,7 @@ fn fixtures() -> String {
             ok: true,
             summary: "3 events found".into(),
             data: Some(json!({"ids": [4, 7, 9]})),
+            outcome: None,
         },
         AssistantEvent::Delta {
             text: "The build failed at event 7".into(),

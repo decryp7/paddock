@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_ECHARTS, PdChart, fakeEchartsLoader, reducedMotion } from './chart';
 import { donutNarrowHeight } from './options';
 import type { PdChartSpec } from './options';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 /** An ECharts option tree, inspected structurally by these specs. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the option tree is untyped JSON the specs walk by key
@@ -109,6 +110,7 @@ describe('pd-chart', () => {
     f.componentInstance.state.set('error');
     await settle(f);
     expect(f.nativeElement.querySelector('[data-testid=chart-error]')?.textContent).toContain('Could not reach the engine.');
+    assertStatusGlyphs(f.nativeElement.querySelector('[data-testid=chart-error]'));
     f.nativeElement.querySelector('.pd-retry').click();
     expect(f.componentInstance.retried).toBe(1);
     const before = fake.instances[0]!.resized;

@@ -71,7 +71,7 @@ export function stepLabel(step: NextStep): string | null {
         }
       </pd-needs-ai-card>
     } @else if (store.requestError(); as err) {
-      <pd-needs-ai-card [name]="t.stateUnknown" [message]="err" icon="alert" testid="needs-ai-failed">
+      <pd-needs-ai-card [name]="t.stateUnknown" [message]="err" icon="warning" testid="needs-ai-failed">
         <button type="button" class="pd-btn" data-testid="needs-ai-retry" (click)="store.load()">{{ t.retry }}</button>
       </pd-needs-ai-card>
     }
@@ -101,7 +101,7 @@ export class PdNeedsAi {
 
   protected readonly title = computed(() => $localize`:@@pd.pitwall.title:${this.feature()}:feature: needs local AI`);
   protected readonly approve = computed(() => $localize`:@@pd.pitwall.approve:Approve ${this.store.app()}:app: in Pitwall > Apps & keys and check that it shows this code.`);
-  protected readonly icon = computed(() => (['incompatible', 'unavailable'].includes(this.store.kind() ?? '') ? 'alert' : 'info'));
+  protected readonly icon = computed(() => (['incompatible', 'unavailable'].includes(this.store.kind() ?? '') ? 'warning' : 'info'));
   /** The engine's buttons, without the ones with nothing to press (`none`). */
   protected readonly steps = computed(() => this.store.actions().filter((s) => s === 'pair' || stepLabel(s) !== null));
 
