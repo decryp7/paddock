@@ -2,7 +2,7 @@
 
 - Status: accepted (2026-10-24, by the user); work starts after shell 0.3.0 is tagged
 - Date: 2026-10-24
-- Amended 2026-10-25 after the trial ([2026-10-monorepo-spike.md](../research/2026-10-monorepo-spike.md)): history size,
+- Amended 2026-10-25 (twice: Debrief is imported first, see the last amendment) after the trial ([2026-10-monorepo-spike.md](../research/2026-10-monorepo-spike.md)): history size,
   import checklist (§2), sccache wording (§1, §9), affected rules (§6), task runner decided (§7), per-app `latest`
   releases and the bridge target (§4), CODEOWNERS syntax (§9)
 - Decision by the user (2026-10-24): "finish 0.3.0, then monorepo under paddock". This ADR decides how.
@@ -463,3 +463,16 @@ key (from its old repo's secrets) and built with the shared public key. The upda
 installs through the old repo's `latest.json`; every later release is signed with the shared key only. A transition
 release must never be skipped; the bridge keeps pointing old installs at it until the bridge period ends. New apps
 (Pacenotes, Sighter, the demos) use the shared key from their first release.
+
+## Amendment: Debrief first (user, 2026-10-25)
+
+The user changed the order of §11 to reach a Debrief release sooner. After the frame (step 2), **Debrief is imported
+next** (step 5 moves before steps 3 and 4), with the same checklist (§2) and the same per-app steps as step 4: the
+history-preserving import into `apps/debrief` with tags renamed to `debrief-v*`; its CI as an affected matrix leg; its
+`bench`, `corpus`, `fuzz` and `mutants` workflows as nightly jobs scoped to `apps/debrief`; a `release-debrief.yml` for
+`debrief-v*` tags; the endpoint pair (§4), so installed copies keep updating through the old repo's `latest.json`; and
+the pointer commit in the old repo (§3 stage 1) last, after the import's CI is green. Before the import, Debrief's
+`test/x50-shell-baseline` is merged into its `main`, and `perf/test-speed` is rebased or merged if it still applies
+cleanly and passes Debrief's affected tests (otherwise it stays a hand-off branch, [monorepo-handoff.md](../plans/monorepo-handoff.md)).
+The other six apps (Pacenotes and Sighter, then Spotter, Pitcrew, Dyno and Pitwall) are imported after that Debrief
+release. The frame and the Debrief import land on `main` as two separate merges, each verified locally and by one CI run.
