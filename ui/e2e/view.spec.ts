@@ -292,7 +292,7 @@ test('P2-4: stale is drawn as a warning, not as the danger of a failure', async 
 
 test('R2 P2-1: no edge of a graph or diagram runs through a box that is not one of its ends', async ({ page }) => {
   const box = await open(page);
-  for (const id of ['g1', 'g2', 'd1']) {
+  for (const id of ['g1', 'g2', 'g3', 'd1']) {
     const crossing = await box.locator(`[data-node-id="${id}"] svg.pd-view-scene__svg`).evaluate((svg) => {
       const rects = Array.from(svg.querySelectorAll<SVGRectElement>('g.pd-view-scene__node rect')).map((r) => ({ x: r.x.baseVal.value, y: r.y.baseVal.value, w: r.width.baseVal.value, h: r.height.baseVal.value }));
       const bad: string[] = [];
