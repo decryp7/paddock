@@ -322,7 +322,7 @@ fn quitting_and_a_lost_connection_are_told_apart() {
     assert_eq!(b.gone(&p), Some(Gone::Disconnected));
     assert!(matches!(b.page_count(), Err(Error::Closed)));
     f.fake.act(UserAction::Quit).unwrap();
-    wait_until("the process to exit", || !b.process.is_running());
+    wait_until("the process to exit", || !b.proc().is_running());
     assert_eq!(b.gone(&p), Some(Gone::Exited));
     assert!(b.close(), "it had ended already");
 }
@@ -338,7 +338,7 @@ fn the_time_limit_runs_on_the_injected_clock() {
     );
     assert_eq!(b.ended_by(), EndedBy::Nothing);
     clock.advance(FAR);
-    wait_until("the browser to be ended", || !b.process.is_running());
+    wait_until("the browser to be ended", || !b.proc().is_running());
     assert_eq!(b.ended_by(), EndedBy::TimeLimit);
     b.kill();
 }
@@ -359,7 +359,7 @@ fn the_memory_cap_ends_the_tree() {
     wait_until("the cap to end the browser", || {
         b.ended_by() == EndedBy::MemoryCap
     });
-    wait_until("the process to end", || !b.process.is_running());
+    wait_until("the process to end", || !b.proc().is_running());
     b.kill();
 }
 

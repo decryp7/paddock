@@ -77,6 +77,9 @@ impl RuntimeKind for ChromeForTesting {
     }
 
     fn self_test(&self, executable: &Path, version: &str) -> std::result::Result<String, String> {
+        if self.os == OsKind::Windows {
+            return windows_self_test(executable, version);
+        }
         let mut cmd = paddock_proc::command(executable);
         cmd.arg("--version");
         let out = paddock_proc::run_bounded(cmd, Limits::new(SELF_TEST_LIMIT).max_output(4096))
@@ -87,6 +90,53 @@ impl RuntimeKind for ChromeForTesting {
             &out.stdout_text(),
             version,
         )
+    }
+}
+
+/// Chrome on Windows prints nothing for `--version`, so its self-test is the version's manifest beside the program
+/// (`<version>.manifest`, part of every Windows build) and one headless page dump with a throwaway profile, which must
+/// exit cleanly with a document.
+fn windows_self_test(executable: &Path, version: &str) -> std::result::Result<String, String> {
+    let dir = executable.parent().unwrap_or(Path::new("."));
+    if !dir.join(format!("{version}.manifest")).is_file() {
+        return Err(format!(
+            "it is not version {version} (no {version}.manifest beside it)"
+        ));
+    }
+    let profile =
+        std::env::temp_dir().join(format!("paddock-cft-self-test-{}", std::process::id()));
+    let mut cmd = paddock_proc::command(executable);
+    cmd.args([
+        "--headless=new",
+        "--disable-gpu",
+        "--no-first-run",
+        "--dump-dom",
+    ])
+    .arg(format!("--user-data-dir={}", profile.display()))
+    .arg(crate::launch::START_PAGE);
+    let out = paddock_proc::run_bounded(cmd, Limits::new(SELF_TEST_LIMIT).max_output(64 * 1024));
+    let _ = std::fs::remove_dir_all(&profile);
+    let out = out.map_err(|e| e.to_string())?;
+    check_dump(
+        out.outcome == Outcome::TimedOut,
+        out.success(),
+        &out.stdout_text(),
+        version,
+    )
+}
+
+/// The verdict on a headless page dump.
+fn check_dump(
+    timed_out: bool,
+    success: bool,
+    stdout: &str,
+    version: &str,
+) -> std::result::Result<String, String> {
+    match () {
+        _ if timed_out => Err("it did not answer in time".into()),
+        _ if !success => Err("it ended with an error".into()),
+        _ if !stdout.contains("<html") => Err("it did not show a page".into()),
+        _ => Ok(format!("Chrome for Testing {version}")),
     }
 }
 
@@ -371,6 +421,56 @@ mod tests {
                 body: Box::new(std::io::Cursor::new(self.0.clone())),
             })
         }
+    }
+
+    #[test]
+    fn the_windows_self_test_wants_a_page_and_the_manifest() {
+        let v = "1.2.3";
+        assert_eq!(
+            check_dump(false, true, "<html><body></body></html>", v),
+            Ok("Chrome for Testing 1.2.3".into())
+        );
+        assert!(
+            check_dump(true, false, "", v)
+                .unwrap_err()
+                .contains("in time")
+        );
+        assert!(
+            check_dump(false, false, "", v)
+                .unwrap_err()
+                .contains("error")
+        );
+        assert!(
+            check_dump(false, true, "", v)
+                .unwrap_err()
+                .contains("did not show a page")
+        );
+        let d = tempfile::tempdir().unwrap();
+        let e = windows_self_test(&d.path().join("chrome.exe"), v).unwrap_err();
+        assert!(e.contains("no 1.2.3.manifest"), "{e}");
+    }
+
+    /// The Windows self-test's run, with a script standing in for chrome.exe (it prints a document for `--dump-dom`).
+    #[cfg(unix)]
+    #[test]
+    fn the_windows_self_test_runs_a_headless_page_dump() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("9.9.manifest"), "<assembly/>").unwrap();
+        let exe = d.path().join("chrome.exe");
+        std::fs::write(&exe, "#!/bin/sh\ncase \"$*\" in *--dump-dom*about:blank*) echo '<html><head></head><body></body></html>';; *) exit 3;; esac\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let k = ChromeForTesting::new(OsKind::Windows);
+        assert_eq!(
+            k.self_test(&exe, "9.9"),
+            Ok("Chrome for Testing 9.9".into())
+        );
+        std::fs::write(d.path().join("8.8.manifest"), "<assembly/>").unwrap();
+        std::fs::remove_file(&exe).unwrap();
+        assert!(
+            k.self_test(&exe, "8.8").is_err(),
+            "a program that does not run"
+        );
     }
 
     #[cfg(unix)]

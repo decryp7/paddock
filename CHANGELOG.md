@@ -130,6 +130,9 @@ Conventional Commits; one semver tag for the whole repo.
   #494FDB as in the CSS.
 
 ### Added
+- `paddock-chromium` on Windows: every end of the browser (the time limit's included) goes through its `Supervised`, so the
+  kill-on-close job closes with it; the Chrome for Testing self-test checks the version manifest and a headless page dump (Chrome
+  prints no `--version` there). The real-browser test runs on macOS and Windows CI too (install action, `catalogue:`).
 - Review fixes for the files and storage UI (independent review, 2 P1, 11 P2, 9 P3). Settings > Storage is the shared `pd-table`: one
   line per row, rows grouped by cache or the user's data with the aggregate size on the group row, hover icon buttons (What is inside,
   Show in the file manager) and a "…" menu ending in Clear in danger text; the cache button is a normal button. The size tree no
