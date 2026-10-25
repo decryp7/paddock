@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input } from '@an
 import type { Matrix, MatrixCell } from '../generated/view';
 import { toneOf } from './model';
 import { ViewRuntime } from './runtime';
+import { PdViewScroll } from './scroll';
 import { PdViewTone, TONE_CSS, toneClass } from './tone';
 
 /** The cell at (row, col), by place: a lookup of a sparse list. */
@@ -17,9 +18,9 @@ export function matrixIndex(m: Matrix): ReadonlyMap<string, MatrixCell> {
 @Component({
   selector: 'pd-view-matrix',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdViewTone],
+  imports: [PdViewScroll, PdViewTone],
   template: `
-    <div class="pd-view-matrix__scroll" role="region" tabindex="0" [attr.aria-label]="label() || defaultLabel">
+    <div class="pd-view-matrix__scroll pd-view-matrix__frame" role="region" pdViewScroll [attr.aria-label]="label() || defaultLabel">
       <table class="pd-view-matrix__table">
         <thead>
           <tr>
@@ -55,17 +56,19 @@ export function matrixIndex(m: Matrix): ReadonlyMap<string, MatrixCell> {
   styles: `
     ${TONE_CSS}
     :host { display: block; min-width: 0; }
-    .pd-view-matrix__scroll { overflow: auto; max-width: 100%; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); }
+    .pd-view-matrix__frame { display: block; width: max-content; max-width: 100%; }
+    .pd-view-matrix__scroll { overflow: auto; max-width: 100%; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
     .pd-view-matrix__scroll:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-view-matrix__table { border-collapse: collapse; font-size: var(--pd-text-body); }
     th, td { padding: var(--pd-space-1) var(--pd-space-3); border: 1px solid var(--pd-hairline); text-align: center; min-width: 64px; min-height: var(--pd-row-height); }
     thead th { background: var(--pd-surface-2); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
-    tbody th { text-align: start; background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); position: sticky; inset-inline-start: 0; max-width: 240px; overflow-wrap: anywhere; }
+    tbody th { text-align: start; background: var(--pd-surface-2); color: var(--pd-text); font-weight: var(--pd-weight-medium); position: sticky; inset-inline-start: 0; max-width: 240px; overflow-wrap: break-word; }
     .pd-view-matrix__corner { background: var(--pd-surface-2); }
     td[class*='pd-view-tone-'] { background: var(--pd-view-tint); color: var(--pd-text); }
     td.pd-view-tone-neutral { background: transparent; }
     td > pd-view-tone { margin-inline-end: var(--pd-space-1); color: var(--pd-view-tone); }
-    .pd-view-matrix__cell { min-height: 24px; padding: 0 var(--pd-space-1); border: 0; background: none; font: inherit; color: var(--pd-accent); text-decoration: underline; cursor: pointer; border-radius: 2px; }
+    .pd-view-matrix__cell { min-height: 24px; padding: 0 var(--pd-space-1); border: 0; background: none; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; border-radius: 2px; }
+    td.pd-view-tone-neutral .pd-view-matrix__cell { color: var(--pd-accent); }
     .pd-view-matrix__cell:focus-visible { outline: 2px solid var(--pd-focus-ring); }
     .pd-view-matrix__cell:disabled { color: var(--pd-text-subtle); cursor: default; }
   `,

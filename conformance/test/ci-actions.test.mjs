@@ -2,7 +2,9 @@
 // run step names its shell, every script and local action they reference exists, every input they use or pass is declared.
 // (The scripts themselves are tested in ci-scripts.test.mjs, tools/test and the release tests.)
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parseSteps } from '../src/util/workflows.mjs';
@@ -127,7 +129,7 @@ test('setup-rust wires the shared sccache backend: inputs from Gitea variables, 
   assert.match(text, /BACKEND: \$\{\{ inputs\.sccache-backend \}\}/);
   assert.match(text, /REDIS_ENDPOINT: \$\{\{ inputs\.sccache-redis-endpoint \}\}/);
   assert.match(text, /REDIS_DB: \$\{\{ inputs\.sccache-redis-db \}\}/);
-  for (const v of ['RUSTC_WRAPPER=sccache', 'CARGO_INCREMENTAL=0', 'SCCACHE_IGNORE_SERVER_IO_ERROR=1', 'SCCACHE_REDIS_ENDPOINT=', 'SCCACHE_REDIS_DB=']) {
+  for (const v of ['WRAPPER=sccache', 'RUSTC_WRAPPER=$WRAPPER', 'CARGO_INCREMENTAL=0', 'SCCACHE_IGNORE_SERVER_IO_ERROR=1', 'SCCACHE_REDIS_ENDPOINT=', 'SCCACHE_REDIS_DB=']) {
     assert.ok(text.includes(v), `${v} is exported`);
   }
   // Redis on every OS unless the backend is local or no endpoint is set (then local disk); the database is never part of the URL.
@@ -225,4 +227,54 @@ test('the strict reader check catches the sccache-stats mistake and leaves block
   assert.equal(strictPlainScalarProblem('description: "use `if: always()` here"\n'), null);
   assert.equal(strictPlainScalarProblem('steps:\n  - run: |\n      echo "a: b"\n      x: y\n  - name: n\n'), null);
   assert.equal(strictPlainScalarProblem('on:\n  push:\nenv:\n  A: https://x/y\n'), null);
+});
+
+// sccache puts every CARGO_* variable into its cache key. The host runners' build folder differs per checkout, so CARGO_TARGET_DIR
+// alone made every key unique (2% hits on macOS, 0% on Windows, 95-99% in containers). Run the real step with a shim sccache.
+function runSccacheStep(env) {
+  const dir = mkdtempSync(join(tmpdir(), 'paddock-sccache-'));
+  const action = join(ACTIONS, 'setup-rust');
+  const text = read(join(action, 'action.yml'));
+  const at = text.indexOf('- name: sccache\n');
+  const block = text.slice(at, text.indexOf('- name: Linux dependencies', at));
+  const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin', 'sccache'), '#!/bin/sh\n[ "$1" = --version ] && echo sccache 0.0\nexit 0\n');
+  chmodSync(join(dir, 'bin', 'sccache'), 0o755);
+  writeFileSync(join(dir, 'step.sh'), body);
+  const ghEnv = join(dir, 'github-env');
+  writeFileSync(ghEnv, '');
+  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
+    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, HOME: dir, RUNNER_OS: 'macOS', GITHUB_ENV: ghEnv, BACKEND: 'auto', REDIS_ENDPOINT: '', REDIS_DB: '', ACTION_DIR: action, ...env },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  return readFileSync(ghEnv, 'utf8');
+}
+
+test('a job with its own CARGO_TARGET_DIR runs rustc through a wrapper that keeps the folder out of the sccache key', () => {
+  const withTarget = runSccacheStep({ CARGO_TARGET_DIR: '/work/abc/.paddock-ci-target' });
+  assert.match(withTarget, new RegExp(`^RUSTC_WRAPPER=${join(ACTIONS, 'setup-rust', 'rustc-wrapper.sh').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+  assert.match(runSccacheStep({ CARGO_BUILD_TARGET_DIR: '/x' }), /^RUSTC_WRAPPER=.*rustc-wrapper\.sh$/m);
+  assert.match(runSccacheStep({}), /^RUSTC_WRAPPER=sccache$/m, 'no build folder variable: sccache directly');
+});
+
+test('the rustc wrapper hands sccache the compile without the build folder variables and with everything else', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'paddock-wrapper-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin', 'sccache'), '#!/bin/sh\necho "args=$*"\necho "target=${CARGO_TARGET_DIR-unset} build=${CARGO_BUILD_TARGET_DIR-unset} manifest=${CARGO_MANIFEST_DIR-unset}"\nexit 7\n');
+  chmodSync(join(dir, 'bin', 'sccache'), 0o755);
+  const wrapper = join(dir, 'rustc-wrapper.sh');
+  copyFileSync(join(ACTIONS, 'setup-rust', 'rustc-wrapper.sh'), wrapper);
+  chmodSync(wrapper, 0o755);
+  const r = spawnSync(wrapper, ['rustc', '--crate-name', 'a b'], {
+    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, CARGO_TARGET_DIR: '/t', CARGO_BUILD_TARGET_DIR: '/t', CARGO_MANIFEST_DIR: '/m' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 7, 'the exit status of sccache is the exit status of the wrapper');
+  assert.match(r.stdout, /args=rustc --crate-name a b/);
+  assert.match(r.stdout, /target=unset build=unset manifest=\/m/);
+  const cmd = read(join(ACTIONS, 'setup-rust', 'rustc-wrapper.cmd'));
+  assert.match(cmd, /set "CARGO_TARGET_DIR="/);
+  assert.match(cmd, /sccache\.exe %\*\r?\nexit \/b %ERRORLEVEL%/);
 });

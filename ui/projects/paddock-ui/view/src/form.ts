@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, linkedSignal, signal } from '@angular/core';
+import { PdPathText } from '@decryp7/paddock-ui';
 import { PdField, PdFieldControl, type PdFieldError, type PdFieldStateLike } from '@decryp7/paddock-ui/forms';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { Field, FieldKind, Form } from '../generated/view';
@@ -33,12 +34,18 @@ export function fieldProblem(field: Field, value: unknown): PdFieldError | null 
  * A `Form` node: text, number, choice, toggle, path and secret-reference fields built from the plugin's description, each labelled
  * with its help text under it. The form never submits by itself: the submit button sends the action with `values` (field id to
  * value), after the fields passed their checks (the engine re-validates). A path field holds a `GrantRef` chosen with the host's
- * picker and a secret field a `SecretRef` chosen with the host's secret picker; the view never shows or types either.
+ * picker and a secret field a `SecretRef` chosen with the host's secret picker; the view never shows or types either, only the
+ * name the host gives the choice (a path is cut in the middle with the full value as its tooltip).
+ *
+ * Signal Forms (rule 37) are not used here, on purpose: the field set comes from data (a plugin's `Form`), so there is no static model
+ * type to build a form from, and the values are one `linkedSignal` keyed by the document. `pd-field` takes a `PdFieldStateLike`, so a
+ * move to a schema built from the field list costs little; revisit before Pacenotes adds bigger forms (docs/plans/shared-next.md, X51).
+ * `fieldProblem` is a convenience mirror of the engine's checks, which re-validates.
  */
 @Component({
   selector: 'pd-view-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdField, PdFieldControl, PdGlyph, PdViewButton],
+  imports: [PdField, PdFieldControl, PdGlyph, PdPathText, PdViewButton],
   template: `
     <form class="pd-view-form" (submit)="submit($event)" novalidate>
       @for (f of form().fields; track f.id) {
@@ -46,7 +53,7 @@ export function fieldProblem(field: Field, value: unknown): PdFieldError | null 
           @if ('toggle' in k) {
             <div class="pd-view-form__check">
               <label class="pd-check">
-                <input type="checkbox" class="pd-switch" role="switch" [checked]="values()[f.id] === true" [disabled]="runtime.disabled()" [attr.aria-describedby]="f.help ? helpId(f) : null" (change)="set(f.id, $any($event.target).checked)" />
+                <input type="checkbox" class="pd-switch" role="switch" [checked]="values()[f.id] === true" [disabled]="runtime.disabled()" [attr.aria-describedby]="f.help ? helpId(f) : null" (change)="set(f.id, $any($event.target).checked); touch(f.id)" (blur)="touch(f.id)" />
                 <span>{{ f.label }}</span>
               </label>
               @if (f.help) {
@@ -74,12 +81,29 @@ export function fieldProblem(field: Field, value: unknown): PdFieldError | null 
                 </select>
               } @else if ('path' in k) {
                 <div class="pd-view-form__pick">
-                  <span class="pd-view-form__chosen" [class.pd-view-form__chosen--none]="!values()[f.id]">{{ values()[f.id] ? chosen : (k.path.folder ? noFolder : noFile) }}</span>
+                  <span class="pd-view-form__chosen" [class.pd-view-form__chosen--none]="!values()[f.id]" data-testid="view-chosen">
+                    @if (!values()[f.id]) {
+                      {{ k.path.folder ? noFolder : noFile }}
+                    } @else if (names()[f.id]; as shown) {
+                      <pd-path-text [value]="shown" />
+                    } @else {
+                      {{ chosen }}
+                    }
+                  </span>
                   <button type="button" class="pd-btn" [attr.aria-label]="f.label + ': ' + (k.path.folder ? chooseFolder : chooseFile)" [disabled]="runtime.disabled()" (click)="pickPath(f, k.path.folder)">{{ k.path.folder ? chooseFolder : chooseFile }}</button>
                 </div>
               } @else if ('secretRef' in k) {
                 <div class="pd-view-form__pick">
-                  <span class="pd-view-form__chosen" [class.pd-view-form__chosen--none]="!values()[f.id]"><pd-glyph name="lock" [size]="14" />{{ values()[f.id] ? chosenSecret : noSecret }}</span>
+                  <span class="pd-view-form__chosen" [class.pd-view-form__chosen--none]="!values()[f.id]" data-testid="view-chosen">
+                    <pd-glyph name="lock" [size]="14" />
+                    @if (!values()[f.id]) {
+                      {{ noSecret }}
+                    } @else if (names()[f.id]; as shown) {
+                      <pd-path-text [value]="shown" [plain]="true" />
+                    } @else {
+                      {{ chosenSecret }}
+                    }
+                  </span>
                   <button type="button" class="pd-btn" [attr.aria-label]="f.label + ': ' + chooseSecret" [disabled]="runtime.disabled()" (click)="pickSecret(f)">{{ chooseSecret }}</button>
                 </div>
               }
@@ -88,7 +112,7 @@ export function fieldProblem(field: Field, value: unknown): PdFieldError | null 
         }
       }
       <div class="pd-view-form__actions">
-        <pd-view-button [action]="form().submit" variant="primary" [extra]="{ values: values() }" [guard]="canSubmit" />
+        <pd-view-button [action]="form().submit" [variant]="primary() ? 'primary' : 'default'" [extra]="{ values: values() }" [guard]="canSubmit" />
       </div>
     </form>
   `,
@@ -98,7 +122,8 @@ export function fieldProblem(field: Field, value: unknown): PdFieldError | null 
     .pd-view-form__check { display: grid; gap: var(--pd-space-1); }
     .pd-view-form__help { font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-view-form__pick { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; min-width: 0; }
-    .pd-view-form__chosen { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; flex: 1; overflow-wrap: anywhere; }
+    .pd-view-form__chosen { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; flex: 1 1 8rem; overflow-wrap: break-word; }
+    .pd-view-form__pick > .pd-btn { flex: none; }
     .pd-view-form__chosen--none { color: var(--pd-text-muted); }
     .pd-view-form__actions { display: flex; gap: var(--pd-space-2); }
   `,
@@ -106,8 +131,12 @@ export function fieldProblem(field: Field, value: unknown): PdFieldError | null 
 export class PdViewForm {
   protected readonly runtime = inject(ViewRuntime);
   readonly form = input.required<Form>();
+  /** Draw the submit button filled: the view's one primary action (`ViewRuntime.primary`); another form or action already has it when false. */
+  readonly primary = input(true);
   /** The values being edited; they start again when the plugin sends a different form. */
   protected readonly values = linkedSignal<Form, Record<string, unknown>>({ source: this.form, computation: initialValues });
+  /** What the host called the path or secret each field holds (shown instead of the opaque reference); it starts again with the form. */
+  protected readonly names = linkedSignal<Form, Record<string, string>>({ source: this.form, computation: () => ({}) });
   private readonly touched = signal<ReadonlySet<string>>(new Set());
   protected readonly submitted = signal(false);
   protected readonly none = $localize`:@@pd.view.form.none:Not chosen`;
@@ -166,11 +195,17 @@ export class PdViewForm {
     e.preventDefault();
   }
   protected async pickPath(f: Field, folder: boolean): Promise<void> {
-    const grant = await this.runtime.pickPath(f.id, f.label, folder);
-    if (grant) this.set(f.id, grant);
+    const picked = await this.runtime.pickPath(f.id, f.label, folder);
+    if (picked) this.choose(f.id, picked.value, picked.name);
+    this.touch(f.id);
   }
   protected async pickSecret(f: Field): Promise<void> {
-    const ref = await this.runtime.pickSecret(f.id, f.label);
-    if (ref) this.set(f.id, ref);
+    const picked = await this.runtime.pickSecret(f.id, f.label);
+    if (picked) this.choose(f.id, picked.value, picked.name);
+    this.touch(f.id);
+  }
+  private choose(id: string, value: unknown, name: string): void {
+    this.set(id, value);
+    this.names.update((n) => ({ ...n, [id]: name }));
   }
 }

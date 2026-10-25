@@ -410,7 +410,8 @@ fn dispatch(
     per_tool: &mut HashMap<String, usize>,
 ) -> Finished {
     let tool = turn.tools.get(&call.name);
-    let write = tool.is_some_and(|t| t.access() == Access::Write);
+    let access = tool.map_or(Access::ReadOnly, |t| t.access());
+    let write = access.writes();
     let summary = tool.map_or_else(
         || cap(&call.input.to_string(), 120),
         |t| cap(&t.describe(&call.input), 160),
@@ -420,8 +421,9 @@ fn dispatch(
         name: call.name.clone(),
         summary: summary.clone(),
         write,
+        destructive: access.destructive(),
     });
-    let output = decide_and_run(turn, hooks, call, tool, write, &summary, total, per_tool);
+    let output = decide_and_run(turn, hooks, call, tool, access, &summary, total, per_tool);
     (hooks.emit)(AssistantEvent::ToolFinished {
         call_id: call.id.clone(),
         name: call.name.clone(),
@@ -438,7 +440,7 @@ fn decide_and_run(
     hooks: &mut Hooks<'_>,
     call: &ToolCall,
     tool: Option<&std::sync::Arc<dyn crate::tool::AssistantTool>>,
-    write: bool,
+    access: Access,
     summary: &str,
     total: &mut usize,
     per_tool: &mut HashMap<String, usize>,
@@ -459,7 +461,7 @@ fn decide_and_run(
             cap(raw, 120)
         ));
     }
-    let offered = tool.filter(|t| turn.allow_write || t.access() == Access::ReadOnly);
+    let offered = tool.filter(|t| turn.allow_write || !t.access().writes());
     let Some(tool) = offered else {
         return ToolOutput::failed(format!("there is no tool called {}", call.name));
     };
@@ -475,13 +477,14 @@ fn decide_and_run(
     }
     *used += 1;
     *total += 1;
-    if write {
+    if access.writes() {
         turn.gate
             .expect(&call.id, turn.clock, turn.budgets.approval_wait);
         (hooks.emit)(AssistantEvent::ApprovalNeeded {
             call_id: call.id.clone(),
             name: call.name.clone(),
             summary: summary.into(),
+            destructive: access.destructive(),
             input: call.input.clone(),
         });
         match turn.gate.wait(

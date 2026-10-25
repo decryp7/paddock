@@ -331,6 +331,22 @@ describe('namesPaletteProvider', () => {
     expect(namesToItems({ matches: [], clarify: null, searchable: 3 })).toEqual([]);
   });
 
+  it('gives each match its own icon when the app maps matches to glyphs (the kind of a symbol, review 2 P3-5)', async () => {
+    const two: NamesSearchReply = {
+      matches: [
+        { id: 'a#run', display: 'run', how: 'parts', score: 1, why: 'a' },
+        { id: 'a#Thing', display: 'Thing', how: 'parts', score: 1, why: 'a' },
+      ],
+      clarify: null,
+      searchable: 2,
+    };
+    expect(namesToItems(two, (m) => (m.display === 'run' ? 'pd:symbol-function' : undefined)).map((i) => i.icon)).toEqual(['pd:symbol-function', undefined]);
+    const ctx = { kinds: { 'a#Thing': 'pd:symbol-type' } as Record<string, string> };
+    const p = namesPaletteProvider<typeof ctx>({ id: 'wd.sym', title: msg('wd.sym', 'Symbols'), order: 1, search: () => Promise.resolve(two), accept: () => undefined, icon: (m, c) => c.kinds[m.id] });
+    const items = await p.search('t', ctx as never, { limit: 5, signal: new AbortController().signal });
+    expect(items.map((i) => i.icon)).toEqual([undefined, 'pd:symbol-type']);
+  });
+
   it('calls names_search with a bounded query and limit, and accepts only matches', async () => {
     const search = vi.fn(() => Promise.resolve(reply));
     const accepted: string[] = [];

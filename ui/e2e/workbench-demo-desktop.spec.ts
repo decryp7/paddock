@@ -24,7 +24,7 @@ const PITWALL_NOT_RUNNING = {
   builtInForSession: false,
 };
 
-const ASSISTANT_INFO = { provider: 'Pitwall', tools: [{ name: 'list_files', description: 'Lists the sample repository', write: false }] };
+const ASSISTANT_INFO = { provider: 'Pitwall', tools: [{ name: 'list_files', description: 'Lists the sample repository', write: false, destructive: false }] };
 
 /** The engine at rest: nothing saved in the layout store, no jobs, no messages, Pitwall not running. */
 const desktop = (page: Page, extra: Record<string, unknown> = {}): Promise<TauriFake> =>

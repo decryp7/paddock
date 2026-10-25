@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detailLines, layers, layoutGraph, layoutSequence, type LayoutNode } from './layout';
+import { detailLines, hubOf, layers, layoutGraph, layoutSequence, MARK_W, ringsFrom, type LayoutNode } from './layout';
 import { diagramScene, graphScene } from './scene';
 import { sampleViewDoc } from './sample';
 import { shapeOf } from './model';
@@ -42,8 +42,10 @@ describe('layoutGraph', () => {
     expect(s.edges.find((x) => x.label === 'x')).toBeTruthy();
     // The cycle edge runs outside the boxes, on the right.
     const back = s.edges.find((x) => x.from === 'e' && x.to === 'a')!;
-    expect(back.path).toMatch(/^M [\d.]+ [\d.]+ H [\d.]+ V [\d.]+ H [\d.]+$/);
+    expect(back.path).toMatch(/^M [\d.]+ [\d.]+ C [\d.]+ [\d.]+, [\d.]+ [\d.]+, [\d.]+ [\d.]+$/);
+    expect(Math.min(...back.path.match(/[\d.]+/g)!.filter((_, i) => i % 2 === 0).map(Number))).toBeGreaterThan(0);
     expect(back.lx).toBeLessThanOrEqual(s.width);
+    expect(back.anchor).toBe('start');
   });
 
   it('is the same every time', () => {
@@ -69,10 +71,87 @@ describe('layoutGraph', () => {
     const p1 = s.nodes.find((x) => x.id === 'p1')!;
     expect(Math.abs(hub.x + hub.w / 2 - p1.x - p1.w / 2) + Math.abs(hub.y + hub.h / 2 - p1.y - p1.h / 2)).toBeGreaterThan(50);
     expect(s.edges.some((x) => x.path.includes(' L '))).toBe(true);
+    expect(hub.x + hub.w / 2).toBeGreaterThan(p1.x + p1.w / 2 - 400);
     for (const x of s.nodes) {
       expect(x.x).toBeGreaterThanOrEqual(0);
       expect(x.y).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('puts the hub of a radial graph in the middle and the spokes on a ring around it (review 1, P1-1)', () => {
+    const s = layoutGraph(['hub', 'a', 'b', 'c'].map((id) => n(id)), [e('a', 'hub'), e('b', 'hub'), e('c', 'hub')], true);
+    const centre = (id: string) => {
+      const x = s.nodes.find((q) => q.id === id)!;
+      return [x.x + x.w / 2, x.y + x.h / 2] as const;
+    };
+    const [hx, hy] = centre('hub');
+    const radii = ['a', 'b', 'c'].map((id) => Math.hypot(centre(id)[0] - hx, centre(id)[1] - hy));
+    expect(radii[0]).toBeGreaterThan(50);
+    expect(Math.max(...radii) - Math.min(...radii)).toBeLessThan(0.5);
+    // The canvas fits the boxes: no more than the padding around the real bounding box.
+    const left = Math.min(...s.nodes.map((q) => q.x));
+    const right = Math.max(...s.nodes.map((q) => q.x + q.w));
+    const top = Math.min(...s.nodes.map((q) => q.y));
+    const bottom = Math.max(...s.nodes.map((q) => q.y + q.h));
+    expect([left, top]).toEqual([16, 16]);
+    expect(s.width).toBeCloseTo(right + 16, 0);
+    expect(s.height).toBeCloseTo(bottom + 16, 0);
+  });
+
+  it('never puts two boxes on each other, in any layout: several roots, several components, chains, hubs, one ring of many', () => {
+    const ids = (k: number, p = 'n') => Array.from({ length: k }, (_, i) => `${p}${i}`);
+    const cases: { name: string; nodes: LayoutNode[]; edges: ReturnType<typeof e>[] }[] = [
+      { name: 'three roots into one hub', nodes: ['hub', 'x', 'y', 'z'].map((id) => n(id)), edges: [e('x', 'hub'), e('y', 'hub'), e('z', 'hub')] },
+      { name: 'two disconnected components', nodes: ids(6).map((id) => n(id)), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n3', 'n4'), e('n4', 'n5')] },
+      { name: 'no edges at all', nodes: ids(9).map((id) => n(id, { label: id.repeat(6) })), edges: [] },
+      { name: 'a chain', nodes: ids(7).map((id) => n(id)), edges: ids(6).map((id, i) => e(id, `n${i + 1}`)) },
+      { name: 'a star of twelve with long labels and details', nodes: [n('c', { detail: 'a\nb\nc', caption: 'g' }), ...ids(12, 's').map((id) => n(id, { label: id.repeat(9), tone: 'bad' }))], edges: ids(12, 's').map((id) => e('c', id, 'edge')) },
+      { name: 'a cycle', nodes: ids(5).map((id) => n(id)), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n2', 'n3'), e('n3', 'n4'), e('n4', 'n0')] },
+      { name: 'self loops and unknown ends', nodes: ids(3).map((id) => n(id)), edges: [e('n0', 'n0', 'loop'), e('n0', 'zz'), e('n1', 'n2')] },
+    ];
+    for (const c of cases) {
+      for (const radial of [false, true]) {
+        const s = layoutGraph(c.nodes, c.edges, radial);
+        for (let i = 0; i < s.nodes.length; i++) {
+          const a = s.nodes[i]!;
+          expect(a.x, `${c.name} radial=${radial} ${a.id}`).toBeGreaterThanOrEqual(0);
+          expect(a.y).toBeGreaterThanOrEqual(0);
+          expect(a.x + a.w).toBeLessThanOrEqual(s.width);
+          expect(a.y + a.h).toBeLessThanOrEqual(s.height);
+          for (let j = i + 1; j < s.nodes.length; j++) expect(overlap(a, s.nodes[j]!), `${c.name} radial=${radial} ${a.id}/${s.nodes[j]!.id}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('does not overlap the boxes of the sample documents graphs either', () => {
+    const root = shapeOf(sampleViewDoc().root);
+    if (root.tag !== 'stack') throw new Error('stack');
+    for (const id of ['g1', 'g2', 'd1', 'd2']) {
+      const k = shapeOf(root.v.children.find((c) => c.id === id)!);
+      const s = k.tag === 'graph' ? graphScene(k.v) : k.tag === 'diagram' ? diagramScene(k.v) : null;
+      if (!s) throw new Error(id);
+      for (let i = 0; i < s.nodes.length; i++) for (let j = i + 1; j < s.nodes.length; j++) expect(overlap(s.nodes[i]!, s.nodes[j]!), id).toBe(false);
+    }
+  });
+
+  it('finds the hub and the rings from it, and puts what it cannot reach one ring out', () => {
+    expect(hubOf(4, [[1, 0], [2, 0], [3, 0]])).toBe(0);
+    expect(hubOf(3, [])).toBe(0);
+    expect(hubOf(3, [[1, 1], [1, 2]])).toBe(1);
+    expect(ringsFrom(0, 5, [[1, 0], [2, 1], [3, 3]])).toEqual([0, 1, 2, 3, 3]);
+  });
+
+  it('keeps the label of an edge beside its line, not on it', () => {
+    const s = layoutGraph(['a', 'b'].map((id) => n(id)), [e('a', 'b', 'needs db')]);
+    const x1 = s.nodes[0]!.x + s.nodes[0]!.w / 2;
+    expect(s.edges[0]!.anchor).toBe('start');
+    expect(s.edges[0]!.lx).toBeGreaterThan(x1);
+  });
+
+  it('makes room for the status mark of a box', () => {
+    const [plain, marked] = layoutGraph([n('a', { label: 'x'.repeat(14) }), n('b', { label: 'x'.repeat(14), tone: 'good' })], []).nodes;
+    expect(marked!.w).toBe(plain!.w + MARK_W);
   });
 
   it('puts the one root of a radial graph in the middle', () => {

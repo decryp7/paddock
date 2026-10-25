@@ -239,6 +239,7 @@ impl Checker {
             let p = format!("{path}.columns[{i}]");
             self.id(&format!("{p}.key"), &col.key)?;
             self.label(&format!("{p}.label"), &col.label)?;
+            self.text(&format!("{p}.unit"), &col.unit)?;
             Self::unique(&p, &mut keys, &col.key)?;
         }
         if let Some(s) = &t.sort
@@ -520,6 +521,7 @@ impl Checker {
 
     fn chart(&mut self, c: &ChartSpec, path: &str) -> Result<(), ViewError> {
         self.text(&format!("{path}.title"), &c.title)?;
+        self.text(&format!("{path}.unit"), &c.unit)?;
         for (i, cat) in c.categories.iter().enumerate() {
             self.text(&format!("{path}.categories[{i}]"), cat)?;
         }

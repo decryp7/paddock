@@ -49,6 +49,12 @@ from it. When `sccache --show-stats` stays at 0 requests while builds run, the s
 in the shell that builds. A server started from a shell without `SCCACHE_DIR` writes to `~/Library/Caches/Mozilla.sccache`
 on the system disk.
 
+sccache hashes every `CARGO_*` variable into its cache key, `CARGO_TARGET_DIR` included, so worktrees with different target
+folders share no entries when the folder comes from the environment (the registry crates then miss in every one). Point
+`RUSTC_WRAPPER` at `.gitea/actions/setup-rust/rustc-wrapper.sh` (it unsets the folder variables and runs sccache) or set the
+folder with `--config build.target-dir=...` / `.cargo/config.toml`. CI does the former. The workspace's own path crates still
+key on their checkout path (`CARGO_MANIFEST_DIR`); a symlink does not help, cargo uses the physical path.
+
 **Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:
 
 ```toml
