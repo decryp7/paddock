@@ -1,6 +1,6 @@
 # Contact sheet of `<pd-view>`: review 5 (NOT self-approved)
 
-Plan X51, ADR 0002. Made from the real components after the fixes for review 4 (`../REVIEW.md`, `../FIXES.md`). Every section (kinds, states, interaction, 320 px) was captured in one run from one commit: `1a75abca60`. Awaiting the independent reviewer (rule 22).
+Plan X51, ADR 0002. Made from the real components after the fixes for review 4 (`../REVIEW.md`, `../FIXES.md`). Every section (kinds, states, interaction, 320 px) was captured in one run from one commit: `3d7184c437`. Awaiting the independent reviewer (rule 22).
 
 Open the `sheet-*.png` files: each is one section, dark on the left and light on the right, no taller than about 3,000 px (6,000 px of bitmap), readable at 100%.
 The single images (`dark-*.png`, `light-*.png`) are the same shots at 2x; a subject taller than 1,800 px is cut into numbered slices (`-1`, `-2`).
