@@ -73,8 +73,8 @@ The family glyph shadow (`feDropShadow` in the tile's `deep` colour) is replaced
 | Size | Content |
 |---|---|
 | 1024, 512, 256 | everything: fine repeats (door slats, mullions, lane line), the fine chequer (step 14, two rows), the accent at 8 units |
-| 128 and below to 60 (`simple: true`) | no fine repeats (no slats, mullions or lane lines); fewer, wider repeated parts (three bays, pillars 22); the cue that carries the meaning stays, coarser (chequer step 34, one row); the accent 10; door rails 8. README size 112 and diagram size 60 are rendered from this frame |
-| 32, 24 | hand-drawn pixel isometric (`PIT_SMALL`): one pixel per part, whole-pixel widths for repeated parts (three bays of whole pixels), flat tones (no gradients), the same parts as the master in order: ground detail, main face with openings, upper band, roof. At 24 drop any band that would make 1 px stripes (Paddock drops the glass) and keep end faces at least 3 px |
+| 128 and below to 60 (`simple: true`) | no fine repeats (no slats, mullions or lane lines); fewer, wider repeated parts (three bays, pillars 22); openings fully dark (no lit floor) with doors only 40 % down; the cue that carries the meaning stays, coarser (chequer step 24 on a 40-high wall); the accent 10; door rails 8. README size 112 and diagram size 60 are rendered from this frame |
+| 32, 24 | hand-drawn pixel isometric (`PIT_SMALL`): one pixel per part, whole-pixel widths for repeated parts (three bays of whole pixels), flat tones (no gradients), the same parts as the master in order: ground detail, main face with openings, upper band, roof. Keep the defining bands even at 24 (Paddock keeps a 1-row glass band, taking the row from the ground floor) and end faces at least 3 px |
 | 16 | the flat symbol (Paddock: the slatted door), one tone, whole pixels, coverage 18 to 26 % |
 | Tray | the flat symbol as a template (alpha only, one tone), x 2 to 14; light and dark variants from it |
 

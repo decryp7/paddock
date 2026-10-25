@@ -152,6 +152,7 @@ export const ISO_TRAY = isoSmall({ grid: 16, L: 10, D: 3, H: 4, T: 1.5, ov: 0.5,
 import { PALETTE, STRIPE } from './design.mjs';
 export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H2 = 64, T = 16, ov = 6, bays = 4, margin = 16, pillar = 14,
   recess = 14, doorDown = 0.62, apron = 80, wallD = 12, wallH = 30, simple = false, box: [bw0, bh0] = [690, 560], dy = 10, dx = -4 } = {}) {
+  if (simple) wallH = 40;
   const wall0 = -apron - wallD; // pit wall from d = wall0 to wall0 + wallD
   const top = H1 + C1 + H2 + T;
   const pts = [[-ov, wall0, 0], [L + ov, wall0, 0], [L + ov, D + ov, top], [-ov, D + ov, top], [-ov, wall0, wallH], [L + ov, D + ov, 0]];
@@ -187,7 +188,7 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
       lin('edge', P(-ov, -canopy, H1 + C1), P(L + ov, -canopy, H1), [[0, '#AEB7C2'], [1, '#959FAB']]),
       lin('glass', P(0, 0, H1 + C1 + H2), P(L, 0, H1 + C1), [[0, '#34404F'], [0.5, '#1C2531'], [1, '#121821']]),
       lin('sheen', P(0, 0, H1 + C1 + H2), P(L * 0.5, 0, H1 + C1), [[0, '#FFFFFF', 0.28], [0.55, '#FFFFFF', 0.04], [1, '#FFFFFF', 0]]),
-      lin('door', P(0, 0, H1), P(L, 0, H1 * 0.4), [[0, '#9EA8B4'], [1, '#7F8996']]),
+      lin('door', P(0, 0, H1), P(L, 0, H1 * 0.4), simple ? [[0, '#7F8996'], [1, '#66707C']] : [[0, '#9EA8B4'], [1, '#7F8996']]),
       lin('apron', P(-ov, wall0, 0), P(L + ov, 0, 0), [[0, '#6A7380'], [1, '#545D69']]),
       lin('stripe', P(-ov, -canopy, H1), P(L + ov, -canopy, H1), stripeStops.map(([o, c]) => [o, c])),
       lin('long', P(0, 0, 0), [P(0, 0, 0)[0] + 160, P(0, 0, 0)[1] + 100], [[0, '#000000', 0.55], [1, '#000000', 0]]),
@@ -210,11 +211,12 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
       const a = margin + i * (bw + pillar), b = a + bw;
       const opening = poly(P(a, 0, 0), P(b, 0, 0), P(b, 0, oh), P(a, 0, oh));
       clips.push(`<clipPath id="${id('bay' + i)}"><path d="${opening}"/></clipPath>`);
-      const db = oh * (1 - doorDown), r = recess;
+      const db = oh * (1 - (simple ? 0.4 : doorDown)), r = recess;
       const door = poly(P(a, r, db), P(b, r, db), P(b, r, oh), P(a, r, oh));
       const lines = simple ? '' : Array.from({ length: 6 }, (_, j) => db + 5 + j * ((oh - db - 6) / 6)).map(t => `M${P(a, r, t).join(' ')}L${P(b, r, t).join(' ')}`).join('');
       // Each bay its own glow gradient (the bays step down the screen, so one shared vertical gradient would light them unevenly).
-      clips.push(lin('in' + i, P(a, 0, oh), P(a, 0, 0), [[0, '#0E1318'], [0.55, '#2E3A48'], [1, '#8FA3B8']]));
+      // Simple frame (112, 60): a dark interior with no lit floor, so the bays read as garages, not shelves.
+      clips.push(lin('in' + i, P(a, 0, oh), P(a, 0, 0), simple ? [[0, '#0E1318'], [1, '#1A222C']] : [[0, '#0E1318'], [0.55, '#2E3A48'], [1, '#8FA3B8']]));
       bayParts.push(`<g clip-path="url(#${id('bay' + i)})"><path d="${opening}" fill="url(#${id('in' + i)})"/><path d="${door}" fill="url(#${id('door')})"/>${lines ? `<path d="${lines}" stroke="#8D97A3" stroke-width="2"/>` : ''}<path d="M${P(a, r, db).join(' ')}L${P(b, r, db).join(' ')}" stroke="#5F6976" stroke-width="${simple ? 8 : 5}"/><path d="${poly(P(a, 0, 0), P(a, r, 0), P(a, r, oh), P(a, 0, oh))}" fill="#56606C"/><path d="${poly(P(a, 0, oh), P(b, 0, oh), P(b, r, oh), P(a, r, oh))}" fill="#2B323B"/></g>`);
     }
     defs.push(...clips, `<clipPath id="${id('g0')}"><path d="${g0.front}${g0.end}"/></clipPath>`, `<clipPath id="${id('up')}"><path d="${up.front}${up.end}"/></clipPath>`);
@@ -226,8 +228,8 @@ export function pitBuilding({ L = 380, D = 90, H1 = 120, C1 = 16, canopy = 46, H
     // Pit wall: chequered top (the master only), the long face and the end.
     const cq = [];
     {
-      // The chequer is the motorsport cue, so the simple frame keeps it, coarser (one row of 34).
-      const step = simple ? 34 : 14, rows = simple ? 1 : 2, dd = wallD / rows;
+      // The chequer is the motorsport cue, so the simple frame keeps it, coarser (two rows of 24 on a taller wall).
+      const step = simple ? 24 : 14, rows = 2, dd = wallD / rows;
       for (let s = -ov, i = 0; s < L + ov - 0.1; s += step, i++) for (let r = 0; r < rows; r++) if ((i + r) % 2 === 0)
         cq.push(poly(P(s, wall0 + r * dd, wallH), P(Math.min(s + step, L + ov), wall0 + r * dd, wallH), P(Math.min(s + step, L + ov), wall0 + (r + 1) * dd, wallH), P(s, wall0 + (r + 1) * dd, wallH)));
     }
@@ -284,5 +286,5 @@ function pitSmall({ grid, L, D, H1, H2, apron, bays, margin, pillar, door }) {
 }
 export const PIT_SMALL = {
   32: pitSmall({ grid: 32, L: 16, D: 4, H1: 6, H2: 2, apron: 4, bays: 3, margin: 1, pillar: 1, door: 0.4 }),
-  24: pitSmall({ grid: 24, L: 13, D: 3, H1: 5, H2: 0, apron: 3, bays: 3, margin: 1, pillar: 1, door: 0.4 }),
+  24: pitSmall({ grid: 24, L: 13, D: 3, H1: 4, H2: 1, apron: 3, bays: 3, margin: 1, pillar: 1, door: 0.4 }),
 };

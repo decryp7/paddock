@@ -98,7 +98,7 @@ family row at 128 and hand-tuned 32/16 on light and dark, pixel-exact close-ups 
 `alternative/paddock-pit-sheet.png`: a motorsport pit building (ground floor with four lit bays and half-raised doors, a cantilevered
 canopy carrying a thin pinstripe in the seven app hues, an upper hospitality floor with dark glass, the roof slab, and in front the
 pit lane and the chequered pit wall), about 72 % of the tile width. A simplified frame (`paddock-pit-128`, also used at 112 and 60:
-three bays, no slats or mullions, a coarser chequer), pixel-isometric frames at 32 and 24 (`PIT_SMALL`), and the flat slatted door
+three dark bays with doors 40 % down, no slats or mullions, a coarser chequer on a taller wall), pixel-isometric frames at 32 and 24 (`PIT_SMALL`), and the flat slatted door
 at 16 and in the tray. The rendering rules are in `STYLE.md`.
 
 ## Seam scan
