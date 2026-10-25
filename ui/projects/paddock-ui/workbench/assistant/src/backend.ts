@@ -113,7 +113,7 @@ export const DEMO_ANSWER =
  *
  * - `/tool [what]`: a read-only tool call (`find`) that finishes with a citation (`item 7`), then the answer.
  * - `/tool-slow`: a `find` call that stays running until `stop()`; the turn then ends as cancelled, with no answer.
- * - `/tool-fail`: a `find` call that fails with a reason ("The index is locked by another process."), then the answer.
+ * - `/tool-fail`: a `find` call that fails with a reason ("The index is locked by another process."), then a short answer about it.
  * - `/write`: asks for the user's approval of a writing tool (`erase`) and waits for it (needs "Allow actions").
  * - `/fail`: streams a few words and then ends the turn with an error event of kind `failed`.
  * - `/slow`: streams its first words and then waits until `stop()` (a running turn with Stop visible).
@@ -233,6 +233,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
     this.emit(id, { type: 'started', title: c.title });
     if (this.gate) await this.gate;
     let said = '';
+    let outcome = '';
     const command = text.split(/\s/, 1)[0] ?? '';
     if (command === '/tool' || command === '/tool-fail' || command === '/tool-slow') {
       const what = text.slice(command.length).trim() || 'everything';
@@ -243,6 +244,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
         run.halt = null;
       } else if (command === '/tool-fail') {
         this.emit(id, { type: 'toolFinished', callId: 'call_1', name: 'find', ok: false, summary: 'The index is locked by another process.' });
+        outcome = 'I could not look that up: the index is locked by another process. Try again in a moment.';
       } else {
         this.emit(id, {
           type: 'toolFinished',
@@ -262,8 +264,15 @@ export class MemoryAssistantBackend extends AssistantBackend {
       run.call = null;
       if (approved) this.erased++;
       this.emit(id, { type: 'toolFinished', callId: 'call_2', name: 'erase', ok: approved, summary: approved ? 'Erased' : 'Declined by the user' });
+      outcome = approved ? 'Done. I erased everything.' : 'I did not erase anything.';
     }
-    const answer = this.options.reply ? this.options.reply(text) : command === '/tool' ? 'Found item 7 for you.' : DEMO_ANSWER;
+    const answer = this.options.reply
+      ? this.options.reply(text)
+      : command === '/tool'
+        ? 'Found item 7 for you.'
+        : command === '/fail'
+          ? 'Let me explain how the request is handled, starting with the router and'
+          : outcome || DEMO_ANSWER;
     const words = answer.split(/(?<=\s)/);
     for (const word of words) {
       if (run.stopped) break;

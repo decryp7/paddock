@@ -120,6 +120,8 @@
   --pd-surface-1: #15171b;
   --pd-surface-2: #1b1e23;
   --pd-surface-3: #22262c;
+  // Code (block and inline): a sunken surface that differs from the pane in every scheme.
+  --pd-surface-code: #22262c;
   --pd-hairline: rgb(255 255 255 / 0.08);
   --pd-border-strong: rgb(255 255 255 / 0.16);
   // Boundary of inputs and checkable controls: at least 3:1 against surface-1 (WCAG 1.4.11).
@@ -172,6 +174,7 @@
   --pd-surface-1: #ffffff;
   --pd-surface-2: #f0f2f5;
   --pd-surface-3: #ffffff;
+  --pd-surface-code: #eceff3;
   --pd-hairline: rgb(15 20 30 / 0.1);
   --pd-border-strong: rgb(15 20 30 / 0.22);
   --pd-border-control: #6b7380;

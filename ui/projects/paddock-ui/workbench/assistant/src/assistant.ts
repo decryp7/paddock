@@ -3,7 +3,7 @@ import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect
 import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore } from './assistant.store';
-import { conversationTitle, type TurnPart, type TurnView } from './chat-model';
+import { chipText, conversationTitle, type TurnPart, type TurnView } from './chat-model';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
 
@@ -183,10 +183,7 @@ const SCROLL_STICK_PX = 24;
                 @if (chip.icon && hasGlyph(chip.icon)) {
                   <pd-glyph [name]="chip.icon" [size]="14" />
                 }
-                <span class="chip-label">{{ chip.label }}</span>
-                @if (chip.detail) {
-                  <span class="chip-detail">{{ chip.detail }}</span>
-                }
+                <span class="chip-label">{{ chipText(chip.label, chip.detail) }}</span>
                 <pd-glyph [name]="chip.on ? 'close' : 'plus'" [size]="14" />
               </button>
             </li>
@@ -230,7 +227,7 @@ const SCROLL_STICK_PX = 24;
     .bar { display: flex; align-items: center; gap: var(--pd-space-1); padding: var(--pd-space-1) var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); min-height: var(--pd-toolbar-height); }
     .title { margin: 0; font-size: inherit; font-weight: var(--pd-weight-semibold); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .spacer { flex: 1; }
-    .list { list-style: none; margin: 0; padding: var(--pd-space-1); max-height: 40%; overflow-y: auto; border-bottom: 1px solid var(--pd-hairline); }
+    .list { list-style: none; margin: 0; padding: var(--pd-space-1) var(--pd-space-3); max-height: 40%; overflow-y: auto; border-bottom: 1px solid var(--pd-hairline); }
     .row { display: flex; align-items: center; gap: var(--pd-space-1); border-radius: var(--pd-radius-control); }
     .row.active { background: var(--pd-accent-tint); }
     .row:hover { background: var(--pd-hover); }
@@ -288,13 +285,12 @@ const SCROLL_STICK_PX = 24;
     .chip.static { cursor: default; min-height: 0; }
     .chip.off { opacity: 0.6; text-decoration: line-through; }
     .chip:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .chip-label { font-weight: var(--pd-weight-medium); }
-    .chip-detail { color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .chip-label { font-weight: var(--pd-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .input { width: 100%; box-sizing: border-box; resize: none; font: inherit; color: var(--pd-text); background: var(--pd-surface-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-input); padding: var(--pd-space-2); }
     .input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 0; }
     .send-row { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; }
     .allow { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    @container (max-width: 360px) { .log { padding: var(--pd-space-2); } .user { max-width: 100%; } .chip-detail { display: none; } }
+    @container (max-width: 360px) { .log { padding: var(--pd-space-2); } .user { max-width: 100%; } }
   `,
 })
 export class PdAssistant {
@@ -401,6 +397,9 @@ export class PdAssistant {
       if (el && el.value !== draft) el.value = draft;
     });
   }
+
+  /** One format for a context chip, in the composer and in the sent question. */
+  protected readonly chipText = chipText;
 
   /** A conversation title as shown: no leading slash command, sentence case. */
   protected heading(raw: string): string {
