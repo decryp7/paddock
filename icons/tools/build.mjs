@@ -36,7 +36,7 @@ for (const app of ONLY) {
 
   // 1b. Seam scan of the tile background (rule in tools/scan.mjs): fails the build on a hard step in a vertical column.
   for (const platform of ['macos', 'windows']) {
-    const seams = scanSeams(render(masterSvg(app, { platform, bare: true })));
+    const seams = scanSeams(render(masterSvg(app, { platform, bare: true, uid: 'scan' })));
     console.log(`  seam scan ${app} ${platform}: ${seams.length ? seams.length + ' steps' : 'smooth'}`);
     if (seams.length) {
       const e = seams[0];
