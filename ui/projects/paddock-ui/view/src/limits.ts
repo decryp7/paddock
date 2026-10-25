@@ -54,9 +54,18 @@ export function validateViewAction(action: ViewAction): ViewIssue | null {
   }
 }
 
+/** Whitespace or a C0/C1 control character anywhere in the text (written as code-point tests, not a control-character regex). */
+function hasSpaceOrControl(text: string): boolean {
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (/\s/.test(ch) || code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
 /** The check of a `web_url`: `http` or `https`, a host, no user information, no spaces or control characters. */
 export function isWebUrl(url: string): boolean {
-  if (url.length > VIEW_EXTRA_LIMITS.maxUrl || /[\s\u0000-\u001f\u007f-\u009f]/.test(url)) return false;
+  if (url.length > VIEW_EXTRA_LIMITS.maxUrl || hasSpaceOrControl(url)) return false;
   const m = /^https?:\/\/([^/?#]*)/i.exec(url);
   const authority = m?.[1] ?? '';
   return authority !== '' && !authority.includes('@') && !authority.startsWith(':');

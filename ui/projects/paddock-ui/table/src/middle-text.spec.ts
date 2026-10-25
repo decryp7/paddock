@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { PD_MEASURE_TEXT, PdMiddleText, middleTruncate, tailOf } from './middle-text';
@@ -31,7 +31,7 @@ describe('middle truncation', () => {
   });
 });
 
-@Component({ imports: [PdMiddleText], template: `<div style="width: 200px"><pd-middle-text value="/Users/alex/Library/Application Support/Debrief/plugins/syslog/plugin-0.bin" /></div>` })
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, imports: [PdMiddleText], template: `<div style="width: 200px"><pd-middle-text value="/Users/alex/Library/Application Support/Debrief/plugins/syslog/plugin-0.bin" /></div>` })
 class Host {}
 
 describe('pd-middle-text', () => {

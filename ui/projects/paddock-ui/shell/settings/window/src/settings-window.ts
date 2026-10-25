@@ -97,6 +97,7 @@ interface LoadedPage {
     }
 
     <div class="pd-main">
+      <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the nav only receives keydown bubbling from its focusable page buttons (arrow-key roving) -->
       <nav class="pd-nav" [attr.aria-label]="t.pages" (keydown)="navKey($event)">
         @for (g of nav(); track g.id) {
           <h2 class="pd-group" [id]="'pd-settings-group-' + g.id">{{ g.title }}</h2>

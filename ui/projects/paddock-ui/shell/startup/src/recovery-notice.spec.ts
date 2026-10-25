@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import type { StartReport, UncleanShutdown } from '../generated/startup';
@@ -13,7 +13,7 @@ const UNCLEAN: UncleanShutdown = {
   offers: { restore: true, safeMode: true, startFresh: true },
 };
 
-@Component({ selector: 'pd-test-host', imports: [PdRecoveryNotice, PdSafeModeBadge], providers: [RecoveryStore], template: '<pd-safe-mode-badge /><pd-recovery-notice />' })
+@Component({ changeDetection: ChangeDetectionStrategy.OnPush, selector: 'pd-test-host', imports: [PdRecoveryNotice, PdSafeModeBadge], providers: [RecoveryStore], template: '<pd-safe-mode-badge /><pd-recovery-notice />' })
 class Host {}
 
 async function mount(report: StartReport, tweak: (b: MockStartupBackend) => void = () => undefined): Promise<{ fixture: ComponentFixture<Host>; backend: MockStartupBackend; el: HTMLElement }> {

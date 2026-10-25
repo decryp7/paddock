@@ -4,7 +4,6 @@ import { panelTitle, WORKBENCH_PORTS, WorkbenchRegistry, type PanelWindowsPort, 
 import { PANEL_LIMITS, type GhostRequest, type PanelsEvent, type PopOutInfo } from '../generated/panels';
 import { GhostSession, type DragOutPreview } from './ghost-session';
 import { PANELS_IO } from './io';
-import { PopoutState } from './popout-state';
 import { syncedValues, UiSync, type SyncedValue } from './ui-sync';
 
 /** The key of the host's name among the synced values (display scope: every guest window shows it). */
