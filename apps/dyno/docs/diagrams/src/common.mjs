@@ -1,5 +1,5 @@
-import { Diagram, link, g8 } from '../../../../paddock/diagrams/tools/lib.mjs';
-import { sequence, dot, cls } from '../../../../paddock/diagrams/tools/uml.mjs';
+import { Diagram, link, g8 } from '../../../../../diagrams/tools/lib.mjs';
+import { sequence, dot, cls } from '../../../../../diagrams/tools/uml.mjs';
 import { writeFileSync } from 'node:fs';
 export { link, g8, sequence, dot, cls };
 /** Where the .drawio sources and exports live: dyno/diagrams (the docs link there). */

@@ -1,7 +1,7 @@
 // Hand-drawn, theme-aware overview of Dyno (one SVG, light and dark through a prefers-color-scheme style block).
 // Same recipe as Paddock's diagrams/tools/overview.mjs. Usage: node docs/diagrams/src/overview.mjs  ->  diagrams/dyno-overview.svg
-import { theme } from '../../../../paddock/diagrams/tools/themes.mjs';
-import { tw, wrap } from '../../../../paddock/diagrams/tools/lib.mjs';
+import { theme } from '../../../../../diagrams/tools/themes.mjs';
+import { tw, wrap } from '../../../../../diagrams/tools/lib.mjs';
 import { writeFileSync } from 'node:fs';
 import { OUT } from './common.mjs';
 
