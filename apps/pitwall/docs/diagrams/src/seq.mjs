@@ -1,5 +1,5 @@
 import { P, save, sequence } from './common.mjs';
-import { ld, tw } from '../../../../paddock/diagrams/tools/lib.mjs';
+import { ld, tw } from '../../../../../diagrams/tools/lib.mjs';
 
 /**
  * parts: [id, name, tech, role]; script items: ['m', a, b, text, reply?] ['s', p, text] ['o', kind, cond] ['e', cond] ['c'] ['n', p, text, w?]

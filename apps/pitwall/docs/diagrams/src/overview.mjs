@@ -2,8 +2,8 @@
 // block (one file, no <picture> needed). Usage: node diagrams/tools/overview.mjs <app> <out.svg>. This is Pitcrew's content as a
 // worked example: copy the file, change the text and the box list, keep the layout rules of STYLE.md (horizontal arrows in gutters).
 
-import { theme } from '../../../../paddock/diagrams/tools/themes.mjs';
-import { tw, wrap } from '../../../../paddock/diagrams/tools/lib.mjs';
+import { theme } from '../../../../../diagrams/tools/themes.mjs';
+import { tw, wrap } from '../../../../../diagrams/tools/lib.mjs';
 import { writeFileSync } from 'node:fs';
 
 const t = theme('pitwall');
