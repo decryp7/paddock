@@ -67,7 +67,7 @@ export class PdPathText {
   protected readonly copied = signal(false);
 
   constructor() {
-    // A ResizeObserver is outside the signal graph (DOM); it .set()s the width signal because the browser, not another signal, owns that value.
+    // effect-state: a ResizeObserver is outside the signal graph (DOM); it sets the width signal because the browser, not another signal, owns that value.
     effect((onCleanup) => {
       const el = this.box().nativeElement;
       if (typeof ResizeObserver === 'undefined') return;
