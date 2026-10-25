@@ -284,8 +284,11 @@ test('no script sits between cargo and rustc: RUSTC_WRAPPER is sccache itself, w
   assert.deepEqual(scripts, [], 'no cmd.exe script in the shared actions');
   const files = [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(WORKFLOWS, f))];
   for (const f of files) {
-    for (const m of read(f).matchAll(/RUSTC_WRAPPER\s*[=:]\s*"?([^"\s>]*)/g)) {
-      assert.match(m[1], /^(sccache|\$WRAPPER)?$/, `${f}: RUSTC_WRAPPER=${m[1]}; a wrapper script fails on Windows`);
+    // sccache itself, the action's $WRAPPER, or an expression that picks sccache or nothing (`${{ ... && 'sccache' || '' }}`).
+    for (const m of read(f).matchAll(/RUSTC_WRAPPER\s*[=:]\s*("?)(\$\{\{[^}]*\}\}|[^"\s>]*)/g)) {
+      const v = m[2];
+      const expr = /^\$\{\{/.test(v) && [...v.matchAll(/'([^']*)'/g)].every((q) => /^(sccache|ubuntu-latest|macos-latest|windows-latest)?$/.test(q[1]));
+      assert.ok(expr || /^(sccache|\$WRAPPER)?$/.test(v), `${f}: RUSTC_WRAPPER=${v}; a wrapper script fails on Windows`);
     }
   }
 });
@@ -361,8 +364,8 @@ test('install-test-browser fails when the installer printed no CHROMIUM_TEST_PAT
 test('every Node script decides it is the main module with isMain, which resolves links', () => {
   const listed = spawnSync('git', ['ls-files', '*.mjs', '*.js'], { cwd: PADDOCK, encoding: 'utf8' });
   assert.equal(listed.status, 0, listed.stderr);
-  // Paddock's own scripts; an app's (apps/<app>/) follow the rule when they move onto the shared actions and scripts.
-  const files = listed.stdout.split('\n').filter((f) => f && !f.includes('node_modules/') && !f.startsWith('apps/debrief/'));
+  // Paddock's own scripts and the demos'; an app's (apps/<app>/) follow the rule when they move onto the shared scripts.
+  const files = listed.stdout.split('\n').filter((f) => f && !f.includes('node_modules/') && !/^apps\/(?!shell-demo\/|workbench-demo\/)/.test(f));
   assert.ok(files.length > 50, `${files.length} scripts`);
   const naive = /import\.meta\.url\s*===|===\s*import\.meta\.url|fileURLToPath\(import\.meta\.url\)\s*===|===\s*fileURLToPath\(import\.meta\.url\)(?!\))|pathToFileURL\(process\.argv\[1\]/;
   const bad = files.filter((f) => naive.test(read(join(PADDOCK, f))) && !f.endsWith('ci-actions.test.mjs'));

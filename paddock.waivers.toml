@@ -6,11 +6,34 @@ path = "ui/projects/paddock-e2e/src/*"
 reason = "the unit tests of the installed-Chrome guard must name the installed Chrome (channel and paths) to prove it is refused"
 expires = "2027-04-30"
 
-# Debrief's parser crates without a fuzz target or never-panics test, found when Debrief was imported (ADR 0014): its
-# AGENTS.md already promises one per parser. Each is a Debrief follow-up; the waiver keeps the strict C36 for Paddock's
-# shared crates meanwhile.
+# Findings in the imported apps (ADR 0014). Paddock's self-check is strict for its own shared code; the apps' gaps are
+# each app's follow-up work, dated so they cannot be forgotten.
 [[waiver]]
 check = "C36"
-path = "apps/debrief/*"
-reason = "Debrief parser crates found at the import (cargo-debrief-plugin, debrief-agent, debrief-cli, debrief-monitor, debrief-plugin-native, debrief-plugin-tools, xtask) get their never-panics tests as a Debrief follow-up"
+path = "apps/*"
+reason = "parser crates of the imported apps without a fuzz target or never-panics test (Debrief 7, Dyno 4, Pitcrew 2, Pitwall 3, Spotter 1); each app adds its never-panics tests as a follow-up"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C37"
+path = "apps/dyno/*"
+reason = "Dyno's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up (Debrief's perf/test-speed shows how)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C37"
+path = "apps/pitcrew/*"
+reason = "Pitcrew's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C37"
+path = "apps/pitwall/*"
+reason = "Pitwall's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C37"
+path = "apps/spotter/*"
+reason = "Spotter's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
 expires = "2026-12-31"
