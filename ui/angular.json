@@ -131,6 +131,10 @@
             "development": { "buildTarget": "workbench-demo:build:development" }
           },
           "defaultConfiguration": "development"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": { "tsConfig": "projects/workbench-demo/tsconfig.spec.json", "runner": "vitest", "setupFiles": ["projects/workbench-demo/src/test-setup.ts"] }
         }
       }
     }

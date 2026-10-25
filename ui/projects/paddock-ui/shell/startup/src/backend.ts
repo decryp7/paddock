@@ -178,7 +178,7 @@ export class MockStartupBackend extends StartupBackend {
     this.recoveryCalls.push('restore');
     const s = storage();
     s?.removeItem(MOCK_UNCLEAN_KEY);
-    let ui: unknown = null;
+    let ui: unknown;
     try {
       ui = JSON.parse(s?.getItem(MOCK_CHECKPOINT_KEY) ?? 'null');
     } catch {

@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal, viewChild } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { PD_ECHARTS, fakeEchartsLoader } from '@decryp7/paddock-ui/chart';
 import { FakeECharts, all, buttonByText, one, press, text, typeInto } from '@decryp7/paddock-ui/testing';
@@ -6,10 +6,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ActionRef, GrantRef, Node, NodeKind, SecretRef, ViewAction, ViewDoc } from '../generated/view';
 import { VIEW_EXTRA_LIMITS } from './limits';
 import { KNOWN_KINDS, shapeOf } from './model';
-import { NO_VIEW_HOST, VIEW_HOST, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPickRequest } from './host';
+import { NO_VIEW_HOST, VIEW_HOST, VIEW_OPEN_AI_SETTINGS, type ViewConfirmRequest, type ViewHost, type ViewOpenRequest, type ViewPicked, type ViewPickRequest } from './host';
 import { sampleViewDoc } from './sample';
 import { fieldProblem, initialValues } from './form';
 import { PdView } from './view';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 /** A host that records what it was asked and answers as the test says. */
 class FakeHost implements ViewHost {
@@ -19,8 +20,8 @@ class FakeHost implements ViewHost {
   secrets: ViewPickRequest[] = [];
   answer = true;
   failWith: Error | null = null;
-  grant: GrantRef | null = 'grant-7';
-  secret: SecretRef | null = 'secret-3';
+  grant: ViewPicked<GrantRef> | null = { value: 'grant-7', name: '/work/releases/1.4/out' };
+  secret: ViewPicked<SecretRef> | null = { value: 'secret-3', name: 'publish-token' };
   async confirm(r: ViewConfirmRequest): Promise<boolean> {
     this.confirms.push(r);
     if (this.failWith) throw this.failWith;
@@ -30,12 +31,12 @@ class FakeHost implements ViewHost {
     this.opens.push(r);
     if (this.failWith) throw this.failWith;
   }
-  async pickPath(r: ViewPickRequest): Promise<GrantRef | null> {
+  async pickPath(r: ViewPickRequest): Promise<ViewPicked<GrantRef> | null> {
     this.paths.push(r);
     if (this.failWith) throw this.failWith;
     return this.grant;
   }
-  async pickSecret(r: ViewPickRequest): Promise<SecretRef | null> {
+  async pickSecret(r: ViewPickRequest): Promise<ViewPicked<SecretRef> | null> {
     this.secrets.push(r);
     if (this.failWith) throw this.failWith;
     return this.secret;
@@ -43,6 +44,7 @@ class FakeHost implements ViewHost {
 }
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdView],
   template: `<pd-view view="demo.view" [doc]="doc()" [busy]="busy()" [loading]="loading()" [showTitle]="showTitle()" (action)="actions.push($event)" (retry)="retries = retries + 1" />`,
 })
@@ -82,7 +84,7 @@ describe('pd-view', () => {
     host = new FakeHost();
     fake = new FakeECharts();
     TestBed.configureTestingModule({
-      providers: [provideZonelessChangeDetection(), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(fake.init) }, ...(provideHost ? [{ provide: VIEW_HOST, useValue: host }] : [])],
+      providers: [provideZonelessChangeDetection(), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(fake.init) }, { provide: VIEW_OPEN_AI_SETTINGS, useValue: () => undefined }, ...(provideHost ? [{ provide: VIEW_HOST, useValue: host }] : [])],
     });
     const f = TestBed.createComponent(Host);
     f.componentInstance.doc.set(doc);
@@ -107,7 +109,9 @@ describe('pd-view', () => {
       const kinds = new Set(all(el(f), '[data-kind]').map((n) => n.getAttribute('data-kind')));
       for (const k of KNOWN_KINDS) expect(kinds.has(k), k).toBe(true);
       expect(all(el(f), '[data-testid=view-unknown]')).toHaveLength(1);
-      expect(text(node(f, 'future'))).toBe('Update the app to view this');
+      expect(text(node(f, 'future'))).toBe('Update the app to view this (hologram)');
+      assertStatusGlyphs(node(f, 'future'));
+      expect(one(node(f, 'future'), '[data-testid=view-unknown]').getAttribute('title')).toBe('hologram');
       // The rest of the view still draws.
       expect(text(node(f, 'h'))).toContain('Release 1.4: what is left');
     });
@@ -300,6 +304,7 @@ describe('pd-view', () => {
       await settle(f);
       expect(f.componentInstance.actions).toHaveLength(0);
       expect(text(one(el(f), '[data-testid=view-notice]'))).toContain('cannot ask for a confirmation');
+      assertStatusGlyphs(one(el(f), '[data-testid=view-notice]'));
       expect(NO_VIEW_HOST.confirm).toBeTypeOf('function');
     });
 
@@ -384,14 +389,14 @@ describe('pd-view', () => {
       expect(text(one(el(f), '[data-testid=view-notice]'))).toBe('No browser.');
     });
 
-    it('sends the needs-AI setup action and the empty action', async () => {
+    it('shows the needs-AI reason without routing the plugin\'s setup action', async () => {
       const f = await setup();
       const ai = one(el(f), '[data-testid=view-needs-ai]');
       expect(text(ai)).toContain('Explain the failing check');
       expect(text(ai)).toContain('Pitwall is not running.');
-      buttonByText(ai, 'Set up Pitwall').click();
-      await settle(f);
-      expect(last(f).action).toBe('setup-ai');
+      // The only button is the app's own "Open AI settings" (the host of this test provides one); the plugin's setup is not drawn.
+      expect(all(ai, 'button').map((b) => text(b))).toEqual(['Open AI settings']);
+      expect(f.componentInstance.actions.map((a) => a.action)).not.toContain('setup-ai');
     });
 
     it('says why in the needs-AI state when the plugin gave no reason', async () => {
@@ -415,7 +420,8 @@ describe('pd-view', () => {
       expect(text(t.querySelector('caption'))).toBe('Release readiness');
       expect(all(t, 'tbody tr')).toHaveLength(3);
       expect(text(all(t, 'tbody tr')[2])).toContain('Problem: Failing');
-      expect(t.querySelector('[role=region]')?.getAttribute('tabindex')).toBe('0');
+      // A region that fits is not a tab stop (PdViewScroll adds it only while it overflows).
+      expect(t.querySelector('[role=region]')?.getAttribute('tabindex')).toBeNull();
     });
 
     it('sends sort with the column and the direction, flipping the sorted column', async () => {
@@ -625,7 +631,7 @@ describe('pd-view', () => {
       expect(all(g, 'path.pd-view-scene__edge')).toHaveLength(6);
       expect(text(g.querySelector('details'))).toContain('Build to Unit tests');
       expect(text(g.querySelector('details'))).toContain('Build to Integration tests (needs db)');
-      expect(g.querySelector('[role=region]')?.getAttribute('tabindex')).toBe('0');
+      expect(g.querySelector('[role=region]')?.getAttribute('tabindex')).toBeNull();
     });
 
     it('sends the action of a box with its id, by click and by keyboard, and leaves other boxes alone', async () => {
@@ -633,7 +639,7 @@ describe('pd-view', () => {
       const g = node(f, 'g1');
       const buttons = all(g, 'g[role=button]');
       expect(buttons).toHaveLength(2);
-      expect(buttons[0]?.getAttribute('aria-label')).toBe('Open step: Unit tests');
+      expect(buttons[0]?.getAttribute('aria-label')).toBe('Open step: Unit tests — Good');
       buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await settle(f);
       expect(last(f)).toEqual({ view: 'demo.view', action: 'open-node', args: { node: 'b' } });
@@ -754,7 +760,9 @@ describe('pd-view', () => {
       buttonByText(form(f), 'Choose a folder…').click();
       await settle(f);
       expect(host.paths).toEqual([{ fieldId: 'out', label: 'Output folder', folder: true }]);
-      expect(text(form(f))).toContain('Chosen');
+      // The field shows the name the host gave the choice (cut in the middle, the full path as its tooltip), never the grant.
+      expect(one(form(f), '[data-testid=path-text]').getAttribute('title')).toBe('/work/releases/1.4/out');
+      expect(form(f).innerHTML).not.toContain('grant-7');
       publish(f).click();
       await settle(f);
       expect((last(f).args as { values: Record<string, unknown> }).values['out']).toBe('grant-7');
@@ -782,7 +790,7 @@ describe('pd-view', () => {
       buttonByText(form(f), 'Choose a secret…').click();
       await settle(f);
       expect(host.secrets).toEqual([{ fieldId: 'token', label: 'Publish token' }]);
-      expect(text(form(f))).toContain('A stored secret is chosen');
+      expect(text(form(f))).toContain('publish-token');
       expect(form(f).innerHTML).not.toContain('secret-3');
       buttonByText(form(f), 'Choose a file…').click();
       await settle(f);
@@ -960,13 +968,13 @@ describe('pd-view', () => {
       expect(options.some((o) => o.includes('"type":"pie"'))).toBe(true);
       expect(text(node(f, 'c1'))).toContain('Test time per run');
       expect(node(f, 'c1').querySelector('[role=img]')?.getAttribute('aria-label')).toBe('Test time per run');
-      expect(text(node(f, 'c1').querySelector('p.pd-sr'))).toContain('Seconds from 39 to 52');
+      expect(text(node(f, 'c1').querySelector('p.pd-sr'))).toContain('Seconds from 39 s to 52 s');
     });
   });
 
   describe('empty', () => {
-    it('draws icon, title and hint, and the action as the one primary button', async () => {
-      const f = await setup();
+    it('draws icon, title and hint, and the action as the one primary button when no form comes first', async () => {
+      const f = await setup(edited((c) => c.splice(c.findIndex((x) => x.id === 'form'), 1)));
       const e = node(f, 'empty');
       expect(text(e)).toContain('Nothing matches');
       expect(text(e)).toContain('Change the filter');

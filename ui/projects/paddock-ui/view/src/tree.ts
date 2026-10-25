@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input, signal } from '@angular/core';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import type { Tree, TreeNode } from '../generated/view';
-import { glyphFor, toneOf } from './model';
+import { glyphFor, toneOf, toneWord } from './model';
 import { ViewRuntime } from './runtime';
-import { PdViewTone, TONE_CSS, toneClass } from './tone';
+import { PdViewTone, TONE_CSS, toneClass, VIEW_HOVER } from './tone';
 
 /** One line of the shown tree. */
 export interface TreeRow {
@@ -64,8 +64,10 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph, PdViewTone],
   template: `
+    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the tree only receives keydown bubbling from its treeitems, which are the focus stops (roving tabindex) -->
     <ul class="pd-view-tree" role="tree" [attr.aria-label]="label() || defaultLabel" (keydown)="key($event)">
       @for (row of rows(); track row.node.id) {
+        <!-- eslint-disable @angular-eslint/template/role-has-required-aria -- nodes are not selectable, and a tree without a selection model leaves aria-selected out (ARIA APG) -->
         <li
           role="treeitem"
           class="pd-view-tree__row"
@@ -75,6 +77,7 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
           [attr.aria-setsize]="row.setSize"
           [attr.aria-expanded]="row.hasChildren || row.node.expandable ? row.expanded : null"
           [attr.data-node]="row.node.id"
+          [attr.title]="toneTitle(row.node.tone)"
           [style.--pd-view-depth]="row.node.depth"
           [tabindex]="row.node.id === tabStop() ? 0 : -1"
           (focus)="active.set(row.node.id)"
@@ -96,6 +99,7 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
             <span class="pd-view-tree__label">{{ row.node.label }}</span>
           }
         </li>
+        <!-- eslint-enable @angular-eslint/template/role-has-required-aria -->
       }
     </ul>
   `,
@@ -103,13 +107,14 @@ export function visibleRows(tree: Tree, expanded: ReadonlySet<string>, collapsed
     ${TONE_CSS}
     :host { display: block; min-width: 0; }
     .pd-view-tree { list-style: none; margin: 0; padding: 0; }
-    .pd-view-tree__row { display: flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-row-height); padding-inline-start: calc(var(--pd-view-depth, 0) * var(--pd-space-4)); color: var(--pd-view-tone, var(--pd-text)); border-radius: var(--pd-radius-control); }
-    .pd-view-tree__row.pd-view-tone-neutral { color: var(--pd-text); }
-    .pd-view-tree__row:hover { background: var(--pd-hover); }
+    .pd-view-tree__row { display: flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-row-height); padding-inline-start: calc(var(--pd-view-depth, 0) * var(--pd-space-4) + var(--pd-space-1)); color: var(--pd-text); border-radius: var(--pd-radius-control); }
+    /* Calm by default: only the mark of a tone is coloured; the label stays in text colour and the word is the row's tooltip. */
+    .pd-view-tree__row pd-view-tone { color: var(--pd-view-tone); }
+    .pd-view-tree__row:hover { background: ${VIEW_HOVER}; }
     .pd-view-tree__row:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     .pd-view-tree__twisty { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; background: none; color: var(--pd-text-muted); cursor: pointer; border-radius: var(--pd-radius-control); }
     .pd-view-tree__twisty:focus-visible { outline: 2px solid var(--pd-focus-ring); }
-    .pd-view-tree__label { min-width: 0; overflow-wrap: anywhere; }
+    .pd-view-tree__label { min-width: 0; overflow-wrap: break-word; }
     .pd-view-tree__label--act { padding: 0; border: 0; background: none; font: inherit; color: var(--pd-accent); cursor: pointer; text-align: start; min-height: 24px; }
     .pd-view-tree__label--act:hover:not(:disabled) { text-decoration: underline; }
     .pd-view-tree__label--act:focus-visible { outline: 2px solid var(--pd-focus-ring); border-radius: 2px; }
@@ -134,6 +139,10 @@ export class PdViewTree {
 
   protected glyph(n: TreeNode): string {
     return glyphFor(n.icon);
+  }
+  /** The word of a non-neutral tone, the row's tooltip (the mark itself is the glyph). */
+  protected toneTitle(tone: unknown): string | null {
+    return toneWord(toneOf(tone)) || null;
   }
   protected rowClass(row: TreeRow): string {
     return `pd-view-tree__row ${toneClass(toneOf(row.node.tone))}`;

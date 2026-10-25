@@ -21,6 +21,21 @@ pub enum Access {
     ReadOnly,
     /// Changes something. Offered only after a user click, and each call needs the user's approval.
     Write,
+    /// Changes something that cannot be undone (erases, overwrites, sends). Treated as [`Access::Write`], and the approval
+    /// is drawn as a danger choice with Decline as the default.
+    Destructive,
+}
+
+impl Access {
+    /// Whether the tool changes things (needs "Allow actions" and an approval per call).
+    pub fn writes(self) -> bool {
+        self != Access::ReadOnly
+    }
+
+    /// Whether what it changes cannot be undone.
+    pub fn destructive(self) -> bool {
+        self == Access::Destructive
+    }
 }
 
 /// The limits of one tool.
@@ -200,7 +215,7 @@ impl Tools {
 
     /// Whether any tool writes.
     pub fn has_write(&self) -> bool {
-        self.by_name.values().any(|t| t.access() == Access::Write)
+        self.by_name.values().any(|t| t.access().writes())
     }
 
     /// The specs to offer the model: read-only tools, plus the writing ones when the user allowed actions.
@@ -221,7 +236,8 @@ impl Tools {
                 ToolInfo {
                     name: spec.name,
                     description: spec.description,
-                    write: t.access() == Access::Write,
+                    write: t.access().writes(),
+                    destructive: t.access().destructive(),
                 }
             })
             .collect()
@@ -239,6 +255,8 @@ pub struct ToolInfo {
     pub description: String,
     /// It changes things (needs the user's approval per call).
     pub write: bool,
+    /// What it changes cannot be undone (implies `write`): its approval is a danger choice.
+    pub destructive: bool,
 }
 
 /// The first problem with `input` against the tool's schema: not an object, or a `required` argument missing. The check is

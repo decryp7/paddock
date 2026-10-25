@@ -1,9 +1,7 @@
 import { booleanAttribute, ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdNeedsAiCard } from '@decryp7/paddock-ui/states';
 import type { NextStep } from '../generated/pitwall';
 import { PitwallStore } from './pitwall.store';
-
-let nextId = 0;
 
 /** The button text of a step the component cannot run itself: the app does it (`(step)`), because only it knows where Pitwall is. */
 export function stepLabel(step: NextStep): string | null {
@@ -42,69 +40,43 @@ export function stepLabel(step: NextStep): string | null {
 @Component({
   selector: 'pd-needs-ai',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph],
+  imports: [PdNeedsAiCard],
   template: `
     @if (store.needsAttention()) {
-      <section class="pd-needs-ai" [attr.aria-labelledby]="titleId" data-testid="needs-ai" [attr.data-kind]="store.kind()">
-        <pd-glyph class="pd-needs-ai__icon" [name]="icon()" [size]="20" />
-        <div class="pd-needs-ai__body">
-          <p class="pd-needs-ai__title" [id]="titleId">{{ title() }}</p>
-          <p class="pd-needs-ai__message" data-testid="needs-ai-message">{{ store.message() }}</p>
-          @if (store.pairingCode(); as code) {
-            <p class="pd-needs-ai__code" data-testid="needs-ai-code" [attr.aria-label]="t.codeLabel">{{ code }}</p>
-            <p class="pd-needs-ai__hint" data-testid="needs-ai-approve">{{ approve() }}</p>
+      <pd-needs-ai-card
+        [title]="title()"
+        [message]="store.message()"
+        [icon]="icon()"
+        [kind]="store.kind() ?? ''"
+        [code]="store.pairingCode() ?? ''"
+        [codeLabel]="t.codeLabel"
+        [approve]="approve()"
+        [hint]="store.onBuiltIn() ? t.onBuiltIn : ''"
+        [error]="store.actionError() ?? ''"
+      >
+        @if (store.pairingCode()) {
+          <button type="button" class="pd-btn" data-testid="needs-ai-cancel" [disabled]="store.busy()" (click)="store.cancelPairing()">{{ t.cancel }}</button>
+        } @else {
+          @for (step of steps(); track $index) {
+            <button type="button" class="pd-btn" [class.pd-btn--primary]="$first" [attr.data-testid]="'needs-ai-' + step" [disabled]="store.busy()" (click)="run(step)">
+              {{ label(step) }}
+            </button>
           }
-          <div class="pd-needs-ai__actions">
-            @if (store.pairingCode()) {
-              <button type="button" class="pd-btn" data-testid="needs-ai-cancel" [disabled]="store.busy()" (click)="store.cancelPairing()">{{ t.cancel }}</button>
-            } @else {
-              @for (step of steps(); track $index) {
-                <button type="button" class="pd-btn" [class.pd-btn--primary]="$first" [attr.data-testid]="'needs-ai-' + step" [disabled]="store.busy()" (click)="run(step)">
-                  {{ label(step) }}
-                </button>
-              }
-            }
-            @if (store.canUseBuiltIn()) {
-              <button type="button" class="pd-btn" data-testid="needs-ai-builtin" [disabled]="store.busy()" (click)="store.useBuiltIn()">{{ t.useBuiltIn }}</button>
-            }
-            @if (settingsLink()) {
-              <button type="button" class="pd-btn pd-btn--ghost" data-testid="needs-ai-settings" (click)="openSettings.emit()">{{ t.openSettings }}</button>
-            }
-          </div>
-          @if (store.onBuiltIn()) {
-            <p class="pd-needs-ai__hint" data-testid="needs-ai-on-builtin">{{ t.onBuiltIn }}</p>
-          }
-          @if (store.actionError(); as err) {
-            <p class="pd-needs-ai__error" role="alert" data-testid="needs-ai-error">{{ err }}</p>
-          }
-        </div>
-      </section>
+        }
+        @if (store.canUseBuiltIn()) {
+          <button type="button" class="pd-btn" data-testid="needs-ai-builtin" [disabled]="store.busy()" (click)="store.useBuiltIn()">{{ t.useBuiltIn }}</button>
+        }
+        @if (settingsLink()) {
+          <button type="button" class="pd-btn pd-btn--ghost" data-testid="needs-ai-settings" (click)="openSettings.emit()">{{ t.openSettings }}</button>
+        }
+      </pd-needs-ai-card>
     } @else if (store.requestError(); as err) {
-      <section class="pd-needs-ai" [attr.aria-label]="t.stateUnknown" data-testid="needs-ai-failed">
-        <pd-glyph class="pd-needs-ai__icon" name="alert" [size]="20" />
-        <div class="pd-needs-ai__body">
-          <p class="pd-needs-ai__message">{{ err }}</p>
-          <div class="pd-needs-ai__actions">
-            <button type="button" class="pd-btn" data-testid="needs-ai-retry" (click)="store.load()">{{ t.retry }}</button>
-          </div>
-        </div>
-      </section>
+      <pd-needs-ai-card [name]="t.stateUnknown" [message]="err" icon="warning" testid="needs-ai-failed">
+        <button type="button" class="pd-btn" data-testid="needs-ai-retry" (click)="store.load()">{{ t.retry }}</button>
+      </pd-needs-ai-card>
     }
   `,
-  styles: `
-    :host { display: block; container-type: inline-size; }
-    .pd-needs-ai { display: flex; gap: var(--pd-space-3); align-items: flex-start; padding: var(--pd-space-4); border: 1px solid var(--pd-border-subtle); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); color: var(--pd-text); }
-    .pd-needs-ai__icon { color: var(--pd-text-muted); margin-top: 2px; }
-    .pd-needs-ai[data-kind='incompatible'] .pd-needs-ai__icon, .pd-needs-ai[data-kind='unavailable'] .pd-needs-ai__icon { color: var(--pd-danger-text, var(--pd-danger)); }
-    .pd-needs-ai__body { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; flex: 1; }
-    p { margin: 0; overflow-wrap: anywhere; }
-    .pd-needs-ai__title { font-weight: var(--pd-weight-semibold); }
-    .pd-needs-ai__hint { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
-    .pd-needs-ai__code { font-size: var(--pd-text-title); font-weight: var(--pd-weight-semibold); letter-spacing: 0.15em; font-variant-numeric: tabular-nums; }
-    .pd-needs-ai__actions { display: flex; flex-wrap: wrap; gap: var(--pd-space-2); }
-    .pd-needs-ai__error { color: var(--pd-danger-text, var(--pd-danger)); }
-    @container (max-width: 360px) { .pd-needs-ai { flex-direction: column; padding: var(--pd-space-3); } }
-  `,
+  styles: `:host { display: block; }`,
 })
 export class PdNeedsAi {
   /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
@@ -118,7 +90,6 @@ export class PdNeedsAi {
     stateUnknown: $localize`:@@pd.pitwall.state-unknown:Pitwall`,
   };
   protected readonly store = inject(PitwallStore);
-  protected readonly titleId = `pd-needs-ai-${++nextId}`;
   /** The feature, as the user knows it ("Ask about this log"). */
   readonly feature = input.required<string>();
   /** Offer "Open AI settings" (the app's AI page). */
@@ -130,7 +101,7 @@ export class PdNeedsAi {
 
   protected readonly title = computed(() => $localize`:@@pd.pitwall.title:${this.feature()}:feature: needs local AI`);
   protected readonly approve = computed(() => $localize`:@@pd.pitwall.approve:Approve ${this.store.app()}:app: in Pitwall > Apps & keys and check that it shows this code.`);
-  protected readonly icon = computed(() => (['incompatible', 'unavailable'].includes(this.store.kind() ?? '') ? 'alert' : 'info'));
+  protected readonly icon = computed(() => (['incompatible', 'unavailable'].includes(this.store.kind() ?? '') ? 'warning' : 'info'));
   /** The engine's buttons, without the ones with nothing to press (`none`). */
   protected readonly steps = computed(() => this.store.actions().filter((s) => s === 'pair' || stepLabel(s) !== null));
 

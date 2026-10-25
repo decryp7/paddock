@@ -250,3 +250,97 @@ fn history_keeps_the_newest_messages_that_fit_from_a_user_message_on() {
     );
     assert_eq!(mid.len(), 1);
 }
+
+#[test]
+fn an_old_file_without_the_reopen_fields_still_loads_and_the_new_parts_survive_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.json");
+    let old = json!({"version": 1, "conversations": [{
+        "id": "c1-1", "title": "Old", "createdMs": 1, "updatedMs": 2,
+        "messages": [
+            {"role": "user", "text": "q", "atMs": 1},
+            {"role": "assistant", "text": "", "toolCalls": [{"id": "call_1", "name": "find", "input": {}}], "atMs": 2},
+            {"role": "tool", "text": "r", "toolCallId": "call_1", "toolName": "find", "ok": true, "summary": "s", "atMs": 3},
+            {"role": "assistant", "text": "a", "end": "answered", "atMs": 4}
+        ]}]})
+    .to_string();
+    std::fs::write(&path, old).unwrap();
+    let (store, _) = open(&path);
+    assert_eq!(store.take_problem(), None);
+    let c = store.get("c1-1").unwrap();
+    assert_eq!(c.messages.len(), 4);
+    assert_eq!(c.messages[2].call_summary, None);
+    assert_eq!(
+        (
+            c.messages[2].write,
+            c.messages[2].outcome,
+            c.messages[3].error.clone()
+        ),
+        (None, None, None)
+    );
+
+    // What the view needs of a turn is kept, and so are the citations of a result too large to keep whole.
+    let cites: Vec<_> = (0..MAX_CITATIONS + 5)
+        .map(|i| json!({"text": format!("item {i}"), "target": format!("record:{i}")}))
+        .chain([json!({"text": 5})])
+        .collect();
+    let big = json!({"blob": "x".repeat(MAX_DATA_BYTES + 1), "citations": cites});
+    let error = StoredError {
+        message: "m".repeat(MAX_NOTE_CHARS + 10),
+        needs_ai: Some(json!({"kind": "notRunning"})),
+    };
+    store
+        .append(
+            "c1-1",
+            vec![
+                StoredMessage::tool("c", "erase", "no", false, "Declined".into(), Some(big), 5)
+                    .with_call("Erase everything", true, true, Some(ToolOutcome::Declined)),
+                StoredMessage::tool(
+                    "d",
+                    "t",
+                    "r",
+                    true,
+                    "s".into(),
+                    Some(json!({"blob": "x".repeat(MAX_DATA_BYTES + 1)})),
+                    5,
+                ),
+                StoredMessage::assistant("half", vec![], Some(EndReason::Failed), 6)
+                    .with_ending(Some(error), Some("n".repeat(MAX_NOTE_CHARS + 10))),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+    drop(store);
+    let (store, _) = open(&path);
+    let c = store.get("c1-1").unwrap();
+    let tool = &c.messages[4];
+    assert_eq!(
+        (
+            tool.call_summary.as_deref(),
+            tool.write,
+            tool.destructive,
+            tool.outcome
+        ),
+        (
+            Some("Erase everything"),
+            Some(true),
+            Some(true),
+            Some(ToolOutcome::Declined)
+        )
+    );
+    let kept = tool.data.as_ref().unwrap()["citations"].as_array().unwrap();
+    assert_eq!(kept.len(), MAX_CITATIONS, "capped, malformed ones dropped");
+    assert!(tool.data.as_ref().unwrap().get("blob").is_none());
+    assert_eq!(
+        c.messages[5].data, None,
+        "large data without citations is dropped"
+    );
+    let last = &c.messages[6];
+    let e = last.error.as_ref().unwrap();
+    assert_eq!(e.message.chars().count(), MAX_NOTE_CHARS);
+    assert_eq!(e.needs_ai, Some(json!({"kind": "notRunning"})));
+    assert_eq!(
+        last.end_message.as_ref().unwrap().chars().count(),
+        MAX_NOTE_CHARS
+    );
+}

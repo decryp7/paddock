@@ -141,8 +141,9 @@ abstract class MenuView {
   styles:
     `
     :host { display: block; min-width: 0; }
-    .pd-bar { display: flex; flex-wrap: wrap; gap: 2px; }
-    .pd-top { min-height: 28px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; font: inherit; }
+    /* One line always: a bar that wraps is clipped by the 40 px title bar; the title bar scrolls it (and truncates the app name first). */
+    .pd-bar { display: flex; flex-wrap: nowrap; gap: 2px; }
+    .pd-top { flex: none; white-space: nowrap; min-height: 28px; padding: 0 var(--pd-space-2); border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; font: inherit; }
     .pd-top:hover, .pd-top:focus-visible, .pd-top[aria-expanded='true'] { background: var(--pd-hover); color: var(--pd-text); outline: none; }
     .pd-top:focus-visible { box-shadow: inset 0 0 0 2px var(--pd-focus-ring); }
   ` + MENU_STYLES,

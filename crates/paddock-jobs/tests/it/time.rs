@@ -356,3 +356,41 @@ fn a_system_clock_wait_ends_on_its_tokens_deadline() {
     let far = CancelToken::with_deadline(Duration::from_secs(3600));
     assert_eq!(SystemClock.wait(Duration::from_millis(1), &far), Ok(()));
 }
+
+/// The CI flake of `paddock-plugin-host` (run 6319): a short wait that another thread started and ended (a finished
+/// call's guard timer, its token already cancelled) counted as a started wait, so a test advanced before the wait it
+/// meant was in place, and that wait never ended. Pending waits are the boundary that cannot be fooled.
+#[test]
+fn a_stray_short_wait_does_not_count_as_pending_and_an_ended_wait_stops_counting_at_once() {
+    let c = FakeClock::new();
+    let stray = CancelToken::new();
+    stray.cancel();
+    assert!(c.wait(SECOND, &stray).is_err());
+    assert_eq!(
+        c.waits_started(),
+        1,
+        "it started, so a started count is fooled"
+    );
+    assert_eq!(c.pending(), 0, "but it is not pending");
+    let worker = {
+        let c = c.clone();
+        std::thread::spawn(move || c.sleep(SECOND))
+    };
+    assert!(c.wait_for_pending(1, GUARD));
+    assert_eq!(c.pending(), 1);
+    c.advance(SECOND);
+    // Its end has come: no longer pending, whether or not its thread has left yet.
+    assert_eq!(c.pending(), 0);
+    worker.join().unwrap();
+    assert!(!c.wait_for_pending(1, Duration::ZERO));
+    // A wait whose token is cancelled stops being pending before it leaves.
+    let token = CancelToken::new();
+    let held = {
+        let (c, token) = (c.clone(), token.clone());
+        std::thread::spawn(move || c.wait(MINUTE, &token))
+    };
+    assert!(c.wait_for_pending(1, GUARD));
+    token.cancel();
+    assert_eq!(c.pending(), 0);
+    assert!(held.join().unwrap().is_err());
+}

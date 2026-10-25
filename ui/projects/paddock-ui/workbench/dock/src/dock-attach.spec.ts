@@ -2,19 +2,27 @@ import { TestBed } from '@angular/core/testing';
 import { settle } from '@decryp7/paddock-ui/shell/testing';
 import { DockContext } from './dock-context';
 import { GUIDE } from './dock-geometry';
-import { dockview, forgetDockviewForTest } from './dockview-loader';
+import { dockview, forgetDockviewForTest, loadDockview } from './dockview-loader';
 import { mountDock, probeView } from './harness.spec-helper';
 
-// Spec files usually run in their own module registry, but a worker can be reused: the test starts from "not loaded" itself.
+// Spec files share a worker (the builder runs Vitest with isolate=false): the test starts from "not loaded" itself.
 describe('attaching before dockview has loaded', () => {
-  beforeEach(() => forgetDockviewForTest());
+  afterEach(() => forgetDockviewForTest());
 
   it('attaches as soon as dockview is there, and only to the container asked for last', async () => {
+    // The test holds the import, so "not loaded yet" holds however warm the worker's module cache is.
+    const real = await import('dockview');
+    let release: () => void = () => undefined;
+    forgetDockviewForTest(() => new Promise((resolve) => (release = () => resolve(real))));
     expect(dockview()).toBeNull();
     const { dock, rendered } = await mountDock({ views: [probeView('a.one')], preload: false });
     const ctx = TestBed.inject(DockContext);
-    // The harness window asked while dockview was loading: it is attached once it is there.
-    await vi.waitFor(() => expect(ctx.api).not.toBeNull());
+    expect(ctx.api).toBeNull();
+    // The harness window asked while dockview was loading: it attaches when that load resolves (the same promise, so it
+    // has attached by the time this await returns; no polling).
+    release();
+    await loadDockview();
+    expect(ctx.api).not.toBeNull();
     await settle(rendered.fixture);
     dock.detach();
     expect(ctx.api).toBeNull();

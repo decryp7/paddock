@@ -190,3 +190,51 @@ describe('pd-notification-host', () => {
     f.destroy();
   });
 });
+
+describe('pd-notification-host in a small window (review 2, P3-14)', () => {
+  // jsdom does no layout, so the rules are read from the component's own styles; e2e/shell-demo.spec.ts measures them in a browser.
+  // Angular keeps the styles scoped and pretty-printed (`.a[_ngcontent-%COMP%] {\n  width: 14px;`): flatten them to `.a { width: 14px; }`.
+  const css = ((PdNotificationHost as unknown as { ɵcmp: { styles: string[] } }).ɵcmp.styles ?? [])
+    .join('\n')
+    .replace(/\[_ng(?:content|host)-%COMP%\]/g, '')
+    .replace(/\s+/g, ' ');
+  const compact = /@media \(max-width: 480px\) \{(.*?)\} \}/.exec(css)?.[1] ?? '';
+
+  it('a toast is never wider than 360 px', () => {
+    expect(/\.pd-toast \{[^}]*\bwidth: 360px;/.test(css)).toBe(true);
+    expect(css).not.toMatch(/\bwidth: 3[7-9]\dpx/);
+    expect(compact).toMatch(/max-width: 360px/);
+  });
+
+  it('at 480 px and below it is one line: the message, the first action and the close, above the status bar', () => {
+    expect(compact).not.toBe('');
+    expect(compact).toMatch(/\.pd-toast \{[^}]*flex-direction: row/);
+    expect(compact).toMatch(/\.pd-title \{[^}]*white-space: nowrap/);
+    expect(compact).toMatch(/\.pd-actions \.pd-btn:not\(:first-child\) \{ display: none;/);
+    expect(compact).toMatch(/\.pd-body:not\(\.pd-err\)/);
+    // The older toasts wait in the centre: two show at most.
+    expect(compact).toMatch(/\.pd-toast:nth-last-child\(n ?\+ ?3\) \{ display: none;/);
+    // The close stays reachable and in the flow.
+    expect(compact).toMatch(/\.pd-x \{[^}]*position: static/);
+  });
+
+  it('shows a notice\'s short form instead of its title at 480 px and below, and the title otherwise (review 3 P3-8)', () => {
+    expect(css).toMatch(/\.pd-short \{ display: none; \}/);
+    expect(compact).toMatch(/\.pd-has-short \.pd-full \{ display: none; \}/);
+    expect(compact).toMatch(/\.pd-has-short \.pd-short \{ display: inline; \}/);
+  });
+
+  it('keeps every action and the close in the markup (the small form only hides them), the primary first as authored', async () => {
+    const list = signal<readonly HostNotification[]>([
+      n('a', { actions: [{ label: 'Undo', kind: 'primary', run: () => undefined }, { label: 'More', kind: 'ghost', run: () => undefined }], body: 'long body', details: 'd' }),
+    ]);
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), { provide: NOTIFY_CLOCK, useValue: new FakeClock() }, { provide: NOTIFICATION_SOURCES, multi: true, useValue: { items: list } }],
+    });
+    const fixture = TestBed.createComponent(PdNotificationHost);
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    expect([...el.querySelectorAll('.pd-actions .pd-btn')].map((b) => b.textContent?.trim())).toEqual(['Undo', 'More', 'Details']);
+    expect(el.querySelector('[data-testid=notification-dismiss]')).not.toBeNull();
+  });
+});

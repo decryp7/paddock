@@ -4,6 +4,7 @@ import {
   compassCells,
   DropPosition,
   edgeCells,
+  bottomFlyoutInsets,
   fullSpanEdge,
   hitGuide,
   isLayoutTarget,
@@ -250,5 +251,26 @@ describe('previewRect', () => {
     expect(previewRect('left', box, 0.25)).toEqual(r(10, 20, 50, 100));
     expect(previewRect('right', box, 0.25)).toEqual(r(160, 20, 50, 100));
     expect(previewRect('center', box)).not.toBe(box);
+  });
+});
+
+describe('bottomFlyoutInsets (review 3 P3-3)', () => {
+  const root = { x: 0, y: 0, width: 1000, height: 600 };
+  it('keeps a bottom slide-out off a full-height side column, over the groups along the bottom', () => {
+    const editor = { x: 0, y: 0, width: 700, height: 400 };
+    const problems = { x: 0, y: 400, width: 700, height: 200 };
+    const assistant = { x: 700, y: 0, width: 300, height: 600 };
+    expect(bottomFlyoutInsets([editor, problems, assistant], root)).toEqual({ left: 0, right: 300 });
+    const tools = { x: 0, y: 0, width: 250, height: 600 };
+    const centre = { x: 250, y: 0, width: 750, height: 600 };
+    // A left column and a centre that also runs the full height: the centre is not at a side, so the span is the centre's.
+    expect(bottomFlyoutInsets([tools, centre], root)).toEqual({ left: 250, right: 0 });
+  });
+
+  it('takes the whole width when the bottom spans it, or when nothing is there', () => {
+    expect(bottomFlyoutInsets([{ x: 0, y: 300, width: 1000, height: 300 }, { x: 0, y: 0, width: 1000, height: 300 }], root)).toBeNull();
+    expect(bottomFlyoutInsets([], root)).toBeNull();
+    expect(bottomFlyoutInsets([{ x: 0, y: 0, width: 1000, height: 600 }], root)).toBeNull();
+    expect(bottomFlyoutInsets([{ x: 0, y: 0, width: 0, height: 600 }], root)).toBeNull();
   });
 });

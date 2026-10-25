@@ -18,6 +18,7 @@ export interface PaddockFixtures {
  */
 export const test = base.extend<PaddockFixtures, { readonly paddockBrowserGuard: void }>({
   paddockBrowserGuard: [
+    // eslint-disable-next-line no-empty-pattern -- Playwright reads the fixtures a function needs from its first parameter, which must be a destructuring pattern
     async ({}, use, workerInfo) => {
       const problems = browserProblems(workerInfo.project.use as BrowserUse);
       if (problems.length) throw new Error(`Refusing the installed browser (rule 7):\n- ${problems.join('\n- ')}`);

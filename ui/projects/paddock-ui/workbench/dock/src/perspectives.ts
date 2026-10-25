@@ -186,6 +186,21 @@ export class Perspectives {
     this.persist({ active, layouts });
   }
 
+  /**
+   * After the saved layouts were edited elsewhere (the manage dialog renamed or deleted some): reads them again and forgets
+   * what was remembered for layouts that are gone; an active choice that is gone falls back to the first perspective.
+   */
+  async refresh(): Promise<void> {
+    await this.saved.reload();
+    const present = new Set(this.saved.list().map((l) => SAVED_PREFIX + l.name));
+    const gone = (id: string) => id.startsWith(SAVED_PREFIX) && !present.has(id);
+    const layouts = Object.fromEntries(Object.entries(this.state.layouts).filter(([id]) => !gone(id)));
+    // after-await: the choice as it is now, after the reload (it may have changed while the layouts were read).
+    const active = gone(this.activeId()) ? '' : this.activeId();
+    this.activeId.set(active);
+    this.persist({ active, layouts });
+  }
+
   /** Moves a saved perspective up (-1) or down (+1) in the list (and so to another Ctrl+n). */
   move(name: string, delta: -1 | 1): void {
     this.saved.move(name, delta);

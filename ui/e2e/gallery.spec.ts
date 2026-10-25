@@ -5,23 +5,6 @@ import { PD_ICON_DOTS } from '../projects/paddock-ui/icons/src/paths';
 const DOTS = Object.fromEntries(Object.entries(PD_ICON_DOTS).map(([k, v]) => [k, (v ?? []).map((d) => [d[0], d[1]])]));
 
 const THEMES = ['dark', 'light'] as const;
-const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter'] as const;
-const SECTIONS = [
-  'card',
-  'status-pill',
-  'metric',
-  'sparkline',
-  'empty-state',
-  'error-state',
-  'skeleton',
-  'job',
-  'segmented-control',
-  'icons',
-  'controls',
-  'path-text',
-  'tray-popover',
-  'chart-theme',
-] as const;
 
 async function open(page: Page, theme: string, accent: string, density = 'standard'): Promise<void> {
   await page.goto(`/?theme=${theme}&accent=${accent}&density=${density}`);
@@ -56,7 +39,7 @@ test('interactive card activates with Enter and Space', async ({ page }) => {
   await card.focus();
   await page.keyboard.press('Enter');
   await page.keyboard.press('Space');
-  await expect(card).toContainText('activated 2');
+  await expect(page.getByTestId('activations')).toHaveText('activated 2');
 });
 
 test('native feel: the shell is not selectable, content opts in', async ({ page }) => {
@@ -182,6 +165,9 @@ test.describe('UI basics review fixes (regressions)', () => {
       });
       expect(r.headClipped).toBe(true);
       expect(r.tailClipped).toBe(false);
+      // One ellipsis only: the name is not cut as long as the directory still shows something.
+      const cuts = await page.locator(`${sel} pd-path-text`).evaluate((host) => ['.pd-head', '.pd-name', '.pd-tail'].filter((c) => { const e = host.querySelector(c) as HTMLElement; return e.clientWidth > 0 && e.scrollWidth > e.clientWidth; }));
+      expect(cuts.length, cuts.join(', ')).toBeLessThanOrEqual(1);
       expect(r.tail.endsWith('.log')).toBe(true);
       expect(r.font).toMatch(/mono|Mono|Menlo|Consolas/i);
     });

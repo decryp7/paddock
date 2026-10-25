@@ -36,7 +36,7 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
         [cdkMenuTriggerFor]="more"
         [cdkMenuPosition]="positions"
         #moreTrigger="cdkMenuTriggerFor"
-        [class.pd-on]="moreTrigger.isOpen()"
+        [class.pd-open]="moreTrigger.isOpen()"
         (keydown.arrowright)="openWithKeyboard(moreTrigger, $event)"
       >
         <pd-icon name="pd:more" />
@@ -60,7 +60,8 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
           [cdkMenuTriggerData]="{ $implicit: item }"
           [cdkMenuPosition]="positions"
           #trigger="cdkMenuTriggerFor"
-          [class.pd-on]="trigger.isOpen() || items.isActive(item)"
+          [class.pd-on]="items.isActive(item)"
+          [class.pd-open]="trigger.isOpen()"
           (keydown.arrowright)="openWithKeyboard(trigger, $event)"
         >
           <ng-container *ngTemplateOutlet="face; context: { $implicit: item }" />
@@ -92,7 +93,7 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
         <span class="pd-act-pulse" aria-hidden="true"></span>
       }
       @if (items.badge(item); as badge) {
-        <span class="pd-act-badge" aria-hidden="true">{{ badge }}</span>
+        <span class="pd-act-badge" aria-hidden="true" [attr.data-tone]="items.badgeTone(item)">{{ badge }}</span>
       }
     </ng-template>
 
@@ -163,8 +164,10 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
     :host { width: 48px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0; min-height: 0; background: var(--pd-surface-1); border-inline-end: 1px solid var(--pd-hairline); overflow: hidden; }
     .pd-act { position: relative; width: 36px; height: 36px; flex: none; border-radius: var(--pd-radius-card); border: 0; background: transparent; color: var(--pd-text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; }
     .pd-act-icon { transform: scale(1.125); }
-    .pd-act:hover { color: var(--pd-text); background: var(--pd-hover); }
-    .pd-act:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; color: var(--pd-text); }
+    .pd-act:hover, .pd-act.pd-open { color: var(--pd-text); background: var(--pd-hover); }
+    .pd-act:focus-visible { outline: none; color: var(--pd-text); }
+    /* The focus ring above the badge, so the 2 px ring stays continuous at the corner the badge sits on (review 3 P3-12). */
+    .pd-act:focus-visible::after { content: ''; position: absolute; inset: 0; z-index: 1; border: 2px solid var(--pd-focus-ring); border-radius: inherit; pointer-events: none; }
     .pd-act.pd-on { background: var(--pd-accent-tint); color: var(--pd-text); }
     /* The selected item's indicator: a 2x20 px bar on the bar's inner edge, outside the rounded tile (review P2-5). */
     .pd-act.pd-on::before { content: ''; position: absolute; inset-inline-start: -6px; top: 8px; width: 2px; height: 20px; border-radius: 1px; background: var(--pd-accent-fill); }
@@ -174,7 +177,11 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
     .pd-act-pulse { position: absolute; top: 6px; inset-inline-end: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--pd-accent); animation: pd-act-pulse 1.6s ease-in-out infinite; }
     @keyframes pd-act-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
     @media (prefers-reduced-motion: reduce) { .pd-act-pulse { animation: none; } }
-    .pd-act-badge { position: absolute; top: 1px; inset-inline-end: 0; box-shadow: 0 0 0 1.5px var(--pd-surface-1); min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--pd-accent-fill); color: var(--pd-on-accent); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); line-height: 14px; text-align: center; }
+    .pd-act-badge { position: absolute; top: 1px; inset-inline-end: 0; box-shadow: 0 0 0 1.5px var(--pd-surface-1); min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--pd-surface-3); color: var(--pd-text); font-size: var(--pd-text-caption); font-weight: var(--pd-weight-semibold); line-height: 14px; text-align: center; }
+    /* Navigation counts are neutral; a count of problems takes its status tint (design guide, Badges; review 2 P3-10). */
+    .pd-act-badge[data-tone='info'] { background: var(--pd-info-tint); color: var(--pd-text); }
+    .pd-act-badge[data-tone='warning'] { background: var(--pd-warning-tint); color: var(--pd-text); box-shadow: 0 0 0 1.5px var(--pd-surface-1), inset 0 0 0 1px var(--pd-warning); }
+    .pd-act-badge[data-tone='danger'] { background: var(--pd-danger-tint); color: var(--pd-text); box-shadow: 0 0 0 1.5px var(--pd-surface-1), inset 0 0 0 1px var(--pd-danger); }
     .pd-act-menu { min-width: 220px; max-width: min(360px, calc(100vw - 16px)); max-height: calc(100vh - 32px); overflow-y: auto; overscroll-behavior: contain; }
     .pd-act-menu:focus { outline: none; }
     .pd-act-check { color: var(--pd-accent); }

@@ -1410,7 +1410,8 @@ browser.close();                                                    // Browser.c
   OffScreen, Headless}`, `QUIET_FLAGS` (no GPU, no component downloads, no throttling; `opts.quiet`), `disk_cache_bytes` for a
   kept profile, `extra_args`. `Sandbox::decide(env, root)`: dropped only as root with `PADDOCK_BROWSER_NO_SANDBOX=1` (CI
   containers), then also `--disable-dev-shm-usage`; `launch_with(exe, opts, sandbox)` lets tests run that branch on any OS.
-- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends). Every wait runs on
+- The process is a `paddock_proc::Supervised` tree (no console window, in the registry `end_all` ends; on Windows in its
+  kill-on-close job, which every end closes, the time limit's included). Every wait runs on
   `opts.clock` (a `FakeClock` in tests): the lifetime limit, the start-up wait (`start_limit`), `start_page`'s wait and the
   pages' `wait_ready` polls; only `close_gracefully`'s grace for a real process uses the OS clock. `memory_cap` goes through
   `MemoryCap` (an injectable sampler); `ended_by()` says which limit ended the browser.

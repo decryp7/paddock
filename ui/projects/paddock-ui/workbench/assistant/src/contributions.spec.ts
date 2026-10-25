@@ -93,7 +93,7 @@ describe('tool renderers', () => {
     expect(TestBed.inject(ASSISTANT_CITATIONS)).toBeNull();
   });
 
-  const card = (over: Partial<ToolCard>): ToolCard => ({ callId: 'c', name: 'find', summary: 'things', write: false, state: 'ok', result: null, data: undefined, ...over });
+  const card = (over: Partial<ToolCard>): ToolCard => ({ callId: 'c', name: 'find', summary: 'things', write: false, destructive: false, state: 'ok', result: null, data: undefined, ...over });
 
   it('the default card says what happened in every state', async () => {
     TestBed.resetTestingModule();
@@ -101,6 +101,8 @@ describe('tool renderers', () => {
     const r = await render(PdAssistantToolCard, { card: card({ state: 'running' }) });
     const line = (): string => r.one('[data-testid=assistant-tool-result]').textContent ?? '';
     expect(line()).toBe('Working…');
+    expect(r.one('[data-testid=assistant-tool-spinner]')).toBeTruthy();
+    expect(r.element.querySelectorAll('pd-glyph')).toHaveLength(0);
     await r.set({ card: card({ state: 'awaiting' }) });
     expect(line()).toBe('Waiting for your decision');
     await r.set({ card: card({ state: 'ok' }) });
@@ -110,6 +112,10 @@ describe('tool renderers', () => {
     await r.set({ card: card({ state: 'failed', name: '' }) });
     expect(line()).toBe('Did not finish');
     expect(r.element.textContent).toContain('(unreadable call)');
+    await r.set({ card: card({ state: 'failed', stopped: true }) });
+    expect(line()).toBe('Stopped');
+    expect(r.one('[data-testid=assistant-tool-card]').getAttribute('data-state')).toBe('stopped');
+    expect(r.one('[data-testid=assistant-tool-result]').classList.contains('muted')).toBe(true);
     await settle(r.fixture);
   });
 });

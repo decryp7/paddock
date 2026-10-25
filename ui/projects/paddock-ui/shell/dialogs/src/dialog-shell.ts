@@ -173,6 +173,7 @@ export class DialogShell {
   }
 
   private async start(): Promise<void> {
+    const host = this.host();
     try {
       const def = this.def;
       if (!def) throw new Error($localize`:@@pd.dialogs.unknown:This dialog is not known to this version of the app: ${this.id || '(none)'}:dialog:`);
@@ -182,7 +183,7 @@ export class DialogShell {
       if (typeof document !== 'undefined') document.title = start.title;
       const input = isRecord(start.input) ? start.input : {};
       const injector = contentInjector(part.injector, this.ref, input);
-      const ref = mountContent(this.host(), part.component, injector, part.injector, input);
+      const ref = mountContent(host, part.component, injector, part.injector, input);
       this.content = ref.instance as DialogContent;
       this.contentInjector_ = injector;
       this.loading.set(false);

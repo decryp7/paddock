@@ -1,4 +1,4 @@
-import { Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PdSelect, type PdSelectOption } from './select';
@@ -11,6 +11,7 @@ const OPTIONS: PdSelectOption[] = [
 ];
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdSelect],
   template: `<label for="theme">Theme</label><pd-select inputId="theme" [options]="options" [value]="value()" placeholder="Choose" [disabled]="disabled()" (valueChange)="value.set($event)" />`,
 })

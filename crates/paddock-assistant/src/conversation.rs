@@ -30,6 +30,10 @@ pub const MAX_TITLE_CHARS: usize = 60;
 pub const MAX_CONTEXT_ITEMS: usize = 8;
 /// Longest text of one context item, in characters.
 pub const MAX_CONTEXT_CHARS: usize = 4000;
+/// Most citations kept of a tool result whose data is too large to keep whole.
+pub const MAX_CITATIONS: usize = 50;
+/// Longest error or end message kept with a turn, in characters.
+pub const MAX_NOTE_CHARS: usize = 2000;
 
 /// Something the user attached to a message (a context chip): what the model is told, labelled for the user.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +46,30 @@ pub struct ContextItem {
     pub label: String,
     /// What the model is told; data, never instructions.
     pub text: String,
+}
+
+/// How a tool call ended when it was not a result: the user's choice, not a failure of the tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub enum ToolOutcome {
+    /// The user declined the write.
+    Declined,
+    /// The user stopped the turn while the call waited.
+    Stopped,
+}
+
+/// Why a turn failed, kept so a reopened conversation shows the failure it showed live.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct StoredError {
+    /// One sentence for the user.
+    pub message: String,
+    /// For a failure whose cause is the AI engine: the state (the shared component renders it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional, type = "AiState"))]
+    pub needs_ai: Option<Value>,
 }
 
 /// One message of a stored conversation.
@@ -76,6 +104,30 @@ pub struct StoredMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional, type = "unknown"))]
     pub data: Option<Value>,
+    /// For a tool message: the call as the user read it on its card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub call_summary: Option<String>,
+    /// For a tool message: the tool changes things.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub write: Option<bool>,
+    /// For a tool message: what it changes cannot be undone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub destructive: Option<bool>,
+    /// For a tool message: the user declined the call or stopped the turn (not a failure of the tool).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub outcome: Option<ToolOutcome>,
+    /// For the last assistant message of a turn that failed: why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub error: Option<StoredError>,
+    /// For the last assistant message of a turn a budget ended: what happened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub end_message: Option<String>,
     /// For a user message: what was attached.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<ContextItem>,
@@ -99,6 +151,12 @@ impl StoredMessage {
             ok: None,
             summary: None,
             data: None,
+            call_summary: None,
+            write: None,
+            destructive: None,
+            outcome: None,
+            error: None,
+            end_message: None,
             context: vec![],
             end: None,
             at_ms,
@@ -145,6 +203,34 @@ impl StoredMessage {
             data,
             ..StoredMessage::new(Role::Tool, text, at_ms)
         }
+    }
+
+    /// A tool message with the call as the user read it and how it ended when that was the user's choice.
+    #[must_use]
+    pub fn with_call(
+        mut self,
+        call_summary: &str,
+        write: bool,
+        destructive: bool,
+        outcome: Option<ToolOutcome>,
+    ) -> StoredMessage {
+        self.call_summary = Some(call_summary.to_string());
+        self.write = write.then_some(true);
+        self.destructive = destructive.then_some(true);
+        self.outcome = outcome;
+        self
+    }
+
+    /// The last assistant message of a turn that failed, or ended on a budget: with the reason shown to the user.
+    #[must_use]
+    pub fn with_ending(
+        mut self,
+        error: Option<StoredError>,
+        end_message: Option<String>,
+    ) -> StoredMessage {
+        self.error = error;
+        self.end_message = end_message;
+        self
     }
 
     /// The message as the model reads it: a user message carries its context first, as data.
@@ -258,6 +344,26 @@ fn title_of(text: &str) -> String {
     )
 }
 
+/// What the view needs of a result too large to keep: its citations (a few, short), or nothing.
+fn citations_only(data: Option<&Value>) -> Option<Value> {
+    let list = data?.get("citations")?.as_array()?;
+    let kept: Vec<Value> = list
+        .iter()
+        .filter(|c| {
+            c.get("text").is_some_and(Value::is_string)
+                && c.get("target").is_some_and(Value::is_string)
+        })
+        .take(MAX_CITATIONS)
+        .cloned()
+        .collect();
+    let out = serde_json::json!({ "citations": kept });
+    (!kept_is_empty(&out) && out.to_string().len() <= MAX_DATA_BYTES).then_some(out)
+}
+
+fn kept_is_empty(v: &Value) -> bool {
+    v["citations"].as_array().is_none_or(Vec::is_empty)
+}
+
 fn bound_message(m: &mut StoredMessage) {
     if m.text.chars().count() > MAX_MESSAGE_CHARS {
         m.text = cut(&m.text, MAX_MESSAGE_CHARS);
@@ -266,7 +372,13 @@ fn bound_message(m: &mut StoredMessage) {
         .as_ref()
         .is_some_and(|d| d.to_string().len() > MAX_DATA_BYTES)
     {
-        m.data = None;
+        m.data = citations_only(m.data.as_ref());
+    }
+    if let Some(e) = &mut m.error {
+        e.message = cut(&e.message, MAX_NOTE_CHARS);
+    }
+    if let Some(n) = &mut m.end_message {
+        *n = cut(n, MAX_NOTE_CHARS);
     }
     m.context.truncate(MAX_CONTEXT_ITEMS);
     for c in &mut m.context {
@@ -465,6 +577,10 @@ impl ConversationStore {
             .map_or(from, |p| from + p);
         c.messages[start..]
             .iter()
+            // A turn's closing note (a failure with nothing generated) says nothing to the model.
+            .filter(|m| {
+                !(m.role == Role::Assistant && m.text.is_empty() && m.tool_calls.is_empty())
+            })
             .map(StoredMessage::to_chat)
             .collect()
     }

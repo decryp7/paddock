@@ -122,22 +122,17 @@ fn a_hanging_call_past_its_grace_is_a_fault_and_the_process_is_ended() {
     let rig = Rig::new();
     let s = rig.supervisor("", Grants::none());
     echo(&s).unwrap();
-    let base = rig.clock.waits_started();
     let caller = {
         let s = s.clone();
         std::thread::spawn(move || s.invoke(fixture::TOOL, "hang", json!({})))
     };
-    // Two waits start on the clock: the call's timeout and the guard's budget. Nothing sleeps.
-    assert!(
-        rig.clock
-            .wait_for_started(base + 2, Duration::from_secs(30))
-    );
+    // Two waits are pending on the clock: the call's timeout and the guard's budget. Pending (not merely started) waits
+    // are the step boundary: a short wait another thread starts and ends meanwhile (the previous call's guard timer) cannot
+    // be mistaken for one of them, and the advance cannot run before both are in place. Nothing sleeps.
+    assert!(rig.clock.wait_for_pending(2, Duration::from_secs(30)));
     rig.clock.advance(Duration::from_secs(30));
-    // The call timed out; the plugin ignores the cancel, so the cancel grace is the next wait.
-    assert!(
-        rig.clock
-            .wait_for_started(base + 3, Duration::from_secs(30))
-    );
+    // The call timed out; the plugin ignores the cancel, so the cancel grace is the next wait, beside the guard's budget.
+    assert!(rig.clock.wait_for_pending(2, Duration::from_secs(30)));
     rig.clock.advance(Duration::from_secs(2));
     let (kind, message) = fault(caller.join().unwrap());
     assert_eq!(kind, FaultKind::Hang);
@@ -426,21 +421,14 @@ fn a_plugin_that_dies_while_describing_itself_is_a_counted_crash() {
 fn a_plugin_that_never_describes_itself_is_a_hang_on_the_clock() {
     let rig = Rig::new();
     let s = misbehaving(&rig, "hang");
-    let base = rig.clock.waits_started();
     let caller = {
         let s = s.clone();
         std::thread::spawn(move || echo(&s))
     };
     // The Describe call waits for the start timeout; the plugin ignores the cancel, so the grace is the next wait.
-    assert!(
-        rig.clock
-            .wait_for_started(base + 1, Duration::from_secs(30))
-    );
+    assert!(rig.clock.wait_for_pending(1, Duration::from_secs(30)));
     rig.clock.advance(Duration::from_secs(15));
-    assert!(
-        rig.clock
-            .wait_for_started(base + 2, Duration::from_secs(30))
-    );
+    assert!(rig.clock.wait_for_pending(1, Duration::from_secs(30)));
     rig.clock.advance(Duration::from_secs(2));
     let (kind, message) = fault(caller.join().unwrap());
     assert_eq!(kind, FaultKind::Hang);
@@ -544,15 +532,11 @@ fn a_hung_call_that_the_connection_could_not_time_out_is_abandoned_by_the_guard(
     let rig = Rig::with(|c| c.hang_grace = Duration::ZERO);
     let s = rig.supervisor("", Grants::none());
     echo(&s).unwrap();
-    let base = rig.clock.waits_started();
     let caller = {
         let s = s.clone();
         std::thread::spawn(move || s.invoke(fixture::TOOL, "hang", json!({})))
     };
-    assert!(
-        rig.clock
-            .wait_for_started(base + 2, Duration::from_secs(30))
-    );
+    assert!(rig.clock.wait_for_pending(2, Duration::from_secs(30)));
     // Both the call's timeout and the guard's budget (30 s + the 2 s cancel grace) are waiting; passing the whole budget at
     // once ends the guard's wait and the connection's grace in one step, whichever the threads see first.
     rig.clock.advance(Duration::from_secs(32));

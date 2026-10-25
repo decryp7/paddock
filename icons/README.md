@@ -11,19 +11,40 @@ Open `preview.html` to review them, or see the renders in `screenshots/`.
 | Pacenotes | Approved (2026-10-23) |
 | Paddock (umbrella mark) | Reviewed (2026-10-24) |
 | Paddock Shell Demo (a demo app, not a family member) | New (2026-10-24), awaiting independent review |
-| Paddock Workbench Demo (a demo app, not a family member) | New (2026-10-25), awaiting independent review (rule 22); a warm stone tile with a split-dock window, ink #26231E; `tools/cvd.mjs` not run for it |
+| Paddock Workbench Demo (a demo app, not a family member) | New (2026-10-25), awaiting independent review (rule 22); a near-black tile (`#050505`) with its own silhouette (activity-bar dots, a split dock with tabs on the top pane), white ink; family CVD minimums unchanged (review 3 P2-6) |
 
 ## Demo apps
 
-`DEMOS` in `tools/design.mjs` are built by the same pipeline (`ONLY=shell-demo node tools/build.mjs`; `ONLY=workbench-demo` for the workbench demo, copied to `apps/workbench-demo/src-tauri/icons`, checked by `node scripts/workbench-demo-release.mjs icons`) but stay out of
+`DEMOS` in `tools/design.mjs` are built by the same pipeline (`ONLY=shell-demo node tools/build.mjs`; `ONLY=workbench-demo` for the workbench demo, copied to `apps/workbench-demo/src-tauri/icons`, checked by `node scripts/demo-release.mjs workbench-demo icons`) but stay out of
 the family sheet (`preview.html`) and the Carbon concept. Paddock Shell Demo (`apps/shell-demo`) is a neutral silver
 tile (`#D1D4DA` on a `#DDE1E7` to `#B5BCC7` gradient with a 1 px inner rim at 8 % black, so its outline holds on white; dark ink `#1E2530`, 10.4:1) with the shell itself as its glyph: a window with its title bar, the pages
 sidebar and the page. Silver is light like Spotter's tile, so it takes the dark ink and the light-tile material. Its tray template is solid
 (alpha only: half-transparent parts would read as disabled). A search
 over low-chroma tiles (`tools/cvd.mjs`) kept the family's minimums unchanged (normal 17.7, protan 11.6, deutan 13.6,
 tritan 10.7) only for near-black and light silver; mid greys fell to 1.6 to 5.4 against Dyno or Pitwall. Its
-`tauri/` folder is copied to `apps/shell-demo/src-tauri/icons` (`node scripts/shell-demo-release.mjs icons` checks
+`tauri/` folder is copied to `apps/shell-demo/src-tauri/icons` (`node scripts/demo-release.mjs shell-demo icons` checks
 they are equal).
+
+Paddock Workbench Demo (`apps/workbench-demo`) has its own silhouette, not the shell's window with a sidebar: the activity bar as a
+strip of three dots, then the dock split into a tall pane and two stacked panes, with two tabs on the top one (solid shapes, no outline
+frame; the tray template is the same shape in one tone). Its tile is near-black `#050505` (neutral grey ramp `#1C1C1C` to `#000000`, R=G=B so the 8-bit steps cannot tint, deep `#000000`, a faint
+light rim for dark docks), white ink: 20.4:1 on the base, 17.0:1 on the top stop, 21:1 on the bottom stop. The first warm stone tile
+`#DAD5CB` was only 2.4 dE from the shell demo's silver. A grid search over every colour (`tools/cvd.mjs`, all family tiles plus Paddock and
+the shell demo) found only near-black below about `#050609` (the shipped `#050505` is neutral) keeps the family minimums (normal 17.7, protan 11.6, deutan 13.6, tritan 10.7,
+unchanged); every light or mid neutral lowered one of them, and Paddock's graphite `#2B3038` rules out a lighter near-black (`#0E1014`
+already gives 13.5 normal). Against the whole family plus Paddock and the shell demo the tile's own nearest distances are Paddock 19.3
+normal, 19.7 protan, 19.2 deutan, 19.2 tritan; against the shell demo 75.4 or more under all four. `ONLY=workbench-demo node tools/build.mjs`,
+copy `workbench-demo/tauri/.` to `apps/workbench-demo/src-tauri/icons`. Side-by-side with the shell demo at 16, 32 and 1024 px:
+`ui/docs/review/x50-workbench/demo-icons-compare.png`.
+
+## Seam scan
+
+`node tools/build.mjs` fails when a master has a hard seam in the tile (`tools/scan.mjs`, tests in `tools/scan.test.mjs`, `npm test`).
+For every icon and both masters it renders the tile background alone (`masterSvg(app, { bare: true })`: no glyph, no livery sweep) at
+1024 px and walks each pixel column. A pixel is tile body when it and the pixels 8 px left, right, above and below are fully opaque (this
+drops the rounded edge, its rim strokes and the drop shadow); no channel may change by more than 3 levels between adjacent body pixels.
+The macOS tile's drop-shadow filter must interpolate in sRGB (`color-interpolation-filters="sRGB"`): in the default linearRGB the dark
+ramps are quantised into 6 to 13 level bands. Results with that attribute: all ten icons, both masters, 0 steps.
 
 ## Build
 

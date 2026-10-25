@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeChart, FakeECharts } from './fake-chart';
 import { all, at, buttonByText, byText, manualFrames, must, one, press, text, typeInto } from './dom';
 import { installTestKit } from './setup';
@@ -25,6 +25,15 @@ describe('installTestKit', () => {
     }).not.toThrow();
   });
 
+  it('replaces a global a spec stubbed to undefined and left behind (the key exists, the constructor does not)', () => {
+    vi.stubGlobal('ResizeObserver', undefined);
+    vi.stubGlobal('PointerEvent', undefined);
+    installTestKit();
+    expect(typeof ResizeObserver).toBe('function');
+    expect(typeof PointerEvent).toBe('function');
+    vi.unstubAllGlobals();
+  });
+
   it('reports a target to a ResizeObserver stand-in so libraries reading entry.target keep working', () => {
     const el = document.createElement('div');
     const seen: Element[] = [];
@@ -43,6 +52,31 @@ describe('installTestKit', () => {
     });
     it('finds the window clean again', () => {
       expect('__pd_leftover__' in window).toBe(false);
+    });
+  });
+
+  // Regression: the Angular builder runs Vitest with isolate=false, so spec files share one window per worker. A test that
+  // failed before its own clean-up (fake timers, a spy on a DOM prototype, a stubbed global, a node on the page, a stored
+  // value) broke whichever spec file ran next in that worker: order-dependent failures seen in full runs only.
+  describe('what a test leaves behind', () => {
+    const realAppend = Node.prototype.appendChild;
+    const realNavigator = globalThis.navigator;
+    it('leaves fake timers, a spy, a stubbed global, a node and a stored value behind', () => {
+      document.body.append(Object.assign(document.createElement('div'), { id: 'pd-leftover' }));
+      vi.useFakeTimers();
+      vi.spyOn(Node.prototype, 'appendChild').mockImplementation(<T extends Node>(n: T) => n);
+      vi.stubGlobal('navigator', { leftover: true });
+      localStorage.setItem('pd-leftover', '1');
+      sessionStorage.setItem('pd-leftover', '1');
+      expect(vi.isFakeTimers()).toBe(true);
+    });
+    it('is gone before the next test starts', () => {
+      expect(vi.isFakeTimers()).toBe(false);
+      expect(Node.prototype.appendChild).toBe(realAppend);
+      expect(globalThis.navigator).toBe(realNavigator);
+      expect(document.getElementById('pd-leftover')).toBeNull();
+      expect(localStorage.getItem('pd-leftover')).toBeNull();
+      expect(sessionStorage.getItem('pd-leftover')).toBeNull();
     });
   });
 });

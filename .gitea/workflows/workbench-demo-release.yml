@@ -39,13 +39,13 @@ jobs:
 
       - name: The tag names the app's version
         if: startsWith(github.ref, 'refs/tags/workbench-demo-v')
-        run: node scripts/workbench-demo-release.mjs check-tag "${{ github.ref_name }}"
+        run: node scripts/demo-release.mjs workbench-demo check-tag "${{ github.ref_name }}"
 
       - name: The app icons are the icon pipeline's
-        run: node scripts/workbench-demo-release.mjs icons
+        run: node scripts/demo-release.mjs workbench-demo icons
 
       - name: The release notes (the version's CHANGELOG section)
-        run: node scripts/workbench-demo-release.mjs notes /tmp/notes.md && cat /tmp/notes.md
+        run: node scripts/demo-release.mjs workbench-demo notes /tmp/notes.md && cat /tmp/notes.md
 
       - name: UI (specs, translations, the workbench demo's build and browser checks)
         working-directory: ui
@@ -126,13 +126,13 @@ jobs:
         env:
           CI: "true"
         run: |
-          bash scripts/workbench-demo/bundle.sh "${{ matrix.bundles }}"
+          bash scripts/demo/bundle.sh workbench-demo "${{ matrix.bundles }}"
 
       # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and on the app inside
       # the DMG, every Mach-O with the app's TeamIdentifier. The demo bundles no sidecar; the app is never started.
       - name: Verify the .app and the DMG (macOS)
         if: runner.os == 'macOS'
-        run: bash scripts/workbench-demo/verify-macos.sh
+        run: bash scripts/demo/verify-macos.sh workbench-demo
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         with:
@@ -173,6 +173,6 @@ jobs:
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          node --test scripts/workbench-demo-release.test.mjs
-          node scripts/workbench-demo-release.mjs notes release-notes.md
-          node scripts/workbench-demo-release.mjs publish "${{ github.ref_name }}" release release-notes.md
+          node --test scripts/demo-release.test.mjs
+          node scripts/demo-release.mjs workbench-demo notes release-notes.md
+          node scripts/demo-release.mjs workbench-demo publish "${{ github.ref_name }}" release release-notes.md
