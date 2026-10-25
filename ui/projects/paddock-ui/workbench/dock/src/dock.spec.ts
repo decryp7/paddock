@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { settle } from '@decryp7/paddock-ui/shell/testing';
 import { definePerspective, defineView } from '@decryp7/paddock-ui/workbench';
 import { msg } from '@decryp7/paddock-ui/shell';
+import { DockPersistence } from './dock-persistence';
 import { InMemoryDockLayoutStore } from './dock-store';
 import { mountDock, Probe, probeView, tabIds } from './harness.spec-helper';
 
@@ -125,6 +126,23 @@ describe('panels', () => {
 });
 
 describe('persistence', () => {
+  it('writes a waiting save at once on flush, and nothing when no save waits', async () => {
+    const store = new InMemoryDockLayoutStore();
+    const { dock, rendered } = await mountDock({ views: [probeView('a.one')], store });
+    const persistence = TestBed.inject(DockPersistence);
+    await persistence.flush();
+    store.entries.clear();
+    await persistence.flush();
+    expect(store.entries.size).toBe(0);
+    await dock.showView('a.one');
+    await settle(rendered.fixture);
+    await persistence.flush();
+    expect(JSON.stringify(store.entries.get('wb.layout'))).toContain('a.one');
+    store.entries.clear();
+    await persistence.flush();
+    expect(store.entries.size).toBe(0);
+  });
+
   it('saves the arrangement and restores it in the next window', async () => {
     const store = new InMemoryDockLayoutStore();
     const views = [probeView('a.one'), probeView('a.two')];
@@ -132,11 +150,13 @@ describe('persistence', () => {
     await first.dock.showView('a.one');
     await first.dock.showView('a.two');
     await settle(first.rendered.fixture);
-    await new Promise((r) => setTimeout(r, 5));
+    await TestBed.inject(DockPersistence).flush();
     expect(store.entries.has('wb.layout')).toBe(true);
     first.rendered.fixture.destroy();
     const second = await mountDock({ views, store });
     expect(second.dock.openPanels()).toEqual(['a.one', 'a.two']);
+    // Regression (review 2 P2-F): a restored layout raises no activation, yet its front panel is the active one.
+    expect(second.dock.activePanel()).toBe('a.two');
   });
 
   it('builds the default layout from corrupt or foreign stored data', async () => {
@@ -210,7 +230,7 @@ describe('views with a live when', () => {
     const first = await mountDock({ views: [gated], store, ready });
     await first.dock.showView('a.gated');
     await settle(first.rendered.fixture);
-    await new Promise((r) => setTimeout(r, 5));
+    await TestBed.inject(DockPersistence).flush();
     first.rendered.fixture.destroy();
     const second = await mountDock({ views: [gated], store, ready });
     expect(second.dock.openPanels()).toEqual(['a.gated']);

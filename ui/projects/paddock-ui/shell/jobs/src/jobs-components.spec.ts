@@ -168,6 +168,17 @@ describe('pd-jobs-status', () => {
     fixture.nativeElement.remove();
   });
 
+  it('the running spinner and the ring are 14 px with a 2 px stroke (review 2, P3-9)', () => {
+    // jsdom does no layout, so the rule is read from the component's styles; e2e/shell-demo.spec.ts measures it in a browser.
+    // Angular keeps the styles scoped and pretty-printed (`.a[_ngcontent-%COMP%] {\n  width: 14px;`): flatten them to `.a { width: 14px; }`.
+    const css = ((PdJobsStatus as unknown as { ɵcmp: { styles: string[] } }).ɵcmp.styles ?? []).join('\n').replace(/\[_ng(?:content|host)-%COMP%\]/g, '').replace(/\s+/g, ' ');
+    const busy = /\.pd-busy \.pd-dot \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(busy).toMatch(/box-sizing: border-box; width: 14px; height: 14px;/);
+        expect(busy).toMatch(/border: 2px solid/);
+    // The ring's hole is 14 px wide minus a 2 px band: a 5 px radius.
+    expect(css).toMatch(/radial-gradient\( circle, transparent 4\.5px, #000 5px\)/);
+  });
+
   it('opens below when the item sits at the top', async () => {
     jobsBed();
     const fixture = TestBed.createComponent(PdJobsStatus);

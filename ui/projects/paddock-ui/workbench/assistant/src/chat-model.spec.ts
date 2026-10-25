@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantEvent } from '../generated/assistant';
 import { FIXTURE_CONVERSATION, FIXTURE_EVENTS } from '../generated/assistant-fixtures';
-import { answerText, reduceTurn, startTurn, turnsOf, type TurnView } from './chat-model';
+import { answerText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
 
 const run = (events: readonly AssistantEvent[], from: TurnView = startTurn('q')): TurnView => events.reduce(reduceTurn, from);
 const usage = { inputTokens: 1, outputTokens: 2 };
@@ -76,5 +76,24 @@ describe('turnsOf', () => {
     expect(turns).toHaveLength(1);
     expect(turns[0]?.parts.map((p) => (p.kind === 'tool' ? `${p.card.callId}:${p.card.state}` : 'text'))).toEqual(['a:failed', 'b:ok']);
     expect(turns[0]?.citations).toEqual([{ text: 'k', target: 't' }]);
+  });
+});
+
+describe('conversationTitle', () => {
+  it('drops a leading slash command and uses sentence case', () => {
+    expect(conversationTitle('/slow Explain the request pipeline')).toBe('Explain the request pipeline');
+    expect(conversationTitle('why did the build fail?')).toBe('Why did the build fail?');
+    expect(conversationTitle('/slow')).toBe('Slow');
+    expect(conversationTitle('  /tool   find it ')).toBe('Find it');
+    expect(conversationTitle('')).toBe('');
+  });
+});
+
+describe('setDeclined', () => {
+  it('marks a call declined and keeps the mark when the engine reports it did not run', () => {
+    const base = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true }]);
+    const declined = reduceTurn(setDeclined(base, 'c1', true), { type: 'toolFinished', callId: 'c1', name: 'erase', ok: false, summary: 'Declined by the user' });
+    expect(declined.parts[0]).toMatchObject({ kind: 'tool', card: { state: 'failed', declined: true } });
+    expect(setDeclined(setDeclined(base, 'c1', true), 'c1', false).parts[0]).toMatchObject({ card: { declined: false } });
   });
 });

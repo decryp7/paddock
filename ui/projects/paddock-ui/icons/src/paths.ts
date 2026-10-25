@@ -24,6 +24,8 @@ export const PD_ICON_PATHS = {
   pin: 'M9 4h6l-1 5.5 3 3H7l3-3zM12 12.5V20',
   // Status
   alert: 'M12 4 21 19.5H3zM12 9v3.5',
+  // A status error (circle with ×); `alert` (triangle) is the warning shape, `info` (circle i) the info one.
+  error: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM9 9l6 6M15 9l-6 6',
   info: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5',
   lock: 'M5.5 11h13v9.5h-13zM8 11V7.5a4 4 0 0 1 8 0V11M12 15v2',
   shield: 'M12 3 19.5 6v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z',

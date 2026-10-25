@@ -24,12 +24,16 @@ export {
   type DockInvoke,
 } from './src/dock-store';
 export { dockContributions, provideDockContributions, DOCK_COMMANDS } from './src/dock-contributions';
+export { dockLayoutDialogs, LAYOUT_SAVE_DIALOG_ID, LAYOUT_MANAGE_DIALOG_ID } from './src/layout-dialogs';
+export { type LayoutManageResult } from './src/layout-manage-dialog';
+export { layoutNameProblem, cleanLayoutName, MAX_LAYOUT_NAME, type LayoutNameProblem } from './src/named-layouts';
+export { hideUntilPlaced, isAtOrigin, clampToViewport, placeMenu } from './src/menu-placement';
 export { PANEL_VISIBLE } from './src/angular-panel';
 export { type DockNotice } from './src/dock-context';
 export { Perspectives, PERSPECTIVE_KEYS, type PerspectiveInfo } from './src/perspectives';
 export { WindowLayouts } from './src/window-layouts';
 export { type NamedLayout } from './src/named-layouts';
-export { type SavedLayout, type DockExtras, readLayout, toEnvelope, ENVELOPE_VERSION } from './src/layout-store';
+export { type SavedLayout, type DockExtras, type PoppedOutPanel, readLayout, toEnvelope, ENVELOPE_VERSION } from './src/layout-store';
 export { type DockSlot, type Side, type Point, type Rect } from './src/dock-geometry';
 export { type ViewKind } from './src/view-kind';
 export { type SwitcherState } from './src/switcher';

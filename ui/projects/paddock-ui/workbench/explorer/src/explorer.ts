@@ -76,7 +76,7 @@ const INDENT = 12;
                       [attr.title]="row.node.problem ?? null"
                       (click)="click(row)"
                       (dblclick)="store.open(row.section, row.node)"
-                      (contextmenu)="onContextMenu(row)"
+                      (contextmenu)="onContextMenu($event, row, trigger)"
                       (dragstart)="dragStart($event, row)"
                     >
                       <span class="pd-ex-twisty" aria-hidden="true" (click)="toggle(row, $event)">
@@ -337,11 +337,18 @@ export class PdExplorer {
   }
 
   /** A right-click on a row: its menu at the pointer (one code path with the keyboard's `openMenuFor`). */
-  protected onContextMenu(row: Extract<TreeRow, { kind: 'node' }>): void {
-    // The row's actions first; the tree's CDK trigger then opens the menu at the pointer for this same event (it keeps the
-    // right button's own mouseup and auxclick from closing it again, which `open()` without the event cannot).
+  protected onContextMenu(e: MouseEvent, row: Extract<TreeRow, { kind: 'node' }>, trigger: CdkContextMenuTrigger): void {
     this.target.set(this.menuTarget(row));
     this.menuOpen.set(true);
+    // At the pointer, but never over the row's own label (review 2 P3-1): the top goes below the row when the pointer is
+    // in it. The CDK trigger opens it for this same right-click (so the button's own mouseup and auxclick do not close
+    // it again, which `open()` without an event cannot); it gets the event with the adjusted point.
+    const rect = (e.currentTarget as HTMLElement | null)?.getBoundingClientRect();
+    const y = rect ? Math.max(e.clientY, rect.bottom + 2) : e.clientY;
+    e.preventDefault();
+    e.stopPropagation();
+    const opener = trigger as unknown as { _openOnContextMenu(ev: MouseEvent): void };
+    opener._openOnContextMenu(new MouseEvent('contextmenu', { clientX: e.clientX, clientY: y, button: e.button, ctrlKey: e.ctrlKey }));
   }
 
   /** Opens the actions of a row from the keyboard, at the row (below its label). */

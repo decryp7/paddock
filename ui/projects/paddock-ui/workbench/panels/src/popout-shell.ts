@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, Injector, signal, untracked } from '@angular/core';
 import { PdPartOutlet } from '@decryp7/paddock-ui/shell';
-import { VIEW_PANEL, WorkbenchRegistry, type ViewDef } from '@decryp7/paddock-ui/workbench';
+import { panelTitle, VIEW_PANEL, WorkbenchRegistry, type ViewDef } from '@decryp7/paddock-ui/workbench';
 import { WINDOW_CHROME } from './chrome';
 import { PANELS_IO } from './io';
 import { HOST_TITLE_KEY, hostTitleValue } from './panel-windows';
@@ -52,7 +52,7 @@ export function pinDocumentTitle(title: () => string, injector: Injector): () =>
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdPartOutlet, PdPopoutTitleBar],
   template: `
-    <pd-popout-title-bar [title]="viewTitle()" [host]="state.hostTitle()" [onTop]="state.keepOnTop()" (dockBack)="dockBack()" (toggleOnTop)="toggleOnTop()" />
+    <pd-popout-title-bar [title]="viewTitle()" [path]="route.panel.key ?? ''" [host]="state.hostTitle()" [onTop]="state.keepOnTop()" (dockBack)="dockBack()" (toggleOnTop)="toggleOnTop()" />
     <main class="pd-view" [attr.aria-label]="viewTitle()" [attr.aria-busy]="!ready()" data-testid="popout-view">
       @if (!view()) {
         <p class="pd-note" role="alert" data-testid="popout-missing">{{ t.missing }}</p>
@@ -70,7 +70,7 @@ export function pinDocumentTitle(title: () => string, injector: Injector): () =>
     }
   `,
   styles: `
-    :host { display: flex; flex-direction: column; height: 100vh; background: var(--pd-bg); color: var(--pd-text); }
+    :host { --pd-pane-inset: var(--pd-space-3); display: flex; flex-direction: column; height: 100vh; background: var(--pd-bg); color: var(--pd-text); }
     .pd-view { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: auto; }
     .pd-note { margin: auto; color: var(--pd-text-muted); font-size: var(--pd-text-body); }
     .pd-toast { position: fixed; inset-inline-end: var(--pd-space-3); bottom: var(--pd-space-3); max-width: min(420px, calc(100vw - 2 * var(--pd-space-3))); z-index: 100; display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-2) var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-3); border: 1px solid var(--pd-danger); }
@@ -79,7 +79,7 @@ export function pinDocumentTitle(title: () => string, injector: Injector): () =>
 })
 export class PdPopoutShell {
   protected readonly state = inject(PopoutState);
-  private readonly route = inject(POPOUT_ROUTE)!;
+  protected readonly route = inject(POPOUT_ROUTE)!;
   private readonly registry = inject(WorkbenchRegistry);
   private readonly io = inject(PANELS_IO);
   private readonly chrome = inject(WINDOW_CHROME);
@@ -95,7 +95,11 @@ export class PdPopoutShell {
   protected readonly ready = signal(false);
   /** The view the panel shows; undefined when this version no longer has it. */
   protected readonly view = computed<ViewDef | undefined>(() => this.registry.findView(this.route.panel.panel));
-  protected readonly viewTitle = computed(() => this.view()?.title.text ?? this.route.panel.view);
+  /** The panel's title, the same as its tab in the main window ("main.rs" for an instance, the view's title otherwise), never the view type. */
+  protected readonly viewTitle = computed(() => {
+    const view = this.view();
+    return view ? panelTitle(view, this.route.panel.panel) : this.route.panel.view;
+  });
 
   constructor() {
     const destroy = inject(DestroyRef);

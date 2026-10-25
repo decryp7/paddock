@@ -374,7 +374,7 @@ describe('recent entries lead with the name', () => {
   });
 
   it('shows the file name as the title and the folder as a muted second line, with the full path as the tooltip', async () => {
-    const m = new MemoryFilesBackend({ lists: { lists: [{ id: 'files', entries: [{ path: '/logs/app/service-2026.log', openedAt: 1 }, { path: '/work/a.proj', name: 'Alpha', openedAt: 0 }] }] } });
+    const m = new MemoryFilesBackend({ lists: { lists: [{ id: 'files', entries: [{ path: '/logs/app/service-2026.log', openedAt: 1 }, { path: '/work/a.proj', name: 'Alpha', openedAt: 0 }, { path: '/logs/app/service-2026-10-24-11-30.log', openedAt: 0 }] }] } });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideShellFiles({ backend: () => m })] });
     const fixture = TestBed.createComponent(PdRecentFiles);
     await fixture.whenStable();
@@ -382,10 +382,17 @@ describe('recent entries lead with the name', () => {
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
     const rows = Array.from(el.querySelectorAll('[data-testid="recent-entry"]'));
-    expect(rows.map((r) => r.querySelector('.pd-name')?.textContent)).toEqual(['service-2026.log', 'Alpha']);
-    expect(rows[0]?.querySelector('.pd-name')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
-    expect(rows[0]?.querySelector('pd-path-text')?.textContent?.replace(/\s+/g, '')).toContain('/logs/app');
-    expect(rows[0]?.querySelector('[data-testid="path-text"]')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
+    expect(rows.map((r) => r.querySelector('.pd-name')?.textContent)).toEqual(['service-2026.log', 'Alpha', 'service-2026-10-24-11-30.log']);
+    // A file name shortens in the middle (rule 18), so the extension survives; the full path is its tooltip.
+    expect(rows[0]?.querySelector('.pd-name [data-testid="path-text"]')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
+    const name = rows[0]?.querySelector('.pd-name') as HTMLElement;
+    expect(name.querySelector('.pd-tail')?.textContent).toMatch(/\.log$/);
+    // A long name keeps its end whole (the part the layout never cuts) and shortens in front of it, not at its end.
+    const long = rows[2]?.querySelector('.pd-name') as HTMLElement;
+    expect(long.querySelector('.pd-tail')?.textContent).toMatch(/11-30\.log$/);
+    expect(long.querySelector('.pd-name')).not.toBeNull();
+    expect(rows[0]?.querySelector('pd-path-text.pd-dir')?.textContent?.replace(/\s+/g, '')).toContain('/logs/app');
+    expect(rows[0]?.querySelector('pd-path-text.pd-dir [data-testid="path-text"]')?.getAttribute('title')).toBe('/logs/app/service-2026.log');
     // Reveal has its own glyph, so a folder entry's kind and the action never look the same.
     const reveal = rows[0]?.querySelector('.pd-icon pd-glyph path')?.getAttribute('d');
     expect(reveal).toBe(PD_ICON_PATHS.reveal);

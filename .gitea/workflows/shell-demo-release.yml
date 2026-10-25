@@ -39,13 +39,13 @@ jobs:
 
       - name: The tag names the app's version
         if: startsWith(github.ref, 'refs/tags/shell-demo-v')
-        run: node scripts/shell-demo-release.mjs check-tag "${{ github.ref_name }}"
+        run: node scripts/demo-release.mjs shell-demo check-tag "${{ github.ref_name }}"
 
       - name: The app icons are the icon pipeline's
-        run: node scripts/shell-demo-release.mjs icons
+        run: node scripts/demo-release.mjs shell-demo icons
 
       - name: The release notes (the version's CHANGELOG section)
-        run: node scripts/shell-demo-release.mjs notes /tmp/notes.md && cat /tmp/notes.md
+        run: node scripts/demo-release.mjs shell-demo notes /tmp/notes.md && cat /tmp/notes.md
 
       - name: UI (specs, translations, dialog contracts, the shell demo's build and browser checks)
         working-directory: ui
@@ -127,13 +127,13 @@ jobs:
         env:
           CI: "true"
         run: |
-          bash scripts/shell-demo/bundle.sh "${{ matrix.bundles }}"
+          bash scripts/demo/bundle.sh shell-demo "${{ matrix.bundles }}"
 
       # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and on the app inside
       # the DMG, every Mach-O with the app's TeamIdentifier, the agent started with --self-test; the app is never started.
       - name: Verify the .app and the DMG (macOS)
         if: runner.os == 'macOS'
-        run: bash scripts/shell-demo/verify-macos.sh
+        run: bash scripts/demo/verify-macos.sh shell-demo
 
       # Rule 23 on Linux and Windows: the sample agent (externalBin, plan X4) starts with --self-test; on Linux from the
       # .deb's own files (unpacked, never installed), on Windows from the copy the installer bundles.
@@ -190,6 +190,6 @@ jobs:
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          node --test scripts/shell-demo-release.test.mjs
-          node scripts/shell-demo-release.mjs notes release-notes.md
-          node scripts/shell-demo-release.mjs publish "${{ github.ref_name }}" release release-notes.md
+          node --test scripts/demo-release.test.mjs
+          node scripts/demo-release.mjs shell-demo notes release-notes.md
+          node scripts/demo-release.mjs shell-demo publish "${{ github.ref_name }}" release release-notes.md

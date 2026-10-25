@@ -24,6 +24,21 @@ describe('sanitizeExtras', () => {
   });
 });
 
+describe('sanitizeExtras: panels popped out into windows', () => {
+  it('keeps unique, named pop-outs with a sanitized slot and drops the rest', () => {
+    const e = sanitizeExtras({
+      poppedOut: [{ id: 'a', slot: { referencePanel: 'b', direction: 'right' } }, { id: 'a' }, { id: '' }, 'x', { id: 'c', slot: 'nope' }, { id: 'd' }],
+    });
+    expect(e.poppedOut).toEqual([
+      { id: 'a', slot: { referencePanel: 'b', direction: 'right' } },
+      { id: 'c', slot: { referencePanel: null, direction: 'within' } },
+      { id: 'd', slot: { referencePanel: null, direction: 'within' } },
+    ]);
+    expect(sanitizeExtras({ poppedOut: 'a' }).poppedOut).toBeUndefined();
+    expect(sanitizeExtras({ poppedOut: [] })).toEqual(EMPTY_EXTRAS);
+  });
+});
+
 describe('readLayout', () => {
   it('reads the current version with sanitized extras', () => {
     const saved = readLayout({ version: ENVELOPE_VERSION, layout, extras: { pinnedTabs: ['a', 'a'] } });

@@ -21,13 +21,15 @@ const SEVERITY: Readonly<Record<Problem['level'], number>> = { error: 0, warning
     <pd-table label="Problems" [rows]="rows" [columns]="columns" [rowKey]="key" [maxHeight]="2000" (rowActivate)="open($event)">
       <ng-template pdCell="level" let-r>
         <span class="sev" [attr.data-level]="r.level" role="img" [attr.aria-label]="word(r)" [attr.title]="word(r)">
-          <pd-icon [name]="r.level === 'error' ? 'pd:alert' : 'pd:info'" />
+          <pd-icon [name]="r.level === 'error' ? 'pd:error' : 'pd:alert'" />
         </span>
       </ng-template>
-      <ng-template pdCell="message" let-r>
+      <ng-template pdCell="message" let-r let-folded="folded">
         <span class="msg">
-          <span class="text">{{ r.message }}</span>
-          <span class="where"><pd-path-text [value]="r.path + ':' + r.line" [plain]="true" /></span>
+          <span class="text" [attr.title]="r.message">{{ r.message }}</span>
+          @if (folded) {
+            <span class="where"><pd-path-text [value]="r.path + ':' + r.line" [plain]="true" /></span>
+          }
         </span>
       </ng-template>
     </pd-table>
@@ -39,9 +41,9 @@ const SEVERITY: Readonly<Record<Problem['level'], number>> = { error: 0, warning
     .sev[data-level='warning'] { color: var(--pd-warning); }
     .msg { display: flex; flex-direction: column; min-width: 0; }
     .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .where { display: none; min-width: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
-    /* Below 360 px File and Line are gone: where the problem is folds under it. */
-    @container wd-problems (max-width: 360px) { .where { display: flex; } }
+    /* Below 360 px File and Line are gone: where the problem is folds under it (the table grows the rows: foldBelow). */
+    .where { display: flex; min-width: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); line-height: 1.3; }
+    .text { line-height: 1.4; }
   `,
 })
 export class ProblemsView {
@@ -49,8 +51,8 @@ export class ProblemsView {
   protected readonly rows = [...inject(DemoRepo).problems].sort((a, b) => SEVERITY[a.level] - SEVERITY[b.level] || a.path.localeCompare(b.path) || a.line - b.line);
   protected readonly key = (p: Problem) => `${p.path}:${p.line}`;
   protected readonly columns: PdColumn<Problem>[] = [
-    { key: 'level', header: 'Severity', value: (p) => SEVERITY[p.level], text: (p) => p.level, width: '44px', required: true, headerHidden: true },
-    { key: 'message', header: 'Problem', value: (p) => p.message, required: true, width: 'minmax(0, 3fr)' },
+    { key: 'level', header: 'Severity', value: (p) => SEVERITY[p.level], text: (p) => p.level, width: '28px', required: true, headerHidden: true, sortable: false },
+    { key: 'message', header: 'Problem', value: (p) => p.message, required: true, width: 'minmax(0, 3fr)', foldBelow: 360 },
     { key: 'path', header: 'File', value: (p) => p.path, truncate: 'middle', width: 'minmax(0, 2fr)', hideBelow: 360 },
     { key: 'line', header: 'Line', value: (p) => p.line, align: 'end', width: '56px', hideBelow: 440 },
   ];

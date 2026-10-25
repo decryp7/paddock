@@ -37,7 +37,7 @@ export const DEMO_VIEWS = [
   defineView<Ctx>({
     id: 'wd.code',
     title: msg('wd.view.code', 'Code'),
-    icon: 'pd:template',
+    icon: 'pd:file',
     instances: true,
     layout: { area: 'document', min: { width: 480, height: 240 }, pref: { width: 900, height: 600 }, priority: 100 },
     order: 200,
@@ -85,7 +85,7 @@ const files = defineExplorerProvider<Ctx, FileNode>({
 function page(ctx: Ctx, folder: string, cursor: string | undefined, limit: number) {
   const p = ctx.repo.children(folder, cursor, limit);
   return {
-    nodes: p.items.map((e): FileNode => ({ id: e.path, label: e.name, tooltip: e.path, expandable: e.folder, folder: e.folder, icon: e.folder ? 'pd:folder' : 'pd:template' })),
+    nodes: p.items.map((e): FileNode => ({ id: e.path, label: e.name, tooltip: e.path, expandable: e.folder, folder: e.folder, icon: e.folder ? 'pd:folder' : 'pd:file' })),
     total: p.total,
     ...(p.next !== undefined ? { next: p.next } : {}),
   };
@@ -138,6 +138,7 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
       run: { view: 'wd.problems' },
       badge: (ctx) => ctx.repo.problems.length,
       badgeLabel: (ctx) => `${ctx.repo.problems.length} problems`,
+      badgeTone: (ctx) => (ctx.repo.problems.some((p) => p.level === 'error') ? 'danger' : 'warning'),
     }),
     defineActivityItem<Ctx>({
       id: 'wd.act.layouts',
@@ -145,9 +146,9 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
       icon: 'pd:window',
       order: 500,
       run: {
-        menu: () => [
-          { id: 'understand', label: 'Understand', run: { command: 'wd.p.understand' } },
-          { id: 'review', label: 'Review', run: { command: 'wd.p.review' } },
+        menu: (ctx) => [
+          { id: 'understand', label: 'Understand', checked: ctx.perspective() === 'wd.understand', run: { command: 'wd.p.understand' } },
+          { id: 'review', label: 'Review', checked: ctx.perspective() === 'wd.review', run: { command: 'wd.p.review' } },
         ],
       },
     }),
@@ -158,7 +159,7 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
       title: msg('wd.palette.files', 'Go to file'),
       placeholder: msg('wd.palette.files.ph', 'Type a file name'),
       order: 100,
-      search: (q, ctx, r) => Promise.resolve(ctx.repo.findFiles(q, r.limit).map((f): PaletteItem => ({ id: f.path, label: f.path.split('/').pop() as string, detail: f.path, icon: 'pd:template' }))),
+      search: (q, ctx, r) => Promise.resolve(ctx.repo.findFiles(q, r.limit).map((f): PaletteItem => ({ id: f.path, label: f.path.split('/').pop() as string, detail: f.path, icon: 'pd:file' }))),
       accept: (item, ctx) => void ctx.openFile(item.id),
     }),
     // The engine's names search (paddock-names, rule 20) behind `@`; the demo's mock engine answers in its shape.
@@ -168,10 +169,9 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
       prefix: '@',
       placeholder: msg('wd.palette.symbols.ph', 'Type a symbol name'),
       order: 200,
-      icon: 'pd:selector',
       search: (request, ctx) =>
         Promise.resolve({
-          matches: ctx.repo.findSymbols(request.query, request.limit ?? 10).map((s) => ({ id: `${s.file.path}#${s.name}`, display: s.name, how: 'parts' as const, score: 1, why: `${s.kind} in ${s.file.path}` })),
+          matches: ctx.repo.findSymbols(request.query, request.limit ?? 10).map((s) => ({ id: `${s.file.path}#${s.name}`, display: s.name, how: 'parts' as const, score: 1, why: s.file.path })),
           clarify: null,
           searchable: 6,
         }),
@@ -205,7 +205,7 @@ export const DEMO_CONTRIBUTIONS: WorkbenchBatch<Ctx> = {
     defineAssistantContext<Ctx>({
       id: 'wd.file',
       label: msg('wd.ctx.file', 'Current file'),
-      icon: 'pd:template',
+      icon: 'pd:file',
       value: (ctx) => {
         const path = ctx.selectedPath();
         const file = path ? ctx.repo.file(path) : undefined;
