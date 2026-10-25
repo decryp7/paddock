@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Fixed
+- WebKit (macOS WKWebView): every rule that sets `user-select` sets `-webkit-user-select` too (notification text, service-status code, pop-out title bar,
+  drag ghost); reduced motion turns transitions off (`0s`) instead of 0.01 ms, which WebKit ran as real transitions and painted inherited colours late; the
+  shell demo's key recorder focuses its button on click (WebKit does not). The test kit's `pressTab`/`tabKey` press Option+Tab in WebKit on macOS (full
+  keyboard access is off by default). `ui/playwright.config.ts` has `gallery-webkit`, `shell-demo-webkit` and `workbench-demo-webkit` projects with
+  `PADDOCK_WEBKIT=1`; CI runs them on the Mac runner for pushes to main and v* tags (job `e2e-webkit`, guarded by a conformance test). `prune-build-folders.sh` counts apparent size too (a late-allocating file system reported a full folder as empty).
+
 ### Changed
 - The shared UI has a lint step: `npm run lint` in `ui/` runs `@decryp7/paddock-eslint` (rules 27 to 39 plus the angular-eslint template and
   accessibility rules) over every project, and the `ui` CI job runs it before the specs. All 155 findings are fixed (explicit OnPush in test

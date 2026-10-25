@@ -69,7 +69,7 @@ const EDGES: readonly { dir: ResizeDirection; cls: string }[] = [
   `,
   styles: `
     :host { display: block; flex: none; container-type: inline-size; }
-    .pd-bar { display: flex; align-items: center; gap: var(--pd-space-0); height: 32px; padding-inline: var(--pd-space-3); user-select: none; background: var(--pd-surface-2); color: var(--pd-text); border-bottom: 1px solid var(--pd-border-strong); box-shadow: inset 0 2px 0 var(--pd-accent); }
+    .pd-bar { display: flex; align-items: center; gap: var(--pd-space-0); height: 32px; padding-inline: var(--pd-space-3); -webkit-user-select: none; user-select: none; background: var(--pd-surface-2); color: var(--pd-text); border-bottom: 1px solid var(--pd-border-strong); box-shadow: inset 0 2px 0 var(--pd-accent); }
     :host(.pd-frameless) .pd-bar { padding-inline-end: 0; }
     :host(.pd-mac) .pd-bar { padding-inline-start: 78px; }
     :host(.pd-inactive) .pd-bar { box-shadow: none; color: var(--pd-text-muted); }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, symlinkSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -29,6 +29,21 @@ test('prune: over the cap the incremental caches go first and the rest stays', (
   assert.match(r.out, /removing incremental caches/);
   assert.ok(!existsSync(join(dir, 'debug/incremental')));
   assert.ok(existsSync(join(dir, 'debug/deps/blob')));
+});
+
+// A file system that allocates late (ZFS, btrfs, a compressed or delayed-allocation volume on a runner) reports almost nothing in `du` for
+// data written a moment ago. A sparse file is the same thing, made deterministic: 400 KB long, nothing allocated.
+test('prune: counts the size of the files, not only the blocks the file system has allocated so far', () => {
+  const dir = scratch();
+  mkdirSync(join(dir, 'debug/incremental'), { recursive: true });
+  const fd = openSync(join(dir, 'debug/incremental/blob'), 'w');
+  ftruncateSync(fd, 400 * 1024);
+  closeSync(fd);
+  big(dir, 'debug/deps', 1);
+  const r = prune(dir, 300);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /removing incremental caches/);
+  assert.ok(!existsSync(join(dir, 'debug/incremental')));
 });
 
 test('prune: still over after that, the folder is removed', () => {

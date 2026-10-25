@@ -16,7 +16,17 @@ max="$2"
 
 unit=1048576
 [ "${PADDOCK_PRUNE_UNIT:-gb}" = kb ] && unit=1
-size() { echo $(( $(du -sk "$dir" | cut -f1) / unit )); }
+# The larger of the allocated size and the length of the files. A file system that allocates late (ZFS, btrfs, a compressed volume) reports
+# next to nothing in `du` for data written a moment ago, which kept a full folder under the cap on a runner; `du -A` is BSD/macOS,
+# `--apparent-size` is GNU, and a `du` with neither simply counts allocated blocks.
+size() {
+  local used apparent
+  used=$(du -sk "$dir" | cut -f1)
+  apparent=$(du -skA "$dir" 2>/dev/null | cut -f1 || true)
+  [[ "$apparent" =~ ^[0-9]+$ ]] || apparent=$(du -sk --apparent-size "$dir" 2>/dev/null | cut -f1 || true)
+  [[ "$apparent" =~ ^[0-9]+$ ]] || apparent=0
+  echo $(( (apparent > used ? apparent : used) / unit ))
+}
 
 if [ "$(size)" -ge "$max" ]; then
   echo "prune: $dir is $(size) (cap $max); removing incremental caches"
