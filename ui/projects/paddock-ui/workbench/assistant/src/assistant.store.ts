@@ -5,7 +5,7 @@ import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from
 import { WorkbenchRegistry } from '@decryp7/paddock-ui/workbench';
 import { ASSISTANT_LIMITS, type AssistantInfo, type ContextItem, type ConversationSummary, type Envelope } from '../generated/assistant';
 import { AssistantBackend, type Unlisten } from './backend';
-import { answerText, reduceTurn, startTurn, turnsOf, type TurnView } from './chat-model';
+import { answerText, chipText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
 import { assistantMessage } from './wire';
 
 /** Where the conversation is: nothing going on, a question on its way to the engine, answering, or being stopped. */
@@ -30,6 +30,8 @@ export interface PendingApproval {
   readonly summary: string;
   /** The arguments of the call. */
   readonly input: unknown;
+  /** What it would change cannot be undone. */
+  readonly destructive: boolean;
 }
 
 interface AssistantState {
@@ -49,7 +51,9 @@ interface AssistantState {
   failure: string | null;
   listOpen: boolean;
   /** Conversations deleted but still restorable (until the undo time passes). */
-  deleting: readonly { id: string; title: string }[];
+  deleting: readonly { id: string; title: string; wasActive: boolean }[];
+  /** The heading of a new conversation from its first question, until the engine's list names it. */
+  pendingTitle: string | null;
 }
 
 const initialState: AssistantState = {
@@ -65,6 +69,7 @@ const initialState: AssistantState = {
   failure: null,
   listOpen: false,
   deleting: [],
+  pendingTitle: null,
 };
 
 /** How long a deleted conversation can still be brought back. */
@@ -122,7 +127,8 @@ export const AssistantStore = signalStore(
       /** The pane's heading: the conversation's title, "New conversation" when there is none yet. */
       title: computed(() => {
         const id = store.activeId();
-        return (id && store.conversations().find((c) => c.id === id)?.title) || $localize`:@@pd.wb.assistant.new:New conversation`;
+        const raw = id ? store.conversations().find((c) => c.id === id)?.title : null;
+        return (raw && conversationTitle(raw)) || store.pendingTitle() || $localize`:@@pd.wb.assistant.new:New conversation`;
       }),
       /** The turn that streams in, or the last one. */
       lastTurn: turn,
@@ -132,7 +138,7 @@ export const AssistantStore = signalStore(
       approval: computed<PendingApproval | null>(() => {
         const t = turn();
         if (!t?.running) return null;
-        for (const p of t.parts) if (p.kind === 'tool' && p.card.state === 'awaiting') return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input };
+        for (const p of t.parts) if (p.kind === 'tool' && p.card.state === 'awaiting') return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input, destructive: p.card.destructive };
         return null;
       }),
       canSend: computed(() => store.run() === 'idle' && store.draft().trim().length > 0),
@@ -176,8 +182,44 @@ export const AssistantStore = signalStore(
       } catch (e) {
         patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.delete:The conversation could not be deleted.`) });
       }
-      if (store.activeId() === id) patchState(store, { activeId: null, turns: [], run: 'idle' });
+      if (store.activeId() === id) patchState(store, { activeId: null, turns: [], run: 'idle', pendingTitle: null });
       await refreshList();
+    };
+    const openNow = async (id: string): Promise<void> => {
+      try {
+        const c = await store._backend.load(id);
+        patchState(store, { activeId: c.id, turns: turnsOf(c), failure: null, listOpen: false, pendingTitle: null });
+      } catch (e) {
+        patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.open:The conversation could not be opened.`) });
+      }
+    };
+    /** Starts a turn with this question and context. */
+    const submit = async (text: string, context: readonly ContextItem[]): Promise<void> => {
+      const allowWrite = store.allowWrite() && store.hasWriteTools();
+      const conversationId = store.activeId();
+      patchState(store, {
+        run: 'sending',
+        failure: null,
+        draft: '',
+        off: [],
+        on: [],
+        listOpen: false,
+        turns: [...store.turns(), startTurn(text, context)],
+        // The heading names a new conversation from the moment its question is sent.
+        ...(conversationId ? {} : { pendingTitle: conversationTitle(text) }),
+      });
+      try {
+        const ack = await store._backend.send({ ...(conversationId ? { conversationId } : {}), text, context: [...context], allowWrite });
+        patchState(store, { activeId: ack.conversationId });
+      } catch (e) {
+        // Refused before it started (empty, busy, gone): the question comes back to the draft.
+        patchState(store, {
+          run: 'idle',
+          draft: text,
+          failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.send:The question could not be sent.`),
+          turns: store.turns().slice(0, -1),
+        });
+      }
     };
     return {
       /** Asks for the info and the conversations (also the Retry of a failed first load). */
@@ -228,23 +270,27 @@ export const AssistantStore = signalStore(
       /** A new conversation: the next question starts it. */
       newConversation(): void {
         if (store.run() !== 'idle') return;
-        patchState(store, { activeId: null, turns: [], failure: null, listOpen: false });
+        patchState(store, { activeId: null, turns: [], failure: null, listOpen: false, pendingTitle: null });
       },
       async open(id: string): Promise<void> {
         if (store.run() !== 'idle') return;
-        try {
-          const c = await store._backend.load(id);
-          patchState(store, { activeId: c.id, turns: turnsOf(c), failure: null, listOpen: false });
-        } catch (e) {
-          patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.open:The conversation could not be opened.`) });
-        }
+        await openNow(id);
       },
       remove,
       /** Deletes a conversation after the undo time: it leaves the list now and stays in the store until then. */
       removeLater(id: string): void {
         const c = store.conversations().find((x) => x.id === id);
         if (!c || timers.has(id)) return;
-        patchState(store, { deleting: [...store.deleting(), { id, title: c.title }] });
+        const wasActive = store.activeId() === id;
+        const rest = store.visibleConversations();
+        const at = rest.findIndex((x) => x.id === id);
+        const next = rest[at + 1] ?? rest[at - 1] ?? null;
+        patchState(store, { deleting: [...store.deleting(), { id, title: c.title, wasActive }] });
+        // The open conversation goes with its row: the view moves to the next one, or to a new one, at once.
+        if (wasActive) {
+          patchState(store, { activeId: null, turns: [], run: 'idle', pendingTitle: null });
+          if (next) void openNow(next.id);
+        }
         timers.set(
           id,
           setTimeout(() => {
@@ -260,31 +306,24 @@ export const AssistantStore = signalStore(
         if (timer === undefined) return;
         clearTimeout(timer);
         timers.delete(id);
+        const was = store.deleting().find((d) => d.id === id);
         patchState(store, { deleting: store.deleting().filter((d) => d.id !== id) });
+        if (was?.wasActive) void openNow(id);
       },
       /** Sends the draft with the chips that are on. */
       async send(): Promise<void> {
         if (!store.canSend()) return;
-        const text = store.draft().trim();
         const context: ContextItem[] = store
           .chips()
           .filter((c) => c.on)
-          .map((c) => ({ id: c.id, label: c.detail ? `${c.label}: ${c.detail}` : c.label, text: c.text }));
-        const allowWrite = store.allowWrite() && store.hasWriteTools();
-        const conversationId = store.activeId();
-        patchState(store, { run: 'sending', failure: null, draft: '', off: [], on: [], listOpen: false, turns: [...store.turns(), startTurn(text, context)] });
-        try {
-          const ack = await store._backend.send({ ...(conversationId ? { conversationId } : {}), text, context, allowWrite });
-          patchState(store, { activeId: ack.conversationId });
-        } catch (e) {
-          // Refused before it started (empty, busy, gone): the question comes back to the draft.
-          patchState(store, {
-            run: 'idle',
-            draft: text,
-            failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.send:The question could not be sent.`),
-            turns: store.turns().slice(0, -1),
-          });
-        }
+          .map((c) => ({ id: c.id, label: chipText(c.label, c.detail), text: c.text }));
+        await submit(store.draft().trim(), context);
+      },
+      /** Asks the last question again, with the context it had (the Retry of a failed turn). */
+      async retry(): Promise<void> {
+        const last = store.turns().at(-1);
+        if (!last || store.run() !== 'idle' || !last.error) return;
+        await submit(last.user, last.context);
       },
       /** Stops the running turn (Escape, the Stop button). */
       async stop(): Promise<void> {
@@ -301,9 +340,12 @@ export const AssistantStore = signalStore(
       async approve(callId: string, approved: boolean): Promise<void> {
         const id = store.activeId();
         if (!id) return;
+        // A declined call is the user's choice: mark it before the engine's "did not run" arrives, so it is never drawn as a failure.
+        if (!approved) update((t) => setDeclined(t, callId, true));
         try {
           await store._backend.approve(id, callId, approved);
         } catch (e) {
+          if (!approved) update((t) => setDeclined(t, callId, false));
           patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.approve:The decision could not be sent.`) });
         }
       },

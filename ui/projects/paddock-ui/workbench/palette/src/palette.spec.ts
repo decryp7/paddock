@@ -133,7 +133,7 @@ describe('PaletteStore', () => {
     store.setQuery('> folder');
     expect(store.rows().map((r) => r.label)).toEqual(['Open folder…']);
     expect([...store.rows()[0]!.marks]).toEqual([5, 6, 7, 8, 9, 10]);
-    expect(store.prefixes()).toEqual([{ prefix: '>', title: 'Commands' }]);
+    expect(store.prefixes()).toEqual([{ prefix: '>', title: 'Commands', active: true }]);
     expect(store.placeholder()).toBe('Type a command or search…');
   });
 
@@ -237,7 +237,10 @@ describe('PaletteStore', () => {
     store.open('');
     expect(store.source()).toEqual({ kind: 'commands' });
     expect(store.prefixes().map((p) => p.prefix)).toEqual(['>', '@']);
+    // The footer marks the mode in use (review 3 P3-10).
+    expect(store.prefixes().map((p) => p.active)).toEqual([true, false]);
     store.setQuery('@x');
+    expect(store.prefixes().map((p) => p.active)).toEqual([false, true]);
     timers.flush();
     await settle();
     symbols.calls[0]!.reject(new Error('index is gone'));
@@ -329,6 +332,22 @@ describe('namesPaletteProvider', () => {
       { id: 'p1', label: 'Graphic.Builder.exe', detail: 'close in spelling', icon: 'wd:proc', match: reply.matches[0] },
     ]);
     expect(namesToItems({ matches: [], clarify: null, searchable: 3 })).toEqual([]);
+  });
+
+  it('gives each match its own icon when the app maps matches to glyphs (the kind of a symbol, review 2 P3-5)', async () => {
+    const two: NamesSearchReply = {
+      matches: [
+        { id: 'a#run', display: 'run', how: 'parts', score: 1, why: 'a' },
+        { id: 'a#Thing', display: 'Thing', how: 'parts', score: 1, why: 'a' },
+      ],
+      clarify: null,
+      searchable: 2,
+    };
+    expect(namesToItems(two, (m) => (m.display === 'run' ? 'pd:symbol-function' : undefined)).map((i) => i.icon)).toEqual(['pd:symbol-function', undefined]);
+    const ctx = { kinds: { 'a#Thing': 'pd:symbol-type' } as Record<string, string> };
+    const p = namesPaletteProvider<typeof ctx>({ id: 'wd.sym', title: msg('wd.sym', 'Symbols'), order: 1, search: () => Promise.resolve(two), accept: () => undefined, icon: (m, c) => c.kinds[m.id] });
+    const items = await p.search('t', ctx as never, { limit: 5, signal: new AbortController().signal });
+    expect(items.map((i) => i.icon)).toEqual([undefined, 'pd:symbol-type']);
   });
 
   it('calls names_search with a bounded query and limit, and accepts only matches', async () => {

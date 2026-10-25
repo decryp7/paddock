@@ -1,25 +1,32 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { PdChart, type PdChartSpec } from '@decryp7/paddock-ui/chart';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, input, signal } from '@angular/core';
+import { readPaddockTokens } from '@decryp7/paddock-ui';
+import { PdChart, seriesColor, type PdChartSpec } from '@decryp7/paddock-ui/chart';
 import type { ChartSpec } from '../generated/view';
+
+const unitOf = (c: ChartSpec): { unit?: string } => (c.unit ? { unit: c.unit } : {});
 
 /** The `pd-chart` spec of a view chart: line, area and bar map to themselves, a pie to the donut (the first series, one slice per category). `scatter` has no generic spec: see {@link scatterOption}. */
 export function chartSpecOf(c: ChartSpec): PdChartSpec | null {
   if (c.kind === 'scatter') return null;
   if (c.kind === 'pie') {
-    return { kind: 'donut', x: c.categories, series: c.series.slice(0, 1).map((s) => ({ name: s.name, values: s.values })) };
+    return { kind: 'donut', x: c.categories, series: c.series.slice(0, 1).map((s) => ({ name: s.name, values: s.values })), ...unitOf(c) };
   }
-  return { kind: c.kind, x: c.categories, series: c.series.map((s) => ({ name: s.name, values: s.values })) };
+  return { kind: c.kind, x: c.categories, series: c.series.map((s) => ({ name: s.name, values: s.values })), ...unitOf(c) };
 }
 
-/** An ECharts option for a scatter chart (points at category positions, one series each); the paddock theme colours it. */
-export function scatterOption(c: ChartSpec): Record<string, unknown> {
+/**
+ * An ECharts option for a scatter chart (points at category positions, one series each). `colors` are the series colours from the
+ * design tokens (one series: the accent, like the line and the bar; several: the palette in order); without them the theme's own apply.
+ */
+export function scatterOption(c: ChartSpec, colors: readonly string[] = []): Record<string, unknown> {
   return {
     grid: { left: 48, right: 16, top: 32, bottom: 32 },
     legend: { show: c.series.length > 1, left: 12 },
     tooltip: { trigger: 'item' },
     xAxis: { type: 'category', data: c.categories, boundaryGap: true },
+    // The unit is in the chart's title ("Latency (ms)"), once, like the line chart; the ticks stay plain numbers.
     yAxis: { type: 'value' },
-    series: c.series.map((s) => ({ name: s.name, type: 'scatter', symbolSize: 8, data: s.values })),
+    series: c.series.map((s, i) => ({ name: s.name, type: 'scatter', symbolSize: 8, data: s.values, ...(colors[i] ? { itemStyle: { color: colors[i] } } : {}) })),
   };
 }
 
@@ -32,7 +39,8 @@ export function chartWords(c: ChartSpec): string {
       const lo = Math.min(...nums);
       const hi = Math.max(...nums);
       const last = nums[nums.length - 1];
-      return $localize`:@@pd.view.chart.words:${s.name}:name: from ${lo}:lo: to ${hi}:hi: over ${c.categories.length}:n: points, last ${last}:last:`;
+      const [a, b, z] = [lo, hi, last].map((v) => (c.unit ? `${v} ${c.unit}` : String(v)));
+      return $localize`:@@pd.view.chart.words:${s.name}:name: from ${a}:lo: to ${b}:hi: over ${c.categories.length}:n: points, last ${z}:last:`;
     })
     .join('; ');
 }
@@ -47,12 +55,33 @@ export function chartWords(c: ChartSpec): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdChart],
   template: `<pd-chart [label]="name()" [spec]="spec()" [option]="option()" [summary]="words()" [height]="280" />`,
-  styles: `:host { display: block; min-width: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); }`,
+  styles: `:host { display: block; min-width: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }`,
 })
 export class PdViewChart {
   readonly chart = input.required<ChartSpec>();
-  protected readonly name = computed(() => this.chart().title || $localize`:@@pd.view.chart.name:Chart`);
+  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  /** Counts appearance changes (theme, accent, contrast are attributes of the root), so the scatter colours are read again. */
+  private readonly appearance = signal(0);
+  /** The title; a scatter has no generic spec to carry its unit, so the unit joins the title here (once, like the other charts). */
+  protected readonly name = computed(() => {
+    const c = this.chart();
+    const title = c.title || $localize`:@@pd.view.chart.name:Chart`;
+    return c.kind === 'scatter' && c.unit && !title.includes(`(${c.unit})`) ? `${title} (${c.unit})` : title;
+  });
   protected readonly spec = computed(() => chartSpecOf(this.chart()));
-  protected readonly option = computed(() => (this.chart().kind === 'scatter' ? scatterOption(this.chart()) : null));
+  protected readonly option = computed(() => {
+    const c = this.chart();
+    if (c.kind !== 'scatter') return null;
+    this.appearance();
+    const tokens = readPaddockTokens(this.element.nativeElement);
+    return scatterOption(c, c.series.map((_, i) => seriesColor(tokens, undefined, i, c.series.length === 1)));
+  });
   protected readonly words = computed(() => chartWords(this.chart()));
+
+  constructor() {
+    if (typeof MutationObserver === 'undefined') return;
+    const watch = new MutationObserver(() => this.appearance.update((n) => n + 1));
+    watch.observe(document.documentElement, { attributes: true });
+    inject(DestroyRef).onDestroy(() => watch.disconnect());
+  }
 }

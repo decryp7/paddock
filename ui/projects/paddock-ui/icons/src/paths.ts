@@ -24,6 +24,8 @@ export const PD_ICON_PATHS = {
   pin: 'M9 4h6l-1 5.5 3 3H7l3-3zM12 12.5V20',
   // Status
   alert: 'M12 4 21 19.5H3zM12 9v3.5',
+  // A status error (circle with ×); `alert` (triangle) is the warning shape, `info` (circle i) the info one.
+  error: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM9 9l6 6M15 9l-6 6',
   info: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5',
   lock: 'M5.5 11h13v9.5h-13zM8 11V7.5a4 4 0 0 1 8 0V11M12 15v2',
   shield: 'M12 3 19.5 6v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z',
@@ -62,6 +64,10 @@ export const PD_ICON_PATHS = {
   layers: 'M12 4 20 8.5 12 13 4 8.5zM5.5 12.5 12 16.2l6.5-3.7M5.5 16 12 19.7l6.5-3.7',
   'dock-in': 'M3.5 5h17v14h-17zM12 5v6.5M9 8.5l3 3 3-3M7 15h10',
   file: 'M5.75 3.5h7.75l4.75 5v12H5.75zM13.5 3.5v5h4.75',
+  // Code symbols (plan X50, review 2 P3-5): the kind of a symbol in a palette row or an outline, instead of a letter badge.
+  'symbol-function': 'M16 4.5h-1.5C12.8 4.5 12 5.4 12 7.2v10.1c0 1.6-.8 2.2-2.3 2.2H8M8.5 10.5h7',
+  'symbol-type': 'M9 4.5H8c-1.4 0-2 .7-2 2V10l-1.5 2L6 14v3.5c0 1.3.6 2 2 2h1M15 4.5h1c1.4 0 2 .7 2 2V10l1.5 2-1.5 2v3.5c0 1.3-.6 2-2 2h-1',
+  'symbol-module': 'M12 3.5 19.5 7.75v8.5L12 20.5 4.5 16.25v-8.5zM4.5 7.75 12 12l7.5-4.25M12 12v8.5',
 } as const satisfies Readonly<Record<string, string>>;
 
 /** A filled dot of a glyph: centre and radius on the 24 px grid. */

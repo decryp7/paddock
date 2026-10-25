@@ -17,9 +17,10 @@ import { PdIcon, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { DOCK_NOTICE_ACTION } from './dock-notice';
 import { AngularContentRenderer } from './angular-panel';
 import { AutoHideItem, itemsOn } from './auto-hide';
-import { Side } from './dock-geometry';
+import { bottomFlyoutInsets, Side } from './dock-geometry';
 import { DockKeys } from './dock-keys';
 import { DockMenu, type DockMenuItem } from './dock-menu';
+import { placeMenu } from './menu-placement';
 import { DOCK_STYLES } from './dock-styles';
 import { DockViews } from './dock-views';
 import { WorkbenchDock } from './dock.service';
@@ -41,7 +42,7 @@ export const HOVER_HIDE_MS = 300;
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [DockSwitcher, PdIcon],
-  host: { 'data-testid': 'pd-dock', '[attr.data-ready]': 'dock.ready() ? "" : null', '[attr.data-perspective]': 'dock.activePerspective()' },
+  host: { 'data-testid': 'pd-dock', '[attr.data-ready]': 'dock.ready() ? "" : null', '[attr.aria-busy]': 'dock.ready() ? null : "true"', '[attr.data-perspective]': 'dock.activePerspective()' },
   template: `
     @for (side of sides; track side) {
       @if (bars()[side].length) {
@@ -68,6 +69,13 @@ export const HOVER_HIDE_MS = 300;
     }
     <div class="pd-dock-center">
       <div #mount class="pd-dock-mount" data-testid="pd-dock-mount"></div>
+      @if (!dock.ready()) {
+        <!-- Until the layout is restored (or built) the main area shows the shape of a dock, never an empty page. -->
+        <div class="pd-dock-boot" data-testid="pd-dock-skeleton" aria-hidden="true">
+          <div class="pd-dock-boot-strip"><span></span><span></span></div>
+          <div class="pd-dock-skeleton"><span></span><span></span><span></span><span></span></div>
+        </div>
+      }
       @if (open(); as item) {
         <section
           id="pd-dock-ah-flyout"
@@ -78,15 +86,14 @@ export const HOVER_HIDE_MS = 300;
           [attr.data-panel-id]="item.id"
           [attr.aria-label]="item.title"
           [style.width.px]="item.side === 'bottom' ? null : item.size"
-          [style.height.px]="item.side === 'bottom' ? item.size : null"
+          [style.--pd-ah-size]="item.size + 'px'"
           (mouseenter)="cancelLeave()"
           (mouseleave)="leaveSoon()"
           (keydown.escape)="escape()"
           (focusout)="focusOut($event)"
         >
+          <!-- The strip tab already names the panel and the pane has the room: the actions float over its corner, no header row. -->
           <header class="pd-dock-ah-head">
-            <!-- The strip tab already names the panel: the header repeats nothing (the region's aria-label still does). -->
-            <span class="pd-dock-ah-spacer"></span>
             <button type="button" class="pd-dock-action pd-dock-ah-pin" [attr.aria-label]="pinLabel(item.title)" aria-pressed="true" [attr.title]="pinTitle" (click)="dock.pin(item.id)">
               <pd-icon name="pd:pin" />
             </button>
@@ -104,6 +111,7 @@ export const HOVER_HIDE_MS = 300;
     }
     @if (menus.state(); as menu) {
       <div class="pd-dock-menu-backdrop" (pointerdown)="menus.close()"></div>
+      <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the menu only receives keydown bubbling from its focusable items (arrow keys move between them) -->
       <ul class="pd-dock-menu pd-popmenu" role="menu" data-testid="pd-dock-menu" [style.left.px]="menu.x" [style.top.px]="menu.y" (keydown)="menuKey($event, menu.items)">
         @for (item of menu.items; track item.label) {
           <li role="none">
@@ -173,15 +181,68 @@ export class PdDock implements OnDestroy {
         shell.notify({
           level: notice.key === 'popout' ? 'warning' : 'info',
           message: notice.message,
+          ...(notice.short ? { short: notice.short } : {}),
           kind: `pd.wb.dock.${notice.key.replace(/[^a-z0-9-]/g, '-')}`,
           ...(notice.action ? { action: { type: DOCK_NOTICE_ACTION, key: notice.key, label: notice.action.label } } : {}),
         }),
       );
     });
     this.offKeys = this.keys.listen(document);
-    // effect-state: moves the keyboard focus into a menu that just opened (a DOM side effect)
+    // effect-state: places a menu that just opened inside the window and moves the keyboard focus into it (DOM side effects)
     effect(() => {
-      if (this.menus.state()) afterNextRender(() => this.host.nativeElement.querySelector<HTMLButtonElement>('.pd-dock-menu button:not(:disabled)')?.focus(), { injector: this.injector });
+      const menu = this.menus.state();
+      if (!menu) return;
+      afterNextRender(
+        () => {
+          const el = this.host.nativeElement.querySelector<HTMLElement>('.pd-dock-menu');
+          if (!el) return;
+          placeMenu(el, menu.x, menu.y);
+          el.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+        },
+        { injector: this.injector },
+      );
+    });
+    // effect-state: places a bottom slide-out over the column it belongs to, not over a full-height side column such as the
+    // Assistant's (review 3 P3-3): measures the docked groups and sets the slide-out's insets (DOM side effect). Dockview sizes
+    // its groups after the change that opened the slide-out (and again when a column opens or a splitter moves), so the
+    // groups are watched while it is open.
+    effect((onCleanup) => {
+      const item = this.open();
+      this.dock.layoutChanged();
+      if (item?.side !== 'bottom') return;
+      let frame = 0;
+      const place = (): void => {
+        const center = this.host.nativeElement.querySelector<HTMLElement>('.pd-dock-center');
+        const flyout = this.host.nativeElement.querySelector<HTMLElement>('.pd-dock-ah-flyout-bottom');
+        if (!center || !flyout) return;
+        // The groups' edges are the dockview mount's (the centre also holds the auto-hide bar's room); the insets are the
+        // same for both, which share their left and right edges.
+        const box = (center.querySelector<HTMLElement>('.pd-dock-mount') ?? center).getBoundingClientRect();
+        const groups = [...center.querySelectorAll<HTMLElement>('.dv-groupview')]
+          .filter((g) => !g.closest('.dv-resize-container'))
+          .map((g) => {
+            const r = g.getBoundingClientRect();
+            return { x: r.left, y: r.top, width: r.width, height: r.height };
+          });
+        const insets = bottomFlyoutInsets(groups, { x: box.left, y: box.top, width: box.width, height: box.height });
+        flyout.style.left = `${insets?.left ?? 0}px`;
+        flyout.style.right = `${insets?.right ?? 0}px`;
+      };
+      const soon = (): void => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(place);
+      };
+      const center = this.host.nativeElement.querySelector<HTMLElement>('.pd-dock-center');
+      const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(soon);
+      if (center && watch) {
+        watch.observe(center);
+        center.querySelectorAll<HTMLElement>('.dv-groupview').forEach((g) => watch.observe(g));
+      }
+      soon();
+      onCleanup(() => {
+        cancelAnimationFrame(frame);
+        watch?.disconnect();
+      });
     });
     // Mount the slid-out view's component into the flyout body.
     // effect-state: mounts and disposes view renderers in the DOM flyout (side effect, not derived state)

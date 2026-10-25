@@ -10,6 +10,10 @@ import {
 } from './echarts/theme';
 import { type PaddockChartTokens, mixColors, parseCssColor, readPaddockTokens, sequentialRamp, withAlpha } from './echarts/tokens';
 
+/** An ECharts option tree, inspected structurally by these specs. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the option tree is untyped JSON the specs walk by key
+type LooseOption = any;
+
 const tokens = (scheme: 'dark' | 'light' = 'dark'): PaddockChartTokens => ({
   scheme,
   fontFamily: 'system-ui',
@@ -88,12 +92,12 @@ describe('readPaddockTokens', () => {
 });
 
 describe('createEchartsTheme', () => {
-  const theme = createEchartsTheme(tokens()) as Record<string, any>;
+  const theme = createEchartsTheme(tokens()) as LooseOption;
   it('uses the Paddock palette in stable order and a transparent background', () => {
     expect(theme['color']).toEqual(tokens().palette);
     expect(theme['backgroundColor']).toBe('transparent');
     expect(theme['darkMode']).toBe(true);
-    expect((createEchartsTheme(tokens('light')) as Record<string, any>)['darkMode']).toBe(false);
+    expect((createEchartsTheme(tokens('light')) as LooseOption)['darkMode']).toBe(false);
   });
   it('has no axis lines except the category/time baseline; value grid is dashed hairline', () => {
     expect(theme['valueAxis'].axisLine.show).toBe(false);

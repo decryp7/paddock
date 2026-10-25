@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { PdPathText } from '@decryp7/paddock-ui';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import { PacksStore, type KindView } from '@decryp7/paddock-ui/shell/packs';
 import { PACKS_STYLES } from './styles';
 
@@ -13,7 +13,7 @@ import { PACKS_STYLES } from './styles';
 @Component({
   selector: 'pd-packs-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph, PdPathText],
+  imports: [PdStatusGlyph, PdGlyph, PdPathText],
   template: `
     <section class="pd-packs__head" aria-labelledby="pd-packs-title" data-testid="packs-page">
       <div>
@@ -45,7 +45,7 @@ import { PACKS_STYLES } from './styles';
       @for (k of store.kinds(); track k.id) {
         <section class="pd-packs__kind" [attr.aria-labelledby]="'pd-packs-' + k.id" [attr.data-testid]="'packs-kind-' + k.id">
           <div class="pd-packs__kind-title">
-            <pd-glyph [name]="glyph(k)" [size]="16" [class]="tone(k)" />
+            <pd-status-glyph [status]="status(k)" [size]="16" [class]="tone(k)" />
             <h3 [id]="'pd-packs-' + k.id">{{ k.label }}</h3>
             <span class="pd-packs__muted" [attr.data-testid]="'packs-state-' + k.id">{{ stateWord(k) }}</span>
           </div>
@@ -62,7 +62,7 @@ import { PACKS_STYLES } from './styles';
               @for (p of k.problems; track $index) {
                 <li>
                 <div class="pd-packs__problem" role="alert">
-                  <pd-glyph name="alert" [size]="16" class="pd-packs__bad" />
+                  <pd-status-glyph status="error" [size]="16" class="pd-packs__bad" />
                   <div>
                     <span class="pd-packs__file">{{ p.file }}</span>
                     <span>{{ p.message }}</span>
@@ -76,7 +76,7 @@ import { PACKS_STYLES } from './styles';
             <ul [attr.aria-label]="t.ignored" [attr.data-testid]="'packs-warnings-' + k.id">
               @for (w of k.warnings; track $index) {
                 <li class="pd-packs__note">
-                  <pd-glyph name="info" [size]="16" />
+                  <pd-status-glyph status="info" [size]="16" />
                   <span>{{ w.file }}: {{ w.message }}</span>
                 </li>
               }
@@ -131,8 +131,9 @@ export class PdPacksPage {
     }
   }
 
-  protected glyph(k: KindView): string {
-    return k.health.level === 'ok' ? 'check' : k.health.level === 'notes' ? 'info' : 'alert';
+  /** The status of a kind, drawn from the suite's one map: ok, some keys ignored, packs left out. */
+  protected status(k: KindView): PdStatus {
+    return k.health.level === 'ok' ? 'success' : k.health.level === 'notes' ? 'info' : 'warning';
   }
 
   protected tone(k: KindView): string {

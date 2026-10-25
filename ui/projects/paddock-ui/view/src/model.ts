@@ -1,3 +1,4 @@
+import { statusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import type { ActionRef, Icon, Node, NodeKind, Tone } from '../generated/view';
 
 /** The payload of the `NodeKind` variant `K` (`kindPayload<'table'>` is the `Table`). */
@@ -25,8 +26,14 @@ export function toneOf(tone: unknown): Tone {
   return tone === 'info' || tone === 'good' || tone === 'warn' || tone === 'bad' ? tone : 'neutral';
 }
 
-/** The glyph (of the `pd:` set) for a tone mark; status is never colour alone, so each tone has its own shape. `neutral` has none. */
-export const TONE_GLYPH: Readonly<Record<Tone, string>> = { neutral: '', info: 'info', good: 'check', warn: 'alert', bad: 'close' };
+/** The status a tone stands for (`neutral` is none); the glyph of a status is the suite's one map, `statusGlyph` (rule 40). */
+export const TONE_STATUS: Readonly<Record<Tone, PdStatus | null>> = { neutral: null, info: 'info', good: 'success', warn: 'warning', bad: 'error' };
+
+/** The glyph (of the `pd:` set) for a tone mark, from the suite's status map; status is never colour alone. `neutral` has none. */
+export function toneGlyph(tone: Tone): string {
+  const status = TONE_STATUS[tone];
+  return status ? statusGlyph(status) : '';
+}
 
 /** The word a screen reader hears for a tone. */
 export function toneWord(tone: Tone): string {
@@ -46,10 +53,10 @@ export function toneWord(tone: Tone): string {
 
 /** The glyph of the `pd:` icon set for each icon of the closed `Icon` enum. */
 export const ICON_GLYPH: Readonly<Record<Icon, string>> = {
-  info: 'info',
-  warning: 'alert',
-  error: 'alert',
-  check: 'check',
+  info: statusGlyph('info'),
+  warning: statusGlyph('warning'),
+  error: statusGlyph('error'),
+  check: statusGlyph('success'),
   search: 'search',
   folder: 'folder',
   file: 'file',
@@ -81,3 +88,32 @@ export const isWrite = (a: ActionRef | null | undefined): boolean => a?.writes =
 
 /** A stable key for a child of a stack: its id when it has one, else its place. */
 export const childKey = (n: Node, i: number): string => n.id || `#${i}`;
+
+/**
+ * The node that may draw its action as the view's one filled (primary) button: the first, in document order, that has a main action
+ * of its own (a form's submit, an empty state's action, a needs-AI card's setup). Every other action is drawn secondary, so a view
+ * has at most one filled accent however many such nodes a plugin sends ("one primary per region"). Bounded by the document's depth.
+ */
+export function primaryNode(root: Node | null | undefined, depth = 0): Node | null {
+  if (!root || depth > 32) return null;
+  const s = shapeOf(root);
+  switch (s.tag) {
+    case 'form':
+      return root;
+    case 'empty':
+      return s.v.action ? root : null;
+    case 'needsAi':
+      return root;
+    case 'stack':
+      for (const c of s.v.children) {
+        const found = primaryNode(c, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    default:
+      return null;
+  }
+}
+
+/** The name of the unknown kind, bounded, for the muted suffix of "Update the app to view this". */
+export const unknownKindName = (name: string): string => (name.length > 40 ? `${name.slice(0, 39)}…` : name);

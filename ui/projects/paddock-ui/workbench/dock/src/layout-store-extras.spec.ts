@@ -1,5 +1,4 @@
 import { EMPTY_EXTRAS, ENVELOPE_VERSION, readLayout, sanitizeExtras, toEnvelope } from './layout-store';
-import { at } from './must.spec-helper';
 
 const layout = { grid: { root: { type: 'leaf', data: { views: [], id: '1' } }, height: 1, width: 1, orientation: 'HORIZONTAL' }, panels: {} } as never;
 
@@ -21,6 +20,21 @@ describe('sanitizeExtras', () => {
   it('sanitizes the auto-hidden items too', () => {
     const e = sanitizeExtras({ autoHidden: [{ id: 'a', side: 'left' }, { id: 'b', side: 'nope' }] });
     expect(e.autoHidden.map((i) => i.id)).toEqual(['a']);
+  });
+});
+
+describe('sanitizeExtras: panels popped out into windows', () => {
+  it('keeps unique, named pop-outs with a sanitized slot and drops the rest', () => {
+    const e = sanitizeExtras({
+      poppedOut: [{ id: 'a', slot: { referencePanel: 'b', direction: 'right' } }, { id: 'a' }, { id: '' }, 'x', { id: 'c', slot: 'nope' }, { id: 'd' }],
+    });
+    expect(e.poppedOut).toEqual([
+      { id: 'a', slot: { referencePanel: 'b', direction: 'right' } },
+      { id: 'c', slot: { referencePanel: null, direction: 'within' } },
+      { id: 'd', slot: { referencePanel: null, direction: 'within' } },
+    ]);
+    expect(sanitizeExtras({ poppedOut: 'a' }).poppedOut).toBeUndefined();
+    expect(sanitizeExtras({ poppedOut: [] })).toEqual(EMPTY_EXTRAS);
   });
 });
 

@@ -103,21 +103,23 @@ export class PdPartOutlet {
   /** Loads (again) and shows the part; a failure becomes the error state. */
   async load(part: LazyPart = this.part()): Promise<void> {
     const generation = ++this.generation;
+    const label = this.label();
+    const slot = this.slot();
     this.clear();
     this.state.set({ kind: 'loading' });
     try {
-      const loaded = await loadPart(part, this.parent, `part ${this.label()}`);
+      const loaded = await loadPart(part, this.parent, `part ${label}`);
       if (generation !== this.generation) {
         if (loaded.injector !== this.parent) loaded.injector.destroy();
         return;
       }
       this.injector = loaded.injector === this.parent ? null : loaded.injector;
-      this.ref = this.slot().createComponent(loaded.component, { environmentInjector: loaded.injector });
+      this.ref = slot.createComponent(loaded.component, { environmentInjector: loaded.injector });
       this.state.set({ kind: 'loaded' });
     } catch (e) {
       if (generation !== this.generation) return;
       this.clear();
-      console.error(`[paddock-shell] ${this.label()} failed to load`, e);
+      console.error(`[paddock-shell] ${label} failed to load`, e);
       this.state.set({ kind: 'error', reason: describe(e) });
     }
   }

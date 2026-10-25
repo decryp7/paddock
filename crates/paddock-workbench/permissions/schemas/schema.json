@@ -541,10 +541,10 @@
           "markdownDescription": "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-layout-get`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-keep-on-top`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`"
         },
         {
-          "description": "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract.\n#### This permission set includes:\n\n- `allow-ui-sync-publish`",
+          "description": "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract.\n#### This permission set includes:\n\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-ui-sync-publish`",
           "type": "string",
           "const": "dialog",
-          "markdownDescription": "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract.\n#### This permission set includes:\n\n- `allow-ui-sync-publish`"
+          "markdownDescription": "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract.\n#### This permission set includes:\n\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-ui-sync-publish`"
         }
       ]
     }

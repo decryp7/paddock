@@ -10,6 +10,8 @@ export interface ToolCard {
   /** The call as the user reads it. */
   readonly summary: string;
   readonly write: boolean;
+  /** What it changes cannot be undone: its approval is a danger choice with Decline as the default. */
+  readonly destructive: boolean;
   /** `awaiting`: a write waits for the user's decision. */
   readonly state: 'running' | 'awaiting' | 'ok' | 'failed';
   /** The card's line once finished. */
@@ -18,6 +20,28 @@ export interface ToolCard {
   readonly data: unknown;
   /** The arguments of the call, known once a write asks for approval (shown in the prompt's details). */
   readonly input?: unknown;
+  /** The user declined this call: a choice, not a failure (the card is neutral). */
+  readonly declined?: boolean;
+  /** The user stopped the turn while this call ran or waited: a choice, not a failure (the card is neutral). */
+  readonly stopped?: boolean;
+}
+
+/** The text of a context chip, in the composer and in the sent question alike: "Current file: src/main.rs". */
+export function chipText(label: string, detail: string | null | undefined): string {
+  return detail ? `${label}: ${detail}` : label;
+}
+
+/** Marks a waiting call as declined by the user (or takes the mark back when the decision could not be sent). */
+export function setDeclined(t: TurnView, callId: string, declined: boolean): TurnView {
+  return setCard(t, callId, (c) => ({ ...c, declined }));
+}
+
+/** The conversation's heading: the title without a leading slash command, in sentence case. */
+export function conversationTitle(raw: string): string {
+  const trimmed = raw.trim();
+  const rest = trimmed.replace(/^\/[^\s]*\s*/, '');
+  const base = rest || trimmed.replace(/^\//, '');
+  return base.charAt(0).toLocaleUpperCase() + base.slice(1);
 }
 
 /** A piece of an answer in order: text, or a tool call between two texts. */
@@ -52,11 +76,15 @@ function setCard(t: TurnView, callId: string, change: (c: ToolCard) => ToolCard)
 }
 
 /** A turn that ended: nothing runs, and a card still waiting can no longer be answered. */
-function ended(t: TurnView): TurnView {
+function ended(t: TurnView, byUser = false): TurnView {
   return {
     ...t,
     running: false,
-    parts: t.parts.map((p) => (p.kind === 'tool' && (p.card.state === 'running' || p.card.state === 'awaiting') ? { kind: 'tool', card: { ...p.card, state: 'failed', result: p.card.result ?? null } } : p)),
+    parts: t.parts.map((p) =>
+      p.kind === 'tool' && (p.card.state === 'running' || p.card.state === 'awaiting')
+        ? { kind: 'tool', card: { ...p.card, state: 'failed', result: p.card.result ?? null, ...(byUser ? { stopped: true } : {}) } }
+        : p,
+    ),
   };
 }
 
@@ -71,20 +99,27 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
       return { ...t, parts: [...t.parts, { kind: 'text', text: e.text }] };
     }
     case 'toolStarted': {
-      const card: ToolCard = { callId: e.callId, name: e.name, summary: e.summary, write: e.write, state: 'running', result: null, data: undefined };
+      const card: ToolCard = { callId: e.callId, name: e.name, summary: e.summary, write: e.write, destructive: e.destructive, state: 'running', result: null, data: undefined };
       return { ...t, parts: [...t.parts, { kind: 'tool', card }] };
     }
     case 'approvalNeeded':
-      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input }));
+      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input, destructive: e.destructive }));
     case 'toolFinished': {
       const cites = citationsOf(e.data);
-      const next = setCard(t, e.callId, (c) => ({ ...c, state: e.ok ? 'ok' : 'failed', result: e.summary, data: e.data }));
+      const next = setCard(t, e.callId, (c) => ({
+        ...c,
+        state: e.ok ? 'ok' : 'failed',
+        result: e.summary,
+        data: e.data,
+        ...(e.outcome === 'declined' ? { declined: true } : {}),
+        ...(e.outcome === 'stopped' ? { stopped: true } : {}),
+      }));
       return cites.length ? { ...next, citations: [...next.citations, ...cites.filter((c) => !next.citations.some((k) => k.text === c.text && k.target === c.target))] } : next;
     }
     case 'notice':
       return { ...t, notes: [...t.notes, e.message] };
     case 'done': {
-      const finished = ended(t);
+      const finished = ended(t, e.end === 'cancelled');
       // An answer that arrived whole (no deltas) still shows.
       const parts = finished.parts.some((p) => p.kind === 'text') || !e.text ? finished.parts : [...finished.parts, { kind: 'text' as const, text: e.text }];
       return { ...finished, parts, end: e.end, message: e.message ?? null, usage: e.usage };
@@ -94,14 +129,23 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
   }
 }
 
-/** The turns of a stored conversation. */
+/** Adds citations a turn does not show yet (the same phrase and target is shown once). */
+function withCitations(t: TurnView, cites: readonly AssistantCitation[]): TurnView {
+  const fresh = cites.filter((c, i) => !t.citations.some((k) => k.text === c.text && k.target === c.target) && cites.findIndex((k) => k.text === c.text && k.target === c.target) === i);
+  return fresh.length ? { ...t, citations: [...t.citations, ...fresh] } : t;
+}
+
+/** The turns of a stored conversation: the same views the running turns had (tool cards, citations, how each ended). */
 export function turnsOf(c: Conversation): TurnView[] {
   const turns: TurnView[] = [];
   const open = (): TurnView | undefined => turns.at(-1);
   const put = (t: TurnView): void => void (turns[turns.length - 1] = t);
+  /** The input of each call, for the details of a write. */
+  const inputs = new Map<string, unknown>();
   for (const m of c.messages) {
     if (m.role === 'user') {
       turns.push({ ...startTurn(m.text, m.context ?? []), running: false });
+      inputs.clear();
       continue;
     }
     const t = open();
@@ -110,14 +154,33 @@ export function turnsOf(c: Conversation): TurnView[] {
       const parts: TurnPart[] = [...t.parts];
       if (m.text) parts.push({ kind: 'text', text: m.text });
       for (const call of m.toolCalls ?? []) {
-        parts.push({ kind: 'tool', card: { callId: call.id, name: call.name, summary: '', write: false, state: 'failed', result: null, data: undefined } });
+        inputs.set(call.id, call.input);
+        parts.push({ kind: 'tool', card: { callId: call.id, name: call.name, summary: '', write: false, destructive: false, state: 'failed', result: null, data: undefined } });
       }
-      put({ ...t, parts, end: m.end ?? t.end });
+      put({
+        ...t,
+        parts,
+        end: m.end ?? t.end,
+        message: m.endMessage ?? t.message,
+        error: m.error ? { message: m.error.message, needsAi: m.error.needsAi ?? null } : t.error,
+      });
     } else {
-      const done = setCard(t, m.toolCallId ?? '', (card) => ({ ...card, summary: card.summary || (m.summary ?? ''), state: m.ok === false ? 'failed' : 'ok', result: m.summary ?? null, data: m.data }));
-      const cites = citationsOf(m.data);
-      put(cites.length ? { ...done, citations: [...done.citations, ...cites] } : done);
+      const write = m.write === true;
+      const done = setCard(t, m.toolCallId ?? '', (card) => ({
+        ...card,
+        summary: m.callSummary ?? m.summary ?? '',
+        write,
+        destructive: m.destructive === true,
+        state: m.ok === false ? 'failed' : 'ok',
+        result: m.summary ?? null,
+        data: m.data,
+        ...(write ? { input: inputs.get(card.callId) } : {}),
+        ...(m.outcome === 'declined' ? { declined: true } : {}),
+        ...(m.outcome === 'stopped' ? { stopped: true } : {}),
+      }));
+      put(withCitations(done, citationsOf(m.data)));
     }
   }
-  return turns;
+  // A call that never got a result was never started (the turn ended first): the live view had no card for it either.
+  return turns.map((t) => ({ ...t, parts: t.parts.filter((p) => p.kind !== 'tool' || p.card.state !== 'failed' || p.card.result !== null) }));
 }

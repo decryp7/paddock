@@ -3,6 +3,15 @@
 // Needs eslint, @eslint/js, typescript-eslint and angular-eslint (peer dependencies) in the app.
 const plugin = require('./plugin.cjs');
 
+/** A peer dependency, resolved from the app being linted first (so a preset linked from a sibling folder works), then from here. */
+function peer(name) {
+  try {
+    return require(require.resolve(name, { paths: [process.cwd()] }));
+  } catch {
+    return require(name);
+  }
+}
+
 const DEFAULT_IGNORES = ['dist/**', '.angular/**', 'coverage/**', 'node_modules/**', 'src-tauri/**', 'test-results/**', 'playwright-report/**'];
 
 /**
@@ -16,9 +25,9 @@ const DEFAULT_IGNORES = ['dist/**', '.angular/**', 'coverage/**', 'node_modules/
  */
 function preset(options) {
   if (!options || !options.prefix) throw new Error('paddock-eslint preset: { prefix } is required (the app\'s selector prefix)');
-  const eslint = require('@eslint/js');
-  const tseslint = require('typescript-eslint');
-  const angular = require('angular-eslint');
+  const eslint = peer('@eslint/js');
+  const tseslint = peer('typescript-eslint');
+  const angular = peer('angular-eslint');
   // `no-restricted-imports` is one rule: a later block replaces an earlier one, so each block lists every path it needs.
   const formsPath = { name: '@angular/forms', importNames: ['FormBuilder', 'ReactiveFormsModule', 'FormGroup', 'FormControl'], message: 'New forms use Signal Forms (rule 37).' };
   const patchPath = { name: '@ngrx/signals', importNames: ['patchState'], message: "Change state in the store's own methods (a *.store.ts file), not outside it (rule 31)." };

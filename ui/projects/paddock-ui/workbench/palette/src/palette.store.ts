@@ -4,7 +4,7 @@ import { CommandService, ShellContextHost, SHELL_PORTS, type CommandDef } from '
 import { formatKey, Keymap } from '@decryp7/paddock-ui/shell/menu';
 import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { COMMANDS_PREFIX, WORKBENCH_PORTS, WorkbenchRegistry, type PaletteItem, type PaletteProviderDef } from '@decryp7/paddock-ui/workbench';
-import { didYouMean, marksOf, plain, rank, type Rankable, type Ranked } from './match';
+import { didYouMean, marksOf, plain, queryMarks, rank, type Rankable, type Ranked } from './match';
 import { PaletteRecent } from './recent';
 
 /** The most results a provider is asked for, and the most rows the list shows. */
@@ -177,14 +177,17 @@ export const PaletteStore = signalStore(
       suggesting: computed(() => suggestions().length > 0),
       rows: computed<readonly PaletteRow[]>(() => (store.source().kind === 'commands' ? commandRows() : store.providerRows())),
       provider,
-      /** The prefixes the palette answers, for the hint line: the commands' and each offered provider's. */
-      prefixes: computed(() => [
-        { prefix: COMMANDS_PREFIX, title: $localize`:@@pd.wb.palette.prefix.commands:Commands` },
-        ...store._registry
-          .availablePaletteProviders()
-          .filter((p) => p.prefix)
-          .map((p) => ({ prefix: p.prefix, title: p.title.text })),
-      ]),
+      /** The prefixes the palette answers, for the hint line: the commands' and each offered provider's; `active` marks the mode in use. */
+      prefixes: computed(() => {
+        const s = store.source();
+        return [
+          { prefix: COMMANDS_PREFIX, title: $localize`:@@pd.wb.palette.prefix.commands:Commands`, active: s.kind === 'commands' },
+          ...store._registry
+            .availablePaletteProviders()
+            .filter((p) => p.prefix)
+            .map((p) => ({ prefix: p.prefix, title: p.title.text, active: s.kind === 'provider' && s.id === p.id })),
+        ];
+      }),
       placeholder: computed(() => provider()?.placeholder?.text ?? $localize`:@@pd.wb.palette.placeholder:Type a command or search…`),
     };
   }),
@@ -218,7 +221,7 @@ export const PaletteStore = signalStore(
             ...(item.icon ? { icon: item.icon } : {}),
             ...(item.keybinding ? { keybinding: formatKey(item.keybinding, store._keymap.platform) } : {}),
             ...(item.disabled ? { disabled: item.disabled } : {}),
-            marks: marksOf(label, item.highlights),
+            marks: item.highlights ? marksOf(label, item.highlights) : queryMarks(query, label),
           };
         });
         patchState(store, { providerRows: rows, active: 0 }, setLoaded());

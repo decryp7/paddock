@@ -3,8 +3,8 @@ import { jobView, type SuJobSnapshot } from './job-view';
 
 /**
  * One long operation (ADR 0008): title and subject, the current phase with its own count, a determinate bar or an indeterminate
- * bar with a growing count, ETA only when the engine has a trustworthy one, Cancel (disabled with the reason while a step cannot be
- * interrupted) and a polite live region that announces phase and state changes, not every tick. Presentational: the app feeds it the
+ * bar with a growing count, ETA only when the engine has a trustworthy one, Cancel (always enabled: a step that cannot be interrupted says so and stops when it ends; rule 11), Retry on a failed job when
+ * the host offers one and a polite live region that announces phase and state changes, not every tick. Presentational: the app feeds it the
  * latest `paddock://jobs` snapshot and handles `cancel`. Set `stalled` when no event arrived for a while; the job is never timed out.
  */
 @Component({
@@ -19,6 +19,11 @@ import { jobView, type SuJobSnapshot } from './job-view';
       }
     </div>
     <div class="pd-line">
+      @if (view().tone === 'success') {
+        <svg class="pd-state pd-state--ok" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      } @else if (view().tone === 'danger') {
+        <svg class="pd-state pd-state--bad" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" /></svg>
+      }
       <span class="pd-headline">{{ view().headline }}</span>
       @if (view().count) {
         <span class="pd-count">{{ view().count }}</span>
@@ -49,6 +54,11 @@ import { jobView, type SuJobSnapshot } from './job-view';
         <span>{{ view().detail }}</span>
       </p>
     }
+    @if (view().canRetry && retryable()) {
+      <div class="pd-actions">
+        <button type="button" class="pd-cancel" (click)="retry.emit(job().id)">{{ t.jobRetry }}</button>
+      </div>
+    }
     @if (view().canCancel) {
       <div class="pd-actions">
         <button type="button" class="pd-cancel" [disabled]="view().cancelDisabled" (click)="cancel.emit(job().id)">{{ t.jobCancel }}</button>
@@ -68,8 +78,9 @@ import { jobView, type SuJobSnapshot } from './job-view';
     /* The phase is calm: muted while running (a stalled step says so in its detail line, with an icon and a word). */
     .pd-headline { color: var(--pd-text-muted); }
     .pd-count, .pd-eta { color: var(--pd-text-muted); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; }
-    :host(.pd-job--success) .pd-headline { color: var(--pd-success); }
-    :host(.pd-job--danger) .pd-headline { color: var(--pd-danger); }
+    .pd-state { align-self: center; flex: none; }
+    :host(.pd-job--success) .pd-headline, :host(.pd-job--success) .pd-state { color: var(--pd-success); }
+    :host(.pd-job--danger) .pd-headline, :host(.pd-job--danger) .pd-state { color: var(--pd-danger); }
     :host(.pd-job--warning) .pd-detail { color: var(--pd-warning); }
     /* Track surface-2, fill the accent text colour: at least 3:1 in both themes (WCAG 1.4.11). */
     .pd-bar { position: relative; height: 6px; overflow: hidden; background: var(--pd-surface-2); box-shadow: inset 0 0 0 1px var(--pd-hairline); border-radius: var(--pd-radius-pill); }
@@ -79,8 +90,8 @@ import { jobView, type SuJobSnapshot } from './job-view';
     /* On the first line when the text wraps: centred in that line's box. */
     .pd-warn { flex: none; margin-top: calc((1lh - 14px) / 2); }
     :host(.pd-job--danger) .pd-detail { color: var(--pd-danger); }
-    .pd-actions { display: flex; align-items: center; gap: var(--pd-space-2); }
-    .pd-cancel { min-height: var(--pd-button-height); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font-weight: var(--pd-weight-medium); }
+    .pd-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); }
+    .pd-cancel { flex: none; min-height: var(--pd-button-height); min-width: var(--pd-hit-min); padding: 0 var(--pd-space-3); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font-weight: var(--pd-weight-medium); }
     .pd-cancel:hover:not(:disabled) { background: var(--pd-hover); }
     .pd-cancel:disabled { opacity: 0.5; }
     .pd-hint { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
@@ -98,6 +109,7 @@ export class SuJob {
   /** The component's texts in the window's language (plan S15: `$localize`, extracted from the package build). */
   protected readonly t = {
     jobCancel: $localize`:@@pd.ui.job.cancel:Cancel`,
+    jobRetry: $localize`:@@pd.ui.job.retry:Retry`,
   };
   /** The latest snapshot of the job. */
   readonly job = input.required<SuJobSnapshot>();
@@ -105,8 +117,13 @@ export class SuJob {
   readonly stalled = input(false);
   /** The job's running time now (ms), when the caller tracks it between events: the count of an unknown step grows. */
   readonly elapsedMs = input<number | null>(null);
+  /** Offers Retry on a failed job (the host owns the retry; without it no button is shown). */
+  readonly retryable = input(false);
   /** Emits the job id when Cancel is pressed. */
+  // eslint-disable-next-line @angular-eslint/no-output-native -- `(cancel)` is the published API of every app; the host element is not a <dialog>
   readonly cancel = output<number>();
+  /** Emits the job id when Retry is pressed. */
+  readonly retry = output<number>();
   /** The progress bar's value text while the total is unknown. */
   protected readonly inProgress = $localize`:@@pd.ui.job.in-progress:In progress`;
 

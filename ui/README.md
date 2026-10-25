@@ -3,7 +3,7 @@
 The shared design system of the Paddock app family (Debrief, Pitcrew, Pitwall, Dyno, Spotter, Pacenotes, Sighter): design tokens, base styles,
 Angular components and an ECharts theme. Part of [paddock](../README.md); versioned with the repo.
 
-![Gallery, dark](docs/screenshots/gallery-dark-debrief.png)
+![Gallery, dark](docs/screenshots/gallery-debrief-dark.png)
 
 ## Install
 
@@ -136,7 +136,8 @@ so a manager app never bundles the workbench:
 | `/shell/settings` | settings over the `paddock-settings` adapter, what a main window imports: `SettingsBackend` (Tauri, memory), `SettingsStore`, the model, `provideShellSettings`, `SETTINGS_CONTRIBUTIONS` | S10 |
 | `/shell/settings/window` | the Settings window, loaded only by it: `pd-settings-window`, `pd-settings-section`, `pd-setting-field`, `SettingsDrafts` (Signal Forms), `settingsWindowProviders` | S10, S16 |
 | `/table`, `/chart`, `/forms` | `pd-table` (sort, filter, columns, groups, virtual scroll, row keyboard and menus, hover actions); `pd-chart` over lazy ECharts with the family theme and the generic chart kinds; `pd-field` and the validation display for Signal Forms | X21 |
-| `/view` | `<pd-view>` (ADR 0002): the renderer of the `paddock-view` documents plugins return; every node kind, limits validated on receipt (`validateViewDoc`), patches (`ViewStore`, `applyViewPatch`), actions as `ViewAction`, the host's `VIEW_HOST` for confirmations, the OS browser and the path and secret pickers; `sampleViewDoc` for demos and specs. Graph and diagram layouts are layered (radial for a radial graph, lifelines for a sequence diagram); a scatter chart needs ECharts' `ScatterChart` in a tree-shaken loader | X51 |
+| `/states` | `pd-needs-ai-card`, the one presentational look of "needs local AI" (`pd-needs-ai` and `<pd-view>` fill it) | X51 |
+| `/view` | `<pd-view>` (ADR 0002): the renderer of the `paddock-view` documents plugins return; every node kind, limits validated on receipt (`validateViewDoc`), patches (`ViewStore`, `applyViewPatch`), actions as `ViewAction`, the host's `VIEW_HOST` for confirmations, the OS browser and the path and secret pickers;  `VIEW_NEEDS_AI` (the app's live Pitwall component for a `needsAi` node) or the plugin's reason with only the app's `VIEW_OPEN_AI_SETTINGS` button (the plugin's `setup` action is never sent, rule 19); `sampleViewDoc` for demos and specs. Graph and diagram layouts are layered (radial for a radial graph, lifelines for a sequence diagram); a scatter chart needs ECharts' `ScatterChart` in a tree-shaken loader | X51 |
 | `/icons`, `/format`, `/prefs`, `/select`, `/testing`, `/shell/feel` | the `pd:` icon set and `outlineIcon`; one formatting API and the middle ellipsis; guarded localStorage; the themed `pd-select`; the DOM test kit (`installTestKit`, helpers, fake ECharts); the native-feel guard | X36, X35, X12, X38 |
 | `/ipc`, `/ipc/testing` | the app IPC kit: `CommandError` (generated from `paddock_commands::CommandError`) with `toCommandError`, `CommandFailure`; `withCallTimeout` for request/reply commands (never jobs, rule 12) and `callTimeoutProblems`; `provideBackend` (Tauri or a lazily imported mock); the mock kit `parseMockOptions` (`?mock=&latency=&fail=&hold=`), `formatMockOptions`, `withMockOptions` | X28 |
 | `/live` | the window side of the live feed: `withLiveFeed` (SignalStore feature over `paddock-live`: `live`, `liveSeq`, `liveLink`, `connectLive`, `resyncLive`), the pure `foldFrame` / `parseFrame`, `LIVE_TRANSPORT` with `tauriLiveTransport` and `MemoryLiveTransport`, the bounded lists `appendBounded`, `appendThrottled`, `upsertBy`, `prependUnique`, and `Debouncer`, `streamCall` / `tauriChannelFactory` (per-call streams) | X29 |
@@ -514,7 +515,8 @@ provideThemes(CONSOLE_THEME),                                                   
 Screenshots for review: [dark](docs/screenshots/shell-demo/theme-dark.png), [light](docs/screenshots/shell-demo/theme-light.png),
 [high contrast dark](docs/screenshots/shell-demo/theme-high-contrast-dark.png),
 [high contrast light](docs/screenshots/shell-demo/theme-high-contrast-light.png),
-[pseudo-locale](docs/screenshots/shell-demo/theme-pseudo-locale-dark.png) (`npm run screenshots`: `e2e/screenshots.spec.ts`, the kit's `captureDocScreens`).
+[pseudo-locale](docs/screenshots/shell-demo/theme-pseudo-locale-dark.png) (`npm run screenshots`: `e2e/screenshots.spec.ts`, the kit's `captureDocScreens`). The pseudo-locale shot translates the shell's own text and
+commands; the demo page's body text is the app's content and stays English.
 
 ## Tokens
 
@@ -531,6 +533,7 @@ densities, high contrast (`data-contrast`) and reduced motion (`data-motion`).
 cd ui
 npm ci
 npm run test:tokens      # WCAG contrast of every pair (standard and high contrast) + colour-vision separation (289 tests)
+npm run lint             # @decryp7/paddock-eslint preset (rules 27 to 39, template a11y) over all projects, 0 findings
 npm test                 # component and helper specs (Vitest via ng test), 100% lines
 npx playwright test      # gallery: axe (both themes), keyboard, native feel, CSP; `npm run screenshots` (the kit's `captureDocScreens`: fixed clock, locale and time zone, 1440x900 at 2x, `hashes.json` for conformance C24) rewrites docs/screenshots
 npm run build            # ng-packagr build to dist/paddock-ui (every entry point)
@@ -582,7 +585,7 @@ Diverging scale now reuses series 1 and 2.
 
 `npm run gallery` serves a demo app at http://localhost:4300 with every component and the chart theme; the toolbar switches
 theme, accent and density, or use `?theme=light&accent=dyno&density=compact`. Playwright screenshots of every component
-(10 sections) in both themes and each of the five accents are in [`docs/screenshots/<theme>/<accent>/<component>.png`](docs/screenshots),
+(14 sections) in both themes and each of the seven accents are in [`docs/screenshots/<theme>/<accent>/<component>.png`](docs/screenshots),
 plus `gallery-*.png` overviews and `density/`.
 
 ![Card, light, Pitcrew](docs/screenshots/light/pitcrew/card.png)

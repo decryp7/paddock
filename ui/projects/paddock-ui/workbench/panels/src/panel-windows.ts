@@ -1,10 +1,9 @@
 import { computed, DestroyRef, inject, Injectable, InjectionToken, Injector, signal, type Signal } from '@angular/core';
 import { SHELL_PORTS, ShellContextHost } from '@decryp7/paddock-ui/shell';
-import { WORKBENCH_PORTS, WorkbenchRegistry, type PanelWindowsPort, type PopOutPlacement } from '@decryp7/paddock-ui/workbench';
+import { panelTitle, WORKBENCH_PORTS, WorkbenchRegistry, type PanelWindowsPort, type PopOutPlacement } from '@decryp7/paddock-ui/workbench';
 import { PANEL_LIMITS, type GhostRequest, type PanelsEvent, type PopOutInfo } from '../generated/panels';
 import { GhostSession, type DragOutPreview } from './ghost-session';
 import { PANELS_IO } from './io';
-import { PopoutState } from './popout-state';
 import { syncedValues, UiSync, type SyncedValue } from './ui-sync';
 
 /** The key of the host's name among the synced values (display scope: every guest window shows it). */
@@ -115,6 +114,7 @@ export class PanelWindows implements PanelWindowsPort {
     await this.start();
     const view = this.registry.findView(panel);
     if (!view || !this.registry.isViewOffered(panel)) return false;
+    // after-await: `start()` loads the list of open windows; this must see it.
     if (this.popped().has(panel)) {
       this.focus(panel);
       return true;
@@ -128,7 +128,7 @@ export class PanelWindows implements PanelWindowsPort {
     try {
       const info = await this.io.popOut({
         panel,
-        title: view.title.text,
+        title: panelTitle(view, panel),
         ...(placement ? { bounds: { x: placement.x, y: placement.y, width: placement.width, height: placement.height, ...(placement.scale ? { scale: placement.scale } : {}) } } : {}),
       });
       this.popped.update((m) => new Map(m).set(panel, info));

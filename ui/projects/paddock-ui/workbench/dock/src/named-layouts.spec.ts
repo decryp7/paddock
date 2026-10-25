@@ -1,6 +1,7 @@
 import { EMPTY_EXTRAS, SavedLayout, toEnvelope } from './layout-store';
 import {
   cleanLayoutName,
+  layoutNameProblem,
   MAX_LAYOUT_NAME,
   MAX_NAMED_LAYOUTS,
   moveLayout,
@@ -36,6 +37,22 @@ describe('cleanLayoutName', () => {
   it('is null when nothing is left', () => {
     expect(cleanLayoutName('')).toBeNull();
     expect(cleanLayoutName(' \n\t ')).toBeNull();
+  });
+});
+
+describe('layoutNameProblem', () => {
+  it('refuses an empty name, one that is too long as typed, and one another layout has (any case)', () => {
+    expect(layoutNameProblem('', [])).toBe('empty');
+    expect(layoutNameProblem(' \n\u0000 ', [])).toBe('empty');
+    expect(layoutNameProblem('x'.repeat(MAX_LAYOUT_NAME + 1), [])).toBe('too-long');
+    expect(layoutNameProblem('x'.repeat(MAX_LAYOUT_NAME), [])).toBeNull();
+    expect(layoutNameProblem('  Work ', ['work'])).toBe('duplicate');
+    expect(layoutNameProblem('Play', ['work'])).toBeNull();
+  });
+
+  it('lets a layout being renamed keep (or change the case of) its own name', () => {
+    expect(layoutNameProblem('Work', ['Work', 'Play'], 'Work')).toBeNull();
+    expect(layoutNameProblem('Play', ['Work', 'Play'], 'Work')).toBe('duplicate');
   });
 });
 
@@ -216,6 +233,18 @@ describe('NamedLayouts', () => {
     expect(layouts.rename('c', ' ')).toBe(false);
     expect(layouts.rename('c', 'c')).toBe(false);
     expect(layouts.rename('zzz', 'q')).toBe(false);
+  });
+
+  it('reads the stored list again when another window changed it, and keeps the list when the store is away', async () => {
+    const { layouts, store } = await make([nl('a')]);
+    await store.save(KEY, serializeNamedLayouts([nl('x'), nl('y')]));
+    await layouts.reload();
+    expect(names(layouts.list())).toEqual(['x', 'y']);
+    const broken: DockLayoutStore = { load: () => Promise.reject(new Error('away')), save: () => Promise.resolve() };
+    const kept = new NamedLayouts(broken, KEY);
+    kept.list.set([nl('keep')]);
+    await kept.reload();
+    expect(names(kept.list())).toEqual(['keep']);
   });
 
   it('moves, removes, finds and indexes layouts', async () => {

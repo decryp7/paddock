@@ -16,6 +16,11 @@ import {
 export interface ShellNotice {
   readonly level: 'info' | 'success' | 'warning' | 'error';
   readonly message: string;
+  /**
+   * A short form for a small window, where a toast is one line ("Layout fitted"); the full `message` stays in Notifications.
+   * Kept for a notice this window keeps itself (one with an `action`); the engine's messages show their title.
+   */
+  readonly short?: string;
   readonly kind?: string;
   /**
    * One button for a window-local follow-up (Undo a layout fit, Retry a pop-out): the notice stays in this window (the

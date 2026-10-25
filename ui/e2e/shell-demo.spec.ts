@@ -23,6 +23,29 @@ test('no horizontal scroll at 320 px (rule 18)', async ({ app, page }) => {
   await expectNoHorizontalScroll(page);
 });
 
+test('the menu bar is one line at 320 px and the title bar clips nothing (screenshot review P1-1)', async ({ app, page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await app.frame.open();
+  const items = app.menus.bar.getByRole('menuitem');
+  const tops = await items.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+  expect(new Set(tops).size, `the menu items sit on lines at ${tops.join(', ')}`).toBe(1);
+  const bar = await app.frame.titleBar.boundingBox();
+  const last = await items.last().boundingBox();
+  expect(last && bar && last.y >= bar.y && last.y + last.height <= bar.y + bar.height, 'every menu item is inside the title bar').toBe(true);
+  expect(last && last.x + last.width, 'the last menu is not cut at the window edge').toBeLessThanOrEqual(320);
+});
+
+test('runner names end in an ellipsis with the full value as the tooltip at 320 px (rule 18; screenshot review P1-2)', async ({ app, page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await app.frame.open('#/runners');
+  const name = page.locator('sd-runners-page .name').first();
+  await expect(name).toBeVisible();
+  // The runner column has the room (State and the counts give way), so no name is cut at all.
+  await expect.poll(() => page.locator('sd-runners-page .name').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth).length), { message: 'names cut at 320 px' }).toBe(0);
+  expect(await name.evaluate((e) => getComputedStyle(e).textOverflow)).toBe('ellipsis');
+  await expect(name).toHaveAttribute('title', /\S/);
+});
+
 test.describe('contributions (plan S2)', () => {
   test('a contributed command runs with the lazily loaded app context', async ({ app, page }) => {
     await page.goto('/');
@@ -97,7 +120,9 @@ test.describe('jobs (plan S9)', () => {
     // Finding files (2 s) and reading (5 s) pass; writing the index cannot be interrupted.
     await page.clock.runFor(7_100);
     await expect(job).toContainText('Writing the index');
-    await expect(job.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    // Cancel works in every phase (rule 11): this step stops when it ends, and the card says so.
+    await expect(job.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    await expect(job).toContainText('Cancel takes effect when this step ends');
     await page.clock.runFor(1_000);
     await expect(job).toContainText('Done');
     await expect(app.notifications.toasts).toContainText('Importing logs: done');
@@ -299,6 +324,38 @@ test.describe('notifications and service health (plan S4)', () => {
     await page.getByRole('button', { name: 'Break the demo engine' }).click();
     await expect(chip).toHaveText('2 services need attention');
     await expect(app.notifications.toastItems).toHaveCount(0);
+  });
+
+  test('the status bar spinner of a running job is 14 px with a 2 px stroke', async ({ app, page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Start sample job' }).click();
+    const dot = app.statusBar.jobs.locator('.pd-dot');
+    await expect(app.statusBar.jobs).toContainText('running');
+    const style = await dot.evaluate((el) => {
+      const c = getComputedStyle(el);
+      return { width: c.width, height: c.height, stroke: c.borderTopWidth };
+    });
+    expect(style).toEqual({ width: '14px', height: '14px', stroke: '2px' });
+  });
+
+  test('a toast is at most 360 px wide, and in a small window one line above the status bar', async ({ app, page }) => {
+    await page.clock.install();
+    await page.setViewportSize({ width: 700, height: 700 });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Notify three times' }).click();
+    const toast = app.notifications.toastItems;
+    await expect(toast).toHaveCount(1);
+    expect((await toast.boundingBox())?.width).toBeLessThanOrEqual(360);
+    await page.setViewportSize({ width: 400, height: 700 });
+    const box = (await toast.boundingBox())!;
+    expect(box.width).toBeLessThanOrEqual(360);
+    // One line of message, the first action and the close: far from a fifth of the window, and clear of the status bar.
+    expect(box.height).toBeLessThan(0.1 * 700);
+    const bar = (await page.getByRole('contentinfo', { name: 'Status bar' }).boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(bar.y);
+    await expect(toast.getByTestId('notification-dismiss')).toBeVisible();
+    await expect(toast.locator('.pd-body')).toBeHidden();
+    await expectNoHorizontalScroll(page);
   });
 
   test('the same notice three times is one toast with a count, which times out and stays in the centre', async ({ app, page }) => {

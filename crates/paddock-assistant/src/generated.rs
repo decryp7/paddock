@@ -36,6 +36,8 @@ fn types() -> String {
         EndReason::decl(),
         ErrorKind::decl(),
         ContextItem::decl(),
+        ToolOutcome::decl(),
+        StoredError::decl(),
         StoredMessage::decl(),
         Conversation::decl(),
         ConversationSummary::decl(),
@@ -114,6 +116,7 @@ fn fixtures() -> String {
             name: "find_events".into(),
             summary: "build failed".into(),
             write: false,
+            destructive: false,
         },
         AssistantEvent::ToolFinished {
             call_id: "call_1".into(),
@@ -121,6 +124,7 @@ fn fixtures() -> String {
             ok: true,
             summary: "3 events found".into(),
             data: Some(json!({"ids": [4, 7, 9]})),
+            outcome: None,
         },
         AssistantEvent::Delta {
             text: "The build failed at event 7".into(),

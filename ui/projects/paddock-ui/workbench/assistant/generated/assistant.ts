@@ -46,6 +46,18 @@ label: string,
  */
 text: string, };
 
+export type ToolOutcome = "declined" | "stopped";
+
+export type StoredError = { 
+/**
+ * One sentence for the user.
+ */
+message: string, 
+/**
+ * For a failure whose cause is the AI engine: the state (the shared component renders it).
+ */
+needsAi?: AiState, };
+
 export type StoredMessage = { 
 /**
  * Who said it.
@@ -79,6 +91,30 @@ summary?: string,
  * For a tool message: the structured result for the app's renderer.
  */
 data?: unknown, 
+/**
+ * For a tool message: the call as the user read it on its card.
+ */
+callSummary?: string, 
+/**
+ * For a tool message: the tool changes things.
+ */
+write?: boolean, 
+/**
+ * For a tool message: what it changes cannot be undone.
+ */
+destructive?: boolean, 
+/**
+ * For a tool message: the user declined the call or stopped the turn (not a failure of the tool).
+ */
+outcome?: ToolOutcome, 
+/**
+ * For the last assistant message of a turn that failed: why.
+ */
+error?: StoredError, 
+/**
+ * For the last assistant message of a turn a budget ended: what happened.
+ */
+endMessage?: string, 
 /**
  * For a user message: what was attached.
  */
@@ -144,7 +180,11 @@ description: string,
 /**
  * It changes things (needs the user's approval per call).
  */
-write: boolean, };
+write: boolean, 
+/**
+ * What it changes cannot be undone (implies `write`): its approval is a danger choice.
+ */
+destructive: boolean, };
 
 export type AssistantInfo = { 
 /**
@@ -208,7 +248,11 @@ summary: string,
 /**
  * The tool changes things.
  */
-write: boolean, } | { "type": "approvalNeeded", 
+write: boolean, 
+/**
+ * What it changes cannot be undone (implies `write`).
+ */
+destructive: boolean, } | { "type": "approvalNeeded", 
 /**
  * The call.
  */
@@ -221,6 +265,10 @@ name: string,
  * What it would do.
  */
 summary: string, 
+/**
+ * What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
+ */
+destructive: boolean, 
 /**
  * The arguments.
  */
@@ -244,7 +292,11 @@ summary: string,
 /**
  * The structured result for the app's renderer of this tool.
  */
-data?: unknown, } | { "type": "notice", 
+data?: unknown, 
+/**
+ * Set when the user's choice ended the call: they declined it, or stopped the turn while it waited.
+ */
+outcome?: ToolOutcome, } | { "type": "notice", 
 /**
  * The sentence.
  */
@@ -310,7 +362,11 @@ summary: string,
 /**
  * The tool changes things.
  */
-write: boolean, } | { "type": "approvalNeeded", 
+write: boolean, 
+/**
+ * What it changes cannot be undone (implies `write`).
+ */
+destructive: boolean, } | { "type": "approvalNeeded", 
 /**
  * The call.
  */
@@ -323,6 +379,10 @@ name: string,
  * What it would do.
  */
 summary: string, 
+/**
+ * What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
+ */
+destructive: boolean, 
 /**
  * The arguments.
  */
@@ -346,7 +406,11 @@ summary: string,
 /**
  * The structured result for the app's renderer of this tool.
  */
-data?: unknown, } | { "type": "notice", 
+data?: unknown, 
+/**
+ * Set when the user's choice ended the call: they declined it, or stopped the turn while it waited.
+ */
+outcome?: ToolOutcome, } | { "type": "notice", 
 /**
  * The sentence.
  */

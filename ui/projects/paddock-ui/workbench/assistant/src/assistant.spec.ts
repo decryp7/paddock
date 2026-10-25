@@ -11,6 +11,7 @@ import { AssistantBackend, MemoryAssistantBackend, type MemoryAssistantOptions }
 import type { ToolCard } from './chat-model';
 import { provideAssistantRenderers, type AssistantCitationHandler } from './tool-cards';
 import type { CitationOpened } from './rich-text';
+import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
 @Component({ selector: 'pd-test-card', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p data-testid="custom-card">{{ card().name }} drawn by the app</p>` })
 class CustomCard {
@@ -106,6 +107,16 @@ describe('PdAssistant', () => {
     expect(backend.sent[0]?.context).toEqual([]);
   });
 
+  it('labels the context chip the same way in the composer and in the sent question (P3-5)', async () => {
+    const { r } = await open();
+    const inComposer = r.one('[data-testid=assistant-chip] .chip-label').textContent?.trim();
+    r.one('[data-testid=assistant-send]');
+    const box = await type(r, 'q');
+    await press(r, box, { key: 'Enter' });
+    for (let i = 0; i < 6; i++) await settle(r.fixture);
+    expect(r.one('[data-testid=assistant-user] .chip').textContent?.trim()).toBe(inComposer);
+  });
+
   it('stops a running answer with Escape or the Stop button and says so', async () => {
     const { r, backend } = await open({ reply: () => 'one two three' });
     backend.hold();
@@ -197,6 +208,16 @@ describe('PdAssistant', () => {
     await settle(r.fixture);
     expect(r.one('[data-testid=assistant-list]').textContent).toContain('No conversations yet.');
     expect(text(r, 'assistant-undo')).toContain('Deleted "Why did the build fail?"');
+    expect(text(r, 'assistant-title')).toBe('New conversation');
+    expect(text(r, 'assistant-turn')).toBe('');
+    r.one('[data-testid=assistant-undo-button]').click();
+    for (let i = 0; i < 4; i++) await settle(r.fixture);
+    expect(text(r, 'assistant-title')).toBe('Why did the build fail?');
+    expect(text(r, 'assistant-user')).toContain('Why did the build fail?');
+    r.one('[data-testid=assistant-list-toggle]').click();
+    await settle(r.fixture);
+    r.one('[data-testid=assistant-delete]').click();
+    await settle(r.fixture);
     await vi.advanceTimersByTimeAsync(8000);
     vi.useRealTimers();
     for (let i = 0; i < 4; i++) await settle(r.fixture);
@@ -343,6 +364,56 @@ describe('PdAssistant', () => {
       }
     });
 
+    it('follows the user’s own question to the end even when they had scrolled up (review 2 shot 13)', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      const log = r.one('[data-testid=assistant-log]');
+      let top = 0;
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 });
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
+      Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => void (top = v) });
+      top = 100;
+      log.dispatchEvent(new Event('scroll'));
+      await press(r, await type(r, 'next question'), { key: 'Enter' });
+      backend.emit('m1', { type: 'delta', text: 'answer' });
+      await settle(r.fixture);
+      expect(top).toBe(1000);
+      expect(r.all('[data-testid=assistant-jump]')).toHaveLength(0);
+    });
+
+    it('keeps the latest item in view when the log shrinks under a user at the bottom, such as an approval growing (review 4 P3-1)', async () => {
+      const fired: ResizeObserverCallback[] = [];
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(cb: ResizeObserverCallback) {
+            fired.push(cb);
+          }
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      const { r } = await open();
+      await settle(r.fixture);
+      const log = r.one('[data-testid=assistant-log]');
+      let top = 800;
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 });
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
+      Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => void (top = v) });
+      log.dispatchEvent(new Event('scroll'));
+      // The approval's Details open: the log is shorter, its scroll position is not.
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 120 });
+      expect(fired.length).toBeGreaterThan(0);
+      for (const cb of fired) cb([], {} as ResizeObserver);
+      expect(top).toBe(1000);
+      // A user who scrolled up to read is left where they are.
+      top = 300;
+      log.dispatchEvent(new Event('scroll'));
+      for (const cb of fired) cb([], {} as ResizeObserver);
+      expect(top).toBe(300);
+    });
+
     it('follows the streaming text only while the user is at the bottom, else offers Jump to latest', async () => {
       const { r, backend } = await open();
       backend.hold();
@@ -411,23 +482,191 @@ describe('PdAssistant', () => {
       r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
       await press(r, await type(r, '/write'), { key: 'Enter' });
       expect(text(r, 'assistant-approval-tool')).toBe('erase');
-      expect(text(r, 'assistant-approval-args')).toBe('None');
+      expect(text(r, 'assistant-approval-args')).toBe('No arguments');
       expect(r.one('[data-testid=assistant-allow]').classList.contains('pd-btn--sm')).toBe(false);
       expect(r.one('[data-testid=assistant-decline]').classList.contains('pd-btn--sm')).toBe(false);
-      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toContain('"path": "/x"');
-      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args').endsWith('…')).toBe(true);
-      backend.emit('m1', { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 's', input: undefined });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: undefined });
       await settle(r.fixture);
-      expect(text(r, 'assistant-approval-args')).toBe('None');
+      expect(text(r, 'assistant-approval-args')).toBe('No arguments');
     });
 
     it('draws a chip icon only when the glyph exists', async () => {
       const { r } = await open();
       expect(r.element.querySelectorAll('[data-testid=assistant-chip] pd-glyph')).toHaveLength(2);
+    });
+
+    it('empties the box when typing and Enter happen in one task (P2-I)', async () => {
+      const { r } = await open();
+      const box = r.one<HTMLTextAreaElement>('[data-testid=assistant-input]');
+      box.value = 'hello';
+      box.dispatchEvent(new Event('input'));
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(box.value).toBe('');
+      expect(text(r, 'assistant-user')).toContain('hello');
+    });
+
+    it('shows a progress cue after the streaming text only while the turn runs (P2-I)', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      await press(r, await type(r, 'q'), { key: 'Enter' });
+      backend.emit('m1', { type: 'delta', text: 'partial' });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-streaming]')).toHaveLength(1);
+      backend.emit('m1', { type: 'done', text: 'partial', usage: { inputTokens: 1, outputTokens: 1 }, end: 'answered' });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-streaming]')).toHaveLength(0);
+    });
+
+    it('makes Allow neutral and Decline the secondary on the right for a write that can be undone, and names the tool (P2-C)', async () => {
+      const { r, backend } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
+      await settle(r.fixture);
+      const allow = r.one('[data-testid=assistant-allow]');
+      const decline = r.one('[data-testid=assistant-decline]');
+      expect(allow.classList.contains('pd-btn--primary')).toBe(false);
+      expect(allow.classList.contains('pd-btn--danger')).toBe(false);
+      expect(allow.textContent?.trim()).toBe('Allow erase');
+      expect(decline.classList.contains('pd-btn--ghost')).toBe(true);
+      expect(allow.compareDocumentPosition(decline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(text(r, 'assistant-approval-consequence')).toBe('Erase everything');
+      expect(r.one('[data-testid=assistant-approval]').classList.contains('danger')).toBe(false);
+      expect(r.all('[data-testid=assistant-approval-final]')).toHaveLength(0);
+      expect(r.element.querySelectorAll('[data-testid=assistant-approval] .pd-btn--primary')).toHaveLength(0);
+    });
+
+    it('makes a destructive approval a danger choice: Decline is the focused default, Allow a danger button, never the primary (P2-C)', async () => {
+      const { r } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      await settle(r.fixture);
+      const section = r.one('[data-testid=assistant-approval]');
+      const allow = r.one('[data-testid=assistant-allow]');
+      const decline = r.one('[data-testid=assistant-decline]');
+      expect(section.classList.contains('danger')).toBe(true);
+      expect(section.getAttribute('aria-describedby')).toBe('pd-assistant-approval-final');
+      expect(text(r, 'assistant-approval-final')).toBe('This cannot be undone.');
+      // Regression (review 3 sheet): a whitespace-only node between the label and the action is dropped by the compiler.
+      expect(r.one('#pd-assistant-approval').textContent).toBe('The assistant wants to: Erase everything');
+      expect(allow.classList.contains('pd-btn--danger')).toBe(true);
+      expect(allow.classList.contains('pd-btn--primary')).toBe(false);
+      expect(allow.classList.contains('pd-btn--danger-fill')).toBe(false);
+      expect(decline.classList.contains('pd-btn--ghost')).toBe(false);
+      expect(document.activeElement).toBe(decline);
+      expect(r.element.querySelectorAll('[data-testid=assistant-approval] .pd-btn--primary')).toHaveLength(0);
+    });
+
+    it('draws a declined tool as a neutral card with a muted Declined, not as a failure (P2-G)', async () => {
+      const { r } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      r.one('[data-testid=assistant-decline]').click();
+      for (let i = 0; i < 8; i++) await settle(r.fixture);
+      const card = r.one('[data-testid=assistant-tool-card]');
+      expect(card.getAttribute('data-state')).toBe('declined');
+      expect(text(r, 'assistant-tool-result')).toBe('Declined');
+      expect(r.one('[data-testid=assistant-tool-result]').classList.contains('muted')).toBe(true);
+    });
+
+    it('draws a tool the user stopped as a neutral card with a muted Stopped, not as a failure (P2-3)', async () => {
+      const { r } = await open();
+      await press(r, await type(r, '/tool-slow find'), { key: 'Enter' });
+      for (let i = 0; i < 8; i++) await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-tool-card]').getAttribute('data-state')).toBe('running');
+      r.one('[data-testid=assistant-stop]').click();
+      for (let i = 0; i < 8; i++) await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-tool-card]').getAttribute('data-state')).toBe('stopped');
+      expect(text(r, 'assistant-tool-result')).toBe('Stopped');
+      expect(r.one('[data-testid=assistant-tool-result]').classList.contains('muted')).toBe(true);
+    });
+
+    it('still draws a tool that failed for real as a failure with its reason (P2-G)', async () => {
+      const { r } = await open();
+      await press(r, await type(r, '/tool-fail'), { key: 'Enter' });
+      for (let i = 0; i < 8; i++) await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-tool-card]').getAttribute('data-state')).toBe('failed');
+      expect(text(r, 'assistant-tool-result')).toBe('The index is locked by another process.');
+      assertStatusGlyphs(r.one('[data-testid=assistant-tool-card]'));
+    });
+
+    it('designs a failed turn: icon, plain words, likely cause, Retry that resends and details, in the answer column (P2-H)', async () => {
+      const { r, backend } = await open();
+      await press(r, await type(r, '/fail Explain it'), { key: 'Enter' });
+      for (let i = 0; i < 40; i++) await settle(r.fixture);
+      const error = r.one('[data-testid=assistant-error]');
+      expect(error.closest('[data-testid=assistant-answer]')).toBeTruthy();
+      expect(error.querySelector('pd-glyph')).toBeTruthy();
+      expect(error.textContent).toContain('The answer did not finish.');
+      expect(text(r, 'assistant-error-cause')).toContain('Likely cause');
+      expect(r.one('[data-testid=assistant-answer]').textContent).toContain('Let me explain how the request');
+      expect(r.all('[data-testid=assistant-error-details]')).toHaveLength(0);
+      r.one('[data-testid=assistant-error-details-toggle]').click();
+      await settle(r.fixture);
+      expect(text(r, 'assistant-error-details')).toBe('The model stopped answering.');
+      r.one('[data-testid=assistant-error-retry]').click();
+      for (let i = 0; i < 40; i++) await settle(r.fixture);
+      expect(backend.sent.map((s) => s.text)).toEqual(['/fail Explain it', '/fail Explain it']);
+      expect(r.all('[data-testid=assistant-turn]')).toHaveLength(2);
+      // Only the newest failed turn can be retried.
+      expect(r.all('[data-testid=assistant-error-retry]')).toHaveLength(1);
+      assertStatusGlyphs(r.one('[data-testid=assistant-error]'));
+    });
+
+    it('titles a conversation without its leading slash command, in sentence case (P3-11)', async () => {
+      const { r } = await open({
+        conversations: [{ ...FIXTURE_CONVERSATION, title: '/slow explain the request pipeline' }],
+      });
+      r.one('[data-testid=assistant-list-toggle]').click();
+      await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-open]').textContent?.trim()).toBe('Explain the request pipeline');
+      r.one('[data-testid=assistant-open]').click();
+      for (let i = 0; i < 4; i++) await settle(r.fixture);
+      expect(text(r, 'assistant-title')).toBe('Explain the request pipeline');
+      expect(r.one('[data-testid=assistant-title]').getAttribute('title')).toBe('Explain the request pipeline');
+    });
+
+    it('dims the context chip together with the inert composer (P3-12)', async () => {
+      const pitwall = new MemoryPitwallBackend({ state: { kind: 'notRunning' }, app: 'Demo' });
+      const { r } = await open({ pitwall });
+      const chip = r.one<HTMLButtonElement>('[data-testid=assistant-chip]');
+      expect(chip.disabled).toBe(true);
+      expect(chip.classList.contains('inert')).toBe(true);
+      pitwall.setState({ kind: 'ready', model: 'q', vision: false, contextTokens: 8192 });
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(r.one('[data-testid=assistant-chip]').classList.contains('inert')).toBe(false);
+    });
+
+    it('draws the Details disclosure with a 14 px chevron glyph that rotates when open (P3-13)', async () => {
+      const { r } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      const glyph = r.one('[data-testid=assistant-approval-details] summary pd-glyph');
+      expect(glyph.getAttribute('name') ?? glyph.outerHTML).toContain('chevron-right');
+      expect(glyph.outerHTML).toMatch(/14/);
+      expect(r.element.querySelector('[data-testid=assistant-approval-details]')?.hasAttribute('open')).toBe(false);
+    });
+
+    it('moves the focus to Undo after Delete (deviation 1)', async () => {
+      const { r } = await open({ conversations: [FIXTURE_CONVERSATION] });
+      r.one('[data-testid=assistant-list-toggle]').click();
+      await settle(r.fixture);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const del = r.one<HTMLButtonElement>('[data-testid=assistant-delete]');
+      del.focus();
+      del.click();
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(document.activeElement).toBe(r.one('[data-testid=assistant-undo-button]'));
     });
   });
 });

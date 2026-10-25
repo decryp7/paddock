@@ -2199,10 +2199,13 @@
         <source>In progress</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.not-cancellable" datatype="html">
-        <source>This step cannot be stopped</source>
+        <source>This step cannot be stopped; Cancel takes effect when it ends.</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.of" datatype="html">
         <source><x id="done"/> of <x id="total"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.retry" datatype="html">
+        <source>Retry</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.so-far" datatype="html">
         <source><x id="done"/> so far</source>
@@ -2212,6 +2215,9 @@
       </trans-unit>
       <trans-unit id="pd.ui.job.starting" datatype="html">
         <source>Starting</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.job.stops-after" datatype="html">
+        <source><x id="reason"/>: Cancel takes effect when this step ends.</source>
       </trans-unit>
       <trans-unit id="pd.ui.job.user-cancelled" datatype="html">
         <source>Stopped at your request.</source>
@@ -2405,6 +2411,9 @@
       <trans-unit id="pd.view.error" datatype="html">
         <source>This view cannot be shown</source>
       </trans-unit>
+      <trans-unit id="pd.view.error-plugin" datatype="html">
+        <source><x id="plugin"/> sent a view this app cannot show</source>
+      </trans-unit>
       <trans-unit id="pd.view.form.choose-file" datatype="html">
         <source>Choose a file…</source>
       </trans-unit>
@@ -2449,6 +2458,9 @@
       </trans-unit>
       <trans-unit id="pd.view.host.secret" datatype="html">
         <source>choose a secret</source>
+      </trans-unit>
+      <trans-unit id="pd.view.issue.align" datatype="html">
+        <source>&quot;start&quot; or &quot;end&quot; was expected</source>
       </trans-unit>
       <trans-unit id="pd.view.issue.args" datatype="html">
         <source>arguments larger than <x id="max"/> bytes</source>
@@ -2573,11 +2585,23 @@
       <trans-unit id="pd.view.loading" datatype="html">
         <source>Loading…</source>
       </trans-unit>
+      <trans-unit id="pd.view.logs" datatype="html">
+        <source>Open logs</source>
+      </trans-unit>
       <trans-unit id="pd.view.matrix.label" datatype="html">
         <source>Matrix</source>
       </trans-unit>
       <trans-unit id="pd.view.needs-ai" datatype="html">
         <source>This needs local AI, which is not ready.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.needs-ai.elsewhere" datatype="html">
+        <source>Set up local AI in this app's settings.</source>
+      </trans-unit>
+      <trans-unit id="pd.view.needs-ai.settings" datatype="html">
+        <source>Open AI settings</source>
+      </trans-unit>
+      <trans-unit id="pd.view.needs-ai.title" datatype="html">
+        <source><x id="feature"/> needs local AI</source>
       </trans-unit>
       <trans-unit id="pd.view.open-failed" datatype="html">
         <source>The page could not be opened.</source>
@@ -2605,6 +2629,9 @@
       </trans-unit>
       <trans-unit id="pd.view.progress" datatype="html">
         <source>Progress</source>
+      </trans-unit>
+      <trans-unit id="pd.view.reload" datatype="html">
+        <source>Reload</source>
       </trans-unit>
       <trans-unit id="pd.view.retry" datatype="html">
         <source>Retry</source>
@@ -2696,8 +2723,14 @@
       <trans-unit id="pd.view.unknown" datatype="html">
         <source>Update the app to view this</source>
       </trans-unit>
+      <trans-unit id="pd.view.working" datatype="html">
+        <source>Working…</source>
+      </trans-unit>
       <trans-unit id="pd.view.writes" datatype="html">
         <source>Changes data</source>
+      </trans-unit>
+      <trans-unit id="pd.view.writes.short" datatype="html">
+        <source>Edits</source>
       </trans-unit>
       <trans-unit id="pd.wb.activity.empty" datatype="html">
         <source>Nothing here</source>
@@ -2732,8 +2765,14 @@
       <trans-unit id="pd.wb.assistant.approve.allow" datatype="html">
         <source>Allow</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.allow-tool" datatype="html">
+        <source>Allow <x id="tool"/></source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.arguments" datatype="html">
         <source>Arguments</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.cannot-undo" datatype="html">
+        <source>This cannot be undone.</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.decline" datatype="html">
         <source>Decline</source>
@@ -2742,7 +2781,7 @@
         <source>Details</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.no-arguments" datatype="html">
-        <source>None</source>
+        <source>No arguments</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
         <source>Tool</source>
@@ -2861,6 +2900,9 @@
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.declined" datatype="html">
+        <source>Declined</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.done" datatype="html">
         <source>Done</source>
       </trans-unit>
@@ -2870,8 +2912,26 @@
       <trans-unit id="pd.wb.assistant.tool.running" datatype="html">
         <source>Working…</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.stopped" datatype="html">
+        <source>Stopped</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
         <source>(unreadable call)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.cause" datatype="html">
+        <source>Likely cause: the local model stopped answering. Check that Pitwall is running, then try again.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.hide" datatype="html">
+        <source>Hide details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.retry" datatype="html">
+        <source>Retry</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.show" datatype="html">
+        <source>Show details</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.turn-failed.title" datatype="html">
+        <source>The answer did not finish.</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.undo" datatype="html">
         <source>Undo</source>
@@ -2924,11 +2984,14 @@
       <trans-unit id="pd.wb.dock.cmd.layout-delete" datatype="html">
         <source>Delete saved layout</source>
       </trans-unit>
+      <trans-unit id="pd.wb.dock.cmd.layout-manage" datatype="html">
+        <source>Manage layouts…</source>
+      </trans-unit>
       <trans-unit id="pd.wb.dock.cmd.layout-reset" datatype="html">
         <source>Reset perspective</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.cmd.layout-save" datatype="html">
-        <source>Save current as perspective</source>
+        <source>Save layout…</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.cmd.panel-menu" datatype="html">
         <source>Panel menu</source>
@@ -2993,8 +3056,77 @@
       <trans-unit id="pd.wb.dock.layout.fit" datatype="html">
         <source>Layout adjusted to fit this window</source>
       </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.fit.short" datatype="html">
+        <source>Layout fitted</source>
+      </trans-unit>
       <trans-unit id="pd.wb.dock.layout.fit.undo" datatype="html">
         <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-apply" datatype="html">
+        <source>Apply</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-apply-for" datatype="html">
+        <source>Apply layout <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-close" datatype="html">
+        <source>Close</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-delete" datatype="html">
+        <source>Delete</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-delete-for" datatype="html">
+        <source>Delete layout <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-deleted" datatype="html">
+        <source>Deleted layout <x id="name"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-empty" datatype="html">
+        <source>No saved layouts yet. Save the current arrangement from the Window menu.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-loading" datatype="html">
+        <source>Loading layouts…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-rename" datatype="html">
+        <source>Rename</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-rename-for" datatype="html">
+        <source>Rename layout <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-rename-label" datatype="html">
+        <source>New name</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-title" datatype="html">
+        <source>Manage layouts</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.manage-undo" datatype="html">
+        <source>Undo</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.name-duplicate" datatype="html">
+        <source>A layout with this name exists. Pick another name.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.name-empty" datatype="html">
+        <source>Give the layout a name.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.name-too-long" datatype="html">
+        <source>Use at most <x id="max"/> characters.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-cancel" datatype="html">
+        <source>Cancel</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-hint" datatype="html">
+        <source>Saves the windows and panels as they are now.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-label" datatype="html">
+        <source>Layout name</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-ok" datatype="html">
+        <source>Save</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.layout.save-title" datatype="html">
+        <source>Save layout</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.notice.action" datatype="html">
         <source>Undo</source>
@@ -3103,6 +3235,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.dock.popout.failed" datatype="html">
         <source>The panel could not be moved to its own window.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.dock.popout.failed.short" datatype="html">
+        <source>Pop-out failed</source>
       </trans-unit>
       <trans-unit id="pd.wb.dock.popout.retry" datatype="html">
         <source>Retry</source>

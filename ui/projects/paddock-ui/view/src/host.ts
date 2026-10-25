@@ -1,4 +1,4 @@
-import { InjectionToken } from '@angular/core';
+import { InjectionToken, type Type } from '@angular/core';
 import type { ActionRef, GrantRef, SecretRef } from '../generated/view';
 
 /** What the host is asked when an action carries a `confirm` question. */
@@ -27,22 +27,31 @@ export interface ViewPickRequest {
   readonly folder?: boolean;
 }
 
+/** What a picker resolves: the engine's reference (never the path or the secret) and the name the user sees for it. */
+export interface ViewPicked<T> {
+  /** The `GrantRef` or `SecretRef` the form sends. */
+  readonly value: T;
+  /** What the form shows for the choice: a path (the view cuts it in the middle and shows the full value as a tooltip) or a secret's name. */
+  readonly name: string;
+}
+
 /**
  * What a view needs from the app around it. The view only draws and reports; everything that asks the user or leaves the page is the
  * host's, so it can be an OS window (rule 17), a native picker or a grant dialog:
  *
  * - `confirm`: asks the action's question (a modal confirmation window) and resolves `true` to go on.
  * - `openInBrowser`: confirms the address with the user and opens it in the OS browser; the view never opens it itself.
- * - `pickPath`: the host's file or folder dialog; resolves a `GrantRef` (the engine's grant for the chosen path), or `null` when cancelled.
- * - `pickSecret`: chooses a stored secret; resolves a `SecretRef`, never the secret itself, or `null`.
+ * - `pickPath`: the host's file or folder dialog; resolves the `GrantRef` (the engine's grant for the chosen path) with the path to
+ *   show, or `null` when cancelled.
+ * - `pickSecret`: chooses a stored secret; resolves the `SecretRef`, never the secret itself, with the secret's name, or `null`.
  *
  * A method may reject with an `Error`: the view shows its message inline.
  */
 export interface ViewHost {
   confirm(request: ViewConfirmRequest): Promise<boolean>;
   openInBrowser(request: ViewOpenRequest): Promise<void>;
-  pickPath(request: ViewPickRequest): Promise<GrantRef | null>;
-  pickSecret(request: ViewPickRequest): Promise<SecretRef | null>;
+  pickPath(request: ViewPickRequest): Promise<ViewPicked<GrantRef> | null>;
+  pickSecret(request: ViewPickRequest): Promise<ViewPicked<SecretRef> | null>;
 }
 
 const unavailable = (what: () => string) => (): Promise<never> =>
@@ -58,3 +67,18 @@ export const NO_VIEW_HOST: ViewHost = {
 
 /** The app's {@link ViewHost}: `{ provide: VIEW_HOST, useValue: myHost }` in the window that shows views. */
 export const VIEW_HOST = new InjectionToken<ViewHost>('PADDOCK_VIEW_HOST', { providedIn: 'root', factory: () => NO_VIEW_HOST });
+
+/**
+ * The app's own "needs local AI" component, when it has the window's Pitwall state (a wrapper over `<pd-needs-ai>` with a `feature`
+ * input, which handles its own `(step)`). A `needsAi` node draws it instead of the plugin's reason, so the repair is the
+ * app's (rule 19) and the state is the one the rest of the window shows. `null` (the default): the node draws the plugin's reason.
+ */
+export const VIEW_NEEDS_AI = new InjectionToken<Type<unknown> | null>('PADDOCK_VIEW_NEEDS_AI', { providedIn: 'root', factory: () => null });
+
+/**
+ * The app's "Open AI settings" (rule 19): what the plugin-less fallback card of a `needsAi` node offers as its only action when the
+ * host has no Pitwall state (no {@link VIEW_NEEDS_AI}). It is the app's own repair, never routed through the plugin: the plugin's
+ * `setup` action of a `needsAi` node is not sent to it. `null` (the default): the card shows the plugin's reason and a plain line
+ * "Set up local AI in this app's settings." with no button. Every host that shows views provides this or `VIEW_NEEDS_AI` (rule 19); `pd-view` reports a `needsAi` node drawn with neither, in dev mode.
+ */
+export const VIEW_OPEN_AI_SETTINGS = new InjectionToken<(() => void) | null>('PADDOCK_VIEW_OPEN_AI_SETTINGS', { providedIn: 'root', factory: () => null });

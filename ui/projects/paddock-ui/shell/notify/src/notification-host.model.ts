@@ -19,6 +19,8 @@ export interface HostNotification {
   readonly cause: string;
   readonly severity: NoticeSeverity;
   readonly title: string;
+  /** The title's one-line form for a small window (≤ 480 px), where the toast is one line; the full title stays elsewhere. */
+  readonly short?: string | null;
   /** A short sentence under the title. */
   readonly body?: string | null;
   /** Technical text, folded behind "Details". */

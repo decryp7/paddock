@@ -2,7 +2,7 @@
 //! wall time (on an injected clock); a stop ends it within a read slice; a call that cannot be read is reported to the model
 //! and never run; a tool that writes waits for the user's decision first.
 
-use crate::conversation::StoredMessage;
+use crate::conversation::{StoredMessage, ToolOutcome};
 use crate::event::{AssistantEvent, EndReason};
 use crate::provider::{LlmProvider, ProviderError};
 use crate::tool::{Access, Tools, argument_problem};
@@ -210,6 +210,12 @@ fn cap(text: &str, max: usize) -> String {
 
 struct Finished {
     output: crate::tool::ToolOutput,
+    /// The call as the user read it on its card.
+    summary: String,
+    write: bool,
+    destructive: bool,
+    /// Set when the user's choice (not the tool) ended the call.
+    outcome: Option<ToolOutcome>,
 }
 
 /// Runs the turn. `Err` is a provider failure (what was generated until then has been kept and the caller reports it).
@@ -367,17 +373,26 @@ pub fn run_turn(
                     "The assistant ran out of time for this question.",
                 ));
             }
-            let Finished { output } = dispatch(turn, hooks, call, &mut calls_total, &mut per_tool);
+            let Finished {
+                output,
+                summary,
+                write,
+                destructive,
+                outcome,
+            } = dispatch(turn, hooks, call, &mut calls_total, &mut per_tool);
             let text = output.text.clone();
-            (hooks.keep)(StoredMessage::tool(
-                &call.id,
-                &call.name,
-                text.clone(),
-                !output.error,
-                output.summary.clone(),
-                output.data.clone(),
-                now_ms(),
-            ));
+            (hooks.keep)(
+                StoredMessage::tool(
+                    &call.id,
+                    &call.name,
+                    text.clone(),
+                    !output.error,
+                    output.summary.clone(),
+                    output.data.clone(),
+                    now_ms(),
+                )
+                .with_call(&summary, write, destructive, outcome),
+            );
             messages.push(ChatMessage::tool_result(call.id.clone(), text));
         }
         if calls_total >= b.max_tool_calls && tools_off.is_none() {
@@ -410,7 +425,8 @@ fn dispatch(
     per_tool: &mut HashMap<String, usize>,
 ) -> Finished {
     let tool = turn.tools.get(&call.name);
-    let write = tool.is_some_and(|t| t.access() == Access::Write);
+    let access = tool.map_or(Access::ReadOnly, |t| t.access());
+    let write = access.writes();
     let summary = tool.map_or_else(
         || cap(&call.input.to_string(), 120),
         |t| cap(&t.describe(&call.input), 160),
@@ -420,16 +436,25 @@ fn dispatch(
         name: call.name.clone(),
         summary: summary.clone(),
         write,
+        destructive: access.destructive(),
     });
-    let output = decide_and_run(turn, hooks, call, tool, write, &summary, total, per_tool);
+    let (output, outcome) =
+        decide_and_run(turn, hooks, call, tool, access, &summary, total, per_tool);
     (hooks.emit)(AssistantEvent::ToolFinished {
         call_id: call.id.clone(),
         name: call.name.clone(),
         ok: !output.error,
         summary: output.summary.clone(),
         data: output.data.clone(),
+        outcome,
     });
-    Finished { output }
+    Finished {
+        output,
+        summary,
+        write,
+        destructive: access.destructive(),
+        outcome,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -438,12 +463,13 @@ fn decide_and_run(
     hooks: &mut Hooks<'_>,
     call: &ToolCall,
     tool: Option<&std::sync::Arc<dyn crate::tool::AssistantTool>>,
-    write: bool,
+    access: Access,
     summary: &str,
     total: &mut usize,
     per_tool: &mut HashMap<String, usize>,
-) -> crate::tool::ToolOutput {
+) -> (crate::tool::ToolOutput, Option<ToolOutcome>) {
     use crate::tool::ToolOutput;
+    let plain = |o: ToolOutput| (o, None);
     if call.is_malformed() {
         let raw = call
             .input
@@ -454,34 +480,41 @@ fn decide_and_run(
             message: "The assistant sent a tool call that could not be read; it was not run."
                 .into(),
         });
-        return ToolOutput::failed(format!(
+        return plain(ToolOutput::failed(format!(
             "the tool call could not be read ({}). Call a tool again with valid JSON arguments.",
             cap(raw, 120)
-        ));
+        )));
     }
-    let offered = tool.filter(|t| turn.allow_write || t.access() == Access::ReadOnly);
+    let offered = tool.filter(|t| turn.allow_write || !t.access().writes());
     let Some(tool) = offered else {
-        return ToolOutput::failed(format!("there is no tool called {}", call.name));
+        return plain(ToolOutput::failed(format!(
+            "there is no tool called {}",
+            call.name
+        )));
     };
     if let Some(problem) = argument_problem(&tool.spec(), &call.input) {
-        return ToolOutput::failed(format!("the call to {} was not run: {problem}", call.name));
+        return plain(ToolOutput::failed(format!(
+            "the call to {} was not run: {problem}",
+            call.name
+        )));
     }
     let budget = tool.budget();
     let used = per_tool.entry(call.name.clone()).or_default();
     if *used >= budget.max_calls || *total >= turn.budgets.max_tool_calls {
-        return ToolOutput::failed(
+        return plain(ToolOutput::failed(
             "the tool budget for this question is used up; answer from what you have",
-        );
+        ));
     }
     *used += 1;
     *total += 1;
-    if write {
+    if access.writes() {
         turn.gate
             .expect(&call.id, turn.clock, turn.budgets.approval_wait);
         (hooks.emit)(AssistantEvent::ApprovalNeeded {
             call_id: call.id.clone(),
             name: call.name.clone(),
             summary: summary.into(),
+            destructive: access.destructive(),
             input: call.input.clone(),
         });
         match turn.gate.wait(
@@ -492,15 +525,21 @@ fn decide_and_run(
         ) {
             Decision::Approved => {}
             Decision::Denied => {
-                return ToolOutput::failed("the user declined this action; it was not run");
+                return (
+                    ToolOutput::failed("the user declined this action; it was not run"),
+                    Some(ToolOutcome::Declined),
+                );
             }
             Decision::Cancelled => {
-                return ToolOutput::failed("the turn was stopped; the action was not run");
+                return (
+                    ToolOutput::failed("the turn was stopped; the action was not run"),
+                    Some(ToolOutcome::Stopped),
+                );
             }
             Decision::TimedOut => {
-                return ToolOutput::failed(
+                return plain(ToolOutput::failed(
                     "the user did not answer in time; the action was not run",
-                );
+                ));
             }
         }
     }
@@ -509,7 +548,7 @@ fn decide_and_run(
         Err(_) => ToolOutput::failed(format!("the tool {} failed unexpectedly", call.name)),
     };
     output.text = cap(&output.text, budget.max_output_chars);
-    output
+    plain(output)
 }
 
 #[cfg(test)]

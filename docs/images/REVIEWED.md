@@ -4,14 +4,14 @@ One row per image under `docs/images` that passed an independent review. A chang
 
 | image | sha256 | reviewer | date |
 |---|---|---|---|
-| src/icons/debrief.svg | 2a0bf1682eac2b29174c5643ddd463db3949847f787411ab8effe1bbaaf18753 | independent review (Opus) | 2026-10-25 |
-| src/icons/dyno.svg | 9cd2d6318a5a6e0b4a4aeadcc115e4727af9c0843f242f2d59dca3446ec96a29 | independent review (Opus) | 2026-10-25 |
-| src/icons/pacenotes.svg | 3e267c579375822ef14a63734958fa71b7fd8f7d6fd216590141f278814256d4 | independent review (Opus) | 2026-10-25 |
-| src/icons/paddock.svg | 11eb5c2d5abb80cffb8d07430ade3bc24b16670d49739e30d07f6f2a403ed88d | independent review (Opus) | 2026-10-25 |
-| src/icons/pitcrew.svg | fbdc3d4822a4b42da0253c06328c126933f9d3c5fc9690f05fb81a0359065338 | independent review (Opus) | 2026-10-25 |
-| src/icons/pitwall.svg | 2b129bb9a5892c1dee1379cc1fcb83ff6856846ff123f3d9f66c800da90f8fea | independent review (Opus) | 2026-10-25 |
-| src/icons/sighter.svg | 7c69bf4ca78a1247d78fa2b233658511f0a659690ab3dc4ddf60d9e1a28dc866 | independent review (Opus) | 2026-10-25 |
-| src/icons/spotter.svg | 9117f94ac9417bdb7b045436fdfcde46e31c794c662eb01fce3a10023c0b1f49 | independent review (Opus) | 2026-10-25 |
+| src/icons/debrief.svg | fed3d77ff96afe97b28671a5ae2ba75aedd86ae971257b807bb62baf418c6006 | icons sRGB rebuild review (Opus) | 2026-10-25 |
+| src/icons/dyno.svg | c9cb2cf2d5065fc983f8b92d816ff20fb6791ceaec83d6f693a9446cf47d3211 | icons sRGB rebuild review (Opus) | 2026-10-25 |
+| src/icons/pacenotes.svg | 68bfea4f508bae80d458c2e1655eb9f350f7cba599a96f9bc7fb6a2188d71e3e | icons sRGB rebuild review (Opus) | 2026-10-25 |
+| src/icons/paddock.svg | 32ffecdffb004795b7b39c7615186cf21a60a17aa0db1dae198a0620b88f4f17 | icons sRGB rebuild review (Opus) | 2026-10-25 |
+| src/icons/pitcrew.svg | d24bb573f2ff292932fb392b67324e67e0cddfc090cc7c9f2c945ee43b98bb91 | icons sRGB rebuild review (Opus) | 2026-10-25 |
+| src/icons/pitwall.svg | ecd6af6bf0242040f2d6b38c80aec566c83948794294b3c226b27cabe3251bb2 | icons sRGB rebuild review (Opus) | 2026-10-25 |
+| src/icons/sighter.svg | a9f17f11443a04aff43c2195665b776969c9e72f743ea141a440f1ec42334284 | icons sRGB rebuild review (Opus) | 2026-10-25 |
+| src/icons/spotter.svg | 938f1edac5d51d3ad20c42021a0fe3a53944a4c461e4e4012a60898386edb8a8 | icons sRGB rebuild review (Opus) | 2026-10-25 |
 | paddock-ecosystem.svg | 0adea082337f59c84af2f3fa49e7f25435e6d94245aa1a0f5a18a980ef66e6ce | independent review 3 (Opus) | 2026-10-25 |
 | paddock-ecosystem-light.png | 7fe5625be9baddf668afd0650e47cfe3b15c663d99159fe5a8de48fcc1584457 | independent review 3 (Opus) | 2026-10-25 |
 | paddock-ecosystem-dark.png | 4c682bd002c24920a97540b9779db0e15e9edbd566d02ede801065df9d0263d3 | independent review 3 (Opus) | 2026-10-25 |

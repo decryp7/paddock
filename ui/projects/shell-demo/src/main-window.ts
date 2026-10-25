@@ -32,7 +32,7 @@ import { ShellDemo } from './app/shell-demo';
 // Every shell entry point resolves from this app (the reference consumer, ADR 0012 §7): type-only imports, so the build
 // fails when an entry point stops resolving. Each work package replaces its line with the real use of its exports.
 // shell/store is used through shell/jobs and shell/notify (their stores take its withRequestStatus).
-import type * as shellStore from '@decryp7/paddock-ui/shell/store';
+import type * as _shellStore from '@decryp7/paddock-ui/shell/store';
 
 /** The demo's main window: the pages frame (plan S14) from the demo's contributions. */
 export function bootMainWindow(): Promise<unknown> {

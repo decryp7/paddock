@@ -14,3 +14,4 @@ export {
   type TrustedHtmlFactory,
 } from './src/register';
 export { PdGlyph } from './src/glyph';
+export { PD_STATUS_GLYPHS, PdStatusGlyph, statusGlyph, type PdStatus } from './src/status';

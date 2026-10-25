@@ -40,7 +40,7 @@ interface Timer {
         >
           <div class="pd-head">
             <span class="pd-mark" aria-hidden="true"></span>
-            <strong class="pd-title">{{ n.title }}@if ((n.count ?? 1) > 1) {<span class="pd-count" data-testid="notification-count"> (×{{ n.count }})</span>}</strong>
+            <strong class="pd-title" [class.pd-has-short]="!!n.short"><span class="pd-full">{{ n.title }}</span>@if (n.short) {<span class="pd-short" data-testid="notification-short">{{ n.short }}</span>}@if ((n.count ?? 1) > 1) {<span class="pd-count" data-testid="notification-count"> (×{{ n.count }})</span>}</strong>
           </div>
           @if (n.body) {
             <div class="pd-body">{{ n.body }}</div>
@@ -71,7 +71,7 @@ interface Timer {
   styles: `
     :host { position: fixed; right: var(--pd-space-4); bottom: calc(var(--pd-statusbar-height, 28px) + var(--pd-space-2)); z-index: var(--pd-z-toast); pointer-events: none; }
     .pd-stack { display: flex; flex-direction: column; gap: var(--pd-space-2); align-items: flex-end; }
-    .pd-toast { pointer-events: auto; position: relative; width: 380px; max-width: calc(100vw - 2 * var(--pd-space-4)); box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-8) var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-info); border-radius: var(--pd-radius-popover); background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-2); display: flex; flex-direction: column; gap: var(--pd-space-1); font-size: var(--pd-text-body); }
+    .pd-toast { pointer-events: auto; position: relative; width: 360px; max-width: calc(100vw - 2 * var(--pd-space-4)); box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-8) var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-info); border-radius: var(--pd-radius-popover); background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-2); display: flex; flex-direction: column; gap: var(--pd-space-1); font-size: var(--pd-text-body); }
     .pd-toast[data-severity='success'] { border-inline-start-color: var(--pd-success); }
     .pd-toast[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
     .pd-toast[data-severity='error'], .pd-toast[data-severity='critical'] { border-inline-start-color: var(--pd-danger); }
@@ -92,6 +92,24 @@ interface Timer {
     .pd-details { display: block; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pd-text-muted); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); user-select: text; }
     .pd-x { position: absolute; top: var(--pd-space-1); right: var(--pd-space-1); display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
     .pd-x:hover { background: var(--pd-hover); color: var(--pd-text); }
+    /* A small window (review 2, P3-14): one line above the status bar, full width, never wider than 360 px: the message, the
+       first action and the close. The body, details and further actions stay in the notification centre; the two newest
+       toasts show, so the stack never covers a fifth of the window. */
+    .pd-short { display: none; }
+    @media (max-width: 480px) {
+      .pd-has-short .pd-full { display: none; }
+      .pd-has-short .pd-short { display: inline; }
+      :host { left: var(--pd-space-2); right: var(--pd-space-2); }
+      .pd-stack { align-items: stretch; }
+      .pd-toast { width: auto; max-width: 360px; align-self: flex-end; flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-1) var(--pd-space-1) var(--pd-space-2); }
+      .pd-toast:nth-last-child(n + 3) { display: none; }
+      .pd-head { flex: 1 1 0; }
+      .pd-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+      .pd-body:not(.pd-err), .pd-details, .pd-actions .pd-btn:not(:first-child) { display: none; }
+      .pd-err { flex: 1 1 100%; }
+      .pd-actions { flex: none; flex-wrap: nowrap; }
+      .pd-x { position: static; flex: none; }
+    }
   `,
 })
 export class PdNotificationHost {

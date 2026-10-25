@@ -8,7 +8,6 @@ import { Keymap } from './keymap';
 import type { TopMenu } from './menu-model';
 import {
   NATIVE_MENU_GATE,
-  NATIVE_MENU_PORT,
   NATIVE_MENU_SCHEDULE,
   NativeMenuBridge,
   NO_NATIVE_MENU,

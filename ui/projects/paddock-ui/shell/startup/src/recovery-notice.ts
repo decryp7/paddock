@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { RecoveryStore } from './recovery.store';
 
 /**
@@ -11,11 +11,11 @@ import { RecoveryStore } from './recovery.store';
 @Component({
   selector: 'pd-recovery-notice',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph],
+  imports: [PdStatusGlyph],
   template: `
     @if (store.unclean(); as u) {
       <section class="pd-recovery" role="alert" data-testid="recovery-notice" aria-labelledby="pd-recovery-title">
-        <pd-glyph class="pd-recovery__icon" name="alert" [size]="16" />
+        <pd-status-glyph class="pd-recovery__icon" status="warning" [size]="16" />
         <div class="pd-recovery__text">
           <strong id="pd-recovery-title">{{ t.title }}</strong>
           @if (store.restarting()) {

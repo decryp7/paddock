@@ -37,10 +37,10 @@ export function sampleViewDoc(etag = 1): ViewDoc {
           node('t1', {
             table: {
               columns: [
-                { key: 'name', label: 'Check', sortable: true },
-                { key: 'state', label: 'State', sortable: true },
-                { key: 'ms', label: 'Time (ms)', sortable: true },
-                { key: 'log', label: 'Log', sortable: false },
+                { key: 'name', label: 'Check', sortable: true, align: 'start', unit: '' },
+                { key: 'state', label: 'State', sortable: true, align: 'start', unit: '' },
+                { key: 'ms', label: 'Time', sortable: true, align: 'end', unit: 'ms' },
+                { key: 'log', label: 'Log', sortable: false, align: 'start', unit: '' },
               ],
               rows: {
                 inline: [
@@ -56,8 +56,8 @@ export function sampleViewDoc(etag = 1): ViewDoc {
           node('t2', {
             table: {
               columns: [
-                { key: 'file', label: 'File', sortable: true },
-                { key: 'lines', label: 'Lines', sortable: false },
+                { key: 'file', label: 'File', sortable: true, align: 'start', unit: '' },
+                { key: 'lines', label: 'Lines', sortable: false, align: 'end', unit: '' },
               ],
               rows: { paged: { total: 120, pageSize: 2, page: 1, rows: [[cell('src/model.rs'), cell('652')], [cell('src/validate.rs'), cell('583')]] } },
               rowAction: null,
@@ -111,6 +111,28 @@ export function sampleViewDoc(etag = 1): ViewDoc {
               ],
             },
           }),
+          node('g3', {
+            graph: {
+              layout: 'radial',
+              nodes: [
+                { id: 'hub', label: 'paddock-ipc', tone: 'info', action: null },
+                { id: 'p1', label: 'paddock-view', tone: 'neutral', action: null },
+                { id: 'p2', label: 'paddock-shell', tone: 'neutral', action: null },
+                { id: 'p3', label: 'paddock-env', tone: 'neutral', action: null },
+                { id: 'p4', label: 'paddock-secrets', tone: 'neutral', action: null },
+                { id: 'p5', label: 'paddock-chromium', tone: 'neutral', action: null },
+              ],
+              edges: [
+                { from: 'p1', to: 'hub', label: '' },
+                { from: 'p2', to: 'hub', label: '' },
+                { from: 'p3', to: 'hub', label: '' },
+                { from: 'p4', to: 'hub', label: '' },
+                { from: 'p5', to: 'hub', label: '' },
+                { from: 'p1', to: 'p4', label: 'tokens' },
+                { from: 'p2', to: 'p5', label: '' },
+              ],
+            },
+          }),
           node('d1', {
             diagram: {
               kind: 'class',
@@ -145,7 +167,7 @@ export function sampleViewDoc(etag = 1): ViewDoc {
           node('form', {
             form: {
               fields: [
-                { id: 'name', label: 'Release name', help: 'Shown in the changelog.', required: true, kind: { text: { value: 'v1.4', placeholder: 'v1.4', multiline: false } } },
+                { id: 'name', label: 'Release name', help: 'Shown in the changelog.', required: true, kind: { text: { value: 'v1.4', placeholder: 'e.g. v1.5', multiline: false } } },
                 { id: 'notes', label: 'Notes', help: '', required: false, kind: { text: { value: '', placeholder: 'What changed', multiline: true } } },
                 { id: 'retries', label: 'Retries', help: '0 to 5', required: false, kind: { number: { value: 2, min: 0, max: 5 } } },
                 { id: 'channel', label: 'Channel', help: '', required: true, kind: { choice: { value: 'beta', options: [{ value: 'beta', label: 'Beta' }, { value: 'stable', label: 'Stable' }] } } },
@@ -181,11 +203,11 @@ export function sampleViewDoc(etag = 1): ViewDoc {
               ],
             },
           }),
-          node('c1', { chart: { kind: 'line', title: 'Test time per run', categories: ['Mon', 'Tue', 'Wed', 'Thu'], series: [{ name: 'Seconds', values: [41, 44, 39, 52] }] } }),
-          node('c2', { chart: { kind: 'bar', title: 'Failures by area', categories: ['core', 'ui', 'ci'], series: [{ name: 'Failures', values: [3, 1, 4] }] } }),
-          node('c3', { chart: { kind: 'area', title: 'Open findings', categories: ['W1', 'W2', 'W3'], series: [{ name: 'Open', values: [12, 8, 5] }] } }),
-          node('c4', { chart: { kind: 'pie', title: 'Findings by state', categories: ['Open', 'Suppressed', 'Blocked'], series: [{ name: 'Findings', values: [5, 2, 1] }] } }),
-          node('c5', { chart: { kind: 'scatter', title: 'Size against time', categories: ['a', 'b', 'c', 'd'], series: [{ name: 'Runs', values: [3, 7, 4, 9] }] } }),
+          node('c1', { chart: { kind: 'line', title: 'Test time per run', categories: ['Mon', 'Tue', 'Wed', 'Thu'], unit: 's', series: [{ name: 'Seconds', values: [41, 44, 39, 52] }] } }),
+          node('c2', { chart: { kind: 'bar', title: 'Failures by area', categories: ['core', 'ui', 'ci'], unit: '', series: [{ name: 'Failures', values: [3, 1, 4] }] } }),
+          node('c3', { chart: { kind: 'area', title: 'Open findings', categories: ['W1', 'W2', 'W3'], unit: '', series: [{ name: 'Open', values: [12, 8, 5] }] } }),
+          node('c4', { chart: { kind: 'pie', title: 'Findings by state', categories: ['Open', 'Suppressed', 'Blocked'], unit: '', series: [{ name: 'Findings', values: [5, 2, 1] }] } }),
+          node('c5', { chart: { kind: 'scatter', title: 'Size against time', categories: ['a', 'b', 'c', 'd'], unit: 'ms', series: [{ name: 'Runs', values: [3, 7, 4, 9] }] } }),
           node('empty', { empty: { icon: 'search', title: 'Nothing matches', hint: 'Change the filter or run the checks again.', action: act('rerun', 'Run the checks') } }),
           node('ai', { needsAi: { feature: 'Explain the failing check', reason: 'Pitwall is not running.', setup: act('setup-ai', 'Set up Pitwall') } }),
           node('l1', { link: { label: 'Open the run', target: { action: act('open-run', 'Open the run') } } }),

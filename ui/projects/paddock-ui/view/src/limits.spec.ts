@@ -13,7 +13,7 @@ const issue = (d: unknown): ViewIssue => {
   return i;
 };
 const table = (over: Record<string, unknown> = {}): NodeKind =>
-  ({ table: { columns: [{ key: 'a', label: 'A', sortable: false }], rows: { inline: [] }, rowAction: null, sort: null, ...over } }) as unknown as NodeKind;
+  ({ table: { columns: [{ key: 'a', label: 'A', sortable: false, align: 'start', unit: '' }], rows: { inline: [] }, rowAction: null, sort: null, ...over } }) as unknown as NodeKind;
 
 describe('validateViewDoc: the mirror of paddock_view::validate', () => {
   it('accepts the sample document with a node of every kind', () => {
@@ -123,7 +123,7 @@ describe('validateViewDoc: the mirror of paddock_view::validate', () => {
   it('checks tables: columns, sort, cell counts, row limits and pages', () => {
     const cell = { text: 'x', tone: 'neutral', link: null };
     expect(validateViewDoc(doc(table({ rows: { inline: [[cell]] } })))).toBeNull();
-    expect(issue(doc(table({ columns: [{ key: 'a', label: 'A', sortable: false }, { key: 'a', label: 'B', sortable: false }] }))).code).toBe('duplicateId');
+    expect(issue(doc(table({ columns: [{ key: 'a', label: 'A', sortable: false, align: 'start', unit: '' }, { key: 'a', label: 'B', sortable: false, align: 'start', unit: '' }] }))).code).toBe('duplicateId');
     expect(issue(doc(table({ sort: { column: 'zz', descending: false } }))).message).toContain('no column');
     expect(issue(doc(table({ rows: { inline: [[cell, cell]] } }))).message).toContain('2 cells for 1 columns');
     expect(issue(doc(table({ rows: { inline: Array.from({ length: VIEW_LIMITS.maxInlineRows + 1 }, () => [cell]) } }))).code).toBe('tooManyRows');
@@ -216,12 +216,15 @@ describe('validateViewDoc: the mirror of paddock_view::validate', () => {
   });
 
   it('checks charts: one value per category, finite values and the point limit', () => {
-    const chart = (series: unknown[], categories = ['a', 'b']): NodeKind => ({ chart: { kind: 'line', title: 'T', categories, series } }) as unknown as NodeKind;
+    const chart = (series: unknown[], categories = ['a', 'b']): NodeKind => ({ chart: { kind: 'line', title: 'T', unit: '', categories, series } }) as unknown as NodeKind;
     expect(validateViewDoc(doc(chart([{ name: 'S', values: [1, 2] }])))).toBeNull();
     expect(issue(doc(chart([{ name: 'S', values: [1] }]))).message).toContain('1 values for 2 categories');
     expect(issue(doc(chart([{ name: 'S', values: [1, Number.NaN] }]))).message).toContain('finite');
     expect(issue(doc(chart([{ name: 'S', values: [1, 'x'] }]))).message).toContain('finite');
     expect(issue(doc(chart([{ name: ' ', values: [1, 2] }]))).code).toBe('unlabelled');
+    const unit = (u: unknown): NodeKind => ({ chart: { kind: 'line', title: 'T', unit: u, categories: [], series: [] } }) as unknown as NodeKind;
+    expect(validateViewDoc(doc(unit('%')))).toBeNull();
+    expect(issue(doc(unit(5))).path).toContain('.unit');
     const cats = Array.from({ length: 2000 }, (_, i) => String(i));
     const wide = Array.from({ length: 11 }, (_, i) => ({ name: `s${i}`, values: cats.map(() => 1) }));
     expect(issue(doc(chart(wide, cats))).message).toContain('limit');

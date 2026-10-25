@@ -104,7 +104,7 @@ describe('the Set-up page', () => {
 
   it('skips a step and takes it up again, and says when everything is settled', async () => {
     const e = held();
-    const { q, click, sync } = await open(PdSetupPage, e.memory);
+    const { q, click } = await open(PdSetupPage, e.memory);
     await click('setup-skip-pitwall');
     expect(text(q('setup-status-pitwall')!)).toContain('Skipped');
     expect(text(q('setup-skip-pitwall')!)).toBe('Take it up again');

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, Directive, inject, input } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { fieldMessage, type PdFieldMessages, type PdFieldStateLike } from './messages';
 
 let nextId = 0;
@@ -19,14 +19,14 @@ let nextId = 0;
 @Component({
   selector: 'pd-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph],
+  imports: [PdStatusGlyph],
   host: { class: 'pd-field', '[class.pd-field--invalid]': 'invalid()', '[class.pd-field--short]': 'size() === "short"' },
   template: `
     <label class="pd-field__label" [for]="controlId">{{ label() }}@if (required()) {<span class="pd-required" aria-hidden="true"> *</span>}</label>
     <ng-content />
     <div class="pd-messages" aria-live="polite">
       @if (message(); as m) {
-        <p class="pd-field__error" [id]="errorId" data-testid="field-error"><pd-glyph name="alert" [size]="14" /><span>{{ m }}</span></p>
+        <p class="pd-field__error" [id]="errorId" data-testid="field-error"><pd-status-glyph status="error" [size]="14" /><span>{{ m }}</span></p>
       }
     </div>
     @if (hint() && !message()) {

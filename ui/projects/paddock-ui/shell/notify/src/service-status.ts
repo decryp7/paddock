@@ -26,7 +26,7 @@ let nextId = 0;
   },
   template: `
     @if (problems().length || unknown()) {
-      <button type="button" class="pd-chip" data-testid="service-health-chip" [class.pd-repairing]="allRepairing()" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="compact() ? text() : null" [attr.title]="text()" (click)="open.set(!open())">
+      <button type="button" class="pd-chip" data-testid="service-health-chip" [class.pd-repairing]="allRepairing()" [class.pd-unknown]="!problems().length" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="compact() ? text() : null" [attr.title]="text()" (click)="open.set(!open())">
         <span class="pd-mark" aria-hidden="true"></span>
         <span class="pd-text">{{ compact() ? compactText() : text() }}</span>
       </button>
@@ -80,7 +80,9 @@ let nextId = 0;
     .pd-chip:hover { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 6%); }
     /* Pressed while its details are open: the link between the chip and its popover. */
     .pd-chip[aria-expanded='true'] { background: color-mix(in srgb, var(--pd-danger-tint), var(--pd-text) 10%); box-shadow: inset 0 0 0 1px var(--pd-danger); }
-    .pd-chip.pd-repairing { background: var(--pd-surface-2); }
+    .pd-chip.pd-repairing, .pd-chip.pd-unknown { background: var(--pd-surface-2); }
+    /* Not knowing is not failing: the unknown state is calm (a neutral mark and the words), never the danger colour. */
+    .pd-chip.pd-unknown .pd-mark { background: var(--pd-text-muted); }
     .pd-chip:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-mark { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-danger); }
     .pd-repairing .pd-mark { background: var(--pd-text-muted); border-radius: 50%; }
