@@ -2294,6 +2294,7 @@ dependencies = [
  "debrief-store-client",
  "debrief-store-duck",
  "getrandom 0.4.3",
+ "libc",
  "log",
  "serde",
  "serde_json",
