@@ -355,7 +355,7 @@ describe('the layout fitted to a window', () => {
     layout.notifyFitted(undo);
     await settle(rendered.fixture);
     const posted = shellPorts().notices.at(-1)!;
-    expect(posted).toMatchObject({ level: 'info', message: 'Layout adjusted to fit this window', kind: 'pd.wb.dock.layout-fit', action: { label: 'Undo' } });
+    expect(posted).toMatchObject({ level: 'info', message: 'Layout adjusted to fit this window', short: 'Layout fitted', kind: 'pd.wb.dock.layout-fit', action: { label: 'Undo' } });
     await runNoticeButton(posted);
     await settle(rendered.fixture);
     expect(undo).toHaveBeenCalledTimes(1);
