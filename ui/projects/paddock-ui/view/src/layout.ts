@@ -325,7 +325,12 @@ export function layoutGraph(nodes: readonly LayoutNode[], edges: readonly Layout
   if (!radial) return first;
   // A line that had to bow around a box can swing past the left or top of the canvas: draw again with room for it.
   let low = 0;
-  for (const edge of first.edges) for (const p of flattenPath(edge.path)) low = Math.min(low, p[0] - 4, p[1] - 4);
+  for (const edge of first.edges) {
+    for (const p of flattenPath(edge.path)) low = Math.min(low, p[0] - 4, p[1] - 4);
+    // A label may sit past the left or top as well.
+    const r = edge.label ? labelRect(edge.lx, edge.ly, edge.anchor, edge.label) : null;
+    if (r) low = Math.min(low, r.x - 4, r.y - 4);
+  }
   return low < 0 ? layoutGraphAt(nodes, edges, radial, Math.ceil(-low)) : first;
 }
 

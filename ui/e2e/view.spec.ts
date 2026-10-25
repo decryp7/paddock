@@ -13,8 +13,10 @@ async function open(page: Page, theme = 'dark', width = 1280): Promise<Locator> 
   await page.goto(`/?theme=${theme}&accent=debrief`);
   const box = page.locator('[data-testid="view-box"]');
   await box.locator('pd-view article').waitFor();
-  // The five charts have drawn.
+  // The five charts have drawn, the fonts are in and every scrolling region has measured itself (the layout is settled, so a measurement is stable).
   await expect(box.locator('pd-chart canvas')).toHaveCount(5);
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  await expect(box.locator('[pdViewScroll]:not([data-layout="done"])')).toHaveCount(0);
   return box;
 }
 const log = (page: Page) => page.getByTestId('view-log');
@@ -157,10 +159,13 @@ const overlaps = (a: DOMRect, b: DOMRect): boolean => a.left < b.right && b.left
 test('P1-1: the radial graph shows all its boxes, apart, in a canvas that fits them', async ({ page }) => {
   const box = await open(page);
   const g = box.locator('[data-node-id="g2"]');
-  const boxes = await g.locator('g.pd-view-scene__node rect').evaluateAll((rs) => rs.map((r) => r.getBoundingClientRect().toJSON() as DOMRect));
+  // One evaluate for the boxes and the canvas, so both are read from the same layout.
+  const { boxes, svg } = await g.evaluate((root) => ({
+    boxes: Array.from(root.querySelectorAll('g.pd-view-scene__node rect')).map((r) => r.getBoundingClientRect().toJSON() as DOMRect),
+    svg: root.querySelector('svg.pd-view-scene__svg')!.getBoundingClientRect().toJSON() as DOMRect,
+  }));
   expect(boxes).toHaveLength(4);
   for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i]!, boxes[j]!), `${i}/${j}`).toBe(false);
-  const svg = await g.locator('svg.pd-view-scene__svg').evaluate((s) => s.getBoundingClientRect().toJSON() as DOMRect);
   const right = Math.max(...boxes.map((b) => b.right));
   const bottom = Math.max(...boxes.map((b) => b.bottom));
   // The canvas is the boxes and the padding, not a 1,000 px field around four boxes.

@@ -10,6 +10,11 @@ Conventional Commits; one semver tag for the whole repo.
   variables, then sccache) whenever a build folder variable is set.
 
 ### Added
+- X51 review 4 fixes for `<pd-view>` (1 P2, 1 P3; `ui/docs/review/x51-view/FIXES.md`). Edge labels are placed by one rule (`placeLabels`): a
+  bowed edge's label sits at the apex of the bow on the outward side, and every label is checked against every box, every edge path and
+  the labels before it, walking distance, place and side deterministically when it collides; the canvas grows to hold a label. A radial
+  edge prefers a bow that does not cross another edge near an arrowhead (the shell to chromium edge now bows). `<pd-view>` scroll regions
+  carry `data-layout="done"` once measured, and the e2e `open()` waits for it and for `document.fonts.ready`. Contact sheet `review-5/`.
 - X51 review 3 fixes for `<pd-view>` (1 P2, 3 P3; `ui/docs/review/x51-view/FIXES.md`). The inset focus ring of a sortable header, of "Show as
   a list" and of a tree row no longer runs over their text (the e2e ring check now also asserts that). A scroll region is the containing
   block of its visually hidden text, so that text can no longer widen the page at 320 px (`SCROLL_CSS`). A second radial sample with

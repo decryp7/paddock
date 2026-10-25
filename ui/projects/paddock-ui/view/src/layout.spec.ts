@@ -85,6 +85,7 @@ function labelHits(s: Scn): string[] {
   for (const edge of s.edges) {
     if (!edge.label) continue;
     const r = inflate(labelRect(edge.lx, edge.ly, edge.anchor, edge.label), 1);
+    if (r.x < 0 || r.y < 0 || r.x + r.w > s.width || r.y + r.h > s.height) bad.push(`${edge.label} leaves the canvas`);
     for (const b of s.nodes) if (overlap(r, b)) bad.push(`${edge.label} touches box ${b.id}`);
     for (const o of s.edges) if (pathCrosses(o.path, [r])) bad.push(`${edge.label} touches edge ${o.from}>${o.to}`);
   }
