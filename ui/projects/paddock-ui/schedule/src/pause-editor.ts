@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, model } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdDayPicker } from './day-picker';
 import { MAX_PAUSE_WINDOWS, newWindow, type PauseWindow, type PauseWindows, type Weekday, zoneValue } from './schedule-model';
 
@@ -15,7 +15,7 @@ import { MAX_PAUSE_WINDOWS, newWindow, type PauseWindow, type PauseWindows, type
 @Component({
   selector: 'pd-pause-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdDayPicker, PdGlyph],
+  imports: [PdStatusGlyph, PdDayPicker, PdGlyph],
   template: `
     @if (value().windows.length === 0) {
       <p class="pd-empty">{{ emptyText }}</p>
@@ -47,7 +47,7 @@ import { MAX_PAUSE_WINDOWS, newWindow, type PauseWindow, type PauseWindows, type
       <input class="pd-input" type="text" spellcheck="false" autocomplete="off" [placeholder]="zonePlaceholder" [value]="value().zone ?? ''" [disabled]="disabled()" (change)="setZone($event)" />
     </label>
     @for (p of problems(); track $index) {
-      <p class="pd-problem" role="alert"><pd-glyph name="alert" [size]="14" />{{ p }}</p>
+      <p class="pd-problem" role="alert"><pd-status-glyph status="error" [size]="14" />{{ p }}</p>
     }
   `,
   styles: `

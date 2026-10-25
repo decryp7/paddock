@@ -1,6 +1,6 @@
 import { NgComponentOutlet } from '@angular/common';
 import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
-import { PD_ICON_PATHS, PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore } from './assistant.store';
 import { conversationTitle, type TurnPart, type TurnView } from './chat-model';
@@ -22,7 +22,7 @@ const SCROLL_STICK_PX = 24;
   selector: 'pd-assistant',
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [AssistantStore],
-  imports: [NgComponentOutlet, PdGlyph, PdAssistantRichText, PdAssistantToolCard, PdNeedsAi],
+  imports: [PdStatusGlyph, NgComponentOutlet, PdGlyph, PdAssistantRichText, PdAssistantToolCard, PdNeedsAi],
   template: `
     <header class="bar">
       <h2 class="title" data-testid="assistant-title" [attr.title]="store.title()">{{ store.title() }}</h2>
@@ -112,7 +112,7 @@ const SCROLL_STICK_PX = 24;
             }
             @if (failedOf(turn); as err) {
               <div class="fail" role="alert" data-testid="assistant-error">
-                <pd-glyph class="fail-icon" name="alert" [size]="16" />
+                <pd-status-glyph class="fail-icon" status="error" [size]="16" />
                 <div class="fail-body">
                   <p class="fail-title">{{ t.failedTitle }}</p>
                   <p class="fail-cause" data-testid="assistant-error-cause">{{ t.failedCause }}</p>
@@ -146,7 +146,7 @@ const SCROLL_STICK_PX = 24;
       <section class="approval" [class.danger]="ask.destructive" role="alertdialog" aria-labelledby="pd-assistant-approval" [attr.aria-describedby]="ask.destructive ? 'pd-assistant-approval-final' : null" data-testid="assistant-approval">
         <p id="pd-assistant-approval"><strong>{{ t.wantsTo }}</strong>{{ ' ' }}<span data-testid="assistant-approval-consequence">{{ ask.summary }}</span></p>
         @if (ask.destructive) {
-          <p class="final" id="pd-assistant-approval-final" data-testid="assistant-approval-final"><pd-glyph name="alert" [size]="14" /> {{ t.cannotUndo }}</p>
+          <p class="final" id="pd-assistant-approval-final" data-testid="assistant-approval-final"><pd-status-glyph status="warning" [size]="14" /> {{ t.cannotUndo }}</p>
         }
         <details class="details" data-testid="assistant-approval-details">
           <summary><pd-glyph class="chev" name="chevron-right" [size]="14" /> {{ t.details }}</summary>

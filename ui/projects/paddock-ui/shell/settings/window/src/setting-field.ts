@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input, model, output } from '@angular/core';
 import type { FormValueControl, ValidationError } from '@angular/forms/signals';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import { type SettingField, type SettingValue, displayValue, editUnit, parseList, parseNumber, rangeHint, sameValue } from '@decryp7/paddock-ui/shell/settings';
 
@@ -15,7 +15,7 @@ let nextId = 0;
 @Component({
   selector: 'pd-setting-field',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdSelect, PdGlyph],
+  imports: [PdStatusGlyph, PdSelect],
   host: { class: 'pd-setting', '[class.pd-invalid]': '!!message()', '[class.pd-edited]': 'dirty()', '[attr.data-key]': 'setting().key' },
   template: `
     @let f = setting();
@@ -67,7 +67,7 @@ let nextId = 0;
       <p class="pd-help" [id]="id + '-help'">{{ f.description }}</p>
     }
     @if (message(); as m) {
-      <p class="pd-error" [id]="id + '-error'" role="alert"><pd-glyph name="alert" [size]="14" /><span>{{ m }}</span></p>
+      <p class="pd-error" [id]="id + '-error'" role="alert"><pd-status-glyph status="error" [size]="14" /><span>{{ m }}</span></p>
     }
   `,
   styles: `

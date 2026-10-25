@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, InjectionToken, input, type EnvironmentProviders, makeEnvironmentProviders, type Type } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, statusGlyph } from '@decryp7/paddock-ui/icons';
 import type { ToolCard } from './chat-model';
 import type { CitationOpened } from './rich-text';
 
@@ -77,7 +77,7 @@ export class PdAssistantToolCard {
   protected icon(): string {
     const s = this.card().state;
     if (this.declined()) return 'close';
-    return s === 'ok' ? 'check' : s === 'failed' ? 'alert' : s === 'awaiting' ? 'lock' : 'clock';
+    return s === 'ok' ? statusGlyph('success') : s === 'failed' ? statusGlyph('error') : s === 'awaiting' ? 'lock' : 'clock';
   }
   protected stateText(): string {
     const c = this.card();

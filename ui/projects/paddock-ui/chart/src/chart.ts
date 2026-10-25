@@ -14,7 +14,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { readPaddockTokens, registerPaddockTheme, type PaddockChartTokens } from '@decryp7/paddock-ui';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { chartOption, chartSummary, donutNarrowHeight, type PdChartSpec } from './options';
 
 /** The part of an ECharts instance `pd-chart` calls (`FakeChart` of the test kit has the same shape). */
@@ -74,7 +74,7 @@ let nextId = 0;
 @Component({
   selector: 'pd-chart',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdGlyph],
+  imports: [PdStatusGlyph],
   host: { '[style.height.px]': 'hostHeight()' },
   template: `
     @if (showTitle()) {
@@ -90,7 +90,7 @@ let nextId = 0;
       }
       @case ('error') {
         <div class="pd-error" role="alert" data-testid="chart-error">
-          <pd-glyph name="alert" [size]="14" /><span>{{ errorText() || defaultError }}</span>
+          <pd-status-glyph status="error" [size]="14" /><span>{{ errorText() || defaultError }}</span>
           <button type="button" class="pd-retry" (click)="retry.emit()">{{ retryText }}</button>
         </div>
       }
