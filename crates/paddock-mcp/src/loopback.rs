@@ -51,19 +51,17 @@ impl Read for Watched {
             if self.stop.load(Ordering::SeqCst) {
                 return Ok(0);
             }
-            match self.stream.read(buf) {
-                // A slice ended without data (`WouldBlock` on Unix, `TimedOut` on Windows).
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                    ) =>
-                {
-                    if self.deadline.is_some_and(|d| Instant::now() >= d) {
-                        return Err(io::ErrorKind::TimedOut.into());
-                    }
-                }
-                other => return other,
+            let read = self.stream.read(buf);
+            // A slice that ended without data is `WouldBlock` on Unix and `TimedOut` on Windows.
+            let slice_ended = read.as_ref().is_err_and(|e| {
+                let kind = e.kind();
+                kind == io::ErrorKind::WouldBlock || kind == io::ErrorKind::TimedOut
+            });
+            if !slice_ended {
+                return read;
+            }
+            if self.deadline.is_some_and(|d| Instant::now() >= d) {
+                return Err(io::ErrorKind::TimedOut.into());
             }
         }
     }
@@ -241,8 +239,8 @@ mod tests {
         // Data is read as usual.
         client.write_all(b"hi").unwrap();
         assert_eq!(w.read(&mut buf).unwrap(), 2);
-        // A deadline that has passed fails the read after one empty slice.
-        w.deadline = Some(Instant::now());
+        // Empty slices go on until the deadline (here within the second slice), then the read fails.
+        w.deadline = Some(Instant::now() + STOP_SLICE + STOP_SLICE / 2);
         assert_eq!(
             w.read(&mut buf).unwrap_err().kind(),
             io::ErrorKind::TimedOut
