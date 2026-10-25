@@ -13,7 +13,7 @@
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
 /** Release notes beyond this are cut (the app bounds them too). */
 export const MAX_NOTES = 20000;
@@ -108,7 +108,7 @@ function main() {
   console.log(`wrote ${a.out}: ${Object.keys(manifest.platforms).join(', ')}`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   try {
     main();
   } catch (e) {

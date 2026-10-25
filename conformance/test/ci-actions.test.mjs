@@ -364,8 +364,9 @@ test('install-test-browser fails when the installer printed no CHROMIUM_TEST_PAT
 test('every Node script decides it is the main module with isMain, which resolves links', () => {
   const listed = spawnSync('git', ['ls-files', '*.mjs', '*.js'], { cwd: PADDOCK, encoding: 'utf8' });
   assert.equal(listed.status, 0, listed.stderr);
-  // Paddock's own scripts and the demos'; an app's (apps/<app>/) follow the rule when they move onto the shared scripts.
-  const files = listed.stdout.split('\n').filter((f) => f && !f.includes('node_modules/') && !/^apps\/(?!shell-demo\/|workbench-demo\/)/.test(f));
+  // Paddock's own scripts, the demos' and Debrief's (its host jobs run from a linked checkout); another app's (apps/<app>/)
+  // follow the rule when they move onto the shared scripts.
+  const files = listed.stdout.split('\n').filter((f) => f && !f.includes('node_modules/') && !/^apps\/(?!shell-demo\/|workbench-demo\/|debrief\/)/.test(f));
   assert.ok(files.length > 50, `${files.length} scripts`);
   const naive = /import\.meta\.url\s*===|===\s*import\.meta\.url|fileURLToPath\(import\.meta\.url\)\s*===|===\s*fileURLToPath\(import\.meta\.url\)(?!\))|pathToFileURL\(process\.argv\[1\]/;
   const bad = files.filter((f) => naive.test(read(join(PADDOCK, f))) && !f.endsWith('ci-actions.test.mjs'));
@@ -596,3 +597,96 @@ test('node-caches keeps the npm and Angular caches on the host or the container 
   assert.match(bare.stdout, /::notice::no \/sccache mount/);
   assert.match(read(join(PADDOCK, 'ui', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, 'Angular keeps its cache in CI too');
 });
+
+// Debrief's workflow (.gitea/workflows/debrief.yml) on the same speed rules as ci.yml (Paddock lessons, "Test and build speed").
+const debriefYml = () => read(join(WORKFLOWS, 'debrief.yml'));
+/** A job's block (its lines indented under `  <name>:`) in a workflow. */
+const jobBlock = (text, name) => text.match(new RegExp(`^  ${name}:\\n((?:    .*\\n|\\n)+)`, 'm'))?.[1] ?? '';
+/** The non-comment lines of a workflow (a comment may name what is not done). */
+const code = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+test('Debrief builds Rust through sccache in every Rust job, with the build folder as cargo configuration, never CARGO_TARGET_DIR', () => {
+  const yml = debriefYml();
+  const rustJobs = ['rust-lint', 'rust-test', 'rust-test-macos', 'plugin-sdk', 'tauri-smoke', 'bundle'];
+  for (const job of rustJobs) {
+    const block = jobBlock(yml, job);
+    assert.notEqual(block, '', `the ${job} job exists`);
+    assert.match(block, /uses: \.\/\.gitea\/actions\/setup-rust\n(?!\s+if:)/, `${job}: setup-rust (sccache) on every OS`);
+    assert.match(block, /uses: \.\/\.gitea\/actions\/sccache-stats\n\s+if: always\(\)/, `${job}: sccache-stats last`);
+  }
+  const body = code(yml);
+  assert.doesNotMatch(body, /CARGO_(BUILD_)?TARGET_DIR/, 'sccache hashes every CARGO_* variable: no build folder variable');
+  assert.doesNotMatch(body, /RUSTC_WRAPPER/, 'setup-rust sets sccache itself as the wrapper; never a .cmd script (CI 6365)');
+  assert.doesNotMatch(body, /dtolnay\/rust-toolchain|decryp7\/garage:|actions\/setup-node|playwright install/, 'the shared actions and the paddock-ci image');
+  // The kept build folder of the host legs is cargo configuration that cargo itself reads (.cargo/ci.toml, included).
+  assert.match(read(join(PADDOCK, 'apps', 'debrief', '.cargo', 'config.toml')), /include = \[[^\]]*\{ path = "ci\.toml", optional = true \}/);
+  assert.match(read(join(PADDOCK, 'apps', 'debrief', 'scripts', 'ci', 'build-folder.sh')), /target-dir = /);
+  for (const job of ['rust-test-macos', 'tauri-smoke', 'bundle']) assert.match(jobBlock(yml, job), /\bbash scripts\/ci\/build-folder\.sh\n/, `${job}: the build folder`);
+});
+
+test('Debrief\'s host legs build from a stable checkout path, after Git bash is on PATH on Windows', () => {
+  const yml = debriefYml();
+  for (const job of ['rust-test-macos', 'tauri-smoke', 'bundle']) {
+    const block = jobBlock(yml, job);
+    const at = block.indexOf('uses: ./.gitea/actions/stable-workspace');
+    assert.ok(at > 0, `${job} uses stable-workspace`);
+    const gitBash = block.indexOf('Git bash on PATH');
+    if (gitBash >= 0) assert.ok(gitBash < at, `${job}: Git bash is on PATH before stable-workspace`);
+    assert.ok(at < block.indexOf('uses: ./.gitea/actions/setup-rust'), `${job}: the stable path before the first build`);
+    // Every cargo step builds from the stable path (sccache keys a compile on its working folder).
+    for (const step of block.split(/\n      - /).filter((st) => /\n\s+run: .*\bcargo (nextest run|test|build|clippy)\b/.test(`\n${st}`) || /^\s*run: .*\bnpm run e2e:tauri:build|npx tauri build/.test(st))) {
+      assert.match(step, /working-directory: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}/, `${job}: ${step.split('\n')[0]}`);
+    }
+  }
+});
+
+test('Debrief runs its installers and real-app smoke tests only on main, debrief-v* tags, the nightly run and bundles: true', () => {
+  const yml = debriefYml();
+  const on = yml.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
+  assert.match(on, /workflow_dispatch:\n\s+inputs:\n\s+bundles:\n(?:\s+.*\n)*?\s+type: boolean\n\s+default: false/, 'a manual run asks for them');
+  const full = jobBlock(yml, 'plan').match(/^      full: \$\{\{ (.*) \}\}$/m)?.[1] ?? '';
+  assert.notEqual(full, '', 'the plan job says whether this is a full run');
+  assert.match(full, /github\.event_name == 'schedule'/);
+  assert.match(full, /startsWith\(github\.ref, 'refs\/tags\/debrief-v'\)/);
+  assert.match(full, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(full, /github\.event_name == 'workflow_dispatch' && \(inputs\.bundles == true/);
+  assert.doesNotMatch(full, /pull_request/);
+  for (const job of ['tauri-smoke', 'bundle']) {
+    assert.match(jobBlock(yml, job), /^    if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${job}: full runs only`);
+  }
+  // The release needs them, and a tag run is always a full run.
+  assert.match(jobBlock(yml, 'release'), /needs: \[[^\]]*\bbundle\b[^\]]*\btauri-smoke\b/);
+});
+
+test('Debrief\'s end-to-end tests run sharded on the image\'s browsers with kept caches, WebKit only on full runs', () => {
+  const block = jobBlock(debriefYml(), 'e2e');
+  const shards = block.match(/shard: \[([^\]]*)\]/)?.[1].split(',').map((x) => Number(x.trim())) ?? [];
+  assert.ok(shards.length >= 2, 'sharded');
+  assert.deepEqual(shards, shards.map((_, i) => i + 1));
+  assert.match(block, new RegExp(`--shard=\\$\\{\\{ matrix\\.shard \\}\\}/${shards.length} `), 'every shard runs its part');
+  assert.match(block, /uses: \.\/\.gitea\/actions\/node-caches\n\s+with:\n\s+angular-dir: apps\/debrief\/app\n\s+name: debrief-e2e-\$\{\{ matrix\.shard \}\}/, 'one Angular cache per shard');
+  assert.match(block, /DEBRIEF_E2E_PORT: "435\$\{\{ matrix\.shard \}\}"/, 'one port per shard');
+  assert.match(block, /needs\.plan\.outputs\.full != 'true' && '--project=chromium'/, 'branch runs test in Chromium only (rule 3)');
+  // The W0 shell baseline is a manual, macOS-only baseline: never in the default projects (CI 6381 failed every screenshot).
+  const pw = read(join(PADDOCK, 'apps', 'debrief', 'app', 'playwright.config.ts'));
+  assert.match(pw, /name: 'chromium', testIgnore: SHELL_BASELINE/);
+  assert.match(pw, /name: 'webkit', testIgnore: \[PROD_CSP, SHELL_BASELINE\]/);
+  assert.match(pw, /\.\.\.\(BASELINE\n?\s*\?/, 'its projects exist only with DEBRIEF_SHELL_BASELINE');
+});
+
+test('Debrief\'s nextest ci profile stops a hung test, and every longer budget is a waiver with a reason', () => {
+  const text = read(join(PADDOCK, 'apps', 'debrief', '.config', 'nextest.toml'));
+  const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
+  assert.match(ci.slice(0, ci.search(/^\[/m)), /^slow-timeout = \{ period = "30s", terminate-after = [23] \}$/m, 'at most 90 s per test');
+  const lines = text.split('\n');
+  for (const [at] of lines.entries()) {
+    if (lines[at].trim() !== '[[profile.ci.overrides]]') continue;
+    const body = lines.slice(at + 1, lines.findIndex((l, k) => k > at && l.startsWith('['))).join('\n');
+    if (!/^slow-timeout/m.test(body)) continue;
+    let j = at - 1;
+    while (j >= 0 && lines[j].startsWith('#') && !lines[j].startsWith('# waiver:')) j -= 1;
+    assert.ok(j >= 0 && /^# waiver: \S/.test(lines[j]), `the time budget override at line ${at + 1} has no "# waiver:" reason`);
+    assert.match(body, /^filter = "/m, `the override at line ${at + 1} names its tests`);
+  }
+});
+

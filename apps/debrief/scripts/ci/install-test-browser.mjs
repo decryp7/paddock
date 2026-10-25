@@ -11,7 +11,8 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
 const RUNTIME_RS = fileURLToPath(new URL('../../app/src-tauri/src/browser/runtime.rs', import.meta.url));
 
@@ -80,7 +81,7 @@ async function main(argv) {
   if (process.env.GITHUB_ENV) appendFileSync(process.env.GITHUB_ENV, `${line}\n`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).catch((e) => {
     console.error(`install-test-browser: ${e.message}`);
     process.exit(1);

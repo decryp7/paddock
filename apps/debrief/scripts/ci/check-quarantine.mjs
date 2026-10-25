@@ -4,7 +4,8 @@
 //   node scripts/ci/check-quarantine.mjs [file] [--today YYYY-MM-DD]
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
 const DEFAULT = resolve(dirname(fileURLToPath(import.meta.url)), '../../docs/testing/quarantine.md');
 const MAX_DAYS = 190;
@@ -41,4 +42,4 @@ export function main(argv, log = console) {
   return found.length ? 1 : 0;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.exit(main(process.argv.slice(2)));
+if (isMain(import.meta.url)) process.exit(main(process.argv.slice(2)));

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { adhocSign, libduckdbFile, sidecarPlan } from './build-sidecars.mjs';
+import { adhocSign, cargoTargetDir, libduckdbFile, sidecarPlan } from './build-sidecars.mjs';
 
 const select = [
   '-p',
@@ -85,4 +85,21 @@ test('a bundled dylib is re-signed ad hoc on macOS only', () => {
   assert.deepEqual(calls, [['codesign', '--force', '--sign', '-', '--timestamp=none', '/x/libduckdb.dylib']]);
   assert.equal(adhocSign('/x/libduckdb.so', exec, 'linux'), false);
   assert.equal(calls.length, 1);
+});
+
+test('the build folder is CARGO_TARGET_DIR, else the configured one cargo metadata reports, else <root>/target', () => {
+  const never = () => {
+    throw new Error('cargo metadata must not run when CARGO_TARGET_DIR is set');
+  };
+  assert.equal(cargoTargetDir('/w', { CARGO_TARGET_DIR: '/env/target' }, never), '/env/target');
+  // CI's host runners configure the folder in .cargo/ci.toml (build.target-dir); cargo metadata reports it.
+  assert.equal(cargoTargetDir('/w', {}, () => JSON.stringify({ target_directory: '/kept/target-debrief-bundle' })), '/kept/target-debrief-bundle');
+  assert.equal(cargoTargetDir('/w', {}, () => 'not json'), join('/w', 'target'));
+  assert.equal(cargoTargetDir('/w', {}, () => JSON.stringify({})), join('/w', 'target'));
+  assert.equal(
+    cargoTargetDir('/w', {}, () => {
+      throw new Error('cargo: not found');
+    }),
+    join('/w', 'target'),
+  );
 });

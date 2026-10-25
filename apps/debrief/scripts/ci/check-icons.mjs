@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
 export const ICONS = ['icon.png', '128x128@2x.png', '128x128.png', '32x32.png'];
 const MIN_COVERAGE = 0.7;
@@ -110,7 +110,7 @@ export function checkDir(dir) {
   });
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   const dir = process.argv[2] ?? 'app/src-tauri/icons';
   const found = checkDir(dir);
   if (found.length) {
