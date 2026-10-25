@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { calls, run, scratch, shim, write } from './helpers.mjs';
 
 const big = (root, path, kb) => {
   mkdirSync(join(root, path), { recursive: true });
-  writeFileSync(join(root, path, 'blob'), Buffer.alloc(kb * 1024, 1));
+  // Random bytes: a file system that compresses (the CI runners' temp folders) makes a run of equal bytes nearly free in `du`.
+  writeFileSync(join(root, path, 'blob'), randomBytes(kb * 1024));
 };
 const prune = (dir, cap) => run('prune-build-folders.sh', [dir, String(cap)], { env: { PADDOCK_PRUNE_UNIT: 'kb' } });
 

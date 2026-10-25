@@ -51,8 +51,9 @@ export function installTestKit(options: TestKitOptions = {}): void {
           dispatchEvent: () => false,
         }) as MediaQueryList;
     }
-    if (!('ResizeObserver' in globalThis)) win['ResizeObserver'] = ResizeObserverStub;
-    if (!('PointerEvent' in globalThis)) win['PointerEvent'] = PointerEventPolyfill;
+    // `typeof`, not `in`: a spec that stubbed the global to `undefined` and shares the worker with the next file leaves the key behind.
+    if (typeof win['ResizeObserver'] !== 'function') win['ResizeObserver'] = ResizeObserverStub;
+    if (typeof win['PointerEvent'] !== 'function') win['PointerEvent'] = PointerEventPolyfill;
     if (!Element.prototype.setPointerCapture) {
       Element.prototype.setPointerCapture = () => undefined;
       Element.prototype.releasePointerCapture = () => undefined;

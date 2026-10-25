@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeChart, FakeECharts } from './fake-chart';
 import { all, at, buttonByText, byText, manualFrames, must, one, press, text, typeInto } from './dom';
 import { installTestKit } from './setup';
@@ -23,6 +23,15 @@ describe('installTestKit', () => {
       el.releasePointerCapture(1);
       el.scrollIntoView();
     }).not.toThrow();
+  });
+
+  it('replaces a global a spec stubbed to undefined and left behind (the key exists, the constructor does not)', () => {
+    vi.stubGlobal('ResizeObserver', undefined);
+    vi.stubGlobal('PointerEvent', undefined);
+    installTestKit();
+    expect(typeof ResizeObserver).toBe('function');
+    expect(typeof PointerEvent).toBe('function');
+    vi.unstubAllGlobals();
   });
 
   it('reports a target to a ResizeObserver stand-in so libraries reading entry.target keep working', () => {
