@@ -2,7 +2,7 @@ import { Component, provideZonelessChangeDetection, signal } from '@angular/core
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './table';
-import type { PdColumn, PdRowAction, PdSort } from './model';
+import { PD_FOLD_EXTRA, type PdColumn, type PdRowAction, type PdSort } from './model';
 
 interface Plugin {
   id: string;
@@ -39,6 +39,9 @@ const ACTIONS: PdRowAction[] = [
       label="Plugins"
       [rowActions]="actions"
       [groupBy]="groupBy()"
+      [groupSummary]="summary()"
+      [groupMono]="mono()"
+      [countLabel]="countLabel()"
       [virtual]="virtual()"
       [maxHeight]="maxHeight()"
       [state]="state()"
@@ -65,6 +68,9 @@ class Host {
   readonly key = (r: Plugin): string => r.id;
   readonly actions = (r: Plugin): readonly PdRowAction[] => (r.id === 'p3' ? [] : ACTIONS);
   readonly groupBy = signal<string | null>(null);
+  readonly summary = signal<((rows: readonly Plugin[]) => Readonly<Record<string, string>>) | null>(null);
+  readonly mono = signal<boolean | ((group: string) => boolean)>(false);
+  readonly countLabel = signal<((shown: number, total: number) => string) | null>(null);
   readonly virtual = signal<boolean | 'auto'>('auto');
   readonly maxHeight = signal(480);
   readonly state = signal<'ready' | 'loading' | 'error'>('ready');
@@ -196,7 +202,30 @@ describe('pd-table', () => {
     );
     const f = await setup();
     expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Actions']);
+    // No column folds: rows keep one line.
+    expect(rowEls(f).some((r) => r.classList.contains('pd-folded'))).toBe(false);
     expect(getComputedStyle(el(f).querySelector('.pd-grid')!).overflow).not.toBe('scroll');
+  });
+
+  it('grows every row to two lines when a column folds a second line below its width (review 2 P1-A)', async () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly cb: ResizeObserverCallback) {}
+        observe(target: Element): void {
+          this.cb([{ target, contentRect: { width: 320 } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Host);
+    f.componentInstance.columnsOverride = COLUMNS.map((c, i) => (i === 1 ? { ...c, foldBelow: 360 } : c));
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    expect(rowEls(f).every((r) => r.classList.contains('pd-folded'))).toBe(true);
+    expect(el(f).querySelector<HTMLElement>('pd-table')!.style.getPropertyValue('--pd-table-row')).toBe(`${32 + PD_FOLD_EXTRA}px`);
   });
 
   it('moves between rows with the keyboard on one tab stop and opens a row with Enter', async () => {
@@ -282,6 +311,29 @@ describe('pd-table', () => {
     f.componentInstance.groupBy.set(null);
     await settle(f);
     expect(groups()).toHaveLength(0);
+  });
+
+  it('draws a group row\'s own cells in the columns beneath its heading, names the count in the app\'s noun and sets group names in mono', async () => {
+    const f = await setup();
+    f.componentInstance.groupBy.set('kind');
+    f.componentInstance.mono.set(true);
+    f.componentInstance.countLabel.set((shown, total) => `${shown} of ${total} things`);
+    f.componentInstance.summary.set((rows) => ({ size: `${rows.reduce((n, r) => n + r.size, 0)} total` }));
+    await settle(f);
+    const group = el(f).querySelector<HTMLElement>('.pd-group')!;
+    expect(group.classList.contains('pd-group-grid')).toBe(true);
+    expect(group.querySelector('.pd-group-name')?.classList.contains('pd-mono')).toBe(true);
+    const cells = [...group.querySelectorAll<HTMLElement>('.pd-group-summary')];
+    expect(cells.map((c) => c.textContent?.trim()).filter(Boolean)).toHaveLength(1);
+    expect(cells.some((c) => /total$/.test(c.textContent ?? '') && c.classList.contains('pd-end'))).toBe(true);
+    expect(el(f).textContent).toContain('3 of 3 things');
+    // A predicate sets only the groups it names in mono (a label such as "Other items" is not a name).
+    f.componentInstance.mono.set((g) => g === 'format');
+    await settle(f);
+    expect([...el(f).querySelectorAll('.pd-group-name')].map((n) => n.classList.contains('pd-mono'))).toEqual([true, false]);
+    f.componentInstance.summary.set(null);
+    await settle(f);
+    expect(el(f).querySelector('.pd-group-grid')).toBeNull();
   });
 
   it('opens a row’s menu from the keyboard with Shift+F10 or the Menu key', async () => {

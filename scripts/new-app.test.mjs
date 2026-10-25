@@ -6,17 +6,26 @@ import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
 import { angularJson, changelog, crateNames, createApp, leftovers, parseArgs, registryDependencies, rewrite, tsconfigJson } from './new-app.mjs';
 
+const defaults = { template: 'shell-demo', accent: 'graphite' };
+
 const scratch = mkdtempSync(join(tmpdir(), 'paddock-new-app-test-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 describe('the command line', () => {
+  test('takes the template and the accent', () => {
+    const a = parseArgs(['sightr', 'Sightr', '--template', 'workbench-demo', '--accent', 'sighter']);
+    assert.equal(a.template, 'workbench-demo');
+    assert.equal(a.accent, 'sighter');
+  });
+
   test('takes an id and a name, with an identifier derived from the id', () => {
-    assert.deepEqual(parseArgs(['pacenotes', 'Pacenotes']), { id: 'pacenotes', name: 'Pacenotes', identifier: 'net.decryptology.pacenotes', dest: null });
+    assert.deepEqual(parseArgs(['pacenotes', 'Pacenotes']), { id: 'pacenotes', name: 'Pacenotes', identifier: 'net.decryptology.pacenotes', dest: null, ...defaults });
     assert.deepEqual(parseArgs(['my-app', 'My App', '--dest', '/x', '--identifier', 'com.example.my-app']), {
       id: 'my-app',
       name: 'My App',
       identifier: 'com.example.my-app',
       dest: '/x',
+      ...defaults,
     });
   });
 
@@ -25,9 +34,13 @@ describe('the command line', () => {
     assert.throws(() => parseArgs(['Pacenotes', 'P']), /lower-case/);
     assert.throws(() => parseArgs(['ab', 'P']), /3 to 32/);
     assert.throws(() => parseArgs(['shell-demo', 'Demo']), /id of your own/);
+    assert.throws(() => parseArgs(['workbench-demo', 'Demo']), /workbench-demo is a demo/);
+    assert.throws(() => parseArgs(['pacenotes', 'P', '--template', 'nope']), /template "nope" must be one of shell-demo, workbench-demo/);
+    assert.throws(() => parseArgs(['pacenotes', 'P', '--accent', 'pink']), /accent "pink" must be one of/);
     assert.throws(() => parseArgs(['pacenotes', 'Pace"notes']), /name/);
     assert.throws(() => parseArgs(['pacenotes', 'P', '--identifier', 'nodots']), /reverse-domain/);
     assert.throws(() => parseArgs(['pacenotes', 'P', '--force']), /unknown option --force/);
+    assert.throws(() => parseArgs(['pacenotes', 'P', '--template']), /needs a value/);
     assert.throws(() => parseArgs(['pacenotes', 'P', '--dest']), /needs a value/);
   });
 });
@@ -66,6 +79,17 @@ describe('the rewrites', () => {
     const t = tsconfigJson({ compilerOptions: { strict: true, paths: { x: ['y'] } }, angularCompilerOptions: { a: 1 } });
     assert.deepEqual(t.compilerOptions, { strict: true });
     assert.match(changelog('Pacenotes', '2026-10-24'), /^## \[0\.1\.0\] - 2026-10-24$/m);
+    assert.match(changelog('Sightr', '2026-10-24', 'workbench-demo'), /Sightr, started from Paddock Workbench Demo: the Paddock workbench/);
+  });
+
+  test('the workbench template adds the dock stylesheet and the public folder, and has its own leftovers', () => {
+    const demo = { prefix: 'wd', architect: { build: { options: { browser: 'x', tsConfig: 'x', styles: [] } }, serve: { builder: 'b' } } };
+    const a = angularJson(demo, 'workbench-demo').projects.app.architect.build.options;
+    assert.ok(a.styles.includes('node_modules/dockview/dist/styles/dockview.css'));
+    assert.deepEqual(a.assets, [{ glob: '**/*', input: 'public' }]);
+    assert.equal(angularJson(demo).projects.app.architect.build.options.assets, undefined);
+    assert.equal(leftovers(new Map([['a.rs', 'use paddock_workbench_demo::run;']]), 'workbench-demo').length, 1);
+    assert.deepEqual(leftovers(new Map([['a.rs', 'use paddock_workbench_demo::run;']])), [], 'the shell template does not look for the workbench demo');
   });
 });
 
@@ -100,6 +124,18 @@ describe('a new app', () => {
     const pkg = JSON.parse(read('app/package.json'));
     assert.match(pkg.dependencies['@decryp7/paddock-ui'], /^\^\d+\.\d+\.\d+$/);
     assert.equal(JSON.parse(read('app/angular.json')).projects.app.architect.build.options.outputPath, 'dist/app');
+    // An e2e smoke suite on the shared preset: the window, axe in both themes, no horizontal scroll at 320 px.
+    assert.equal(pkg.scripts.e2e, 'playwright test --project=chromium');
+    // The shell demo has no unit-test target of its own, so there is no `test` script that could only fail.
+    assert.equal(pkg.scripts.test, undefined);
+    assert.equal(pkg.devDependencies.jsdom, undefined);
+    assert.equal(JSON.parse(read('app/angular.json')).projects.app.architect.test, undefined);
+    assert.match(read('app/playwright.config.ts'), /paddockConfig\(\{ app: 'pacenotes', defaultPort: 4200, serve: \(port\) => `npx ng serve --port \$\{port\}` \}\)/);
+    const smoke = read('app/e2e/smoke.spec.ts');
+    assert.match(smoke, /page\.locator\('#pd-main'\)/);
+    assert.match(smoke, /axeInThemes\(page\)/);
+    assert.match(smoke, /expectNoHorizontalScroll\(page, '320 px'\)/);
+    assert.doesNotMatch(smoke, /WorkbenchApp/);
   });
 
   test('never writes into a folder that has something in it', () => {
@@ -109,5 +145,69 @@ describe('a new app', () => {
     writeFileSync(marker, 'keep');
     assert.throws(() => createApp({ id: 'taken', name: 'Taken', identifier: 'net.decryptology.taken', dest }), /exists and is not empty/);
     assert.equal(readFileSync(marker, 'utf8'), 'keep');
+  });
+});
+
+describe('a new app from the workbench demo', () => {
+  const dest = join(scratch, 'sightr');
+  const args = { id: 'sightr', name: 'Sightr', identifier: 'net.decryptology.sightr', dest, template: 'workbench-demo', accent: 'sighter' };
+  const read = (p) => readFileSync(join(dest, p), 'utf8');
+
+  test('is the IDE-style demo renamed, on the registries, with the name, id and accent of the new app', () => {
+    assert.equal(createApp(args, '2026-10-24'), dest);
+    const cargo = read('app/src-tauri/Cargo.toml');
+    assert.match(cargo, /^name = "sightr-app"$/m);
+    assert.match(cargo, /^name = "sightr_app"$/m);
+    assert.match(cargo, /paddock-workbench = \{ version = "\d+\.\d+", registry = "decryp7", features = \["tauri"\] \}/);
+    assert.doesNotMatch(cargo, /path = "\.\.\//);
+    assert.doesNotMatch(cargo, /^repository = /m);
+    const conf = JSON.parse(read('app/src-tauri/tauri.conf.json'));
+    assert.equal(conf.productName, 'Sightr');
+    assert.equal(conf.identifier, 'net.decryptology.sightr');
+    assert.equal(conf.app.windows[0].title, 'Sightr');
+    assert.equal(conf.build.frontendDist, '../dist/app/browser');
+    assert.equal(conf.build.beforeBuildCommand, 'npm run build');
+    const lib = read('app/src-tauri/src/lib.rs');
+    assert.match(lib, /pub const APP_ID: &str = "sightr";/);
+    assert.match(lib, /pub const APP_NAME: &str = "Sightr";/);
+    assert.match(lib, /SIGHTR_HOME/);
+    assert.match(read('app/src-tauri/src/main.rs'), /sightr_app::run\(\);/);
+    assert.match(read('app/src-tauri/tests/app.rs'), /use sightr_app::/);
+    assert.match(read('app/src-tauri/tests/app.rs'), /app_dir\(\)\.join\("\.\."\)/);
+    assert.match(read('app/src/app/params.ts'), /: 'sighter';/);
+    assert.match(read('app/src/index.html'), /<title>Sightr<\/title>/);
+    assert.match(read('app/src/main-window.ts'), /appName: 'Sightr'/);
+    assert.match(read('app/src/app/views/orientation-view.ts'), /<h1>Sightr<\/h1>/);
+    assert.match(read('app/src-tauri/deny.toml'), /^# cargo-deny for Sightr /);
+  });
+
+  test('keeps the demo\'s window kinds, capabilities, drag ghost and icons, and none of the shell demo\'s agent or tray', () => {
+    for (const f of ['app/src/dialog-window.ts', 'app/src/popout-window.ts', 'app/src/main-window.ts', 'app/public/drag-ghost.html', 'app/src-tauri/capabilities/popout.json', 'app/src-tauri/icons/icon.icns']) {
+      assert.ok(existsSync(join(dest, f)), f);
+    }
+    assert.ok(!existsSync(join(dest, 'app/src-tauri/agent')) && !existsSync(join(dest, 'app/src-tauri/icons/tray')));
+    const ng = JSON.parse(read('app/angular.json')).projects.app.architect.build.options;
+    assert.deepEqual(ng.assets, [{ glob: '**/*', input: 'public' }]);
+    assert.equal(JSON.parse(read('app/package.json')).description, 'Sightr: the UI (Angular, @decryp7/paddock-ui). Started from Paddock Workbench Demo.');
+    assert.match(read('CHANGELOG.md'), /started from Paddock Workbench Demo/);
+    assert.ok(!existsSync(join(dest, 'app/src-tauri/Cargo.lock')));
+    const smoke = read('app/e2e/smoke.spec.ts');
+    assert.match(smoke, /pd-dock \[role=tab\]/);
+    assert.match(smoke, /workbench\.palette\.open\(\)/);
+    assert.match(read('app/playwright.config.ts'), /app: 'sightr'/);
+    // The demo's unit tests come along, with their own target, setup and tsconfig.
+    const test = JSON.parse(read('app/angular.json')).projects.app.architect.test;
+    assert.equal(test.builder, '@angular/build:unit-test');
+    assert.deepEqual([test.options.tsConfig, test.options.setupFiles], ['tsconfig.spec.json', ['src/test-setup.ts']]);
+    assert.equal(JSON.parse(read('app/package.json')).scripts.test, 'ng test --watch=false');
+    assert.ok(JSON.parse(read('app/package.json')).devDependencies.jsdom, 'the unit tests need a DOM');
+    assert.match(read('app/tsconfig.spec.json'), /"extends": "\.\/tsconfig\.json"/);
+    assert.ok(existsSync(join(dest, 'app/src/test-setup.ts')) && existsSync(join(dest, 'app/src/app/demo.contributions.spec.ts')));
+  });
+
+  test('an unknown template stops the run before anything is written', () => {
+    const other = join(scratch, 'stale');
+    assert.throws(() => createApp({ ...args, dest: other, template: 'nope' }), /unknown template nope/);
+    assert.ok(!existsSync(other));
   });
 });

@@ -33,10 +33,12 @@ pub use layout::{LayoutError, LayoutStore, Layouts};
 paddock_commands::command_table! {
     /// The layout commands (the dock's persistence).
     pub static LAYOUT;
-    /// The value saved under a key (`{ key }` -> object or null). Pop-outs read the layout of their host's perspective.
-    Query [MAIN | POPOUT] => tauri::layout_get,
-    /// Saves (or with `null` deletes) the value under a key; at most 1 MiB of layout plus the request's envelope.
-    Quiet [MAIN] limit 1088 * paddock_commands::KIB => tauri::layout_set,
+    /// The value saved under a key (`{ key }` -> object or null). Pop-outs read the layout of their host's perspective;
+    /// the Manage layouts dialog reads the named layouts (a dialog only through its contract).
+    Query [MAIN | POPOUT | DIALOG] => tauri::layout_get,
+    /// Saves (or with `null` deletes) the value under a key; at most 1 MiB of layout plus the request's envelope. The
+    /// Manage layouts dialog renames and deletes named layouts (through its contract).
+    Quiet [MAIN | DIALOG] limit 1088 * paddock_commands::KIB => tauri::layout_set,
 }
 
 #[cfg(feature = "tauri")]

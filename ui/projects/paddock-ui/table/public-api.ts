@@ -23,6 +23,7 @@ export {
   PD_PRIMARY_MIN_PX,
   PD_ROW_HEIGHTS,
   rowHeightFor,
+  PD_FOLD_EXTRA,
   shownColumns,
   sortRows,
   type PdColumn,

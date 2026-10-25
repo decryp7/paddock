@@ -201,7 +201,7 @@ test.describe('review 1 (X50)', () => {
     // The overlay settles at the pointer within a frame of opening (CDK positions it after it is attached).
     await expect.poll(async () => {
       const m = (await wb.explorer.menu.boundingBox())!;
-      return Math.max(Math.abs(m.x - at.x), Math.abs(m.y - at.y));
+      return Math.max(Math.abs(m.x - at.x), Math.abs(m.y - (box.y + box.height + 2)));
     }).toBeLessThanOrEqual(8);
     await expect(row).toHaveClass(/pd-menu-target/);
     await page.keyboard.press('Escape');
@@ -229,7 +229,66 @@ test.describe('review 1 (X50)', () => {
     ]);
     expect(pw / tw).toBeGreaterThanOrEqual(0.6);
     await expect(table.locator('.where').first()).toBeVisible();
+    // Review 2 P1-A: folded rows grow; no cell overflows, the second line clears the row's bottom border by 4 px.
+    const overflow = await table.locator('[role=row].pd-row').evaluateAll((rows) =>
+      rows.flatMap((r) => {
+        const out: string[] = [];
+        for (const c of r.querySelectorAll<HTMLElement>('[role=gridcell]')) if (c.scrollHeight > c.clientHeight + 1) out.push(`cell ${c.scrollHeight}>${c.clientHeight}`);
+        const where = r.querySelector('.where');
+        if (where && r.getBoundingClientRect().bottom - where.getBoundingClientRect().bottom < 4) out.push('second line on the border');
+        return out;
+      }),
+    );
+    expect(overflow).toEqual([]);
     await expectNoHorizontalScroll(page);
+  });
+
+  test('review 2 P1-B: at 320 px the Explorer slides over the dock, which keeps its whole width', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await expect(page.getByTestId('pd-dock')).toBeVisible();
+    const before = await page.getByTestId('pd-dock').evaluate((d) => d.getBoundingClientRect().width);
+    await wb.activity.item('wd.act.explorer').click();
+    await expect(wb.frame.sidebar).toHaveClass(/pd-side-overlay/);
+    expect(await page.getByTestId('pd-dock').evaluate((d) => d.getBoundingClientRect().width)).toBe(before);
+    // Every control of the dock lies inside the window (none is cut).
+    const cut = await page.locator('pd-dock button, pd-dock [role=tab]').evaluateAll((els) =>
+      els.filter((e) => {
+        const r = e.getBoundingClientRect();
+        return r.width > 0 && (r.left < -0.5 || r.right > innerWidth + 0.5);
+      }).length,
+    );
+    expect(cut).toBe(0);
+    await page.keyboard.press('Escape');
+    await expect(wb.frame.sidebar).toHaveCount(0);
+    await expectNoHorizontalScroll(page);
+  });
+
+  test('review 2 P3-16: the menu is never painted at the window origin, not even on its first frame', async ({ page }) => {
+    const wb = new WorkbenchApp(page);
+    await wb.frame.open();
+    await page.evaluate(() => {
+      const w = window as unknown as { firstMenuFrame?: { x: number; y: number; visibility: string } };
+      new MutationObserver((_, obs) => {
+        const m = document.querySelector('[data-testid="explorer-menu"]');
+        if (!m) return;
+        obs.disconnect();
+        requestAnimationFrame(() => {
+          const r = m.getBoundingClientRect();
+          w.firstMenuFrame = { x: r.x, y: r.y, visibility: getComputedStyle(m).visibility };
+        });
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+    const box = (await wb.explorer.node('wd.files', 'README.md').boundingBox())!;
+    await page.mouse.click(box.x + 60, box.y + 6, { button: 'right' });
+    const first = await page.waitForFunction(() => (window as unknown as { firstMenuFrame?: unknown }).firstMenuFrame).then((h) => h.jsonValue() as Promise<{ x: number; y: number; visibility: string }>);
+    expect(first.visibility === 'hidden' || (Math.abs(first.x - (box.x + 60)) <= 8 && first.y >= box.y + box.height)).toBe(true);
+    // Settled: at the pointer's x, below the row (never over its label: review 2 P3-1).
+    await expect.poll(async () => {
+      const m = (await wb.explorer.menu.boundingBox())!;
+      return Math.abs(m.x - (box.x + 60)) <= 8 && m.y >= box.y + box.height && m.y <= box.y + box.height + 8;
+    }).toBe(true);
   });
 
   test('P1-3: a fitted layout is said in the notifications, never over the dock', async ({ page }) => {

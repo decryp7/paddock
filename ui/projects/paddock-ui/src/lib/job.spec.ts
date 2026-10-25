@@ -71,10 +71,10 @@ describe('jobView', () => {
     const v = jobView(running({ id: 'a', label: 'A', unit: 'items', total: 10, done: 99 }));
     expect([v.percent, v.count]).toEqual([100, '10 of 10']);
   });
-  it('an uninterruptible step disables Cancel and says why', () => {
+  it('an uninterruptible step keeps Cancel enabled (rule 11) and says it acts when the step ends', () => {
     const v = jobView(running({ id: 'a', label: 'Saving', unit: 'items', total: 1, done: 0 }, { cancellable: false, notCancellableReason: 'Writing the database' }));
-    expect([v.canCancel, v.cancelDisabled, v.cancelHint]).toEqual([true, true, 'Writing the database']);
-    expect(jobView(running({ id: 'a', label: 'S', unit: 'items', done: 0 }, { cancellable: false })).cancelHint).toBe('This step cannot be stopped');
+    expect([v.canCancel, v.cancelDisabled, v.cancelHint]).toEqual([true, false, 'Writing the database: Cancel takes effect when this step ends.']);
+    expect(jobView(running({ id: 'a', label: 'S', unit: 'items', done: 0 }, { cancellable: false })).cancelHint).toBe('This step cannot be stopped; Cancel takes effect when it ends.');
   });
   it('stalled is a warning, not an error', () => {
     const v = jobView(discovering, true);
@@ -86,7 +86,7 @@ describe('jobView', () => {
     const user = jobView({ ...base, state: 'cancelled', reason: 'user' } as SuJobSnapshot);
     const late = jobView({ ...base, state: 'cancelled', reason: 'deadline' } as SuJobSnapshot);
     expect([done.tone, done.terminal, done.canCancel]).toEqual(['success', true, false]);
-    expect([failed.tone, failed.detail]).toEqual(['danger', 'Disk full']);
+    expect([failed.tone, failed.detail, failed.canRetry, done.canRetry]).toEqual(['danger', 'Disk full', true, false]);
     expect(user.detail).toBe('Stopped at your request.');
     expect(late.detail).toBe('Stopped: the time limit was reached.');
   });
@@ -146,10 +146,31 @@ describe('SuJob', () => {
     (f.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button.pd-cancel')!.click();
     expect(got).toBe(7);
   });
-  it('a disabled Cancel shows the reason as text', () => {
-    const el = render(running({ id: 'a', label: 'Saving', unit: 'items', done: 0 }, { cancellable: false, notCancellableReason: 'Writing the database' })).nativeElement as HTMLElement;
-    expect(el.querySelector<HTMLButtonElement>('button.pd-cancel')!.disabled).toBe(true);
-    expect(text(el)).toContain('Writing the database');
+  it('Cancel is never disabled (rule 11): a step that cannot be interrupted says why and that Cancel acts when it ends', () => {
+    const f = render(running({ id: 'a', label: 'Saving', unit: 'items', done: 0 }, { cancellable: false, notCancellableReason: 'Writing the database' }));
+    const el = f.nativeElement as HTMLElement;
+    let got = -1;
+    f.componentInstance.cancel.subscribe((id) => (got = id));
+    const button = el.querySelector<HTMLButtonElement>('button.pd-cancel')!;
+    expect(button.disabled).toBe(false);
+    button.click();
+    expect(got).toBe(7);
+    expect(text(el)).toContain('Writing the database: Cancel takes effect when this step ends.');
+  });
+  it('done and failed show an icon next to the word (never colour alone); Retry only where the host offers it', () => {
+    const done = render({ ...base, state: 'done' } as SuJobSnapshot).nativeElement as HTMLElement;
+    expect(done.querySelector('svg.pd-state--ok')).not.toBeNull();
+    const f = render({ ...base, state: 'failed', message: 'Disk full' } as SuJobSnapshot);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('svg.pd-state--bad')).not.toBeNull();
+    expect(el.querySelector('button')).toBeNull();
+    f.componentRef.setInput('retryable', true);
+    f.detectChanges();
+    let got = -1;
+    f.componentInstance.retry.subscribe((id) => (got = id));
+    const retry = [...el.querySelectorAll('button')].find((b) => text(b) === 'Retry')!;
+    retry.click();
+    expect(got).toBe(7);
   });
   it('terminal jobs have no bar and no Cancel; failure shows its message', () => {
     const el = render({ ...base, state: 'failed', message: 'Disk full' } as SuJobSnapshot).nativeElement as HTMLElement;

@@ -87,10 +87,17 @@ fn children_that_exit_or_never_connect_fail_the_launch() {
         launch(&silent, Arc::new(NoCalls)),
         Err(IpcError::Timeout)
     ));
-    assert!(matches!(
-        launch(&ChildSpec::new("/no/such/paddock-program", "nothing"), Arc::new(NoCalls)),
-        Err(IpcError::Spawn(m)) if m.contains("could not be started")
-    ));
+    // A program that does not exist: refused at the spawn, or (where the platform's spawn reports it only through the child's
+    // exit, as under emulation) a child that exited before it took its bootstrap. Either way the launch fails with a reason.
+    let missing = launch(
+        &ChildSpec::new("/no/such/paddock-program", "nothing"),
+        Arc::new(NoCalls),
+    );
+    assert!(
+        matches!(&missing, Err(IpcError::Spawn(m)) if m.contains("could not be started") || m.contains("exited")),
+        "{:?}",
+        missing.err()
+    );
 }
 
 #[test]

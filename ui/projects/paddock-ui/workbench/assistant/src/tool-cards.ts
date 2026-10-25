@@ -46,13 +46,13 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph],
   template: `
-    <div class="card" [attr.data-state]="card().state" data-testid="assistant-tool-card">
+    <div class="card" [attr.data-state]="declined() ? 'declined' : card().state" data-testid="assistant-tool-card">
       <pd-glyph class="state" [name]="icon()" [size]="14" />
       <span class="name">{{ card().name || unreadable }}</span>
       @if (card().summary) {
         <span class="call" [attr.title]="card().summary">{{ card().summary }}</span>
       }
-      <span class="result" data-testid="assistant-tool-result">{{ stateText() }}</span>
+      <span class="result" [class.muted]="declined()" data-testid="assistant-tool-result">{{ declined() ? declinedText : stateText() }}</span>
     </div>
   `,
   styles: `
@@ -63,13 +63,20 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
     .name { font-weight: var(--pd-weight-semibold); color: var(--pd-text); }
     .call { min-width: 0; flex: 1 1 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .result { overflow-wrap: anywhere; }
+    .result.muted { color: var(--pd-text-muted); }
   `,
 })
 export class PdAssistantToolCard {
   readonly card = input.required<ToolCard>();
   protected readonly unreadable = $localize`:@@pd.wb.assistant.tool.unreadable:(unreadable call)`;
+  protected readonly declinedText = $localize`:@@pd.wb.assistant.tool.declined:Declined`;
+  /** The user said no: a neutral card, not a failure. */
+  protected declined(): boolean {
+    return this.card().declined === true && this.card().state === 'failed';
+  }
   protected icon(): string {
     const s = this.card().state;
+    if (this.declined()) return 'close';
     return s === 'ok' ? 'check' : s === 'failed' ? 'alert' : s === 'awaiting' ? 'lock' : 'clock';
   }
   protected stateText(): string {

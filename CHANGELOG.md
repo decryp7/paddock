@@ -4,7 +4,50 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Fixed
+- sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
+  to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
+  variables, then sccache) whenever a build folder variable is set.
+
 ### Added
+- X51 review 2 fixes for `<pd-view>` (0 P1, 6 P2, 9 P3; `ui/docs/review/x51-view/FIXES.md`). Edges never cross a box: back, sideways and
+  long edges run in a lane outside the boxes and between the rows, radial edges bow or go round the outside (`route.ts`, a test over
+  every layout and the sample, and over the real SVG paths); matrix headings keep a minimum width at 320 px; focus rings of sort headers,
+  "Show as a list", scroll regions and the review filter are drawn inside their container (an e2e check over every focusable element);
+  hover is a visible fill on rows and drawing boxes; a region that scrolls fades the side that continues; a drawing opens at its middle;
+  the narrow "Changes data" badge is "Edits"; the review filter scrolls on one row; class members are padded evenly; the scatter shows
+  its unit in the title only. Rule 19: `pd-view` reports (dev mode) a `needsAi` node drawn by a host that provides neither
+  `VIEW_NEEDS_AI` nor `VIEW_OPEN_AI_SETTINGS`, and the hint reads "Set up local AI in this app's settings.". The contact sheet is
+  `ui/docs/review/x51-view/review-3/`, every section from one commit.
+- X51 review 1 fixes for `<pd-view>` (3 P1, 13 P2, 12 P3; `ui/docs/review/x51-view/FIXES.md`). The radial graph puts its hub in the middle
+  and the rest on rings that cannot touch, in a canvas fitted to the boxes (a test over every layout: no two boxes overlap); graph
+  boxes carry a status glyph and the status word in their name and in "Show as a list", which also lists captions and members;
+  `@decryp7/paddock-ui/states` has `pd-needs-ai-card`, `pd-needs-ai` is a container over it, and a `needsAi` node draws the app's own
+  component (`VIEW_NEEDS_AI`) or the same card with the plugin's reason and, only when the host provides `VIEW_OPEN_AI_SETTINGS`, the app's
+  "Open AI settings" (the plugin's own `setup` action of a `needsAi` node is never sent to the plugin, rule 19); inline kinds pack in a row, words break only when they must,
+  headings sit under the view title, stale is a warning with Reload, loading is a skeleton and busy a visible status, one filled
+  button per view, one `pd-view-writes` badge, tree status on the mark only, numbers right-aligned with their unit (`Column.align`,
+  `Column.unit`, `ChartSpec.unit` in `paddock-view`), chosen paths and secrets shown by name (`ViewHost` pickers resolve `{ value,
+  name }`), class diagrams with a stereotype and a member compartment, the review list fits 320 px, scroll regions are tab stops
+  only while they overflow. The contact sheet is `ui/docs/review/x51-view/review-2/` as sheets by section.
+- Review 2 verification fixes. `pd-table`: a required column's floor is `min(128px, 40%)`, so in a phone-width pane the rows fit the
+  body (no sideways scroll inside the table, the last row action stays inside, header and rows share one edge with a scrolling body).
+  Recent files: the file name shortens in the middle (the extension survives) through `pd-path-text`, and a bare name takes no space
+  for an empty directory part.
+- Review 2 of the files and storage UI. The clear confirmation no longer repeats its title and is sentence case ("Clear logs?",
+  "Up to 4.8 MB is removed."); loose entries and the folded smallest items of a tree share one "Other items" group (no group of one that
+  repeats its row, no glyph that looks like a menu); `pd-table`'s `groupMono` takes a predicate, a column track in `em` is documented as
+  wrong (header and rows differ in font size, which put the tree's Size header 5 px off its values), the header keeps the body's
+  scrollbar width and group names truncate; the Storage table counts "3 kinds of data"; the `reveal` arrow is inside the margin; the
+  320 px shots show their subject (Settings closed before the Files shot, the table scrolled into view, the row menu open).
+- X51 `@decryp7/paddock-ui/view`: `<pd-view>`, the renderer of the declarative views plugins return (ADR 0002, `paddock-view`). Every
+  node kind (stack, text, table with sort and paging, lazy tree, graph, diagram, form, review list, matrix, chart, badge, progress,
+  empty, needs-AI, link); an unknown kind says "Update the app to view this" for that node only. Documents are validated on receipt by a
+  TypeScript mirror of the engine limits (`validateViewDoc`), patches (`applyViewPatch`: replace by id with the base etag checked, or a
+  whole document) are applied by `ViewStore` (stale or invalid: inline error with Retry, the last good view stays), actions leave as
+  `ViewAction` with the host keys `row`, `page`, `node`, `finding`, `reason`, `values`, `column`, `descending` (matrix cells add `row`,
+  `col`, `rowId`, `colId`). Confirmations, the OS browser and the path and secret pickers are the host's (`VIEW_HOST`, refused by default).
+  Gallery section, Playwright spec (axe, 320 px) and the review sheet `ui/docs/review/x51-view/`.
 - `cargo-paddock-plugin` (X51, ADR 0001): the plugin author's tool, `cargo paddock-plugin new | build | pack | keygen | sign | verify
   | run | test` on `paddock-cli` conventions (ported from Debrief's `cargo-debrief-plugin`). `new` makes a project that depends on
   `paddock-plugin-api` alone; `pack` writes a deterministic `.paddockplugin` (optionally Ed25519-signed); `verify` checks checksums,
@@ -13,11 +56,39 @@ Conventional Commits; one semver tag for the whole repo.
   starts a plugin program through the same launcher as the app.
 
 ### Fixed
+- Findings of the independent screenshot review (`ui/docs/screenshots/REVIEW.md`): the menu bar never wraps (it stays one line and
+  the app name gives way first; the title bar clips nothing at 320 px); the demo's runner names truncate with an ellipsis and a
+  tooltip, and State and the counts give way before the name; `pd-path-text` shows at most one ellipsis; `pd-job` shows an icon
+  beside Done and Failed, a Retry on a failed job when the host offers one, and a Cancel that is never disabled (a step that
+  cannot be interrupted says so, and that Cancel acts when it ends; rule 11); the jobs status item counts the same elapsed time as
+  the job card; a status chip whose state is unknown is neutral, not danger; `pd-segmented-control` groups its counts. The gallery
+  keeps its click counters out of sight, names the tray popover after the accent's app, labels the metrics, and the README points
+  at images that exist (14 sections, seven accents).
 - UI suites green on the integration branch: the reference specs of jobs and notify provide the undo store the demo context now
   injects; `UNDO_NOTICE_KINDS` lives in `undo-kinds.ts` so the registration file imports no store (the registration lint); the shell
   demo's menu bar test expects Edit (undo, X44); the channels retry test steps the demo engine by hand (`?channels-step=manual`)
   instead of racing its 400 ms timer; the dock's "attach before dockview has loaded" spec forgets the module itself instead of
   relying on a fresh worker.
+- Order-dependent UI specs (X50, rule 5): the Angular builder runs Vitest with `isolate: false`, so spec files share a window per
+  worker. `installTestKit` now puts back real timers, restores spies, undoes stubbed globals and empties the page and both
+  storages before and after every test; the dock's attach spec holds the dockview import (`forgetDockviewForTest(load)`)
+  instead of polling, and `DockPersistence.flush()` replaces sleeps in the dock's persistence specs.
+- X50 workbench review 2: folded table rows grow (`PdColumn.foldBelow`, additive; `headerHidden` for glyph columns), the
+  Explorer slides over the dock below 480 px, severity glyphs by shape (new `pd:error`), an open fly-out is not drawn as
+  selected, neutral or status-toned activity badges, the menu opens below its row and is never painted before it is placed,
+  marks on provider results, the active tab stays visible in an overflowed strip, pop-out titles use the panel's title,
+  the Outline and Files follow the active document after a restore, the assistant's declined/failed/approval states, the
+  composer clears on send, a streaming cue and the log following the user's own question; save and manage layout dialogs
+  are real dialog windows with declared contracts, and pop-outs are saved with the layout.
+- `paddock-assistant`: `Access::Destructive` (a write that cannot be undone); `ToolInfo.destructive` and `destructive` on the
+  `toolStarted`/`approvalNeeded` events (generated TS). The approval of such a tool is a danger choice: danger-tinted card,
+  "This cannot be undone.", Allow as a danger button (never the primary) and Decline the focused default. New shared glyphs
+  `pd:symbol-function`, `pd:symbol-type`, `pd:symbol-module`; `namesPaletteProvider({ icon })` also takes a function per match.
+- `scripts/new-app.mjs`: a new app has an e2e smoke suite on `@decryp7/paddock-e2e` (`playwright.config.ts`,
+  `e2e/smoke.spec.ts`, `npm run e2e`) and, from the workbench demo, its unit tests (a `test` target, `test-setup.ts`, jsdom and
+  the contribution lint); a template without unit tests gets no `test` script. The workbench demo has its own Vitest target
+  (`ng test workbench-demo`, part of `npm test`). Checked end to end once: a generated app's Rust tests, build, unit tests and
+  e2e pass against this repository's crates and packages.
 
 ### Changed
 - BREAKING (X51, unreleased crates): one `ProtocolVersion` and one `GrantRef`. `paddock-plugin-package` drops its own
@@ -57,6 +128,14 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock-chromium` on Windows: every end of the browser (the time limit's included) goes through its `Supervised`, so the
   kill-on-close job closes with it; the Chrome for Testing self-test checks the version manifest and a headless page dump (Chrome
   prints no `--version` there). The real-browser test runs on macOS and Windows CI too (install action, `catalogue:`).
+- Review fixes for the files and storage UI (independent review, 2 P1, 11 P2, 9 P3). Settings > Storage is the shared `pd-table`: one
+  line per row, rows grouped by cache or the user's data with the aggregate size on the group row, hover icon buttons (What is inside,
+  Show in the file manager) and a "…" menu ending in Clear in danger text; the cache button is a normal button. The size tree no
+  longer counts a folder twice (its size is on the group row, its items are the rows, with `pd:` glyphs and a title and Close);
+  lower bounds read "at least 3.9 GB", rounded down. `pd-table` gains `groupSummary`, `groupMono` and `countLabel`. Recent files lead
+  with the file name and show the folder as a muted second line; `pd-path-text` keeps the separator beside the ellipsis. Glyphs: the
+  page fold fixed, bigger `file-code` brackets, a lighter `archive` lid, a `reveal` glyph for the action. The contact sheet is
+  1440 x 900 at 2x with 320 px, hover, menu and confirmation shots.
 - `conformance/ci/pin-runtime.mjs`: pins any `paddock-runtime` catalogue (size and SHA-256 measured while downloading, `--version`,
   `--chrome-for-testing`); `install-test-browser.mjs --catalogue` and the action's `catalogue:` input install the build a catalogue
   pins. `paddock-chromium`'s waits (`start_page`, start-up, `wait_ready`) run on the injected clock; its real-browser test runs
@@ -124,7 +203,8 @@ Conventional Commits; one semver tag for the whole repo.
   "needs update"), and starts it detached with the paths or one deep link of its scheme (`pitcrew://show/machine/mac-mini`);
   "not installed" is a plain `Outcome`. The receiving side parses with `Handoff::from_paths` / `from_link`. `testing` has a file
   system and a spawner that start nothing.
-- Paddock Workbench Demo (plan X50 W8): `apps/workbench-demo`, the workbench demo as an installable app on the `paddock-shell` and `paddock-workbench` plugins (layouts in the config folder, pop-out panels with the drag ghost, the assistant on Pitwall with one read-only sample tool and a calm "Pitwall not running" state), its own icon, ad-hoc macOS sealing, a release workflow from `workbench-demo-v*` tags (`scripts/workbench-demo-release.mjs`, `scripts/workbench-demo/`), a CI job, and the starter section in its README. `ui/projects/workbench-demo` picks the Tauri backends when `inTauri()` and boots main, pop-out and dialog windows; `workbenchInvoke` (`@decryp7/paddock-ui/workbench`) sends the plugin's commands to it.
+- Paddock Workbench Demo (plan X50 W8): `apps/workbench-demo`, the workbench demo as an installable app on the `paddock-shell` and `paddock-workbench` plugins (layouts in the config folder, pop-out panels with the drag ghost, the assistant on Pitwall with one read-only sample tool and a calm "Pitwall not running" state), its own icon, ad-hoc macOS sealing, a release workflow from `workbench-demo-v*` tags (`scripts/demo-release.mjs`, `scripts/demo/`, shared with the shell demo), a CI job, and the starter section in its README. `ui/projects/workbench-demo` picks the Tauri backends when `inTauri()` and boots main, pop-out and dialog windows; `workbenchInvoke` (`@decryp7/paddock-ui/workbench`) sends the plugin's commands to it.
+- Tooling of the demo apps (X50 review 2): one release script for both (`scripts/demo-release.mjs <app> ...`, `scripts/demo/bundle.sh` and `verify-macos.sh` take the app as an argument; a new demo is a row of `APPS`), `scripts/new-app.mjs --template workbench-demo [--accent]` starts an IDE-style app, `ui/e2e/workbench-demo-desktop.spec.ts` plays the demo's main, pop-out and dialog windows over a faked Tauri IPC, the status-bar spinner is 14 px with a 2 px stroke and toasts are at most 360 px wide and one line above the status bar at 480 px and below.
 - `paddock-workbench` plugin (plan X50 W7): `paddock_workbench::Builder` (`layouts`, `panels`, `window_hooks`, `assistant`, each optional) builds the Tauri plugin `paddock-workbench`: the layout, panel and assistant commands in one composed table behind one guard, generated permission sets `default`/`popout`/`dialog` per window class, and generated `WORKBENCH_COMMANDS`/`WORKBENCH_PLUGIN` in `workbench/generated`.
 - Every Paddock crate that parses untrusted input has a never-panics test (`paddock_testkit::assert_never_panics`, new: the one-line
   form of `corpus` + `never_panics`), so C36 reports nothing and is strict in Paddock's own CI (`paddock-conformance --strict C36`: the

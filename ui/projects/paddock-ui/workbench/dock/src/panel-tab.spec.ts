@@ -22,6 +22,22 @@ describe('PanelTab', () => {
     new PanelTab().dispose();
   });
 
+  it('hands a focus on the label to the element that carries role=tab', () => {
+    const carrier = document.createElement('div');
+    carrier.setAttribute('role', 'tab');
+    carrier.tabIndex = 0;
+    const tab = new PanelTab();
+    carrier.appendChild(tab.element);
+    document.body.appendChild(carrier);
+    tab.element.focus();
+    expect(document.activeElement).toBe(carrier);
+    carrier.remove();
+    // Outside a tab strip nothing happens.
+    document.body.appendChild(tab.element);
+    expect(() => tab.element.focus()).not.toThrow();
+    tab.element.remove();
+  });
+
   it('finds the panel id of the tab an event came from', () => {
     const host = document.createElement('div');
     host.innerHTML = '<div role="tab"><div class="pd-dock-tab" data-panel-id="p1"><span id="inner"></span></div></div><div id="other"></div>';

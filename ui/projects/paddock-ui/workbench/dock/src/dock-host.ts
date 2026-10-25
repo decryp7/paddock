@@ -20,6 +20,7 @@ import { AutoHideItem, itemsOn } from './auto-hide';
 import { Side } from './dock-geometry';
 import { DockKeys } from './dock-keys';
 import { DockMenu, type DockMenuItem } from './dock-menu';
+import { placeMenu } from './menu-placement';
 import { DOCK_STYLES } from './dock-styles';
 import { DockViews } from './dock-views';
 import { WorkbenchDock } from './dock.service';
@@ -41,7 +42,7 @@ export const HOVER_HIDE_MS = 300;
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [DockSwitcher, PdIcon],
-  host: { 'data-testid': 'pd-dock', '[attr.data-ready]': 'dock.ready() ? "" : null', '[attr.data-perspective]': 'dock.activePerspective()' },
+  host: { 'data-testid': 'pd-dock', '[attr.data-ready]': 'dock.ready() ? "" : null', '[attr.aria-busy]': 'dock.ready() ? null : "true"', '[attr.data-perspective]': 'dock.activePerspective()' },
   template: `
     @for (side of sides; track side) {
       @if (bars()[side].length) {
@@ -68,6 +69,13 @@ export const HOVER_HIDE_MS = 300;
     }
     <div class="pd-dock-center">
       <div #mount class="pd-dock-mount" data-testid="pd-dock-mount"></div>
+      @if (!dock.ready()) {
+        <!-- Until the layout is restored (or built) the main area shows the shape of a dock, never an empty page. -->
+        <div class="pd-dock-boot" data-testid="pd-dock-skeleton" aria-hidden="true">
+          <div class="pd-dock-boot-strip"><span></span><span></span></div>
+          <div class="pd-dock-skeleton"><span></span><span></span><span></span><span></span></div>
+        </div>
+      }
       @if (open(); as item) {
         <section
           id="pd-dock-ah-flyout"
@@ -78,15 +86,14 @@ export const HOVER_HIDE_MS = 300;
           [attr.data-panel-id]="item.id"
           [attr.aria-label]="item.title"
           [style.width.px]="item.side === 'bottom' ? null : item.size"
-          [style.height.px]="item.side === 'bottom' ? item.size : null"
+          [style.--pd-ah-size]="item.size + 'px'"
           (mouseenter)="cancelLeave()"
           (mouseleave)="leaveSoon()"
           (keydown.escape)="escape()"
           (focusout)="focusOut($event)"
         >
+          <!-- The strip tab already names the panel and the pane has the room: the actions float over its corner, no header row. -->
           <header class="pd-dock-ah-head">
-            <!-- The strip tab already names the panel: the header repeats nothing (the region's aria-label still does). -->
-            <span class="pd-dock-ah-spacer"></span>
             <button type="button" class="pd-dock-action pd-dock-ah-pin" [attr.aria-label]="pinLabel(item.title)" aria-pressed="true" [attr.title]="pinTitle" (click)="dock.pin(item.id)">
               <pd-icon name="pd:pin" />
             </button>
@@ -179,9 +186,19 @@ export class PdDock implements OnDestroy {
       );
     });
     this.offKeys = this.keys.listen(document);
-    // effect-state: moves the keyboard focus into a menu that just opened (a DOM side effect)
+    // effect-state: places a menu that just opened inside the window and moves the keyboard focus into it (DOM side effects)
     effect(() => {
-      if (this.menus.state()) afterNextRender(() => this.host.nativeElement.querySelector<HTMLButtonElement>('.pd-dock-menu button:not(:disabled)')?.focus(), { injector: this.injector });
+      const menu = this.menus.state();
+      if (!menu) return;
+      afterNextRender(
+        () => {
+          const el = this.host.nativeElement.querySelector<HTMLElement>('.pd-dock-menu');
+          if (!el) return;
+          placeMenu(el, menu.x, menu.y);
+          el.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+        },
+        { injector: this.injector },
+      );
     });
     // Mount the slid-out view's component into the flyout body.
     // effect-state: mounts and disposes view renderers in the DOM flyout (side effect, not derived state)

@@ -386,7 +386,8 @@ pub(crate) mod tests {
         let mut out = Removal::default();
         let root_user = std::fs::remove_file(locked.join("a.bin")).is_ok();
         let gone = remove(&d.path().join("x"), &(), &mut out);
-        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The superuser's removal took the folder with it: nothing to restore.
+        let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
         if !root_user {
             assert!(!gone);
             assert!(
@@ -465,7 +466,7 @@ pub(crate) mod tests {
         let mut out = Removal::default();
         let behind = remove(&closed.join("inner"), &(), &mut out);
         let itself = remove(&closed, &(), &mut out);
-        std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755));
         if !root_user {
             assert_eq!(unreadable.files, 0);
             assert!(!behind && !itself);

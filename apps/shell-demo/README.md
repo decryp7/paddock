@@ -34,8 +34,8 @@ The shell crates are path dependencies here; an app outside this repository take
 cd ui && npm ci && npx ng build shell-demo                     # the UI the app embeds (tauri.conf.json frontendDist)
 cd apps/shell-demo/src-tauri && cargo test                      # the app on the mock runtime (no window, no user folders)
 cd ui && npx playwright test --project=shell-demo               # the UI in the browser, and over a fake Tauri IPC (shell-demo-desktop.spec.ts)
-scripts/shell-demo/bundle.sh app,dmg                            # a local DMG to try (never published)
-scripts/shell-demo/verify-macos.sh                              # the ad-hoc seal, `codesign --verify --deep --strict`, the app inside the DMG
+scripts/demo/bundle.sh shell-demo app,dmg                         # a local DMG to try (never published)
+scripts/demo/verify-macos.sh shell-demo                           # the ad-hoc seal, `codesign --verify --deep --strict`, the app inside the DMG
 ```
 
 `cd apps/shell-demo && npm ci && npx tauri dev` runs it against `ng serve shell-demo`.
@@ -47,7 +47,7 @@ packages' `v*` tags: the gates, then a DMG (sealed ad-hoc, hardened runtime off,
 Linux deb and AppImage, and the Gitea release with the version's CHANGELOG section and the First launch notes. Before
 tagging: bump `src-tauri/Cargo.toml` and add the CHANGELOG section, `cargo deny check advisories` in `src-tauri`, one
 manual run of the workflow (it builds the installers without releasing), the icon check
-(`node scripts/shell-demo-release.mjs icons`).
+(`node scripts/demo-release.mjs shell-demo icons`).
 
 ## Start a new app from the demo
 
@@ -71,5 +71,5 @@ Then, in the new app:
    then. After each change: `PADDOCK_WRITE_TS=1 cargo test --test app` (the UI's command names) and the UI's specs
    (`dialog-contracts.json` and `paddock-manifest.json` are written from the registry). `paddock-check-dialog-commands`
    is not set up in the copy: it walks the shell's TypeScript sources, which the npm package does not ship yet.
-4. CI and releases: copy `.gitea/workflows/shell-demo-release.yml` and `scripts/shell-demo/` from here and rename the
-   tag prefix, or follow an app that already releases (Pitwall).
+4. CI and releases: copy `.gitea/workflows/shell-demo-release.yml` from here and rename the tag prefix, and add a row to `APPS` in
+   `scripts/demo-release.mjs` (`scripts/demo/` takes the app as its first argument), or follow an app that already releases (Pitwall).

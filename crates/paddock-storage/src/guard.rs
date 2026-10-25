@@ -153,10 +153,12 @@ mod tests {
         write(&root.join("closed/x"), 1);
         std::fs::set_permissions(root.join("closed"), std::fs::Permissions::from_mode(0o000))
             .unwrap();
+        // The superuser (the CI container) reads a closed folder: nothing to refuse there.
+        let superuser = std::fs::read_dir(root.join("closed")).is_ok();
         let e = recheck(&root.join("closed/x"), &root, None, &mut standard());
         std::fs::set_permissions(root.join("closed"), std::fs::Permissions::from_mode(0o755))
             .unwrap();
-        if let Err(why) = e {
+        if !superuser && let Err(why) = e {
             assert!(why.starts_with("It cannot be read"), "{why}");
         }
     }

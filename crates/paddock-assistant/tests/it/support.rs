@@ -217,7 +217,7 @@ impl AssistantTool for Echo {
     }
 }
 
-/// A tool that writes.
+/// A tool that writes what cannot be undone.
 pub struct Erase(pub Arc<AtomicUsize>);
 
 impl AssistantTool for Erase {
@@ -229,7 +229,7 @@ impl AssistantTool for Erase {
         }
     }
     fn access(&self) -> Access {
-        Access::Write
+        Access::Destructive
     }
     fn describe(&self, _: &Value) -> String {
         "Erase everything".into()
@@ -237,6 +237,29 @@ impl AssistantTool for Erase {
     fn call(&self, _: &Value, _: &Cancel) -> ToolOutput {
         self.0.fetch_add(1, Ordering::SeqCst);
         ToolOutput::ok("erased")
+    }
+}
+
+/// A tool that writes something the user can undo.
+pub struct Note(pub Arc<AtomicUsize>);
+
+impl AssistantTool for Note {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "note".into(),
+            description: "Adds a note".into(),
+            input_schema: json!({"type": "object"}),
+        }
+    }
+    fn access(&self) -> Access {
+        Access::Write
+    }
+    fn describe(&self, _: &Value) -> String {
+        "Add a note".into()
+    }
+    fn call(&self, _: &Value, _: &Cancel) -> ToolOutput {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        ToolOutput::ok("noted")
     }
 }
 

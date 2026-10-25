@@ -6,7 +6,7 @@ import { defineAssistantContext, provideWorkbenchContributions } from '@decryp7/
 import { FIXTURE_CONVERSATION } from '../generated/assistant-fixtures';
 import { ASSISTANT_LIMITS } from '../generated/assistant';
 import { AssistantStore, UNDO_MS } from './assistant.store';
-import { AssistantBackend, MemoryAssistantBackend, type MemoryAssistantOptions } from './backend';
+import { AssistantBackend, DEMO_ANSWER, MemoryAssistantBackend, type MemoryAssistantOptions } from './backend';
 
 interface Ctx {
   readonly selection: string;
@@ -100,7 +100,7 @@ describe('AssistantStore', () => {
     expect(backend.sent[0]).toEqual({ text: 'what is this?', context: [{ id: 'wd.selection', label: 'Selection: lines', text: 'main.rs:12' }], allowWrite: false });
     expect(store.run()).toBe('idle');
     expect(store.activeId()).toMatch(/^m/);
-    expect(store.answer()).toBe('You asked: what is this?');
+    expect(store.answer()).toBe(DEMO_ANSWER);
     expect(store.lastTurn()).toMatchObject({ running: false, end: 'answered', user: 'what is this?' });
     // The chips come back for the next question; the list shows the new conversation.
     expect(store.chips().find((c) => c.id === 'wd.long')?.on).toBe(true);
@@ -212,7 +212,7 @@ describe('AssistantStore', () => {
     backend.emit('someone-else', { type: 'delta', text: 'x' });
     backend.emit('someone-else', { type: 'done', text: 'x', usage: { inputTokens: 0, outputTokens: 0 }, end: 'answered' });
     await quiet();
-    expect(store.answer()).toBe('You asked: again');
+    expect(store.answer()).toBe(DEMO_ANSWER);
     expect(store.turns()).toHaveLength(2);
   });
 
@@ -254,7 +254,7 @@ describe('AssistantStore', () => {
     store.setDraft('q');
     await store.send();
     await quiet();
-    expect(store.answer()).toBe('You asked: q');
+    expect(store.answer()).toBe(DEMO_ANSWER);
     TestBed.resetTestingModule();
     backend.emit('x', { type: 'notice', message: 'late' });
   });

@@ -1,0 +1,274 @@
+import { describe, expect, it } from 'vitest';
+import { detailLines, hubOf, layers, layoutGraph, layoutSequence, MARK_W, ringsFrom, type LayoutNode } from './layout';
+import { diagramScene, graphScene } from './scene';
+import { sampleViewDoc } from './sample';
+import { shapeOf } from './model';
+import { flattenPath, pathCrosses } from './route';
+
+const n = (id: string, over: Partial<LayoutNode> = {}): LayoutNode => ({ id, label: id, ...over });
+const e = (from: string, to: string, label = '') => ({ from, to, label });
+const overlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean =>
+  a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/** Every edge of a scene against every box that is not one of its two ends (a self loop: its own box is fine too). */
+function crossings(s: ReturnType<typeof layoutGraph>): string[] {
+  if (s.kind === 'sequence') return [];
+  const bad: string[] = [];
+  for (const edge of s.edges) {
+    const others = s.nodes.filter((b) => b.id !== edge.from && b.id !== edge.to);
+    if (pathCrosses(edge.path, others)) bad.push(`${edge.from}>${edge.to} (${edge.label})`);
+    const pts = flattenPath(edge.path);
+    for (const p of pts) if (p[0] < 0 || p[1] < 0 || p[0] > s.width || p[1] > s.height) bad.push(`${edge.from}>${edge.to} leaves the canvas at ${p}`);
+  }
+  return bad;
+}
+
+describe('edge routing: an edge never crosses a box (review 2, P2-1)', () => {
+  const ids = (k: number, p = 'n') => Array.from({ length: k }, (_, i) => `${p}${i}`);
+  const cases: { name: string; nodes: LayoutNode[]; edges: ReturnType<typeof e>[] }[] = [
+    { name: 'the sample CI graph with its retry', nodes: ['a', 'b', 'c', 'd', 'e'].map((id) => n(id, { label: id === 'c' ? 'Integration tests' : id.repeat(5) })), edges: [e('a', 'b'), e('a', 'c', 'needs db'), e('b', 'd'), e('c', 'd'), e('d', 'e'), e('e', 'a', 'retry')] },
+    { name: 'a long edge over a middle layer', nodes: ids(4).map((id) => n(id, { label: id.repeat(8) })), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n2', 'n3'), e('n0', 'n3', 'skip'), e('n0', 'n2', 'skip two')] },
+    { name: 'back edges to every layer', nodes: ids(5).map((id) => n(id, { label: id.repeat(7) })), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n2', 'n3'), e('n3', 'n4'), e('n4', 'n0', 'a'), e('n4', 'n1', 'b'), e('n3', 'n0', 'c'), e('n2', 'n0', 'd'), e('n4', 'n2', 'e')] },
+    { name: 'a wide row with an edge sideways inside it', nodes: ids(5).map((id) => n(id)), edges: [e('n0', 'n1'), e('n0', 'n2'), e('n0', 'n3'), e('n0', 'n4'), e('n1', 'n3'), e('n3', 'n1', 'sideways'), e('n4', 'n2')] },
+    { name: 'a radial ring where neighbours on the ring link', nodes: ['c', ...ids(6, 's')].map((id) => n(id)), edges: [...ids(6, 's').map((id) => e('c', id)), e('s0', 's1'), e('s1', 's3'), e('s2', 's5'), e('s4', 's0')] },
+    { name: 'a radial graph with an edge across the hub', nodes: ['c', ...ids(5, 's')].map((id) => n(id)), edges: [...ids(5, 's').map((id) => e('c', id)), e('s0', 's2'), e('s1', 's3')] },
+  ];
+  for (const c of cases) {
+    for (const radial of [false, true]) {
+      it(`${c.name}, radial=${radial}`, () => {
+        expect(crossings(layoutGraph(c.nodes, c.edges, radial))).toEqual([]);
+      });
+    }
+  }
+  it('holds for the graphs and class diagram of the sample document', () => {
+    const root = shapeOf(sampleViewDoc().root);
+    if (root.tag !== 'stack') throw new Error('stack');
+    for (const id of ['g1', 'g2', 'd1', 'd2']) {
+      const k = shapeOf(root.v.children.find((c) => c.id === id)!);
+      const s = k.tag === 'graph' ? graphScene(k.v) : k.tag === 'diagram' ? diagramScene(k.v) : null;
+      if (!s) throw new Error(id);
+      expect(crossings(s), id).toEqual([]);
+      if (k.tag === 'graph') expect(crossings(graphScene({ ...k.v, layout: k.v.layout === 'radial' ? 'layered' : 'radial' })), `${id} other layout`).toEqual([]);
+    }
+  });
+  it('sends the retry edge around the outside: right of every box, with a vertical lane', () => {
+    const root = shapeOf(sampleViewDoc().root);
+    if (root.tag !== 'stack') throw new Error('stack');
+    const g = shapeOf(root.v.children.find((c) => c.id === 'g1')!);
+    if (g.tag !== 'graph') throw new Error('graph');
+    const s = graphScene(g.v);
+    const retry = s.edges.find((x) => x.label === 'retry')!;
+    const right = Math.max(...s.nodes.map((b) => b.x + b.w));
+    expect(Math.max(...flattenPath(retry.path).map((p) => p[0]))).toBeGreaterThan(right);
+    expect(retry.lx).toBeGreaterThan(right);
+  });
+});
+
+describe('layers', () => {
+  it('puts a node below the longest path to it', () => {
+    expect(layers(4, [[0, 1], [1, 2], [0, 2], [0, 3]])).toEqual([0, 1, 2, 1]);
+  });
+  it('breaks a cycle instead of looping and ignores self loops', () => {
+    expect(layers(3, [[0, 1], [1, 2], [2, 0], [1, 1]])).toEqual([0, 1, 2]);
+    expect(layers(0, [])).toEqual([]);
+  });
+  it('is deterministic', () => {
+    const edges: [number, number][] = [[3, 1], [1, 0], [0, 2], [2, 3]];
+    expect(layers(4, edges)).toEqual(layers(4, edges));
+  });
+});
+
+describe('layoutGraph', () => {
+  it('draws a layered graph top-down without overlapping boxes, inside its size', () => {
+    const nodes = ['a', 'b', 'c', 'd', 'e'].map((id) => n(id, { label: id.repeat(12) }));
+    const s = layoutGraph(nodes, [e('a', 'b'), e('a', 'c'), e('b', 'd'), e('c', 'd', 'x'), e('d', 'e'), e('e', 'a')]);
+    expect(s.kind).toBe('layered');
+    for (let i = 0; i < s.nodes.length; i++) {
+      const a = s.nodes[i]!;
+      expect(a.x).toBeGreaterThanOrEqual(0);
+      expect(a.x + a.w).toBeLessThanOrEqual(s.width);
+      expect(a.y + a.h).toBeLessThanOrEqual(s.height);
+      for (let j = i + 1; j < s.nodes.length; j++) expect(overlap(a, s.nodes[j]!)).toBe(false);
+    }
+    const y = (id: string) => s.nodes.find((x) => x.id === id)!.y;
+    expect(y('a')).toBeLessThan(y('b'));
+    expect(y('d')).toBeLessThan(y('e'));
+    expect(s.edges).toHaveLength(6);
+    expect(s.edges.find((x) => x.label === 'x')).toBeTruthy();
+    // The cycle edge runs outside the boxes, on the right.
+    const back = s.edges.find((x) => x.from === 'e' && x.to === 'a')!;
+    expect(back.path).toMatch(/^M [\d.]+ [\d.]+( L [\d.]+ [\d.]+| Q [\d.]+ [\d.]+ [\d.]+ [\d.]+)+$/);
+    expect(Math.min(...back.path.match(/[\d.]+/g)!.filter((_, i) => i % 2 === 0).map(Number))).toBeGreaterThan(0);
+    expect(back.lx).toBeLessThanOrEqual(s.width);
+    expect(back.anchor).toBe('start');
+  });
+
+  it('is the same every time', () => {
+    const nodes = ['a', 'b', 'c'].map((id) => n(id));
+    const edges = [e('a', 'b'), e('a', 'c')];
+    expect(layoutGraph(nodes, edges)).toEqual(layoutGraph(nodes, edges));
+  });
+
+  it('draws a self loop, skips edges to unknown nodes and handles no nodes', () => {
+    const s = layoutGraph([n('a')], [e('a', 'a', 'again'), e('a', 'zz')]);
+    expect(s.edges).toHaveLength(1);
+    expect(s.edges[0]!.lx).toBeGreaterThan(s.nodes[0]!.x + s.nodes[0]!.w);
+    const none = layoutGraph([], []);
+    expect(none.nodes).toEqual([]);
+    expect(none.width).toBeGreaterThan(0);
+  });
+
+  it('draws a radial graph around the first layer with straight edges that end at the boxes', () => {
+    const nodes = ['hub', 'p1', 'p2', 'p3', 'p4'].map((id) => n(id));
+    const s = layoutGraph(nodes, [e('p1', 'hub'), e('p2', 'hub'), e('p3', 'hub'), e('p4', 'hub'), e('hub', 'hub')], true);
+    expect(s.kind).toBe('radial');
+    const hub = s.nodes.find((x) => x.id === 'hub')!;
+    const p1 = s.nodes.find((x) => x.id === 'p1')!;
+    expect(Math.abs(hub.x + hub.w / 2 - p1.x - p1.w / 2) + Math.abs(hub.y + hub.h / 2 - p1.y - p1.h / 2)).toBeGreaterThan(50);
+    expect(s.edges.some((x) => x.path.includes(' L '))).toBe(true);
+    expect(hub.x + hub.w / 2).toBeGreaterThan(p1.x + p1.w / 2 - 400);
+    for (const x of s.nodes) {
+      expect(x.x).toBeGreaterThanOrEqual(0);
+      expect(x.y).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('puts the hub of a radial graph in the middle and the spokes on a ring around it (review 1, P1-1)', () => {
+    const s = layoutGraph(['hub', 'a', 'b', 'c'].map((id) => n(id)), [e('a', 'hub'), e('b', 'hub'), e('c', 'hub')], true);
+    const centre = (id: string) => {
+      const x = s.nodes.find((q) => q.id === id)!;
+      return [x.x + x.w / 2, x.y + x.h / 2] as const;
+    };
+    const [hx, hy] = centre('hub');
+    const radii = ['a', 'b', 'c'].map((id) => Math.hypot(centre(id)[0] - hx, centre(id)[1] - hy));
+    expect(radii[0]).toBeGreaterThan(50);
+    expect(Math.max(...radii) - Math.min(...radii)).toBeLessThan(0.5);
+    // The canvas fits the boxes: no more than the padding around the real bounding box.
+    const left = Math.min(...s.nodes.map((q) => q.x));
+    const right = Math.max(...s.nodes.map((q) => q.x + q.w));
+    const top = Math.min(...s.nodes.map((q) => q.y));
+    const bottom = Math.max(...s.nodes.map((q) => q.y + q.h));
+    expect([left, top]).toEqual([16, 16]);
+    expect(s.width).toBeCloseTo(right + 16, 0);
+    expect(s.height).toBeCloseTo(bottom + 16, 0);
+  });
+
+  it('never puts two boxes on each other, in any layout: several roots, several components, chains, hubs, one ring of many', () => {
+    const ids = (k: number, p = 'n') => Array.from({ length: k }, (_, i) => `${p}${i}`);
+    const cases: { name: string; nodes: LayoutNode[]; edges: ReturnType<typeof e>[] }[] = [
+      { name: 'three roots into one hub', nodes: ['hub', 'x', 'y', 'z'].map((id) => n(id)), edges: [e('x', 'hub'), e('y', 'hub'), e('z', 'hub')] },
+      { name: 'two disconnected components', nodes: ids(6).map((id) => n(id)), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n3', 'n4'), e('n4', 'n5')] },
+      { name: 'no edges at all', nodes: ids(9).map((id) => n(id, { label: id.repeat(6) })), edges: [] },
+      { name: 'a chain', nodes: ids(7).map((id) => n(id)), edges: ids(6).map((id, i) => e(id, `n${i + 1}`)) },
+      { name: 'a star of twelve with long labels and details', nodes: [n('c', { detail: 'a\nb\nc', caption: 'g' }), ...ids(12, 's').map((id) => n(id, { label: id.repeat(9), tone: 'bad' }))], edges: ids(12, 's').map((id) => e('c', id, 'edge')) },
+      { name: 'a cycle', nodes: ids(5).map((id) => n(id)), edges: [e('n0', 'n1'), e('n1', 'n2'), e('n2', 'n3'), e('n3', 'n4'), e('n4', 'n0')] },
+      { name: 'self loops and unknown ends', nodes: ids(3).map((id) => n(id)), edges: [e('n0', 'n0', 'loop'), e('n0', 'zz'), e('n1', 'n2')] },
+    ];
+    for (const c of cases) {
+      for (const radial of [false, true]) {
+        const s = layoutGraph(c.nodes, c.edges, radial);
+        for (let i = 0; i < s.nodes.length; i++) {
+          const a = s.nodes[i]!;
+          expect(a.x, `${c.name} radial=${radial} ${a.id}`).toBeGreaterThanOrEqual(0);
+          expect(a.y).toBeGreaterThanOrEqual(0);
+          expect(a.x + a.w).toBeLessThanOrEqual(s.width);
+          expect(a.y + a.h).toBeLessThanOrEqual(s.height);
+          for (let j = i + 1; j < s.nodes.length; j++) expect(overlap(a, s.nodes[j]!), `${c.name} radial=${radial} ${a.id}/${s.nodes[j]!.id}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('does not overlap the boxes of the sample documents graphs either', () => {
+    const root = shapeOf(sampleViewDoc().root);
+    if (root.tag !== 'stack') throw new Error('stack');
+    for (const id of ['g1', 'g2', 'd1', 'd2']) {
+      const k = shapeOf(root.v.children.find((c) => c.id === id)!);
+      const s = k.tag === 'graph' ? graphScene(k.v) : k.tag === 'diagram' ? diagramScene(k.v) : null;
+      if (!s) throw new Error(id);
+      for (let i = 0; i < s.nodes.length; i++) for (let j = i + 1; j < s.nodes.length; j++) expect(overlap(s.nodes[i]!, s.nodes[j]!), id).toBe(false);
+    }
+  });
+
+  it('finds the hub and the rings from it, and puts what it cannot reach one ring out', () => {
+    expect(hubOf(4, [[1, 0], [2, 0], [3, 0]])).toBe(0);
+    expect(hubOf(3, [])).toBe(0);
+    expect(hubOf(3, [[1, 1], [1, 2]])).toBe(1);
+    expect(ringsFrom(0, 5, [[1, 0], [2, 1], [3, 3]])).toEqual([0, 1, 2, 3, 3]);
+  });
+
+  it('keeps the label of an edge beside its line, not on it', () => {
+    const s = layoutGraph(['a', 'b'].map((id) => n(id)), [e('a', 'b', 'needs db')]);
+    const x1 = s.nodes[0]!.x + s.nodes[0]!.w / 2;
+    expect(s.edges[0]!.anchor).toBe('start');
+    expect(s.edges[0]!.lx).toBeGreaterThan(x1);
+  });
+
+  it('makes room for the status mark of a box', () => {
+    const [plain, marked] = layoutGraph([n('a', { label: 'x'.repeat(14) }), n('b', { label: 'x'.repeat(14), tone: 'good' })], []).nodes;
+    expect(marked!.w).toBe(plain!.w + MARK_W);
+  });
+
+  it('puts the one root of a radial graph in the middle', () => {
+    const s = layoutGraph([n('a')], [], true);
+    expect(s.nodes[0]!.x + s.nodes[0]!.w / 2).toBeCloseTo(s.width / 2, 0);
+  });
+
+  it('sizes boxes by their text, bounded', () => {
+    const s = layoutGraph([n('a'), n('b', { label: 'x'.repeat(200), detail: 'one\n\ntwo\n' + 'y'.repeat(100), caption: 'group' })], []);
+    const [a, b] = s.nodes;
+    expect(a!.w).toBe(96);
+    expect(b!.w).toBe(240);
+    expect(b!.detail).toHaveLength(3);
+    expect(b!.detail[2]!.endsWith('…')).toBe(true);
+    expect(b!.h).toBeGreaterThan(a!.h);
+  });
+});
+
+describe('layoutSequence', () => {
+  it('puts participants left to right and messages top to bottom in the order given', () => {
+    const s = layoutSequence([n('a'), n('b'), n('c')], [e('a', 'b', 'one'), e('b', 'c', 'two'), e('c', 'c', 'self'), e('c', 'a', 'back'), e('a', 'zz')]);
+    expect(s.kind).toBe('sequence');
+    expect(s.lifelines).toHaveLength(3);
+    expect(s.nodes.map((x) => x.id)).toEqual(['a', 'b', 'c']);
+    expect(s.nodes[0]!.x).toBeLessThan(s.nodes[1]!.x);
+    expect(s.edges).toHaveLength(4);
+    expect(s.edges[0]!.ly).toBeLessThan(s.edges[1]!.ly);
+    expect(s.edges[2]!.path).toContain(' h 28 v 16 h -28');
+    expect(s.edges[3]!.path).toMatch(/^M \d+ [\d.]+ L \d+ /);
+    expect(s.lifelines[0]!.y2).toBeLessThanOrEqual(s.height);
+  });
+  it('handles no participants', () => {
+    expect(layoutSequence([], []).width).toBeGreaterThan(0);
+  });
+});
+
+describe('detailLines', () => {
+  it('splits, drops blank lines and bounds lines and count', () => {
+    expect(detailLines(undefined)).toEqual([]);
+    expect(detailLines('')).toEqual([]);
+    expect(detailLines('a\r\n\r\nb')).toEqual(['a', 'b']);
+    expect(detailLines(Array.from({ length: 20 }, (_, i) => `l${i}`).join('\n'))).toHaveLength(12);
+  });
+});
+
+describe('scenes of the sample document', () => {
+  it('draws the graph, the radial graph and the diagrams of the sample', () => {
+    const find = (id: string) => {
+      const root = shapeOf(sampleViewDoc().root);
+      if (root.tag !== 'stack') throw new Error('stack');
+      return shapeOf(root.v.children.find((c) => c.id === id)!);
+    };
+    const g1 = find('g1');
+    const g2 = find('g2');
+    const d1 = find('d1');
+    const d2 = find('d2');
+    if (g1.tag !== 'graph' || g2.tag !== 'graph' || d1.tag !== 'diagram' || d2.tag !== 'diagram') throw new Error('kinds');
+    expect(graphScene(g1.v).kind).toBe('layered');
+    expect(graphScene(g2.v).kind).toBe('radial');
+    expect(diagramScene(d1.v).nodes[0]!.detail).toHaveLength(3);
+    expect(diagramScene(d2.v).kind).toBe('sequence');
+    const forceAsLayered = graphScene({ ...g1.v, layout: 'force' });
+    expect(forceAsLayered.kind).toBe('layered');
+  });
+});

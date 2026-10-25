@@ -1,6 +1,7 @@
 import { afterNextRender, ChangeDetectionStrategy, Component, effect, ElementRef, inject, Injector, input, viewChild } from '@angular/core';
 import { formatBytes } from '@decryp7/paddock-ui/format';
 import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { inSentence } from '@decryp7/paddock-ui/shell/storage';
 
 /**
  * The clear confirmation (a modal decision, one window per question): it names what will be removed and how much, and says
@@ -71,16 +72,16 @@ export class PdStorageConfirmDialog {
     return this.what().trim() !== '';
   }
 
+  /** The facts the title does not repeat: how much goes. */
   protected question(): string {
-    const what = this.what().trim();
     const size = formatBytes(this.bytes());
-    return $localize`:@@pd.storage.confirm-question:Clear ${what}:what:? Up to ${size}:size: is removed.`;
+    return $localize`:@@pd.storage.confirm-question:Up to ${size}:size: is removed.`;
   }
 
   constructor() {
     // The title names what is cleared; it is known only once the opener's inputs are set (a side effect on the window's title).
     effect(() => {
-      if (this.valid()) this.ref.setTitle?.($localize`:@@pd.storage.confirm-title:Clear ${this.what().trim()}:what:?`);
+      if (this.valid()) this.ref.setTitle?.($localize`:@@pd.storage.confirm-title:Clear ${inSentence(this.what())}:what:?`);
     });
     // Keep has the focus: a stray Enter never clears anything.
     effect(() => {
