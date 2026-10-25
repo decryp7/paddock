@@ -193,10 +193,6 @@ A row is valid only while its hash equals the image; a regenerated image that ch
 | light/spotter/sparkline.png | 49195fc46ef7aed16e3e4e24d0bff99e083118dddfb20df232fc2e16b5c65c46 | independent review (Opus) | 2026-10-25 |
 | light/spotter/status-pill.png | fb0fda8dc9615112a0983b2d5c613051c9fa71829e34063003d34d88a7289f52 | independent review (Opus) | 2026-10-25 |
 | light/spotter/tray-popover.png | 7b7d5e2f04515d0c1ccd32a9c75ec967f9e556b81790d6a6819ef2d436e5327c | independent review (Opus) | 2026-10-25 |
-| shell-demo/pages-narrow-open-dark.png | e046de12dd58eab9f1f7fd24334e1813b8fcbcc58e2873f0a76bfa7a88e7c84a | independent review (Opus) | 2026-10-25 |
-| shell-demo/pages-narrow-open-light.png | 79b118746c0a8891da4a60b602447d1b2046b065802d1ef8b99af457c4aa9b75 | independent review (Opus) | 2026-10-25 |
-| shell-demo/pages-rail-open-dark.png | 2f6d5c4d8aedbbd08d2c348899cd33fd6f91df956c7c779e78fdef9b434689f5 | independent review (Opus) | 2026-10-25 |
-| shell-demo/pages-rail-open-light.png | f1416f77c4f7979933bcec6b08e805f6bedadd1e0111b2294520ee34899a5174 | independent review (Opus) | 2026-10-25 |
 | shell-demo/theme-dark.png | 7c37d3f801936756058f7e1c614acd2796bc9e91d8fcbc63d65e7b9b779be30e | independent review (Opus) | 2026-10-25 |
 | shell-demo/theme-high-contrast-dark.png | c88dddaad182c3fb402470c6a2b405906c7236fe976e52679cadd0495827baf2 | independent review (Opus) | 2026-10-25 |
 | shell-demo/theme-high-contrast-light.png | 30bfc6827f24ca6a80322cad5abc517d7bfaf5a0c4edeacd5806a15b87b884aa | independent review (Opus) | 2026-10-25 |
