@@ -133,12 +133,12 @@ for (const theme of THEMES) {
     const box = await open(page, theme, 320);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)).toBe(false);
     expect(await box.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(false);
-    // Nothing inside the view is wider than the view except the regions that scroll themselves.
+    // Nothing inside the view is wider than the view except the regions that scroll themselves (the drawings and tables, the review filter).
     const wide = await box.evaluate((root) => {
       const limit = root.getBoundingClientRect().right + 1;
       const out: string[] = [];
       for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
-        if (el.closest('[role=region]') || el.closest('svg') || el.closest('canvas') || el.tagName === 'CANVAS') continue;
+        if (el.closest('[role=region]') || el.closest('.pd-view-review__filter') || el.closest('svg') || el.closest('canvas') || el.tagName === 'CANVAS') continue;
         if (el.getBoundingClientRect().right > limit) out.push(`${el.tagName.toLowerCase()}.${el.className}`);
       }
       return out;
@@ -261,14 +261,14 @@ for (const theme of THEMES) {
     const review = box.locator('[data-node-id="review"]');
     const over = await review.evaluate((root) => {
       const r = root.getBoundingClientRect();
-      return Array.from(root.querySelectorAll<HTMLElement>('*')).filter((e) => e.getBoundingClientRect().right > r.right + 0.5).map((e) => `${e.tagName.toLowerCase()}.${e.className} +${Math.round(e.getBoundingClientRect().right - r.right)} w${Math.round(e.getBoundingClientRect().width)} vs ${Math.round(r.width)}`);
+      return Array.from(root.querySelectorAll<HTMLElement>('*')).filter((e) => e.getBoundingClientRect().right > r.right + 0.5 && !e.closest('.pd-view-review__filter')).map((e) => `${e.tagName.toLowerCase()}.${e.className} +${Math.round(e.getBoundingClientRect().right - r.right)} w${Math.round(e.getBoundingClientRect().width)} vs ${Math.round(r.width)}`);
     });
     expect(over).toEqual([]);
     expect(await review.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
     const list = review.locator('ul.pd-view-review');
     expect(await list.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
-    // The filter wraps instead of overflowing.
-    expect(await review.locator('.pd-view-review__filter').evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+    // The filter is one row that scrolls in its own box (review 2, P3-5), and does not wrap.
+    expect(await review.locator('.pd-view-review__filter').evaluate((e) => e.scrollWidth > e.clientWidth && getComputedStyle(e).overflowX === 'auto' && getComputedStyle(e).flexWrap === 'nowrap')).toBe(true);
     // The form's chosen text does not break in the middle of a word.
     expect(await box.locator('[data-node-id="form"] .pd-view-form__chosen').first().evaluate((e) => getComputedStyle(e).overflowWrap)).toBe('break-word');
   });
