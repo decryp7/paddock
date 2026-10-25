@@ -18,10 +18,11 @@
 // the reference to replace one by one. The template's README lists the next steps (icon, CI, first page).
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { loadManifest } from '../conformance/src/sync/baseline.mjs';
 import { fill } from '../conformance/src/sync/fill.mjs';
 import { inspectBlock, loadBlocks } from '../conformance/src/sync/blocks.mjs';
+import { isMain } from '../conformance/src/util/is-main.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -541,7 +542,7 @@ export function createApp(input, today = new Date().toISOString().slice(0, 10)) 
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   try {
     const args = parseArgs(process.argv.slice(2));
     const dest = createApp(args);

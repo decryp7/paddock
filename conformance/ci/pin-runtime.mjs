@@ -10,8 +10,8 @@
 //                                                                  the channel's version and URLs from Chrome for Testing
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
 import { readCatalogue, writeCatalogue } from './runtime-catalogue.mjs';
+import { isMain } from '../src/util/is-main.mjs';
 
 /** Chrome for Testing's channel list with download URLs. */
 export const CFT_ENDPOINT = 'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json';
@@ -119,7 +119,7 @@ export async function main(argv, { fetchImpl = fetch, log = console.error } = {}
   return next;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).catch((e) => {
     console.error(`pin-runtime: ${e.message}`);
     process.exit(1);

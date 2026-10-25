@@ -8,7 +8,7 @@
 // Only names that are set and non-empty are written. Values go to stdout or the file, never to the log.
 
 import { appendFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../src/util/is-main.mjs';
 
 /** The secrets that are single-line base64 (the key password is free text and is left alone). */
 export const KEY_NAMES = ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_UPDATER_PUBKEY'];
@@ -36,7 +36,7 @@ export function exportLines(stripped) {
   });
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   try {
     const stripped = strippedEnv();
     const i = process.argv.indexOf('--append-to');

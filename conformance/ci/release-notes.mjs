@@ -6,7 +6,8 @@
 //   node release-notes.mjs --app Pitcrew --changelog artifacts/CHANGELOG-latest.md --out artifacts/RELEASE_NOTES.md [--no-first-launch]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMain } from '../src/util/is-main.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -33,7 +34,7 @@ function main(argv) {
   writeFileSync(o.out, releaseNotes({ appName: o.app, changelog: readFileSync(o.changelog, 'utf8'), withFirstLaunch: o.first }));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   try {
     main(process.argv.slice(2));
   } catch (e) {

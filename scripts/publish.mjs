@@ -20,7 +20,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMain } from '../conformance/src/util/is-main.mjs';
 
 export const REGISTRY_NAME = 'decryp7';
 export const CARGO_INDEX = 'https://dev.decryptology.net/api/packages/decryp7/cargo/';
@@ -371,7 +372,7 @@ async function main() {
   await createRelease(lead.version, todo, env);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   main().catch((e) => {
     console.error(`publish: ${e.message}`);
     process.exit(1);

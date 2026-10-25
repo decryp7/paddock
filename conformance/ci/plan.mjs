@@ -7,7 +7,7 @@
 //
 //   EVENT=schedule SHA=... REF=refs/heads/main GREEN=true TAGS="$(git ls-remote --tags origin 'refs/tags/v*')" node plan.mjs
 import { appendFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../src/util/is-main.mjs';
 
 /** The tag name for `sha` in `git ls-remote --tags` output (annotated tags list the peeled commit as `^{}`), or null. */
 export function tagFor(sha, lsRemote) {
@@ -35,4 +35,4 @@ function main(env, log = console.log) {
   else log(`run=${r.run}`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.env);
+if (isMain(import.meta.url)) main(process.env);

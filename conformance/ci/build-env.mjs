@@ -9,7 +9,7 @@
 // `cargo:rerun-if-env-changed=` for both in build.rs. The commit comes from GITHUB_SHA, else `git rev-parse`; never fails.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../src/util/is-main.mjs';
 
 /** { PADDOCK_BUILD_COMMIT, PADDOCK_BUILD_DATE } from the environment; `head` and `now` are injectable. */
 export function buildEnv({ env = process.env, head = gitHead, now = () => new Date() } = {}) {
@@ -26,7 +26,7 @@ function gitHead() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   const lines = Object.entries(buildEnv()).map(([k, v]) => `${k}=${v}`);
   if (process.env.GITHUB_ENV) appendFileSync(process.env.GITHUB_ENV, `${lines.join('\n')}\n`);
   console.log(lines.join('\n'));

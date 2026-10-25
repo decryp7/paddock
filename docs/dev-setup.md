@@ -50,9 +50,10 @@ in the shell that builds. A server started from a shell without `SCCACHE_DIR` wr
 on the system disk.
 
 sccache hashes every `CARGO_*` variable into its cache key, `CARGO_TARGET_DIR` included, so worktrees with different target
-folders share no entries when the folder comes from the environment (the registry crates then miss in every one). Point
-`RUSTC_WRAPPER` at `.gitea/actions/setup-rust/rustc-wrapper.sh` (it unsets the folder variables and runs sccache) or set the
-folder with `--config build.target-dir=...` / `.cargo/config.toml`. CI does the former. The workspace's own path crates still
+folders share no entries when the folder comes from the environment (the registry crates then miss in every one). Set the
+folder with `--config build.target-dir=...` or `build.target-dir` in a `.cargo/config.toml` above the worktree instead; CI
+passes `--config` on every cargo step. Never put a script between cargo and sccache: on Windows a `.cmd` runs through cmd.exe,
+whose 8191-character command line limit rustc's arguments for a large crate (windows-sys) exceed. The workspace's own path crates still
 key on their checkout path (`CARGO_MANIFEST_DIR`); a symlink does not help, cargo uses the physical path.
 
 **Linker on Linux.** On a Linux development machine use mold (`sudo apt install mold`), in `~/.cargo/config.toml`:

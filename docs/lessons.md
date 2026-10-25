@@ -407,6 +407,16 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   included. A workspace-hack crate also cannot be published; `cargo hakari publish` drops the dependency for the upload,
   which edits a manifest, so the lock file is checked separately instead of `--locked`.
 - Measure under a quiet machine and in back-to-back pairs: at a 1-minute load of 30-50 the same build varied by 60%.
+- Never put a `.cmd`/`.bat` between cargo and rustc on Windows (`RUSTC_WRAPPER`): cmd.exe caps a command line at 8191
+  characters and rustc's arguments for windows-sys are longer ("The command line is too long", CI 6365). To keep a build
+  folder out of sccache's key (it hashes every `CARGO_*` variable) set it as cargo configuration
+  (`--config build.target-dir='...'`), not with `CARGO_TARGET_DIR`. nextest still writes its own store (junit) under the
+  default `target/nextest`.
+- A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
+  and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
+  `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for
+  Testing installer on macOS from CI 6353 on). Use `isMain` (conformance/src/util/is-main.mjs); a step that relies on a
+  script's output also checks that the output is there.
 
 ## Linux VM guests (Paddock C21, 2026-10-25)
 - Linux guests: `tart exec` (like `ssh` without a PAM login) has no logind session, so there is no `systemd --user`

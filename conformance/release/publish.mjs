@@ -9,7 +9,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../src/util/is-main.mjs';
 
 /** Release notes beyond this are cut (Gitea stores the body as text). */
 export const MAX_NOTES = 60000;
@@ -78,7 +78,7 @@ export async function publish({ api, repo, tag, notes, dir }, token, fetchImpl =
   return release.html_url;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   const token = process.env.GITEA_TOKEN;
   if (!token) {
     console.error('publish: GITEA_TOKEN is not set');

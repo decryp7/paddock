@@ -3,10 +3,13 @@
 // (The scripts themselves are tested in ci-scripts.test.mjs, tools/test and the release tests.)
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
+import { executableIn, platformId } from '../ci/install-test-browser.mjs';
+import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
 import { PADDOCK } from './helpers.mjs';
 
@@ -264,31 +267,114 @@ function runSccacheStep(env, shim = 'true') {
   return shim === 'true' ? written : { env: written, stdout: r.stdout };
 }
 
-test('a job with its own CARGO_TARGET_DIR runs rustc through a wrapper that keeps the folder out of the sccache key', () => {
-  const withTarget = runSccacheStep({ CARGO_TARGET_DIR: '/work/abc/.paddock-ci-target' });
-  assert.match(withTarget, new RegExp(`^RUSTC_WRAPPER=${join(ACTIONS, 'setup-rust', 'rustc-wrapper.sh').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
-  assert.match(runSccacheStep({ CARGO_BUILD_TARGET_DIR: '/x' }), /^RUSTC_WRAPPER=.*rustc-wrapper\.sh$/m);
-  assert.match(runSccacheStep({}), /^RUSTC_WRAPPER=sccache$/m, 'no build folder variable: sccache directly');
+// Run 6365: a `rustc-wrapper.cmd` between cargo and sccache broke every Windows build ("The command line is too long" for
+// windows-sys): Windows starts a .cmd through cmd.exe, whose command line is 8191 characters at most.
+test('no script sits between cargo and rustc: RUSTC_WRAPPER is sccache itself, whatever build folder the job has', () => {
+  for (const env of [{}, { CARGO_TARGET_DIR: '/work/abc/.paddock-ci-target' }, { CARGO_BUILD_TARGET_DIR: '/x' }]) {
+    assert.match(runSccacheStep(env), /^RUSTC_WRAPPER=sccache$/m, JSON.stringify(env));
+  }
+  const scripts = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(join(dir, e.name));
+      else if (/\.(cmd|bat)$/i.test(e.name)) scripts.push(join(dir, e.name));
+    }
+  };
+  walk(ACTIONS);
+  assert.deepEqual(scripts, [], 'no cmd.exe script in the shared actions');
+  const files = [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(WORKFLOWS, f))];
+  for (const f of files) {
+    for (const m of read(f).matchAll(/RUSTC_WRAPPER\s*[=:]\s*"?([^"\s>]*)/g)) {
+      assert.match(m[1], /^(sccache|\$WRAPPER)?$/, `${f}: RUSTC_WRAPPER=${m[1]}; a wrapper script fails on Windows`);
+    }
+  }
 });
 
-test('the rustc wrapper hands sccache the compile without the build folder variables and with everything else', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'paddock-wrapper-'));
-  mkdirSync(join(dir, 'bin'));
-  writeFileSync(join(dir, 'bin', 'sccache'), '#!/bin/sh\necho "args=$*"\necho "target=${CARGO_TARGET_DIR-unset} build=${CARGO_BUILD_TARGET_DIR-unset} manifest=${CARGO_MANIFEST_DIR-unset}"\nexit 7\n');
-  chmodSync(join(dir, 'bin', 'sccache'), 0o755);
-  const wrapper = join(dir, 'rustc-wrapper.sh');
-  copyFileSync(join(ACTIONS, 'setup-rust', 'rustc-wrapper.sh'), wrapper);
-  chmodSync(wrapper, 0o755);
-  const r = spawnSync(wrapper, ['rustc', '--crate-name', 'a b'], {
-    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, CARGO_TARGET_DIR: '/t', CARGO_BUILD_TARGET_DIR: '/t', CARGO_MANIFEST_DIR: '/m' },
+// The crate job's host legs keep their build folder outside the checkout. CARGO_TARGET_DIR would put it in sccache's key (every
+// CARGO_* variable is hashed), so it is cargo configuration, passed on every cargo command of the job.
+test('the crate job sets its build folder as cargo configuration on every cargo step, never with CARGO_TARGET_DIR', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const job = ci.match(/^  crate:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
+  assert.notEqual(job, '', 'the crate job exists');
+  assert.doesNotMatch(job, /CARGO_(BUILD_)?TARGET_DIR=/, 'no step sets the build folder variable');
+  const set = [...job.matchAll(/PADDOCK_CARGO_TARGET=(\S+?)'?(?:"|>>)/g)].map((m) => m[1]);
+  assert.equal(set.length, 2, 'one per host OS');
+  for (const v of set) {
+    assert.match(v, /^--config=build\.target-dir='.*\.paddock-ci[\\/]target-/, v);
+    assert.doesNotMatch(v, /GITHUB_WORKSPACE|\.\.|\s/, `${v}: outside the checkout, and no spaces (the variable is expanded unquoted)`);
+  }
+  const cargo = job.split('\n').filter((l) => /^\s*(run: )?cargo (clippy|nextest|test|build|check|llvm-cov)\b/.test(l) && !/--version/.test(l));
+  assert.ok(cargo.length >= 6, `${cargo.length} cargo commands`);
+  for (const l of cargo) assert.match(l, /cargo (clippy|nextest run|test|build|check|llvm-cov) \$PADDOCK_CARGO_TARGET /, l.trim());
+});
+
+// Run 6365: after stable-workspace linked the macOS work folder, `node <work folder>/.../install-test-browser.mjs` exited 0 and
+// printed nothing. Node gives the main module's import.meta.url its real path, so `import.meta.url === pathToFileURL(argv[1])`
+// was false and main() never ran; the real-browser test then failed with "CHROMIUM_TEST_PATH names no Chrome for Testing".
+test('the test-browser installer runs, prints and exports the browser when it is started through a linked folder', () => {
+  const root = mkdtempSync(join(tmpdir(), 'paddock-linked-'));
+  symlinkSync(PADDOCK, join(root, 'work'), 'dir');
+  const dir = join(root, 'browser');
+  const id = platformId();
+  const exe = executableIn(dir, id);
+  mkdirSync(dirname(exe), { recursive: true });
+  writeFileSync(exe, '');
+  writeFileSync(join(dir, '.pinned-version'), '1.2.3');
+  writeFileSync(join(root, 'pin.json'), JSON.stringify({ version: '1.2.3', base: 'https://example.invalid', sums: { [id]: 'a'.repeat(64) } }));
+  const ghEnv = join(root, 'github-env');
+  writeFileSync(ghEnv, '');
+  // The path as the action builds it: through the link and with `..` segments.
+  const script = join(root, 'work', '.gitea', 'actions', 'install-test-browser', '..', '..', '..', 'conformance', 'ci', 'install-test-browser.mjs');
+  const r = spawnSync(process.execPath, [script, '--pin', join(root, 'pin.json'), '--dir', dir, '--env-prefix', 'PADDOCK'], {
+    env: { PATH: process.env.PATH, GITHUB_ENV: ghEnv },
     encoding: 'utf8',
   });
-  assert.equal(r.status, 7, 'the exit status of sccache is the exit status of the wrapper');
-  assert.match(r.stdout, /args=rustc --crate-name a b/);
-  assert.match(r.stdout, /target=unset build=unset manifest=\/m/);
-  const cmd = read(join(ACTIONS, 'setup-rust', 'rustc-wrapper.cmd'));
-  assert.match(cmd, /set "CARGO_TARGET_DIR="/);
-  assert.match(cmd, /sccache\.exe %\*\r?\nexit \/b %ERRORLEVEL%/);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, new RegExp(`^CHROMIUM_TEST_PATH=${exe.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
+  assert.match(read(ghEnv), /^CHROMIUM_TEST_PATH=.+\nPADDOCK_REQUIRE_TEST_BROWSER=1\n$/);
+});
+
+test('install-test-browser fails when the installer printed no CHROMIUM_TEST_PATH', () => {
+  const text = read(join(ACTIONS, 'install-test-browser', 'action.yml'));
+  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+  const root = mkdtempSync(join(tmpdir(), 'paddock-itb-'));
+  mkdirSync(join(root, 'bin'));
+  const run = (out) => {
+    writeFileSync(join(root, 'bin', 'node'), `#!/bin/sh\n${out}\nexit 0\n`);
+    chmodSync(join(root, 'bin', 'node'), 0o755);
+    writeFileSync(join(root, 'step.sh'), body);
+    return spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
+      env: { PATH: `${join(root, 'bin')}:/usr/bin:/bin`, CATALOGUE: 'c.toml', PIN: '', RUST_SOURCE: '', PREFIX: 'PADDOCK', DIR: '/d', INSTALLER: '/i.mjs' },
+      encoding: 'utf8',
+    });
+  };
+  const silent = run('true');
+  assert.notEqual(silent.status, 0, 'an installer that printed nothing fails the step');
+  assert.match(silent.stdout, /::error::install-test-browser printed no CHROMIUM_TEST_PATH/);
+  const ok = run('echo CHROMIUM_TEST_PATH=/b/chrome; echo PADDOCK_REQUIRE_TEST_BROWSER=1');
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /^CHROMIUM_TEST_PATH=\/b\/chrome$/m, 'the installer output is shown');
+});
+
+// The same mistake in any script: an entry point compared without resolving links does nothing when it is reached through one
+// (a linked work folder, node_modules). Every script decides with isMain.
+test('every Node script decides it is the main module with isMain, which resolves links', () => {
+  const listed = spawnSync('git', ['ls-files', '*.mjs', '*.js'], { cwd: PADDOCK, encoding: 'utf8' });
+  assert.equal(listed.status, 0, listed.stderr);
+  const files = listed.stdout.split('\n').filter((f) => f && !f.includes('node_modules/'));
+  assert.ok(files.length > 50, `${files.length} scripts`);
+  const naive = /import\.meta\.url\s*===|===\s*import\.meta\.url|fileURLToPath\(import\.meta\.url\)\s*===|===\s*fileURLToPath\(import\.meta\.url\)(?!\))|pathToFileURL\(process\.argv\[1\]/;
+  const bad = files.filter((f) => naive.test(read(join(PADDOCK, f))) && !f.endsWith('ci-actions.test.mjs'));
+  assert.deepEqual(bad, [], 'compare real paths: isMain(import.meta.url) from conformance/src/util/is-main.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'paddock-ismain-'));
+  writeFileSync(join(root, 'a.mjs'), '');
+  symlinkSync(join(root, 'a.mjs'), join(root, 'b.mjs'));
+  const url = pathToFileURL(realpathSync(join(root, 'a.mjs'))).href;
+  assert.equal(isMain(url, join(root, 'b.mjs')), true, 'through a link');
+  assert.equal(isMain(url, join(root, 'x', '..', 'a.mjs')), true, 'with .. segments');
+  assert.equal(isMain(url, join(root, 'missing.mjs')), false);
+  assert.equal(isMain(url, undefined), false);
+  assert.equal(isMain(url, ''), false);
 });
 
 function runStableWorkspace(os, root, over = {}) {

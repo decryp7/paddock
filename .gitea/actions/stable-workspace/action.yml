@@ -31,7 +31,7 @@ runs:
         if ! why=$({ mkdir -p "$root" && cd "$root" && rm -rf "$stable" && mv "$ws" "$stable"; } 2>&1); then
           # Under act on Windows the runner keeps a handle on the work folder, so it cannot move. Keep a clone at the stable
           # path instead and bring it to this commit (a local clone and fetch: hard links, no network), with every file
-          # that is not git's removed; ignored files (no build output lives there: CARGO_TARGET_DIR is elsewhere) stay.
+          # that is not git's removed; ignored files (no build output lives there: the build folder is elsewhere) stay.
           if why2=$({
             sha=$(git -C "$ws" rev-parse HEAD) &&
             if [ ! -d "$stable/.git" ]; then rm -rf "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable"; fi

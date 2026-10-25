@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../conformance/src/util/is-main.mjs';
 
 const EXT = /\.(png|svg|jpe?g|gif|webp)$/i;
 
@@ -51,6 +51,6 @@ export function versionPaddockDocs(paddockRoot) {
   for (const f of files) if (versionFile(f)) console.log(`versioned image links in ${f}`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   for (const f of process.argv.slice(2)) console.log(`${versionFile(f) ? 'updated  ' : 'unchanged'} ${f}`);
 }

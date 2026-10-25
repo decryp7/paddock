@@ -29,10 +29,16 @@ Conventional Commits; one semver tag for the whole repo.
   OS, and a server that cannot start or answer leaves `RUSTC_WRAPPER` unset so the job builds without the cache. The Redis backend stays an
   option (`sccache-backend: redis`) and is unused by `ci.yml`.
 - sccache hit rate on the host runners (macOS 2%, Windows 0%): sccache hashes every `CARGO_*` variable and the jobs set `CARGO_TARGET_DIR`
-  to a per-job folder, so no key ever matched. `setup-rust` now sets `RUSTC_WRAPPER` to `rustc-wrapper.sh`/`.cmd` (drops the folder
-  variables, then sccache) whenever a build folder variable is set. The new `stable-workspace` action moves a host job's checkout to
+  to a per-job folder, so no key ever matched. The host jobs now set their build folder with `--config build.target-dir=...` on every cargo
+  step (cargo configuration is not hashed) and `RUSTC_WRAPPER` is sccache itself: an earlier `rustc-wrapper.cmd` broke every Windows build,
+  because cmd.exe's 8191-character command line is shorter than rustc's arguments for windows-sys. The new `stable-workspace` action moves a host job's checkout to
   `~/.paddock-ci/src/<name>` and links the hashed work folder to it, because sccache also keys on the compile's physical working folder
   (the workspace crates missed on every run; a symlink alone does not help, cargo canonicalizes). The macOS build folder now outlives the job.
+- The Node scripts in `conformance/` and `scripts/` run when they are started through a symlink (`isMain`, compares real paths). Node gives
+  `import.meta.url` the resolved path and `process.argv[1]` the given one, so after `stable-workspace` linked the macOS work folder the Chrome
+  for Testing installer exited 0 without installing or exporting anything and the real-browser tests failed with "CHROMIUM_TEST_PATH names no
+  Chrome for Testing". The same held for a script reached through `node_modules`. `install-test-browser` also fails when the installer printed
+  no `CHROMIUM_TEST_PATH`.
 
 ### Added
 - X51 review 5 fixes for `<pd-view>` (2 P3). A drawing label keeps 4 units from every box and every edge (its own included) and sits in the clear slot

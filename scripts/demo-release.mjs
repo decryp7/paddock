@@ -14,7 +14,8 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMain } from '../conformance/src/util/is-main.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const GITEA_API = 'https://dev.decryptology.net/api/v1/repos/decryp7/paddock';
@@ -188,7 +189,7 @@ async function main(argv, env) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2), process.env).catch((e) => {
     console.error(`demo-release: ${e.message}`);
     process.exit(1);

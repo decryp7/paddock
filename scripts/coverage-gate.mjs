@@ -7,6 +7,7 @@
 // test (an injected `AppHandle`/`Window` argument never fails to extract, a generic instance for the real runtime is never
 // built). The command's body, signature and arguments are separate lines and stay counted. Nothing else is skipped.
 import { readFileSync } from 'node:fs';
+import { isMain } from '../conformance/src/util/is-main.mjs';
 
 const GENERATED = /^\s*#\[(::)?tauri::command(\(.*\))?\]\s*$/;
 
@@ -35,7 +36,7 @@ export function measure(lcov, read = (p) => { try { return readFileSync(p, 'utf8
   return { hit, total, skipped };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const [path, minimum = '99'] = process.argv.slice(2);
   if (!path) {
     console.error('usage: coverage-gate.mjs <lcov.info> [minimum percent]');

@@ -281,7 +281,10 @@ jobs:
       - uses: actions/checkout@v4
 
       # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it), a build folder that outlives the job, and
-      # eight build jobs (the runner runs two jobs at once).
+      # eight build jobs (the runner runs two jobs at once). The build folder is cargo configuration, never CARGO_TARGET_DIR:
+      # sccache puts every CARGO_* variable into its cache key, and a wrapper script that drops it runs through cmd.exe, whose
+      # 8191-character command line rustc's arguments exceed. PADDOCK_CARGO_TARGET is the one `--config` argument every cargo
+      # step passes (unquoted: the path has no spaces; empty on Linux, where the container's crates/target is the build folder).
       - name: Git bash on PATH and a persistent build folder (Windows)
         if: runner.os == 'Windows'
         shell: cmd
@@ -289,15 +292,16 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
+          echo PADDOCK_CARGO_TARGET=--config=build.target-dir='%USERPROFILE%\.paddock-ci\target-%GITHUB_JOB%'>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
           echo PADDOCK_TEST_BROWSER_DIR=%USERPROFILE%\.paddock-ci\test-browser>>"%GITHUB_ENV%"
 
-      # The Mac host runner: a build folder that outlives the job (the work folder does not: it is hashed per job); the host toolchain as installed.
+      # The Mac host runner: a build folder that outlives the job (the work folder does not: it is hashed per job), as cargo
+      # configuration (see the Windows step); the host toolchain as installed.
       - name: Persistent build folder (macOS)
         if: runner.os == 'macOS'
         run: |
-          echo "CARGO_TARGET_DIR=$HOME/.paddock-ci/target-$GITHUB_JOB" >> "$GITHUB_ENV"
+          echo "PADDOCK_CARGO_TARGET=--config=build.target-dir='$HOME/.paddock-ci/target-$GITHUB_JOB'" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
           echo "PADDOCK_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser" >> "$GITHUB_ENV"  # outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it
 
@@ -331,7 +335,7 @@ jobs:
       - name: Clippy (workspace, every feature)
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy $PADDOCK_CARGO_TARGET --workspace --all-targets --all-features -- -D warnings
 
       # The build chromium.toml pins, on the host runners (the Linux image has it): checked against its SHA-256 and kept in a
       # folder that outlives the job, so it is downloaded once per pin. Sets CHROMIUM_TEST_PATH.
@@ -352,7 +356,7 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
-        run: cargo nextest run --workspace --all-features --profile ci
+        run: cargo nextest run $PADDOCK_CARGO_TARGET --workspace --all-features --profile ci
 
       # The crates whose code changes with an optional feature off (cfg(not(feature)) paths, a default feature that can be
       # turned off) also run without it. Cargo unifies features across the packages of one run, so a crate that another
@@ -362,15 +366,15 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: |
-          cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
-          cargo nextest run -p paddock-diag -p paddock-updater --profile ci
-          cargo nextest run -p paddock-download --no-default-features --profile ci
+          cargo nextest run $PADDOCK_CARGO_TARGET -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
+          cargo nextest run $PADDOCK_CARGO_TARGET -p paddock-diag -p paddock-updater --profile ci
+          cargo nextest run $PADDOCK_CARGO_TARGET -p paddock-download --no-default-features --profile ci
 
       # nextest (and so the coverage job) does not run doc tests.
       - name: Doc tests (workspace, every feature)
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
-        run: cargo test --workspace --all-features --doc
+        run: cargo test $PADDOCK_CARGO_TARGET --workspace --all-features --doc
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()

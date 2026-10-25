@@ -15,9 +15,9 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { CFT_PLATFORMS } from './pin-runtime.mjs';
 import { entryFor, platformKey, readCatalogue } from './runtime-catalogue.mjs';
+import { isMain } from '../src/util/is-main.mjs';
 
 /** The pin from a Rust source (`PINNED_VERSION: &str = "..."`, `const BASE: &str = "..."`, `("linux64", "<sha256>")` pairs). */
 export function parseRustPin(rs) {
@@ -143,7 +143,7 @@ async function main(argv, env = process.env) {
   if (env.GITHUB_ENV) appendFileSync(env.GITHUB_ENV, `${lines.join('\n')}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).catch((e) => {
     console.error(`install-test-browser: ${e.message}`);
     process.exit(1);

@@ -26,10 +26,19 @@ runs:
         RUST_SOURCE: ${{ inputs.rust-source }}
         PREFIX: ${{ inputs.env-prefix }}
         DIR: ${{ inputs.dir }}
+        INSTALLER: ${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs
       run: |
         set -euo pipefail
         args=(--dir "$DIR" --env-prefix "$PREFIX")
         if [ -n "$CATALOGUE" ]; then args+=(--catalogue "$CATALOGUE"); fi
         if [ -n "$PIN" ]; then args+=(--pin "$PIN"); fi
         if [ -n "$RUST_SOURCE" ]; then args+=(--rust-source "$RUST_SOURCE"); fi
-        node "${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs" "${args[@]}"
+        # The installer prints CHROMIUM_TEST_PATH and appends it to $GITHUB_ENV. A run that exits 0 without it (as when Node did not
+        # see the script as its main module through a linked work folder) would leave the tests to fail later with a misleading
+        # message: fail here instead.
+        out=$(node "$INSTALLER" "${args[@]}")
+        printf '%s\n' "$out"
+        case "$out" in
+          *CHROMIUM_TEST_PATH=*) ;;
+          *) echo "::error::install-test-browser printed no CHROMIUM_TEST_PATH ($INSTALLER)"; exit 1 ;;
+        esac
