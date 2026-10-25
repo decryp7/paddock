@@ -270,7 +270,7 @@ jobs:
 
       - name: DIAG reset wrapper log
         if: runner.os == 'macOS'
-        run: mkdir -p "$HOME/.paddock-ci" && : > "$HOME/.paddock-ci/diag-wrapper.log"
+        run: mkdir -p "$HOME/.paddock-ci" && rm -f "$HOME/.paddock-ci/diag-wrapper.log"
 
       - name: Toolchain present
         run: |
