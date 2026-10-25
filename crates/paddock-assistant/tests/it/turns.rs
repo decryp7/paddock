@@ -263,7 +263,14 @@ fn a_tool_that_writes_is_offered_only_after_the_click_and_needs_an_approval() {
     assert!(
         matches!(seen.last().unwrap(), AssistantEvent::ApprovalNeeded { summary, input, destructive: true, .. } if summary == "Erase everything" && input["all"] == true)
     );
-    assert!(seen.iter().any(|e| matches!(e, AssistantEvent::ToolStarted { write: true, destructive: true, .. })));
+    assert!(seen.iter().any(|e| matches!(
+        e,
+        AssistantEvent::ToolStarted {
+            write: true,
+            destructive: true,
+            ..
+        }
+    )));
     assert_eq!(
         runs.load(Ordering::SeqCst),
         0,
@@ -326,8 +333,21 @@ fn a_write_that_can_be_undone_asks_without_the_danger_flag_and_the_tools_say_whi
     let seen = until(&r.rx, |e| {
         matches!(e, AssistantEvent::ApprovalNeeded { .. })
     });
-    assert!(matches!(seen.last().unwrap(), AssistantEvent::ApprovalNeeded { destructive: false, .. }));
-    assert!(seen.iter().any(|e| matches!(e, AssistantEvent::ToolStarted { write: true, destructive: false, .. })));
+    assert!(matches!(
+        seen.last().unwrap(),
+        AssistantEvent::ApprovalNeeded {
+            destructive: false,
+            ..
+        }
+    ));
+    assert!(seen.iter().any(|e| matches!(
+        e,
+        AssistantEvent::ToolStarted {
+            write: true,
+            destructive: false,
+            ..
+        }
+    )));
     r.assistant
         .approve(&ack.conversation_id, "c1", true)
         .unwrap();
