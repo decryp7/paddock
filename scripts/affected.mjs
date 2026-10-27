@@ -638,10 +638,11 @@ export function parseArgs(args) {
     const i = args.indexOf(name);
     if (i < 0) return { i, value: null };
     const value = args[i + 1];
-    if (value === undefined || value.startsWith('--')) throw new Error(`${name} needs a value`);
+    if (value === undefined || value === '' || value.startsWith('--')) throw new Error(`${name} needs a value`);
     return { i, value };
   };
   for (const a of args) if (a.startsWith('--') && !known.includes(a)) throw new Error(`unknown option ${a}`);
+  for (const k of known) if (args.filter((a) => a === k).length > 1) throw new Error(`${k} given more than once`);
   const { i: fi, value: filesArg } = valueOf('--files');
   const { i: ai, value: app } = valueOf('--app');
   const ci = args.includes('--ci');
@@ -650,10 +651,12 @@ export function parseArgs(args) {
   const valueIdx = new Set([fi, ai].filter((i) => i >= 0).map((i) => i + 1));
   const positional = args.filter((a, i) => !a.startsWith('--') && !valueIdx.has(i));
   const [base = null, head = 'HEAD'] = positional;
+  if (ci && (filesArg !== null || all || positional.length)) throw new Error('--ci takes no commits, --files or --all');
   if (positional.length > 2) throw new Error(`too many commits: ${positional.join(' ')}`);
   if (filesArg !== null && (base !== null || all)) throw new Error('--files cannot be combined with a base or --all');
   if (all && base !== null) throw new Error('--all cannot be combined with a base');
   const files = filesArg === null ? null : filesArg.split(',').filter(Boolean);
+  if (files && !files.length) throw new Error('--files needs at least one file');
   return { files, base, head, all, ci, app, explain: args.includes('--explain') };
 }
 

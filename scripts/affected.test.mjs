@@ -484,6 +484,14 @@ describe('command line: incomplete or unknown arguments are refused, never plann
     '--files with a base': ['--files', 'a,b', 'origin/main'],
     '--all with --files': ['--all', '--files', 'a'],
     '--all with a base': ['--all', 'origin/main'],
+    '--ci with a positional': ['--ci', 'origin/main'],
+    '--ci with --files': ['--ci', '--files', 'a'],
+    '--ci with --all': ['--ci', '--all'],
+    '--app with an empty value': ['--ci', '--app', ''],
+    '--files with an empty value': ['--files', ''],
+    '--files with an empty list': ['--files', ','],
+    'a repeated --app': ['--ci', '--app', 'x', '--app', 'y'],
+    'a repeated --explain': ['a', '--explain', '--explain'],
   };
   for (const [name, args] of Object.entries(refused)) {
     test(`${name} throws`, () => assert.throws(() => parseArgs(args), /./));
