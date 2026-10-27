@@ -534,6 +534,20 @@ describe('MockJobs', () => {
     expect(at((await mockNotifications().list()).notices, 0).primary).toEqual({ type: 'reviewProposals', jobId: job.id });
   });
 
+  it('wait returns the real outcome of a job that ended before anyone waited and was not kept in the list', async () => {
+    // A quick job nobody needs to see (shorter than visibleMs, no attention) leaves the list at once; a follower that
+    // starts late (the engine keeps finished jobs) must still hear "done", not "cancelled", or a profile save would
+    // never apply its new summary.
+    const m = new MockJobs(opts({ visibleMs: 100_000, attentionMs: 100_000 }));
+    const job = m.start({ kind: 'import', title: 'Apply' }, async () => ({ value: 1, result: { type: 'workspace' } }));
+    await job.done;
+    expect((await m.list()).jobs).toEqual([]);
+    expect(await m.wait(job.id)).toEqual({ id: job.id, state: 'done', result: { type: 'workspace' }, error: null, message: null });
+    const failed = m.start({ kind: 'export', title: 'E' }, async () => Promise.reject(new Error('disk full')));
+    await failed.done.catch(() => undefined);
+    expect([(await m.wait(failed.id)).state, (await m.wait(failed.id)).error]).toEqual(['failed', 'disk full']);
+  });
+
   it('wait reports a failed job and an unknown one as cancelled', async () => {
     const m = new MockJobs(opts());
     const job = m.start({ kind: 'export', title: 'E' }, async () => Promise.reject(new Error('disk full')));
