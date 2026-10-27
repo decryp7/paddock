@@ -277,6 +277,7 @@ describe('matrix legs', () => {
   test("an app's host-cleanup patterns match its own paths and never the real runner (every app that has them)", () => {
     const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', 'C:\\runner\\act_runner.exe daemon', '/Users/x/actions-runner/Runner.Listener run'];
     const ours = {
+      pitwall: ['/Users/x/app/target/debug/pitwall-server --port 0 --fake-engine'],
       pitcrew: ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter\\chrome-win64\\chrome.exe --headless'],
     };

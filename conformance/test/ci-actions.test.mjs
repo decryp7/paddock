@@ -844,8 +844,8 @@ test('the app bundles get the family keys stripped of whitespace (rule 25, C06),
 test('app-gates tests last-packages apart on Linux only, and a host leg leaves them out of clippy, tests and doc tests', () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.match(gates, /for pkg in \$LAST_PACKAGES; do exclude\+=\(--exclude "\$pkg"\); last\+=\(-p "\$pkg"\); done/, 'one list feeds the exclusions and the separate run');
-  assert.match(gates, /step cargo nextest run --workspace \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
-  assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then step cargo nextest run \$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
+  assert.match(gates, /step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run --workspace \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
+  assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run \$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
   assert.match(gates, /step cargo clippy --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
   assert.match(gates, /step cargo test --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');

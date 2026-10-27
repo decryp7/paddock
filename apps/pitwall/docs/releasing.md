@@ -15,7 +15,7 @@ The version in the tag must match `app/src-tauri/tauri.conf.json` and the worksp
 Status today: the Tauri shell exists (`app/src-tauri`, with `externalBin` bundling the server as a sidecar and a
 separate `tauri.<os>.conf.json` per platform), Pitwall is a leg of the monorepo's `ci.yml` (`apps/pitwall/paddock.ci.json`: Rust on Linux, Windows and macOS, the
 frontend with the Chromium e2e), and `.gitea/workflows/pitwall-release.yml` (repo root) builds the installers on three platforms
-and publishes for `pitwall-v*` tags through the shared `app-release.yml`, only after the WebKit e2e and Pitwall's `ci.yml` legs passed;
+and publishes for `pitwall-v*` tags through the shared `app-release.yml`, only after Pitwall's `ci.yml` legs (WebKit e2e included) passed;
 `latest.json` also goes on the moving `pitwall-latest` release, which installed copies read. Nothing has been released and no installer has been published yet, and
 the installers have not been installed on real Windows and Linux machines. The server binary also builds on its own
 (`cargo build -p pitwall-server --profile dist`).
