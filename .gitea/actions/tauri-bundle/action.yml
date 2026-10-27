@@ -38,4 +38,7 @@ runs:
         TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.signing-private-key }}
         TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.signing-key-password }}
         TAURI_UPDATER_PUBKEY: ${{ inputs.updater-pubkey }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/tauri-bundle.sh" "$BUNDLES" --app-dir "$APP_DIR" --root "${ROOT:-$APP_DIR}" --prepare "$PREPARE"
+      run: |
+        args=(--app-dir "$APP_DIR" --root "${ROOT:-$APP_DIR}")
+        if [ -n "$PREPARE" ]; then args+=(--prepare "$PREPARE"); fi
+        bash "${{ github.action_path }}/../../../conformance/ci/tauri-bundle.sh" "$BUNDLES" "${args[@]}"
