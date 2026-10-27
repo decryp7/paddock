@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <title>Pitwall 32px</title>
   <defs>
-    <linearGradient id="p1dbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient>
-    <mask id="p1dm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M11.5 13.5V16.5M14 12V18M16.5 11V19M19 12V18M21.5 13.5V16.5" fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></mask>
+    <linearGradient id="pitwall-32-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient>
+    
   </defs>
-  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#p1dbg)"/>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#pitwall-32-bg)"/>
   <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#24094F" stroke-opacity="0.35" stroke-width="0.5"/>
-  <path d="M11 7.5H21A5 5 0 0 1 26 12.5V17.5A5 5 0 0 1 21 22.5H11A5 5 0 0 1 6 17.5V12.5A5 5 0 0 1 11 7.5ZM8.5 20L14 22L8 26Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round" mask="url(#p1dm0)"/>
+  <path d="M9 25L19 30L19 17L9 12Z" fill="#B5B8C8" shape-rendering="crispEdges"/><path d="M19 30L24 27.5L24 14.5L19 17Z" fill="#73798D" shape-rendering="crispEdges"/><path d="M9 12L19 17L24 14.5L14 9.5Z" fill="#FFFFFF" shape-rendering="crispEdges"/><path d="M10 19.5L18 23.5L18 17.5L10 13.5Z" fill="#1E1638" shape-rendering="crispEdges"/><path d="M11 19L12 19.5L12 18.5L11 18Z" fill="#EAE4FF" shape-rendering="crispEdges"/><path d="M13 20L14 20.5L14 18.5L13 18Z" fill="#EAE4FF" shape-rendering="crispEdges"/><path d="M15 21L16 21.5L16 18.5L15 18Z" fill="#EAE4FF" shape-rendering="crispEdges"/><path d="M17 22L18 22.5L18 18.5L17 18Z" fill="#EAE4FF" shape-rendering="crispEdges"/><path d="M14 12.5L15 13L16 12.5L15 12Z" fill="#B99AF2" shape-rendering="crispEdges"/><path d="M10 23.5L18 27.5L18 26.5L10 22.5Z" fill="#2A2D3D" shape-rendering="crispEdges"/><path d="M10 21.5L18 25.5L18 24.5L10 20.5Z" fill="#2A2D3D" shape-rendering="crispEdges"/><path d="M11 12L12 12.5L12 5.5L11 5Z" fill="#2F2A3D" shape-rendering="crispEdges"/><path d="M12 12.5L13 12L13 5L12 5.5Z" fill="#1C1826" shape-rendering="crispEdges"/><path d="M18 14.5L20 15.5L20 14.5L18 13.5Z" fill="#2F2A3D" shape-rendering="crispEdges"/><path d="M18 13.5L20 14.5L22 13.5L20 12.5Z" fill="#4A4459" shape-rendering="crispEdges"/>
 </svg>

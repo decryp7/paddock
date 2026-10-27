@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Pitcrew 16px</title>
   <defs>
-    <linearGradient id="pdbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A4C"/><stop offset="1" stop-color="#D4440D"/></linearGradient>
-    <mask id="pdm2" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M6.9 8a1.1 1.1 0 1 1 2.2 0a1.1 1.1 0 1 1 -2.2 0Z" fill="#000"/></mask>
+    <linearGradient id="pitcrew-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A4C"/><stop offset="1" stop-color="#D4440D"/></linearGradient>
+    
   </defs>
-  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#pdbg)"/>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#pitcrew-16-bg)"/>
   <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#8A2A04" stroke-opacity="0.35" stroke-width="0.5"/>
-  <g opacity="0.6"><path d="M12.52 4.21A5.9 5.9 0 1 1 3.48 4.21" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="butt" stroke-linejoin="round"/><path d="M5.15 2.22L1.64 2.67L5.32 5.75Z" fill="#FFFFFF"/></g><path d="M10.94 9.7L8 11.4L5.06 9.7L5.06 6.3L8 4.6L10.94 6.3Z" fill="#FFFFFF" mask="url(#pdm2)"/>
+  <path d="M4 4h5v1h-5ZM2 5h9v3h-9ZM4 8h5v1h-5ZM11 5h1v3h-1ZM12 6h1v2h-1ZM13 5h2v4h-2ZM4 9h4v2h-4ZM3 11h4v2h-4ZM2 13h4v1h-4ZM3 14h2v1h-2ZM9 9h1v1h-1Z" fill="#FFFFFF" shape-rendering="crispEdges"/>
 </svg>

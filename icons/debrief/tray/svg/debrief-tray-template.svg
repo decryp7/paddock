@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
   <title>Debrief tray</title>
-  <defs></defs>
-  <g><g opacity="1"><path d="M2 3.5H8" fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M1.5 9H4.5L6.25 5L8.75 13L10.5 9H14.5" fill="none" stroke="#000000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M10.5 3.5a2 2 0 1 1 4 0a2 2 0 1 1 -4 0Z" fill="#000000"/></g>
+  <defs><mask id="debrief-tray-default-template-m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M4 3H12V9H4Z" fill="#000"/></mask></defs>
+  <g><path d="M3 2H13V10H3Z" fill="#000000" mask="url(#debrief-tray-default-template-m0)" shape-rendering="crispEdges"/><path d="M4 6h2v1h-2ZM6 4h1v2h-1ZM7 3h1v1h-1ZM8 4h1v4h-1ZM9 7h1v1h-1ZM10 6h2v1h-2Z" fill="#000000" shape-rendering="crispEdges"/><path d="M2 11H14V12H2Z" fill="#000000" shape-rendering="crispEdges"/></g>
   
 </svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="-1 -1 18 18" shape-rendering="crispEdges">
+  <title>Pitcrew tray (busy)</title>
+  <defs><mask id="pitcrew-tray-busy-template-18-tk" maskUnits="userSpaceOnUse" x="-1" y="-1" width="18" height="18"><rect x="-1" y="-1" width="18" height="18" fill="#fff"/><path d="M10 9H15V10H16V15H15V16H10V15H9V10H10Z" fill="#000"/></mask></defs>
+  <g mask="url(#pitcrew-tray-busy-template-18-tk)"><path d="M4 4h5v1h-5ZM2 5h9v3h-9ZM4 8h5v1h-5ZM11 5h1v3h-1ZM12 6h1v2h-1ZM13 5h2v4h-2ZM4 9h4v2h-4ZM3 11h4v2h-4ZM2 13h4v1h-4ZM3 14h2v1h-2ZM9 9h1v1h-1Z" fill="#000000" shape-rendering="crispEdges"/></g>
+  
+<path d="M11 10H14V11H15V14H14V15H11V14H10V11H11ZM11 11V14H14V11Z" fill="#000000" fill-rule="evenodd"/>
+</svg>

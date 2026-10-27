@@ -4,6 +4,22 @@ The family icon set: app icons for Debrief, Pitcrew, Spotter, Pitwall, Dyno, Sig
 Paddock mark itself (the umbrella, see below).
 Open `preview.html` to review them, or see the renders in `screenshots/`.
 
+**Since 2026-10-27 the family is isometric:** each app and Paddock is a rendered motorsport object (Debrief an engineer's laptop,
+Pitwall a team radio, Sighter a camera on a tripod, Pitcrew an impact wrench, Spotter binoculars, Pacenotes a tablet with a stylus,
+Dyno a tachometer pod, Paddock the pit building) on the unchanged enamel tiles, with hand-drawn small frames (2:1 pixel isometric at
+32 and 24, a flat symbol at 16 and in the tray). The rules are in [STYLE.md](STYLE.md). The flat set it replaced (and its Carbon
+concept) is kept for reference in `archive/2026-10-flat/`; the sections below on the flat glyphs describe that set.
+
+| Module | Builds |
+|---|---|
+| `tools/iso.mjs` | projection, value ladder, shadows, cylinders, pixel isometric (shared) |
+| `tools/iso-kit.mjs` | the scene kit: normal-shaded faces, chamfered prisms, cylinders, extrusions |
+| `tools/art-scene.mjs` | the masters of Debrief, Pitwall, Sighter and Pitcrew (on the scene kit) |
+| `tools/art-direct.mjs` | the masters, 32/24 frames and flat symbols of Spotter, Pacenotes and Dyno (on iso.mjs) |
+| `tools/paddock-iso.mjs` | Paddock's pit building and its 32/24 frames |
+| `tools/iso-family.mjs` | the registry of every frame and tray state of the eight icons, used by build, preview and tests |
+| `tools/install.mjs` | copies the sets into the apps (`src-tauri/icons`, tray PNGs, in-app copies) and `docs/images/src/icons` |
+
 | App | Status |
 |---|---|
 | Debrief, Pitcrew, Spotter, Pitwall, Dyno | Approved |
@@ -117,17 +133,23 @@ npm ci                       # at the repo root: one npm workspace (ADR 0014 §1
 cd icons
 npm run all                  # everything: SVG, PNG, tray, Tauri sets, .ico, preview, screenshots
 ONLY=pacenotes node tools/build.mjs   # one app (or ONLY=paddock for the umbrella mark)
+node tools/install.mjs                # copy the built sets into the apps and the docs (--check only compares)
+npm test                              # seam scan, coverage at 16 and in the tray, tray alpha, docs copies
 node tools/umbrella-sheet.mjs <dir>   # review renders: the umbrella beside the apps, small frames, tray
 ```
 
-Edit only `tools/design.mjs`; every SVG is generated from the geometry there. Output is deterministic except `tauri/icon.icns`,
-which embeds build-specific bytes.
+Edit the art modules above (the family) or `tools/design.mjs` (tiles, the demo apps' flat glyphs); every SVG is generated. Output is
+deterministic except `tauri/icon.icns`, which embeds build-specific bytes; every SVG carries explicit id prefixes, so a file does not
+depend on what was built before it.
 
 ## How apps consume the icons
 
-Each `<app>/tauri/` folder is a drop-in replacement for the app's `src-tauri/icons`. Tray icons are in `<app>/tray/`.
-The ecosystem image uses a copy of each macOS master in `docs/images/src/icons/` (refresh it after changing an icon, then run
-`node docs/images/src/ecosystem.mjs --png`).
+Each `<app>/tauri/` folder is a drop-in replacement for the app's `src-tauri/icons`. Tray icons are in `<app>/tray/`; the apps
+embed the 18 pt @2x template and the 32 px light and dark PNGs. `node tools/install.mjs` copies both into each app in its own layout
+(Pitwall maps its tray states Idle, Busy, Paused, Unavailable to serving, busy, idle, error) and the in-app copies (favicons, brand
+logos). The ecosystem image and the app posters inline the 60 frame (`<app>/<app>-60.svg`, copied to `docs/images/src/icons/`;
+`npm test` fails when a copy is stale); then run `node docs/images/src/ecosystem.mjs --png` and
+`PADDOCK_APPS=$PWD/../apps node docs/images/src/app-poster.mjs all --png`.
 
 ## Chosen direction: Enamel
 
@@ -186,18 +208,20 @@ Each app has a tile in its own saturated hue, one bold glyph, a faint diagonal "
 ```
 <app>/<app>-macos.svg, <app>-windows.svg       1024 masters (pure vector)
 <app>/<app>-macos-1024.png, -windows-1024.png  rendered masters
+<app>/<app>-128.svg|png, <app>-60.svg|png       the simple frame (128 and 112) and the 60 frame (diagrams)
 <app>/small/<app>-{16,24,32,48}.svg|png         hand-tuned small frames
-<app>/tray/svg/                                 tray sources (template / light / dark)
+<app>/tray/svg/                                 tray sources (template, template-18pt, light, dark)
 <app>/tray/macos/<name>-{16,18}ptTemplate[@2x].png   menu-bar template images
-<app>/tray/windows/<name>-{light,dark}-{16,20,24,32}.png and .ico
+<app>/tray/windows/<name>-{light,dark}-{16,32}.png and .ico
 <app>/tauri/                                    drop-in replacement for src-tauri/icons
 paddock/web/                                    favicon (svg, ico), apple-touch-icon, 512 and avatar PNGs (umbrella only)
-alternative/<app>-carbon.svg                    Carbon concept
+archive/2026-10-flat/                           the flat set and its Carbon concept, for reference
+alternative/                                    design studies (the Paddock candidates)
 preview.html, screenshots/                      review sheet and renders
 tools/                                          generators (design.mjs is the source of truth)
 ```
 
-- **Tray names:** `<app>-tray` when the app has no states (Debrief), otherwise `<app>-tray-<status>`. The statuses are Pitcrew ok/busy/warning/error, Spotter normal/new, Pitwall idle/serving/warning and Dyno normal/high.
+- **Tray names:** `<app>-tray` when the app has no states (Debrief), otherwise `<app>-tray-<status>`. The statuses are Pitcrew ok/busy/warning/error, Spotter normal/new, Pitwall idle/serving/busy/warning/error and Dyno normal/high.
 - **Light and dark tray icons:** "light" means a light taskbar (dark glyph) and "dark" means a dark taskbar (white glyph).
 - **The `tauri/` set:**
   - `icon.icns` and the PNGs come from the macOS master.

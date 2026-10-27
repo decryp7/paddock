@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
   <title>Pitcrew tray (warning)</title>
-  <defs><mask id="tsm2" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M6.8 8a1.2 1.2 0 1 1 2.4 0a1.2 1.2 0 1 1 -2.4 0Z" fill="#000"/></mask><mask id="tsk" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#fff"/><path d="M12.25 6.85L17.65 16.25H6.85Z" fill="#000"/></mask></defs>
-  <g mask="url(#tsk)"><path d="M12.6 4.14A6 6 0 1 1 3.4 4.14" fill="none" stroke="#1C1C1E" stroke-width="1.75" stroke-linecap="butt" stroke-linejoin="round"/><path d="M5.2 2L1.41 2.47L5.39 5.81Z" fill="#1C1C1E"/><path d="M11.03 9.75L8 11.5L4.97 9.75L4.97 6.25L8 4.5L11.03 6.25Z" fill="#1C1C1E" mask="url(#tsm2)"/></g>
-  <path d="M12.25 8.65L16 15.25H8.5Z" fill="#F5A524" stroke="#F5A524" stroke-width="0.8" stroke-linejoin="round"/><path d="M12.25 11.05V13.05" stroke="#1A1200" stroke-width="1.1" stroke-linecap="round"/><circle cx="12.25" cy="14.35" r="0.55" fill="#1A1200"/>
+  <defs><mask id="pitcrew-tray-warning-light-tk" maskUnits="userSpaceOnUse" x="-1" y="-1" width="18" height="18"><rect x="-1" y="-1" width="18" height="18" fill="#fff"/><path d="M11 8H14V9H15V11H16V16H8V11H9V9H11Z" fill="#000"/></mask><mask id="pitcrew-tray-warning-light-tm" maskUnits="userSpaceOnUse" x="-1" y="-1" width="18" height="18"><rect x="-1" y="-1" width="18" height="18" fill="#fff"/><path d="M12 11H13V13H12ZM12 14H13V15H12Z" fill="#000"/></mask></defs>
+  <g mask="url(#pitcrew-tray-warning-light-tk)"><path d="M4 4h5v1h-5ZM2 5h9v3h-9ZM4 8h5v1h-5ZM11 5h1v3h-1ZM12 6h1v2h-1ZM13 5h2v4h-2ZM4 9h4v2h-4ZM3 11h4v2h-4ZM2 13h4v1h-4ZM3 14h2v1h-2ZM9 9h1v1h-1Z" fill="#1C1C1E" shape-rendering="crispEdges"/></g>
+  
+<path d="M12 9H13V11H14V13H15V15H9V13H10V11H11V9H12Z" fill="#F5A524"/><path d="M12 11H13V13H12ZM12 14H13V15H12Z" fill="#1A1200"/>
 </svg>

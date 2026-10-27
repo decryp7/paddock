@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="-1 -1 18 18" shape-rendering="crispEdges">
+  <title>Sighter tray</title>
+  <defs><mask id="sighter-tray-default-template-18-m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M7 6h2v1h-2ZM6 7h1v1h-1ZM9 7h1v1h-1ZM6 8h1v1h-1ZM9 8h1v1h-1ZM7 9h2v1h-2Z" fill="#000"/></mask></defs>
+  <g><path d="M3 5H13V11H3ZM6 3H9V5H6Z" fill="#000000" mask="url(#sighter-tray-default-template-18-m0)" shape-rendering="crispEdges"/><path d="M7 11h1v3h-1ZM6 13h1v1h-1ZM5 14h1v1h-1ZM9 13h1v1h-1ZM10 14h1v1h-1Z" fill="#000000" shape-rendering="crispEdges"/></g>
+  
+</svg>

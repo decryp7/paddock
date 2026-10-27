@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <title>Paddock 24px</title>
+  <defs>
+    <linearGradient id="k3bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
+    <linearGradient id="k3fam0" x1="2.25" y1="0" x2="21.75" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0.0000" stop-color="#5590FF"/><stop offset="0.1429" stop-color="#5590FF"/><stop offset="0.1429" stop-color="#8A5AE6"/><stop offset="0.2857" stop-color="#8A5AE6"/><stop offset="0.2857" stop-color="#BFA2EE"/><stop offset="0.4286" stop-color="#BFA2EE"/><stop offset="0.4286" stop-color="#DE559F"/><stop offset="0.5714" stop-color="#DE559F"/><stop offset="0.5714" stop-color="#FF8A4C"/><stop offset="0.7143" stop-color="#FF8A4C"/><stop offset="0.7143" stop-color="#FFD257"/><stop offset="0.8571" stop-color="#FFD257"/><stop offset="0.8571" stop-color="#C2A845"/><stop offset="1.0000" stop-color="#C2A845"/></linearGradient><mask id="k3m1" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M3.5 12.5H20.5" fill="none" stroke="#000" stroke-width="1" stroke-linecap="butt"/></mask>
+  </defs>
+  <path d="M6.25 1H17.75A5.25 5.25 0 0 1 23 6.25V17.75A5.25 5.25 0 0 1 17.75 23H6.25A5.25 5.25 0 0 1 1 17.75V6.25A5.25 5.25 0 0 1 6.25 1Z" fill="url(#k3bg)"/>
+  <path d="M6.25 1.25H17.75A5 5 0 0 1 22.75 6.25V17.75A5 5 0 0 1 17.75 22.75H6.25A5 5 0 0 1 1.25 17.75V6.25A5 5 0 0 1 6.25 1.25Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="0.5"/>
+  <path d="M3.5 8L12 4.5L20.5 8" fill="none" stroke="url(#k3fam0)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10H11A0 0 0 0 1 11 10V16A0 0 0 0 1 11 16H5A0 0 0 0 1 5 16V10A0 0 0 0 1 5 10ZM13 10H19A0 0 0 0 1 19 10V16A0 0 0 0 1 19 16H13A0 0 0 0 1 13 16V10A0 0 0 0 1 13 10Z" fill="#FFFFFF" mask="url(#k3m1)"/><path d="M4.5 18H19.5A1 1 0 0 1 20.5 19V19A1 1 0 0 1 19.5 20H4.5A1 1 0 0 1 3.5 19V19A1 1 0 0 1 4.5 18Z" fill="#FFFFFF"/>
+</svg>
