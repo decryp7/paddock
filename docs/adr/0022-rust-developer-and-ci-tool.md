@@ -122,7 +122,7 @@ shell**, mostly in the per-app workflows (Debrief 7 long and 4 branching, Dyno 3
 | What moves | nothing | 9,734 lines (117 files) + actions | B + generators, npm glue, draw.io wrappers (12,019 more lines) | the JS gets types; shell stays |
 | Languages left in tooling | JS, bash, PowerShell, Python, YAML shell | Rust + JS generators and glue + bootstrap shell | Rust; TS only for the Playwright suites (and the TS analysis until replaced); ESLint rules; bootstrap shell | as A |
 | Tested on all three OSes | no | most | all but the bootstrap | no |
-| Effort | 0 | about 23 agent-days | **about 44 agent-days** in six phases, plus about 1.5 for checkpoints | about 4 agent-days |
+| Effort | 0 | about 27 agent-days (phases 1–4) | **about 45 agent-days** in six phases, plus about 1.5 for checkpoints | about 4 agent-days |
 | Real losses | none | none | none, if the three UI-toolchain categories stay (§4) | none |
 | Pacenotes reuse | none | graph, walk, history, rules | + the draw.io emitter | none |
 
@@ -174,17 +174,22 @@ phase 5 (generators and glue) and phase 6 (the alternatives for the lossy catego
 ### 3.3 How CI gets the binary: content-addressed, written only by `main`
 
 **Floating `stable`, no toolchain pin (decided 2026-10-28).** The repository pins no Rust toolchain, and this ADR adds
-none: no repository-wide `rust-toolchain.toml` and no pin in `tools/paddock-dev/`. `setup-rust` keeps syncing to the
-`stable` channel, as today, and its fast path for the CI image keeps comparing the image's toolchain with `stable`. When
-the install fails, it stops with a clear error that names the channel and the rustup output. Because the compiler is not
+none: no repository-wide `rust-toolchain.toml` and no pin in `tools/paddock-dev/`. `setup-rust` syncs to the `stable`
+channel. On host runners it already does (`rustup toolchain install stable`). Its fast path for the CI image does not
+today: when the image has the components, it uses the image's toolchain without comparing it with `stable`
+(`.gitea/actions/setup-rust/action.yml`, lines 37–47). R0 changes the fast path: it runs `rustup check` with a 20 s
+timeout and installs `stable` when an update is available. When the check itself fails (no network, timeout), the job
+uses the image's toolchain and prints a `::notice::` naming its version. When the install fails, `setup-rust` stops with
+a clear error that names the channel and the rustup output. Because the compiler is not
 pinned, a binary built by one machine is matched to the compiler of another through the input hash below, which
 includes the compiler actually used.
 
 **Consequence: stable can move overnight.** A new stable release can break a workspace or the tool (a new lint under
 `-D warnings`, a changed diagnostic in a golden file) without any commit in the repository. Such a break shows up as a
 CI failure on `main` and is fixed forward in a normal PR, like any other red `main`. The ADR adds no machinery for it.
-The tool's own binaries follow automatically: the new compiler gives a new hash, so the first run after the update
-misses and builds, and the next push to `main` that runs `dev-tool.yml` publishes binaries for it.
+The tool's own binaries follow: the new compiler gives a new hash, so runs after the update miss and build until
+`dev-tool.yml` has published for it. A new stable changes no path, so a push alone would not trigger that; the nightly
+run of `dev-tool.yml` (below) publishes for the new compiler within a day.
 
 - **Input hash, computed by git.** The inputs are:
   - the folder `tools/paddock-dev` (its `Cargo.toml`, its `Cargo.lock`, which is exactly the tool's resolved closure with
@@ -193,19 +198,25 @@ misses and builds, and the next push to `main` that runs `dev-tool.yml` publishe
     `paddock-testkit` are left out. They are listed in `tools/paddock-dev/inputs.txt`, and a test compares the list with
     `cargo metadata`'s resolve graph;
   - the `.cargo/config.toml` files on the tool's path;
-  - the compiler actually used: the `release:` and `commit-hash:` lines of `rustc -vV`, run after `setup-rust`. The
-    other lines are left out: `host:` differs per machine, and the target triple selects the file inside the version
-    anyway. A stable update therefore gives a new hash and a rebuild.
+  - the compiler cargo will use: the `release:` and `commit-hash:` lines of its `-vV` output, run after `setup-rust`.
+    The wrapper resolves that compiler as cargo does: `RUSTC`, then `CARGO_BUILD_RUSTC`, then `build.rustc` from the
+    `.cargo/config.toml` files on the tool's path and `$CARGO_HOME/config.toml`, else `rustc` run from
+    `tools/paddock-dev`, so a rustup directory override applies. A `--config` on cargo's command line is not seen; the
+    wrapper never passes one. The `host:` line is left out because it differs per machine. A stable update therefore
+    gives a new hash and a rebuild.
 
   The hash is `git hash-object --stdin` over the output of `git ls-tree HEAD -- <inputs>` followed by those two lines.
   `rustc -vV` takes about 35 ms here (measured, through the rustup proxy). The consumer's target triple selects the file
-  inside the version (`paddock-dev-<target>[.exe]`). When `git status --porcelain --untracked-files=no -- <inputs>` is not empty,
-  the wrapper always builds. `tools/paddock-dev/target/` is ignored in `.gitignore` (R0), so a local build folder never
+  inside the version (`paddock-dev-<target>[.exe]`). When `git status --porcelain --untracked-files=all -- <inputs>` is
+  not empty, the wrapper always builds: a changed tracked file or a new untracked file that `.gitignore` does not exclude
+  (for example a new module under `src/`) is not in `HEAD`'s tree, so the hash cannot describe it. `tools/paddock-dev/target/` is ignored in `.gitignore` (R0), so a local build folder never
   counts as a change. The tool embeds the hash it was built from and prints it (`./dev self hash` prints both the wrapper's and the
   binary's), so the wrapper can be tested. `git rev-parse` takes 16 ms (measured). The tool's dev-dependencies change
   the hash only through `Cargo.lock`; that errs on the side of a rebuild.
-- **Publishing.** A push to `main` that changes the inputs runs `dev-tool.yml`. Each runner computes the hash with the
-  same command and its own compiler, and builds in a fresh target folder with `RUSTC_WRAPPER` unset:
+- **Publishing.** `dev-tool.yml` runs on a push to `main` that changes the inputs, and nightly on `main` at 02:35
+  (`35 2 * * *`, a free slot) to catch a new stable, which changes no path. Each runner computes the hash with the same
+  command and its own compiler. When the package already has this runner's file under that hash, the job ends;
+  otherwise it builds in a fresh target folder with `RUSTC_WRAPPER` unset:
 
   | Target | Runner |
   |---|---|
@@ -213,10 +224,14 @@ misses and builds, and the next push to `main` that runs `dev-tool.yml` publishe
   | `aarch64-unknown-linux-gnu` (agents' Linux containers on the Mac) | none yet: `ci-image.yml` builds `linux/amd64` only. Until it also builds `linux/arm64` (then: an arm64 container on the macOS host runner), arm64 Linux users build on a miss, as on any branch that changes the tool |
   | `aarch64-apple-darwin` | the macOS host runner |
   | `x86_64-pc-windows-msvc` | the Windows host runner. Not `cargo xwin`, whose output is linked differently from what the Windows runners build and test |
+  | `aarch64-pc-windows-msvc` (the Windows 11 ARM test VM) | none: there is no Windows ARM runner, so it builds on a miss |
 
   It then uploads each binary and its `.sha256` to the Gitea generic package `paddock-dev`, version `<hash>`. Runners on
-  the same stable share one version; a runner whose compiler differs publishes under its own hash, which consumers with
-  that compiler find. A consumer whose local `stable` lags `main`'s builds on a miss until `rustup update`. Only this
+  the same compiler share one version. After a stable release, runners pick it up at different times (the image's check,
+  a host's next `setup-rust`), so for a while they publish under different hashes, and a consumer finds a binary only
+  when its compiler matches one runner's. A consumer whose `stable` lags every runner builds on a miss until
+  `rustup update`; one whose `stable` is ahead of the runners (a developer who updated first) also misses until the
+  runners catch up and the nightly run publishes. Only this
   workflow is given the publish token (`DEV_TOOL_PUBLISH_TOKEN`).
 - **Using it in CI.**
   - When the hash is not published (a branch that changes the tool), one `dev-build` job per run builds the Linux
@@ -368,7 +383,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 
 | Phase | WP | Content | Days | Deletes | Adds |
 |---|---|---|---|---|---|
-| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `./dev` + `dev.cmd`, git input hash with the compiler lines, a clear `setup-rust` error on a failed `stable` install, `self hash`, `inputs.txt` test, `dev-tool.yml` on four runners, the `dev-build` job and run artifact, the generic package and its cleanup rule, `.gitignore` for `tools/paddock-dev/target/` | 3.25 | – | 1,300 + 900 tests |
+| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `./dev` + `dev.cmd`, git input hash with the compiler cargo resolves, `setup-rust`'s image fast path checked against `stable` (notice on a failed check, clear error on a failed install), `self hash`, `inputs.txt` test, `dev-tool.yml` on four runners, on push and nightly, the `dev-build` job and run artifact, the generic package and its cleanup rule, `.gitignore` for `tools/paddock-dev/target/` | 3.5 | – | 1,300 + 900 tests |
 | | R1 | composite actions' logic (sccache, stable workspace, build folder and env, host tools and cleanup, node caches, sccache stats); actions become one-liners; extend the WP-C6 check (§3.7) with today's baselines; delete the three one-off scripts | 2.5 | 334 shell lines (actions 815 → about 300 YAML), 72, 491 | 900 + 800 tests |
 | | R10 | app workflows' long and OS-branching `run:` blocks into commands or `paddock.ci.json` (Debrief, Dyno, Spotter, Pitcrew, Pitwall) | 2 | about 450 inline shell lines | 500 + 400 tests |
 | **2 Release and downloads** | R2 | release, bundles, sidecars, `verify-macos` with `FakeRunner`, `self-test`, `latest-json`, notes, strip-keys, publish; Debrief `build-sidecars`, macOS dev-signing, Dyno `check-bundle`, demo release | 3 | 1,271 + about 900 test lines | 1,600 + 1,200 tests |
@@ -385,7 +400,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 | | R14 | npm glue: `build-info`, `whats-new`, i18n locales, `tauri-before-build`, `ui-coverage-guard` as `./dev` commands | 1 | 485 + about 300 | 500 + 400 tests |
 | **6 Lossy categories** | R15 | UI lints into the ESLint preset (moved, not deleted); dialog command contract generated from Rust, then the TS analysis deleted | 2.5 | 633 (243 moved) | 400 + 300 tests |
 | | R16 | clean-up: allow-list down to its final form, docs, a lesson in `docs/lessons.md` | 0.5 | about 200 | 200 |
-| | | **Total** | **about 44, plus about 1.5 for the six checkpoints** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
+| | | **Total** | **about 45, plus about 1.5 for the six checkpoints** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
 
 The checkpoints add about 0.25 days per phase, about 1.5 in all.
 
@@ -396,8 +411,13 @@ The checkpoints add about 0.25 days per phase, about 1.5 in all.
 - The golden files pass on Linux, macOS and Windows. The shadow week ended with no unexplained difference.
 - Phase 1:
   - There is no `rust-toolchain.toml`; `setup-rust` installs `stable` and fails with a clear error when it cannot.
+  - `setup-rust`'s image fast path, tested in a container whose toolchain is older than `stable`, installs `stable`;
+    with the network cut, it uses the image's toolchain and prints the notice.
   - A test shows that two different `rustc -vV` release or commit-hash lines give two different hashes, and that a
-    different `host:` line does not.
+    different `host:` line does not; that the wrapper hashes the compiler named by `RUSTC` and by `build.rustc`; and
+    that a new untracked, non-ignored file under an input path makes the wrapper build.
+  - `dev-tool.yml`'s publish decision: a `workflow_dispatch` run on `main` with a compiler whose hash is missing from the
+    package publishes it, and a second run with the same compiler publishes nothing.
   - On one commit, the hash that `./dev self hash` prints on Linux, macOS and Windows equals the version `dev-tool.yml`
     published from that OS's runner, and equals the hash embedded in the downloaded binary.
   - `./dev` finds the root from a subfolder on all three OSes.
@@ -449,13 +469,15 @@ removes it), 243 lines of ESLint rules, about 570 lines of bootstrap shell, and 
 The user took these decisions on 2026-10-28:
 
 1. **Floating `stable`, no toolchain pin** (§3.3): no repository-wide `rust-toolchain.toml` and no pin in
-   `tools/paddock-dev/`. `setup-rust` keeps syncing to `stable` and fails with a clear error. The compiler's release and
-   commit hash are part of the binary's input hash. A break from a new stable release is a CI failure on `main`, fixed
+   `tools/paddock-dev/`. `setup-rust` syncs to `stable`, its image fast path included, and fails with a clear error. The compiler's release and
+   commit hash are part of the binary's input hash, and `dev-tool.yml` also runs nightly so a new stable gets
+   binaries. A break from a new stable release is a CI failure on `main`, fixed
    forward.
 2. **Prebuilt binaries written only by `main`**, content-addressed, through the Gitea generic package, with the trust
    model in §3.3; release and tag jobs always build fresh.
 3. **The checkpoint passes when the fix rate halves** (§7): a 50% drop against the post-WP-C6 baseline and no worse than
-   the control. Phases continue during the checkpoint window.
+   the control; when both counts are below 5, pass means no more commits than the baseline. Phases continue during the
+   checkpoint window.
 4. **A joint rules-model note with Pacenotes comes before the rules crate** (R8a); the user approves it.
 5. **The dialog command contract is generated from Rust** (R15), so the TypeScript analysis is deleted rather than kept.
 
