@@ -84,7 +84,7 @@ describe('dy-lifespan-page', () => {
   });
 
   it('says when a different disk or battery was detected, and hints at low confidence', async () => {
-    const at = Date.UTC(2026, 8, 3, 12);
+    const at = new Date(2026, 8, 3, 12).getTime(); // noon local time: the same calendar day in every time zone
     const { f, el } = render(one('beyondHorizon', { restartedAt: at, subject: 'battery', confidence: 'low' }));
     await settle(f);
     expect(el.querySelector('.note')?.textContent).toMatch(/A different battery was detected on .*3.*; only readings since then are used\./);
