@@ -16,6 +16,7 @@ Conventional Commits; one semver tag for the whole repo.
 - Pitwall is a leg of `ci.yml` (`apps/pitwall/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin
   `pitwall-release.yml` (plus the WebKit e2e); `pitwall.yml` and Pitwall's copies of the release scripts, bundle verify,
   commit lint, diagram export and check-index are gone. `pitwall-server --version` is started from the built macOS app.
+- New contract field `rustChecks` (Linux lines that run only with the Rust half: Pitwall's coverage guard and time-zone tests).
 - New contract field `lastPackages` (`app-gates` input `last-packages`): packages tested apart and last on Linux, left out of host legs
   (Pitwall's Tauri shell, whose build overwrites the server binary the other tests start).
 - Pitwall's server plans loads against a `MemoryReader` (`Serving::set_memory_reader`, the host by default); its tests pin a roomy machine.

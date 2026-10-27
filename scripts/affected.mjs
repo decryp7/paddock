@@ -409,6 +409,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         nextest_config: app.nextestConfig ?? '',
         prepare: linux ? (app.prepare ?? []).join('\n') : '',
         checks: linux ? (app.checks ?? []).join('\n') : '',
+        rust_checks: linux ? (app.rustChecks ?? []).join('\n') : '',
         ui_checks: linux ? (app.ui ?? []).join('\n') : '',
         angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
         last_packages: (app.lastPackages ?? []).join(' '),

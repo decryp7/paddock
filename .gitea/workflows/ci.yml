@@ -613,6 +613,7 @@ jobs:
           nextest-config: ${{ matrix.nextest_config }}
           prepare: ${{ matrix.prepare }}
           checks: ${{ matrix.checks }}
+          rust-checks: ${{ matrix.rust_checks }}
           ui-checks: ${{ matrix.ui_checks }}
           rust: ${{ matrix.rust }}
           ui: ${{ matrix.ui }}

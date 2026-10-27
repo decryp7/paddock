@@ -22,7 +22,7 @@ on:
     branches: [main]
     tags: ["pitwall-v*"]
   schedule:
-    - cron: "45 1 * * *"
+    - cron: "15 1 * * *"
   workflow_dispatch:
     inputs:
       gates:

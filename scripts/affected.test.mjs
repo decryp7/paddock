@@ -316,6 +316,14 @@ describe('contracts', () => {
     }
   });
 
+  test('rust checks reach only the Linux leg, and run only when the change reaches the Rust half', () => {
+    const [leg] = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.os === LINUX);
+    assert.match(leg.rust_checks, /cargo llvm-cov nextest -p pitwall-core/);
+    assert.equal(leg.rust, true);
+    for (const l of matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.os !== LINUX)) assert.equal(l.rust_checks, '', 'host legs run the Rust gates only');
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /if: inputs\.rust-checks != '' && inputs\.rust == 'true'/, 'the action skips them with the Rust half');
+  });
+
   test("an app's last packages reach every leg, so a host leg and the Linux leg agree on what is tested apart", () => {
     const legs = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph);
     assert.deepEqual([...new Set(legs.map((l) => l.last_packages))], ['pitwall-app'], 'Pitwall tests its Tauri shell after the rest');

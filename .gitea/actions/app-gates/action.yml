@@ -16,6 +16,9 @@ inputs:
   checks:
     description: Commands from the repo root that always run, one per line (release facts).
     default: ""
+  rust-checks:
+    description: Commands from the repo root that run only when the Rust half does (a coverage guard, tests in another time zone), one per line. Linux leg only.
+    default: ""
   ui-checks:
     description: Commands from the repo root for the UI half, one per line (lint, unit tests, Chromium e2e).
     default: ""
@@ -55,6 +58,13 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.checks }}
+      run: bash -euo pipefail -c "$COMMANDS"
+
+    - name: Rust checks (${{ inputs.app }})
+      if: inputs.rust-checks != '' && inputs.rust == 'true'
+      shell: bash
+      env:
+        COMMANDS: ${{ inputs.rust-checks }}
       run: bash -euo pipefail -c "$COMMANDS"
 
     # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke).

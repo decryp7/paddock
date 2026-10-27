@@ -10,7 +10,10 @@
     "cd apps/pitwall",
     "node --test scripts/ci/*.test.mjs",
     "node scripts/ci/check-icons.mjs",
-    "bash scripts/ci/privacy-check.sh",
+    "bash scripts/ci/privacy-check.sh"
+  ],
+  "rustChecks": [
+    "cd apps/pitwall",
     "cargo llvm-cov nextest -p pitwall-core --profile ci --summary-only --fail-under-lines 99",
     "TZ=Pacific/Auckland cargo nextest run -p pitwall-core -p pitwall-server --profile ci"
   ],
