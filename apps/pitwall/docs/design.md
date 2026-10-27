@@ -3,7 +3,7 @@
 All of Pitwall's design diagrams on one page, from the big picture down to individual flows. Each image is exported
 from its editable draw.io source (linked under the image), which a small generator under
 [`diagrams/src`](diagrams/src/README.md) writes; export with
-[`scripts/export-diagrams.sh`](../scripts/export-diagrams.sh). The style
+Paddock's [`diagrams/scripts/export-diagrams.sh`](https://dev.decryptology.net/decryp7/paddock/src/branch/main/diagrams/scripts/export-diagrams.sh) (see [development.md](development.md)). The style
 rules are in [diagrams/STYLE.md](diagrams/STYLE.md), the reasoning behind the design in the
 [architecture decision records](adr/README.md), and the prose overview in [architecture.md](architecture.md).
 

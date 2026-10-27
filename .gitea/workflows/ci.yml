@@ -616,6 +616,7 @@ jobs:
           ui-checks: ${{ matrix.ui_checks }}
           rust: ${{ matrix.rust }}
           ui: ${{ matrix.ui }}
+          last-packages: ${{ matrix.last_packages }}
           filter: ${{ matrix.filter }}
           display: ${{ matrix.display }}
           e2e-checks: ${{ matrix.e2e_checks }}

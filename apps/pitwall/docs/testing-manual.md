@@ -171,7 +171,7 @@ local server on an ephemeral port with a temp data folder.
 - **Real-engine automated run (any platform):** `PITWALL_LLAMA_E2E=1 cargo test -p pitwall-server --test llama_e2e` downloads the
   pinned engine build and a tiny model into a temporary folder, asks one chat question and deletes everything. It is off in CI.
 - **macOS (13 or later):** install from the `.dmg` (unsigned: right-click > Open the first time, or allow in System Settings > Privacy and
-  Security); the Metal build uses the GPU (`--list-devices` shows `MTL0`). Run `scripts/ci/macos-verify-bundle.sh` on a built
+  Security); the Metal build uses the GPU (`--list-devices` shows `MTL0`). Run the shared `conformance/release/macos-verify-bundle.sh --tauri-conf app/src-tauri/tauri.conf.json` on a built
   bundle.
 - **Linux:** install the `.deb` and run the AppImage; with an NVIDIA card check `nvidia-smi` shows the process under the CUDA
   build, with an AMD/Intel card the Vulkan build; in a container without a GPU only the CPU build works. The AppImage's temporary

@@ -411,6 +411,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         checks: linux ? (app.checks ?? []).join('\n') : '',
         ui_checks: linux ? (app.ui ?? []).join('\n') : '',
         angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
+        last_packages: (app.lastPackages ?? []).join(' '),
         processes: (app.processes ?? []).join(' '),
         process_patterns: (app.processPatterns ?? []).join('\n'),
         test_browser_prefix: app.testBrowser?.envPrefix ?? '',

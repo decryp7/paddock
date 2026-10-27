@@ -31,6 +31,9 @@ inputs:
   ui:
     description: "'true' runs the UI half."
     default: "true"
+  last-packages:
+    description: "Space-separated packages whose tests run after the rest, on Linux only (a Tauri shell whose build overwrites a binary the other tests start); host legs leave them out of clippy, tests and doc tests. Empty: none."
+    default: ""
   filter:
     description: "A nextest filterset for a pull request that reaches only part of the workspace (package(=a) | package(=b)); empty runs every test."
     default: ""
@@ -64,6 +67,7 @@ runs:
         NEXTEST_CONFIG: ${{ inputs.nextest-config }}
         FILTER: ${{ inputs.filter }}
         DISPLAY_TESTS: ${{ inputs.display }}
+        LAST_PACKAGES: ${{ inputs.last-packages }}
       run: |
         set -uo pipefail
         status=0
@@ -72,13 +76,18 @@ runs:
         if [ -n "$NEXTEST_CONFIG" ]; then config=(--config-file "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/$NEXTEST_CONFIG"); fi
         filter=()
         if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the crates this change reaches: $FILTER"; filter=(-E "$FILTER"); fi
+        # last-packages: tested apart after the rest on Linux; a host leg leaves them out altogether.
+        exclude=(); last=()
+        for pkg in $LAST_PACKAGES; do exclude+=(--exclude "$pkg"); last+=(-p "$pkg"); done
+        hostexclude=(); if [ "$RUNNER_OS" != Linux ]; then hostexclude=(${exclude[@]+"${exclude[@]}"}); fi
         # Format, advisories and licences do not depend on the OS; clippy is skipped on Windows like the crates leg.
         if [ "$RUNNER_OS" = Linux ]; then step cargo fmt --all --check; fi
-        if [ "$RUNNER_OS" != Windows ]; then step cargo clippy --workspace --all-targets -- -D warnings; fi
+        if [ "$RUNNER_OS" != Windows ]; then step cargo clippy --workspace ${hostexclude[@]+"${hostexclude[@]}"} --all-targets -- -D warnings; fi
         wrap=()
         if [ "$DISPLAY_TESTS" = true ] && [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session --); fi
-        step ${wrap[@]+"${wrap[@]}"} cargo nextest run --workspace ${config[@]+"${config[@]}"} --profile ci ${filter[@]+"${filter[@]}"}
-        step cargo test --workspace --doc
+        step ${wrap[@]+"${wrap[@]}"} cargo nextest run --workspace ${exclude[@]+"${exclude[@]}"} ${config[@]+"${config[@]}"} --profile ci ${filter[@]+"${filter[@]}"}
+        if [ "$RUNNER_OS" = Linux ] && [ ${#last[@]} -gt 0 ]; then step ${wrap[@]+"${wrap[@]}"} cargo nextest run ${last[@]+"${last[@]}"} ${config[@]+"${config[@]}"} --profile ci --no-tests=pass ${filter[@]+"${filter[@]}"}; fi
+        step cargo test --workspace ${hostexclude[@]+"${hostexclude[@]}"} --doc
         if [ "$RUNNER_OS" = Linux ]; then step cargo deny --all-features --workspace check; fi
         exit $status
 

@@ -1,5 +1,27 @@
 {
-  "$comment": "Pitwall's CI contract (scripts/affected.mjs, ADR 0014 §6). Pitwall is not a leg of ci.yml: its gates (Rust on several OS, licences, frontend, e2e, installers, the release from a pitwall-v* tag) are its own workflow, .gitea/workflows/pitwall.yml, whose plan job asks `node scripts/affected.mjs --ci --app pitwall`.",
-  "workflow": "pitwall.yml",
-  "cargo": "."
+  "$comment": "Pitwall's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a leg of ci.yml on Linux (the app's own checks, then fmt, clippy, tests, doc tests, deny, then the frontend: audit, lint, build, index.html check, unit tests with the 80 % guard, Chromium e2e) and, for the code that differs there (the server with its Windows service and macOS launch agent code), the Rust gates on Windows and macOS. The Tauri shell (pitwall-app) is tested apart and last on Linux only: tauri-build copies its placeholder sidecar over target/debug/pitwall-server, which the server's end-to-end tests start as a child process. Installers, the WebKit e2e and the release are .gitea/workflows/pitwall-release.yml (a pitwall-v* tag, a push to main, the nightly or a manual run), through the shared app-release.yml.",
+  "cargo": ".",
+  "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
+  "angularDir": "app",
+  "lastPackages": ["pitwall-app"],
+  "processes": ["pitwall-server", "llama-server"],
+  "processPatterns": ["pitwall-server .*--fake-engine"],
+  "checks": [
+    "cd apps/pitwall",
+    "node --test scripts/ci/*.test.mjs",
+    "node scripts/ci/check-icons.mjs",
+    "bash scripts/ci/privacy-check.sh",
+    "cargo llvm-cov nextest -p pitwall-core --profile ci --summary-only --fail-under-lines 99",
+    "TZ=Pacific/Auckland cargo nextest run -p pitwall-core -p pitwall-server --profile ci"
+  ],
+  "ui": [
+    "cd apps/pitwall/app",
+    "npm audit --omit=dev --audit-level=high",
+    "npm run lint",
+    "npx ng build",
+    "npm run check:index",
+    "npx ng test --watch=false --coverage",
+    "node ../scripts/ci/ui-coverage-guard.mjs --min 80 --dir coverage",
+    "PW_E2E_PORT=4390 npx playwright test --project=chromium --workers=2 --fully-parallel"
+  ]
 }

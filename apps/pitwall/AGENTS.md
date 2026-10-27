@@ -164,7 +164,8 @@ Pitwall runs native engines on untrusted model files and answers requests from o
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
   cargo deny --workspace check
-  node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs
+  node --test scripts/ci/*.test.mjs
+  node --test conformance/test/*.test.mjs   # (repo root) the shared scripts: commit lint, latest.json, publish, check-index
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
   ```
 
@@ -176,7 +177,7 @@ Pitwall runs native engines on untrusted model files and answers requests from o
 - Updating the pinned llama.cpp release (`crates/pitwall-core/src/runtimes/llama-runtimes.json`) is a reviewed change
   that must pass the end-to-end test.
 - Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`) so changelogs can be
-  generated (`cliff.toml`); `scripts/commit-lint.mjs` checks them. Releases are `pitwall-v*` tags following semver
+  generated (`cliff.toml`); the shared `conformance/src/commit-lint.mjs` checks them (`paddock-conformance commit-lint`). Releases are `pitwall-v*` tags following semver
   (`docs/releasing.md`). Never add Co-Authored-By or AI attribution lines.
 - Record significant architecture decisions as ADRs in `docs/adr/` (numbered, with status, context, decision,
   consequences).

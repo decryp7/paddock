@@ -316,6 +316,12 @@ describe('contracts', () => {
     }
   });
 
+  test("an app's last packages reach every leg, so a host leg and the Linux leg agree on what is tested apart", () => {
+    const legs = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph);
+    assert.deepEqual([...new Set(legs.map((l) => l.last_packages))], ['pitwall-app'], 'Pitwall tests its Tauri shell after the rest');
+    assert.ok(matrix(run('apps/pitcrew/crates/pitcrew-core/src/lib.rs'), graph).every((l) => l.last_packages === ''), 'an app without the field tests its workspace in one run');
+  });
+
   test("an app's process patterns (host-cleanup `pkill -f`) name its own temp folder and never match the real runner", () => {
     const legs = matrix(run('apps/pitcrew/crates/pitcrew-core/src/lib.rs'), graph);
     const patterns = graph.apps.get('pitcrew').processPatterns;
