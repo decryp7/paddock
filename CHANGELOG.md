@@ -21,6 +21,10 @@ Conventional Commits; one semver tag for the whole repo.
   (Pitwall's Tauri shell, whose build overwrites the server binary the other tests start).
 - Pitwall's server plans loads against a `MemoryReader` (`Serving::set_memory_reader`, the host by default); its tests pin a roomy machine.
   The eight-slot slots tests answered 503 `insufficient_memory` on a Windows runner with less than about 11 GiB free (run 6456, job 12127).
+- Every memory reading of `pitwall-server` (dashboard sample, limit status, fit checks in management and updates) goes through that one reader.
+- **Known gap:** the kit's Windows leg skips clippy (as the crates leg), so the server's Windows-service code is no longer linted in CI;
+  the old Pitwall workflow did. `cargo xwin clippy` (ADR 0021) is a local pre-push check only: ADR 0022 does not take xwin into CI, and
+  the paddock-ci image carries no cargo-xwin. Run it before pushing Pitwall Rust changes until a kit field and the image offer it.
 
 ### Windows CI: tests that measured the runner's disk, and a toolchain step that says why it failed
 - Four tests that timed out on a slow Windows runner (run 6461) prove their behaviour without bulk disk work: the log

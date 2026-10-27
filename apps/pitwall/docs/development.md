@@ -92,6 +92,8 @@ Extra checks that CI runs:
 - `conformance/release/macos-verify-bundle.sh` (shared, the `macos-verify` action): the `.app` and the DMG are ad-hoc sealed, resolve
   their bundled libraries and `pitwall-server --version` starts from the built app.
 - Coverage: `cargo llvm-cov -p pitwall-core --summary-only` (target 99 % lines).
+- Windows lint is not in CI (the kit's Windows leg skips clippy; the paddock-ci image has no cargo-xwin, ADR 0021/0022): before pushing server changes run
+  `cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings` (the server's Windows-service code).
 - Cross-target type checks: `cargo clippy -p pitwall-core -p pitwall-server --target x86_64-pc-windows-msvc` and
   `--target x86_64-apple-darwin`.
 
