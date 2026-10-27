@@ -49,6 +49,7 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
    Fields: `cargo` (the Cargo workspace, relative to the app), `os` (default Linux only; add `windows-latest` and `macos-latest` for
    the code that differs there: those legs run the Rust gates only), `nextestConfig`, `prepare` and `checks` (always, Linux), `ui`
    (the UI half: audit, lint, build, tests; one `cd` holds for the lines after it), `angularDir` (the Angular cache kept between runs) and
+   `e2e` (commands of the end-to-end legs, run once per shard with `$E2E_SHARD`/`$E2E_INDEX`), `e2eShards` (how many run at the same time), `e2eArtifacts` (the failure report folder uploaded `if: failure()`), `testBrowser` and `display` (a real browser in the tests: the pinned Chrome for Testing, a virtual display on Linux) and
    `processes` (exact names `host-cleanup` kills on a host) and `processPatterns` (`pkill -f` patterns for test processes that run under another name; each must name the app's own temp folder, e.g. `pitcrew-it-`, never a bare runner name). Remove `workflow`: an app with a `workflow` is not a leg.
    An app with host legs needs `include = [{ path = "ci.toml", optional = true }]` in its `.cargo/config.toml` and `.cargo/ci.toml`
    in its `.gitignore` (`build-folder` fails the leg otherwise).

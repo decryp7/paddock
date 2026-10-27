@@ -399,7 +399,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
     const filter = narrow && !plan.all && hit.length && hit.length < members.length ? hit.map((n) => `package(=${n})`).join(' | ') : '';
     const rust = (plan.kinds[name] ?? []).includes('rust');
     const ui = (plan.kinds[name] ?? []).includes('ui');
-    return oses.filter((os) => os === LINUX || (rust && app.cargo)).map((os) => {
+    const legs = oses.filter((os) => os === LINUX || (rust && app.cargo)).map((os) => {
       const linux = os === LINUX;
       return {
         app: name,
@@ -420,8 +420,29 @@ export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
         rust,
         ui: linux && ui,
         filter,
+        e2e_checks: '',
+        e2e_shard: '',
+        e2e_artifacts: linux && ui ? (app.e2eArtifacts ?? '') : '',
       };
     });
+    // paddock.ci.json `e2e` (commands) with `e2eShards` (default 1): the end-to-end tests are legs of their own on Linux, one per
+    // shard `i/N` (the command reads $E2E_SHARD and $E2E_INDEX), running at the same time; the main leg keeps the other UI lines.
+    const shards = ui && app.e2e?.length ? Math.max(1, app.e2eShards ?? 1) : 0;
+    const base = legs.find((l) => l.os === LINUX);
+    for (let i = 1; i <= shards; i += 1) {
+      legs.push({
+        ...base,
+        prepare: '',
+        checks: '',
+        ui_checks: '',
+        rust: false,
+        ui: false,
+        display: 'false',
+        e2e_checks: app.e2e.join('\n'),
+        e2e_shard: `${i}/${shards}`,
+      });
+    }
+    return legs;
   });
 }
 
@@ -528,7 +549,7 @@ export function summary(plan, reason, legs) {
     '| Project | Runs |',
     '|---|---|',
     ...['crates', 'ui', 'eslint', 'conformance', 'tools'].map((p) => `| ${p} | ${yes(plan[p])} |`),
-    ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${[l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
+    ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${l.e2e_shard ? `e2e ${l.e2e_shard}` : [l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
   ];
   if (plan.docs && !legs.length && !plan.crates && !plan.ui) lines.push('', 'Docs only: nothing to build.');
   return `${lines.join('\n')}\n`;

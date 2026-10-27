@@ -1,7 +1,11 @@
 {
-  "$comment": "Spotter's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a leg of ci.yml on Linux (the app's script tests and icon check; fmt, clippy, nextest under a virtual display with the pinned Chrome for Testing, doc tests, deny; then the frontend: audit, lint, build, unit tests, Chromium e2e, and WebKit e2e on main, tags and the nightly) and, for the code that is different there (the launch agent, Unix socket, SIGTERM stops, Keychain, SMAppService, the Windows service), the Rust gates on Windows and macOS with the same browser. Commands run from the repo root, one per line of a step; one `cd` holds for the lines after it. Installers and the release are .gitea/workflows/spotter-release.yml (a spotter-v* tag, a push to main, the nightly or a manual run), through the shared app-release.yml.",
+  "$comment": "Spotter's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a leg of ci.yml on Linux (the app's script tests and icon check; fmt, clippy, nextest under a virtual display with the pinned Chrome for Testing, doc tests, deny; then the frontend: audit, lint, build, unit tests, and WebKit e2e on main, tags, the nightly and a dispatch with `webkit`; the Chromium e2e in two parallel legs, `e2e`/`e2eShards`, whose failure report `e2eArtifacts` is uploaded) and, for the code that is different there (the launch agent, Unix socket, SIGTERM stops, Keychain, SMAppService, the Windows service), the Rust gates on Windows and macOS with the same browser. Commands run from the repo root, one per line of a step; one `cd` holds for the lines after it. Installers and the release are .gitea/workflows/spotter-release.yml (a spotter-v* tag, a push to main, the nightly or a manual run), through the shared app-release.yml.",
   "cargo": ".",
-  "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
+  "os": [
+    "ubuntu-latest",
+    "windows-latest",
+    "macos-latest"
+  ],
   "angularDir": "app",
   "display": true,
   "testBrowser": {
@@ -9,7 +13,9 @@
     "catalogue": "apps/spotter/crates/spotter-render/src/chromium-manifest.toml",
     "noSandboxOnLinux": true
   },
-  "processPatterns": ["[/\\\\]test-browser-spotter[/\\\\]"],
+  "processPatterns": [
+    "[/\\\\]test-browser-spotter[/\\\\]"
+  ],
   "checks": [
     "cd apps/spotter",
     "node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs",
@@ -22,7 +28,13 @@
     "npm run lint",
     "npx ng build",
     "npx ng test --watch=false --coverage",
-    "PW_PORT=4370 npx playwright test --project=chromium --workers=1 --fully-parallel",
-    "case \"$GITHUB_EVENT_NAME:$GITHUB_REF\" in pull_request:*) ;; schedule:*|*:refs/heads/main|*:refs/tags/*) PW_PORT=4372 npx playwright test --project=webkit --workers=1 ;; esac"
-  ]
+    "if [ -n \"${PADDOCK_WEBKIT:-}\" ]; then full=1; else case \"$GITHUB_EVENT_NAME:$GITHUB_REF\" in pull_request:*) full= ;; schedule:*|*:refs/heads/main|*:refs/tags/*) full=1 ;; *) full= ;; esac; fi; if [ -n \"$full\" ]; then PW_PORT=4372 npx playwright test --project=webkit --workers=1; fi"
+  ],
+  "e2e": [
+    "npm run build -w ui",
+    "cd apps/spotter/app",
+    "PW_PORT=$((4369 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=$E2E_SHARD"
+  ],
+  "e2eShards": 2,
+  "e2eArtifacts": "apps/spotter/app/.angular/playwright-results"
 }

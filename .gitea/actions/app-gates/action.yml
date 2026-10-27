@@ -19,6 +19,12 @@ inputs:
   ui-checks:
     description: Commands from the repo root for the UI half, one per line (lint, unit tests, Chromium e2e).
     default: ""
+  e2e-checks:
+    description: "Commands from the repo root for an end-to-end leg, one per line; $E2E_SHARD (i/N) and $E2E_INDEX (i) are set. Empty: not an end-to-end leg."
+    default: ""
+  e2e-shard:
+    description: "This leg's shard, i/N (paddock.ci.json e2eShards)."
+    default: ""
   rust:
     description: "'true' runs the Rust half."
     default: "true"
@@ -82,3 +88,13 @@ runs:
       env:
         COMMANDS: ${{ inputs.ui-checks }}
       run: bash -euo pipefail -c "$COMMANDS"
+
+    - name: End-to-end tests (${{ inputs.app }} ${{ inputs.e2e-shard }})
+      if: inputs.e2e-checks != ''
+      shell: bash
+      env:
+        COMMANDS: ${{ inputs.e2e-checks }}
+        E2E_SHARD: ${{ inputs.e2e-shard }}
+      run: |
+        export E2E_INDEX="${E2E_SHARD%%/*}"
+        bash -euo pipefail -c "$COMMANDS"

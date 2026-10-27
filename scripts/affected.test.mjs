@@ -202,7 +202,7 @@ describe('matrix legs', () => {
   test('everything gives every app both halves on Linux, and the summary names each leg', () => {
     const plan = affected([], graph, { all: true });
     const legs = matrix(plan, graph);
-    assert.deepEqual(legs.filter((l) => l.os === LINUX).map((l) => [l.app, l.rust, l.ui]), LEGS.map((a) => [a, true, true]));
+    assert.deepEqual(legs.filter((l) => l.os === LINUX && !l.e2e_shard).map((l) => [l.app, l.rust, l.ui]), LEGS.map((a) => [a, true, true]));
     const md = summary(plan, 'everything', legs);
     for (const a of LEGS) assert.match(md, new RegExp(`app ${a} \\| rust \\+ ui`));
   });
@@ -234,6 +234,34 @@ describe('matrix legs', () => {
     ]);
     const plain = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps: new Map([['x', { dir: 'apps/x', cargo: '.' }]]) });
     assert.deepEqual([plain[0].test_browser_prefix, plain[0].test_browser_no_sandbox, plain[0].display], ['', 'false', 'false']);
+  });
+
+  test("`e2e` with `e2eShards` makes one Linux leg per shard and keeps the other UI lines in the main leg; the report folder reaches the Linux UI leg", () => {
+    const apps = new Map([['x', { dir: 'apps/x', cargo: '.', ui: ['npm test'], e2e: ['npx playwright test --shard=$E2E_SHARD'], e2eShards: 2, e2eArtifacts: 'apps/x/app/results' }]]);
+    const legs = matrix({ apps: ['x'], kinds: { x: ['rust', 'ui'] }, packages: {} }, { cargo: new Map(), apps });
+    assert.deepEqual(legs.map((l) => [l.os, l.rust, l.ui, l.ui_checks, l.e2e_shard, l.e2e_checks, l.e2e_artifacts]), [
+      [LINUX, true, true, 'npm test', '', '', 'apps/x/app/results'],
+      [LINUX, false, false, '', '1/2', 'npx playwright test --shard=$E2E_SHARD', 'apps/x/app/results'],
+      [LINUX, false, false, '', '2/2', 'npx playwright test --shard=$E2E_SHARD', 'apps/x/app/results'],
+    ]);
+    const rustOnly = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps });
+    assert.equal(rustOnly.length, 1, 'a change that does not reach the UI runs no e2e leg');
+    const one = new Map([['x', { dir: 'apps/x', cargo: '.', e2e: ['npx playwright test'] }]]);
+    assert.deepEqual(matrix({ apps: ['x'], kinds: { x: ['ui'] }, packages: {} }, { cargo: new Map(), apps: one }).map((l) => l.e2e_shard), ['', '1/1']);
+  });
+
+  test("Spotter's WebKit lines run on a dispatch with `webkit` as well as on main, tags and the nightly, and never on a plain pull request", () => {
+    const line = graph.apps.get('spotter').ui.find((l) => l.includes('webkit'));
+    const run = (env) => execFileSync('bash', ['-c', 'npx() { echo webkit-ran; }; ' + line], { env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' }).trim();
+    assert.equal(run({ GITHUB_EVENT_NAME: 'pull_request', GITHUB_REF: 'refs/pull/1/merge' }), '');
+    assert.equal(run({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/topic' }), '');
+    assert.equal(run({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/topic', PADDOCK_WEBKIT: '1' }), 'webkit-ran');
+    assert.equal(run({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main' }), 'webkit-ran');
+    assert.equal(run({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/tags/spotter-v1.0.0' }), 'webkit-ran');
+    assert.equal(run({ GITHUB_EVENT_NAME: 'schedule', GITHUB_REF: 'refs/heads/main' }), 'webkit-ran');
+    const e2e = graph.apps.get('spotter');
+    assert.equal(e2e.e2eShards, 2);
+    assert.match(e2e.e2e.join('\n'), /--shard=\$E2E_SHARD/);
   });
 
   test("onlyApp (a tag's gates, ci.yml's `app` input) keeps one app, both halves, and no other project", () => {

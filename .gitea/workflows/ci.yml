@@ -509,7 +509,7 @@ jobs:
   # Host legs: the same physical checkout path and a kept build folder every run (stable-workspace, build-folder), the pinned
   # cargo-nextest (host-tools), nothing left behind (host-cleanup).
   app:
-    name: app ${{ matrix.app }} (${{ matrix.os }})
+    name: app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_shard != '' && format(', e2e {0}', matrix.e2e_shard) || '' }})
     needs: [plan]
     if: ${{ needs.plan.outputs.any_app == 'true' }}
     runs-on: ${{ matrix.os }}
@@ -520,6 +520,8 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.apps) }}
     env:
       CARGO_TERM_COLOR: always
+      # A manual run with `webkit` also runs an app's WebKit end-to-end lines (paddock.ci.json `ui`: $PADDOCK_WEBKIT).
+      PADDOCK_WEBKIT: ${{ inputs.webkit == true && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -613,6 +615,16 @@ jobs:
           ui: ${{ matrix.ui }}
           filter: ${{ matrix.filter }}
           display: ${{ matrix.display }}
+          e2e-checks: ${{ matrix.e2e_checks }}
+          e2e-shard: ${{ matrix.e2e_shard }}
+
+      # The failure report of the app's browser tests (paddock.ci.json `e2eArtifacts`, a folder from the repo root); Gitea has the v3 artifact actions.
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure() && matrix.e2e_artifacts != ''
+        with:
+          name: ${{ matrix.app }}-e2e-results-${{ strategy.job-index }}
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ matrix.e2e_artifacts }}
+          if-no-files-found: ignore
 
       # Nothing may stay behind on a host: no fake runners or test sockets of the app's tests (paddock.ci.json `processes`).
       - uses: ./.gitea/actions/host-cleanup
