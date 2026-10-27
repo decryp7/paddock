@@ -95,7 +95,10 @@ mod tests {
         let me = std::process::id();
         let mine = src.processes().into_iter().find(|p| p.pid == me).unwrap();
         let d = src.details(mine.reference()).unwrap();
-        assert_eq!(d.priority, Some(Priority::Normal));
+        // The process's own nice value, not an assumed 0: a loaded Mac (or a tool that throttles busy processes) may have
+        // lowered this test's priority, which made `Normal` fail at random.
+        let nice = get_nice(libc::pid_t::try_from(me).unwrap()).unwrap();
+        assert_eq!(d.priority, Some(Priority::from_nice(nice)));
         assert_eq!(d.efficiency_mode, Some(false));
         assert!(!matches!(d.signature, SignatureInfo::Signed(ref s) if s.is_empty()));
         match &d.open_files {
