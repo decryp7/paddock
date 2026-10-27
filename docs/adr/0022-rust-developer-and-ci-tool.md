@@ -23,22 +23,38 @@ to be genuinely lossy stays in JavaScript or TypeScript.
 
 ### Why, stated honestly
 
-The case does **not** rest on a fix-density claim. Recounted for this ADR (method in the inventory note): between
-2026-10-13 and 2026-10-27 there were **30 distinct `fix:` commits with a tooling scope** (`ci`, `build`, `scripts`,
-`macos`, `publish`, `conformance`, `release`, `notices`) that touched tooling files or workflows. `ci:` commits (mostly
-creation and set-up of the kit) and `fix(ui|app|dialogs|icons|…)` commits that only touched a script on the way are
-left out. This is the one denominator used below. By defect area:
+The case does **not** rest on a fix-density claim. Recounted for this ADR, with this exact filter (details and the
+list in the inventory note):
 
-| Defect area | `fix:` commits (of 30) | Examples |
+- commits in `git log --since=2026-10-13 --no-merges origin/main`, de-duplicated by subject (the imported app histories
+  repeat some commits);
+- the subject starts with `fix(<scope>)`, and the scope is one of `ci`, `build`, `scripts`, `macos`, `publish`,
+  `conformance`, `release`, `notices` or `chromium,ci`;
+- the diff touches a tooling path, including the apps' pre-import paths. The path matches
+  `(^|/)\.gitea/(workflows|actions)/`, `(^|/)scripts/`, `^conformance/`, `^tools/`, `^ci-image/`, `^icons/tools/`,
+  `^diagrams/(tools|scripts)/`, `^docs/images/src/`, `/docs/diagrams/src/` or `(^|/)xtask/`. This covers, for example,
+  `apps/<app>/.gitea/workflows/build.yml` and Debrief's old crate `scripts/` folders.
+
+The result is **37 commits**, the one denominator used below. Not counted:
+
+- `ci:` commits, mostly the creation and set-up of the kit;
+- `fix(...)` commits with an app or UI scope that touched a tooling path on the way: 38 more. Of these, `ui` has 7,
+  `icons` 8, `render` 3 and `app` 3. Adding the four borderline scopes `render`, `chromium-driver`, `e2e` and
+  `diagnostics` would give 43.
+
+By defect area:
+
+| Defect area | `fix:` commits (of 37) | Examples |
 |---|---|---|
-| Release, signing, bundles, sidecars | 8 | unset signing secret overriding the ad-hoc identity; re-sign libduckdb; sidecars found through cargo, not `<app>/target` |
+| Release, signing, bundles, sidecars, updater manifest | 13 | unset signing secret overriding the ad-hoc identity; whitespace in signing keys (three apps); re-sign libduckdb; no hardened runtime while ad hoc |
 | Runner set-up in composite actions (sccache, stable workspace, host paths) | 6 | stable workspace through a junction on Windows; `CARGO_TARGET_DIR` out of the sccache key |
-| Pinned downloads and the test browser | 5 | libduckdb fetched in Node "because Windows has no bash"; `tar` on Windows; retries |
+| Pinned downloads and the test browser | 6 | libduckdb fetched in Node "because Windows has no bash"; `fetch-libduckdb.sh` not executable; `tar` on Windows |
 | Scaffolder, package publisher, notices | 4 | dev-dependency publish order; LF in embedded licences |
 | CI failures of app code and tests, fixed in workflows | 5 | races, Windows paths in tests, DNS in tests |
+| Tests of the tools themselves | 1 | a stubbed global left behind in the prune tests |
 | One-off scripts | 2 | a Windows runner retirement script under strict mode |
 
-The fortnight was atypical (the monorepo import), the counts are small, and 13 of the 30 are OS-specific. They do not
+The fortnight was atypical (the monorepo import), the counts are small, and 14 of the 37 are OS-specific. They do not
 prove that Rust would have prevented these defects. What they show is **where** the defects were: in per-OS branches of
 shell and JavaScript that no test runs on all three systems. The composite actions (22 files, 334 lines of inline shell)
 have no tests at all.
@@ -62,8 +78,9 @@ The reasons for all-Rust are therefore:
 Method (verified, details in the inventory note): every tracked tooling file under `scripts/`, `conformance/`, `tools/`,
 `ci-image/`, `diagrams/`, `icons/tools/`, `docs/images/src/`, `templates/repo/scripts/`, `.gitea/actions/*` and the apps'
 `scripts/`, `app/scripts/` and `docs/diagrams/src/`, without tests and fixtures. Today: 309 files, 27,925 lines. After
-WP-C1–C6 (39 per-app copies, 2,770 lines, deleted): **270 files, 25,155 lines**. "fix:" is the number of the 30
-tooling `fix:` commits that touched the group (a commit can touch several groups). "OS refs" counts OS-specific tokens
+WP-C1–C6 (39 per-app copies, 2,770 lines, deleted): **270 files, 25,155 lines**. "fix:" is the number of the 37
+tooling `fix:` commits that touched the group's current files (a commit can touch several groups; the 7 that touched only
+pre-import paths or the tools' own tests are not assigned to a group). "OS refs" counts OS-specific tokens
 as a proxy for per-OS branches.
 
 | Group | Files | Lines | fix: | OS refs | Phase | Target |
@@ -102,7 +119,7 @@ shell**, mostly in the per-app workflows (Debrief 7 long and 4 branching, Dyno 3
 | What moves | nothing | 9,734 lines (117 files) + actions | B + generators, npm glue, draw.io wrappers (12,019 more lines) | the JS gets types; shell stays |
 | Languages left in tooling | JS, bash, PowerShell, Python, YAML shell | Rust + JS generators and glue + bootstrap shell | Rust; TS only for the Playwright suites (and the TS analysis until replaced); ESLint rules; bootstrap shell | as A |
 | Tested on all three OSes | no | most | all but the bootstrap | no |
-| Effort | 0 | about 23 agent-days | **about 44 agent-days** in six phases | about 4 agent-days |
+| Effort | 0 | about 23 agent-days | **about 45 agent-days** in six phases | about 4 agent-days |
 | Real losses | none | none | none, if the three UI-toolchain categories stay (§4) | none |
 | Pacenotes reuse | none | graph, walk, history, rules | + the draw.io emitter | none |
 
@@ -134,48 +151,98 @@ phase 5 (generators and glue) and phase 6 (the alternatives for the lossy catego
   then never touches `crates/Cargo.lock`, which the planner treats as an input of every crate. The libraries stay in
   `crates/` (published, 99% coverage, hakari) and are path dependencies of the tool. The planner gets a `paddock-dev`
   project with its own three-OS leg (fmt, clippy, xwin clippy, nextest).
-- **`./dev` and `dev.cmd` at the repository root** (about 40 lines each, part of the bootstrap that stays shell): they
-  find the repository root (`git rev-parse --show-toplevel`, `%~dp0`), compute the input hash (§3.3), run the cached binary
-  for that hash, otherwise download it, otherwise build it. They work from any subfolder. A `.cargo/config.toml` alias
-  is not used: its relative `--manifest-path` breaks in subfolders.
+- **`./dev` at the repository root, and `dev.cmd` beside it** (part of the bootstrap that stays shell). `./dev` is about
+  40 lines of POSIX shell. `dev.cmd` is a two-line delegate that runs `./dev` with Git for Windows' `bash.exe`, which every
+  Windows machine of ours has (CI steps already run in Git Bash). "Works from any subfolder" means **root discovery
+  only**: the wrapper finds the root with `git rev-parse --show-toplevel` and runs the tool there. The tool gets the
+  caller's working folder and resolves relative path arguments against it. A `.cargo/config.toml` alias is not used,
+  because its relative `--manifest-path` breaks in subfolders.
+- **The tool's own workspace keeps its lockfile current.** When a path dependency in `crates/` gains or changes a
+  dependency, `tools/paddock-dev/Cargo.lock` must change too. The tool's planner leg runs `cargo metadata --locked` for
+  the tool whenever its input set (below) is affected, and fails with "run `./dev self lock`". The author of the
+  `crates/` change regenerates the lockfile in the same PR. Renovate covers `tools/paddock-dev` as one more Cargo
+  workspace, grouped with `crates/` (ADR 0014 §8).
 - **First run per agent:** the binary cache is per user (`~/.paddock-dev/bin/<hash>/`), not per worktree, so a new agent
   worktree downloads the binary for `main`'s hash in about 1–2 s. Only an agent that changes the tool builds it, in its
-  own `CARGO_TARGET_DIR` (measured cold release builds: 33 s for a probe with the tool's third-party dependencies, 41 s
-  for `paddock-cli` + `paddock-proc` + `paddock-env` with the workspace-hack, both with 2 jobs; seconds with a warm
-  sccache). With uncommitted changes in the tool's inputs, the wrappers always build.
+  own `CARGO_TARGET_DIR`. Measured cold release builds with 2 jobs: 33 s for a probe with the tool's third-party
+  dependencies, 41 s for `paddock-cli` + `paddock-proc` + `paddock-env` with the workspace-hack; seconds with a warm
+  sccache.
 
 ### 3.3 How CI gets the binary: content-addressed, written only by `main`
 
-- **Input hash.** SHA-256 over `tools/paddock-dev/Cargo.lock` (the tool's own lockfile, so exactly its resolved closure
-  with registry checksums), the git tree ids of the tool's path dependencies (listed in `tools/paddock-dev/inputs.txt`; a
-  test compares the list with `cargo metadata`'s resolve graph, so a new path dependency cannot be missed), the tool's
-  `Cargo.toml`, the `.cargo/config.toml` files on its path, `rust-toolchain.toml`, the output of `rustc -Vv`, and the
-  target triple. Not the whole of `crates/Cargo.lock`. `git rev-parse HEAD:<dir>` takes 16 ms (measured).
-- **Publishing.** A push to `main` that changes the inputs runs `dev-tool.yml`: it builds the tool for
-  `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` in a fresh
-  target folder with `RUSTC_WRAPPER` unset, then uploads `paddock-dev-<target>[.exe]` and its `.sha256` to the Gitea
-  generic package `paddock-dev`, version `<hash>`. Only that workflow has the write token (`DEV_TOOL_PUBLISH_TOKEN`,
-  `write:package`). Gitea refuses a second upload of the same file name to a package version (read, Gitea generic
-  registry documentation), so a version, once written, stays.
-- **Using it.** Every job runs `./dev ...`. The wrapper computes the hash and uses `~/.paddock-ci/bin/<hash>/` if present
-  (host runners). Otherwise it downloads the package version for the hash with the job's read token and checks the
-  `.sha256`. On a miss (a branch that changes the tool), it builds from source; sccache is allowed for that. Host runners
-  copy the binary to `~/.paddock-ci/bin/<hash>/` with a write-then-rename and run the copy: Windows cannot replace a
-  running `.exe`, and parallel jobs share the folder.
-- **Release and tag jobs never download.** They build the tool in a fresh target folder with `RUSTC_WRAPPER` unset, so
-  neither the package store nor the shared sccache backend (Redis, writable by every job) can reach a signed artifact.
+**A pinned toolchain first (decision for the user).** The repository pins no Rust toolchain today. There is no
+`rust-toolchain.toml`; `setup-rust` installs `stable`, and the CI image brings its own version (this Mac has 1.99.1).
+A binary built by one machine therefore cannot be matched to the compiler of another. The ADR adds a repository-wide
+`rust-toolchain.toml` with an **exact** version (`channel = "1.99.1"` at the time of writing, with `clippy`, `rustfmt`
+and the CI targets). `setup-rust` and the CI image install exactly that version. Renovate bumps it as one PR that runs
+the full suite; whether Renovate has a built-in manager for this file or needs a regex manager is unverified.
+
+This changes every workspace, not only the tool, and that is intended: a "stable moved overnight" failure becomes a
+reviewed bump. The alternative is a pin in `tools/paddock-dev/` only, with the wrapper building from that folder,
+because rustup picks the toolchain by working folder, not by manifest. It keeps the apps on floating `stable` and is the
+fallback if the user declines a repository-wide pin.
+
+- **Input hash, computed by git.** The inputs are:
+  - the folder `tools/paddock-dev` (its `Cargo.toml`, its `Cargo.lock`, which is exactly the tool's resolved closure with
+    registry checksums, and `src/`);
+  - the folders of the tool's path dependencies, **normal and build dependencies only**. Dev-dependencies such as
+    `paddock-testkit` are left out. They are listed in `tools/paddock-dev/inputs.txt`, and a test compares the list with
+    `cargo metadata`'s resolve graph;
+  - `rust-toolchain.toml`;
+  - the `.cargo/config.toml` files on the tool's path.
+
+  The hash is `git ls-tree HEAD -- <inputs> | git hash-object --stdin`. The `rustc -Vv` output is not used: its `host:`
+  line differs per machine, and the pinned file names the compiler. The consumer's target triple selects the file inside
+  the version (`paddock-dev-<target>[.exe]`). When `git status --porcelain -- <inputs>` is not empty, the wrapper always
+  builds. The tool embeds the hash it was built from and prints it (`./dev self hash` prints both the wrapper's and the
+  binary's), so the wrapper can be tested. `git rev-parse` takes 16 ms (measured). The tool's dev-dependencies change
+  the hash only through `Cargo.lock`; that errs on the side of a rebuild.
+- **Publishing.** A push to `main` that changes the inputs runs `dev-tool.yml`. It computes the hash with the same
+  command and builds in a fresh target folder with `RUSTC_WRAPPER` unset:
+
+  | Target | Runner |
+  |---|---|
+  | `x86_64-unknown-linux-gnu` | the CI image on a Linux runner |
+  | `aarch64-unknown-linux-gnu` (agents' Linux containers on the Mac) | a `linux/arm64` container of the multi-arch CI image on the macOS host runner; if that runner set-up is not available, arm64 Linux users build on a miss |
+  | `aarch64-apple-darwin` | the macOS host runner |
+  | `x86_64-pc-windows-msvc` | the Windows host runner. Not `cargo xwin`, whose output is linked differently from what the Windows runners build and test |
+
+  It then uploads each binary and its `.sha256` to the Gitea generic package `paddock-dev`, version `<hash>`. Only this
+  workflow is given the publish token (`DEV_TOOL_PUBLISH_TOKEN`).
+- **Using it in CI.**
+  - When the hash is not published (a branch that changes the tool), one `dev-build` job per run builds the Linux
+    binary once and uploads it as a run-scoped artifact (v3 artifact actions). The other Linux jobs `need` it and download
+    it. When the hash is published, `dev-build` only checks and ends in seconds.
+  - Linux container jobs otherwise download the package file for the hash with the job's read token and check its
+    `.sha256`.
+  - Host runners use `~/.paddock-ci/bin/<hash>/` if present. Otherwise they download it, or build it on a miss, copy it
+    there with a write-then-rename, and run the copy. Windows cannot replace a running `.exe`, and parallel jobs share the
+    folder.
+- **Release and tag jobs bypass every cache.** They set `PADDOCK_DEV_FRESH=1`: the wrapper skips
+  `~/.paddock-ci/bin`, the package and the run artifact, and builds in a fresh target folder with `RUSTC_WRAPPER` unset.
+  So neither the package store, the host cache nor the shared sccache backend (Redis, writable by every job) can reach a
+  signed artifact.
+- **Retention.** A Gitea cleanup rule keeps the 30 newest versions of `paddock-dev`. Release jobs never need old
+  versions, so an evicted hash only costs one build.
 - **Fresh containers** that build on a miss also fetch the tool's crates. On this Mac, a cold `cargo fetch` of the
   probe's 82 crates into an empty `CARGO_HOME` took about 1 s (sparse index). The container network was not measured;
   allow 2–10 s.
 
 **Trust model.** The tool runs in jobs that hold secrets, so whoever can write a binary under a hash can act with those
-secrets. Writers: only `dev-tool.yml` on a push to `main`, the only workflow given the publish token. Gitea passes no
-secrets to workflows from forks (read, not verified on our instance). Gitea does not scope a secret to one workflow (read,
-unverified), so any workflow on a push to this repository could read the token. The real boundary is therefore "who may
-push workflows to this repository" (the user and the agents), the same boundary that protects the signing secrets today.
-Content addressing ensures a binary is only ever used for the inputs it was built from. The `.sha256` file catches
-transport errors, not a malicious writer. The `actions/cache` server and the sccache Redis backend are writable by every
-job and are never trusted for the tool or for release builds (research note §7).
+secrets.
+
+- **The token is wider than the tool.** The publish token is a Gitea `write:package` token, and such tokens are scoped
+  to a user, not to a package (read). It can publish to the cargo and npm registries too, and delete and re-upload
+  package versions, so "a version, once written, stays" holds only against callers without it. That is the same class of
+  token `publish.yml` already holds for the crates and npm packages; the ADR adds no new kind of privilege.
+- **The real boundary.** Gitea passes no secrets to workflows from forks (read, not verified on our instance), and it
+  does not scope a secret to one workflow (read, unverified). Any workflow run by a push to this repository could read
+  the token. The real boundary is therefore "who may push workflows to this repository" (the user and the agents), the
+  same boundary that protects the signing secrets today.
+- **What the checks catch.** Content addressing makes sure a binary is only used for the inputs it was built from. The
+  `.sha256` file and the embedded hash catch transport errors and mix-ups, not a malicious token holder.
+- **Never trusted.** The `actions/cache` server and the sccache Redis backend are writable by every job, so they are
+  never trusted for the tool or for release builds (research note §7), and release builds start from source.
 
 ### 3.4 Windows and macOS host runners
 
@@ -200,8 +267,9 @@ verification 0.5–1.0 s, publish dry run 7.8 s, the conformance job 7.5 s. Plan
 ci` (Node is in the image). The 113 s "notices are up to date" step is cargo resolving licences.
 
 **Net per CI run** (about 7.5 executed jobs): the tool saves about 3–4 s (planner, conformance) and costs a download of
-about 3 MB, 1–2 s, per Linux container job that uses it. Host runners pay nothing after their first copy. Net about +2
-to +10 s per run, plus one build per runner type when the tool changes. **Speed is neutral; it is not a reason for this
+about 3 MB, 1–2 s, per Linux container job that uses it, plus a few seconds for the `dev-build` check job. Host runners
+pay nothing after their first copy. Net about +5 to +15 s per run. A run that changes the tool adds one Linux build in
+`dev-build` (about 10 s with a warm sccache, 40–60 s cold), shared by the run's jobs, and one build per host runner. **Speed is neutral; it is not a reason for this
 decision.**
 
 ### 3.6 Testing
@@ -212,9 +280,10 @@ decision.**
 - **Golden files from today's scripts.** Before a script is deleted, its outputs on fixture inputs become golden files
   (`paddock_testkit::golden`): the planner on the research replay's cases (an identical tree, a red run with one failed
   job, a CI-only change) and on synthetic diffs; `latest.json`; notices; release notes; conformance findings per check, as
-  JSON, on `conformance/fixtures` and on the inputs of the 240 existing tests; icon PNGs and `.icns`/`.ico` bytes;
-  draw.io XML after canonicalisation. The port must reproduce them exactly; any difference is reviewed, never accepted
-  silently.
+  JSON, on `conformance/fixtures` and on the inputs of the 240 existing tests; draw.io XML after canonicalisation. The port must reproduce these exactly; any difference is reviewed, never
+  accepted silently. Icons are compared by decoded pixels, not bytes: PNG encoders differ. A pixel may differ by at most
+  2 per channel, and at most 0.1% of the pixels may differ at all. The `.icns` and `.ico` files are compared by
+  structure: entry types, sizes and order.
 - **Shadow week** for the planner, release, `latest.json` and conformance: on `main` the old and the new run side by
   side and a step compares their JSON; a difference is a warning with both outputs. Release commands also get a
   `workflow_dispatch` dry run of `app-release.yml` per app before the switch.
@@ -258,7 +327,8 @@ Everything else moves without real loss. For the icon pipeline, `@resvg/resvg-js
 |---|---|
 | A port changes behaviour silently | golden files from the old script; shadow week; release dry runs |
 | The binary in the package store is wrong or malicious | content-addressed by inputs; only `main` writes; releases build from source without shared caches (§3.3) |
-| A tool change costs a build per runner type | own workspace and lockfile; sccache on non-release misses; host copies by hash |
+| A tool change costs a build per runner type | own workspace and lockfile; one `dev-build` job per run shares the Linux build; sccache on non-release misses; host copies by hash |
+| The toolchain pin lags or a bump breaks a workspace | Renovate opens one bump PR that runs the full suite; the pin is the only place to change |
 | Contributors must change CI in Rust | small commands with a plan/executor split and golden tests; YAML stays the readable surface |
 | The generators lose quick iteration | `cargo` incremental builds of one small crate take seconds; data files for diagrams need no build |
 | The project stalls half-way, with two systems | each phase ends in deletions; per-phase acceptance and a checkpoint (§7) |
@@ -274,7 +344,7 @@ port), `pacenotes-rules`, `pacenotes-review`, a dependency graph from repositori
 | Piece | Shared crate | Fits Pacenotes | Constraints | CI-only |
 |---|---|---|---|---|
 | Walk and hashing | `paddock-repo-files`: bounded walk with `ignore`, `.gitignore`-aware, rayon, SHA-256 | yes; `pacenotes-index` adds its denylist and allow-list on top | its own crate, so the graph and rules crates do not drag each other in | none |
-| Project graph: Cargo and npm workspaces, `tsconfig` paths, Tauri `frontendDist`, file to project, reverse closure | `paddock-repo-graph` | yes: §23's "repositories → packages and modules" level, edges with source and confidence | reads manifests with `toml`/`serde_json`. The `cargo metadata` adapter (exact, used by CI) **is never run inside Pacenotes**: Pacenotes opens hostile repositories and executes nothing from them (§14), and cargo reads the repository's `.cargo/config.toml` (which can name the `rustc` and wrapper programs) | GLOBAL/DOCS rules, `kinds`, nextest packages, the CI matrix: `dev plan` |
+| Project graph: Cargo and npm workspaces, `tsconfig` paths, Tauri `frontendDist`, file to project, reverse closure | `paddock-repo-graph` | yes: §23's "repositories → packages and modules" level, edges with source and confidence | reads manifests with `toml`/`serde_json`. The `cargo metadata` adapter (exact, used by CI) **is never run inside Pacenotes**. Pacenotes opens hostile repositories and executes nothing from them (§14), and cargo reads the repository's `.cargo/config.toml`, which can name the `rustc` and wrapper programs. To enforce this, the adapter sits behind the crate feature `cargo-metadata`, off by default, and the extended WP-C6 check fails when any manifest under `apps/pacenotes/` enables it, directly or through `cargo tree -e features` in Pacenotes' leg | GLOBAL/DOCS rules, `kinds`, nextest packages, the CI matrix: `dev plan` |
 | Git history | the `History` port in `paddock-repo-graph`: changed files between revisions, log with subjects, file at revision | yes: Pacenotes plugs in its gix adapter | the CI adapter runs `git` through `paddock-proc` | Gitea run and job records |
 | Rules engine | `paddock-repo-rules` | yes, once both models agree | **The models differ today.** Conformance has `error`/`warn`, findings with a one-sentence fix, path-glob waivers with reason and expiry (counted waivers from ADR 0021), and job summaries. Pacenotes §24 has severities `blocker`…`info`, scoped suppressions (line, file, path, rule) with reason and expiry, baselines by fingerprint (rule, path, normalised snippet hash), fix diffs, SARIF and exit codes 0/1/2/3. A **joint rules-model note**, written with the Pacenotes design before the crate (phase 4, first WP), fixes one model: a severity superset, a `Finding` with optional fix text and diff, `Suppression` with scope, reason, expiry and count, fingerprint baselines, report writers (text, JSON, SARIF 2.1.0, job summary) and the exit-code mapping | the family checks themselves |
 | draw.io emitter | `paddock-drawio` (model to canonical mxGraph XML, theme tokens from one source, UML/C4 shapes) | yes: `pacenotes-diagram` adds layout, round-trip merge and diffs on top | golden tests against today's `.mjs` output (the oracle §9.7 asked for) | the family's diagram data files |
@@ -289,7 +359,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 
 | Phase | WP | Content | Days | Deletes | Adds |
 |---|---|---|---|---|---|
-| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `./dev` + `dev.cmd`, input hash and `inputs.txt` test, `dev-tool.yml` and the generic package | 3 | – | 1,300 + 900 tests |
+| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `rust-toolchain.toml` pin in `setup-rust` and the image, `./dev` + `dev.cmd`, git input hash, `self hash`, `inputs.txt` test, `dev-tool.yml` on four runners, the `dev-build` job and run artifact, the generic package and its cleanup rule | 3.5 | – | 1,300 + 900 tests |
 | | R1 | composite actions' logic (sccache, stable workspace, build folder and env, host tools and cleanup, node caches, sccache stats); actions become one-liners; extend the WP-C6 check (§3.7) with today's baselines; delete the three one-off scripts | 2.5 | 334 shell lines (actions 815 → about 300 YAML), 72, 491 | 900 + 800 tests |
 | | R10 | app workflows' long and OS-branching `run:` blocks into commands or `paddock.ci.json` (Debrief, Dyno, Spotter, Pitcrew, Pitwall) | 2 | about 450 inline shell lines | 500 + 400 tests |
 | **2 Release and downloads** | R2 | release, bundles, sidecars, `verify-macos` with `FakeRunner`, `self-test`, `latest-json`, notes, strip-keys, publish; Debrief `build-sidecars`, macOS dev-signing, Dyno `check-bundle`, demo release | 3 | 1,271 + about 900 test lines | 1,600 + 1,200 tests |
@@ -306,7 +376,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 | | R14 | npm glue: `build-info`, `whats-new`, i18n locales, `tauri-before-build`, `ui-coverage-guard` as `./dev` commands | 1 | 485 + about 300 | 500 + 400 tests |
 | **6 Lossy categories** | R15 | UI lints into the ESLint preset (moved, not deleted); dialog command contract generated from Rust, then the TS analysis deleted | 2.5 | 633 (243 moved) | 400 + 300 tests |
 | | R16 | clean-up: allow-list down to its final form, docs, a lesson in `docs/lessons.md` | 0.5 | about 200 | 200 |
-| | | **Total** | **about 44** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
+| | | **Total** | **about 45** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
 
 The checkpoints add about 0.25 days per phase.
 
@@ -315,17 +385,26 @@ The checkpoints add about 0.25 days per phase.
 - Every script in the phase is deleted, along with its tests and call sites. The allow-list and the baselines of §3.7
   shrank by those entries.
 - The golden files pass on Linux, macOS and Windows. The shadow week ended with no unexplained difference.
-- Phase 1: `./dev` works from a subfolder on all three OSes. A new worktree downloads the binary for `main`'s hash. A
-  branch that changes the tool builds it. Release jobs build it fresh.
+- Phase 1:
+  - `rust-toolchain.toml` pins the exact version, and `setup-rust` and the CI image install it.
+  - On one commit, the hash that `./dev self hash` prints on Linux, macOS and Windows equals the version `dev-tool.yml`
+    published, and equals the hash embedded in each downloaded binary.
+  - `./dev` finds the root from a subfolder on all three OSes.
+  - A new worktree downloads the binary for `main`'s hash; a branch that changes the tool builds it once in `dev-build`.
+  - A job with `PADDOCK_DEV_FRESH=1` builds it fresh without sccache.
 - Phase 2: a `workflow_dispatch` dry run of `app-release.yml` succeeds for every app. A published DMG still passes
   `codesign --verify --deep --strict`.
 - Phase 3: rule 3's documents name `./dev plan`, and the planner's output equals the JS output on the replay fixtures.
 - Phase 4: the joint model note is approved by the user. `dev check` reports the same findings as the JS checks on
   `main` and on the fixtures.
-- Phase 5: the icons are byte-identical to the JS output, or differ only as reviewed in an independent review (rule 22);
-  the diagrams match after canonicalisation.
+- Phase 5:
+  - The icons match the JS output by decoded pixels within the tolerance of §3.6, and the `.icns`/`.ico` structure
+    matches.
+  - The icon sheets still get an independent review (rule 22).
+  - The diagrams match after canonicalisation.
 
-**Checkpoint after each phase** (with all-Rust decided, it decides the pace and the order, not whether to go on):
+**Checkpoint after each phase.** Work on the next phase continues during the four-week checkpoint window. A failed
+checkpoint can only reorder or pause later work, never undo the decision for all-Rust.
 
 - *What is counted:* `fix:` commits with a tooling scope (§Context) whose diff touches the phase's paths. Not counted:
   the commits of the PR that created a command, and fixes made during its shadow week (reported separately as
@@ -334,8 +413,9 @@ The checkpoints add about 0.25 days per phase.
 - *Control:* in the same window, the tooling areas not yet ported, plus the workflows.
 - *Window:* four weeks after the phase's last deletion.
 - *Pass:* the ported areas' rate per 1,000 lines is at most half their baseline rate and no higher than the control's
-  rate in the same window. When both counts are below 5, pass means "no more commits than the baseline". On a fail, the
-  next phase does not start until the defects are root-caused (rule 40) and the cause is fixed in the tool's design.
+  rate in the same window. When both counts are below 5, pass means "no more commits than the baseline". On a fail, later
+  work packages pause or are reordered until the defects are root-caused (rule 40) and the cause is fixed in the tool's
+  design.
 
 **Line deltas:** about 23,900 lines of JS, shell, PowerShell, Python and inline shell go (measured), and 243 lint lines
 move into the ESLint preset. About 20,700 Rust lines and 5,000 lines of diagram data come in (estimated). About 1,100
@@ -355,12 +435,14 @@ removes it), 243 lines of ESLint rules, about 570 lines of bootstrap shell, and 
 
 ## Decisions for the user (for the re-review)
 
-1. Content-addressed delivery from `main` through the Gitea generic package, with the trust model in §3.3 (the boundary is
-   push access to the repository).
-2. Per-phase acceptance and the checkpoint metric in §7: a 50% drop against the post-WP-C6 baseline and no worse than the
-   control.
-3. The joint rules-model note (R8a) gates the rules crate; the user approves it.
-4. The dialog command contract is generated from Rust (R15), so the TypeScript analysis is deleted rather than kept.
+1. A repository-wide `rust-toolchain.toml` with an exact version (1.99.1 today), bumped by Renovate (§3.3). The fallback
+   is a pin for the tool's folder only.
+2. Content-addressed delivery from `main` through the Gitea generic package, with the trust model in §3.3. The boundary
+   is push access to the repository, and the `write:package` token is user-scoped like the one `publish.yml` has.
+3. Per-phase acceptance and the checkpoint metric in §7: a 50% drop against the post-WP-C6 baseline and no worse than the
+   control. Phases continue during the checkpoint window.
+4. The joint rules-model note (R8a) gates the rules crate; the user approves it.
+5. The dialog command contract is generated from Rust (R15), so the TypeScript analysis is deleted rather than kept.
 
 ## Sources
 

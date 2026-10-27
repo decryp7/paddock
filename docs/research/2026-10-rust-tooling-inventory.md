@@ -10,13 +10,17 @@ Evidence for [ADR 0022](../adr/0022-rust-developer-and-ci-tool.md). Research onl
   `apps/*/app/scripts/`, `apps/*/docs/diagrams/src/` and two shell scripts inside Debrief crates; extensions `.mjs .js .cjs
   .ts .sh .ps1 .py .yml`; tests (`*.test.*`, `test/`, `tests/`) and fixtures counted apart. 309 files, 27,925 lines; 94
   test files, about 8,400 lines.
-- **fix: commits (one denominator):** `git log --since=2026-10-13 --no-merges origin/main`; subjects
-  `fix(<scope>):` with a tooling scope (`ci`, `build`, `scripts`, `macos`, `publish`, `conformance`, `release`, `notices`,
-  `chromium,ci`) whose diff touches an inventoried file or a workflow; de-duplicated by subject (the imported app
-  histories repeat some commits). Left out: `ci:` commits (mostly the creation and set-up of the kit) and `fix(...)`
-  commits with an app or UI scope (`ui`, `app`, `dialogs`, `icons`, `diagrams`, `screenshots`, `service`, ...) that only
-  touched a script on the way. Result: **30 commits**, listed below with their defect area. (The research note's 111 counted
-  `fix:` and `ci:` together on tooling paths.)
+- **fix: commits (one denominator), exact filter:** `git log --since=2026-10-13 --no-merges origin/main`, de-duplicated
+  by subject (the imported app histories repeat some commits); subject `fix(<scope>)` with scope `ci`, `build`,
+  `scripts`, `macos`, `publish`, `conformance`, `release`, `notices` or `chromium,ci`; and at least one changed path
+  matching `(^|/)\.gitea/(workflows|actions)/`, `(^|/)scripts/`, `^conformance/`, `^tools/`, `^ci-image/`, `^icons/tools/`,
+  `^diagrams/(tools|scripts)/`, `^docs/images/src/`, `/docs/diagrams/src/` or `(^|/)xtask/`. The path patterns include the
+  apps' pre-import locations (`apps/<app>/.gitea/workflows/build.yml`, crate `scripts/` folders). Result: **37 commits**,
+  listed below. Not counted: `ci:` commits (mostly the kit's creation and set-up), and 38 `fix(...)` commits with an app
+  or UI scope that touched such a path on the way (`icons` 8, `ui` 7, `render` 3, `app` 3, `diagrams` 2, `dialogs` 2,
+  `screenshots` 2, `shell-demo` 2, and one each of `service`, `chromium-driver`, `about`, `dialog`, `e2e`, `diagnostics`,
+  plus 3 without a scope). With the borderline scopes `render`, `chromium-driver`, `e2e` and `diagnostics` the count
+  would be 43. (The research note's 111 counted `fix:` and `ci:` together.)
 - **OS refs:** occurrences of `win32 darwin windows macos codesign hdiutil xattr pwsh powershell .exe junction mklink
   process.platform RUNNER_OS runner.os uname notarytool spctl lipo otool install_name_tool launchctl systemctl appimage
   .dmg .msi nsis signtool` (case-insensitive). A proxy for per-OS branches, not a count of them.
@@ -28,7 +32,7 @@ Evidence for [ADR 0022](../adr/0022-rust-developer-and-ci-tool.md). Research onl
   `stable-workspace` 1/1 each, `app-fuzz`, `debrief-fuzz`, `service-smoke`, `app-gates`, `install-test-browser`,
   `publish-release`, `sidecar-self-test` 1/0 each, `debrief-runner-check` 0/1.
 
-## The 30 tooling fix: commits (verified)
+## The 37 tooling fix: commits (verified)
 
 | Commit | Date | Defect area | Subject |
 |---|---|---|---|
@@ -62,9 +66,17 @@ Evidence for [ADR 0022](../adr/0022-rust-developer-and-ci-tool.md). Research onl
 | `fd8480ae4` | 2026-10-21 | downloads/browser | fix(build): the sidecar build fetches the pinned libduckdb itself when DUCKDB_LIB_DIR is not set |
 | `71f13dc77` | 2026-10-18 | release | fix(release): the sidecars config builds both helpers; release task and CI bundles use it |
 | `d6f3a56e1` | 2026-10-18 | scaffold/publish/notices | fix(notices): embed the LICENSE files with LF line endings on every checkout |
+| `36c5e7c6d` | 2026-10-25 | tests of the tools | fix(ci): the test kit replaces a global left stubbed to undefined; prune tests write incompressible data … |
+| `5a57ab190` | 2026-10-23 | release | fix(macos): ship ad-hoc builds without the hardened runtime so library validation accepts libduckdb … (`apps/debrief/.gitea/workflows/build.yml`, pre-import) |
+| `033f8f88b` | 2026-10-23 | release | fix(ci): strip whitespace from the signing key secret too (`apps/dyno/.gitea/workflows/build.yml`, pre-import) |
+| `ffbdd4fbd` | 2026-10-23 | release | fix(ci): strip whitespace from the signing key and updater key secrets (`apps/spotter/.gitea/workflows/build.yml`, pre-import) |
+| `4abf0bd1a` | 2026-10-23 | release | fix(ci): clear old installers before bundling and refuse installers of another version (`apps/pitcrew/.gitea/workflows/build.yml`, pre-import) |
+| `0836634d6` | 2026-10-23 | release | fix(ci): give the updater manifest the public https download address (`apps/pitcrew/.gitea/workflows/build.yml`, pre-import) |
+| `a8587f7c2` | 2026-10-21 | downloads/browser | fix(ci): fetch-libduckdb.sh is executable and run with bash … (`apps/debrief/.gitea/workflows/build.yml`, `bench.yml`, pre-import) |
 
-By area: release, signing, bundles, sidecars 8; runner set-up 6; pinned downloads and browser 5; app code and tests
-fixed in workflows 5; scaffolder, publisher, notices 4; one-off scripts 2. OS-specific: 13.
+By area: release, signing, bundles, sidecars, updater manifest 13; runner set-up 6; pinned downloads and browser 6;
+app code and tests fixed in workflows 5; scaffolder, publisher, notices 4; one-off scripts 2; tests of the tools 1.
+OS-specific: 14.
 
 ## Measurements (verified, Mac mini M4 Pro, 14 cores, load 3–4, warm file cache)
 
@@ -96,7 +108,7 @@ job logs (`job-*.log`, 29 files) show `npm ci` taking 3–15 s.
 ## Inventory per file (verified)
 
 Lines are physical lines; for composite actions the shell inside `run:` blocks is given in brackets. "fix:" counts the
-30 commits above. The phase is the one in ADR 0022 §7.
+37 commits above that touched current files (the 7 on pre-import paths or tool tests are not assigned). The phase is the one in ADR 0022 §7.
 
 ### Rust: runner set-up and downloads (phases 1–2), release (phase 2), planner (phase 3)
 
