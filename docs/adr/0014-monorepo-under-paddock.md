@@ -92,6 +92,8 @@ written as `apps/debrief/docs/adr/0056-...`.
   (§9), which rebuilt Pitwall in 13 s after a shared-crate change.
 
 `crates/` stays one workspace for the shared crates; its tests are the shared behaviour tests of rule 43.
+A third kind, `tools/<tool>/`, is a developer and CI tool with its own workspace and lockfile and path dependencies on
+`crates/` (ADR 0022, `tools/paddock-dev`).
 Versions of common dependencies are kept equal by Renovate grouping (§8) and a `cargo deny` duplicate check per
 workspace, not by one lockfile. Revisit a root workspace only if two or more apps need different versions of a shared
 crate's dependency and the duplicate check cannot hold them together.
