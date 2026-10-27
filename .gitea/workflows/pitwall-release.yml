@@ -1,10 +1,9 @@
 # Pitwall's installers and release (ADR 0014; moved from decryp7/pitwall's build.yml). The gates are not here: Pitwall is a leg
-# of ci.yml (apps/pitwall/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend with the Chromium e2e), and its bundles, the macOS seal check,
+# of ci.yml (apps/pitwall/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend with the Chromium and WebKit e2e), and its bundles, the macOS seal check,
 # the sidecar start and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
 #
-#   push to main      installers on three OS and the real-app smoke when the change reaches Pitwall (the same plan as ci.yml),
-#                     and the WebKit e2e (the engine of the macOS WKWebView)
-#   a pitwall-v* tag  the WebKit e2e and the gates (ci.yml, only Pitwall's legs), then installers, then the Gitea release with latest.json on
+#   push to main      installers on three OS and the real-app smoke when the change reaches Pitwall (the same plan as ci.yml)
+#   a pitwall-v* tag  the gates (ci.yml, only Pitwall's legs, WebKit e2e included), then installers, then the Gitea release with latest.json on
 #                     the release and on the moving pitwall-latest release, which installed copies update from
 #   nightly           installers again, so a toolchain or runner change shows up the night it happens
 #   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
@@ -59,46 +58,16 @@ jobs:
           tag-pattern: pitwall-v*
           nightly-marker: "false"
 
-  # WebKit (the engine of the macOS app's WKWebView): browser flows against `ng serve` with the mock backend. Every run of this
-  # workflow is a full run (rule 3: branches run Chromium only, in ci.yml's leg). The gates wait for it, so a tag is never
-  # released past a failed WebKit run (a failed need skips the gates, and a tag needs them green).
-  e2e-webkit:
-    name: e2e webkit
-    needs: [plan]
-    if: ${{ needs.plan.outputs.run == 'true' }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
-    defaults:
-      run:
-        working-directory: apps/pitwall/app
-    env:
-      PW_E2E_PORT: "4392"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.gitea/actions/node-caches
-        with:
-          angular-dir: apps/pitwall/app
-          name: pitwall-e2e-webkit
-      - name: Install
-        run: (cd ../../.. && npm ci)
-      - name: End-to-end tests (WebKit)
-        run: npx playwright test --project=webkit --workers=1
-      - uses: actions/upload-artifact@v3
-        if: failure()
-        with:
-          name: playwright-report-webkit
-          path: apps/pitwall/app/playwright-report
-          if-no-files-found: ignore
-
   # A tag is gated by exactly Pitwall's legs of ci.yml (all of them, both halves, on the tagged commit).
   gates:
     name: gates
-    needs: [plan, e2e-webkit]
+    needs: [plan]
     if: ${{ needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/pitwall-v') || github.event.inputs.gates == 'true') }}
     uses: ./.gitea/workflows/ci.yml
     with:
       app: pitwall
+      # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included.
+      webkit: ${{ github.event_name == 'workflow_dispatch' }}
 
   release:
     name: installers + release
