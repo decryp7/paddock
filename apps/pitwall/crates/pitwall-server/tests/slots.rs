@@ -294,3 +294,14 @@ async fn a_load_is_planned_against_the_memory_serving_reads_not_the_host() {
     assert_eq!(*h.parallels.lock().unwrap(), vec![8]);
     h.st.serving.release_all();
 }
+
+/// Every reading of memory (the dashboard sample, the limits' machine size) goes through the one reader on the state, so a
+/// test's machine is the machine everywhere, never the CI runner's.
+#[tokio::test]
+async fn every_memory_reading_uses_the_one_reader_on_the_state() {
+    let h = fresh().await;
+    h.st.serving.set_memory_reader(machine(8));
+    let sample = h.st.memory_sample();
+    assert_eq!(sample.ram_total, 64 << 30);
+    assert_eq!(sample.ram_available, 8 << 30);
+}

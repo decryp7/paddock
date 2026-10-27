@@ -291,7 +291,7 @@ impl Serving {
     }
 
     /// Live memory as serving plans with it.
-    fn memory_now(&self) -> pitwall_core::memory::System {
+    pub(crate) fn memory_now(&self) -> pitwall_core::memory::System {
         let reader = self
             .inner
             .memory

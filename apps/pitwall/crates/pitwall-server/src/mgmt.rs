@@ -190,7 +190,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "local_models" => {
             let s = st.cfg();
             let hot = st.serving.hot_ram().0;
-            let room = crate::system::room(&st.hardware, hot);
+            let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, hot);
             let v: Vec<mgmt::LocalModel> = st
                 .library
                 .local()
@@ -214,7 +214,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "repo_files" => {
             let repo: String = arg(a, "repo")?;
             let s = st.cfg();
-            let room = crate::system::room(&st.hardware, st.serving.hot_ram().0);
+            let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
             ok(st.library.repo(&repo, s.models.default_context, &room).await.map_err(offline_or)?)
         }
         "download_model" => {
@@ -319,7 +319,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                 None => s.prefs(&id).context.unwrap_or(s.models.default_context),
             };
             let chosen = parse_slots_opt(a, "slots")?.unwrap_or_else(|| s.slots_for(&id));
-            let room = crate::system::room(&st.hardware, st.serving.hot_ram().0);
+            let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
             let trained = f.info.context_length.map(|c| c.min(u64::from(u32::MAX)) as u32);
             ok(slots::solve(
                 Some(&crate::library::size_of(&f)),
@@ -370,7 +370,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "build_capabilities" => ok(crate::engine_pins::capabilities(st)),
         "packs" => {
             let s = st.cfg();
-            let room = crate::system::room(&st.hardware, st.serving.hot_ram().0);
+            let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
             let tag: Option<String> = arg(a, "tag").unwrap_or(None);
             let rec = pitwall_core::packs::recommend(&st.packs.models, tag.as_deref(), &room);
             ok(json!({
@@ -577,7 +577,7 @@ fn downloads(st: &AppState) -> Vec<Download> {
 
 async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: Option<&str>) -> R<Value> {
     let s = st.cfg();
-    let room = crate::system::room(&st.hardware, st.serving.hot_ram().0);
+    let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
     let r = st.library.repo(repo, s.models.default_context, &room).await.map_err(offline_or)?;
     let q = r
         .variants

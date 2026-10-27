@@ -59,11 +59,6 @@ pub fn host_memory() -> MemoryReader {
     Arc::new(read_system)
 }
 
-/// The room a fit check has right now.
-pub fn room(hw: &Hardware, releasable: u64) -> Room {
-    room_from(&read_system(hw), hw, releasable)
-}
-
 /// [`room`] over a memory reading already taken.
 pub fn room_from(sys: &System, hw: &Hardware, releasable: u64) -> Room {
     Room {
@@ -129,7 +124,6 @@ mod tests {
         assert!(s.total > 0 && s.available <= s.total);
         assert!(host_memory()(&hw).total > 0, "the default reader is the host");
         assert_eq!(room_from(&s, &hw, 7).ram_releasable, 7);
-        assert!(room(&hw, 0).ram_total > 0);
         assert!(pid_alive(std::process::id()));
         assert!(rss(std::process::id()) > 0);
         let _ = free_disk(std::path::Path::new("."));
