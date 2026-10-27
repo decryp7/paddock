@@ -9,7 +9,7 @@ crates/pitcrew-core      pure logic: rules, state machines, config, protocol (no
 crates/pitcrew-service   the background service: supervision, OS service integration, IPC server
 app/src-tauri            the Tauri 2 shell: tray, window, commands, updater
 app/src                  the Angular UI (standalone components, signals, SignalStores)
-scripts/                 commit-lint, release manifest (latest.json), sidecar.mjs, check-index.mjs, macos-bootstrap.sh, macos-verify.sh
+scripts/                 sidecar.mjs, macos-bootstrap.sh, macos-verify.sh (commit lint, latest.json, publish, bundle verify and check-index are the shared kit in conformance/)
 docs/adr/                architecture decisions (0001-0012)
 docs/diagrams/           draw.io sources (.drawio) and exported SVGs; see design.md
 .gitea/workflows/        CI
@@ -40,7 +40,7 @@ cargo run -p pitcrew-service -- check-config     # reads pitcrew.toml from the d
 `npx tauri dev` and `tauri build` run `scripts/sidecar.mjs` first (`beforeDevCommand` / `beforeBuildCommand`): it builds
 `pitcrew-service` (debug with `--dev`, the `dist` profile otherwise; honours `CARGO_TARGET_DIR`) and copies it to
 `app/src-tauri/binaries/pitcrew-service-<target triple>` where Tauri's `externalBin` expects it. `tauri build` then
-runs `scripts/check-index.mjs`, which fails when the built `index.html` has inline `<style>`/`<script>` (they break
+runs the shared `conformance/ci/check-index.mjs`, which fails when the built `index.html` has inline `<style>`/`<script>` (they break
 component styles under Tauri's CSP; `inlineCritical` stays `false`, see [macos.md](macos.md)).
 
 ### Screenshots and browser tests
@@ -91,7 +91,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny --workspace check
-node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs
+node --test conformance/test/*.test.mjs   # (repo root) the shared scripts
 (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
 ```
 
@@ -116,11 +116,11 @@ revert the family icon. To change the icon, change it in Paddock (`icons/tools/i
 
 ## CI/CD
 
-`.gitea/workflows/pitcrew.yml (repo root)`: jobs `rust-lint` (format + clippy, Linux), `rust-test` (Linux and the Windows host runner),
-`macos` (clippy + tests on the Mac host runner, kept lean), `licences` (cargo-deny, commit messages, the three script
-tests), `frontend` (lint, build, unit tests with coverage); `bundle` (Windows NSIS and macOS `.dmg`) on `v*` tags, the
-nightly run and manual runs; the `release` job publishes the installers, release notes (git-cliff) and `latest.json`.
-See [releasing.md](releasing.md).
+Pitcrew is a leg of the monorepo's `ci.yml` (`apps/pitcrew/paddock.ci.json`, the shared `app-gates` action): on Linux format,
+clippy, nextest, doc tests, `cargo deny`, then the frontend (npm audit, lint, build, unit tests with coverage); on Windows and
+macOS the Rust gates (clippy not on Windows) for the code that differs there. Commit messages of pull requests are checked by
+`ci.yml`'s `commits` job. `.gitea/workflows/pitcrew-release.yml` builds the installers (three OS, macOS seal and sidecar
+check) and publishes `pitcrew-v*` tags through the shared `app-release.yml`. See [releasing.md](releasing.md).
 
 ## Architecture documents and diagrams
 
@@ -131,7 +131,7 @@ See [releasing.md](releasing.md).
   [diagrams/STYLE.md](diagrams/STYLE.md). After editing one, export all of them:
 
   ```sh
-  bash scripts/export-diagrams.sh   # needs draw.io desktop (DRAWIO overrides the executable) and node
+  bash ../../diagrams/scripts/export-diagrams.sh "$PWD/docs/diagrams"   # from apps/pitcrew; needs draw.io desktop (DRAWIO overrides the executable) and node
   ```
 
   It writes `docs/diagrams/svg/<name>.svg` (transparent, follows light or dark; `design.md` and the README embed these)

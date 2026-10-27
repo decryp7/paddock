@@ -1,20 +1,33 @@
-# Reusable (plan X10): an app's release from a v* tag, and only from one (rule 9). Installers are built on all three
+# Reusable (plan X10): an app's release from its tag, and only from one (rule 9). Installers are built on all three
 # platforms (macOS DMG sealed ad-hoc and verified with codesign --verify --deep --strict, rule 23; Windows NSIS; Linux deb
 # and AppImage), the updater keys are stripped of whitespace (rule 25), the About page gets its commit and date, and the
 # Gitea release is published with notes (changelog plus the First launch block), latest.json and the installers.
 #
+# In the monorepo (ADR 0014) an app's workflow is a thin caller: its tag is `<app>-v*`, the gates are ci.yml's `app` legs
+# (`uses: ./.gitea/workflows/ci.yml` with `app: <id>`), and this workflow is called from the same checkout
+# (.gitea/workflows/pitcrew-release.yml is the pattern):
+#
 #   jobs:
-#     gates: { ... the app's own test jobs ... }
+#     gates: { uses: ./.gitea/workflows/ci.yml, with: { app: pitcrew } }
 #     release:
 #       needs: [gates]
-#       uses: decryp7/paddock/.gitea/workflows/app-release.yml@v0.3.0
-#       with: { paddock-ref: v0.3.0, app-id: pitcrew, app-name: Pitcrew, sidecars: "pitcrew-service" }
-#       secrets: inherit
+#       uses: ./.gitea/workflows/app-release.yml
+#       with:
+#         paddock-ref: ${{ github.sha }}     # this very commit: the kit lives in the same repository
+#         app-id: pitcrew
+#         app-name: Pitcrew
+#         app-dir: apps/pitcrew/app          # the Tauri project (src-tauri/, tauri.conf.json)
+#         cargo-dir: apps/pitcrew            # the Cargo workspace whose .cargo/config.toml includes ci.toml (build-folder)
+#         tag-prefix: pitcrew-               # tags are pitcrew-v1.2.3; the version is what follows the prefix
+#         latest-tag: pitcrew-latest         # the moving release the updater reads latest.json from
+#         sidecars: pitcrew-service:--version
+#       secrets: the Tauri keys, RELEASE_TOKEN (the family names its keys PADDOCK_TAURI_*: map them, see pitcrew-release.yml)
 #
 # Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, TAURI_UPDATER_PUBKEY (the updater; without them the
-# build is unsigned and cannot update itself), RELEASE_TOKEN (a Gitea token with write:repository). Run it by hand
-# (workflow_dispatch in the caller) to build and verify the bundles without releasing: the "one CI build with bundles" of
-# rule 25. Cross-repository `uses:` of a workflow needs the Gitea to resolve it (plan D7); where it does not, copy these jobs.
+# build is unsigned and cannot update itself), APPLE_SIGNING_IDENTITY (empty while the apps are ad-hoc sealed, rule 23),
+# RELEASE_TOKEN (a Gitea token with write:repository). Run it by hand (workflow_dispatch in the caller) to build and verify
+# the bundles without releasing: the "one CI build with bundles" of rule 25. An app in its own repository calls it as
+# decryp7/paddock/.gitea/workflows/app-release.yml@<tag> with `paddock-ref: <tag>`, and its own `root` and `cargo-dir`.
 
 name: app-release
 
@@ -22,7 +35,7 @@ on:
   workflow_call:
     inputs:
       paddock-ref:
-        description: The Paddock tag whose actions and scripts this run uses (the same tag as in `uses:`).
+        description: The Paddock commit or tag whose actions and scripts this run uses (in the monorepo, the commit being built).
         type: string
         required: true
       app-id:
@@ -32,10 +45,43 @@ on:
         type: string
         required: true
       app-dir:
+        description: The Tauri project folder (src-tauri/ and package.json), from the repository root.
         type: string
         default: app
+      root:
+        description: Where .nvmrc, the npm lock and `npm ci` are (default `.`, the repository root, one lock for every app).
+        type: string
+        default: .
+      cargo-dir:
+        description: The Cargo workspace folder whose .cargo/config.toml includes ci.toml; the build folder is set there (build-folder action).
+        type: string
+        required: true
+      tag-prefix:
+        description: "The app's tag prefix with the dash (pitcrew-): tags are <prefix>v1.2.3. Empty: plain v* tags."
+        type: string
+        default: ""
+      latest-tag:
+        description: "The moving release that also carries latest.json (pitcrew-latest). Empty: none."
+        type: string
+        default: ""
+      notes-extra:
+        description: "A paragraph after the First launch block of the release notes (e.g. to reinstall once). Empty: none."
+        type: string
+        default: ""
+      cliff-config:
+        description: "The git-cliff config of the app's changelog (empty: git-cliff's default lookup)."
+        type: string
+        default: ""
+      cliff-paths:
+        description: "Paths whose commits belong in the app's changelog, one glob per line (apps/pitcrew/**). Empty: all commits."
+        type: string
+        default: ""
+      setup-node:
+        description: "Install Node from .nvmrc on Linux. False for an image that has the repo's Node baked in (the Paddock CI image)."
+        type: boolean
+        default: true
       sidecars:
-        description: Sidecar programs started from the built macOS app with --self-test, space separated.
+        description: "Sidecar programs started from the built macOS app, one per line: name or name:args (default argument --self-test)."
         type: string
         default: ""
       image:
@@ -47,6 +93,8 @@ on:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
         required: false
       TAURI_UPDATER_PUBKEY:
+        required: false
+      APPLE_SIGNING_IDENTITY:
         required: false
       RELEASE_TOKEN:
         required: false
@@ -65,7 +113,7 @@ jobs:
           - os: macos-latest
             bundles: app,dmg
     runs-on: ${{ matrix.os }}
-    # Linux runs in the garage image (Tauri's libraries pre-installed); Windows and macOS run on the host.
+    # Linux runs in the caller's image (Tauri's libraries pre-installed); Windows and macOS run on the host.
     container: ${{ matrix.os == 'ubuntu-latest' && inputs.image || '' }}
     defaults:
       run:
@@ -79,18 +127,76 @@ jobs:
           ref: ${{ inputs.paddock-ref }}
           path: .paddock
 
-      - name: Persistent build folder (macOS)
-        if: runner.os == 'macOS'
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
         run: |
-          echo "CARGO_TARGET_DIR=$GITHUB_WORKSPACE/../.paddock-ci-target-${{ inputs.app-id }}" >> "$GITHUB_ENV"
-          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
-      - uses: ./.paddock/.gitea/actions/setup-node
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # The same physical checkout path every run on the host runners (sccache keys a compile on its folder), and the
+      # release build folder as cargo configuration (.cargo/ci.toml), which `tauri build` reads like every cargo command:
+      # target/ on Linux, a kept folder on the hosts.
+      - uses: ./.paddock/.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
         with:
-          app-dir: ${{ inputs.app-dir }}
+          name: ${{ inputs.app-id }}-bundle-${{ runner.os }}
+
+      - uses: ./.paddock/.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ inputs.cargo-dir }}
+          name: ${{ inputs.app-id }}-bundle
 
       - uses: ./.paddock/.gitea/actions/setup-rust
+
+      - uses: ./.paddock/.gitea/actions/setup-node
+        if: runner.os == 'Linux' && inputs.setup-node
+        with:
+          app-dir: ${{ inputs.root }}
+
+      # Host runners keep their own Node; fail fast when it is missing or not the major version .nvmrc asks for.
+      - name: Host Node matches .nvmrc
         if: runner.os != 'Linux'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          NVMRC: ${{ inputs.root }}/.nvmrc
+        run: |
+          want=$(tr -d ' v\r\n' < "$NVMRC" | cut -d. -f1)
+          if ! command -v node >/dev/null; then
+            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/nodejs:$PATH"
+            else
+              echo "::error::Node.js is not installed on this runner: install Node $want ($NVMRC)."
+              exit 1
+            fi
+          fi
+          have=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$have" != "$want" ]; then
+            echo "::error::The runner has Node $(node --version) but $NVMRC asks for Node $want."
+            exit 1
+          fi
+
+      - uses: ./.paddock/.gitea/actions/node-caches
+        with:
+          angular-dir: ${{ inputs.app-dir }}
+          name: ${{ inputs.app-id }}-bundle
+
+      # A tag names the version the installers carry: fail before three OS build the wrong one.
+      - name: The tag names the app's version
+        if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix))
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          PREFIX: ${{ inputs.tag-prefix }}
+          CONF: ${{ inputs.app-dir }}/src-tauri/tauri.conf.json
+        run: node .paddock/conformance/ci/check-tag.mjs --tag "$TAG" --prefix "$PREFIX" --conf "$CONF"
 
       - uses: ./.paddock/.gitea/actions/build-env
 
@@ -98,21 +204,28 @@ jobs:
         with:
           bundles: ${{ matrix.bundles }}
           app-dir: ${{ inputs.app-dir }}
+          root: ${{ inputs.root }}
+          apple-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           signing-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           updater-pubkey: ${{ secrets.TAURI_UPDATER_PUBKEY }}
 
       # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and the app inside the
-      # DMG, every sidecar started with its self-test; the app is never started here.
+      # DMG, every sidecar started from the built app; the app is never started here.
       - uses: ./.paddock/.gitea/actions/macos-verify
         if: runner.os == 'macOS'
         with:
           sidecars: ${{ inputs.sidecars }}
+          tauri-conf: ${{ inputs.app-dir }}/src-tauri/tauri.conf.json
+
+      - uses: ./.paddock/.gitea/actions/sccache-stats
+        if: always()
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         with:
           name: ${{ inputs.app-id }}-${{ runner.os }}
-          path: dist/*
+          # Where tauri-bundle.sh wrote it: the stable checkout on a host (on Windows the work folder stays a separate clone).
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/dist/*
           if-no-files-found: error
 
       - uses: ./.paddock/.gitea/actions/host-cleanup
@@ -122,7 +235,7 @@ jobs:
 
   release:
     name: release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix))
     needs: [bundle]
     runs-on: ubuntu-latest
     permissions:
@@ -154,16 +267,28 @@ jobs:
 
       - uses: ./.paddock/.gitea/actions/setup-rust
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: git-cliff
-
+      # git-cliff comes with the Paddock CI image; other images build it once.
       - name: Changelog of this release
-        run: git cliff --latest --strip header -o release/CHANGELOG-latest.md
+        env:
+          CONFIG: ${{ inputs.cliff-config }}
+          PATHS: ${{ inputs.cliff-paths }}
+          PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          command -v git-cliff >/dev/null || cargo install git-cliff --locked
+          args=(--latest --strip header -o release/CHANGELOG-latest.md)
+          if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
+          if [ -n "$PREFIX" ]; then args+=(--tag-pattern "${PREFIX}v.*"); fi
+          while IFS= read -r path; do
+            if [ -n "$path" ]; then args+=(--include-path "$path"); fi
+          done <<< "$PATHS"
+          git cliff "${args[@]}"
 
       - uses: ./.paddock/.gitea/actions/publish-release
         with:
           app-name: ${{ inputs.app-name }}
           changelog: release/CHANGELOG-latest.md
           artifacts-dir: release
+          tag-prefix: ${{ inputs.tag-prefix }}
+          latest-tag: ${{ inputs.latest-tag }}
+          notes-extra: ${{ inputs.notes-extra }}
           token: ${{ secrets.RELEASE_TOKEN }}

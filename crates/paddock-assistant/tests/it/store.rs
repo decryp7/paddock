@@ -180,34 +180,70 @@ fn texts_data_and_message_counts_are_bounded() {
 
 #[test]
 fn the_number_of_conversations_and_the_file_size_are_bounded_oldest_first() {
+    // Small bounds prove the behaviour: the real ones (50 conversations, 4 MiB) only cost flushed megabytes on disk.
+    let limits = StoreLimits {
+        conversations: 2,
+        file_bytes: 64 * 1024,
+    };
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("a.json");
-    let (store, clock) = open(&path);
+    let clock = FakeClock::at_wall_ms(1_700_000_000_000);
+    let store =
+        ConversationStore::open_with(dir.path().join("a.json"), Arc::new(clock.clone()), limits);
     let mut first = String::new();
-    for i in 0..MAX_CONVERSATIONS + 5 {
+    for i in 0..limits.conversations + 2 {
         clock.advance(std::time::Duration::from_secs(1));
         let (id, _, _) = store.create(user(&format!("q{i}")));
         if i == 0 {
             first = id;
         }
     }
-    assert_eq!(store.summaries().len(), MAX_CONVERSATIONS);
+    assert_eq!(store.summaries().len(), limits.conversations);
     assert!(store.get(&first).is_none(), "the oldest went first");
-    // Big conversations push the file over its size bound: the oldest go, the newest stays.
-    let (store, clock) = open(&dir.path().join("b.json"));
+    // Big conversations push the file over its size bound while the count bound is far away: only the byte limit
+    // can evict here, the oldest go, the newest stays.
+    let limits = StoreLimits {
+        conversations: 10,
+        ..limits
+    };
+    let store =
+        ConversationStore::open_with(dir.path().join("b.json"), Arc::new(clock.clone()), limits);
     let mut ids = vec![];
-    for _ in 0..6 {
+    for _ in 0..3 {
         clock.advance(std::time::Duration::from_secs(1));
         let (id, _, _) = store.create(user("seed"));
-        let big: Vec<StoredMessage> = (0..60)
-            .map(|_| StoredMessage::assistant("w".repeat(MAX_MESSAGE_CHARS), vec![], None, 2))
-            .collect();
+        let big = vec![StoredMessage::assistant(
+            "w".repeat(MAX_MESSAGE_CHARS),
+            vec![],
+            None,
+            2,
+        )];
         store.append(&id, big).unwrap().unwrap();
         ids.push(id);
     }
-    assert!(std::fs::metadata(dir.path().join("b.json")).unwrap().len() <= MAX_FILE_BYTES);
+    assert!(std::fs::metadata(dir.path().join("b.json")).unwrap().len() <= limits.file_bytes);
+    assert!(
+        store.summaries().len() < ids.len(),
+        "fewer than the 3 created are left, with room for 10"
+    );
     assert!(store.get(ids.last().unwrap()).is_some());
-    assert!(store.get(&ids[0]).is_none());
+    assert!(
+        store.get(&ids[0]).is_none(),
+        "the oldest went for size, not for count"
+    );
+}
+
+#[test]
+fn a_store_keeps_the_real_bounds_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store, _) = open(&dir.path().join("a.json"));
+    assert_eq!(
+        store.limits(),
+        StoreLimits {
+            conversations: MAX_CONVERSATIONS,
+            file_bytes: MAX_FILE_BYTES,
+        }
+    );
+    assert_eq!(store.limits(), StoreLimits::default());
 }
 
 #[test]

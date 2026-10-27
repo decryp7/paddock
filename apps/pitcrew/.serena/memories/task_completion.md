@@ -5,7 +5,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny --workspace check
-node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs
+node --test conformance/test/*.test.mjs   # (repo root) the shared kit scripts: commit lint, latest.json, publish, check-index
 (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
 ```
 Plus, as relevant: Playwright screenshots (docs/screenshots/) for UI changes; the macOS CI job for macOS code

@@ -1,11 +1,14 @@
 # Releasing Pitcrew (and signed updates)
 
-A `v*` tag on `main` runs `.gitea/workflows/pitcrew.yml (repo root)`: the `bundle` jobs build the installers (Windows NSIS and the macOS `.dmg` on the `macos-latest` host runner), and the `release` job publishes a Gitea release with the
+A `pitcrew-v*` tag on `main` runs `.gitea/workflows/pitcrew-release.yml` (repo root): Pitcrew's legs of `ci.yml` gate the tag
+(Rust on Linux, Windows and macOS, the frontend), then the shared `app-release.yml` builds the installers on three platforms
+(Windows NSIS, the macOS `.dmg` sealed ad hoc and verified, Linux `.deb` and AppImage) and publishes a Gitea release with the
 installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Pitcrew's
-updater reads. Installers are also built for the nightly run of `main` and manual runs (`workflow_dispatch`).
+updater reads. It also puts `latest.json` on the moving `pitcrew-latest` release, which installed copies read. Installers
+are also built for pushes to `main` that reach Pitcrew, the nightly run and manual runs (`workflow_dispatch`, no release).
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+git tag pitcrew-v0.2.0 && git push origin pitcrew-v0.2.0
 ```
 
 The version in the tag must match `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`. Pre-releases are
@@ -25,8 +28,8 @@ projects' releases (ADR 0002), independently of this.
 - **Signatures are mandatory.** Every update is verified with the minisign public key built into the app before it
   is installed, and `requireSignedVersion` binds each signature to its version (GHSA-j38x-g3m3-95fr). A build without
   the public key says "Updates are not available in this build" and never checks.
-- `latest.json` is written by `scripts/release/latest-json.mjs` from the signed installers (`*.sig` next to each);
-  `node --test scripts/release/latest-json.test.mjs` tests it.
+- `latest.json` is written by the shared `conformance/release/latest-json.mjs` from the signed installers (`*.sig` next to
+  each); `node --test conformance/test/latest-json.test.mjs` (repo root) tests it.
 
 ## One-time set-up: Pitcrew's own signing key
 

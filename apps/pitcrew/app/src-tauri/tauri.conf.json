@@ -7,7 +7,7 @@
     "frontendDist": "../dist/app/browser",
     "devUrl": "http://localhost:4200",
     "beforeDevCommand": "node ../scripts/sidecar.mjs --dev && npm run start",
-    "beforeBuildCommand": "node ../scripts/sidecar.mjs && npm run build && node ../scripts/check-index.mjs"
+    "beforeBuildCommand": "node ../scripts/sidecar.mjs && npm run build && node ../../../conformance/ci/check-index.mjs"
   },
   "app": {
     "macOSPrivateApi": true,

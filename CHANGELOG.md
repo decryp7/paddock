@@ -4,6 +4,19 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Windows CI: tests that measured the runner's disk, and a toolchain step that says why it failed
+- Four tests that timed out on a slow Windows runner (run 6461) prove their behaviour without bulk disk work: the log
+  tail is read from a synthetic 1 GiB source that counts the bytes read (a real 1 GiB `set_len` file is a gigabyte of
+  zeros on NTFS), the walk's cancel test uses the new `WalkOptions::cancel_check_items` (default `CANCEL_CHECK_ITEMS`; breaking for `paddock-jobs` callers that build `WalkOptions` with a struct literal, which must add the field or use `..Default::default()`)
+  with a few hundred files instead of 12,000, the assistant store's bounds are `StoreLimits` (`ConversationStore::open_with`,
+  defaults `MAX_CONVERSATIONS` and `MAX_FILE_BYTES`, pinned by a test) and the damaged-package property builds its two
+  packages once instead of 256 times.
+- `setup-rust` keeps its channel sync, and a failed `rustup toolchain install` now says why (on Windows, Git Bash's exit
+  127 means rustup was ended with an NTSTATUS crash code, run 6460). Pinning the toolchain stays an open ADR 0022 decision.
+- cmd steps wrote `echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"`, which cmd reads as a redirect of handle 8, so the variable was never
+  set on Windows; it is now `(echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"`, and a conformance test rejects a digit directly before
+  a redirect in any workflow or action.
+
 ### No transition release, no update bridge (ADR 0014, last amendment)
 - Every app release from the monorepo is signed with the shared `PADDOCK_TAURI_*` key only; the
   `<APP>_TRANSITION_SIGNING_KEY` path is gone. Nothing is written to an app's old repository:

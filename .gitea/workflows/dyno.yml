@@ -128,7 +128,7 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
       - name: Build jobs (macOS)
         if: runner.os == 'macOS'
@@ -389,7 +389,7 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
       - name: Build jobs (macOS)
         if: runner.os == 'macOS'

@@ -1,26 +1,47 @@
 #!/usr/bin/env bash
 # Builds the installers with `tauri build` and copies them (and their updater signatures) to ./dist (plan X10; Pitwall's
 # scripts/ci/tauri-bundle.sh, shared).
-#   bash tauri-bundle.sh <bundles> [--app-dir app]       e.g. nsis | deb,appimage | app,dmg
+#   bash tauri-bundle.sh <bundles> [--app-dir app] [--root <dir>]       e.g. nsis | deb,appimage | app,dmg
+# --root is where `npm ci` runs (default: the app dir; the monorepo's root, whose one lock installs every app). The build
+# folder is the build-folder action's ($PADDOCK_BUILD_FOLDER), else cargo's $CARGO_TARGET_DIR, else target/.
 # With TAURI_SIGNING_PRIVATE_KEY and TAURI_UPDATER_PUBKEY set the updater artifacts are signed (the keys are stripped of
 # whitespace first); without them (forks, pull requests, secrets not set yet) the build still succeeds, unsigned and without
 # update support. Skips cleanly (exit 0) while <app-dir>/src-tauri does not exist. Run from the repository root.
 set -euo pipefail
 bundles="${1:?bundles, e.g. deb,appimage}"
 app_dir="app"
-if [ "${2:-}" = "--app-dir" ]; then app_dir="${3:?--app-dir needs a value}"; fi
+root=""
+shift
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --app-dir) app_dir="${2:?--app-dir needs a value}"; shift 2 ;;
+    --root) root="${2:?--root needs a value}"; shift 2 ;;
+    *) echo "::error::unknown option $1"; exit 2 ;;
+  esac
+done
+root="${root:-$app_dir}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# On a host runner the stable-workspace action moved the checkout: build from its physical path (sccache keys a compile on it).
+if [ -n "${PADDOCK_WORKSPACE:-}" ]; then
+  ws="$PADDOCK_WORKSPACE"
+  if command -v cygpath >/dev/null; then ws="$(cygpath -u "$ws")"; fi
+  cd "$ws"
+fi
 
 if [ ! -f "$app_dir/src-tauri/Cargo.toml" ]; then
   echo "::warning::$app_dir/src-tauri does not exist yet: no installers to build."
   exit 0
 fi
 
-dir="${CARGO_TARGET_DIR:-target}"
+dir="${PADDOCK_BUILD_FOLDER:-${CARGO_TARGET_DIR:-target}}"
 if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
 # A host runner keeps its target folder between runs: drop old installers so an earlier version's (signed) installer can
 # never be collected into this release (it once shipped as latest.json's Windows download).
 rm -rf "$dir/dist/bundle"
+
+# Tauri's DMG step skips its Finder window scripting on CI (no Automation permission prompt on a host runner).
+export CI="${CI:-true}"
 
 # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
 eval "$(node "$here/../release/strip-keys.mjs")"
@@ -28,17 +49,24 @@ eval "$(node "$here/../release/strip-keys.mjs")"
 # An unset secret arrives as an empty variable, which Tauri lets override signingIdentity "-" (codesign: `Signing with identity ""`).
 [ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
 
+(cd "$root" && npm ci)
 (
   cd "$app_dir"
-  npm ci
+  # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, rule 23): ad-hoc code under it cannot load a
+  # vendor-signed library ("different Team IDs"). A real signing identity turns it back on, as notarization requires.
+  extra=()
+  mkdir -p ../target
+  if [ "$(uname -s)" = Darwin ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
+    echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
+    extra=(--config ../target/hardened.conf.json)
+  fi
   if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then
-    mkdir -p ../target
     node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
-    npx tauri build --bundles "$bundles" --config ../target/updater.conf.json -- --profile dist
+    npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
   else
     echo '::warning::No updater signing secrets: this build cannot update itself.'
     unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-    npx tauri build --bundles "$bundles" -- --profile dist
+    npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
   fi
 )
 

@@ -50,7 +50,17 @@ runs:
         args=(--profile minimal)
         for c in $COMPONENTS; do args+=(--component "$c"); done
         for t in $TARGETS; do args+=(--target "$t"); done
-        rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update
+        rc=0
+        rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
+        if [ "$rc" != 0 ]; then
+          why="exit $rc"
+          # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
+          if [ "$rc" = 127 ] && [ "$RUNNER_OS" = Windows ]; then
+            why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+          fi
+          echo "::error::rustup could not install the $TOOLCHAIN toolchain ($why). Run 'rustup toolchain install $TOOLCHAIN' on the runner to see why."
+          exit 1
+        fi
         rustup default "$TOOLCHAIN"
         rustc --version
         cargo --version

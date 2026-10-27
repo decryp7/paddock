@@ -2,7 +2,7 @@
 
 All of Pitcrew's design diagrams on one page, from the big picture down to individual flows. Each image is exported
 from its editable draw.io source (linked under the image) with
-[`scripts/export-diagrams.sh`](../scripts/export-diagrams.sh); edit the `.drawio`, then re-run the script. The SVGs are
+Paddock's [`diagrams/scripts/export-diagrams.sh`](https://dev.decryptology.net/decryp7/paddock/src/branch/main/diagrams/scripts/export-diagrams.sh) (see [development.md](development.md)); edit the `.drawio`, then re-run the script. The SVGs are
 re-exported from the sources (draw.io desktop); until then they may lag behind the `.drawio` files. The images follow your
 light or dark setting. The style rules are in [diagrams/STYLE.md](diagrams/STYLE.md), the reasoning behind the design in the [architecture decision
 records](adr/0001-architecture.md), and the prose overview in [architecture.md](architecture.md).

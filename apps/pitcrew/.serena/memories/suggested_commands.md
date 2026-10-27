@@ -13,6 +13,6 @@ cargo run -p pitcrew-service -- check-config
 (cd app && SCREENSHOTS=1 npx playwright test --project=screenshots)  # docs/screenshots (mock backend, port 4310)
 (cd app && npx tauri build)                     # installer (NSIS / .dmg); unsigned without the updater secrets
 (cd app && npx ng test --watch=false --coverage && npx ng lint && npx ng build)
-node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs
+node --test conformance/test/*.test.mjs   # (repo root) the shared kit scripts: commit lint, latest.json, publish, check-index
 bash scripts/macos-bootstrap.sh && bash scripts/macos-verify.sh   # on a Mac (docs/macos.md)
 ```

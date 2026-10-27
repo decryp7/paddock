@@ -1,7 +1,10 @@
 // Fails the bundle when the built index.html has inline <style> or <script> elements. Tauri adds a nonce or hash
 // for each to the CSP, and a style-src with a nonce makes browsers ignore 'unsafe-inline', which blocks the
 // <style> elements Angular adds at run time: the app then renders without its component styles.
+// Shared by every Tauri + Angular app (rule 42; it was a per-app copy). Run it from the app's folder as Tauri's
+// beforeBuildCommand after `ng build`: node ../../../conformance/ci/check-index.mjs [dist/app/browser/index.html]
 import { readFileSync } from 'node:fs';
+import { isMain } from '../src/util/is-main.mjs';
 
 export function inlineElements(html) {
   const found = [];
@@ -11,7 +14,7 @@ export function inlineElements(html) {
   return found;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const file = process.argv[2] ?? 'dist/app/browser/index.html';
   const found = inlineElements(readFileSync(file, 'utf8'));
   if (found.length) {

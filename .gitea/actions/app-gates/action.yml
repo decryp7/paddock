@@ -1,5 +1,5 @@
 name: app-gates
-description: "One app's matrix leg in the monorepo (ADR 0014 §6): the app's own commands from apps/<app>/paddock.ci.json (prepare, checks, UI checks), and the Rust gates of its Cargo workspace (fmt, clippy, nextest, doc tests, deny), only for the halves the change reaches. The caller checks out, sets up Rust and runs `npm ci` at the root; the inputs come from the plan job's matrix (scripts/affected.mjs)."
+description: "One app's matrix leg in the monorepo (ADR 0014 §6): the app's own commands from apps/<app>/paddock.ci.json (prepare, checks, UI checks), and the Rust gates of its Cargo workspace (fmt, clippy, nextest, doc tests, deny), only for the halves the change reaches. On Windows and macOS legs (paddock.ci.json `os`) the Rust half skips what one OS decides for all: fmt and deny run on Linux only, clippy not on Windows (as the crates leg). The caller checks out, sets up Rust and runs `npm ci` at the root; the inputs come from the plan job's matrix (scripts/affected.mjs)."
 inputs:
   app:
     description: The app (its folder under apps/).
@@ -49,7 +49,8 @@ runs:
     - name: Rust (${{ inputs.app }}; fmt, clippy, tests on the mock runtime, doc tests, deny)
       if: inputs.rust == 'true' && inputs.cargo != ''
       shell: bash
-      working-directory: ${{ inputs.cargo }}
+      # The stable checkout path on a host runner (stable-workspace), so sccache sees the same working folder every run.
+      working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ inputs.cargo }}
       env:
         NEXTEST_CONFIG: ${{ inputs.nextest-config }}
         FILTER: ${{ inputs.filter }}
@@ -58,14 +59,15 @@ runs:
         status=0
         step() { echo "::group::$*"; "$@" || { status=1; echo "::error::failed: $*"; }; echo "::endgroup::"; }
         config=()
-        if [ -n "$NEXTEST_CONFIG" ]; then config=(--config-file "$GITHUB_WORKSPACE/$NEXTEST_CONFIG"); fi
+        if [ -n "$NEXTEST_CONFIG" ]; then config=(--config-file "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/$NEXTEST_CONFIG"); fi
         filter=()
         if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the crates this change reaches: $FILTER"; filter=(-E "$FILTER"); fi
-        step cargo fmt --all --check
-        step cargo clippy --workspace --all-targets -- -D warnings
-        step cargo nextest run --workspace "${config[@]}" --profile ci "${filter[@]}"
+        # Format, advisories and licences do not depend on the OS; clippy is skipped on Windows like the crates leg.
+        if [ "$RUNNER_OS" = Linux ]; then step cargo fmt --all --check; fi
+        if [ "$RUNNER_OS" != Windows ]; then step cargo clippy --workspace --all-targets -- -D warnings; fi
+        step cargo nextest run --workspace ${config[@]+"${config[@]}"} --profile ci ${filter[@]+"${filter[@]}"}
         step cargo test --workspace --doc
-        step cargo deny check
+        if [ "$RUNNER_OS" = Linux ]; then step cargo deny --all-features --workspace check; fi
         exit $status
 
     - name: UI (${{ inputs.app }})

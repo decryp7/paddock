@@ -13,12 +13,17 @@ pub const MAX_LOG_FILES: usize = 4;
 /// The last `max` bytes of `path`, cut forward to the next line start when the read began inside a line; `None` when the
 /// file cannot be read. Returns the bytes and whether the file was longer.
 pub fn tail_of(path: &Path, max: u64) -> Option<(Vec<u8>, bool)> {
-    let mut file = File::open(path).ok()?;
+    let file = File::open(path).ok()?;
     let len = file.metadata().ok()?.len();
+    tail_of_reader(file, len, max)
+}
+
+/// [`tail_of`] over any seekable source `len` bytes long: one seek, then at most `max` bytes read.
+fn tail_of_reader(mut source: impl Read + Seek, len: u64, max: u64) -> Option<(Vec<u8>, bool)> {
     let start = len.saturating_sub(max);
-    file.seek(SeekFrom::Start(start)).ok()?;
+    source.seek(SeekFrom::Start(start)).ok()?;
     let mut bytes = Vec::with_capacity((len - start).min(max) as usize);
-    file.take(max).read_to_end(&mut bytes).ok()?;
+    source.take(max).read_to_end(&mut bytes).ok()?;
     if start > 0 {
         // Began inside a line (or a character): drop up to the first newline.
         match bytes.iter().position(|b| *b == b'\n') {
@@ -92,24 +97,69 @@ mod tests {
         assert!(tail_of(&dir.path().join("missing.log"), 10).is_none());
     }
 
+    /// A log of any length made up on the fly (zeros, then `tail`), counting every byte read: no disk, no allocation of its
+    /// length, so the test costs the same on every file system (NTFS does not make `set_len` files sparse).
+    struct Synthetic {
+        len: u64,
+        tail: &'static [u8],
+        at: u64,
+        read: u64,
+    }
+
+    impl Read for Synthetic {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = buf.len().min(self.len.saturating_sub(self.at) as usize);
+            let tail_from = self.len - self.tail.len() as u64;
+            for (i, b) in buf[..n].iter_mut().enumerate() {
+                let pos = self.at + i as u64;
+                *b = if pos >= tail_from {
+                    self.tail[(pos - tail_from) as usize]
+                } else {
+                    0
+                };
+            }
+            self.at += n as u64;
+            self.read += n as u64;
+            Ok(n)
+        }
+    }
+
+    impl Seek for Synthetic {
+        fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+            // `tail_of_reader` seeks only from the start.
+            if let SeekFrom::Start(at) = to {
+                self.at = at;
+            }
+            Ok(self.at)
+        }
+    }
+
     #[test]
     fn a_one_gigabyte_log_is_read_from_the_end_only() {
+        let mut log = Synthetic {
+            len: 1 << 30,
+            tail: b"\nlast-1\nlast-2\n",
+            at: 0,
+            read: 0,
+        };
+        let (bytes, cut) = tail_of_reader(&mut log, 1 << 30, 1024 * 1024).unwrap();
+        assert!(cut);
+        assert!(bytes.ends_with(b"last-1\nlast-2\n"));
+        // A seek, not a scan: the bytes read are the window, whatever the length (counted, never timed).
+        assert_eq!(log.read, 1024 * 1024);
+    }
+
+    #[test]
+    fn a_file_is_read_through_the_same_tail() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("big.log");
         let mut f = File::create(&p).unwrap();
-        // A sparse file: 1 GiB long, the last lines real. Reading it whole would take seconds and a gigabyte of memory.
-        f.set_len(1 << 30).unwrap();
-        f.seek(SeekFrom::End(0)).unwrap();
+        f.write_all(&[b'x'; 4096]).unwrap();
         f.write_all(b"\nlast-1\nlast-2\n").unwrap();
         drop(f);
-        let started = std::time::Instant::now();
-        let (bytes, cut) = tail_of(&p, 1024 * 1024).unwrap();
-        assert!(cut && bytes.len() <= 1024 * 1024);
-        assert!(bytes.ends_with(b"last-1\nlast-2\n"));
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(5),
-            "a seek, not a scan"
-        );
+        let (bytes, cut) = tail_of(&p, 1024).unwrap();
+        assert!(cut);
+        assert_eq!(bytes, b"last-1\nlast-2\n");
     }
 
     #[test]

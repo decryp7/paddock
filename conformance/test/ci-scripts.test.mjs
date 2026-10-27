@@ -71,6 +71,9 @@ test('release notes: the changelog, then the First launch block with the product
   assert.match(notes, /Windows protected your PC/);
   assert.ok(notes.endsWith('\n') && !notes.endsWith('\n\n'));
   assert.equal(releaseNotes({ appName: 'X', changelog: 'a\n', withFirstLaunch: false }), 'a\n');
+  const extra = releaseNotes({ appName: 'Pitcrew', changelog: '- one\n', extra: '  **Existing installs:** reinstall once.\n' });
+  assert.match(extra, /Open Anyway[^\n]*\n[^\n]*SmartScreen[^\n]*\n\n\*\*Existing installs:\*\* reinstall once\.\n$/, 'an app\'s own paragraph follows the block');
+  assert.equal(releaseNotes({ appName: 'X', changelog: 'a\n', withFirstLaunch: false, extra: '   ' }), 'a\n', 'a blank extra adds nothing');
   assert.throws(() => firstLaunch('bad\nname'), /not a product name/);
   assert.throws(() => firstLaunch('X', '/nonexistent/file.md'));
 });
@@ -80,6 +83,9 @@ test('release notes CLI', () => {
   const out = join(dir, 'RELEASE_NOTES.md');
   assert.equal(node('release-notes.mjs', ['--app', 'Dyno', '--changelog', join(dir, 'c.md'), '--out', out]).status, 0);
   assert.match(readFileSync(out, 'utf8'), /Dyno is not code-signed yet/);
+  const withExtra = join(dir, 'EXTRA.md');
+  assert.equal(node('release-notes.mjs', ['--app', 'Dyno', '--changelog', join(dir, 'c.md'), '--out', withExtra, '--extra', 'Reinstall once.']).status, 0);
+  assert.match(readFileSync(withExtra, 'utf8'), /\n\nReinstall once\.\n$/);
   assert.equal(node('release-notes.mjs', ['--app', 'Dyno']).status, 2);
   assert.equal(node('release-notes.mjs', ['--wat']).status, 2);
 });
@@ -145,7 +151,7 @@ function bundleRepo({ withTauri = true, version = '1.2.3', installers = ['Demo_1
   const root = makeApp({
     ...(withTauri ? { 'app/src-tauri/Cargo.toml': '', 'app/src-tauri/tauri.conf.json': JSON.stringify({ version }) } : {}),
     'bin/npm': '#!/bin/bash\necho "npm $*" >> "$BIN_LOG"\n',
-    'bin/npx': `#!/bin/bash\necho "npx $* [key=\${TAURI_SIGNING_PRIVATE_KEY:-unset}|pub=\${TAURI_UPDATER_PUBKEY:-unset}]" >> "$BIN_LOG"\nmkdir -p "$CARGO_TARGET_DIR/dist/bundle/deb"\n${installers.map((f) => `touch "$CARGO_TARGET_DIR/dist/bundle/deb/${f}"`).join('\n')}\n`,
+    'bin/npx': `#!/bin/bash\necho "npx $* [key=\${TAURI_SIGNING_PRIVATE_KEY:-unset}|pub=\${TAURI_UPDATER_PUBKEY:-unset}]" >> "$BIN_LOG"\nd="\${PADDOCK_BUILD_FOLDER:-$CARGO_TARGET_DIR}"\nmkdir -p "$d/dist/bundle/deb"\n${installers.map((f) => `touch "$d/dist/bundle/deb/${f}"`).join('\n')}\n`,
   });
   chmodSync(join(root, 'bin/npm'), 0o755);
   chmodSync(join(root, 'bin/npx'), 0o755);
@@ -190,6 +196,31 @@ test('tauri-bundle: an installer of another version fails the build; a missing s
   assert.equal(bundle(root, ['deb']).status, 0, 'an old installer in the target folder is dropped before the build');
   assert.ok(!existsSync(join(root, 'dist/Demo_0.9.0_amd64.deb')));
   assert.equal(bundle(root, []).status !== 0, true, 'bundles are required');
+});
+
+test('tauri-bundle: --root is where npm ci runs, and the build-folder action\'s folder wins over CARGO_TARGET_DIR', () => {
+  const root = bundleRepo();
+  mkdirSync(join(root, 'ws'), { recursive: true });
+  const folder = join(root, 'kept');
+  writeFileSync(join(root, 'bin/npm'), '#!/bin/bash\necho "npm $* in $(basename "$PWD")" >> "$BIN_LOG"\n');
+  const r = bundle(root, ['deb', '--app-dir', 'app', '--root', 'ws'], { PADDOCK_BUILD_FOLDER: folder, CARGO_TARGET_DIR: join(root, 'ignored') });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(existsSync(join(root, 'dist/Demo_1.2.3_amd64.deb')), 'collected from the build-folder action\'s folder');
+  assert.ok(!existsSync(join(root, 'ignored')));
+  assert.match(readFileSync(join(root, 'calls.log'), 'utf8'), /npm ci in ws/);
+  assert.match(r.stdout + r.stderr, /No updater signing secrets/);
+});
+
+test('tauri-bundle: a real macOS signing identity turns the hardened runtime back on; ad hoc or unset does not', { skip: process.platform !== 'darwin' && 'the script adds it on macOS only' }, () => {
+  const real = bundleRepo();
+  assert.equal(bundle(real, ['deb'], { APPLE_SIGNING_IDENTITY: 'Developer ID Application: Example (ABCDE12345)' }).status, 0);
+  assert.match(readFileSync(join(real, 'calls.log'), 'utf8'), /--config \.\.\/target\/hardened\.conf\.json/);
+  assert.deepEqual(JSON.parse(readFileSync(join(real, 'target/hardened.conf.json'), 'utf8')), { bundle: { macOS: { hardenedRuntime: true } } });
+  for (const identity of ['-', '']) {
+    const adhoc = bundleRepo();
+    assert.equal(bundle(adhoc, ['deb'], { APPLE_SIGNING_IDENTITY: identity }).status, 0);
+    assert.doesNotMatch(readFileSync(join(adhoc, 'calls.log'), 'utf8'), /hardened/, `identity "${identity}"`);
+  }
 });
 
 test('the shared sources the scripts read exist in this checkout', () => {

@@ -403,12 +403,31 @@ fn size_of(data: &Data) -> u64 {
     serde_json::to_vec(data).map_or(u64::MAX, |v| v.len() as u64)
 }
 
+/// The bounds of a [`ConversationStore`]. The defaults are [`MAX_CONVERSATIONS`] and [`MAX_FILE_BYTES`]; tests use small
+/// ones, so proving the bounds does not write megabytes through flushed saves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreLimits {
+    /// Most conversations kept (at least one).
+    pub conversations: usize,
+    /// Largest file, in bytes.
+    pub file_bytes: u64,
+}
+
+impl Default for StoreLimits {
+    fn default() -> Self {
+        StoreLimits {
+            conversations: MAX_CONVERSATIONS,
+            file_bytes: MAX_FILE_BYTES,
+        }
+    }
+}
+
 /// Keeps the file within its bounds; `keep` (the conversation being written) is the last to go.
-fn bound_data(data: &mut Data, keep: &str) {
+fn bound_data(data: &mut Data, keep: &str, limits: StoreLimits) {
     data.conversations
         .sort_by_key(|c| std::cmp::Reverse(c.updated_ms));
-    data.conversations.truncate(MAX_CONVERSATIONS.max(1));
-    while size_of(data) > MAX_FILE_BYTES - 4096 && data.conversations.len() > 1 {
+    data.conversations.truncate(limits.conversations.max(1));
+    while size_of(data) > limits.file_bytes.saturating_sub(4096) && data.conversations.len() > 1 {
         let oldest = data
             .conversations
             .iter()
@@ -429,6 +448,7 @@ pub struct ConversationStore {
     file: VersionedFile<Data>,
     state: Mutex<State>,
     clock: Arc<dyn Clock>,
+    limits: StoreLimits,
 }
 
 impl ConversationStore {
@@ -436,8 +456,17 @@ impl ConversationStore {
     /// and replaced by defaults, a newer one is left alone and nothing is saved. The problem, if any, is told once
     /// ([`take_problem`](Self::take_problem)).
     pub fn open(path: impl AsRef<Path>, clock: Arc<dyn Clock>) -> ConversationStore {
+        Self::open_with(path, clock, StoreLimits::default())
+    }
+
+    /// [`open`](Self::open) with other bounds than the defaults.
+    pub fn open_with(
+        path: impl AsRef<Path>,
+        clock: Arc<dyn Clock>,
+        limits: StoreLimits,
+    ) -> ConversationStore {
         let file =
-            VersionedFile::<Data>::new(path.as_ref(), FORMAT_VERSION).max_bytes(MAX_FILE_BYTES);
+            VersionedFile::<Data>::new(path.as_ref(), FORMAT_VERSION).max_bytes(limits.file_bytes);
         let loaded = file.load();
         let mut data = loaded.value;
         for c in &mut data.conversations {
@@ -445,7 +474,7 @@ impl ConversationStore {
             bound_conversation(c);
         }
         data.conversations.retain(|c| !c.messages.is_empty());
-        bound_data(&mut data, "");
+        bound_data(&mut data, "", limits);
         ConversationStore {
             file,
             state: Mutex::new(State {
@@ -456,7 +485,13 @@ impl ConversationStore {
                 counter: 0,
             }),
             clock,
+            limits,
         }
+    }
+
+    /// The bounds this store keeps.
+    pub fn limits(&self) -> StoreLimits {
+        self.limits
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -586,7 +621,7 @@ impl ConversationStore {
     }
 
     fn persist(&self, state: &mut State, keep: &str) -> Result<(), SaveError> {
-        bound_data(&mut state.data, keep);
+        bound_data(&mut state.data, keep, self.limits);
         self.file
             .save(&state.data)
             .map_err(|e| SaveError(e.to_string()))

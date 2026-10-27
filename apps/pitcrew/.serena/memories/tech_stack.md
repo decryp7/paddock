@@ -7,7 +7,6 @@
   zip (diagnostics); objc2-service-management (SMAppService on macOS); winreg (taskbar theme).
 - UI: Angular 22 (standalone, signals), @ngrx/signals, Angular CDK + Material (selectively), Apache ECharts,
   Vitest (`ng test`), Playwright (e2e and screenshots against the mock backend).
-- CI: Gitea Actions `.gitea/workflows/build.yml` (Linux container jobs, the Windows host runner, the macOS host
-  runner `macos-latest`).
-- macOS bundle: ad-hoc signed (`signingIdentity "-"`, required by SMAppService); `scripts/check-index.mjs` rejects inline
+- CI: Gitea Actions: Pitcrew is a leg of the monorepo `ci.yml` (paddock.ci.json); `pitcrew-release.yml` builds the installers and releases.
+- macOS bundle: ad-hoc signed (`signingIdentity "-"`, required by SMAppService); the shared `conformance/ci/check-index.mjs` rejects inline
   `<style>`/`<script>` in index.html (Tauri CSP nonce); `scripts/sidecar.mjs` builds the service for `externalBin`.
