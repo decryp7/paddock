@@ -311,11 +311,13 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
 
       # The new projects share one build folder, as cargo configuration above them (never CARGO_TARGET_DIR: sccache hashes
-      # it), so their common dependencies build once.
+      # it), so their common dependencies build once. They live outside the repo, so they do not see the repo's
+      # .cargo/config.toml: the registry that the shared crates name in `publish` (paddock-proc, reached through debrief-ipc)
+      # is declared here as well, or cargo cannot even parse their manifests.
       - name: One build folder for the new projects
         run: |
           mkdir -p /tmp/plugins/.cargo
-          printf "[build]\ntarget-dir = '/tmp/debrief-sdk-target'\n" > /tmp/plugins/.cargo/config.toml
+          printf "[build]\ntarget-dir = '/tmp/debrief-sdk-target'\n\n[registries.decryp7]\nindex = \"sparse+https://dev.decryptology.net/api/packages/decryp7/cargo/\"\n" > /tmp/plugins/.cargo/config.toml
 
       - name: Install cargo debrief-plugin
         run: cargo install --path crates/cargo-debrief-plugin --locked --debug --target-dir /tmp/debrief-sdk-target

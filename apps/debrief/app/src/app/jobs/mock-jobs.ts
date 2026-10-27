@@ -83,6 +83,8 @@ export class MockJobs implements JobsBackend {
   private readonly handlers = new Set<(s: JobsSnapshot) => void>();
   /** Who waits for a job's end (a dialog following it). */
   private readonly waiters = new Map<number, ((o: JobOutcome) => void)[]>();
+  /** Outcomes of jobs that ended without staying in the list: the engine keeps finished jobs, so a late `wait` still hears them. */
+  private readonly forgotten = new Map<number, JobOutcome>();
   private ticker: ReturnType<typeof setInterval> | null = null;
 
   /** Kinds still held (`options.hold`), and the finishes waiting for the release. */
@@ -165,7 +167,11 @@ export class MockJobs implements JobsBackend {
     e.result = result;
     if (state === 'done' && e.info.progress.fraction !== null) e.info.progress = { ...e.info.progress, fraction: 1 };
     const kept = age >= this.options.visibleMs || attention;
-    if (!kept) this.entries = this.entries.filter((x) => x !== e);
+    if (!kept) {
+      this.entries = this.entries.filter((x) => x !== e);
+      this.forgotten.set(e.info.id, this.outcome(e));
+      if (this.forgotten.size > HISTORY_CAP) this.forgotten.delete(this.forgotten.keys().next().value as number);
+    }
     const finished = this.entries.filter((x) => x.info.finishedAt !== null);
     if (finished.length > HISTORY_CAP) this.entries = this.entries.filter((x) => x !== finished[0]);
     if (attention) this.notify(e, state);
@@ -378,7 +384,7 @@ export class MockJobs implements JobsBackend {
 
   async wait(id: number): Promise<JobOutcome> {
     const e = this.entries.find((x) => x.info.id === id);
-    if (!e) return { id, state: 'cancelled', result: null, error: null, message: null };
+    if (!e) return this.forgotten.get(id) ?? { id, state: 'cancelled', result: null, error: null, message: null };
     if (e.info.finishedAt !== null) return this.outcome(e);
     return new Promise<JobOutcome>((resolve) => this.waiters.set(id, [...(this.waiters.get(id) ?? []), resolve]));
   }
@@ -423,6 +429,7 @@ export class MockJobs implements JobsBackend {
     this.ticker = null;
     this.handlers.clear();
     this.waiters.clear();
+    this.forgotten.clear();
   }
 }
 
