@@ -355,11 +355,13 @@ cancel tokens and reasons, the stuck watchdog, tiered workers, the tokio driver,
 | 11 | L | Pitwall and Spotter: adopt `paddock-jobs` (first shared dependency), tokio driver, Pitwall checks with demand (live loop), syscalls instead of `sysctl`/`pmset` spawns, Spotter's scheduler on the timetable, its schedule copy retired for `paddock-jobs::schedule`, render group with a reserved slot, render watchdog via `paddock-chromium`. |
 | 12 | S | Lint: flag `thread::spawn`, `Builder::spawn` and sleep loops outside `exec` and the allow-list; record lessons. |
 
-## Open decisions for the user
+## Decisions (user, 2026-10-27)
 
-1. **Folder watching:** keep the OS `NotifySource` (event-driven, low latency) and only remove the 50 ms wake loop, or
-   move folders onto the poll-backed source too ("same mechanism on every OS"), accepting up to one interval of delay?
-2. **Tiers:** two OS tiers (foreground, background) as proposed, or a third for `Idle`?
-3. **Defaults:** aging 30 s, stuck grace 2 s, reserved Interactive 1, written-off cap 8, lease cap 64.
-4. **Store-worker priority (WP-9):** a wire-contract change in Debrief; do it with this ADR or later?
-5. **Pitwall/Spotter adoption (WP-11):** now, or after Debrief and Dyno?
+1. **Folder watching:** keep the OS `NotifySource` (one crate, one code path on every OS) and remove the 50 ms wake loop;
+   the poll-backed source is only the fallback for network drives, where events do not arrive.
+2. **Tiers:** two OS tiers (foreground for Interactive and User, background for Background and Idle).
+3. **Defaults:** as proposed (aging 30 s, stuck grace 2 s, reserved Interactive 1, written-off cap 8, lease cap 64);
+   they are Settings-backed tunables, revisited with measurements.
+4. **Store-worker priority (WP-9):** now, together with the DuckDB 2 rework of the store worker in the Debrief 1.2 phase,
+   so the wire contract changes once.
+5. **Pitwall/Spotter adoption (WP-11):** in each app's own phase (one app at a time), with its other shared-crate catch-up.
