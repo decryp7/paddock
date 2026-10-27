@@ -96,7 +96,12 @@ mod tests {
         HelperConfig {
             schema: SCHEMA,
             user: HelperUser::Uid(501),
-            agent_exe: PathBuf::from("/Applications/Dyno.app/Contents/MacOS/dyno-agent"),
+            // Absolute on every platform: the parser checks it against the host, and "/Applications" has no drive on Windows.
+            agent_exe: PathBuf::from(if cfg!(windows) {
+                r"C:\Applications\Dyno.app\Contents\MacOS\dyno-agent"
+            } else {
+                "/Applications/Dyno.app/Contents/MacOS/dyno-agent"
+            }),
             version: "1.0.0".into(),
         }
     }

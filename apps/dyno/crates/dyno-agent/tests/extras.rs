@@ -259,8 +259,9 @@ fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
 fn the_finder_refuses_a_folder_that_is_not_there_and_stale_selections() {
     let h = Harness::start();
     let peer = h.client();
+    let missing = std::env::temp_dir().join("dyno-definitely-not-here");
     let q = FinderQuery {
-        folder: "/definitely/not/here".into(),
+        folder: missing.to_string_lossy().into_owned(),
         mode: FinderMode::Both,
         min_bytes: 0,
     };

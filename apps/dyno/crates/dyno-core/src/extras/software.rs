@@ -350,12 +350,21 @@ HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{CC
 
     #[test]
     fn the_destination_must_be_a_plain_absolute_file_with_the_right_extension() {
-        assert!(validate_destination("/tmp/r.md", InventoryFormat::Markdown).is_ok());
-        assert!(validate_destination("/tmp/R.JSON", InventoryFormat::Json).is_ok());
-        for bad in ["", "r.md", "/tmp/r.json", "/tmp/.md", "/tmp/../r.md", "/tmp/a\0.md"] {
-            assert!(validate_destination(bad, InventoryFormat::Markdown).is_err(), "{bad}");
+        // Absolute on every platform: a bare "/tmp" has no drive on Windows.
+        let t = if cfg!(windows) { "C:\\tmp" } else { "/tmp" };
+        assert!(validate_destination(&format!("{t}/r.md"), InventoryFormat::Markdown).is_ok());
+        assert!(validate_destination(&format!("{t}/R.JSON"), InventoryFormat::Json).is_ok());
+        for bad in [
+            "".to_string(),
+            "r.md".to_string(),
+            format!("{t}/r.json"),
+            format!("{t}/.md"),
+            format!("{t}/../r.md"),
+            format!("{t}/a\0.md"),
+        ] {
+            assert!(validate_destination(&bad, InventoryFormat::Markdown).is_err(), "{bad}");
         }
-        assert!(validate_destination(&format!("/{}.md", "a".repeat(2_000)), InventoryFormat::Markdown).is_err());
+        assert!(validate_destination(&format!("{t}/{}.md", "a".repeat(2_000)), InventoryFormat::Markdown).is_err());
     }
 
     #[test]

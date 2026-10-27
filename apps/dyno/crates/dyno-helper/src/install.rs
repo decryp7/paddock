@@ -553,6 +553,9 @@ mod tests {
     fn params(user: HelperUser) -> InstallParams {
         let agent_exe = if matches!(user, HelperUser::Sid(_)) {
             PathBuf::from(r"C:\Program Files\Dyno\dyno-agent.exe")
+        } else if cfg!(windows) {
+            // The config parser requires an absolute path on the host; "/Applications" has no drive on Windows.
+            PathBuf::from(r"C:\Applications\Dyno.app\Contents\MacOS\dyno-agent")
         } else {
             PathBuf::from("/Applications/Dyno.app/Contents/MacOS/dyno-agent")
         };
