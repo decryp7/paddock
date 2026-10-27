@@ -262,6 +262,9 @@ struct Shared {
     clock: Arc<dyn Clock>,
     listeners: Mutex<Vec<Listener>>,
     gates: Mutex<HashMap<JobKind, GateFn>>,
+    /// One pump judges the gates and applies their verdicts at a time: a verdict asked earlier never lands after a
+    /// newer one (a stale "healthy" resumed a queue a later pump had paused).
+    pumping: Mutex<()>,
     retry: Mutex<HashMap<JobKind, RetryFn>>,
     ticking: AtomicBool,
     tick: Duration,
@@ -298,6 +301,7 @@ impl Jobs {
             clock,
             listeners: Mutex::new(Vec::new()),
             gates: Mutex::new(HashMap::new()),
+            pumping: Mutex::new(()),
             retry: Mutex::new(HashMap::new()),
             ticking: AtomicBool::new(false),
             tick,
@@ -437,8 +441,11 @@ impl Jobs {
 
     /// Starts every job the queue allows now (after asking the gates whether their kinds may run).
     pub fn pump(&self) {
+        // Held while the gates are asked and their verdicts applied, released before jobs are spawned and listeners
+        // told (they may pump again). Gates never pump.
+        let one_pump = lock(&self.0.pumping);
         let gates: Vec<(JobKind, GateFn)> = lock(&self.0.gates).iter().map(|(k, g)| (*k, g.clone())).collect();
-        // Gates run outside the lock: they may ask other services (the AI's health).
+        // Gates run outside the queue's lock: they may ask other services (the AI's health).
         let verdicts: Vec<(JobKind, Option<String>)> = gates.into_iter().map(|(k, g)| (k, guarded_gate(&g))).collect();
         let now = self.now();
         let held = self.starts_held();
@@ -477,6 +484,7 @@ impl Jobs {
             let changed = changed || !start.is_empty();
             (start, changed)
         };
+        drop(one_pump);
         for (id, work, flag) in start {
             self.spawn(id, work, flag);
         }
@@ -1088,6 +1096,45 @@ pub(crate) mod tests {
         let (later, _go) = gated(&jobs, ai("later"));
         assert_eq!(jobs.state_of(later.id), Some(JobState::Queued));
         assert!(jobs.snapshot(None).paused[0].reason.contains("crashed"));
+    }
+
+    /// Regression (the AI quarantine test hung under load): a pump whose gate said "healthy" before the worker was
+    /// quarantined applied that stale verdict after a later pump had paused the queue, resumed it and started the
+    /// waiting job. Pumps now judge and apply one at a time, so the newest verdict is the last one applied.
+    #[test]
+    fn a_stale_gate_verdict_never_undoes_a_newer_pause() {
+        let (jobs, _) = service();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (release_first, first_may_answer) = mpsc::channel::<()>();
+        let first_may_answer = Mutex::new(first_may_answer);
+        let (second_asked, second_was_asked) = mpsc::channel::<()>();
+        let c = calls.clone();
+        jobs.set_gate(JobKind::Ai, move || {
+            if c.fetch_add(1, Ordering::SeqCst) == 0 {
+                // Judged healthy, then slow to come back (a loaded machine).
+                let _ = lock(&first_may_answer).recv();
+                None
+            } else {
+                let _ = second_asked.send(());
+                Some("The AI worker crashed repeatedly".to_string())
+            }
+        });
+        let (j1, j2) = (jobs.clone(), jobs.clone());
+        let first = std::thread::spawn(move || j1.pump());
+        wait_until("the first pump to ask its gate", || calls.load(Ordering::SeqCst) >= 1);
+        let second = std::thread::spawn(move || j2.pump());
+        // Without one pump at a time the second judges and pauses now; with it, it waits for the first.
+        if second_was_asked.recv_timeout(Duration::from_millis(500)).is_ok() {
+            second.join().unwrap();
+            release_first.send(()).unwrap();
+            first.join().unwrap();
+        } else {
+            release_first.send(()).unwrap();
+            first.join().unwrap();
+            second.join().unwrap();
+        }
+        let paused = jobs.snapshot(None).paused;
+        assert_eq!(paused.len(), 1, "the newer verdict (paused) stands: {paused:?}");
     }
 
     #[test]
