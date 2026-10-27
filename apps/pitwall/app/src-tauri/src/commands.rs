@@ -356,8 +356,11 @@ pub struct Streams {
 impl Streams {
     fn register(&self, task: impl FnOnce(String) -> tauri::async_runtime::JoinHandle<()>) -> String {
         let id = format!("chat-{}", self.next.fetch_add(1, Ordering::SeqCst) + 1);
+        // The table stays locked from spawning to inserting: a task that ends at once blocks in `finish` until its
+        // handle is in, so `finish` always removes it and no finished stream is left behind.
+        let mut tasks = self.tasks.lock().unwrap_or_else(|p| p.into_inner());
         let handle = task(id.clone());
-        self.tasks.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone(), handle);
+        tasks.insert(id.clone(), handle);
         id
     }
 
@@ -589,14 +592,27 @@ mod tests {
         (Arc::new(move |v| g.lock().unwrap().push(v)), got)
     }
 
+    /// Waits for `cond`; the 60 s limit only guards against a hang, it is never the thing a test depends on.
     async fn wait_until(mut cond: impl FnMut() -> bool) {
-        for _ in 0..200 {
-            if cond() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        let limit = std::time::Instant::now() + Duration::from_secs(60);
+        while !cond() {
+            assert!(std::time::Instant::now() < limit, "condition not reached (hang guard)");
+            tokio::task::yield_now().await;
         }
-        panic!("condition not reached");
+    }
+
+    #[test]
+    fn a_task_that_ends_before_it_is_registered_is_not_left_in_the_table() {
+        let streams = Arc::new(Streams::default());
+        for _ in 0..500 {
+            let s = streams.clone();
+            streams.register(move |id| tauri::async_runtime::spawn(async move { s.finish(&id) }));
+        }
+        let limit = std::time::Instant::now() + Duration::from_secs(60);
+        while streams.running() != 0 {
+            assert!(std::time::Instant::now() < limit, "stale entries: {}", streams.running());
+            std::thread::yield_now();
+        }
     }
 
     #[tokio::test]
