@@ -194,10 +194,15 @@ text: document.body ? document.body.innerText.slice(0, 4000) : ''}})"
     }
 }
 
-/// The address of a navigation in the same frame that is not the one `reply` (to `Page.navigate`) belongs to.
+/// The address of a document navigation in the same frame that is not the one `reply` (to `Page.navigate`) belongs to;
+/// a same-document change (`pushState`, a fragment) never replaces a load.
 fn replaced_by(e: &crate::cdp::Event, session: &str, reply: &Value) -> Option<String> {
     let p = &e.params;
     (e.method == "Page.frameStartedNavigating"
+        && !matches!(
+            p.get("navigationType").and_then(Value::as_str),
+            Some("sameDocument" | "historySameDocument")
+        )
         && e.session.as_deref() == Some(session)
         && p.get("frameId") == reply.get("frameId")
         && p.get("loaderId") != reply.get("loaderId"))
@@ -205,8 +210,8 @@ fn replaced_by(e: &crate::cdp::Event, session: &str, reply: &Value) -> Option<St
 }
 
 /// Why `Page.navigate` answered with `error` (its `errorText`) instead of a page. Chrome reports every navigation it
-/// cancels before the page commits as `net::ERR_ABORTED`: a response that is a download (or has no content), and a
-/// navigation that another one replaced. Each gets its own message, so a user (and a failed test) sees what happened.
+/// cancels before the page commits as `net::ERR_ABORTED`: a response that is a download or has no content (a 204), and a
+/// navigation that another one replaced. A download and a replacement get their own message; anything else keeps the code.
 fn not_loaded(error: &str, reply: &Value, replaced_by: Option<&str>) -> Error {
     if reply.get("isDownload").and_then(Value::as_bool) == Some(true) {
         return Error::Protocol("the address is a file download, not a page".into());
@@ -275,6 +280,12 @@ mod tests {
             params: json!({"frameId": "F"}),
         };
         assert_eq!(replaced_by(&other, "S", &r), None);
+        // A same-document change (pushState, a fragment) of the old page does not cancel the load.
+        let mut same = started("S", "F", "L2", "http://a.test/#top");
+        same.params["navigationType"] = json!("sameDocument");
+        assert_eq!(replaced_by(&same, "S", &r), None);
+        same.params["navigationType"] = json!("historySameDocument");
+        assert_eq!(replaced_by(&same, "S", &r), None);
         // A replacement without an address still counts.
         let mut e = started("S", "F", "L3", "");
         e.params.as_object_mut().unwrap().remove("url");
