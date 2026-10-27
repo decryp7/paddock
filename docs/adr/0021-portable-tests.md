@@ -258,7 +258,7 @@ files and new findings fail from WP-2 on.
 | 3 | `.gitattributes` policy in root and `templates/repo` (golden and snapshot lines before `*.cmd`); renormalise only the `eol=lf` paths; C28 sync of the app files | `.gitattributes`, `templates/repo/.gitattributes`, `apps/*/.gitattributes` | implementer | S |
 | 4 | `scripts/xwin-clippy.sh` (affected workspaces, own target dir, heavy slot, LLVM on `PATH`), `docs/dev-setup.md`, the brief template's pre-push line; one cold run per workspace to record time and any `-sys` crate trouble | `scripts/`, `docs/dev-setup.md`, brief template | implementer | S–M |
 | 5 | Migrate the shared crates (38 at-risk paths, 12,000-file walk, 12 short positive waits, their C30 findings) and delete their waivers; replace the 50 M spin wait with a gate or `FakeClock` (plain fix, no waiver) | `crates/*` | implementer | S |
-| 6 | Clippy preset entries `File::set_modified`, `File::set_times` after migrating or allowing the 22 call sites | `lint/clippy.toml`, app `clippy.toml` | implementer | S |
+| 6 | Clippy preset entries that make the shared crates the only path (decision 5): `File::set_modified`/`set_times` → `paddock_files::set_mtime`; `std::env::temp_dir` → `paddock_testkit::Scratch` (tests) or `paddock-env` (product); `std::thread::sleep` in test code → `FakeClock` or `testkit::wait::eventually`; `Instant::now`/`SystemTime::now` in core crates → `paddock_jobs::time::Clock`. Each entry lands once its call sites are migrated or allowed with a reason (counted, like C38's waivers); the lint message names the replacement | `lint/clippy.toml`, app `clippy.toml` | implementer | M |
 | 7 | Per app, one branch each, in the release order: Debrief (largest: 28 at-risk paths, 50,001-file test, 141 `temp_dir`, 155 C30, 9 JSON/TOML), Dyno, Pitcrew, Pitwall, Spotter; delete the local helpers and the app's waivers | `apps/<app>/` | implementer | Debrief L, others S–M |
 | 8 | The new rule under the next free number (46 today, taken at merge) into `docs/rules.md` and the root `AGENTS.md` only (rule 8: rules live once, no per-app copies); the lesson is already recorded | `docs/rules.md`, `AGENTS.md` | coordinator | S |
 
@@ -295,3 +295,6 @@ paths.
    changes; no lefthook hook.
 3. The Microsoft CRT/SDK licence is accepted for local use.
 4. C38 is strict after WP-2, with per-file, per-sub-check counted waivers for every current finding.
+5. The shared crates are the only path for OS-specific and timing-sensitive calls (user, 2026-10-27): no new crate;
+   `paddock-env`, `paddock-files`, `paddock-proc`, `paddock-jobs::time` and `paddock-testkit` hold them, and WP-6's clippy
+   entries (temp folders, sleeps in tests, wall-clock reads in core code, file times) enforce it.
