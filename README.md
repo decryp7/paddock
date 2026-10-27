@@ -1,9 +1,9 @@
-<p align="center"><img src="icons/paddock/paddock-macos.svg" width="112" alt="Paddock icon: pit garages under a roof striped in the seven app colours"></p>
+<p align="center"><img src="icons/paddock/paddock-macos.svg?v=8be373ca" width="112" alt="Paddock icon: pit garages under a roof striped in the seven app colours"></p>
 
 <h1 align="center">Paddock</h1>
 
 <p align="center">
-  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=948644b8" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%"></a>
+  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=80de9834" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%"></a>
 </p>
 
 <p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>
@@ -16,17 +16,17 @@ anywhere.
 
 ## The apps
 
-All seven live in this repository under [`apps/`](apps/).
+All seven live in this repository under [`apps/`](apps/). The old per-app repositories are archived (read-only); their past releases stay downloadable there.
 
-| | App | What it does | Status |
-|---|---|---|---|
-| <img src="icons/debrief/debrief-macos.svg" width="40" alt=""> | **[Debrief](apps/debrief/README.md)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | **v1.1.1 released** (1.2.0 in progress) |
-| <img src="icons/pitcrew/pitcrew-macos.svg" width="40" alt=""> | **[Pitcrew](apps/pitcrew/README.md)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.1 released** |
-| <img src="icons/pitwall/pitwall-macos.svg" width="40" alt=""> | **[Pitwall](apps/pitwall/README.md)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | **v1.0.3 released** (1.0.4 in progress) |
-| <img src="icons/dyno/dyno-macos.svg" width="40" alt=""> | **[Dyno](apps/dyno/README.md)** | Measures, explains and tunes your PC, observe first. | In development |
-| <img src="icons/spotter/spotter-macos.svg" width="40" alt=""> | **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development (1.0.0 not yet tagged) |
-| <img src="icons/sighter/sighter-macos.svg" width="40" alt=""> | **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned (design only) |
-| <img src="icons/pacenotes/pacenotes-macos.svg" width="40" alt=""> | **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned (design only) |
+| App | What it does | Status |
+|---|---|---|
+| <img src="icons/debrief/small/debrief-48.svg?v=c366fad7" width="40" height="40" align="absmiddle" alt=""> **[Debrief](apps/debrief/README.md)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | **v1.1.1 released, 1.2.0 in progress** |
+| <img src="icons/pitcrew/small/pitcrew-48.svg?v=5ef689a0" width="40" height="40" align="absmiddle" alt=""> **[Pitcrew](apps/pitcrew/README.md)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.1 released** |
+| <img src="icons/pitwall/small/pitwall-48.svg?v=79cf019f" width="40" height="40" align="absmiddle" alt=""> **[Pitwall](apps/pitwall/README.md)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | **v1.0.3 released** |
+| <img src="icons/dyno/small/dyno-48.svg?v=248f2a7e" width="40" height="40" align="absmiddle" alt=""> **[Dyno](apps/dyno/README.md)** | Measures, explains and tunes your PC, observe first. | In development |
+| <img src="icons/spotter/small/spotter-48.svg?v=73f96228" width="40" height="40" align="absmiddle" alt=""> **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development |
+| <img src="icons/sighter/small/sighter-48.svg?v=e9f11ffe" width="40" height="40" align="absmiddle" alt=""> **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned |
+| <img src="icons/pacenotes/small/pacenotes-48.svg?v=57c4f323" width="40" height="40" align="absmiddle" alt=""> **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned |
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 
@@ -63,12 +63,15 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 ## Repository layout
 
 ```
-apps/<app>/   the seven apps, plus the shell and workbench demos
-crates/       shared Rust crates (Gitea cargo registry)
-ui/           @decryp7/paddock-ui and @decryp7/paddock-e2e
-icons/        the isometric icon family, per app and platform
-conformance/  the shared conformance checks every app runs
-docs/         rules, lessons, ADRs, design guide, ecosystem, images
+apps/<app>/       the seven apps, plus the shell and workbench demos
+crates/           shared Rust crates (Gitea cargo registry)
+ui/               @decryp7/paddock-ui and @decryp7/paddock-e2e
+icons/            the isometric icon family, per app and platform
+conformance/      the shared conformance checks every app runs
+diagrams/         the diagram kit (style spec, draw.io library)
+scripts/          repo tooling: release dry run, new-app generator, affected-only CI
+docs/             rules, lessons, ADRs, design guide, ecosystem, images
+.gitea/workflows/ CI and the per-app release workflows
 ```
 
 ## What is in this repo
@@ -80,7 +83,7 @@ docs/         rules, lessons, ADRs, design guide, ecosystem, images
 | Diagram kit | [`diagrams/`](diagrams/README.md) | style spec, draw.io shape library, templates, canonical export script | draw.io library URL |
 | Icon set | [`icons/`](icons/README.md) | the family app icons per platform and the tooling that builds them | copy the app's folder |
 | Release practices | [`docs/lessons.md`](docs/lessons.md), [`CHANGELOG.md`](CHANGELOG.md) | tag workflow, signed updates, `latest.json`, the release script | follow the lessons |
-| Rust crates | [`crates/`](crates/README.md) | shared Rust code. Planned: `paddock-mcp` (MCP servers across the family, ADR 0007), the plugin platform (host, IPC and API, extracted from Debrief's ADR 0017 model), `paddock-pitwall` (the Pitwall client) and `paddock-testplan` (the `.sighterplan` format) | git dependency on a tag |
+| Rust crates | [`crates/`](crates/README.md) | shared Rust code. Planned: `paddock-mcp` (MCP servers across the family, ADR 0007), the plugin platform (host, IPC and API, extracted from Debrief's ADR 0017 model), `paddock-pitwall` (the Pitwall client) and `paddock-testplan` (the `.sighterplan` format) | Gitea cargo registry `decryp7` |
 | Paddock Shell Demo | [`apps/shell-demo/`](apps/shell-demo/README.md) | the shell demo as an installable app on the `paddock-shell` plugin, to check the shared UI on every OS; the starter of new apps (`node scripts/new-app.mjs <id> "<Name>"`) | installers from a `shell-demo-v*` tag |
 | Paddock Workbench Demo | [`apps/workbench-demo/`](apps/workbench-demo/README.md) | the workbench demo (dock, pop-out panels, assistant on Pitwall) as an installable app on the `paddock-shell` and `paddock-workbench` plugins; the starter of new IDE-style apps | installers from a `workbench-demo-v*` tag |
 | Rules | [`docs/rules.md`](docs/rules.md) | the binding rules for every app and agent | follow them; each app's AGENTS.md carries them |
@@ -125,10 +128,9 @@ Debrief 1.1.1, Pitwall 1.0.3 and Pitcrew 1.0.1 are released. The order of work:
 
 1. Debrief 1.2 (in progress).
 2. The shared Paddock crates: the plugin platform and `paddock-pitwall`.
-3. Debrief switches its AI to Pitwall.
-4. Spotter and Dyno finish.
-5. Pitcrew 1.1: local autoscaling.
-6. Pacenotes and Sighter implementation.
+3. Spotter and Dyno finish.
+4. Pitcrew 1.1: local autoscaling.
+5. Pacenotes and Sighter implementation.
 
 Paddock itself is pre-1.0: a minor bump may change tokens or component APIs, and removed things are deleted rather than
 deprecated.

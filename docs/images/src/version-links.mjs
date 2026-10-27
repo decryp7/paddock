@@ -3,7 +3,7 @@
 // hash is the first 8 hex characters of the SHA-256 of the image file. Plain Node, no dependencies.
 //   node docs/images/src/version-links.mjs <file.md> [more.md ...]
 // Only `src`/`srcset` attributes and Markdown links `[text](path)` / `![alt](path)` whose path ends in .png/.svg/.jpg/.jpeg/.gif/.webp, has no
-// scheme, and resolves (relative to the Markdown file) to an existing file inside a directory named `images` are touched.
+// scheme, and resolves (relative to the Markdown file) to an existing file inside a directory named `images` or `icons` are touched.
 // Everything else (screenshots, external URLs, ordinary links) is left alone. Idempotent: an unchanged image keeps its link.
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -20,7 +20,7 @@ export function versionRef(ref, mdDir) {
   const m = ref.match(/^([^?#]+)(?:\?[^#]*)?(#.*)?$/);
   if (!m || /^[a-z][a-z0-9+.-]*:|^\/\//i.test(m[1]) || !EXT.test(m[1])) return ref;
   const file = resolve(mdDir, decodeURIComponent(m[1]));
-  if (!file.split(sep).includes('images') || !existsSync(file) || !statSync(file).isFile()) return ref;
+  if (!file.split(sep).some((d) => d === 'images' || d === 'icons') || !existsSync(file) || !statSync(file).isFile()) return ref;
   return `${m[1]}?v=${shortHash(file)}${m[2] ?? ''}`;
 }
 
