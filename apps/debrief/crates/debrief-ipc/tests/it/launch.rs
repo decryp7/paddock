@@ -69,6 +69,48 @@ fn a_child_connects_authenticates_and_answers() {
     assert!(c.exited());
 }
 
+/// The folders named `prefix-*` where private sockets are made (the runtime folder, the temp folder, `/tmp`).
+#[cfg(unix)]
+fn socket_dirs(prefix: &str) -> Vec<std::path::PathBuf> {
+    let mut bases: Vec<std::path::PathBuf> = std::env::var_os("XDG_RUNTIME_DIR").map(Into::into).into_iter().collect();
+    bases.extend([std::env::temp_dir(), "/tmp".into()]);
+    let mut found: Vec<_> = bases
+        .into_iter()
+        .filter_map(|b| std::fs::read_dir(b.canonicalize().unwrap_or(b)).ok())
+        .flat_map(|d| d.flatten().map(|e| e.path()))
+        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(prefix)))
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Regression: the socket's private folder stayed until the child was dropped, so every child still running when its
+/// host ended (a crash, `exit`, a test process ending with children in statics) left a `debrief-*` folder in the temp
+/// folder. The connection needs no address once it is made: the folder goes as soon as the handshake is done.
+#[cfg(unix)]
+#[test]
+fn the_private_socket_folder_is_gone_once_the_child_is_connected() {
+    let prefix = format!("debrief-test-gone-{}", debrief_ipc::endpoint::random_hex(4).unwrap());
+    let mut s = spec(&[]);
+    s.spawn.endpoint_prefix = prefix.clone();
+    let c = launch(&s, Arc::new(NoCalls)).unwrap();
+    assert_eq!(ask(&c, "echo connected").unwrap(), "connected");
+    assert_eq!(
+        socket_dirs(&prefix),
+        Vec::<std::path::PathBuf>::new(),
+        "no socket folder while the child runs"
+    );
+    // The connection works on without it.
+    assert_eq!(ask(&c, "echo still").unwrap(), "still");
+    // A child that never connects leaves nothing either.
+    let mut s = spec(&["--no-connect"]);
+    s.spawn.endpoint_prefix = prefix.clone();
+    s.spawn.connect_window = Duration::from_millis(300);
+    assert!(launch(&s, Arc::new(NoCalls)).is_err());
+    assert!(socket_dirs(&prefix).is_empty());
+}
+
 #[test]
 fn children_that_die_or_never_connect_fail_the_launch() {
     match launch(&spec(&["--exit-now"]), Arc::new(NoCalls)) {

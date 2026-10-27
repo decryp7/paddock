@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { listLeaks, main, newLeaks } from './check-temp-leaks.mjs';
+import { groupLeaks, leakPattern, listLeaks, main, newLeaks } from './check-temp-leaks.mjs';
 
 const quiet = () => {
   const out = [];
@@ -58,6 +58,36 @@ test('without a baseline every matching folder counts; a corrupt baseline counts
     const bad = join(s.dir, 'bad.json');
     writeFileSync(bad, 'not json');
     assert.equal(main(['--dir', s.dir, '--check', bad], quiet().log), 1);
+  } finally {
+    s.done();
+  }
+});
+
+test('a leaked name is reduced to its fixture: pids, counters, hex ids and tempfile suffixes go', () => {
+  assert.equal(leakPattern('debrief-ai-find-36441-0'), 'debrief-ai-find-*');
+  assert.equal(leakPattern('debrief-plugin-0306efa26cfd'), 'debrief-plugin-*');
+  assert.equal(leakPattern('debrief-snap-tiny-512-3'), 'debrief-snap-tiny-*');
+  assert.equal(leakPattern('debrief-core-names-search-Ab3xYz'), 'debrief-core-names-search-*');
+  assert.equal(leakPattern('debrief-app-test-global-log-38257'), 'debrief-app-test-global-log-*');
+  assert.equal(leakPattern('debrief-old'), 'debrief-old', 'nothing per-run: the name itself');
+  assert.equal(leakPattern('debrief-123'), 'debrief-*');
+});
+
+test('the offenders are listed with their counts, most first', () => {
+  const names = ['debrief-plugin-aa11', 'debrief-ai-find-1-0', 'debrief-plugin-bb22', 'debrief-ai-find-2-0', 'debrief-plugin-cc33', 'imt-x'];
+  assert.deepEqual(groupLeaks(names), [
+    { pattern: 'debrief-plugin-*', count: 3 },
+    { pattern: 'debrief-ai-find-*', count: 2 },
+    { pattern: 'imt-x', count: 1 },
+  ]);
+  const s = scratch();
+  try {
+    for (const n of names) mkdirSync(join(s.dir, n));
+    const out = quiet();
+    assert.equal(main(['--dir', s.dir], out.log), 1);
+    const text = out.out.join('\n');
+    assert.match(text, /Offenders[\s\S]*3 {2}debrief-plugin-\*[\s\S]*2 {2}debrief-ai-find-\*/);
+    assert.match(text, /debrief-plugin-aa11/, 'the folders are listed too');
   } finally {
     s.done();
   }

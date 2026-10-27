@@ -224,8 +224,10 @@ fn apply_control() {
 }
 
 fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: &str) {
-    let _ = stream.set_read_timeout(Some(TICK));
+    // The handshake waits for the whole upgrade request however slow the client is; only the message loop ticks (a
+    // read timeout during the handshake abandoned it, "Handshake not finished", on a loaded machine).
     let Ok(mut ws) = tungstenite::accept(stream) else { return };
+    let _ = ws.get_ref().set_read_timeout(Some(TICK));
     let mut told_closed = false;
     // Applies the user's actions; false when the connection is to end. The browser reports a closed window once, as
     // Chrome does: the page's session detaches and its target is destroyed.
@@ -318,6 +320,48 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression (a loaded machine): the 10 ms read timeout of the fake's message loop was set before the WebSocket
+    /// handshake, so a client whose upgrade request came in slower than that saw the connection close ("WebSocket
+    /// protocol error: Handshake not finished"). Half a request, then a wait on our side: the fake must still be there.
+    #[test]
+    fn a_slow_handshake_is_waited_for() {
+        use std::io::Read;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Some(Ok(stream)) = listener.incoming().next() {
+                connection(stream, false, 1, "");
+            }
+        });
+        let mut c = std::net::TcpStream::connect(addr).unwrap();
+        c.write_all(b"GET /devtools/browser/fake HTTP/1.1\r\nHost: 127.0.0.1\r\n").unwrap();
+        // Twenty of the fake's ticks without the rest of the request: a fake that gave up has closed by then.
+        c.set_read_timeout(Some(TICK * 20)).unwrap();
+        let mut b = [0u8; 64];
+        match c.read(&mut b) {
+            Ok(0) => panic!("the fake closed the connection during the handshake"),
+            Ok(n) => panic!(
+                "unexpected answer before the request was complete: {:?}",
+                String::from_utf8_lossy(&b[..n])
+            ),
+            Err(e) => assert!(
+                matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut),
+                "{e}"
+            ),
+        }
+        c.write_all(
+            b"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        )
+        .unwrap();
+        c.set_read_timeout(None).unwrap();
+        let n = c.read(&mut b).unwrap();
+        assert!(
+            String::from_utf8_lossy(&b[..n]).starts_with("HTTP/1.1 101"),
+            "{:?}",
+            String::from_utf8_lossy(&b[..n])
+        );
+    }
 
     /// Regression (macOS CI, nextest): the test binary finds libduckdb through `DYLD_FALLBACK_LIBRARY_PATH`, which the
     /// shell running the fake dropped, so every fake browser exited at once ("exited right after it started").

@@ -33,3 +33,6 @@ chrono.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 tempfile.workspace = true
 sysinfo = { workspace = true, features = ["system"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true

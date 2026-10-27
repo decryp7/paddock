@@ -228,6 +228,7 @@ enum Msg<T> {
 /// wait for the disk, and never write under their own locks).
 pub struct Debounced<T: Send + 'static> {
     tx: Mutex<Option<mpsc::Sender<Msg<T>>>>,
+    writer: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl<T: Send + 'static> Debounced<T> {
@@ -268,10 +269,17 @@ impl<T: Send + 'static> Debounced<T> {
                 write(t);
             }
         });
-        if let Err(e) = spawned {
-            log::warn!("the configuration writer could not start: {e}");
-        }
-        Arc::new(Debounced { tx: Mutex::new(Some(tx)) })
+        let writer = match spawned {
+            Ok(h) => Some(h),
+            Err(e) => {
+                log::warn!("the configuration writer could not start: {e}");
+                None
+            }
+        };
+        Arc::new(Debounced {
+            tx: Mutex::new(Some(tx)),
+            writer: Mutex::new(writer),
+        })
     }
 
     /// Queues a snapshot to write.
@@ -292,6 +300,17 @@ impl<T: Send + 'static> Debounced<T> {
             .is_some_and(|tx| tx.send(Msg::Flush(ack)).is_ok());
         if sent {
             let _ = done.recv_timeout(limit);
+        }
+    }
+}
+
+/// The pending snapshot is written before the writer is gone: nothing reaches the disk after its owner was dropped
+/// (a later write would recreate a folder its owner already removed).
+impl<T: Send + 'static> Drop for Debounced<T> {
+    fn drop(&mut self) {
+        crate::sync::lock(&self.tx).take();
+        if let Some(h) = crate::sync::lock(&self.writer).take() {
+            let _ = h.join();
         }
     }
 }
@@ -370,5 +389,26 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(*written.lock().unwrap(), [5, 6], "written after the delay without a flush");
+    }
+
+    /// Regression: the writer thread wrote what was pending after its owner was dropped, so a folder a test (or the
+    /// app) had removed came back (a `debrief-*` folder left in the temp folder).
+    #[test]
+    fn dropping_the_writer_writes_what_is_pending_before_it_returns() {
+        let t = TempDir::new("debounced-drop");
+        let file = t.0.join("sub").join("n.json");
+        let target = file.clone();
+        let debounced = Debounced::new(Duration::from_secs(3600), move |n: u32| {
+            write_atomic(&target, n.to_string().as_bytes()).unwrap();
+        });
+        debounced.schedule(7);
+        drop(debounced);
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "7",
+            "written by the time the drop returned"
+        );
+        std::fs::remove_dir_all(t.0.join("sub")).unwrap();
+        assert!(!t.0.join("sub").exists(), "and nothing writes after it");
     }
 }

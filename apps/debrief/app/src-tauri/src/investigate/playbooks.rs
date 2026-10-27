@@ -10,10 +10,14 @@ use serde_json::Value;
 use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
 
-/// The library folder. Tests use a folder of their own so they never touch the user's configuration.
+/// The library folder. Tests use a folder of their own so they never touch the user's configuration: inside the test
+/// app's scratch stores, which are removed when the test ends.
 #[cfg(test)]
-fn dir<R: Runtime>(_app: &AppHandle<R>) -> CmdResult<PathBuf> {
-    Ok(std::env::temp_dir().join(format!("debrief-playbooks-shell-test-{}", std::process::id())))
+fn dir<R: Runtime>(app: &AppHandle<R>) -> CmdResult<PathBuf> {
+    use tauri::Manager;
+    app.try_state::<crate::AppState>()
+        .map(|s| s.store_root.join("playbooks"))
+        .ok_or_else(|| CmdError::failed("the test app has no state"))
 }
 
 #[cfg(not(test))]

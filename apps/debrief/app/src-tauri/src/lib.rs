@@ -881,6 +881,92 @@ pub(crate) mod test_support {
         }
     }
 
+    thread_local! {
+        static SCRATCH: std::cell::RefCell<Vec<tempfile::TempDir>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// A fresh empty folder named `debrief-<prefix>-...` in the OS temp folder, removed when the calling (test) thread
+    /// ends, also after a panic: for folders a helper hands out without a guard the test could keep (a test app's
+    /// scratch stores). CI fails on `debrief-*` folders left behind (docs/testing/temp-leaks.md).
+    pub fn scratch_dir(prefix: &str) -> PathBuf {
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("debrief-{prefix}-"))
+            .tempdir()
+            .expect("create a scratch folder");
+        let path = dir.path().to_path_buf();
+        SCRATCH.with(|k| k.borrow_mut().push(dir));
+        path
+    }
+
+    /// Folders for the whole test process: removed when it exits (an `atexit` handler), for folders that other
+    /// threads keep writing into after the test that made them ended (a test app's scratch stores: the in-process
+    /// store's index and compaction threads), or that code without a test thread asks for (the bundle folder).
+    static PROCESS_SCRATCH: std::sync::Mutex<Vec<tempfile::TempDir>> = std::sync::Mutex::new(Vec::new());
+
+    extern "C" fn remove_process_scratch_at_exit() {
+        remove_process_scratch();
+    }
+
+    /// Removes every folder [`process_scratch_dir`] made (what the exit handler does). A store thread may still be
+    /// writing a file into one while it goes (the removal then finds the folder not empty): asked again a few times.
+    pub fn remove_process_scratch() {
+        let dirs = std::mem::take(&mut *crate::sync::lock(&PROCESS_SCRATCH));
+        for dir in dirs {
+            let path = dir.path().to_path_buf();
+            drop(dir);
+            for _ in 0..20 {
+                if !path.exists() || std::fs::remove_dir_all(&path).is_ok() {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// A fresh empty folder named `debrief-<prefix>-...` in the OS temp folder, removed when the test process exits.
+    pub fn process_scratch_dir(prefix: &str) -> PathBuf {
+        static AT_EXIT: std::sync::Once = std::sync::Once::new();
+        AT_EXIT.call_once(|| {
+            extern "C" {
+                fn atexit(cb: extern "C" fn()) -> std::os::raw::c_int;
+            }
+            // SAFETY: registers a plain `extern "C"` function with the C runtime; it runs once, at exit.
+            let registered = unsafe { atexit(remove_process_scratch_at_exit) };
+            assert_eq!(registered, 0, "atexit failed");
+        });
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("debrief-{prefix}-"))
+            .tempdir()
+            .expect("create a scratch folder");
+        let path = dir.path().to_path_buf();
+        crate::sync::lock(&PROCESS_SCRATCH).push(dir);
+        path
+    }
+
+    #[test]
+    fn process_scratch_folders_live_on_after_their_thread_until_they_are_removed() {
+        let dir = std::thread::spawn(|| process_scratch_dir("probe-process")).join().unwrap();
+        assert!(dir.is_dir(), "kept for later threads");
+        std::fs::write(dir.join("f"), b"x").unwrap();
+        remove_process_scratch();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn scratch_folders_are_removed_when_the_test_thread_ends_even_after_a_panic() {
+        let kept = std::thread::spawn(|| scratch_dir("probe")).join().unwrap();
+        assert!(!kept.exists());
+        let panicked = std::thread::spawn(|| {
+            let p = scratch_dir("probe-panic");
+            std::fs::write(p.join("f"), b"x").unwrap();
+            std::panic::resume_unwind(Box::new(p));
+        })
+        .join()
+        .unwrap_err()
+        .downcast::<PathBuf>()
+        .unwrap();
+        assert!(!panicked.exists());
+    }
+
     pub fn block<F: std::future::Future>(f: F) -> F::Output {
         tauri::async_runtime::block_on(f)
     }
@@ -1055,8 +1141,6 @@ pub(crate) mod test_support {
     /// The clock of the test app's jobs and notification centre.
     pub struct TestClock(pub std::sync::Arc<jobs::ManualClock>);
 
-    static NEXT_TEST_APP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
     /// Builds the bundled plugins binary once when it is not next to the test executable (`cargo test -p debrief-app`
     /// builds only this crate; `cargo nextest run --workspace` in CI builds every binary), so the tests that need
     /// the plugins run instead of failing on their absence. `DEBRIEF_PLUGINS` names one built elsewhere.
@@ -1112,12 +1196,9 @@ pub(crate) mod test_support {
             ensure_plugins_binary();
             debrief_plugin_host::Builtins::load(&debrief_plugin_host::builtins::default_binary())
         });
-        // The store in process, scratch stores under the system temp folder (one folder per test app).
-        let root = std::env::temp_dir().join(format!(
-            "debrief-test-stores-{}-{}",
-            std::process::id(),
-            NEXT_TEST_APP.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        ));
+        // The store in process, scratch stores under the system temp folder (one folder per test app, removed when
+        // the test process exits: the store's background threads may still write after the test).
+        let root = process_scratch_dir("test-stores");
         PluginsStopWithTheTest::register(&plugins);
         let stores = engine::local::with_plugins(plugins.clone(), safe_mode);
         let shared = AppState::with(profile_dir, safe_mode, plugins, stores, root);

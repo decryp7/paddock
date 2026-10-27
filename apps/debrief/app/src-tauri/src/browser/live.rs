@@ -1,17 +1,22 @@
-//! Nightly and manual live test of research's results-page step against the real search engines, in a real Chromium
-//! (ADR 0043; it replaces the web view probe). Ignored by default: run it with
+//! Live test of research's results-page step against the real search engines, in a real Chromium (ADR 0043; it replaces
+//! the web view probe), and the same probe over recorded engine pages, which CI runs. The live test is ignored and never
+//! runs in CI (tests do not depend on the real network): run it by hand with
 //! `DEBRIEF_LIVE_SEARCH=1 cargo test -p debrief-app --lib live_search -- --ignored --nocapture`. It uses the same ports and
 //! functions research does (`research::search`, `research::read_results`, `research::open_result`) through
 //! [`ChromiumPage`], once per built-in engine, and fails with diagnostics (page kind, link counts, ready state, a
 //! screenshot) unless an engine gives at least [`MIN_LINKS`] result links or a recognised consent/CAPTCHA hand-off.
 //! `DEBRIEF_E2E_LIVE_SEARCH_OUT` names an absolute folder for `live-search.json` and the screenshots; the queries are
-//! neutral (never user data) and the report keeps page addresses without their query string.
+//! neutral (never user data) and the report keeps page addresses without their query string. The recorded probe
+//! (`tests::recorded`) runs the same steps, verdicts and report over what the results-page collector returned on each
+//! engine's page (`live_fixtures/*.json`, invented results), with a fake clock.
 
 use super::renderer::ChromiumPage;
 use super::research::ReadOnlyDriver;
 use super::sessions::Renderers;
 use debrief_ai::browser::research::{self, ResearchEnv, ResultsOutcome, ResultsRead};
-use debrief_ai::browser::{AgentLimits, ChatBrowser, PageDiagnostics, PageKind, SearchEngine, SearchSettings};
+use debrief_ai::browser::{
+    AgentLimits, ChatBrowser, PageDiagnostics, PageDriver, PageKind, PageReader, ResultsReader, SearchEngine, SearchSettings,
+};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -29,6 +34,18 @@ const PACE: Duration = Duration::from_secs(3);
 
 static SLEEP: fn(Duration) = std::thread::sleep;
 static NOW: fn() -> Instant = Instant::now;
+
+/// The browser one engine is probed in, and the clock research waits by: the real Chromium and the wall clock in the
+/// live test, a recorded web and a fake clock in the recorded one.
+pub struct Probe<'a> {
+    pub reader: &'a dyn PageReader,
+    pub results: &'a dyn ResultsReader,
+    pub driver: &'a dyn PageDriver,
+    pub sleep: &'a (dyn Fn(Duration) + Sync),
+    pub now: &'a (dyn Fn() -> Instant + Sync),
+    /// Saves a screenshot of the results page shown to the path given.
+    pub screenshot: &'a dyn Fn(&Path) -> Result<(), String>,
+}
 
 /// How one engine did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -133,32 +150,16 @@ fn screenshot(renderers: &Renderers, path: &Path) -> Result<(), String> {
 }
 
 fn read(
-    renderers: &Arc<Renderers>,
+    probe: &Probe<'_>,
     engine: SearchEngine,
     query: &str,
     results_shown: &mut dyn FnMut(),
 ) -> Result<(ResultsRead, Option<Result<String, String>>), String> {
-    let control = Arc::new(ChatBrowser::new(AgentLimits::default()));
-    control.set_agent(true, AgentLimits::default());
-    let page = |drive: bool| ChromiumPage {
-        renderers: renderers.clone(),
-        owner: "live".into(),
-        may_drive: drive.then(|| Box::new(|| true) as Box<dyn Fn() -> bool + Send + Sync>),
-        rules: Some(control.clone()),
-        product: "Debrief".into(),
-        notify: Arc::new(|_| {}),
-        lease: Default::default(),
-    };
-    let reader = page(false);
-    let driver = ReadOnlyDriver {
-        page: page(true),
-        control: control.clone(),
-    };
     let cancel = AtomicBool::new(false);
     let env = ResearchEnv {
-        reader: &reader,
-        results: &reader,
-        driver: &driver,
+        reader: probe.reader,
+        results: probe.results,
+        driver: probe.driver,
         search: SearchSettings { engine, custom: None },
         log: &NoLog,
         id: "live".into(),
@@ -168,8 +169,8 @@ fn read(
         searches: &debrief_ai::browser::SearchClock::default(),
         cache: None,
         total: research::TOTAL_TIME,
-        sleep: &SLEEP,
-        now: &NOW,
+        sleep: probe.sleep,
+        now: probe.now,
     };
     research::search(&env, query)
         .and_then(|url| {
@@ -178,7 +179,7 @@ fn read(
             let first = match &read.outcome {
                 ResultsOutcome::Links(links) => match links.first() {
                     Some((link, _)) => {
-                        std::thread::sleep(debrief_ai::browser::gentle::DEFAULT_PAUSE_MIN);
+                        (probe.sleep)(debrief_ai::browser::gentle::DEFAULT_PAUSE_MIN);
                         Some(research::open_result(&env, link, &url, 1)?.map(|o| o.url.site().to_string()))
                     }
                     None => None,
@@ -190,11 +191,12 @@ fn read(
         .map_err(|e| e.to_string())
 }
 
-fn probe(renderers: &Arc<Renderers>, engine: SearchEngine, query: &str, out: &Path) -> EngineReport {
-    let started = Instant::now();
+/// Probes one engine and reports how it did; the screenshot of its results page goes into `out`.
+pub fn probe(probe: &Probe<'_>, engine: SearchEngine, query: &str, out: &Path) -> EngineReport {
+    let started = (probe.now)();
     let file = format!("live-{}.png", engine.id());
     let mut shot = Err("no screenshot taken".to_string());
-    let read = read(renderers, engine, query, &mut || shot = screenshot(renderers, &out.join(&file)));
+    let read = read(probe, engine, query, &mut || shot = (probe.screenshot)(&out.join(&file)));
     let (verdict, note, read) = match read {
         Ok((r, first)) => {
             let (v, n) = verdict(&r.outcome, first.as_ref());
@@ -204,7 +206,7 @@ fn probe(renderers: &Arc<Renderers>, engine: SearchEngine, query: &str, out: &Pa
         Err(e) if e.contains("still needs you") => (Verdict::Warn, format!("handed to the user: {e}"), None),
         Err(e) => (Verdict::Fail, e, None),
     };
-    let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let elapsed_ms = u64::try_from((probe.now)().saturating_duration_since(started).as_millis()).unwrap_or(u64::MAX);
     let (screenshot, screenshot_error) = match shot {
         Ok(()) => (Some(file), None),
         Err(e) => (None, Some(e)),
@@ -229,9 +231,41 @@ fn probe(renderers: &Arc<Renderers>, engine: SearchEngine, query: &str, out: &Pa
     }
 }
 
-/// Every built-in engine against the real service; needs a Chromium-based browser and the network.
+/// Probes `engines` one after the other (`pause` between them), writes the report into `out` and returns the failed
+/// engines' lines ("Google: why").
+pub fn probe_all(
+    query: &str,
+    engines: &[SearchEngine],
+    out: &Path,
+    pause: &dyn Fn(Duration),
+    probe_one: &mut dyn FnMut(SearchEngine) -> EngineReport,
+) -> Result<Vec<String>, String> {
+    let mut reports = Vec::new();
+    for (i, engine) in engines.iter().enumerate() {
+        if i > 0 {
+            pause(PACE);
+        }
+        reports.push(probe_one(*engine));
+    }
+    let report = Report {
+        query,
+        platform: std::env::consts::OS,
+        done: true,
+        engines: &reports,
+    };
+    let json = serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?;
+    std::fs::write(out.join(REPORT), json).map_err(|e| format!("cannot write the report: {e}"))?;
+    Ok(reports
+        .iter()
+        .filter(|e| e.verdict == Verdict::Fail)
+        .map(|e| format!("{}: {}", e.label, e.note))
+        .collect())
+}
+
+/// Every built-in engine against the real service; needs a Chromium-based browser and the network. Manual runs only:
+/// CI runs [`tests::recorded`] instead.
 #[test]
-#[ignore = "live: needs a browser and the network (nightly / manual)"]
+#[ignore = "live: needs a browser and the network (manual runs only)"]
 fn live_search_every_engine_gives_results_or_a_recognised_hand_off() {
     if std::env::var("DEBRIEF_LIVE_SEARCH").is_err() {
         eprintln!("set DEBRIEF_LIVE_SEARCH=1 to run the live search test");
@@ -244,26 +278,37 @@ fn live_search_every_engine_gives_results_or_a_recognised_hand_off() {
     std::fs::create_dir_all(&out).unwrap();
     let query = query_from(std::env::var(QUERY_VAR).ok()).unwrap();
     let renderers = Arc::new(Renderers::default());
-    let mut engines = Vec::new();
-    for (i, engine) in selected(std::env::var(ENGINES_VAR).ok().as_deref()).into_iter().enumerate() {
-        if i > 0 {
-            std::thread::sleep(PACE);
-        }
-        engines.push(probe(&renderers, engine, &query, &out));
-    }
+    let engines = selected(std::env::var(ENGINES_VAR).ok().as_deref());
+    let failed = probe_all(&query, &engines, &out, &SLEEP, &mut |engine| {
+        let control = Arc::new(ChatBrowser::new(AgentLimits::default()));
+        control.set_agent(true, AgentLimits::default());
+        let page = |drive: bool| ChromiumPage {
+            renderers: renderers.clone(),
+            owner: "live".into(),
+            may_drive: drive.then(|| Box::new(|| true) as Box<dyn Fn() -> bool + Send + Sync>),
+            rules: Some(control.clone()),
+            product: "Debrief".into(),
+            notify: Arc::new(|_| {}),
+            lease: Default::default(),
+        };
+        let reader = page(false);
+        let driver = ReadOnlyDriver {
+            page: page(true),
+            control: control.clone(),
+        };
+        let shoot = |path: &Path| screenshot(&renderers, path);
+        let chromium = Probe {
+            reader: &reader,
+            results: &reader,
+            driver: &driver,
+            sleep: &SLEEP,
+            now: &NOW,
+            screenshot: &shoot,
+        };
+        probe(&chromium, engine, &query, &out)
+    });
     renderers.kill_all();
-    let report = Report {
-        query: &query,
-        platform: std::env::consts::OS,
-        done: true,
-        engines: &engines,
-    };
-    std::fs::write(out.join(REPORT), serde_json::to_vec_pretty(&report).unwrap()).unwrap();
-    let failed: Vec<_> = engines
-        .iter()
-        .filter(|e| e.verdict == Verdict::Fail)
-        .map(|e| format!("{}: {}", e.label, e.note))
-        .collect();
+    let failed = failed.unwrap();
     assert!(failed.is_empty(), "live search failed: {failed:?} (report in {})", out.display());
 }
 
@@ -271,6 +316,219 @@ fn live_search_every_engine_gives_results_or_a_recognised_hand_off() {
 mod tests {
     use super::*;
     use debrief_ai::browser::WebUrl;
+
+    /// The live probe over recorded engine pages, with a fake clock: what CI runs instead of the real engines.
+    pub(super) mod recorded {
+        use super::*;
+        use debrief_ai::browser::{BrowserError, DomSnapshot, Element, PageCapture, ResultsPage, ScrollDirection};
+        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Mutex;
+
+        /// What the results-page collector returned on each engine's page for the default query (invented results).
+        pub const GOOGLE: &str = include_str!("live_fixtures/google.json");
+        pub const DUCKDUCKGO: &str = include_str!("live_fixtures/duckduckgo.json");
+        pub const BING: &str = include_str!("live_fixtures/bing.json");
+        /// Google's cookie consent page instead of its results.
+        pub const GOOGLE_CONSENT: &str = include_str!("live_fixtures/google-consent.json");
+
+        /// A recorded web: each engine's site answers with its recorded results page, the engines' own redirects go
+        /// to their result, and any other address shows a page of its own.
+        pub struct RecordedWeb {
+            pages: HashMap<String, ResultsPage>,
+            redirects: HashMap<String, String>,
+            at: Mutex<String>,
+        }
+
+        impl RecordedWeb {
+            pub fn new(recorded: &[&str]) -> RecordedWeb {
+                let pages = recorded
+                    .iter()
+                    .map(|json| {
+                        let reply: serde_json::Map<String, serde_json::Value> = serde_json::from_str(json).expect("a recorded reply");
+                        let page = debrief_ai::browser::results_page_from(&reply);
+                        (site(&page.url), page)
+                    })
+                    .collect();
+                RecordedWeb {
+                    pages,
+                    redirects: HashMap::new(),
+                    at: Mutex::new("about:blank".into()),
+                }
+            }
+
+            /// An engine's own redirect link and where it goes.
+            pub fn redirect(mut self, from: &str, to: &str) -> RecordedWeb {
+                self.redirects.insert(from.into(), to.into());
+                self
+            }
+
+            fn at(&self) -> String {
+                self.at.lock().unwrap().clone()
+            }
+        }
+
+        /// A recorded page answers for its engine's whole site (a consent page answers for the engine it stands in for).
+        fn site(url: &str) -> String {
+            let host = WebUrl::parse(url).map(|u| u.host().to_ascii_lowercase()).unwrap_or_default();
+            host.trim_start_matches("www.").trim_start_matches("consent.").to_string()
+        }
+
+        impl PageReader for RecordedWeb {
+            fn capture(&self) -> Result<PageCapture, BrowserError> {
+                Ok(PageCapture {
+                    title: "A result".into(),
+                    url: self.at(),
+                    text: "What the result says.".into(),
+                    truncated: false,
+                    removed: vec![],
+                })
+            }
+            fn snapshot(&self) -> Result<DomSnapshot, BrowserError> {
+                Ok(DomSnapshot {
+                    url: self.at(),
+                    title: "A result".into(),
+                    elements: vec![],
+                    text: "What the result says.".into(),
+                    hand_off: None,
+                })
+            }
+        }
+
+        impl ResultsReader for RecordedWeb {
+            fn results_page(&self, _region: &[&str]) -> Result<ResultsPage, BrowserError> {
+                self.pages.get(&site(&self.at())).cloned().ok_or(BrowserError::Timeout)
+            }
+        }
+
+        impl PageDriver for RecordedWeb {
+            fn navigate(&self, url: &WebUrl) -> Result<(), BrowserError> {
+                let to = self
+                    .redirects
+                    .get(url.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| url.as_str().to_string());
+                *self.at.lock().unwrap() = to;
+                Ok(())
+            }
+            fn click(&self, _: &Element) -> Result<(), BrowserError> {
+                panic!("research never clicks")
+            }
+            fn type_text(&self, _: &Element, _: &str, _: bool) -> Result<(), BrowserError> {
+                panic!("research never types")
+            }
+            fn scroll(&self, _: ScrollDirection) -> Result<(), BrowserError> {
+                panic!("research never scrolls")
+            }
+            fn back(&self) -> Result<(), BrowserError> {
+                panic!("research never goes back")
+            }
+        }
+
+        /// A clock that only moves when research waits on it.
+        #[derive(Default)]
+        pub struct FakeClock {
+            start: Option<Instant>,
+            waited_ms: AtomicU64,
+        }
+
+        impl FakeClock {
+            pub fn new() -> FakeClock {
+                FakeClock {
+                    start: Some(Instant::now()),
+                    waited_ms: AtomicU64::new(0),
+                }
+            }
+            pub fn sleep(&self, d: Duration) {
+                self.waited_ms
+                    .fetch_add(u64::try_from(d.as_millis()).unwrap_or(u64::MAX), Ordering::SeqCst);
+            }
+            pub fn now(&self) -> Instant {
+                self.start.expect("FakeClock::new") + Duration::from_millis(self.waited_ms.load(Ordering::SeqCst))
+            }
+        }
+
+        /// Runs the live probe over `web` for `engines`; returns the failed lines and the report written.
+        pub fn run(web: &RecordedWeb, engines: &[SearchEngine], out: &Path) -> (Vec<String>, serde_json::Value) {
+            let clock = FakeClock::new();
+            let sleep = |d: Duration| clock.sleep(d);
+            let now = || clock.now();
+            let shoot = |path: &Path| std::fs::write(path, b"png").map_err(|e| e.to_string());
+            let recorded = Probe {
+                reader: web,
+                results: web,
+                driver: web,
+                sleep: &sleep,
+                now: &now,
+                screenshot: &shoot,
+            };
+            let failed = probe_all(DEFAULT_QUERY, engines, out, &sleep, &mut |engine| {
+                probe(&recorded, engine, DEFAULT_QUERY, out)
+            })
+            .unwrap();
+            let report = serde_json::from_slice(&std::fs::read(out.join(REPORT)).unwrap()).unwrap();
+            (failed, report)
+        }
+    }
+
+    /// The live probe's steps, verdicts and report over each engine's recorded results page: results are read, the
+    /// first one opens (directly, or through the engine's redirect), and nothing needs the network or a browser.
+    #[test]
+    fn every_engine_passes_on_its_recorded_results_page() {
+        use recorded::*;
+        let out = crate::test_support::scratch_dir("live-search");
+        let web = RecordedWeb::new(&[GOOGLE, DUCKDUCKGO, BING]).redirect(
+            "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.example.org%2Fapi%2Fsystem.timeoutexception&rut=abc",
+            "https://docs.example.org/api/system.timeoutexception",
+        );
+        let (failed, report) = run(&web, &selected(None), &out);
+        assert_eq!(failed, Vec::<String>::new());
+        let engines = report["engines"].as_array().unwrap();
+        assert_eq!(
+            engines.iter().map(|e| e["engine"].as_str().unwrap()).collect::<Vec<_>>(),
+            ["google", "duckDuckGo", "bing"]
+        );
+        for e in engines {
+            assert_eq!(e["verdict"], "pass", "{e}");
+            assert!(e["links"].as_u64().unwrap() >= MIN_LINKS as u64, "{e}");
+            assert!(e["ready"].as_bool().unwrap(), "read because it was ready: {e}");
+            assert!(e["note"].as_str().unwrap().contains("the first one opened on"), "{e}");
+            // The organic results come first (the engine's own links on its site never count); sites only, never
+            // addresses.
+            let sites: Vec<&str> = e["resultSites"].as_array().unwrap().iter().map(|s| s.as_str().unwrap()).collect();
+            assert!(sites[..3].iter().all(|s| s.contains(".example.")), "{sites:?}");
+            assert!(
+                sites
+                    .iter()
+                    .all(|s| !s.contains('/') && !s.ends_with("duckduckgo.com") && *s != "www.google.com" && *s != "www.bing.com"),
+                "{sites:?}"
+            );
+            let shot = e["screenshot"].as_str().unwrap();
+            assert!(out.join(shot).is_file(), "the results page's screenshot is saved");
+            // The page's diagnostics keep no query string.
+            assert!(!e["page"].to_string().contains("TimeoutException&") && !e["page"]["path"].as_str().unwrap().contains('?'));
+        }
+        assert_eq!(report["query"], DEFAULT_QUERY);
+        assert_eq!(report["done"], true);
+    }
+
+    /// A consent page is the recognised hand-off (a warning); an engine whose page shows too few results fails, and
+    /// the run says which and why.
+    #[test]
+    fn a_consent_page_warns_and_a_thin_results_page_fails_the_run() {
+        use recorded::*;
+        let out = crate::test_support::scratch_dir("live-search-handoff");
+        let mut thin: serde_json::Value = serde_json::from_str(BING).unwrap();
+        thin["links"].as_array_mut().unwrap().truncate(2);
+        let thin = thin.to_string();
+        let web = RecordedWeb::new(&[GOOGLE_CONSENT, &thin]);
+        let (failed, report) = run(&web, &[SearchEngine::Google, SearchEngine::Bing], &out);
+        let engines = report["engines"].as_array().unwrap();
+        assert_eq!(engines[0]["verdict"], "warn", "{}", engines[0]);
+        assert!(engines[0]["note"].as_str().unwrap().contains("a consent page"), "{}", engines[0]);
+        assert_eq!(engines[1]["verdict"], "fail");
+        assert_eq!(failed, [format!("Bing: only 1 result links (at least {MIN_LINKS} expected)")]);
+    }
 
     fn links(n: usize) -> ResultsOutcome {
         ResultsOutcome::Links(

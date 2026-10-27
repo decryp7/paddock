@@ -371,6 +371,36 @@ fn kill(w: &StoreWorker) -> u32 {
     pid
 }
 
+/// Kills the worker and returns once it has ended. The signal is asynchronous: until the process is gone it can still
+/// answer a call (a busy machine stretches that window), so a test that asks "which worker answers now?" waits here.
+/// `waitid` with `WNOWAIT` blocks until the child (the worker is this process's child) has exited and leaves it
+/// unreaped, so the supervisor still collects its exit status; `ECHILD` means the supervisor reaped it already.
+fn kill_and_wait(w: &StoreWorker) {
+    let pid = kill(w);
+    #[cfg(unix)]
+    {
+        let id = libc::id_t::try_from(pid).unwrap();
+        // SAFETY: a zeroed siginfo_t is a valid out-parameter for waitid.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        loop {
+            // SAFETY: plain system call on our own child with a valid out-pointer.
+            let r = unsafe { libc::waitid(libc::P_PID, id, &mut info, libc::WEXITED | libc::WNOWAIT) };
+            if r == 0 {
+                break;
+            }
+            let e = std::io::Error::last_os_error();
+            match e.raw_os_error() {
+                Some(libc::EINTR) => continue,
+                // Already reaped (the supervisor noticed the exit first): it is gone either way.
+                Some(libc::ECHILD) => break,
+                _ => panic!("waitid on the worker failed: {e}"),
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = pid;
+}
+
 #[test]
 fn a_worker_killed_mid_import_or_mid_query_fails_the_call_and_recovers() {
     let logs = TempDir::new("killed-logs");
@@ -471,15 +501,13 @@ fn the_worker_starts_with_its_tuning_and_the_next_start_takes_a_changed_one() {
     launch.memory_mode = MemoryMode::Low;
     w.set_launch(launch);
     assert_eq!(w.worker_status().unwrap().tuning, first, "a running worker keeps its values");
-    kill(&w);
-    // The next call starts the worker again, with the new values; the store reopens.
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let status = loop {
-        match w.worker_status() {
-            Ok(s) => break s,
-            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(100)),
-            Err(e) => panic!("the worker did not start again: {e}"),
-        }
+    // Only once the killed worker is gone: before that it may still answer with its old values.
+    kill_and_wait(&w);
+    // The first call finds the worker dead (unless something noticed before); the next one starts it again, with the
+    // new values, and the store reopens.
+    let status = match w.worker_status() {
+        Ok(s) => s,
+        Err(_) => w.worker_status().expect("the worker starts again"),
     };
     assert_eq!((status.tuning, status.memory_mode), (second, MemoryMode::Low));
     assert_eq!(store.summary().unwrap().total, 0);

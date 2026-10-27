@@ -27,8 +27,16 @@ const MAX_VISUAL_BYTES: usize = 32 << 20;
 const MAX_REPORT_JSON: usize = 64 << 20;
 
 /// Folder under the system temp folder where bundles are extracted to be opened.
+#[cfg(not(test))]
 pub(crate) fn bundles_root() -> PathBuf {
     std::env::temp_dir().join("debrief-bundles")
+}
+
+/// Tests extract into a folder of the test process, removed when it exits.
+#[cfg(test)]
+pub(crate) fn bundles_root() -> PathBuf {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| crate::test_support::process_scratch_dir("bundles")).clone()
 }
 
 /// Refuses to save a project into an opened bundle's folder (bundles open read-only).

@@ -10,18 +10,10 @@ use debrief_core::ports::Store;
 use debrief_core::workspace::WorkspaceStore;
 use debrief_core::{Profile, Workspace};
 use serde_json::{json, Value};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 fn store() -> WorkspaceStore {
-    static N: AtomicUsize = AtomicUsize::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "debrief-ai-names-{}-{}",
-        std::process::id(),
-        N.fetch_add(1, Ordering::SeqCst)
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::scratch::scratch_dir("ai-names");
     let rows = [
         "Started CompanyA.Graphic.Builder.exe pid 4242",
         "Render queue drained by graphicbuilder.exe",

@@ -1,0 +1,16 @@
+{
+  "url": "https://duckduckgo.com/?q=System.TimeoutException",
+  "title": "System.TimeoutException at DuckDuckGo",
+  "readyState": "complete",
+  "quietMs": 700,
+  "regionFound": true,
+  "total": 6,
+  "text": "System.TimeoutException",
+  "links": [
+    { "href": "https://duckduckgo.com/settings", "text": "Settings", "region": false, "heading": false },
+    { "href": "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.example.org%2Fapi%2Fsystem.timeoutexception&rut=abc", "text": "TimeoutException Class", "region": true, "heading": true },
+    { "href": "https://qa.example.net/q/4242", "text": "Why does my request throw System.TimeoutException?", "region": true, "heading": true },
+    { "href": "https://forum.example.com/t/timeouts/77", "text": "Timeouts under load", "region": true, "heading": true },
+    { "href": "https://duckduckgo.com/y.js?ad=1", "text": "Ad", "region": true, "heading": false }
+  ]
+}

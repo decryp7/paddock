@@ -226,6 +226,39 @@ impl ProjectDir {
         Ok(out)
     }
 
+    /// What an export to `out` packs, as (file to read, name in the archive), sorted by name: the shared files, with
+    /// `substitutes` read from elsewhere. An archive saved inside the folder is never packed into itself: neither
+    /// `out` nor its `.part` file (which grows while it is read).
+    pub fn export_files(&self, out: &Path, substitutes: &[(PathBuf, PathBuf)]) -> Result<Vec<(PathBuf, PathBuf)>> {
+        let own: Vec<PathBuf> = [out.to_path_buf(), part_path(out)]
+            .iter()
+            .filter_map(|p| self.relative(p))
+            .collect();
+        let mut files: Vec<(PathBuf, PathBuf)> = self
+            .shared_files()?
+            .into_iter()
+            .filter(|rel| !own.contains(rel))
+            .filter(|rel| !substitutes.iter().any(|(s, _)| s == rel))
+            .map(|rel| (self.dir.join(&rel), rel))
+            .collect();
+        files.extend(substitutes.iter().map(|(rel, src)| (src.clone(), rel.clone())));
+        files.sort_by(|a, b| a.1.cmp(&b.1));
+        Ok(files)
+    }
+
+    /// `path` relative to the project folder when it lies inside it (compared by resolved folders, so `a/./b` and
+    /// symlinked spellings match); the file itself need not exist.
+    fn relative(&self, path: &Path) -> Option<PathBuf> {
+        let name = path.file_name()?;
+        let parent = match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => Path::new("."),
+        };
+        let parent = parent.canonicalize().ok()?;
+        let dir = self.dir.canonicalize().ok()?;
+        Some(parent.strip_prefix(&dir).ok()?.join(name))
+    }
+
     /// Writes the project as an `.debriefz` zip to `out` (via a `.part` file, moved into place when complete).
     /// The caller checkpoints the database first, so no write-ahead log is needed.
     pub fn export(&self, out: &Path) -> Result<u64> {
@@ -243,14 +276,7 @@ impl ProjectDir {
         let result = (|| -> Result<u64> {
             let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(file));
             let mut total = 0u64;
-            let mut files: Vec<(PathBuf, PathBuf)> = self
-                .shared_files()?
-                .into_iter()
-                .filter(|rel| !substitutes.iter().any(|(s, _)| s == rel))
-                .map(|rel| (self.dir.join(&rel), rel))
-                .collect();
-            files.extend(substitutes.iter().map(|(rel, src)| (src.clone(), rel.clone())));
-            files.sort_by(|a, b| a.1.cmp(&b.1));
+            let files = self.export_files(out, substitutes)?;
             // The job running this export (if any) sees the bytes packed of those to pack, and Cancel stops it between chunks.
             let control = crate::ql::QueryControl::current();
             if let Some(c) = &control {
@@ -434,10 +460,34 @@ mod tests {
     use super::*;
 
     fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-package-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        crate::test_dirs::scratch_dir(&format!("package-{tag}"))
+    }
+
+    fn entries(archive: &Path) -> Vec<String> {
+        let mut z = zip::ZipArchive::new(std::fs::File::open(archive).unwrap()).unwrap();
+        (0..z.len()).map(|i| z.by_index(i).unwrap().name().unwrap().to_string()).collect()
+    }
+
+    /// Regression: an archive saved inside the project folder used to pack itself (its growing `.part` file, read
+    /// while it was written, never ended) and the previous save.
+    #[test]
+    fn an_archive_saved_inside_the_project_folder_never_packs_itself() {
+        let root = temp("export-inside");
+        let p = ProjectDir::create(&root, "inside").unwrap();
+        std::fs::write(root.join("data.duckdb"), vec![7u8; 300_000]).unwrap();
+        let out = root.join("saved.debriefz");
+        let names = p.export_files(&out, &[]).unwrap();
+        let rel: Vec<_> = names.iter().map(|(_, rel)| rel.to_string_lossy().into_owned()).collect();
+        assert_eq!(rel, ["data.duckdb", "project.toml"]);
+        // A save over an earlier one, in the folder: neither the earlier archive nor the one being written is packed.
+        p.export(&out).unwrap();
+        std::fs::write(part_path(&out), b"left by a crash").unwrap();
+        p.export(&out).unwrap();
+        assert_eq!(entries(&out), ["data.duckdb", "project.toml"]);
+        // Named through another spelling of the same folder, too.
+        let dotted = root.join(".").join("saved.debriefz");
+        let rel: Vec<_> = p.export_files(&dotted, &[]).unwrap().into_iter().map(|(_, r)| r).collect();
+        assert_eq!(rel, [PathBuf::from("data.duckdb"), PathBuf::from("project.toml")]);
     }
 
     #[test]
@@ -478,7 +528,6 @@ mod tests {
         let err = control.scope(|| p.export(&out)).unwrap_err();
         assert!(format!("{err:#}").contains("cancelled"), "{err:#}");
         assert!(!out.exists() && !root.join("c.debriefz.part").exists());
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -515,7 +564,6 @@ mod tests {
         assert!(!opened.dir.join("index").exists() && opened.dir.join("snapshots").is_dir());
         // A folder opens as it is.
         assert!(matches!(open_package(&dir, &root).unwrap(), Package::Project { .. }));
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[rustfmt::skip]
@@ -562,7 +610,6 @@ mod tests {
         let not_zip = root.join("plain.debriefz");
         std::fs::write(&not_zip, b"hello").unwrap();
         assert!(open_package(&not_zip, &root.join("o")).is_err());
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -584,7 +631,6 @@ mod tests {
         let opened = open_package(&out, &root.join("open")).unwrap();
         let (opened, _) = project(opened);
         assert_eq!(std::fs::read(opened.dir.join("data.duckdb")).unwrap(), b"the copy");
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]
@@ -613,7 +659,6 @@ mod tests {
             dir: root.join("missing.debrief"),
         };
         assert!(missing.export(&root.join("m.debriefz")).is_err());
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -647,7 +692,6 @@ mod tests {
         assert_eq!(again.dir, dir.dir);
         assert!(!again.dir.join("added-later.txt").exists());
         assert_eq!(std::fs::read(again.dir.join("data.duckdb")).unwrap(), b"db");
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -679,7 +723,6 @@ mod tests {
         let err = open_package(&archive, &dest).unwrap_err().to_string();
         assert!(err.contains("more than 100000 files"), "{err}");
         assert!(!dest.exists(), "nothing was extracted");
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -696,6 +739,5 @@ mod tests {
         let (dir, manifest) = project(open_package(&archive, &root.join("o")).unwrap());
         assert_eq!(manifest.name, "withdirs");
         assert_eq!(std::fs::read(dir.dir.join("notes/a.txt")).unwrap(), b"hi");
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

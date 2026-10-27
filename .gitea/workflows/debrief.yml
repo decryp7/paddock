@@ -716,16 +716,8 @@ jobs:
           path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app/e2e-tauri/.artifacts
           if-no-files-found: ignore
 
-      # The live search test (docs/development.md, "Live search test"): research against the real Google, Bing and
-      # DuckDuckGo in a real Chromium (the runner's Edge or Chrome). Nightly and manual runs only, never on pushes or
-      # pull requests: engines rate-limit automated traffic and change their pages.
-      - name: Live search test
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'macOS'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        env:
-          DEBRIEF_LIVE_SEARCH: "1"
-          DEBRIEF_E2E_LIVE_SEARCH_OUT: ${{ runner.temp }}/live-search
-        run: cargo test -p debrief-app --lib live_search -- --ignored --nocapture
+      # No live search test here: CI never depends on the real network. The same probe runs over recorded engine pages in
+      # the rust tests (browser::live::tests); the live one is a manual run (docs/development.md, "Live search test").
 
       # The start-up benchmark (Paddock rule 16; startup_timings.rs): five everyday starts of the built app after a
       # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
@@ -756,15 +748,6 @@ jobs:
         with:
           name: startup-timings-${{ runner.os }}
           path: ${{ runner.temp }}/startup-timings.json
-          if-no-files-found: ignore
-
-      # The report and page screenshots, passed or not (a warning is worth a look too).
-      - name: Live search test report
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'macOS'
-        uses: actions/upload-artifact@v3
-        with:
-          name: live-search-${{ runner.os }}
-          path: ${{ runner.temp }}/live-search
           if-no-files-found: ignore
 
       # Unlink the shared node_modules (rmdir on a junction removes the link only, never the target's files).

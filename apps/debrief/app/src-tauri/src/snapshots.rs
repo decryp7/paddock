@@ -763,12 +763,7 @@ mod tests {
     use crate::test_support::Now as _;
 
     fn temp(tag: &str) -> PathBuf {
-        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let d = std::env::temp_dir().join(format!("debrief-snap-{tag}-{}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        crate::test_support::scratch_dir(&format!("snap-{tag}"))
     }
 
     const PNG: [u8; 12] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4];
@@ -1266,7 +1261,7 @@ mod tests {
             .starts_with("data:image/png;base64,"));
         let bad = save_snapshot(&handle, "main", "AAAA".into(), "image/png".into(), ctx("bad"));
         assert!(bad.is_err());
-        let out = std::env::temp_dir().join(format!("debrief-snap-cmd-{}.zip", std::process::id()));
+        let out = temp("cmd").join("out.zip");
         let grants = || crate::paths::WindowGrants::of(&handle, "main");
         let refused = export_diagnostics(handle.clone(), grants(), out.to_string_lossy().into(), vec![], None).now();
         assert!(refused.unwrap_err().contains("only writes where you choose"));
