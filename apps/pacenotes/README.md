@@ -11,7 +11,7 @@ your local AI the same view over MCP. Everything runs on your machine.
 
 </div>
 
-![Pacenotes: Understand your code, locally](docs/images/pacenotes-hero.svg?v=6ec0fe1d)
+![Pacenotes: Understand your code, locally](docs/images/pacenotes-hero.svg?v=5cfa4726)
 
 
 > **Status: in design; implementation starts after Debrief's release.** There is no product code in this repository.
@@ -19,9 +19,9 @@ your local AI the same view over MCP. Everything runs on your machine.
 
 ## What it will do
 
-![Pacenotes features](docs/images/pacenotes-features.svg?v=240701bb)
+![Pacenotes features](docs/images/pacenotes-features.svg?v=014a8905)
 
-![How Pacenotes works](docs/images/pacenotes-how-it-works.svg?v=57d376de)
+![How Pacenotes works](docs/images/pacenotes-how-it-works.svg?v=083b177c)
 
 ## Understand a new codebase, in any language
 

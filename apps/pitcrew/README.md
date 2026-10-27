@@ -13,7 +13,7 @@ updates it between jobs, so the builds keep running.
 
 </div>
 
-![Pitcrew: Keep every CI runner running](docs/images/pitcrew-hero.svg?v=4ea08cb0)
+![Pitcrew: Keep every CI runner running](docs/images/pitcrew-hero.svg?v=a3c711ad)
 
 
 > **Status: v1.0.2.** Supervisor, watchdog, safe updates with roll-back, housekeeping, insights, disk guard, pause
@@ -50,9 +50,9 @@ going on, and adds what the scripts lack:
 
 ## Key features
 
-![Pitcrew features](docs/images/pitcrew-features.svg?v=4b2f3e4d)
+![Pitcrew features](docs/images/pitcrew-features.svg?v=7242a492)
 
-![How Pitcrew works](docs/images/pitcrew-how-it-works.svg?v=20df3ec7)
+![How Pitcrew works](docs/images/pitcrew-how-it-works.svg?v=e25fe44d)
 
 Every feature, with screenshots, is in [docs/features.md](docs/features.md).
 
