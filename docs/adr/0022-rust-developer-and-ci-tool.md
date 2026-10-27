@@ -1,348 +1,378 @@
-# 22. One Rust developer and CI tool (`paddock-dev`) on shared repository crates, after the CI kit consolidation
+# 22. All tooling in Rust: one developer and CI tool (`paddock-dev`) on shared repository crates, after the CI kit consolidation
 
-- Status: Proposed (2026-10-27)
+- Status: Proposed (2026-10-27). Direction decided by the user on 2026-10-27: everything in Rust (option C below), after
+  the consolidation WP-C1 to WP-C6, with conformance as a shared Rust rules crate; only the categories shown to lose
+  something real stay non-Rust, each with its reason. This text awaits a re-review before acceptance.
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 13
-  (bounded parallelism), rule 23 (ad-hoc sealing), rule 40 (recurring bugs mean a missing design rule), rules 42/43
-  (share first, shared behaviour tested once); ADR 0014 §6–§7 (affected CI, no task runner), ADR 0021 (portable tests,
-  C38, counted waivers); Pacenotes ADR 0001 and `apps/pacenotes/docs/proposal.md` §14, §9.7, §23, §24
-- Evidence: the research note *Nx, Turborepo or our own scripts* (`docs/research/2026-10-nx-vs-scripts.md`, branch
-  `docs/research-nx`, §1, §5, §6, §9); the inventory and measurements in
-  [research note 2026-10 Rust tooling inventory](../research/2026-10-rust-tooling-inventory.md) (every script, per file);
-  `origin/main` at `932b1728b`
+  (bounded parallelism), rule 22 (independent review of images), rule 23 (ad-hoc sealing), rule 40 (recurring bugs mean
+  a missing design rule), rules 42/43 (share first, shared behaviour tested once); ADR 0009 (declared contracts), ADR 0014
+  §1, §6–§7 (no root workspace, affected CI, no task runner); ADR 0021 (portable tests, counted waivers);
+  `apps/pacenotes/docs/proposal.md` §9.7, §14, §23, §24
+- Evidence: [research note: Nx, Turborepo or our own scripts](../research/2026-10-nx-vs-scripts.md) (§1, §4–§6, §9);
+  [research note: Rust tooling inventory and measurements](../research/2026-10-rust-tooling-inventory.md) (every script,
+  per file; method; timings); `origin/main` at `1f40b4efe`
 
 ## Context
 
-The user decided on 2026-10-27: first consolidate the apps onto the shared CI kit (WP-C1 to WP-C6 of the research note,
-in progress), then move the build and CI scripts to a Rust implementation **where it pays off**. The user then asked two
-follow-up questions that this ADR answers too: can **all** scripts be Rust, and what does each option do to **CI speed**.
-Parts of the tooling should also be reusable by Pacenotes (dependency graph, rules engine over a repository).
+The user decided on 2026-10-27 to consolidate the apps onto the shared CI kit first (WP-C1 to WP-C6 of the research
+note; WP-C1 Pitcrew is on `ci/consolidate-pitcrew`) and then to move the build, CI and developer scripts to Rust. After a
+first draft of this ADR (which recommended porting only where it pays), the user chose **all Rust**: the kit's scripts,
+the conformance checks, the icon, diagram and poster generators and the npm glue. Only what the comparison below shows
+to be genuinely lossy stays in JavaScript or TypeScript.
 
-What the research note found, and what still holds after the consolidation:
+### Why, stated honestly
 
-- About 21,200 non-test lines of CI and build tooling; a task runner would replace only the 6% that is affected
-  detection. The rest is release, signing, bundle verification, sidecars, conformance, OS-specific runner set-up and
-  app checks. The consolidation deletes about 4,900 lines of copies.
-- Of the 111 `fix:`/`ci:` commits on tooling paths since 2026-10-13, **none** fixed a wrong selection in `affected.mjs`.
-  They were OS specifics (33), signing and bundles (31), test portability (22), sccache and build folders (19), the
-  browser (11), secrets (5) and lints (5). Re-counted for this ADR: 110 distinct subjects (the imported histories repeat
-  some commits), with the same shape.
+The case does **not** rest on a fix-density claim. Recounted for this ADR (method in the inventory note): between
+2026-10-13 and 2026-10-27 there were **30 distinct `fix:` commits with a tooling scope** (`ci`, `build`, `scripts`,
+`macos`, `publish`, `conformance`, `release`, `notices`) that touched tooling files or workflows. `ci:` commits (mostly
+creation and set-up of the kit) and `fix(ui|app|dialogs|icons|…)` commits that only touched a script on the way are
+left out. This is the one denominator used below. By defect area:
 
-Why a Rust tool is on the table at all: the failures cluster in **bash inside YAML and shell scripts that branch per OS**
-(Git Bash on Windows with `cygpath`, `cmd //c mklink //J`, `powershell Expand-Archive`; `sha256sum` versus `shasum`;
-`codesign`/`hdiutil`/`xattr` on macOS). That code has no unit tests that run on all three systems: the composite actions
-(22 files, 334 lines of inline shell) have **no tests at all** and took 36 fix commits; `ci.yml`'s 48 inline `run:`
-blocks took 40. Rust code in `crates/` is built, linted (including `cargo xwin clippy` for Windows, ADR 0021) and tested on
-Linux, macOS and Windows by the existing crate legs, and the family already has the building blocks the scripts
-re-implement badly: `paddock-proc` (subprocesses with timeouts and output caps), `paddock-download` (hash while writing,
-retries), `paddock-archive` (safe unzip/untar), `paddock-env`, `paddock-cli` (exit codes, `--json`), `paddock-chromium`
-(the pinned test browser, screenshots) and `paddock-testkit` (`FakeRunner` for scripted OS commands, golden files,
-hermetic environment).
+| Defect area | `fix:` commits (of 30) | Examples |
+|---|---|---|
+| Release, signing, bundles, sidecars | 8 | unset signing secret overriding the ad-hoc identity; re-sign libduckdb; sidecars found through cargo, not `<app>/target` |
+| Runner set-up in composite actions (sccache, stable workspace, host paths) | 6 | stable workspace through a junction on Windows; `CARGO_TARGET_DIR` out of the sccache key |
+| Pinned downloads and the test browser | 5 | libduckdb fetched in Node "because Windows has no bash"; `tar` on Windows; retries |
+| Scaffolder, package publisher, notices | 4 | dev-dependency publish order; LF in embedded licences |
+| CI failures of app code and tests, fixed in workflows | 5 | races, Windows paths in tests, DNS in tests |
+| One-off scripts | 2 | a Windows runner retirement script under strict mode |
+
+The fortnight was atypical (the monorepo import), the counts are small, and 13 of the 30 are OS-specific. They do not
+prove that Rust would have prevented these defects. What they show is **where** the defects were: in per-OS branches of
+shell and JavaScript that no test runs on all three systems. The composite actions (22 files, 334 lines of inline shell)
+have no tests at all.
+
+The reasons for all-Rust are therefore:
+
+1. **Cross-OS consistency.** One implementation of each step, using `std`, `paddock-proc`, `paddock-archive` and
+   `paddock-download` instead of Git Bash, `cygpath`, `cmd //c mklink`, PowerShell, `sha256sum` versus `shasum` and
+   three libduckdb fetchers.
+2. **One language and toolchain.** Today the kit is JavaScript, bash, PowerShell, Python and shell in YAML. The family
+   is Rust-first, and rules, clippy presets, `cargo deny`, coverage gates and `cargo xwin clippy` (ADR 0021) apply to Rust
+   unchanged.
+3. **Types and tests on three OSes.** Rust in the repository is built, linted and tested on Linux, macOS and Windows.
+   OS commands can be scripted with `paddock-testkit::FakeRunner`, so for example the macOS bundle verification is
+   tested on every system.
+4. **Reuse by Pacenotes** (rule 42): project graph, repository walk and hashing, a `History` port, a rules engine and a
+   draw.io emitter (§6).
 
 ## 1. Inventory after consolidation
 
-Method (verified): every tracked tooling file under `scripts/`, `conformance/`, `tools/`, `ci-image/`, `diagrams/`,
-`icons/tools/`, `docs/images/src/`, `templates/repo/scripts/`, `.gitea/actions/*` and the apps' `scripts/`, `app/scripts/`
-and `docs/diagrams/src/`, excluding tests and fixtures. "fix:/ci:" counts distinct commit subjects since 2026-10-13 that
-touched the file (a commit that touched three files counts once per file). "OS refs" counts OS-specific tokens
-(`win32`, `darwin`, `codesign`, `hdiutil`, `cygpath`, `RUNNER_OS`, `.exe`, ...) as a proxy for per-OS branches. "Untested"
-means no test file names the script (a heuristic). Workflows (`.gitea/workflows/*.yml`) stay YAML and are counted apart.
+Method (verified, details in the inventory note): every tracked tooling file under `scripts/`, `conformance/`, `tools/`,
+`ci-image/`, `diagrams/`, `icons/tools/`, `docs/images/src/`, `templates/repo/scripts/`, `.gitea/actions/*` and the apps'
+`scripts/`, `app/scripts/` and `docs/diagrams/src/`, without tests and fixtures. Today: 309 files, 27,925 lines. After
+WP-C1–C6 (39 per-app copies, 2,770 lines, deleted): **270 files, 25,155 lines**. "fix:" is the number of the 30
+tooling `fix:` commits that touched the group (a commit can touch several groups). "OS refs" counts OS-specific tokens
+as a proxy for per-OS branches.
 
-| Class | Group | Files | Lines | fix:/ci: | OS refs | Untested lines |
+| Group | Files | Lines | fix: | OS refs | Phase | Target |
 |---|---|---|---|---|---|---|
-| **Rust, phase 1** | Release, signing, bundles, sidecars, verify (`conformance/release/*`, `conformance/ci/tauri-bundle.sh`, `conformance/src/sidecar`, Debrief `build-sidecars.mjs` and `scripts/macos/*`, Dyno `check-bundle.sh`, demo release and verify) | 15 | 1,267 | 19 | 141 | 148 |
-| | Runner set-up, pinned downloads, test browser (`conformance/ci/{build-env,build-folder,install-test-browser,pin-runtime,runtime-catalogue}`, three libduckdb fetchers, Spotter's browser pins, Debrief's two Python runtime updaters) | 12 | 1,089 | 11 | 92 | 296 |
-| | Planner, timings, coverage gate (`scripts/affected.mjs`, `conformance/ci/plan.mjs`, `scripts/ci-timings.mjs`, `scripts/coverage-gate.mjs`) | 4 | 1,003 | 7 | 0 | 355 |
-| **Rust, phase 2** | Host tools, smokes, verify-installed (`tools/*.sh`, `prune-build-folders.{sh,ps1}`, per-app `linux-*`/`macos-*` verify and container scripts, Debrief CI smokes, shell-demo smokes) | 24 | 1,555 | 6 | 162 | 785 |
-| | Notices, window weight, benches, plugin and font builds | 11 | 976 | 2 | 31 | 96 |
-| | Scaffolder and package publisher (`scripts/new-app.mjs`, `scripts/publish.mjs`) | 2 | 990 | 8 | 3 | 0 |
-| **Rust, phase 3** | Conformance engine and checks C03–C37 (`conformance/src/**`) | 43 | 2,534 | 8 | 44 | 759 |
-| | App checks that become rules (Debrief `check-{quarantine,smoke-dialogs,temp-leaks}`, `check-workflows.py`, Dyno `check-capabilities`, Pitwall `privacy-check.sh`) | 6 | 320 | 7 | 17 | 57 |
-| **Thin YAML** | Composite actions `.gitea/actions/*` (inline shell moves into the tool; 815 YAML lines, 334 of them shell) | 22 | 334 | 36 | 61 | all |
-| **Keep JS/TS** | Playwright screenshot and visual-QA suites (Debrief `screenshots/`, `visual-qa/`) | 5 | 720 | 9 | 6 | 720 |
-| | TypeScript type-checker analysis (`check-dialog-commands`, `dialog-commands-analysis`) | 2 | 633 | 4 | 8 | 0 |
-| | UI source lints (`lint-effects`, `lint-styles`; move into the ESLint preset) | 2 | 243 | 1 | 0 | 0 |
-| | npm lifecycle, Angular i18n, UI coverage glue (`build-info`, `whats-new`, `i18n/*`, Pitwall `tauri-before-build`, `ui-coverage-guard`) | 6 | 485 | 1 | 3 | 76 |
-| **Keep JS for now** | Icon pipeline `icons/tools/` (author time; `@resvg/resvg-js`, `playwright-core`) | 23 | 4,098 | 18 | 125 | 2,097 |
-| | Diagram and poster generators (`diagrams/tools/`, `docs/images/src/`, each app's `docs/diagrams/src/`) | 77 | 7,277 | 3 | 138 | 6,486 |
-| **Keep shell** | Bootstrap (`ci-image/*.sh`, `tools/bootstrap.sh`, `scripts/setup-dev.sh`, Pitwall/Pitcrew `*-bootstrap.sh`): runs before Rust exists | 7 | 485 | 1 | 90 | 373 |
-| | Thin wrappers around the draw.io CLI | 6 | 159 | 0 | 6 | 116 |
-| **Delete** | One-off migrations (`rename-to-debrief.mjs`, `rename-codebase-tool.mjs`, `windows-retire-legacy-runner.ps1`) | 3 | 491 | 3 | 16 | 491 |
-| *(gone before this ADR starts)* | Per-app copies deleted by WP-C1–C6 (release, bundle verify, commit-lint, export-diagrams, check-icons/index, sidecar/bundle/cleanup) | 39 | 2,765 | 36 | 202 | 445 |
+| Composite actions `.gitea/actions/*` (334 lines of inline shell) | 22 | 334 | 6 | 61 | 1 | one-line YAML calling the tool |
+| Runner set-up, pinned downloads, test browser (incl. three libduckdb fetchers, two Python runtime updaters) | 12 | 1,089 | 4 | 92 | 1–2 | `dev ci`, `dev fetch` |
+| Release, signing, bundles, sidecars, verify | 15 | 1,271 | 8 | 142 | 2 | `dev release` |
+| Planner, timings, coverage gate | 4 | 1,003 | 1 | 0 | 3 | `dev plan`, `dev ci` |
+| Host tools, smokes, verify-installed (sh, ps1) | 24 | 1,555 | 0 | 162 | 3 | `dev host` |
+| Notices, window weight, benches, plugin and font builds | 11 | 976 | 1 | 31 | 3 | `dev notices`, ... |
+| Scaffolder and package publisher | 2 | 990 | 4 | 3 | 3 | `dev new-app`, `dev packages` |
+| Conformance engine and checks C03–C37 | 43 | 2,545 | 2 | 45 | 4 | `paddock-repo-rules`, `dev check` |
+| App checks that become rules | 6 | 320 | 0 | 17 | 4 | rules |
+| Icon pipeline (`@resvg/resvg-js`, `playwright-core`) | 23 | 4,098 | 0 | 125 | 5 | `dev icons` (resvg, `paddock-chromium`) |
+| Diagram and poster generators | 77 | 7,277 | 1 | 138 | 5 | `paddock-drawio` + data files; `dev images` |
+| draw.io CLI wrappers (sh) | 6 | 159 | 0 | 6 | 5 | `dev diagrams export` |
+| npm lifecycle, i18n, UI coverage glue | 6 | 485 | 0 | 3 | 5 | `dev` commands called from `package.json` |
+| UI source lints (`lint-effects`, `lint-styles`) | 2 | 243 | 0 | 0 | 6 | **stay JS**: rules in the ESLint preset |
+| TypeScript type-checker analysis | 2 | 633 | 0 | 8 | 6 | **stays TS** until the dialog command contract is generated from Rust, then deleted |
+| Playwright screenshot and visual-QA suites | 5 | 720 | 0 | 6 | – | **stay TS** |
+| Bootstrap shell (`ci-image/*.sh`, `tools/bootstrap.sh`, `scripts/setup-dev.sh`, two app bootstraps) | 7 | 485 | 0 | 90 | 3 | **stays shell**, merged into one bootstrap per OS |
+| One-off migrations | 3 | 491 | 2 | 16 | 1 | deleted |
 
-**Totals after consolidation** (270 files, 25,140 lines; the 39 copies are gone):
+Duplicates the tool collapses (verified by reading): three libduckdb fetchers beside Debrief's Rust `xtask libduckdb`;
+four build-folder pruners; four Linux container runners; six verify-installed scripts; two test-browser installers and
+two pinners; two notices generators; two window-weight measurers. About 1,100 lines.
 
-| Decision | Files | Lines | fix:/ci: touches | Share of the fixes |
-|---|---|---|---|---|
-| Port to Rust (phases 1–3) | 117 | 9,734 | 68 | 55% |
-| Thin YAML (logic into the tool) | 22 | 334 shell | 36 | 29% |
-| Keep JS/TS (UI toolchain) | 15 | 2,081 | 15 | 12% |
-| Keep JS for now (author-time generators) | 100 | 11,375 | 21 | (design iterations, not tooling bugs) |
-| Keep shell (bootstrap, draw.io) | 13 | 644 | 1 | 1% |
-| Delete | 3 | 491 | 3 | 2% |
-
-The port set holds 84% of the tooling fix touches outside the author-time generators in 40% of the lines. The icon fixes
-are almost all visual design changes ("a warmer tile gradient", "no seams in the dark tile"), not tooling defects.
-
-Duplicates inside the port set that a single tool collapses (verified by reading): three libduckdb fetchers
-(`libduckdb.mjs`, `fetch-libduckdb.sh`, `libduckdb-env.sh`) beside Debrief's Rust `xtask libduckdb`; four build-folder
-pruners (`tools/prune-build-folders.{sh,ps1}`, Debrief `clean-build-dirs.ps1`, Dyno `ci-prune.sh`); four Linux container
-runners; six verify-installed scripts; two test-browser installers and two pinners; two notices generators; two
-window-weight measurers. About 1,100 lines.
+Workflows stay YAML. Their inline shell is in scope: with the definitions of §3.7, `.gitea/workflows/*` and
+`.gitea/actions/*` hold 392 `run:` blocks today, **31 longer than 10 non-comment lines and 21 that branch on the OS in
+shell**, mostly in the per-app workflows (Debrief 7 long and 4 branching, Dyno 3/4, Spotter 3/3, Pitcrew 3/2).
 
 ## 2. Options
 
-| | A. Keep the scripts (after consolidation) | **B. Port where it pays (recommended)** | C. Everything in Rust | D. Type the scripts (TypeScript run by Node 24's type stripping) |
+| | A. Keep the scripts | B. Port where it pays | **C. All Rust (decided)** | D. Type the scripts (TypeScript via Node 24 type stripping) |
 |---|---|---|---|---|
-| What moves | nothing | 9,734 lines (117 files) and the actions' inline shell | B plus 13,456 lines of UI glue and author-time generators | the 6,000 JS lines get types; shell stays |
-| Fixes it addresses | none | 104 of 123 tooling fix touches outside the generators (actions + port set) | B + 36 more (mostly design) | JS typos and shape errors only; none of the OS, signing or path fixes, which live in shell |
-| Tested on all three OS | no (shell in YAML is untested) | yes: crate legs on Linux, macOS, Windows plus `cargo xwin clippy` | yes | no |
-| Effort | 0 | about 23 agent-days in three phases, go/no-go after phase 1 | about 44 agent-days | about 4 agent-days |
-| Real losses | none | none found (§4) | Playwright's runner, traces and WebKit for the screenshot suites; the TypeScript type checker; ESLint integration (§4) | none |
-| Pacenotes reuse | none | `paddock-repo-graph`, `paddock-repo-rules` (§6) | same | none |
+| What moves | nothing | 9,734 lines (117 files) + actions | B + generators, npm glue, draw.io wrappers (12,019 more lines) | the JS gets types; shell stays |
+| Languages left in tooling | JS, bash, PowerShell, Python, YAML shell | Rust + JS generators and glue + bootstrap shell | Rust; TS only for the Playwright suites (and the TS analysis until replaced); ESLint rules; bootstrap shell | as A |
+| Tested on all three OSes | no | most | all but the bootstrap | no |
+| Effort | 0 | about 23 agent-days | **about 44 agent-days** in six phases | about 4 agent-days |
+| Real losses | none | none | none, if the three UI-toolchain categories stay (§4) | none |
+| Pacenotes reuse | none | graph, walk, history, rules | + the draw.io emitter | none |
 
-D is cheap but misses the point: the defects are in shell and per-OS branches, not in JavaScript types. A is the
-baseline the research note's job-level cache work (WP-A1) assumes; it stays valid if this ADR is rejected.
+D was rejected because the OS-specific code is in shell, which types do not reach. B and C share phases 1–4; C adds
+phase 5 (generators and glue) and phase 6 (the alternatives for the lossy categories).
 
-## 3. Decision (proposed)
+## 3. Decision
 
 ### 3.1 One tool, library crates underneath
 
-- **`paddock-dev`**, one binary with subcommands, built on `paddock-cli` conventions (`--json` writes one object, stable
-  exit codes, errors name the next step, progress on stderr). A root `.cargo/config.toml` alias makes it
-  `cargo dev <command>` from anywhere in the repository (`run --locked --quiet --manifest-path crates/paddock-dev/Cargo.toml --`),
-  which is the xtask pattern without a root workspace (ADR 0014 §1 forbids one).
-- Command groups, each replacing a set of scripts: `plan` (affected, explain, CI matrix, job-level last green when
-  WP-A1 lands), `ci` (`setup` = sccache configuration, stable workspace, build folder, build env, host tools, node caches;
-  `timings`, `coverage-gate`), `fetch <pin>` (every pinned, hash-checked download: sccache, libduckdb, Chrome for
-  Testing, runtimes; one pin file), `release` (`bundle`, `sidecars`, `verify-macos`, `self-test`, `latest-json`, `notes`,
+- **`paddock-dev`**, one binary with subcommands, following `paddock-cli` conventions (`--json` writes one object, stable
+  exit codes, errors name the next step, progress on stderr). Command groups: `plan`, `ci` (`setup`, `timings`,
+  `coverage-gate`), `fetch <pin>`, `release` (`bundle`, `sidecars`, `verify-macos`, `self-test`, `latest-json`, `notes`,
   `strip-keys`, `publish`), `host` (`prune`, `container`, `verify-installed`, `vm-smoke`, `cleanup`), `notices`,
-  `window-weight`, `new-app`, `packages publish`, and in phase 3 `check` (conformance).
-- **Library crates in `crates/`** for the parts with a second consumer (§6): `paddock-repo-graph` (projects, edges,
-  file-to-project mapping, affected closure, the walk and the `History` port) in phase 1, `paddock-repo-rules` (rule
-  trait, findings, waivers with expiry and counts, baseline, reports) in phase 3. CI-only logic (release, signing,
-  runner set-up, Gitea run records) stays in modules of `paddock-dev` until something else needs it.
-- **Reuse, not new code:** `paddock-proc` for every external command (timeouts, output caps, whole-tree kill, no console
-  window on Windows), `paddock-download` + `paddock-archive` for pinned downloads (they replace the curl/`sha256sum`/
-  `shasum`/`unzip`/`Expand-Archive` branches), `paddock-env`, `paddock-chromium` for the test browser, `paddock-plugin-package`
-  for SHA256SUMS-style checks, Debrief's `xtask libduckdb` (moved, its tests with it), `paddock-testkit` for tests.
+  `window-weight`, `new-app`, `packages`, `check` (conformance), `icons`, `diagrams`, `images`, `build-info`, `i18n`.
+- **Library crates in `crates/`** where a second consumer exists (§6): `paddock-repo-files` (bounded, `.gitignore`-aware
+  walk and hashing), `paddock-repo-graph` (projects, edges, file-to-project mapping, affected closure, the `History`
+  port), `paddock-repo-rules` (after a joint rules-model note with the Pacenotes design, §6), `paddock-drawio` (the
+  draw.io emitter and theme tokens). CI-only logic stays in modules of `paddock-dev`.
+- **Reuse, not new code:** `paddock-proc` for every external command (timeouts, output caps, tree kill, no console window
+  on Windows); `paddock-download` and `paddock-archive` for pinned downloads; **`paddock-runtime`'s TOML catalogues** for
+  every pin (Chrome for Testing, FFmpeg, llama.cpp, libduckdb, sccache), rewritten with `toml_edit` so comments survive;
+  `paddock-env`; `paddock-chromium` for the test browser and screenshots; `paddock-testkit` for tests. Debrief's `xtask
+  libduckdb` moves into `dev fetch`; `xtask gen-samples` stays in Debrief.
 
-### 3.2 Crate placement
+### 3.2 Placement and how developers run it
 
-`crates/paddock-dev` (`publish = false`) and the library crates are members of the `crates/` workspace. Measured: a cold
-release build of `paddock-cli` + `paddock-proc` + `paddock-env` with the workspace-hack takes 41 s with 2 jobs, so a
-separate tools workspace would save little (the path dependencies still pull the workspace-hack) and would lose the
-crate legs that test every member on three OSes for free, the 99% coverage gate and hakari's single feature set.
-Debrief's `xtask` keeps `gen-samples` (Debrief domain) and loses `libduckdb` to `cargo dev fetch libduckdb`.
+- **The binary has its own workspace, `tools/paddock-dev/`, with its own `Cargo.lock`.** A dependency change of the tool
+  then never touches `crates/Cargo.lock`, which the planner treats as an input of every crate. The libraries stay in
+  `crates/` (published, 99% coverage, hakari) and are path dependencies of the tool. The planner gets a `paddock-dev`
+  project with its own three-OS leg (fmt, clippy, xwin clippy, nextest).
+- **`./dev` and `dev.cmd` at the repository root** (about 40 lines each, part of the bootstrap that stays shell): they
+  find the repository root (`git rev-parse --show-toplevel`, `%~dp0`), compute the input hash (§3.3), run the cached binary
+  for that hash, otherwise download it, otherwise build it. They work from any subfolder. A `.cargo/config.toml` alias
+  is not used: its relative `--manifest-path` breaks in subfolders.
+- **First run per agent:** the binary cache is per user (`~/.paddock-dev/bin/<hash>/`), not per worktree, so a new agent
+  worktree downloads the binary for `main`'s hash in about 1–2 s. Only an agent that changes the tool builds it, in its
+  own `CARGO_TARGET_DIR` (measured cold release builds: 33 s for a probe with the tool's third-party dependencies, 41 s
+  for `paddock-cli` + `paddock-proc` + `paddock-env` with the workspace-hack, both with 2 jobs; seconds with a warm
+  sccache). With uncommitted changes in the tool's inputs, the wrappers always build.
 
-### 3.3 How CI gets the binary
+### 3.3 How CI gets the binary: content-addressed, written only by `main`
 
-Measured on the Mac mini (M4 Pro, `CARGO_BUILD_JOBS=2`, synthetic probe crate with the dependencies the tool needs:
-serde, toml, regex, ignore, rayon, sha2, ureq; through the machine semaphore):
+- **Input hash.** SHA-256 over `tools/paddock-dev/Cargo.lock` (the tool's own lockfile, so exactly its resolved closure
+  with registry checksums), the git tree ids of the tool's path dependencies (listed in `tools/paddock-dev/inputs.txt`; a
+  test compares the list with `cargo metadata`'s resolve graph, so a new path dependency cannot be missed), the tool's
+  `Cargo.toml`, the `.cargo/config.toml` files on its path, `rust-toolchain.toml`, the output of `rustc -Vv`, and the
+  target triple. Not the whole of `crates/Cargo.lock`. `git rev-parse HEAD:<dir>` takes 16 ms (measured).
+- **Publishing.** A push to `main` that changes the inputs runs `dev-tool.yml`: it builds the tool for
+  `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` in a fresh
+  target folder with `RUSTC_WRAPPER` unset, then uploads `paddock-dev-<target>[.exe]` and its `.sha256` to the Gitea
+  generic package `paddock-dev`, version `<hash>`. Only that workflow has the write token (`DEV_TOOL_PUBLISH_TOKEN`,
+  `write:package`). Gitea refuses a second upload of the same file name to a package version (read, Gitea generic
+  registry documentation), so a version, once written, stays.
+- **Using it.** Every job runs `./dev ...`. The wrapper computes the hash and uses `~/.paddock-ci/bin/<hash>/` if present
+  (host runners). Otherwise it downloads the package version for the hash with the job's read token and checks the
+  `.sha256`. On a miss (a branch that changes the tool), it builds from source; sccache is allowed for that. Host runners
+  copy the binary to `~/.paddock-ci/bin/<hash>/` with a write-then-rename and run the copy: Windows cannot replace a
+  running `.exe`, and parallel jobs share the folder.
+- **Release and tag jobs never download.** They build the tool in a fresh target folder with `RUSTC_WRAPPER` unset, so
+  neither the package store nor the shared sccache backend (Redis, writable by every job) can reach a signed artifact.
+- **Fresh containers** that build on a miss also fetch the tool's crates. On this Mac, a cold `cargo fetch` of the
+  probe's 82 crates into an empty `CARGO_HOME` took about 1 s (sparse index). The container network was not measured;
+  allow 2–10 s.
 
-| | Cold release | Cold debug | sccache warm, after `cargo clean` | Up to date | Binary |
-|---|---|---|---|---|---|
-| Probe tool | 33 s | 17 s | 5 s | 0.06 s | 2.9 MB |
-| `paddock-cli` + `proc` + `env` with workspace-hack | 41 s | 24 s | not measured | | |
-
-| Option | Per job | Skew between tool source and binary | Verdict |
-|---|---|---|---|
-| (a) Prebuilt in the CI image | 0 s | the image is rebuilt rarely; a tool change in a PR would run the old binary | only with a hash check |
-| (b) `cargo dev` from source in every job | Linux containers: about 10 s warm sccache, about 60 s cold (estimate from the table: tool plus workspace-hack); host runners with a persistent target folder: 0.06 s when unchanged | none | too slow alone on Linux (about 7.5 executed jobs per run, research §4: +1 to +7 min of runner time per run) |
-| (c) A tagged release artifact, downloaded and hash-checked | 1–2 s | a tool change needs a release before use | slows tool development; no |
-| **(d) Hybrid (recommended)** | Linux: the image's binary when its embedded input hash equals the tree's, else build (sccache); host runners: persistent `~/.paddock-ci/dev-target`, `cargo build --locked` (0.06 s no-op); tag and release jobs always build from source | none: the hash covers the tool's crate closure and `Cargo.lock` | yes |
-
-The input hash is the list of git tree ids of the tool's path-dependency closure plus `Cargo.lock`'s blob id; `git
-rev-parse HEAD:<dir>` takes 16 ms. A test checks the list against `cargo metadata`, so a new dependency cannot be missed.
-The image build (`ci-image.yml`) builds the tool in a builder stage and embeds the hash; the planner marks `ci-image` affected
-when the tool's inputs change. The binary never comes from the `actions/cache` server, which every job can write
-(research §7, the CREEP pattern): a poisoned tool binary would run in release jobs with signing secrets.
+**Trust model.** The tool runs in jobs that hold secrets, so whoever can write a binary under a hash can act with those
+secrets. Writers: only `dev-tool.yml` on a push to `main`, the only workflow given the publish token. Gitea passes no
+secrets to workflows from forks (read, not verified on our instance). Gitea does not scope a secret to one workflow (read,
+unverified), so any workflow on a push to this repository could read the token. The real boundary is therefore "who may
+push workflows to this repository" (the user and the agents), the same boundary that protects the signing secrets today.
+Content addressing ensures a binary is only ever used for the inputs it was built from. The `.sha256` file catches
+transport errors, not a malicious writer. The `actions/cache` server and the sccache Redis backend are writable by every
+job and are never trusted for the tool or for release builds (research note §7).
 
 ### 3.4 Windows and macOS host runners
 
-Host runners are persistent, so the tool builds once per tool change (about 40–60 s, then 0.06 s checks). The shell
-that YAML steps start stays Git Bash on Windows, but the step is one line (`cargo dev ci setup ...`); the junction,
-path conversion, zip extraction and hashing happen in Rust (`std::os::windows`, `junction` crate, `paddock-archive`,
-`sha2`), not through `cygpath`, `cmd //c mklink` and PowerShell. Rust is a prerequisite on every runner already (the
-crate legs). The bootstrap that installs Rust (`tools/bootstrap.sh`, `ci-image/fetch-verified.sh`, the toolchain step of
-`setup-rust`) stays shell, about 600 lines.
+The YAML step stays a Git Bash one-liner (`./dev ci setup …`). The junction, path conversion, extraction and hashing
+happen in Rust (`std::os::windows`, the `junction` crate, `paddock-archive`, `sha2`), not in `cygpath`, `cmd //c mklink`
+or PowerShell. The host bootstrap (Rust, Git, Visual Studio build tools, Node for the UI) stays shell, merged into one
+`tools/bootstrap.{sh,ps1}` per OS in phase 3.
 
-### 3.5 Speed (measured, then estimated)
+### 3.5 Speed
 
-| Measurement (this Mac, warm file cache) | Today | Rust |
+Measured on the Mac mini (M4 Pro, warm file cache, inventory note):
+
+| What | Today | Rust |
 |---|---|---|
-| Process start (`node -e 0` / Rust binary / `bash -c true`) | 32 ms | 10 ms (bash 9 ms) |
-| `affected.mjs` on 1, 20 and 200 commits | 0.36–0.37 s (15 serial `cargo metadata` calls of about 31 ms each, plus git) | est. 0.1 s (the calls in parallel) |
-| Conformance, CI subset of 12 checks | 2.9 s (C36 alone 2.0 s, C30 1.1 s) | est. 0.2–0.4 s; C36 is an O(files × crates) owner lookup, so an index fix in JS would also bring it near 0.5 s |
-| Scan of 2,691 `.rs` files: read, regex, SHA-256 | Node, one thread: 0.12 s | rayon: 0.09 s (I/O-bound) |
-| Conformance tests | 240 tests, 1.8 s | comparable |
+| Process start | `node -e 0` 32 ms | 10 ms (`bash -c true` 9 ms) |
+| `affected.mjs`, 1 to 200 commits | 0.36–0.37 s: 15 serial `cargo metadata --no-deps` calls (23–32 ms each, including the timing wrapper, so about 20 ms) ≈ 0.3 s, plus git | est. 0.05–0.1 s with the calls in parallel |
+| Conformance, CI subset (12 checks) | 2.9 s (C36 2.0 s, an O(files × crates) owner lookup; C30 1.1 s) | est. 0.2–0.4 s; an index in JS would also bring C36 down |
+| Read, regex and SHA-256 of 2,691 `.rs` files | Node, one thread, 0.12 s | rayon 0.09 s (I/O-bound) |
 
-From the 142 CI runs the research recorded (1,070 executed jobs, step timings): the tooling steps themselves are short.
-Plan steps 0.3 s, release facts 0.2 s, `.app`/DMG verification 0.5–1.0 s, publish dry run 7.8 s, the conformance job
-7.5 s in total. Node set-up is not a tooling cost: the conformance, plan and tools jobs run no `npm ci` (conformance has no
-dependencies; Node is in the CI image); `setup-node` plus install in the tools job averaged 1.5 s per run. The only
-tooling-only `npm ci` is the icons job (5 runs, 3–15 s per install in the saved logs). The slow tooling step,
-"Third-party notices are up to date" (113 s), is `cargo` resolving licences, not Node.
+In CI (142 recorded runs, 1,070 executed jobs) the tooling steps are short: plan 0.3 s, release facts 0.2 s, `.app`/DMG
+verification 0.5–1.0 s, publish dry run 7.8 s, the conformance job 7.5 s. Plan, conformance and tools jobs run no `npm
+ci` (Node is in the image). The 113 s "notices are up to date" step is cargo resolving licences.
 
-**Net per CI run** (about 7.5 executed jobs, 23 runner minutes on average):
-
-| Option | Tool unchanged | Tool changed in the push |
-|---|---|---|
-| (a) image only | −3 to −4 s (conformance and planner) | wrong results (old binary): rejected |
-| (b) build from source everywhere | +1 min warm / +7 min cold | same |
-| (c) release artifact | +10 s (downloads) | needs a release first |
-| **(d) hybrid** | **−3 to −4 s** | +10 s per Linux job that needs the tool until the image is rebuilt, +40–60 s once per host runner |
-
-**Speed is not a reason to port.** It is roughly neutral with (d) and clearly negative with (b). The case rests on
-the fix history (§1) and on tests that run on all three OSes.
+**Net per CI run** (about 7.5 executed jobs): the tool saves about 3–4 s (planner, conformance) and costs a download of
+about 3 MB, 1–2 s, per Linux container job that uses it. Host runners pay nothing after their first copy. Net about +2
+to +10 s per run, plus one build per runner type when the tool changes. **Speed is neutral; it is not a reason for this
+decision.**
 
 ### 3.6 Testing
 
-- **Pure core, thin edges.** Every command splits into a plan (pure: inputs to a list of actions or a result) and an
-  executor (runs the actions through `paddock-proc`). Plans are unit-tested on every OS; OS commands (`codesign`,
-  `hdiutil`, `xattr`, `lipo`, `otool`, `mklink`, `launchctl`) are scripted with `paddock-testkit::FakeRunner`, so the
-  macOS bundle verification is tested on Linux and Windows too.
-- **Golden tests from today's scripts.** Before a script is deleted, its outputs on fixture inputs are recorded as golden
-  files (`paddock_testkit::golden`): `affected.mjs --ci` on the research replay's cases (identical tree, one red job, a
-  CI-only change) and on synthetic diffs, `latest-json.mjs` (already "byte-equal to the apps' copies"), notices, release
-  notes, conformance findings as JSON per check against `conformance/fixtures` and the existing 240 tests' inputs. The
-  Rust port must reproduce them byte for byte; differences are reviewed, not accepted silently.
-- **Replay fixtures.** The research tool's run and job records (`/Volumes/d7sst7/dev-targets/research-nx-tools/`,
-  reduced to synthetic ids and paths) become planner fixtures, so job-level last green is tested on recorded shapes.
-- **Real-OS checks** stay where they are today: the macOS `verify` and `self-test` steps run on the built app in CI;
-  `--self-test` of every sidecar from the built app (rule 23). Tests never touch the user's machine (rule 7): host
-  commands get a dry-run mode and scratch roots.
-- Coverage: 99% lines for the library crates and for `paddock-dev`'s plan modules; executors are covered by the CI
-  steps that use them.
+- **Pure core, thin edges.** Each command is a plan (pure: inputs to actions or a result) and an executor (runs the
+  actions through `paddock-proc`). Plans are unit-tested on every OS. OS commands (`codesign`, `hdiutil`, `xattr`, `lipo`,
+  `otool`, `mklink`, `launchctl`) are scripted with `FakeRunner`.
+- **Golden files from today's scripts.** Before a script is deleted, its outputs on fixture inputs become golden files
+  (`paddock_testkit::golden`): the planner on the research replay's cases (an identical tree, a red run with one failed
+  job, a CI-only change) and on synthetic diffs; `latest.json`; notices; release notes; conformance findings per check, as
+  JSON, on `conformance/fixtures` and on the inputs of the 240 existing tests; icon PNGs and `.icns`/`.ico` bytes;
+  draw.io XML after canonicalisation. The port must reproduce them exactly; any difference is reviewed, never accepted
+  silently.
+- **Shadow week** for the planner, release, `latest.json` and conformance: on `main` the old and the new run side by
+  side and a step compares their JSON; a difference is a warning with both outputs. Release commands also get a
+  `workflow_dispatch` dry run of `app-release.yml` per app before the switch.
+- **Real-OS checks** stay: macOS verification and `--self-test` of every sidecar from the built app (rule 23). Host
+  commands have a dry-run mode and scratch roots (rule 7).
+- Coverage 99% lines for the library crates and the tool's plan modules.
 
-### 3.7 Coexistence and migration order
+### 3.7 Coexistence, and the check that keeps the class closed (rule 40)
 
-- **One command at a time.** A script is replaced by its command in one PR: the command, its golden tests, the call
-  sites (YAML, `paddock.ci.json`, docs), and the deletion of the script and its JS tests. No long-lived dual paths.
-- **Shadow run for the risky ones** (planner, release, `latest.json`, conformance): for one week the old and the new run
-  side by side on `main` and a step compares their JSON; a difference is a warning with both outputs. Then the old one is
-  deleted. Release commands are additionally dry-run with `workflow_dispatch` of `app-release.yml` before the switch.
-- **Order:** by fix count per line and OS branching, highest first: (1) the composite actions' setup logic (`setup-rust`'s
-  sccache part had 9 fixes, `stable-workspace` 5, `sccache-stats` 3), (2) release, bundle, sidecar and verify, (3) pinned
-  downloads and the test browser, (4) the planner (after WP-A1 lands in JS, so the job-level base is ported with its
-  fixtures, not designed twice), (5) host tools and smokes, (6) notices, window weight, scaffolder, publisher, (7)
-  conformance as `paddock-repo-rules`.
-- **Rule 40 check (C39, the next free id):** once phase 1 is done, conformance fails when a new `.sh`, `.ps1`, `.py` or
-  `.mjs` appears under the kit paths (`scripts/`, `conformance/ci/`, `conformance/release/`, `.gitea/actions/`, `tools/`,
-  `apps/*/scripts/`) outside an allow-list (bootstrap, draw.io wrappers, the kept UI glue), and when a workflow `run:`
-  block exceeds 10 lines or branches on the OS. Counted waivers as in ADR 0021.
+- **One command at a time.** A PR adds the command and its golden tests, switches the call sites (YAML,
+  `paddock.ci.json`, `package.json`, docs) and deletes the script and its tests. No long-lived dual paths, except the shadow
+  week.
+- **Extend the WP-C6 check, do not add a new one.** WP-C6 adds a conformance check that fails when an app re-adds a copy
+  of a kit script. This ADR extends it, from the start of phase 1:
+  - (a) no new `.sh`, `.ps1`, `.py`, `.mjs`, `.js` or `.ts` tooling file in the tooling paths of §1, outside an
+    allow-list (the bootstrap, the `dev` wrappers, the Playwright suites, the ESLint preset);
+  - (b) a counted baseline of today's tooling files that may only shrink: each phase removes its entries;
+  - (c) counted baselines of the 31 long and 21 OS-branching `run:` blocks that may only fall.
 
-## 4. Everything in Rust?
+  A block is **long** at more than 10 non-comment lines. It **branches on the OS** when its shell tests `RUNNER_OS`,
+  `runner.os`, `OSTYPE` or `uname`, or calls `cygpath`. A step-level `if: runner.os == '…'` is declarative and exempt.
+  Counted waivers as in ADR 0021.
 
-Asked by the user. Category by category, what Rust would cost or lose:
+## 4. What stays non-Rust, and why
 
-| Category (lines) | Rust alternative | Cost | Loss | Verdict |
-|---|---|---|---|---|
-| Kit, CI, release, host scripts (6,880) | the tool | in B | none | port (B) |
-| Conformance engine and checks, app checks (2,854) | `paddock-repo-rules`; checks are regex and file scans, a 1:1 port; `toml` replaces the hand-written waiver parser | 4–5 days; 240 tests become golden fixtures | none; a gain: one rules engine with Pacenotes (§6) | port in phase 3 (B) |
-| Playwright screenshot and visual-QA suites (720) | `paddock-chromium` has `Page.captureScreenshot` and a small synchronous DevTools client | 3–4 days to write locators, auto-waiting, retries and a reporter | Playwright's test runner, trace viewer, auto-wait, and **WebKit** (the suites check Chromium and WebKit; `paddock-chromium` drives Chromium only) | keep TS: it is UI test code, like the Vitest specs |
-| TypeScript type-checker analysis (633) | `oxc` parses TypeScript but has no type checker; no Rust TypeScript type checker is maintained (the native TypeScript compiler is Go) | 2 days for a name-based approximation | precision (types of the dialog command calls) | keep; better: generate the dialog command contract from Rust (ADR 0009's declared contracts) and drop the analysis |
-| UI source lints (243) | oxlint (custom rules need a fork or its JS plugin API) | 1 day | integration with the ESLint preset the apps already run | keep, as ESLint rules in `eslint/` |
-| npm lifecycle and i18n glue (485) | `cargo dev` called from `package.json` scripts | 1 day | every `npm start` first needs the tool built (40–60 s once per checkout); `ng extract-i18n` stays Angular's | keep; no defects to fix (1 fix) |
-| Icon pipeline (4,098) | `resvg` crate (`@resvg/resvg-js` is its binding), `png`, hand-written `.icns`/`.ico` (the JS already writes them by hand), preview sheets with `paddock-chromium` | 4–5 days | design iteration speed (a cargo build per change instead of a 30 ms Node start); nothing functional | feasible without real loss; not now (no tooling defects) |
-| Diagram and poster generators (7,277) | `drawio` XML emitter in Rust (Pacenotes plans `pacenotes-diagram`, §9.7, with these scripts as the oracle); posters: HTML templates and `paddock-chromium` screenshots | 6–8 days | none, once the emitter exists | move when Pacenotes' emitter lands: the per-app generators are mostly data and become input files |
+| Category (lines) | Rust alternative | What would be lost | Decision |
+|---|---|---|---|
+| Playwright screenshot and visual-QA suites (720) | `paddock-chromium` (`Page.captureScreenshot`, a small synchronous DevTools client) | Playwright's runner, locators and auto-waiting, the trace viewer, and **WebKit**: the suites run in Chromium and WebKit, `paddock-chromium` drives Chromium only | stay TS; they are UI test code, like the Vitest specs |
+| TypeScript type-checker analysis of dialog commands (633) | none: `oxc` parses TypeScript but has no type checker, and the native TypeScript compiler is written in Go | the types of the calls; a name-based approximation would miss cases | stays until the dialog command contract is **generated from Rust** (ts-rs is already in the family; ADR 0009's declared contracts). Then the analysis is deleted, not ported (phase 6) |
+| UI source lints (243) | oxlint (custom rules need its JS plugin API or a fork) | integration with the ESLint preset every app runs | become rules in `eslint/` (JavaScript by the nature of ESLint) |
+| Bootstrap (about 570 with the wrappers) | none: it installs Rust | n/a | shell, one script per OS |
 
-All-Rust in total: about 13,456 more lines (about 15,000 Rust lines), about 21 agent-days on top of B (15 of them for the parts without loss), about 44
-agent-days in all. **Feasible without real loss for everything except three UI-toolchain categories (about 1,600 lines):
-the Playwright suites, the type-checker analysis and the ESLint-style lints.** Those belong to the Angular app's own
-toolchain, like its unit tests; porting them would replace mature tools with weaker home-made ones. Recommendation:
-B now; the generators follow Pacenotes' emitter (diagrams) or a later icon refresh (icons) if the user wants a JS-free
-kit; the three UI categories stay JS/TS.
+Everything else moves without real loss. For the icon pipeline, `@resvg/resvg-js` is a binding of the Rust `resvg`, the
+`.icns`/`.ico` writers are hand-written already, and previews use `paddock-chromium`. The cost is design iteration speed
+(a cargo build instead of a 30 ms Node start). The diagram generators are mostly data and become input files for
+`paddock-drawio`. The npm glue becomes `./dev` calls from `package.json`.
 
 ## 5. Risks
 
 | Risk | Mitigation |
 |---|---|
-| A port changes behaviour silently (release, `latest.json`, planner) | golden files from the old script; one-week shadow runs with a JSON comparison; release dry runs before the switch |
-| Tool build time on cold runners | the hybrid delivery (§3.3); the binary never from the writable cache |
-| Bootstrap loop (the tool needs Rust and sccache that the setup configures) | the toolchain step stays shell; the tool builds without sccache on a miss; on Linux the image carries it |
-| Contributors must read Rust to change CI | the family is Rust-first; commands are small modules with a plan/executor split and golden tests; YAML stays as the readable surface |
-| The port stalls half-way, leaving two systems | phases end in deletions; go/no-go after phase 1 on a measured fix rate (§7) |
-| Scope creep into a build system | the tool runs steps and checks; it never replaces cargo, npm, ng or nextest, and has no cache of its own (research §7–§8) |
-| The `crates/` workspace grows and its legs run more often | the tool's crates are small; job-level last green (WP-A1) skips legs whose inputs did not change |
+| A port changes behaviour silently | golden files from the old script; shadow week; release dry runs |
+| The binary in the package store is wrong or malicious | content-addressed by inputs; only `main` writes; releases build from source without shared caches (§3.3) |
+| A tool change costs a build per runner type | own workspace and lockfile; sccache on non-release misses; host copies by hash |
+| Contributors must change CI in Rust | small commands with a plan/executor split and golden tests; YAML stays the readable surface |
+| The generators lose quick iteration | `cargo` incremental builds of one small crate take seconds; data files for diagrams need no build |
+| The project stalls half-way, with two systems | each phase ends in deletions; per-phase acceptance and a checkpoint (§7) |
+| Scope creep into a build system | the tool runs steps and checks; it never replaces cargo, npm, ng or nextest and has no result cache |
+| `crates/` legs run more often | the tool has its own workspace; job-level last green (WP-A1) skips unchanged legs |
 
 ## 6. Reuse by Pacenotes (rule 42)
 
-Pacenotes (proposal §14) plans `pacenotes-index` (walk, ignore, hashing), `pacenotes-git` (gix behind a `History` port),
-`pacenotes-rules` (rules, suppressions, SARIF), `pacenotes-review` (findings, baselines, exit codes) and a dependency
-graph from repositories down to symbols (§23), plus `pacenotes-diagram` (§9.7). The overlaps:
+Pacenotes plans `pacenotes-index` (walk, ignore, hashing, secret denylist), `pacenotes-git` (gix behind a `History`
+port), `pacenotes-rules`, `pacenotes-review`, a dependency graph from repositories down to symbols (proposal §23) and
+`pacenotes-diagram` (§9.7, with the Paddock tools as its oracle).
 
-| Piece | Today (JS) | Shared crate | Fits Pacenotes' design | CI-only parts |
+| Piece | Shared crate | Fits Pacenotes | Constraints | CI-only |
 |---|---|---|---|---|
-| Project graph: Cargo workspaces and path dependencies, npm workspaces, `tsconfig` paths, Tauri `frontendDist`, file-to-project mapping (longest prefix), reverse-dependency closure | `affected.mjs` `cargoGraph()`, `npmGraph()` | `paddock-repo-graph` | yes: §23's "repositories → packages and modules" level, edges with a source and confidence. Pacenotes cannot assume `cargo` is installed: the crate reads manifests with `toml`/`serde_json` and uses `cargo metadata` only as an optional precise adapter | GLOBAL/DOCS/DOC_INPUTS rules, `kinds`, nextest `packages`, the CI matrix: modules of `paddock-dev plan` |
-| Repository walk and hashing | `conformance/src/util/fs.mjs` `walk()` | in `paddock-repo-graph` (`walk`: `ignore` crate, `.gitignore`-aware, bounded, rayon, SHA-256 per file) | yes: `pacenotes-index` adds its secret denylist and workspace allow-list on top | none |
-| Git history | `git diff --name-only`, `git log` through `execFileSync` | a `History` port in `paddock-repo-graph` (changed files between revisions, log with subjects, file at revision) with a git CLI adapter over `paddock-proc` | yes: Pacenotes plugs its gix adapter into the same port | Gitea run and job records for last green: `paddock-dev` |
-| Rules engine: rule ids with sub-checks, findings with `file:line`, severity, fix in one sentence, waivers with reason, expiry and counts, baseline, reports (text, JSON, job summary) | `finding.mjs`, `waivers.mjs`, `report.mjs`, `runner.mjs`, C28 baseline | `paddock-repo-rules` (phase 3), with SARIF 2.1.0 output added | yes: §24's rule model (id, severity, scope globs, fix hint, examples as tests), suppressions with a reason and expiry, baselines by fingerprint, exit codes. Pacenotes adds tree-sitter pattern rules and Markdown rules as further `Rule` implementations (open/closed) | the family checks C03–C39 themselves |
-| draw.io emitter | `diagrams/tools/lib.mjs`, `uml.mjs`, `themes.mjs` | none yet; Pacenotes builds `pacenotes-diagram` first, with these scripts as its oracle | yes | none |
-| Gitea REST client | `publish.mjs`, `affected.mjs` (runs), `publish-release` | a module of `paddock-dev`; extract to a shared crate when Pacenotes' `pacenotes-gitea` starts (PR comments) | partly (auth, paging, errors) | releases, packages, run records |
+| Walk and hashing | `paddock-repo-files`: bounded walk with `ignore`, `.gitignore`-aware, rayon, SHA-256 | yes; `pacenotes-index` adds its denylist and allow-list on top | its own crate, so the graph and rules crates do not drag each other in | none |
+| Project graph: Cargo and npm workspaces, `tsconfig` paths, Tauri `frontendDist`, file to project, reverse closure | `paddock-repo-graph` | yes: §23's "repositories → packages and modules" level, edges with source and confidence | reads manifests with `toml`/`serde_json`. The `cargo metadata` adapter (exact, used by CI) **is never run inside Pacenotes**: Pacenotes opens hostile repositories and executes nothing from them (§14), and cargo reads the repository's `.cargo/config.toml` (which can name the `rustc` and wrapper programs) | GLOBAL/DOCS rules, `kinds`, nextest packages, the CI matrix: `dev plan` |
+| Git history | the `History` port in `paddock-repo-graph`: changed files between revisions, log with subjects, file at revision | yes: Pacenotes plugs in its gix adapter | the CI adapter runs `git` through `paddock-proc` | Gitea run and job records |
+| Rules engine | `paddock-repo-rules` | yes, once both models agree | **The models differ today.** Conformance has `error`/`warn`, findings with a one-sentence fix, path-glob waivers with reason and expiry (counted waivers from ADR 0021), and job summaries. Pacenotes §24 has severities `blocker`…`info`, scoped suppressions (line, file, path, rule) with reason and expiry, baselines by fingerprint (rule, path, normalised snippet hash), fix diffs, SARIF and exit codes 0/1/2/3. A **joint rules-model note**, written with the Pacenotes design before the crate (phase 4, first WP), fixes one model: a severity superset, a `Finding` with optional fix text and diff, `Suppression` with scope, reason, expiry and count, fingerprint baselines, report writers (text, JSON, SARIF 2.1.0, job summary) and the exit-code mapping | the family checks themselves |
+| draw.io emitter | `paddock-drawio` (model to canonical mxGraph XML, theme tokens from one source, UML/C4 shapes) | yes: `pacenotes-diagram` adds layout, round-trip merge and diffs on top | golden tests against today's `.mjs` output (the oracle §9.7 asked for) | the family's diagram data files |
+| Gitea REST client | a module of `paddock-dev` | partly (auth, paging, errors) | extracted when `pacenotes-gitea` (PR comments) starts | releases, packages, run records |
 
-## 7. Work packages
+## 7. Phases, work packages and acceptance
 
-Estimates are agent-days for an implementer (Sonnet) with a researcher or designer for the first package of each phase.
-"Deletes" is measured (lines of the scripts, actions' shell and their tests today); "adds" is estimated (Rust source
-about 1.2 times the JS it replaces after duplicates collapse, shell about 2 times; tests about 1:1).
+Phase 0 is the prerequisite and is not counted: WP-C1–C6 (consolidation) and WP-A1 (job-level last green, built in JS
+first and ported in phase 3 with its fixtures). Estimates are agent-days for an implementer, with a researcher or designer
+on the first package of each phase. "Deletes" is measured (scripts plus their tests); "adds" is estimated (Rust about 1.2
+times the JS it replaces after duplicates collapse, shell about 2 times; tests about 1:1).
 
-| WP | Content | Agent-days | Deletes (measured) | Adds (estimated) |
-|---|---|---|---|---|
-| **Phase 1** (after WP-C1–C6) | | | | |
-| R0 | Skeleton: `crates/paddock-dev` (commands, `paddock-cli` conventions, plan/executor split), `paddock-repo-graph` with walk and the `History` port, the `cargo dev` alias, the hybrid delivery (image builder stage, input hash, host target folder), docs | 2 | 0 | 900 + 600 tests |
-| R1 | Composite actions' logic: sccache configuration, stable workspace, build folder, build env, host tools, host cleanup, node caches, sccache stats; the actions become one-line calls | 2 | 334 shell lines (actions shrink from 815 to about 300 YAML lines) | 900 + 800 tests |
-| R2 | Release, bundles, sidecars, verify: `tauri-bundle`, `sidecars`, `verify-macos` (with `FakeRunner` tests on all OSes), `self-test`, `latest-json`, `notes`, `strip-keys`, `publish`, Debrief's `build-sidecars`, macOS dev-signing, Dyno `check-bundle`, demo release and verify | 3 | 1,267 + about 900 test lines | 1,600 + 1,200 tests |
-| R3 | Pinned downloads and the test browser: one pin file, `fetch` on `paddock-download`/`paddock-archive`, Chrome for Testing, libduckdb (from `xtask`), runtime catalogues; the Python updaters go | 2 | 1,089 + about 500 test lines (incl. `build-folder.sh`, `build-env.mjs`, which R1 calls) | 900 + 700 tests (450 moved from `xtask`) |
-| **Go/no-go** | Measure four weeks of `fix:`/`ci:` commits on the ported paths per week against the 66 touches on the same paths in the two baseline weeks (2026-10-13 to 10-27); continue if the rate fell, or stop at phase 1 with no dual systems left | 0.25 | | |
-| **Phase 2** | | | | |
-| R4 | Planner: `plan` with explain, CI matrix and the job-level last green (WP-A1, ported with its replay fixtures), `ci timings`, `coverage-gate`; shadow week | 2.5 | 1,003 + 341 test lines | 1,300 + 900 tests |
-| R5 | Host tools and smokes: one `host prune`, `container`, `verify-installed`, `vm-smoke` with per-app config instead of 24 scripts | 2.5 | 1,555 + 620 test lines | 1,100 + 800 tests |
-| R6 | Notices, window weight, startup bench, plugin and font builds | 1.5 | 976 + about 400 test lines | 900 + 500 tests |
-| R7 | `new-app` and `packages publish` (with `cargo hakari publish`) | 2 | 990 + about 700 test lines | 1,200 + 800 tests |
-| **Phase 3** | | | | |
-| R8 | `paddock-repo-rules` and `cargo dev check`: findings, waivers, baseline, reports incl. SARIF; checks C03–C37 and the six app checks ported against golden findings; shadow week | 4.5 | 2,854 + 3,460 test lines | 3,300 + 3,800 tests |
-| R9 | Clean-up: check C39 (§3.7), AGENTS.md and README updates, `conformance/` reduced to fixtures, a lesson in `docs/lessons.md` | 0.5 | about 200 (package files, bins) | 200 |
-| **Total B** | | **about 22.75** | **about 9,900 source + about 6,900 test lines + 334 shell in YAML** | **about 12,300 source + 10,100 tests** |
-| *Optional (C)* | Icons (4–5), diagrams with Pacenotes' emitter (6–8), posters (2), npm glue (1) | about 15 | 11,860 | about 13,000 |
+| Phase | WP | Content | Days | Deletes | Adds |
+|---|---|---|---|---|---|
+| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `./dev` + `dev.cmd`, input hash and `inputs.txt` test, `dev-tool.yml` and the generic package | 3 | – | 1,300 + 900 tests |
+| | R1 | composite actions' logic (sccache, stable workspace, build folder and env, host tools and cleanup, node caches, sccache stats); actions become one-liners; extend the WP-C6 check (§3.7) with today's baselines; delete the three one-off scripts | 2.5 | 334 shell lines (actions 815 → about 300 YAML), 72, 491 | 900 + 800 tests |
+| | R10 | app workflows' long and OS-branching `run:` blocks into commands or `paddock.ci.json` (Debrief, Dyno, Spotter, Pitcrew, Pitwall) | 2 | about 450 inline shell lines | 500 + 400 tests |
+| **2 Release and downloads** | R2 | release, bundles, sidecars, `verify-macos` with `FakeRunner`, `self-test`, `latest-json`, notes, strip-keys, publish; Debrief `build-sidecars`, macOS dev-signing, Dyno `check-bundle`, demo release | 3 | 1,271 + about 900 test lines | 1,600 + 1,200 tests |
+| | R3 | `dev fetch` on `paddock-runtime` catalogues, `paddock-download`, `paddock-archive`: Chrome for Testing, libduckdb (from `xtask`), runtime pins; the Python updaters go | 2 | 1,017 + about 500 | 900 + 700 tests |
+| **3 Planner, hosts, scaffolding** | R4 | `dev plan` (explain, CI matrix, job-level last green with the replay fixtures), `ci timings`, `coverage-gate`; shadow week; update rule 3's wording in `docs/rules.md` (line 127), root `AGENTS.md` (lines 24, 42, 53, 83) and `apps/debrief/AGENTS.md` (line 13) | 2.5 | 1,003 + 341 | 1,300 + 900 tests |
+| | R5 | `dev host` (prune, container, verify-installed, vm-smoke) with per-app config instead of 24 scripts; one bootstrap per OS | 2.5 | 1,555 + 620 | 1,100 + 800 tests |
+| | R6 | notices, window weight, startup bench, plugin and font builds | 1.5 | 976 + about 400 | 900 + 500 tests |
+| | R7 | `new-app`, `packages publish` (with `cargo hakari publish`) | 2 | 990 + about 700 | 1,200 + 800 tests |
+| **4 Rules** | R8a | joint rules-model note with the Pacenotes design (§6) | 1 | – | note |
+| | R8 | `paddock-repo-rules`, `dev check`: checks C03–C37 and the six app checks against golden findings; shadow week; `conformance/` keeps only fixtures | 4.5 | 2,865 + 3,460 | 3,300 + 3,800 tests |
+| **5 Generators and UI glue** | R11 | `paddock-drawio` and `dev diagrams` (generate, export through the draw.io CLI); per-app diagram sources become data files | 7 | 5,999 + 159 wrappers | 1,500 + 5,000 data + 1,200 tests |
+| | R12 | `dev icons` (resvg, PNG, `.icns`, `.ico`, previews and sheets with `paddock-chromium`, install and `--check`); `cargo deny` on resvg's licence | 4.5 | 4,098 + 161 | 4,500 + 1,200 tests |
+| | R13 | `dev images` (posters: templates and `paddock-chromium` screenshots) | 2 | 1,278 | 600 + 300 tests |
+| | R14 | npm glue: `build-info`, `whats-new`, i18n locales, `tauri-before-build`, `ui-coverage-guard` as `./dev` commands | 1 | 485 + about 300 | 500 + 400 tests |
+| **6 Lossy categories** | R15 | UI lints into the ESLint preset (moved, not deleted); dialog command contract generated from Rust, then the TS analysis deleted | 2.5 | 633 (243 moved) | 400 + 300 tests |
+| | R16 | clean-up: allow-list down to its final form, docs, a lesson in `docs/lessons.md` | 0.5 | about 200 | 200 |
+| | | **Total** | **about 44** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
 
-Line deltas: B replaces about 9,900 lines of JS, shell, PowerShell and Python plus 334 lines of untested shell in YAML
-with about 12,300 lines of Rust, nearly all of it running in tests on three OSes; about 1,100 duplicated lines go. The
-number of languages in the kit drops from five (JS, bash, PowerShell, Python, YAML shell) to Rust plus YAML, plus JS/TS
-for the UI toolchain and the author-time generators.
+The checkpoints add about 0.25 days per phase.
+
+**Per-phase acceptance** (all must hold before the next phase starts):
+
+- Every script in the phase is deleted, along with its tests and call sites. The allow-list and the baselines of §3.7
+  shrank by those entries.
+- The golden files pass on Linux, macOS and Windows. The shadow week ended with no unexplained difference.
+- Phase 1: `./dev` works from a subfolder on all three OSes. A new worktree downloads the binary for `main`'s hash. A
+  branch that changes the tool builds it. Release jobs build it fresh.
+- Phase 2: a `workflow_dispatch` dry run of `app-release.yml` succeeds for every app. A published DMG still passes
+  `codesign --verify --deep --strict`.
+- Phase 3: rule 3's documents name `./dev plan`, and the planner's output equals the JS output on the replay fixtures.
+- Phase 4: the joint model note is approved by the user. `dev check` reports the same findings as the JS checks on
+  `main` and on the fixtures.
+- Phase 5: the icons are byte-identical to the JS output, or differ only as reviewed in an independent review (rule 22);
+  the diagrams match after canonicalisation.
+
+**Checkpoint after each phase** (with all-Rust decided, it decides the pace and the order, not whether to go on):
+
+- *What is counted:* `fix:` commits with a tooling scope (§Context) whose diff touches the phase's paths. Not counted:
+  the commits of the PR that created a command, and fixes made during its shadow week (reported separately as
+  shake-out).
+- *Baseline:* the same areas in the four weeks after WP-C6 merges (the consolidated kit, not the import fortnight).
+- *Control:* in the same window, the tooling areas not yet ported, plus the workflows.
+- *Window:* four weeks after the phase's last deletion.
+- *Pass:* the ported areas' rate per 1,000 lines is at most half their baseline rate and no higher than the control's
+  rate in the same window. When both counts are below 5, pass means "no more commits than the baseline". On a fail, the
+  next phase does not start until the defects are root-caused (rule 40) and the cause is fixed in the tool's design.
+
+**Line deltas:** about 23,900 lines of JS, shell, PowerShell, Python and inline shell go (measured), and 243 lint lines
+move into the ESLint preset. About 20,700 Rust lines and 5,000 lines of diagram data come in (estimated). About 1,100
+duplicated lines collapse. Left outside Rust: 1,353 TS lines (the Playwright suites, and the TS analysis until R15
+removes it), 243 lines of ESLint rules, about 570 lines of bootstrap shell, and YAML.
 
 ## Consequences
 
-- The kit's OS-specific behaviour has unit tests that run on Linux, macOS and Windows; the composite actions become
-  readable one-line calls.
-- One way to download a pinned file, run an external command with a timeout, prune build folders or verify an
-  installed app, instead of two to six.
-- Pacenotes starts with a project graph, a walk, a `History` port and (after phase 3) a rules engine that CI has
-  already exercised.
-- Contributors change CI logic in Rust; a tool change costs a build (about 40–60 s cold, seconds warm).
-- The research note's job-level last green (WP-A1) is built in JS first and ported in R4.
+- One implementation per tooling step, tested on Linux, macOS and Windows; composite actions and workflow steps become
+  readable one-liners, kept that way by the extended WP-C6 check.
+- The kit uses Rust, YAML and a small bootstrap; TypeScript remains only in the UI's own test and lint toolchain.
+- Pacenotes starts with a walk, a project graph, a `History` port, an agreed rules engine and a draw.io emitter that CI
+  and the docs already exercise.
+- A tool change costs a build per runner type and a publish from `main`; everyday use costs a 1–2 s download per
+  container job.
+- Icon and diagram work moves from editing `.mjs` files to editing Rust and data files.
 
-## Decisions for the user
+## Decisions for the user (for the re-review)
 
-1. **Option B** (port where it pays, about 22.75 agent-days in three phases) over A (keep), C (everything in Rust,
-   about 44) and D (types only).
-2. **Go/no-go after phase 1** on the measured fix rate, rather than committing to all three phases now.
-3. **Delivery (d), hybrid:** the image's binary when its input hash matches, otherwise built from source; never from the
-   cache server.
-4. **Conformance in Rust in phase 3** as the shared `paddock-repo-rules`, which reverses the default of keeping it in JS,
-   because Pacenotes needs the same engine.
-5. **Author-time generators:** keep in JS (recommended), or schedule them with Pacenotes' emitter (diagrams) and the next
-   icon refresh (icons) for a JS-free kit.
+1. Content-addressed delivery from `main` through the Gitea generic package, with the trust model in §3.3 (the boundary is
+   push access to the repository).
+2. Per-phase acceptance and the checkpoint metric in §7: a 50% drop against the post-WP-C6 baseline and no worse than the
+   control.
+3. The joint rules-model note (R8a) gates the rules crate; the user approves it.
+4. The dialog command contract is generated from Rust (R15), so the TypeScript analysis is deleted rather than kept.
 
 ## Sources
 
-- Measurements and per-file inventory: [research note 2026-10 Rust tooling inventory](../research/2026-10-rust-tooling-inventory.md)
-- Research note, Nx and Turborepo against our scripts: branch `docs/research-nx`, `docs/research/2026-10-nx-vs-scripts.md`
+- Research notes: [Nx, Turborepo or our own scripts](../research/2026-10-nx-vs-scripts.md);
+  [Rust tooling inventory and measurements](../research/2026-10-rust-tooling-inventory.md)
 - cargo xtask pattern: <https://github.com/matklad/cargo-xtask> (read)
-- cargo-hakari publishing without the workspace-hack: <https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing/index.html> (read)
-- resvg: <https://github.com/linebender/resvg> (read; `@resvg/resvg-js` is its Node binding, <https://github.com/thx/resvg-js>)
+- cargo-hakari publishing: <https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing/index.html> (read)
+- Gitea generic package registry (one upload per file name and version): <https://docs.gitea.com/usage/packages/generic> (read)
+- Gitea Actions secrets: <https://docs.gitea.com/usage/actions/secrets> (read; workflow-level scoping not offered, unverified on our instance)
+- resvg: <https://github.com/linebender/resvg> (read); `@resvg/resvg-js` is its Node binding: <https://github.com/thx/resvg-js> (read)
 - oxc (parser and linter, no type checker): <https://oxc.rs/docs/guide/introduction.html> (read)
-- TypeScript's native compiler is written in Go: <https://devblogs.microsoft.com/typescript/typescript-native-port/> (read)
-- Playwright browsers (Chromium, Firefox, WebKit): <https://playwright.dev/docs/browsers> (read)
+- The native TypeScript compiler is written in Go: <https://devblogs.microsoft.com/typescript/typescript-native-port/> (read)
+- Playwright browsers: <https://playwright.dev/docs/browsers> (read)
 - Node.js type stripping: <https://nodejs.org/api/typescript.html> (read)
 - SARIF 2.1.0: <https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html> (read)
