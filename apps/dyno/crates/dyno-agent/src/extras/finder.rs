@@ -329,8 +329,11 @@ mod tests {
     #[test]
     fn bad_folders_say_what_to_fix() {
         assert!(resolve_root("relative/path").unwrap_err().contains("full path"));
-        assert!(resolve_root("/definitely/not/here/dyno").unwrap_err().contains("cannot be opened"));
         let (_t, root) = fixture();
+        // Absolute on every platform (a bare "/x" has no drive on Windows), and not there.
+        assert!(resolve_root(&root.join("not").join("here").to_string_lossy())
+            .unwrap_err()
+            .contains("cannot be opened"));
         assert!(resolve_root(&root.join("big.bin").to_string_lossy())
             .unwrap_err()
             .contains("not a file"));

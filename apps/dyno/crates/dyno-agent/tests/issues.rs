@@ -8,7 +8,7 @@ use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, IssuesQuery, SourceState};
 use dyno_core::ports::PlatformError;
-use dyno_core::protocol::{Message, Reply, Request};
+use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
 use dyno_core::time::{Timestamp, HOUR, MINUTE};
 use dyno_core::unusual::baseline::UnusualAction;
 use dyno_ipc::Peer;
@@ -330,6 +330,27 @@ fn unusual(peer: &Peer<Message>, include_ignored: bool) -> dyno_core::unusual::U
     *o
 }
 
+/// Subscribes to the process table. With nobody watching the agent refreshes it only every 10 s, which is the same as
+/// the 10 s these tests wait for a new process; watching makes it follow the one-second system interval.
+fn watch_processes(peer: &Peer<Message>) {
+    ask(
+        peer,
+        Request::Subscribe {
+            detail: LiveDetail::Processes,
+        },
+    )
+    .unwrap();
+}
+
+/// A program path in the host operating system's temporary folder, which is what the agent judges it by.
+fn temp_exe(name: &str) -> String {
+    if cfg!(windows) {
+        format!(r"C:\Users\tester\AppData\Local\Temp\{name}.exe")
+    } else {
+        format!("/tmp/{name}")
+    }
+}
+
 fn shared_has_process(h: &Harness, name: &str) -> bool {
     dyno_agent::agent::lock(&h.shared().core)
         .latest
@@ -342,6 +363,7 @@ fn shared_has_process(h: &Harness, name: &str) -> bool {
 fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_ignored_and_forgotten() {
     let h = Harness::start(vec![]);
     let peer = h.client();
+    watch_processes(&peer);
     // No learning period: the first look still only learns what is already running.
     let Reply::Settings(mut s) = ask(&peer, Request::Settings).unwrap() else {
         panic!("settings")
@@ -356,7 +378,7 @@ fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_igno
     assert_eq!(o.known, 1);
     // A program that starts later, from a temporary folder, is listed and explained, and writes one activity line.
     let mut odd = process(200, "helper", 1.0);
-    odd.exe = Some("/private/var/folders/ab/T/helper".into());
+    odd.exe = Some(temp_exe("helper"));
     h.fake.add_process(odd);
     wait_until("the new process", || shared_has_process(&h, "helper"));
     shared.unusual.look(&shared);
@@ -392,11 +414,7 @@ fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_igno
     let Reply::Rules(rules) = ask(&peer, Request::Rules).unwrap() else {
         panic!("rules")
     };
-    assert!(
-        rules.protected.iter().any(|p| p == "/private/var/folders/ab/T/helper"),
-        "{:?}",
-        rules.protected
-    );
+    assert!(rules.protected.iter().any(|p| *p == temp_exe("helper")), "{:?}", rules.protected);
     assert!(h.fake.actions().is_empty());
     // Restore brings it back, Ignore hides it, and the ignored one shows when asked.
     ask(
@@ -439,11 +457,12 @@ fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_igno
 fn a_fresh_install_learns_silently_for_the_configured_period() {
     let h = Harness::start(vec![]);
     let peer = h.client();
+    watch_processes(&peer);
     wait_until("the first process table", || shared_has_process(&h, "calm"));
     let shared = h.shared();
     shared.unusual.look(&shared);
     let mut odd = process(300, "tmp-thing", 1.0);
-    odd.exe = Some("/tmp/tmp-thing".into());
+    odd.exe = Some(temp_exe("tmp-thing"));
     h.fake.add_process(odd);
     wait_until("the new process", || shared_has_process(&h, "tmp-thing"));
     shared.unusual.look(&shared);
@@ -458,7 +477,7 @@ fn a_fresh_install_learns_silently_for_the_configured_period() {
     s.unusual.enabled = false;
     ask(&peer, Request::SaveSettings { settings: s }).unwrap();
     let mut more = process(301, "another", 1.0);
-    more.exe = Some("/tmp/another".into());
+    more.exe = Some(temp_exe("another"));
     h.fake.add_process(more);
     wait_until("the other process", || shared_has_process(&h, "another"));
     shared.unusual.look(&shared);

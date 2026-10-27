@@ -45,7 +45,11 @@ impl Harness {
 }
 
 fn dyno_in(env: &Env, args: &str) -> (i32, String, String) {
-    let args: Vec<String> = args.split_whitespace().map(String::from).collect();
+    dyno_argv(env, args.split_whitespace().map(String::from).collect())
+}
+
+/// Like `dyno_in` for arguments that contain spaces (a counter path such as `\Memory\Available Bytes`).
+fn dyno_argv(env: &Env, args: Vec<String>) -> (i32, String, String) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let code = run(&args, env, &mut out, &mut err);
     (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
@@ -124,7 +128,7 @@ fn counters_list_search_and_get_work_against_this_machines_counters() {
     let (code, text, _) = h.dyno(&format!("counters search {}", first.trim_start_matches("\\Memory\\")));
     assert_eq!(code, 0);
     assert!(text.contains(&first), "{text}");
-    let (code, json, _) = h.dyno(&format!("counters get --json {first}"));
+    let (code, json, _) = dyno_argv(&h.env, ["counters", "get", "--json", first.as_str()].map(String::from).to_vec());
     assert_eq!(code, 0);
     assert_eq!(serde_json::from_str::<serde_json::Value>(&json).unwrap()[0]["path"], first.as_str());
     let (code, _, err) = h.dyno("counters get nonsense");
@@ -163,16 +167,16 @@ fn without_a_running_agent_it_says_so_and_a_damaged_file_does_too() {
     std::fs::write(env.discovery(), "garbage").unwrap();
     assert_eq!(dyno_in(&env, "top").0, 4);
     // A stale file naming an agent that is gone is a failure with advice, not a hang.
-    std::fs::write(
-        env.discovery(),
-        format!(
-            r#"{{"endpoint":"{}","token":"{}","pid":1,"started":1,"version":"0.0.1","protocol":{}}}"#,
-            tmp.path().join("gone.sock").display(),
-            "ab".repeat(32),
-            dyno_core::protocol::PROTOCOL_VERSION
-        ),
-    )
-    .unwrap();
+    // Built as JSON so a Windows path's backslashes are escaped.
+    let stale = serde_json::json!({
+        "endpoint": tmp.path().join("gone.sock").to_string_lossy(),
+        "token": "ab".repeat(32),
+        "pid": 1,
+        "started": 1,
+        "version": "0.0.1",
+        "protocol": dyno_core::protocol::PROTOCOL_VERSION,
+    });
+    std::fs::write(env.discovery(), serde_json::to_vec(&stale).unwrap()).unwrap();
     let (code, _, err) = dyno_in(&env, "status");
     assert_eq!(code, 1);
     assert!(err.contains("did not answer"), "{err}");
