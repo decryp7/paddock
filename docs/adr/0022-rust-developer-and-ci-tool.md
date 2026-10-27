@@ -2,7 +2,8 @@
 
 - Status: Proposed (2026-10-27). Direction decided by the user on 2026-10-27: everything in Rust (option C below), after
   the consolidation WP-C1 to WP-C6, with conformance as a shared Rust rules crate; only the categories shown to lose
-  something real stay non-Rust, each with its reason. The five open decisions were taken on 2026-10-28 (Decisions taken). This text awaits a re-review before acceptance.
+  something real stay non-Rust, each with its reason. The five open decisions were taken on 2026-10-28 (Decisions
+  taken). This text awaits a re-review before acceptance.
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 13
   (bounded parallelism), rule 22 (independent review of images), rule 23 (ad-hoc sealing), rule 40 (recurring bugs mean
