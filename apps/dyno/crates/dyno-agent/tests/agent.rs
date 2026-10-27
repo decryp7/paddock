@@ -7,12 +7,15 @@ use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::activity::UndoState;
 use dyno_core::history::HistoryRange;
+use dyno_core::ports::{PlatformError, ProcessSource};
 use dyno_core::process::{Priority, ProcessAction};
 use dyno_core::protocol::{ErrorCode, LiveDetail, LiveUpdate, Message, Reply, Request};
 use dyno_core::time::Timestamp;
 use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
+use dyno_platform::Platform;
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 struct Harness {
@@ -24,13 +27,18 @@ struct Harness {
 
 impl Harness {
     fn start() -> Harness {
+        Harness::start_with(|platform| platform)
+    }
+
+    /// Starts the agent over the fake, with `adapt` free to replace ports of the platform first.
+    fn start_with(adapt: impl FnOnce(Platform) -> Platform) -> Harness {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         for (pid, name, cpu) in [(100, "busy", 60.0), (101, "calm", 1.0), (102, "launchd", 0.1)] {
             fake.add_process(process(pid, name, cpu));
         }
-        let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
+        let running = Running::start(dirs.clone(), adapt(fake.platform()), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
         Harness {
             running: Some(running),
             fake,
@@ -58,6 +66,67 @@ impl Harness {
         .unwrap();
         ask(&peer, Request::Subscribe { detail }).unwrap();
         (peer, rx)
+    }
+
+    /// Waits until the agent's process table holds `pid`. The sampler fills it on its own thread after the agent
+    /// starts, and the agent acts only on processes it has sampled, so a test that acts must wait for this first.
+    fn wait_for_process(&self, pid: u32) {
+        let (_peer, rx) = self.subscriber(LiveDetail::Processes);
+        loop {
+            let live = rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("a live update with the process table");
+            if live.processes.is_some_and(|ps| ps.iter().any(|p| p.pid == pid)) {
+                return;
+            }
+        }
+    }
+}
+
+/// A process table that stays unread until the test opens it: the state between the agent's start and its first
+/// process sample, held as long as the test needs it.
+#[derive(Clone, Default)]
+struct Gate(Arc<(Mutex<bool>, Condvar)>);
+
+impl Gate {
+    fn open(&self) {
+        *self.0 .0.lock().unwrap() = true;
+        self.0 .1.notify_all();
+    }
+
+    fn wait(&self) {
+        let (open, cv) = &*self.0;
+        let _open = cv.wait_while(open.lock().unwrap(), |o| !*o).unwrap();
+    }
+
+    /// Opens the gate when dropped, so a failing assertion cannot leave the sampler blocked and the agent unstoppable.
+    /// Declare it after the harness: it is dropped first.
+    fn opener(&self) -> GateOpener {
+        GateOpener(self.clone())
+    }
+}
+
+struct GateOpener(Gate);
+
+impl Drop for GateOpener {
+    fn drop(&mut self) {
+        self.0.open();
+    }
+}
+
+struct GatedProcesses {
+    gate: Gate,
+    inner: Box<dyn ProcessSource>,
+}
+
+impl ProcessSource for GatedProcesses {
+    fn processes(&mut self) -> Vec<dyno_core::process::ProcessSample> {
+        self.gate.wait();
+        self.inner.processes()
+    }
+
+    fn details(&mut self, target: dyno_core::process::ProcessRef) -> Result<dyno_core::process::ProcessDetails, PlatformError> {
+        self.inner.details(target)
     }
 }
 
@@ -668,6 +737,42 @@ fn cleanup_scans_without_deleting_runs_only_what_was_chosen_and_undoes() {
     assert_eq!(tree.bytes, 6);
 }
 
+/// Regression (CI run 6489): the sampler reads the first process table on its own thread after the agent starts, so
+/// a test that acts at once races it. Held deterministically here: before the first table the target is not found;
+/// once the table holds it, the same action succeeds.
+#[test]
+fn an_action_before_the_first_process_table_is_not_found_and_succeeds_once_the_table_holds_it() {
+    let gate = Gate::default();
+    let h = Harness::start_with(|mut p| {
+        p.processes = Box::new(GatedProcesses {
+            gate: gate.clone(),
+            inner: p.processes,
+        });
+        p
+    });
+    let _opener = gate.opener();
+    let peer = h.client();
+    let act = || {
+        ask(
+            &peer,
+            Request::Act {
+                target: target(100),
+                action: ProcessAction::SetPriority(Priority::BelowNormal),
+            },
+        )
+    };
+    let err = act().unwrap_err();
+    assert!(err.contains("not in the list"), "{err}");
+    assert!(h.fake.actions().is_empty());
+    gate.open();
+    h.wait_for_process(100);
+    let Reply::Activity(entry) = act().unwrap() else {
+        panic!("activity")
+    };
+    assert!(entry.title.contains("busy"), "{}", entry.title);
+    assert_eq!(h.fake.actions().len(), 1);
+}
+
 #[test]
 fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html() {
     let h = Harness::start();
@@ -686,6 +791,7 @@ fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html
         .unwrap_err()
         .contains("at most 52"));
     // Something the user did shows up under "what changed" (not as a rule action).
+    h.wait_for_process(100);
     ask(
         &peer,
         Request::Act {
