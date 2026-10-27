@@ -1,5 +1,5 @@
 {
-  "$comment": "Pitwall's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a leg of ci.yml on Linux (the app's own checks, then fmt, clippy, tests, doc tests, deny, then the frontend: audit, lint, build, index.html check, unit tests with the 80 % guard, Chromium e2e) and, for the code that differs there (the server with its Windows service and macOS launch agent code), the Rust gates on Windows and macOS. The Tauri shell (pitwall-app) is tested apart and last on Linux only: tauri-build copies its placeholder sidecar over target/debug/pitwall-server, which the server's end-to-end tests start as a child process. Installers, the WebKit e2e and the release are .gitea/workflows/pitwall-release.yml (a pitwall-v* tag, a push to main, the nightly or a manual run), through the shared app-release.yml.",
+  "$comment": "Pitwall's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a leg of ci.yml on Linux (the app's own checks, then fmt, clippy, tests, doc tests, deny, then the frontend: audit, lint, build, index.html check, unit tests with the 80 % guard; the Chromium e2e in two parallel legs, `e2e`/`e2eShards`, and the WebKit e2e in a leg of its own, `e2eWebkit`, on main, tags, the nightly and a dispatch with `webkit`) and, for the code that differs there (the server with its Windows service and macOS launch agent code), the Rust gates on Windows and macOS. The Tauri shell (pitwall-app) is tested apart and last on Linux only: tauri-build copies its placeholder sidecar over target/debug/pitwall-server, which the server's end-to-end tests start as a child process. Installers and the release are .gitea/workflows/pitwall-release.yml (a pitwall-v* tag, a push to main, the nightly or a manual run), through the shared app-release.yml.",
   "cargo": ".",
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
@@ -24,7 +24,16 @@
     "npx ng build",
     "npm run check:index",
     "npx ng test --watch=false --coverage",
-    "node ../scripts/ci/ui-coverage-guard.mjs --min 80 --dir coverage",
-    "PW_E2E_PORT=4390 npx playwright test --project=chromium --workers=2 --fully-parallel"
+    "node ../scripts/ci/ui-coverage-guard.mjs --min 80 --dir coverage"
+  ],
+  "e2e": [
+    "cd apps/pitwall/app",
+    "PW_E2E_PORT=$((4390 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=$E2E_SHARD"
+  ],
+  "e2eShards": 2,
+  "e2eArtifacts": "apps/pitwall/app/playwright-report",
+  "e2eWebkit": [
+    "cd apps/pitwall/app",
+    "PW_E2E_PORT=4393 npx playwright test --project=webkit --workers=1"
   ]
 }
