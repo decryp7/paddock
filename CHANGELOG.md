@@ -9,8 +9,8 @@ Conventional Commits; one semver tag for the whole repo.
   `spotter-release.yml`; `spotter.yml` and Spotter's copies of `scripts/release/*`, `macos-verify-bundle.sh`, `commit-lint`,
   `export-diagrams.sh` and `check-index.mjs` are deleted. Kit additions: `paddock.ci.json` `testBrowser` (the pinned Chrome for
   Testing on the host legs, `<PREFIX>_TEST_BROWSER`/`_REQUIRE_TEST_BROWSER`, and `_NO_SANDBOX` on Linux) and `display` (xvfb for the
-  tests), `e2e`/`e2eShards` (end-to-end legs, one per shard, in parallel), `e2eArtifacts` (failure report upload), a `webkit` dispatch input
-  that reaches the app's lines as `$PADDOCK_WEBKIT`, and `tauri-bundle` `--prepare` (`app-release.yml` input `prepare`: a command after `npm ci`, e.g. building the UI library).
+  tests), `e2e`/`e2eShards` (end-to-end legs, one per shard, in parallel), `e2eArtifacts` (failure report upload), `e2eWebkit` (a WebKit leg of its own), a `webkit` input on `ci.yml`'s manual run (and the Spotter release dispatch passes it),
+  `CARGO_PROFILE_DEV_DEBUG=line-tables-only` for every app leg (Spotter's old setting; Pitcrew's debug builds shrink too), and `tauri-bundle` `--prepare` (`app-release.yml` input `prepare`: a command after `npm ci`, e.g. building the UI library).
 
 ### Windows CI: tests that measured the runner's disk, and a toolchain step that says why it failed
 - Four tests that timed out on a slow Windows runner (run 6461) prove their behaviour without bulk disk work: the log

@@ -73,7 +73,7 @@ starts is asked to quit (`Browser.close`) and given a few seconds before any kil
 Spotter is a leg of the monorepo's `ci.yml` (`apps/spotter/paddock.ci.json`, the shared `app-gates` action): on Linux the app's
 script tests and icon check, format, clippy, nextest (profile `ci`, under a virtual display with the pinned Chrome for Testing:
 `SPOTTER_TEST_BROWSER`, `SPOTTER_REQUIRE_TEST_BROWSER=1`), doc tests and `cargo deny`, then the frontend (audit, lint, build,
-unit tests with coverage, and the WebKit e2e on `main`, tags, the nightly and a `ci.yml` dispatch with `webkit`; the Chromium e2e runs in two parallel legs whose Playwright report is uploaded on failure); on Windows and macOS the Rust
+unit tests with coverage, the Chromium e2e in two parallel legs and the WebKit e2e (on `main`, tags, the nightly and a `ci.yml` dispatch with `webkit`) in a leg of its own, whose Playwright report is uploaded on failure; the e2e legs run only when the change reaches the UI, so a Rust-only change runs none); on Windows and macOS the Rust
 gates (clippy not on Windows) with the same browser, for the code that differs there. Commit messages of pull requests are checked
 by `ci.yml`'s `commits` job. `.gitea/workflows/spotter-release.yml` builds the installers (three OS, macOS seal check) and publishes
 `spotter-v*` tags through the shared `app-release.yml`. See [releasing.md](releasing.md).
