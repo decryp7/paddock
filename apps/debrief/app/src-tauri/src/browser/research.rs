@@ -417,6 +417,40 @@ fn prepare<R: Runtime>(
 /// How long the model may take to draft a search text before the engine's text is used.
 const DRAFT_TIMEOUT: Duration = Duration::from_secs(45);
 
+/// Sets a cancel flag after a timeout unless dropped first: dropping wakes the timer thread, which ends at once
+/// instead of sleeping out the full timeout.
+struct DraftTimer {
+    done: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl DraftTimer {
+    fn start(cancel: Arc<std::sync::atomic::AtomicBool>, timeout: Duration) -> DraftTimer {
+        let (done, wake) = std::sync::mpsc::channel::<()>();
+        let thread = std::thread::Builder::new()
+            .name("debrief-draft-timer".into())
+            .spawn(move || cancel_on_timeout(&wake, timeout, &cancel))
+            .ok();
+        DraftTimer { done: Some(done), thread }
+    }
+}
+
+/// Waits for the guard to drop (or `wake` to be sent to); sets `cancel` only when `timeout` passes first.
+fn cancel_on_timeout(wake: &std::sync::mpsc::Receiver<()>, timeout: Duration, cancel: &std::sync::atomic::AtomicBool) {
+    if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = wake.recv_timeout(timeout) {
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Drop for DraftTimer {
+    fn drop(&mut self) {
+        drop(self.done.take());
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
 /// The question to research and its search text: drafted by the model from the question and the event (the engine's
 /// text when there is no model or its draft is unusable). Not yet checked by the leak guard. Runs the model: call off
 /// the main thread.
@@ -459,11 +493,8 @@ pub(crate) fn draft_search<R: Runtime>(
         c.assistant(&crate::ai::knowledge::for_window(win, &focus), cancel.clone()).ok()
     });
     let model = assistant.as_ref().map(WithModel);
-    let timer = cancel.clone();
-    std::thread::spawn(move || {
-        SLEEP(DRAFT_TIMEOUT);
-        timer.store(true, std::sync::atomic::Ordering::Relaxed);
-    });
+    // Ends with the draft: the timer thread stops waiting as soon as this guard drops.
+    let _timer = DraftTimer::start(cancel.clone(), DRAFT_TIMEOUT);
     let drafted = draft_or(model.as_ref().map(|m| m as &dyn QueryDrafter), &question, event.as_ref(), || {
         fallback
     })
@@ -567,6 +598,26 @@ pub(crate) fn retry<R: Runtime>(app: &AppHandle<R>, job: &jobs::model::Job) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: the draft's timeout thread slept out its full 45 s after the draft had finished.
+    #[test]
+    fn the_draft_timer_ends_with_the_draft_and_does_not_cancel() {
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Dropping joins the thread: it returns only if the thread woke up instead of sleeping out the hour.
+        drop(DraftTimer::start(cancel.clone(), Duration::from_secs(3600)));
+        assert!(
+            !cancel.load(std::sync::atomic::Ordering::Relaxed),
+            "a finished draft is not cancelled"
+        );
+    }
+
+    #[test]
+    fn the_draft_timer_cancels_when_the_timeout_passes() {
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (_alive, wake) = std::sync::mpsc::channel::<()>();
+        cancel_on_timeout(&wake, Duration::from_millis(1), &cancel);
+        assert!(cancel.load(std::sync::atomic::Ordering::Relaxed));
+    }
 
     #[test]
     fn specs_name_the_question_and_keep_the_request_for_retry() {
