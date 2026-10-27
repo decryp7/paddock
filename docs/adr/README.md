@@ -23,3 +23,4 @@
 | [0019](0019-limits-explain-themselves.md) | Limits explain themselves: one typed limit error with the value and the Settings path, Raise it and Retry, a test per limit (accepted) |
 | [0020](0020-shared-executor.md) | One shared executor in `paddock-jobs`: tasks, periodic checks (poller pool) and leases, with priority classes, cooperative abort and a stuck watchdog |
 | [0021](0021-portable-tests.md) | Portable tests: `paddock-testkit` for OS-aware paths, text, quoting, scaled fixtures, condition waits and bounded tools; check C38 over every test; xwin clippy before push; `.gitattributes` policy (accepted) |
+| [0022](0022-rust-developer-and-ci-tool.md) | One Rust developer and CI tool, `paddock-dev` (`cargo dev`), on shared `paddock-repo-graph` and `paddock-repo-rules` crates, after the CI kit consolidation; port where it pays in three phases, keep the UI toolchain in JS/TS (proposed) |
