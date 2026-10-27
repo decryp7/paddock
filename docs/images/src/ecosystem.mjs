@@ -20,7 +20,7 @@ const row1 = [
 ];
 const row3 = [
   { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] },
-  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Measures, explains and', 'tunes your PC.'] },
+  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC:', 'read-only monitor.'] },
   { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new releases', 'anywhere, the moment', 'one appears.'] },
 ];
 const CW = 340, GAP = 215, X0 = 75, CH = 170;

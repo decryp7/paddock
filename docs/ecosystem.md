@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=80de9834" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=f79ff99e" alt="Paddock: Pacenotes, Debrief, Sighter, Spotter, Dyno and Pitcrew around Pitwall, the local AI hub, all built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
 </picture>
 
 Seven desktop tools for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -16,7 +16,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=f7f6ec3f) and [dark](images/paddock-ecosystem-dark.png?v=ebcad78f), integrations
+hero [light](images/paddock-ecosystem-light.png?v=ba281164) and [dark](images/paddock-ecosystem-dark.png?v=79f12b8e), integrations
 [light](images/paddock-integrations-light.png?v=59baa1a0) and [dark](images/paddock-integrations-dark.png?v=3ae9a8ae), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
@@ -81,11 +81,11 @@ Status: **v1.0.1 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/pitwall>
 
 ### Dyno
-**Purpose.** Measures, explains and tunes your PC.
-**For.** People who want to know why a machine is slow and to fix it safely.
+**Purpose.** Watches your PC, read-only: live and history, alarms, a disk map and benchmarks.
+**For.** People who want to know what a machine is doing, now and over time.
 - A background agent keeps history while the window is closed.
-- Plain-words diagnosis with evidence, grouped by application; performance counters and benchmarks.
-- Observe first: changes happen only through rules you enable or a click, each with an undo, via a privileged helper.
+- Live and history views grouped by application, alarms, system facts, a disk map and benchmarks.
+- Strictly read-only: no tuning, no actions and no advice, so nothing needs a privileged helper.
 - Extensible with validated declarative packs, no code.
 
 Status: in development. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
@@ -197,7 +197,7 @@ Motorsport vocabulary, because the family is about keeping things running fast a
 | **Pitcrew** | The mechanics who service the car mid-race | Keeps CI runners running and serviced |
 | **Pitwall** | The gantry where engineers watch data and radio the cars | The hub every app talks to |
 | **Debrief** | The review after a session | Analysing what happened afterwards |
-| **Dyno** | The rig that measures a car's power | Measures and tunes your PC |
+| **Dyno** | The rig that measures a car's power | Watches your PC, read-only |
 | **Spotter** | Watches the track and calls what is coming | Calls out new releases |
 | **Sighter** | A sighting lap before the race | Looks at the UI before tests drive it |
 | **Pacenotes** | The co-driver's notes describing the road ahead | Describes the shape of a codebase to whoever is navigating it |
