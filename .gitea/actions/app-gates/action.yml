@@ -61,15 +61,16 @@ runs:
       run: bash -euo pipefail -c "$COMMANDS"
 
     - name: Rust checks (${{ inputs.app }})
-      if: inputs.rust-checks != '' && inputs.rust == 'true'
+      if: ${{ !cancelled() && inputs.rust-checks != '' && inputs.rust == 'true' }}
       shell: bash
       env:
         COMMANDS: ${{ inputs.rust-checks }}
       run: bash -euo pipefail -c "$COMMANDS"
 
-    # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke).
+    # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke), and the steps after a
+    # failed check (`checks`, `rust-checks`) still run, so one run reports every failure (`!cancelled()`).
     - name: Rust (${{ inputs.app }}; fmt, clippy, tests on the mock runtime, doc tests, deny)
-      if: inputs.rust == 'true' && inputs.cargo != ''
+      if: ${{ !cancelled() && inputs.rust == 'true' && inputs.cargo != '' }}
       shell: bash
       # The stable checkout path on a host runner (stable-workspace), so sccache sees the same working folder every run.
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ inputs.cargo }}
@@ -102,14 +103,14 @@ runs:
         exit $status
 
     - name: UI (${{ inputs.app }})
-      if: inputs.ui == 'true' && inputs.ui-checks != ''
+      if: ${{ !cancelled() && inputs.ui == 'true' && inputs.ui-checks != '' }}
       shell: bash
       env:
         COMMANDS: ${{ inputs.ui-checks }}
       run: bash -euo pipefail -c "$COMMANDS"
 
     - name: End-to-end tests (${{ inputs.app }} ${{ inputs.e2e-shard }})
-      if: inputs.e2e-checks != ''
+      if: ${{ !cancelled() && inputs.e2e-checks != '' }}
       shell: bash
       env:
         COMMANDS: ${{ inputs.e2e-checks }}

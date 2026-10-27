@@ -852,6 +852,15 @@ test('app-gates tests last-packages apart on Linux only, and a host leg leaves t
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /last-packages: \$\{\{ matrix\.last_packages \}\}/, 'ci.yml hands the contract field to app-gates');
 });
 
+test('app-gates reports every failed check: the steps after a failed check still run', () => {
+  const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
+  for (const name of ['Rust checks', 'Rust (', 'UI (', 'End-to-end tests']) {
+    const at = gates.indexOf(`- name: ${name}`);
+    assert.ok(at > 0, name);
+    assert.match(gates.slice(at, at + 300), /if: \$\{\{ !cancelled\(\) && /, `${name} runs after an earlier check failed`);
+  }
+});
+
 // The kit apps: what their old workflow asserted, now asserted on the contract and the thin release caller.
 test('a kit app lists the OS legs its old workflow had, keeps its build folder out of the checkout, and releases through app-release.yml', () => {
   for (const app of KIT_APPS) {
