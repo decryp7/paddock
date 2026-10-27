@@ -5,7 +5,7 @@
 #   paddock-ci-verify [--manifest FILE]
 #
 # Expected values come from the environment the Dockerfile sets: EXPECT_NODE_MAJOR, EXPECT_SCCACHE, EXPECT_CHROME,
-# EXPECT_PLAYWRIGHT, EXPECT_DUCKDB. An expectation that is not set is not checked.
+# EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK. An expectation that is not set is not checked.
 set -uo pipefail
 
 manifest=/etc/paddock-ci-release
@@ -49,6 +49,16 @@ if tool node node --version && [ -n "${EXPECT_NODE_MAJOR:-}" ]; then
   if [ "$major" != "$EXPECT_NODE_MAJOR" ]; then bad "node is $OUT, .nvmrc wants major $EXPECT_NODE_MAJOR"; fi
 fi
 tool npm npm --version
+
+# shellcheck prints its version on the second line ("version: 0.11.0").
+if command -v shellcheck >/dev/null 2>&1; then
+  scv=
+  while IFS= read -r l; do case "$l" in "version: "*) scv=${l#version: }; break ;; esac; done < <(shellcheck --version 2>&1)
+  note "shellcheck: ${scv:-unknown}"
+  if [ -n "${EXPECT_SHELLCHECK:-}" ] && [ "$scv" != "$EXPECT_SHELLCHECK" ]; then bad "shellcheck is '${scv}', the image pins ${EXPECT_SHELLCHECK}"; fi
+else
+  bad "shellcheck is missing"
+fi
 
 pw=${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}
 for b in chromium webkit; do

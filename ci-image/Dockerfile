@@ -98,6 +98,7 @@ ARG PLAYWRIGHT_VERSION=1.64.1
 ARG CHROME_VERSION=156.0.8078.47
 ARG DUCKDB_VERSION=1.5.6
 ARG SCCACHE_VERSION=0.19.0
+ARG SHELLCHECK_VERSION=0.11.0
 
 # sccache at the exact pin replaces whatever the base carries; the cargo tools sit beside the base's.
 COPY --from=fetch /out/bin/ /usr/local/bin/
@@ -121,7 +122,7 @@ COPY verify.sh /usr/local/bin/paddock-ci-verify
 # The build fails here when the image is not what the jobs expect; on success the manifest is /etc/paddock-ci-release.
 # (Chrome is checked on amd64 only: Google publishes no Linux arm64 build.)
 RUN EXPECT_NODE_MAJOR="${NODE_MAJOR}" EXPECT_SCCACHE="${SCCACHE_VERSION}" EXPECT_PLAYWRIGHT="${PLAYWRIGHT_VERSION}" \
-    EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
+    EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_SHELLCHECK="${SHELLCHECK_VERSION}" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
     paddock-ci-verify
 
 LABEL org.opencontainers.image.title="paddock-ci" \
