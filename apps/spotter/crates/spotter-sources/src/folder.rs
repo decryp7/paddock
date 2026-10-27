@@ -104,7 +104,7 @@ pub async fn scan_job(req: ScanRequest, job: &Job) -> Result<Scan, SourceError> 
     let halt = Halt { job: job.clone(), abandon };
     // A plain thread rather than the blocking pool: a hung share must not hold a pool thread the app needs.
     std::thread::spawn(move || {
-        let _ = tx.send(scan_now(&req, &halt));
+        let _ = tx.send(scan_now(&req, &halt, spotter_core::limits::MAX_FOLDER_MATCHES));
     });
     await_scan(rx, wait, &path, limits.max_entries, limits.timeout_secs).await
 }
@@ -192,7 +192,9 @@ fn join_rel(rel: &str, name: &str) -> String {
     }
 }
 
-fn scan_now(req: &ScanRequest, halt: &Halt) -> Result<Scan, Stop> {
+/// `max_matches` is the most matching files one share may hold (a parameter so the cap is tested with a handful of
+/// files rather than tens of thousands).
+fn scan_now(req: &ScanRequest, halt: &Halt, max_matches: usize) -> Result<Scan, Stop> {
     let started = Instant::now();
     let src = &req.source;
     let root = PathBuf::from(&src.path);
@@ -203,7 +205,7 @@ fn scan_now(req: &ScanRequest, halt: &Halt) -> Result<Scan, Stop> {
     let (mut entries, dirs, mut stats, ignored, reused) = match reuse(req, &root) {
         // A reused listing judged nothing, so there is nothing to sample.
         Some((entries, dirs, stats)) => (entries, dirs, stats, Vec::new(), true),
-        None => walk(req, &root, started, halt)?,
+        None => walk(req, &root, started, halt, max_matches)?,
     };
     let known = req.previous.as_ref();
     let mut settling = 0;
@@ -324,6 +326,7 @@ struct Walk<'a> {
     halt: &'a Halt,
     deadline: Instant,
     max: u64,
+    max_matches: usize,
     queue: Mutex<Queue>,
     wake: Condvar,
     scanned: AtomicU64,
@@ -486,7 +489,7 @@ impl Walk<'_> {
         found.matched.append(&mut matched);
         found.ignored.append(&mut ignored);
         keep_first(&mut found.ignored, req.sample_ignored);
-        let too_many = found.matched.len() > spotter_core::limits::MAX_FOLDER_MATCHES;
+        let too_many = found.matched.len() > self.max_matches;
         drop(found);
         if too_many {
             self.fail(Stop::TooManyMatches);
@@ -501,7 +504,7 @@ type Walked = (Matched, Dirs, ScanStats, Vec<(String, Skip)>, bool);
 /// Lists the share with [`WALK_THREADS`] folders in flight. The result does not depend on which thread got where:
 /// matches are sorted, folders are keyed, the ignored sample is the first names in sorted order, and the counts are
 /// totals.
-fn walk(req: &ScanRequest, root: &Path, started: Instant, halt: &Halt) -> Result<Walked, Stop> {
+fn walk(req: &ScanRequest, root: &Path, started: Instant, halt: &Halt, max_matches: usize) -> Result<Walked, Stop> {
     let src = &req.source;
     halt.job.report(Phase::Finding, Unit::Count, 0, None);
     let walk = Walk {
@@ -509,6 +512,7 @@ fn walk(req: &ScanRequest, root: &Path, started: Instant, halt: &Halt) -> Result
         halt,
         deadline: started + Duration::from_secs(u64::from(src.limits.timeout_secs)),
         max: u64::from(src.limits.max_entries),
+        max_matches,
         queue: Mutex::new(Queue {
             items: VecDeque::from([(root.to_path_buf(), String::new(), 0u32)]),
             active: 0,
@@ -1098,18 +1102,24 @@ mod tests {
         assert!(matches!(explain_stop("/x", Stop::TooSlow, 10, 5), SourceError::Unreachable(_)));
     }
 
-    #[tokio::test]
-    async fn more_matches_than_the_cap_is_a_message() {
-        let d = tempfile::tempdir().unwrap();
-        for i in 0..=spotter_core::limits::MAX_FOLDER_MATCHES {
-            std::fs::write(d.path().join(format!("f{i}.bin")), b"").unwrap();
-        }
-        let src = source(d.path(), &[("maxEntries", "1000000")]);
-        let e = scan(request(src)).await.unwrap_err();
-        assert!(
-            matches!(&e, SourceError::InvalidConfig(m) if m.contains("Too many matches")),
-            "{e:?}"
-        );
+    #[test]
+    fn more_matches_than_the_cap_is_a_message() {
+        // The cap is a parameter, so a handful of files proves it on every platform (creating tens of thousands of
+        // files took over a minute on Windows).
+        let cap = 5;
+        let scan_with = |files: usize| {
+            let d = tempfile::tempdir().unwrap();
+            for i in 0..files {
+                std::fs::write(d.path().join(format!("f{i}.bin")), b"").unwrap();
+            }
+            let halt = Halt { job: Job::none(), abandon: Cancel::new() };
+            scan_now(&request(source(d.path(), &[("maxEntries", "1000000")])), &halt, cap)
+        };
+        assert_eq!(scan_with(cap).unwrap().entries.len(), cap, "exactly the cap is fine");
+        let stop = scan_with(cap + 1).unwrap_err();
+        assert!(matches!(stop, Stop::TooManyMatches));
+        let e = explain_stop("/x", stop, 1_000_000, 5);
+        assert!(matches!(&e, SourceError::InvalidConfig(m) if m.contains("Too many matches")), "{e:?}");
     }
 
     #[tokio::test]
