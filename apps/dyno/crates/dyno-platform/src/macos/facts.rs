@@ -15,14 +15,25 @@ const TIMEOUT: Duration = Duration::from_secs(8);
 /// Facts for macOS.
 pub struct MacFacts {
     home: Option<PathBuf>,
+    run: Tool,
 }
+
+/// Runs one system program and returns its text, or nothing when it fails or times out.
+type Tool = fn(&str, &[&str]) -> Option<String>;
 
 impl MacFacts {
     /// Facts for the current user.
     pub fn new() -> Self {
         MacFacts {
             home: std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from),
+            run: tool,
         }
+    }
+
+    /// Facts read through `run` and from `home` instead of the real programs and home folder (tests).
+    #[cfg(test)]
+    fn with(home: Option<PathBuf>, run: Tool) -> Self {
+        MacFacts { home, run }
     }
 }
 
@@ -50,11 +61,11 @@ pub fn smart_health(status: &str) -> DiskHealthStatus {
 
 impl FactsSource for MacFacts {
     fn facts(&mut self) -> SystemFacts {
-        let os = tool("/usr/bin/sw_vers", &[])
+        let os = (self.run)("/usr/bin/sw_vers", &[])
             .and_then(|t| parse_sw_vers(&t))
             .unwrap_or_else(|| "macOS".into());
         let mut f = SystemFacts::unknown(os);
-        f.disks = match tool("/usr/sbin/diskutil", &["info", "/"]).and_then(|t| parse_smart_status(&t)) {
+        f.disks = match (self.run)("/usr/sbin/diskutil", &["info", "/"]).and_then(|t| parse_smart_status(&t)) {
             Some(s) => Reading::Available(vec![DiskHealth {
                 name: "Startup disk".into(),
                 status: smart_health(&s),
@@ -65,7 +76,7 @@ impl FactsSource for MacFacts {
         };
         f.restart_pending = Reading::unavailable("macOS does not say when a restart is pending");
         f.pending_updates = Reading::unavailable("Dyno does not check for macOS updates (it is slow and contacts Apple)");
-        f.power_plan = match tool("/usr/bin/pmset", &["-g"]).and_then(|t| parse_pmset_low_power(&t)) {
+        f.power_plan = match (self.run)("/usr/bin/pmset", &["-g"]).and_then(|t| parse_pmset_low_power(&t)) {
             Some(low) => Reading::Available(PowerPlan {
                 id: if low { "low-power" } else { "automatic" }.into(),
                 name: if low { "Low Power Mode" } else { "Automatic" }.into(),
@@ -95,12 +106,31 @@ mod tests {
         assert_eq!(smart_health("Not Supported"), DiskHealthStatus::Unknown);
     }
 
+    /// Canned answers in the shape of the real programs' output; the test never runs them or reads the real home folder.
+    fn canned(program: &str, _args: &[&str]) -> Option<String> {
+        match program {
+            "/usr/bin/sw_vers" => Some("ProductName:\t\tmacOS\nProductVersion:\t\t15.1\nBuildVersion:\t\t24B83\n".into()),
+            "/usr/sbin/diskutil" => Some("   Device Identifier:         disk3s1s1\n   SMART Status:             Verified\n".into()),
+            "/usr/bin/pmset" => Some("System-wide power settings:\n lowpowermode         0\n".into()),
+            _ => None,
+        }
+    }
+
     #[test]
-    fn reads_this_macs_facts() {
-        let f = MacFacts::new().facts();
+    fn reads_the_facts_from_the_programs_output_without_touching_this_mac() {
+        let home = tempfile::tempdir().unwrap();
+        let f = MacFacts::with(Some(home.path().to_path_buf()), canned).facts();
         assert!(f.os.starts_with("macOS"), "{}", f.os);
-        assert!(f.power_plan.value().is_some() || f.power_plan.value().is_none());
-        assert!(f.disks.value().is_some(), "SMART status of the startup disk: {:?}", f.disks);
+        assert_eq!(f.power_plan.value().map(|p| p.power_saver), Some(false));
+        let disks = f.disks.value().unwrap();
+        assert_eq!(disks[0].status, DiskHealthStatus::Healthy);
         assert!(f.restart_pending.value().is_none());
+    }
+
+    #[test]
+    fn missing_programs_degrade_to_unavailable_readings() {
+        let f = MacFacts::with(None, |_, _| None).facts();
+        assert_eq!(f.os, "macOS");
+        assert!(f.disks.value().is_none() && f.power_plan.value().is_none());
     }
 }
