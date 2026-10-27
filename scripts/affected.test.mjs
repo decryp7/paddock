@@ -277,7 +277,7 @@ describe('matrix legs', () => {
   test("an app's host-cleanup patterns match its own paths and never the real runner (every app that has them)", () => {
     const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', 'C:\\runner\\act_runner.exe daemon', '/Users/x/actions-runner/Runner.Listener run'];
     const ours = {
-      pitwall: ['/Users/x/app/target/debug/pitwall-server --port 0 --fake-engine'],
+      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
       pitcrew: ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter\\chrome-win64\\chrome.exe --headless'],
     };
@@ -342,6 +342,31 @@ describe('contracts', () => {
       const re = new RegExp(pat);
       for (const line of ours) assert.match(line, re, `${pat} misses the test copy`);
       for (const line of real) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
+    }
+  });
+
+  test("every process pattern is anchored on a folder of this job, and Pitwall's never reaches an installed app, another job or the user's own engine", () => {
+    for (const [name, app] of graph.apps) {
+      for (const pat of app.processPatterns ?? []) {
+        assert.match(pat, /pitcrew-it-|test-browser-|\.paddock-ci|target-/, `${name}: ${pat} names no temp or build folder of the job`);
+      }
+    }
+    const pitwall = graph.apps.get('pitwall');
+    assert.deepEqual(pitwall.processes ?? [], [], 'no exact process names: they would kill the user\'s installed Pitwall and its engine, and other jobs');
+    const ours = ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'];
+    const near = [
+      '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --port 8080',
+      '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-spotter-app/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-pitwall-bundle/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock/engines/llama-server --port 8081 -m model.gguf',
+      '/Users/x/dev/pitwall/target/debug/pitwall-server --fake-engine',
+      '/opt/homebrew/bin/llama-server --port 8080',
+    ];
+    for (const pat of pitwall.processPatterns) {
+      const re = new RegExp(pat);
+      for (const line of ours) assert.match(line, re, `${pat} misses ${line}`);
+      for (const line of near) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
     }
   });
 

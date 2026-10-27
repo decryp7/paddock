@@ -4,8 +4,7 @@
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
   "lastPackages": ["pitwall-app"],
-  "processes": ["pitwall-server", "llama-server"],
-  "processPatterns": ["pitwall-server .*--fake-engine"],
+  "processPatterns": ["[/\\\\]\\.paddock-ci[/\\\\]target-pitwall-app[/\\\\]debug[/\\\\]pitwall-server(\\.exe)? .*--fake-engine"],
   "checks": [
     "cd apps/pitwall",
     "node --test scripts/ci/*.test.mjs",
