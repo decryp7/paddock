@@ -176,6 +176,16 @@ fn projects_open_without_their_files_and_degrade_source_context() {
     let archive = dir.0.join("incident.debriefz");
     assert!(store.export_project(&mut manifest, &archive).unwrap() > 0);
     drop(store);
+    // The shared catalog is in the storage format the previous Debrief (DuckDB 1.5: versions 64 to 68) still opens.
+    {
+        use std::io::Read;
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
+        let mut header = [0u8; 20];
+        zip.by_name("data.duckdb").unwrap().read_exact(&mut header).unwrap();
+        assert_eq!(&header[8..12], b"DUCK");
+        let version = u64::from_le_bytes(header[12..20].try_into().unwrap());
+        assert!((64..=68).contains(&version), "storage version {version}");
+    }
     // The project is shared: the original files are gone.
     std::fs::remove_dir_all(&logs).unwrap();
     let (opened, m) = DuckStore::open_project(&archive, &dir.0.join("opened"), Profile::default_profile(), PluginRegistry::new()).unwrap();

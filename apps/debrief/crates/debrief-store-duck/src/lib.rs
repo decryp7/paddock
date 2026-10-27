@@ -145,6 +145,13 @@ pub const PREAGGREGATE_ABOVE: u64 = 1_000_000;
 /// File name of the database in a store folder.
 pub const DB_FILE: &str = "data.duckdb";
 
+/// The DuckDB storage version new catalogs are written in (`storage_compatibility_version`, set when the database is
+/// opened: the main file is created in it, a later `SET` does not change it). DuckDB 2.0 would otherwise write a
+/// format DuckDB 1.x cannot open, so a project shared from this Debrief would not open in the previous release. The
+/// catalog is small and needs none of the newer storage features. Lift it only with a `FORMAT_VERSION` bump that
+/// rebuilds the catalog (`COPY FROM DATABASE`, then swap).
+pub(crate) const STORAGE_VERSION: &str = "v1.5.0";
+
 /// Idle connections kept for reuse.
 const POOL: usize = 8;
 
@@ -159,6 +166,19 @@ fn classify(message: String) -> StoreError {
     // Linux/macOS (a POSIX lock) and Windows (a sharing violation).
     if lower.contains("could not set lock on file") || lower.contains("conflicting lock") || lower.contains("file is already open in") {
         StoreError::Locked(format!("this project is open in another Debrief window or program ({message})"))
+    } else if lower.contains("database file with version number") || lower.contains("created with a newer version of duckdb") {
+        // DuckDB fails before `meta` is read, so the format-version check of `open_with` never runs: say it the same way.
+        let found = lower
+            .split("version number ")
+            .nth(1)
+            .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>())
+            .filter(|n| !n.is_empty())
+            .map_or(String::new(), |n| {
+                format!(" (database format {n}; this Debrief reads up to {STORAGE_VERSION})")
+            });
+        StoreError::Invalid(format!(
+            "this project was saved by a newer Debrief{found}; update Debrief to open it"
+        ))
     } else if lower.contains("no magic bytes found")
         || lower.contains("too small to be a parquet file")
         || (lower.contains("parquet") && (lower.contains("corrupt") || lower.contains("invalid footer")))
@@ -620,6 +640,10 @@ fn open_db(dir: &Path, opts: &StoreOptions) -> StoreResult<Connection> {
     let config = Config::default()
         .max_memory(&opts.memory_limit)
         .and_then(|c| c.threads(opts.duck_threads.max(1) as i64))
+        // DuckDB 2.0 reads Parquet through a pool of I/O threads that defaults to four per core and does not follow
+        // `threads`; bound it by the same Performance setting (rule 13) so the worker's memory budget holds.
+        .and_then(|c| c.with("async_threads", opts.duck_threads.max(1).to_string()))
+        .and_then(|c| c.with("storage_compatibility_version", STORAGE_VERSION))
         .and_then(|c| c.with("temp_directory", tmp.to_string_lossy()))
         .and_then(|c| c.enable_autoload_extension(false))
         // The catalog is small; a checkpoint at the end of each change is enough.
@@ -838,8 +862,11 @@ impl DuckStore {
     pub fn configure(&self, opts: StoreOptions) -> StoreResult<()> {
         let conn = self.inner.conn()?;
         let limit = sql::lit(&opts.memory_limit).ok_or_else(|| StoreError::Invalid("bad memory limit".into()))?;
-        conn.execute_batch(&format!("SET memory_limit = {limit}; SET threads = {};", opts.duck_threads.max(1)))
-            .map_err(|e| StoreError::Invalid(format!("{e}")))?;
+        conn.execute_batch(&format!(
+            "SET memory_limit = {limit}; SET threads = {n}; SET async_threads = {n};",
+            n = opts.duck_threads.max(1)
+        ))
+        .map_err(|e| StoreError::Invalid(format!("{e}")))?;
         *write_lock(&self.inner.options) = opts;
         Ok(())
     }
@@ -1236,6 +1263,93 @@ mod tests {
         );
     }
 
+    /// The storage version DuckDB wrote into a database file's header (8 bytes of checksum, "DUCK", then the version).
+    fn storage_version(file: &Path) -> u64 {
+        let bytes = std::fs::read(file).unwrap();
+        assert_eq!(&bytes[8..12], b"DUCK", "not a DuckDB file");
+        u64::from_le_bytes(bytes[12..20].try_into().unwrap())
+    }
+
+    #[test]
+    fn a_new_catalog_is_written_in_the_storage_format_the_previous_release_reads() {
+        let dir = std::env::temp_dir().join(format!("debrief-storage-pin-{}", std::process::id()));
+        let conn = open_db(&dir, &StoreOptions::default()).unwrap();
+        conn.execute_batch("CREATE TABLE t(x INTEGER); INSERT INTO t VALUES (1); CHECKPOINT")
+            .unwrap();
+        drop(conn);
+        // DuckDB 1.5 reads storage versions 64 to 68; a file created by 2.0 without the pin is version 69.
+        let pinned = storage_version(&dir.join(DB_FILE));
+        assert!((64..=68).contains(&pinned), "storage version {pinned}");
+        // The control: the same file created without the pin is newer, so the test would notice the pin going.
+        let unpinned_file = dir.join("unpinned.duckdb");
+        let latest = Config::default().with("storage_compatibility_version", "latest").unwrap();
+        let unpinned = Connection::open_with_flags(&unpinned_file, latest).unwrap();
+        unpinned.execute_batch("CREATE TABLE t(x INTEGER); CHECKPOINT").unwrap();
+        drop(unpinned);
+        assert!(
+            storage_version(&unpinned_file) > 68,
+            "the control file is not newer than DuckDB 1.5 reads"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn duckdbs_newer_storage_version_error_is_not_an_engine_failure() {
+        // The text DuckDB 1.5.6 prints for a catalog that DuckDB 2.0 created without the pin (captured from its CLI).
+        let e = classify(
+            "IO Error: Trying to read a database file with version number 69, but we can only read versions between 64 and 68.\n\
+             The database file was created with a newer version of DuckDB.\n\n\
+             Newer DuckDB version might introduce backward incompatible changes (possibly guarded by compatibility settings).\n\
+             See the storage page for migration strategy and more information: https://duckdb.org/internals/storage"
+                .into(),
+        );
+        assert!(
+            matches!(&e, StoreError::Invalid(m) if m.contains("saved by a newer Debrief") && m.contains("update Debrief") && m.contains("69")),
+            "{e:?}"
+        );
+        assert!(!e.is_retryable());
+        // A later DuckDB's own wording of the same failure.
+        let e = classify("IO Error: The database file was created with a newer version of DuckDB.".into());
+        assert!(
+            matches!(&e, StoreError::Invalid(m) if m.contains("saved by a newer Debrief")),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn async_threads_follow_the_chosen_threads_instead_of_four_per_core() {
+        let dir = std::env::temp_dir().join(format!("debrief-async-threads-{}", std::process::id()));
+        let opts = StoreOptions {
+            duck_threads: 3,
+            ..StoreOptions::default()
+        };
+        let conn = open_db(&dir, &opts).unwrap();
+        let setting = |name: &str| -> String {
+            conn.query_row(&format!("SELECT CAST(current_setting('{name}') AS VARCHAR)"), [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(setting("async_threads"), "3");
+        drop(conn);
+        // Changing the limits at run time moves both together.
+        let store_dir = dir.join("s");
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = DuckStore::create_with(&store_dir, Profile::default_profile(), PluginRegistry::new(), opts).unwrap();
+        store
+            .configure(StoreOptions {
+                duck_threads: 5,
+                ..StoreOptions::default()
+            })
+            .unwrap();
+        let conn = store.inner.conn().unwrap();
+        let value: String = conn
+            .query_row("SELECT CAST(current_setting('async_threads') AS VARCHAR)", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(value, "5");
+        drop(conn);
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_database_gives_freed_memory_back_and_keeps_its_limit() {
         let dir = std::env::temp_dir().join(format!("debrief-open-db-{}", std::process::id()));
@@ -1244,7 +1358,7 @@ mod tests {
             conn.query_row(&format!("SELECT CAST(current_setting('{name}') AS VARCHAR)"), [], |r| r.get(0))
                 .unwrap()
         };
-        assert_eq!(setting("allocator_flush_threshold"), "32.0 MiB");
+        assert_eq!(setting("allocator_flush_threshold"), "32MiB");
         assert_eq!(setting("allocator_background_threads"), "true");
         assert_eq!(setting("threads"), DUCK_THREADS.to_string());
         assert_eq!(setting("temp_directory"), dir.join("tmp").to_string_lossy());
@@ -1272,7 +1386,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(setting("threads"), "3");
-        assert_eq!(setting("allocator_flush_threshold"), "8.0 MiB");
+        assert_eq!(setting("allocator_flush_threshold"), "8MiB");
         assert_eq!(setting("allocator_background_threads"), "false");
         assert!(
             setting("max_temp_directory_size").starts_with("1.8 GiB"),

@@ -1,7 +1,7 @@
 // Fetches the official prebuilt libduckdb the store worker links, without a shell: Windows has no bash. The pins
 // (version, release assets and their SHA-256) stay in one place, crates/debrief-store-duck/scripts/fetch-libduckdb.sh,
 // which CI and the docs run directly; this module reads them from it. The archive is checked against its pin before
-// it is unpacked (Windows 10+ `tar`, which reads zip; `unzip` elsewhere) into a fresh folder of the cache.
+// it is unpacked (`tar -xzf`; Windows 10+ ships bsdtar) into a fresh folder of the cache.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 export function parsePins(script) {
   const version = /^VERSION=(\S+)$/m.exec(script)?.[1];
   if (!version) throw new Error('fetch-libduckdb.sh names no VERSION');
-  const assets = [...script.matchAll(/ASSET=(libduckdb-[\w.-]+\.zip); SHA=([0-9a-f]{64})/g)].map((m) => ({ asset: m[1], sha: m[2] }));
+  const assets = [...script.matchAll(/ASSET=(duckdb-shared-libs-[\w.-]+\.tar\.gz); SHA=([0-9a-f]{64})/g)].map((m) => ({ asset: m[1], sha: m[2] }));
   if (assets.length === 0) throw new Error('fetch-libduckdb.sh pins no assets');
   return { version, assets };
 }
@@ -20,8 +20,15 @@ export function parsePins(script) {
 /** The pinned asset for a Node `platform` and `arch`, or an error naming what is pinned. */
 export function assetFor(pins, platform, arch) {
   const cpu = { x64: 'amd64', arm64: 'arm64' }[arch];
+  // macOS is Apple silicon only: DuckDB 2.1 drops Intel Macs and Debrief does not ship for them.
   const name =
-    platform === 'darwin' ? 'libduckdb-osx-universal.zip' : platform === 'win32' ? `libduckdb-windows-${cpu}.zip` : platform === 'linux' ? `libduckdb-linux-${cpu}.zip` : null;
+    platform === 'darwin' && arch === 'arm64'
+      ? 'duckdb-shared-libs-osx-arm64.tar.gz'
+      : platform === 'win32'
+        ? `duckdb-shared-libs-windows-${cpu}.tar.gz`
+        : platform === 'linux'
+          ? `duckdb-shared-libs-linux-${cpu}.tar.gz`
+          : null;
   const pin = pins.assets.find((a) => a.asset === name);
   if (!pin) throw new Error(`no pinned libduckdb for ${platform}-${arch} (pinned: ${pins.assets.map((a) => a.asset).join(', ')})`);
   return pin;
@@ -49,7 +56,7 @@ async function download(url, init, tries = 4) {
 export async function fetchLibduckdb(scriptPath, cacheDir, platform = process.platform, arch = process.arch) {
   const pins = parsePins(readFileSync(scriptPath, 'utf8'));
   const { asset, sha } = assetFor(pins, platform, arch);
-  const dir = join(cacheDir, pins.version, asset.replace(/\.zip$/, ''));
+  const dir = join(cacheDir, pins.version, asset.replace(/\.tar\.gz$/, ''));
   if (!existsSync(join(dir, '.verified'))) {
     const url = `https://github.com/duckdb/duckdb/releases/download/v${pins.version}/${asset}`;
     console.error(`fetching ${url}`);
@@ -58,15 +65,14 @@ export async function fetchLibduckdb(scriptPath, cacheDir, platform = process.pl
     const got = createHash('sha256').update(bytes).digest('hex');
     if (got !== sha) throw new Error(`SHA-256 mismatch for ${asset}: expected ${sha}, got ${got}`);
     mkdirSync(join(cacheDir, pins.version), { recursive: true });
-    const zip = join(cacheDir, pins.version, asset);
-    writeFileSync(zip, bytes);
+    const archive = join(cacheDir, pins.version, asset);
+    writeFileSync(archive, bytes);
     // A fresh, empty folder; only the library, its import library and the headers are used.
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
-    // Windows' own bsdtar (System32), which reads zip; a `tar` earlier on PATH (Git's GNU tar) takes `C:` for a host.
-    const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
-    if (platform === 'win32') execFileSync(tar, ['-xf', zip, '-C', dir], { stdio: 'inherit' });
-    else execFileSync('unzip', ['-q', '-o', zip, '-d', dir], { stdio: 'inherit' });
+    // Windows' own bsdtar (System32): a `tar` earlier on PATH (Git's GNU tar) takes `C:` for a host.
+    const tar = platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+    execFileSync(tar, ['-xzf', archive, '-C', dir], { stdio: 'inherit' });
     writeFileSync(join(dir, '.verified'), '');
   }
   return { DUCKDB_LIB_DIR: dir, DUCKDB_INCLUDE_DIR: dir };

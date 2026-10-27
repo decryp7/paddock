@@ -61,10 +61,11 @@ impl Pins {
             "aarch64" => Some("arm64"),
             _ => None,
         };
+        // macOS is Apple silicon only: DuckDB 2.1 drops Intel Macs and Debrief does not ship for them.
         let name = match (os, cpu) {
-            ("macos", _) => Some("libduckdb-osx-universal.zip".to_owned()),
-            ("windows", Some(cpu)) => Some(format!("libduckdb-windows-{cpu}.zip")),
-            ("linux", Some(cpu)) => Some(format!("libduckdb-linux-{cpu}.zip")),
+            ("macos", Some("arm64")) => Some("duckdb-shared-libs-osx-arm64.tar.gz".to_owned()),
+            ("windows", Some(cpu)) => Some(format!("duckdb-shared-libs-windows-{cpu}.tar.gz")),
+            ("linux", Some(cpu)) => Some(format!("duckdb-shared-libs-linux-{cpu}.tar.gz")),
             _ => None,
         };
         name.and_then(|n| self.assets.iter().find(|p| p.asset == n)).ok_or_else(|| {
@@ -79,13 +80,13 @@ impl Pins {
     }
 }
 
-/// `ASSET=libduckdb-….zip; SHA=<64 hex>` anywhere in a line.
+/// `ASSET=duckdb-shared-libs-….tar.gz; SHA=<64 hex>` anywhere in a line.
 fn parse_pin_line(line: &str) -> Option<Pin> {
     let rest = &line[line.find("ASSET=")? + "ASSET=".len()..];
     let (asset, rest) = rest.split_once("; SHA=")?;
     let sha: String = rest.chars().take_while(char::is_ascii_hexdigit).collect();
-    let valid_asset = asset.starts_with("libduckdb-")
-        && asset.ends_with(".zip")
+    let valid_asset = asset.starts_with("duckdb-shared-libs-")
+        && asset.ends_with(".tar.gz")
         && asset.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
     (valid_asset && sha.len() == 64).then(|| Pin {
         asset: asset.to_owned(),
@@ -108,9 +109,9 @@ pub fn verify(pin: &Pin, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
-/// The folder an asset unpacks into: `<target>/libduckdb/<version>/<asset without .zip>`.
+/// The folder an asset unpacks into: `<target>/libduckdb/<version>/<asset without .tar.gz>`.
 pub fn unpack_dir(target_dir: &Path, version: &str, pin: &Pin) -> PathBuf {
-    let stem = pin.asset.strip_suffix(".zip").unwrap_or(&pin.asset);
+    let stem = pin.asset.strip_suffix(".tar.gz").unwrap_or(&pin.asset);
     target_dir.join("libduckdb").join(version).join(stem)
 }
 
@@ -195,16 +196,16 @@ pub fn config_includes_local(config: &str) -> bool {
     })
 }
 
-/// Unpacks a verified archive into `dir`, which is emptied first. Entries that would escape `dir` are refused by
-/// the zip crate.
+/// Unpacks a verified `.tar.gz` into `dir`, which is emptied first. Entries that would escape `dir` are refused by
+/// the tar crate.
 pub fn unpack(bytes: &[u8], dir: &Path) -> Result<(), String> {
     if dir.exists() {
         std::fs::remove_dir_all(dir).map_err(|e| format!("could not empty {}: {e}", dir.display()))?;
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("not a zip archive: {e}"))?;
-    zip.extract(dir)
-        .map_err(|e| format!("could not unpack into {}: {e}", dir.display()))
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+    tar.unpack(dir)
+        .map_err(|e| format!("could not unpack the .tar.gz into {}: {e}", dir.display()))
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {
@@ -274,44 +275,44 @@ pub fn run(root: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const SCRIPT: &str = "set -eu\n\nVERSION=1.5.6\nCACHE=x\n\
-        case x in\n  MINGW*-x86_64)\n    ASSET=libduckdb-windows-amd64.zip; SHA=44cf59583f9951d2cb09b1bf115a63ecb2d8901e363903029d86c7d8683fe96a ;;\n\
-          Linux-aarch64)\n    ASSET=libduckdb-linux-arm64.zip; SHA=B72ED9F05003F5E9D2015F7CEADA6416B377D9DD33169CDDE3C9E33897856EEE ;;\n\
-          Darwin-*)\n    ASSET=libduckdb-osx-universal.zip; SHA=e0bc007d9b0094c0970ac1847a8601d10aad07cbd2910ce586ec810f77b638d6 ;;\n\
-          Bad)\n    ASSET=libduckdb-x.zip; SHA=abc ;;\n    ASSET=../evil.zip; SHA=e0bc007d9b0094c0970ac1847a8601d10aad07cbd2910ce586ec810f77b638d6 ;;\nesac\n\
-        DIR=\"$CACHE/$VERSION/${ASSET%.zip}\"\n";
+    const SCRIPT: &str = "set -eu\n\nVERSION=2.0.0\nCACHE=x\n\
+        case x in\n  MINGW*-x86_64)\n    ASSET=duckdb-shared-libs-windows-amd64.tar.gz; SHA=2b83169128239de5f45fe21de80f99bf436e53aa4bb24020dd951a1ba8d4b95f ;;\n\
+          Linux-aarch64)\n    ASSET=duckdb-shared-libs-linux-arm64.tar.gz; SHA=C60EECF91143CA6BBAC55C4F4D40DC22520488B0AC257C86E0FE9A2B451CF2B7 ;;\n\
+          Darwin-arm64)\n    ASSET=duckdb-shared-libs-osx-arm64.tar.gz; SHA=c35d60080b31ba5d11a3ce505a6831be784f003b4c575d32a4c2badb3b41cdf0 ;;\n\
+          Bad)\n    ASSET=duckdb-shared-libs-x.tar.gz; SHA=abc ;;\n    ASSET=../evil.tar.gz; SHA=e0bc007d9b0094c0970ac1847a8601d10aad07cbd2910ce586ec810f77b638d6 ;;\nesac\n\
+        DIR=\"$CACHE/$VERSION/${ASSET%.tar.gz}\"\n";
 
     #[test]
     fn parses_the_version_and_every_well_formed_pin() {
         let pins = Pins::parse(SCRIPT).unwrap();
-        assert_eq!(pins.version, "1.5.6");
+        assert_eq!(pins.version, "2.0.0");
         let names: Vec<&str> = pins.assets.iter().map(|p| p.asset.as_str()).collect();
         assert_eq!(
             names,
             [
-                "libduckdb-windows-amd64.zip",
-                "libduckdb-linux-arm64.zip",
-                "libduckdb-osx-universal.zip"
+                "duckdb-shared-libs-windows-amd64.tar.gz",
+                "duckdb-shared-libs-linux-arm64.tar.gz",
+                "duckdb-shared-libs-osx-arm64.tar.gz"
             ]
         );
         assert_eq!(
             pins.assets[1].sha256,
-            "b72ed9f05003f5e9d2015f7ceada6416b377d9dd33169cdde3c9e33897856eee"
+            "c60eecf91143ca6bbac55c4f4d40dc22520488b0ac257c86e0fe9a2b451cf2b7"
         );
         assert_eq!(
             pins.url(&pins.assets[0]),
-            "https://github.com/duckdb/duckdb/releases/download/v1.5.6/libduckdb-windows-amd64.zip"
+            "https://github.com/duckdb/duckdb/releases/download/v2.0.0/duckdb-shared-libs-windows-amd64.tar.gz"
         );
     }
 
     #[test]
     fn a_script_without_version_or_pins_is_refused() {
         assert_eq!(
-            Pins::parse("ASSET=libduckdb-a.zip; SHA=00").unwrap_err(),
+            Pins::parse("ASSET=duckdb-shared-libs-a.tar.gz; SHA=00").unwrap_err(),
             "fetch-libduckdb.sh names no VERSION"
         );
         assert_eq!(Pins::parse("VERSION=1.0\n").unwrap_err(), "fetch-libduckdb.sh pins no assets");
-        assert!(Pins::parse("VERSION=1.0;rm -rf /\nASSET=libduckdb-a.zip; SHA=0").is_err());
+        assert!(Pins::parse("VERSION=1.0;rm -rf /\nASSET=duckdb-shared-libs-a.tar.gz; SHA=0").is_err());
     }
 
     #[test]
@@ -323,7 +324,6 @@ mod tests {
             ("windows", "aarch64"),
             ("linux", "x86_64"),
             ("linux", "aarch64"),
-            ("macos", "x86_64"),
             ("macos", "aarch64"),
         ] {
             assert!(pins.asset_for(os, arch).is_ok(), "{os}-{arch}");
@@ -333,12 +333,19 @@ mod tests {
     #[test]
     fn picks_the_asset_for_the_host() {
         let pins = Pins::parse(SCRIPT).unwrap();
-        assert_eq!(pins.asset_for("windows", "x86_64").unwrap().asset, "libduckdb-windows-amd64.zip");
-        assert_eq!(pins.asset_for("macos", "aarch64").unwrap().asset, "libduckdb-osx-universal.zip");
-        assert_eq!(pins.asset_for("macos", "x86_64").unwrap().asset, "libduckdb-osx-universal.zip");
+        assert_eq!(
+            pins.asset_for("windows", "x86_64").unwrap().asset,
+            "duckdb-shared-libs-windows-amd64.tar.gz"
+        );
+        assert_eq!(
+            pins.asset_for("macos", "aarch64").unwrap().asset,
+            "duckdb-shared-libs-osx-arm64.tar.gz"
+        );
+        // Intel Macs are not supported (DuckDB 2.1 drops them).
+        assert!(pins.asset_for("macos", "x86_64").is_err());
         let err = pins.asset_for("linux", "x86_64").unwrap_err();
         assert!(
-            err.starts_with("no pinned libduckdb for linux-x86_64 (pinned: libduckdb-windows-amd64.zip"),
+            err.starts_with("no pinned libduckdb for linux-x86_64 (pinned: duckdb-shared-libs-windows-amd64.tar.gz"),
             "{err}"
         );
         assert!(pins.asset_for("freebsd", "x86_64").is_err());
@@ -348,23 +355,32 @@ mod tests {
     #[test]
     fn verifies_the_archive_against_its_pin() {
         let pin = Pin {
-            asset: "libduckdb-a.zip".into(),
+            asset: "duckdb-shared-libs-a.tar.gz".into(),
             sha256: sha256_hex(b"archive"),
         };
         assert!(verify(&pin, b"archive").is_ok());
         let err = verify(&pin, b"tampered").unwrap_err();
-        assert!(err.starts_with("SHA-256 mismatch for libduckdb-a.zip: expected "), "{err}");
+        assert!(
+            err.starts_with("SHA-256 mismatch for duckdb-shared-libs-a.tar.gz: expected "),
+            "{err}"
+        );
         assert_eq!(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     }
 
     #[test]
     fn the_unpack_folder_is_versioned_per_asset_under_the_target() {
         let pin = Pin {
-            asset: "libduckdb-linux-amd64.zip".into(),
+            asset: "duckdb-shared-libs-linux-amd64.tar.gz".into(),
             sha256: String::new(),
         };
-        let dir = unpack_dir(Path::new("t"), "1.5.6", &pin);
-        assert_eq!(dir, Path::new("t").join("libduckdb").join("1.5.6").join("libduckdb-linux-amd64"));
+        let dir = unpack_dir(Path::new("t"), "2.0.0", &pin);
+        assert_eq!(
+            dir,
+            Path::new("t")
+                .join("libduckdb")
+                .join("2.0.0")
+                .join("duckdb-shared-libs-linux-amd64")
+        );
         let root = Path::new("repo");
         assert_eq!(target_dir(root, None), root.join("target"));
         assert_eq!(target_dir(root, Some("")), root.join("target"));
@@ -374,10 +390,14 @@ mod tests {
     #[test]
     fn config_paths_are_workspace_relative_when_inside_it() {
         let root = std::env::temp_dir().join("repo");
-        let inside = root.join("target").join("libduckdb").join("1.5.6").join("libduckdb-windows-amd64");
+        let inside = root
+            .join("target")
+            .join("libduckdb")
+            .join("2.0.0")
+            .join("duckdb-shared-libs-windows-amd64");
         assert_eq!(
             ConfigPath::new(&root, &inside),
-            ConfigPath::Relative("target/libduckdb/1.5.6/libduckdb-windows-amd64".into())
+            ConfigPath::Relative("target/libduckdb/2.0.0/duckdb-shared-libs-windows-amd64".into())
         );
         let outside = std::env::temp_dir().join("elsewhere").join("libduckdb");
         assert!(
@@ -391,10 +411,10 @@ mod tests {
     #[test]
     fn the_local_config_is_valid_toml_with_both_variables() {
         for path in [
-            ConfigPath::Relative("target/libduckdb/1.5.6/a".into()),
+            ConfigPath::Relative("target/libduckdb/2.0.0/a".into()),
             ConfigPath::Absolute("C:/Users/x \"y\"/a\\b".into()),
         ] {
-            let text = render_local_config("1.5.6", "libduckdb-windows-amd64.zip", &path);
+            let text = render_local_config("2.0.0", "duckdb-shared-libs-windows-amd64.tar.gz", &path);
             let table: toml::Table = text.parse().unwrap();
             let env = table["env"].as_table().unwrap();
             for key in ["DUCKDB_LIB_DIR", "DUCKDB_INCLUDE_DIR"] {
@@ -432,21 +452,29 @@ mod tests {
     }
 
     #[test]
-    fn unpacks_a_zip_into_a_fresh_folder() {
-        let mut buf = std::io::Cursor::new(Vec::new());
+    fn unpacks_a_tar_gz_into_a_fresh_folder() {
+        let mut tar_bytes = Vec::new();
         {
-            let mut w = zip::ZipWriter::new(&mut buf);
-            w.start_file("duckdb.h", zip::write::SimpleFileOptions::default()).unwrap();
-            std::io::Write::write_all(&mut w, b"/* header */").unwrap();
-            w.finish().unwrap();
+            let mut b = tar::Builder::new(&mut tar_bytes);
+            let mut h = tar::Header::new_gnu();
+            h.set_size(12);
+            h.set_mode(0o644);
+            h.set_cksum();
+            b.append_data(&mut h, "duckdb.h", &b"/* header */"[..]).unwrap();
+            b.finish().unwrap();
         }
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        std::io::Write::write_all(&mut gz, &tar_bytes).unwrap();
+        let archive = gz.finish().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("lib");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("stale.dll"), b"old").unwrap();
-        unpack(buf.get_ref(), &dir).unwrap();
+        unpack(&archive, &dir).unwrap();
         assert_eq!(std::fs::read(dir.join("duckdb.h")).unwrap(), b"/* header */");
         assert!(!dir.join("stale.dll").exists());
-        assert!(unpack(b"not a zip", &dir).unwrap_err().starts_with("not a zip archive"));
+        assert!(unpack(b"not an archive", &dir)
+            .unwrap_err()
+            .starts_with("could not unpack the .tar.gz"));
     }
 }
