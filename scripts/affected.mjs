@@ -385,7 +385,7 @@ export const LINUX = 'ubuntu-latest';
  * reaches part of the app's Cargo workspace; '' runs it all). The Linux leg runs everything the change reaches; a Windows or
  * macOS leg runs only the Rust gates, and only when the change reaches the Rust half.
  */
-export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
+export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false } = {}) {
   // An app with a workflow of its own (paddock.ci.json `workflow`) is not a leg: its workflow asks `--ci --app`. An app
   // with nothing to run (docs only: no Cargo workspace, no commands) is no leg either.
   const runs = (a) => !a.workflow && (a.cargo || a.prepare?.length || a.checks?.length || a.ui?.length);
@@ -399,7 +399,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
     const filter = narrow && !plan.all && hit.length && hit.length < members.length ? hit.map((n) => `package(=${n})`).join(' | ') : '';
     const rust = (plan.kinds[name] ?? []).includes('rust');
     const ui = (plan.kinds[name] ?? []).includes('ui');
-    return oses.filter((os) => os === LINUX || (rust && app.cargo)).map((os) => {
+    const legs = oses.filter((os) => os === LINUX || (rust && app.cargo)).map((os) => {
       const linux = os === LINUX;
       return {
         app: name,
@@ -413,12 +413,53 @@ export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
         angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
         processes: (app.processes ?? []).join(' '),
         process_patterns: (app.processPatterns ?? []).join('\n'),
+        test_browser_prefix: app.testBrowser?.envPrefix ?? '',
+        test_browser_catalogue: app.testBrowser?.catalogue ?? '',
+        test_browser_no_sandbox: linux && app.testBrowser?.noSandboxOnLinux ? 'true' : 'false',
+        display: linux && app.display ? 'true' : 'false',
         rust,
         ui: linux && ui,
         filter,
+        e2e_checks: '',
+        e2e_shard: '',
+        e2e_leg: '',
+        e2e_artifacts: linux && ui ? (app.e2eArtifacts ?? '') : '',
       };
     });
+    // paddock.ci.json `e2e` (commands) with `e2eShards` (default 1): the end-to-end tests are legs of their own on Linux, one per
+    // shard `i/N` (the command reads $E2E_SHARD and $E2E_INDEX), running at the same time; the main leg keeps the other UI lines.
+    const shards = ui && app.e2e?.length ? Math.max(1, app.e2eShards ?? 1) : 0;
+    const base = legs.find((l) => l.os === LINUX);
+    for (let i = 1; i <= shards; i += 1) {
+      legs.push({
+        ...base,
+        prepare: '',
+        checks: '',
+        ui_checks: '',
+        rust: false,
+        ui: false,
+        display: 'false',
+        e2e_checks: app.e2e.join('\n'),
+        e2e_shard: `${i}/${shards}`,
+        e2e_leg: `e2e-${i}`,
+      });
+    }
+    // `e2eWebkit` (commands): the WebKit end-to-end tests, a leg of their own when the run asks for WebKit (see wantsWebkit).
+    if (ui && webkit && app.e2eWebkit?.length) {
+      legs.push({ ...base, prepare: '', checks: '', ui_checks: '', rust: false, ui: false, display: 'false', e2e_checks: app.e2eWebkit.join('\n'), e2e_shard: '', e2e_leg: 'e2e-webkit' });
+    }
+    return legs;
   });
+}
+
+/**
+ * Whether this run wants the WebKit tests: a push to main or a tag, the nightly, or a manual run that asked for them
+ * (`PLAN_WEBKIT`, from ci.yml's `webkit` input). Never a plain pull request.
+ */
+export function wantsWebkit(env) {
+  if (env.PLAN_WEBKIT) return true;
+  const ref = env.GITHUB_REF ?? '';
+  return env.GITHUB_EVENT_NAME === 'schedule' || (env.GITHUB_EVENT_NAME !== 'pull_request' && (ref === 'refs/heads/main' || ref.startsWith('refs/tags/')));
 }
 
 /**
@@ -524,7 +565,7 @@ export function summary(plan, reason, legs) {
     '| Project | Runs |',
     '|---|---|',
     ...['crates', 'ui', 'eslint', 'conformance', 'tools'].map((p) => `| ${p} | ${yes(plan[p])} |`),
-    ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${[l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
+    ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${l.e2e_leg ? `${l.e2e_leg.replace('-', ' ')}${l.e2e_shard ? ` ${l.e2e_shard}` : ''}` : [l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
   ];
   if (plan.docs && !legs.length && !plan.crates && !plan.ui) lines.push('', 'Docs only: nothing to build.');
   return `${lines.join('\n')}\n`;
@@ -559,7 +600,7 @@ async function ci(env, { app = null } = {}) {
   const { graph } = planned;
   if (env.PLAN_APP && !graph.apps.has(env.PLAN_APP)) throw new Error(`unknown app ${env.PLAN_APP} (no apps/${env.PLAN_APP}/paddock.ci.json)`);
   const plan = env.PLAN_APP ? onlyApp(planned.plan, env.PLAN_APP) : planned.plan;
-  const legs = matrix(plan, graph, { narrow: event === 'pull_request' && !env.PLAN_APP });
+  const legs = matrix(plan, graph, { narrow: event === 'pull_request' && !env.PLAN_APP, webkit: wantsWebkit(env) });
   log(env.PLAN_APP ? `base: only ${env.PLAN_APP}, every leg (a tag's gates)` : `base: ${reason}`);
   log(JSON.stringify(plan, null, 2));
   if (app) {

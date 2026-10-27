@@ -211,6 +211,38 @@ test('tauri-bundle: --root is where npm ci runs, and the build-folder action\'s 
   assert.match(r.stdout + r.stderr, /No updater signing secrets/);
 });
 
+test('tauri-bundle: --prepare runs in --root after npm ci and before the build; a failing one stops the build', () => {
+  const root = bundleRepo();
+  mkdirSync(join(root, 'ws'), { recursive: true });
+  writeFileSync(join(root, 'bin/npm'), '#!/bin/bash\necho "npm $* in $(basename "$PWD")" >> "$BIN_LOG"\n');
+  const r = bundle(root, ['deb', '--app-dir', 'app', '--root', 'ws', '--prepare', 'npm run build -w ui']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const log = readFileSync(join(root, 'calls.log'), 'utf8').split('\n');
+  assert.deepEqual(log.slice(0, 2), ['npm ci in ws', 'npm run build -w ui in ws']);
+  assert.match(log[2], /^npx tauri build/);
+  const bad = bundleRepo();
+  const failed = bundle(bad, ['deb', '--prepare', 'exit 3']);
+  assert.notEqual(failed.status, 0);
+  assert.doesNotMatch(readFileSync(join(bad, 'calls.log'), 'utf8'), /npx tauri build/);
+});
+
+// The composite action's own `run:` line, as the runner would expand it: every caller reaches the script through it.
+test("the tauri-bundle action's run line works with and without `prepare` (an empty one adds no flag)", () => {
+  const action = readFileSync(join(PADDOCK, '.gitea', 'actions', 'tauri-bundle', 'action.yml'), 'utf8');
+  const line = action.slice(action.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n').replace('${{ github.action_path }}', join(PADDOCK, '.gitea', 'actions', 'tauri-bundle'));
+  for (const prepare of ['', 'npm run build -w ui']) {
+    const root = bundleRepo();
+    const r = spawnSync('bash', ['-c', line], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { PATH: `${join(root, 'bin')}:${dirname(process.execPath)}:/usr/bin:/bin`, CARGO_TARGET_DIR: join(root, 'target'), BIN_LOG: join(root, 'calls.log'), BUNDLES: 'deb', APP_DIR: 'app', ROOT: '.', PREPARE: prepare },
+    });
+    assert.equal(r.status, 0, `prepare "${prepare}": ${r.stdout}${r.stderr}`);
+    const log = readFileSync(join(root, 'calls.log'), 'utf8');
+    assert.equal(log.includes('npm run build -w ui'), prepare !== '', `prepare "${prepare}" runs exactly when given`);
+  }
+});
+
 test('tauri-bundle: a real macOS signing identity turns the hardened runtime back on; ad hoc or unset does not', { skip: process.platform !== 'darwin' && 'the script adds it on macOS only' }, () => {
   const real = bundleRepo();
   assert.equal(bundle(real, ['deb'], { APPLE_SIGNING_IDENTITY: 'Developer ID Application: Example (ABCDE12345)' }).status, 0);

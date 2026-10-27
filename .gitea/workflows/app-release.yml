@@ -76,6 +76,10 @@ on:
         description: "Paths whose commits belong in the app's changelog, one glob per line (apps/pitcrew/**). Empty: all commits."
         type: string
         default: ""
+      prepare:
+        description: "A command run at `root` after `npm ci`, before the build (an app whose UI imports the shared library: npm run build -w ui). Empty: none."
+        type: string
+        default: ""
       setup-node:
         description: "Install Node from .nvmrc on Linux. False for an image that has the repo's Node baked in (the Paddock CI image)."
         type: boolean
@@ -205,6 +209,7 @@ jobs:
           bundles: ${{ matrix.bundles }}
           app-dir: ${{ inputs.app-dir }}
           root: ${{ inputs.root }}
+          prepare: ${{ inputs.prepare }}
           apple-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           signing-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

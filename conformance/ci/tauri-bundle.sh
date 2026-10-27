@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds the installers with `tauri build` and copies them (and their updater signatures) to ./dist (plan X10; Pitwall's
 # scripts/ci/tauri-bundle.sh, shared).
-#   bash tauri-bundle.sh <bundles> [--app-dir app] [--root <dir>]       e.g. nsis | deb,appimage | app,dmg
-# --root is where `npm ci` runs (default: the app dir; the monorepo's root, whose one lock installs every app). The build
+#   bash tauri-bundle.sh <bundles> [--app-dir app] [--root <dir>] [--prepare <command>]       e.g. nsis | deb,appimage | app,dmg
+# --root is where `npm ci` runs (default: the app dir; the monorepo's root, whose one lock installs every app); --prepare is a
+# command run there right after it (an app whose UI imports the shared library builds it: `npm run build -w ui`). The build
 # folder is the build-folder action's ($PADDOCK_BUILD_FOLDER), else cargo's $CARGO_TARGET_DIR, else target/.
 # With TAURI_SIGNING_PRIVATE_KEY and TAURI_UPDATER_PUBKEY set the updater artifacts are signed (the keys are stripped of
 # whitespace first); without them (forks, pull requests, secrets not set yet) the build still succeeds, unsigned and without
@@ -11,11 +12,13 @@ set -euo pipefail
 bundles="${1:?bundles, e.g. deb,appimage}"
 app_dir="app"
 root=""
+prepare=""
 shift
 while [ $# -gt 0 ]; do
   case "$1" in
     --app-dir) app_dir="${2:?--app-dir needs a value}"; shift 2 ;;
     --root) root="${2:?--root needs a value}"; shift 2 ;;
+    --prepare) prepare="${2:?--prepare needs a command}"; shift 2 ;;
     *) echo "::error::unknown option $1"; exit 2 ;;
   esac
 done
@@ -50,6 +53,7 @@ eval "$(node "$here/../release/strip-keys.mjs")"
 [ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
 
 (cd "$root" && npm ci)
+if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
 (
   cd "$app_dir"
   # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, rule 23): ad-hoc code under it cannot load a

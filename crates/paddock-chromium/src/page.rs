@@ -194,7 +194,16 @@ impl Page {
         let since = self.conn.mark();
         let r = self.call("Page.navigate", json!({"url": url}))?;
         if let Some(e) = r.get("errorText").and_then(Value::as_str) {
-            return Err(Error::Protocol(format!("the page did not load: {e}")));
+            // Chrome cancels this navigation in the same step that starts the one replacing it, and sends that start
+            // just after this reply. Any later reply comes after it, so one more (browser-side) call is the barrier.
+            let _ = self.call("Page.getNavigationHistory", json!({}));
+            let newer = self
+                .conn
+                .wait_event(since, Duration::ZERO, |ev| {
+                    replaced_by(ev, &self.session, &r).is_some()
+                })
+                .and_then(|ev| replaced_by(&ev, &self.session, &r));
+            return Err(not_loaded(e, &r, newer.as_deref()));
         }
         self.wait_load(since, timeout)
     }
@@ -386,6 +395,41 @@ fn ends(e: &Event, session: &str, target: &str) -> bool {
     ) && (id("sessionId") == Some(session) || id("targetId") == Some(target))
 }
 
+/// The address of a document navigation in the same frame that is not the one `reply` (to `Page.navigate`) belongs to;
+/// a same-document change (`pushState`, a fragment) never replaces a load.
+fn replaced_by(e: &Event, session: &str, reply: &Value) -> Option<String> {
+    let p = &e.params;
+    (e.method == "Page.frameStartedNavigating"
+        && !matches!(
+            p.get("navigationType").and_then(Value::as_str),
+            Some("sameDocument" | "historySameDocument")
+        )
+        && e.session.as_deref() == Some(session)
+        && p.get("frameId") == reply.get("frameId")
+        && p.get("loaderId") != reply.get("loaderId"))
+    .then(|| {
+        p.get("url")
+            .and_then(Value::as_str)
+            .unwrap_or("another address")
+            .to_string()
+    })
+}
+
+/// Why `Page.navigate` answered with `error` (its `errorText`) instead of a page. Chrome reports every navigation it
+/// cancels before the page commits as `net::ERR_ABORTED`: a response that is a download or has no content (a 204), and a
+/// navigation that another one replaced. A download and a replacement get their own message; anything else keeps the code.
+fn not_loaded(error: &str, reply: &Value, replaced_by: Option<&str>) -> Error {
+    if reply.get("isDownload").and_then(Value::as_bool) == Some(true) {
+        return Error::Protocol("the address is a file download, not a page".into());
+    }
+    match replaced_by {
+        Some(url) => Error::Protocol(format!(
+            "the page did not load: another navigation (to {url}) replaced it ({error})"
+        )),
+        None => Error::Protocol(format!("the page did not load: {error}")),
+    }
+}
+
 fn str_of(v: &Value, k: &str) -> Result<String> {
     v.get(k)
         .and_then(Value::as_str)
@@ -430,5 +474,75 @@ mod tests {
                 .to_string()
                 .contains("no x")
         );
+    }
+
+    fn started(session: &str, frame: &str, loader: &str, url: &str) -> Event {
+        Event {
+            method: "Page.frameStartedNavigating".into(),
+            session: Some(session.into()),
+            params: json!({"frameId": frame, "loaderId": loader, "url": url, "navigationType": "differentDocument"}),
+        }
+    }
+
+    #[test]
+    fn a_download_is_named_as_one() {
+        let r = json!({"frameId": "F", "loaderId": "L1", "isDownload": true, "errorText": "net::ERR_ABORTED"});
+        let m = not_loaded("net::ERR_ABORTED", &r, None).to_string();
+        assert!(m.contains("file download"), "{m}");
+    }
+
+    #[test]
+    fn a_replaced_load_names_the_navigation_that_replaced_it() {
+        let r = json!({"frameId": "F", "loaderId": "L1", "isDownload": false, "errorText": "net::ERR_ABORTED"});
+        let m = not_loaded("net::ERR_ABORTED", &r, Some("http://a.test/next")).to_string();
+        assert!(
+            m.contains("replaced")
+                && m.contains("http://a.test/next")
+                && m.contains("net::ERR_ABORTED"),
+            "{m}"
+        );
+        let plain = not_loaded("net::ERR_NAME_NOT_RESOLVED", &r, None).to_string();
+        assert!(
+            plain.ends_with("the page did not load: net::ERR_NAME_NOT_RESOLVED"),
+            "{plain}"
+        );
+    }
+
+    #[test]
+    fn only_another_loader_in_the_same_frame_and_session_counts_as_a_replacement() {
+        let r = json!({"frameId": "F", "loaderId": "L1"});
+        assert_eq!(
+            replaced_by(&started("S", "F", "L2", "http://a.test/x"), "S", &r).as_deref(),
+            Some("http://a.test/x")
+        );
+        // The load itself, a child frame, another tab and other events are not replacements.
+        assert_eq!(
+            replaced_by(&started("S", "F", "L1", "http://a.test/"), "S", &r),
+            None
+        );
+        assert_eq!(
+            replaced_by(&started("S", "child", "L2", "http://a.test/ad"), "S", &r),
+            None
+        );
+        assert_eq!(
+            replaced_by(&started("T", "F", "L2", "http://a.test/x"), "S", &r),
+            None
+        );
+        let other = Event {
+            method: "Page.frameStoppedLoading".into(),
+            session: Some("S".into()),
+            params: json!({"frameId": "F"}),
+        };
+        assert_eq!(replaced_by(&other, "S", &r), None);
+        // A same-document change (pushState, a fragment) of the old page does not cancel the load.
+        let mut same = started("S", "F", "L2", "http://a.test/#top");
+        same.params["navigationType"] = json!("sameDocument");
+        assert_eq!(replaced_by(&same, "S", &r), None);
+        same.params["navigationType"] = json!("historySameDocument");
+        assert_eq!(replaced_by(&same, "S", &r), None);
+        // A replacement without an address still counts.
+        let mut e = started("S", "F", "L3", "");
+        e.params.as_object_mut().unwrap().remove("url");
+        assert_eq!(replaced_by(&e, "S", &r).as_deref(), Some("another address"));
     }
 }

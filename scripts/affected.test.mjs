@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, readApps, ROOT, summary, trackedFiles } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -202,7 +202,7 @@ describe('matrix legs', () => {
   test('everything gives every app both halves on Linux, and the summary names each leg', () => {
     const plan = affected([], graph, { all: true });
     const legs = matrix(plan, graph);
-    assert.deepEqual(legs.filter((l) => l.os === LINUX).map((l) => [l.app, l.rust, l.ui]), LEGS.map((a) => [a, true, true]));
+    assert.deepEqual(legs.filter((l) => l.os === LINUX && !l.e2e_shard).map((l) => [l.app, l.rust, l.ui]), LEGS.map((a) => [a, true, true]));
     const md = summary(plan, 'everything', legs);
     for (const a of LEGS) assert.match(md, new RegExp(`app ${a} \\| rust \\+ ui`));
   });
@@ -221,6 +221,80 @@ describe('matrix legs', () => {
   test('an `os` list without Linux is refused: Linux carries the commands', () => {
     const apps = new Map([['x', { dir: 'apps/x', cargo: '.', os: ['macos-latest'] }]]);
     assert.throws(() => matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps }), /must include ubuntu-latest/);
+  });
+
+  test("an app's test browser and display reach every leg; the sandbox flag and the display are Linux-only", () => {
+    const testBrowser = { envPrefix: 'DEMO', catalogue: 'apps/x/chromium.toml', noSandboxOnLinux: true };
+    const apps = new Map([['x', { dir: 'apps/x', cargo: '.', os: [LINUX, 'windows-latest', 'macos-latest'], display: true, testBrowser }]]);
+    const legs = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps });
+    assert.deepEqual(legs.map((l) => [l.os, l.test_browser_prefix, l.test_browser_catalogue, l.test_browser_no_sandbox, l.display]), [
+      [LINUX, 'DEMO', 'apps/x/chromium.toml', 'true', 'true'],
+      ['windows-latest', 'DEMO', 'apps/x/chromium.toml', 'false', 'false'],
+      ['macos-latest', 'DEMO', 'apps/x/chromium.toml', 'false', 'false'],
+    ]);
+    const plain = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps: new Map([['x', { dir: 'apps/x', cargo: '.' }]]) });
+    assert.deepEqual([plain[0].test_browser_prefix, plain[0].test_browser_no_sandbox, plain[0].display], ['', 'false', 'false']);
+  });
+
+  test("`e2e` with `e2eShards` makes one Linux leg per shard and keeps the other UI lines in the main leg; the report folder reaches the Linux UI leg", () => {
+    const apps = new Map([['x', { dir: 'apps/x', cargo: '.', ui: ['npm test'], e2e: ['npx playwright test --shard=$E2E_SHARD'], e2eShards: 2, e2eArtifacts: 'apps/x/app/results' }]]);
+    const legs = matrix({ apps: ['x'], kinds: { x: ['rust', 'ui'] }, packages: {} }, { cargo: new Map(), apps });
+    assert.deepEqual(legs.map((l) => [l.os, l.rust, l.ui, l.ui_checks, l.e2e_shard, l.e2e_checks, l.e2e_artifacts]), [
+      [LINUX, true, true, 'npm test', '', '', 'apps/x/app/results'],
+      [LINUX, false, false, '', '1/2', 'npx playwright test --shard=$E2E_SHARD', 'apps/x/app/results'],
+      [LINUX, false, false, '', '2/2', 'npx playwright test --shard=$E2E_SHARD', 'apps/x/app/results'],
+    ]);
+    const rustOnly = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps });
+    assert.equal(rustOnly.length, 1, 'a change that does not reach the UI runs no e2e leg');
+    const one = new Map([['x', { dir: 'apps/x', cargo: '.', e2e: ['npx playwright test'] }]]);
+    assert.deepEqual(matrix({ apps: ['x'], kinds: { x: ['ui'] }, packages: {} }, { cargo: new Map(), apps: one }).map((l) => l.e2e_shard), ['', '1/1']);
+  });
+
+  test('WebKit is wanted on main, tags, the nightly and a manual run that asks, never on a plain pull request or a branch push', () => {
+    assert.equal(wantsWebkit({ GITHUB_EVENT_NAME: 'pull_request', GITHUB_REF: 'refs/pull/1/merge' }), false);
+    assert.equal(wantsWebkit({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/topic' }), false);
+    assert.equal(wantsWebkit({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/topic', PLAN_WEBKIT: '1' }), true);
+    assert.equal(wantsWebkit({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main' }), true);
+    assert.equal(wantsWebkit({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/tags/spotter-v1.0.0' }), true);
+    assert.equal(wantsWebkit({ GITHUB_EVENT_NAME: 'schedule', GITHUB_REF: 'refs/heads/main' }), true);
+  });
+
+  test("`e2eWebkit` is a leg of its own when WebKit is wanted and the change reaches the UI; every e2e leg has its own name", () => {
+    const apps = new Map([['x', { dir: 'apps/x', cargo: '.', ui: ['npm test'], e2e: ['pw'], e2eShards: 2, e2eWebkit: ['pw --project=webkit'] }]]);
+    const plan = { apps: ['x'], kinds: { x: ['ui'] }, packages: {} };
+    const withWebkit = matrix(plan, { cargo: new Map(), apps }, { webkit: true });
+    assert.deepEqual(withWebkit.map((l) => [l.e2e_leg, l.e2e_shard, l.e2e_checks, l.ui_checks]), [['', '', '', 'npm test'], ['e2e-1', '1/2', 'pw', ''], ['e2e-2', '2/2', 'pw', ''], ['e2e-webkit', '', 'pw --project=webkit', '']]);
+    assert.equal(new Set(withWebkit.map((l) => l.e2e_leg)).size, withWebkit.length, 'the Angular cache name per leg is unique');
+    assert.equal(matrix(plan, { cargo: new Map(), apps }).length, 3, 'no WebKit leg unless asked');
+    assert.equal(matrix({ ...plan, kinds: { x: ['rust'] } }, { cargo: new Map(), apps }, { webkit: true }).length, 1, 'nor for a change that does not reach the UI');
+    const spotter = graph.apps.get('spotter');
+    assert.equal(spotter.e2eShards, 2);
+    assert.match(spotter.e2e.join('\n'), /--shard=\$E2E_SHARD/);
+    assert.match(spotter.e2eWebkit.join('\n'), /--project=webkit/);
+    assert.ok(!spotter.ui.some((l) => /webkit/.test(l)), 'WebKit does not lengthen the main leg');
+  });
+
+  test("an app's host-cleanup patterns match its own paths and never the real runner (every app that has them)", () => {
+    const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', 'C:\\runner\\act_runner.exe daemon', '/Users/x/actions-runner/Runner.Listener run'];
+    const ours = {
+      pitcrew: ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'],
+      spotter: ['/Users/x/.paddock-ci/test-browser-spotter/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter\\chrome-win64\\chrome.exe --headless'],
+    };
+    const near = {
+      spotter: ['/Users/x/.paddock-ci/test-browser-spotter-old/chrome', '/Users/x/.paddock-ci/test-browser-spotterx/chrome', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-old\\chrome.exe', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotterx\\chrome.exe'],
+    };
+    let checked = 0;
+    for (const [name, app] of graph.apps) {
+      if (!app.processPatterns?.length) continue;
+      assert.ok(ours[name], `${name} has process patterns: list its own command lines here`);
+      for (const pat of app.processPatterns) {
+        const re = new RegExp(pat);
+        for (const line of ours[name]) assert.match(line, re, `${name}: ${pat} misses ${line}`);
+        for (const line of [...real, ...(near[name] ?? [])]) assert.doesNotMatch(line, re, `${name}: ${pat} would kill ${line}`);
+        checked += 1;
+      }
+    }
+    assert.ok(checked >= 2);
   });
 
   test("onlyApp (a tag's gates, ci.yml's `app` input) keeps one app, both halves, and no other project", () => {

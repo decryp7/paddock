@@ -1,0 +1,102 @@
+# Spotter's installers and release (ADR 0014; moved from decryp7/spotter's build.yml). The gates are not here: Spotter is a leg
+# of ci.yml (apps/spotter/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend), and its bundles, the macOS seal check,
+# and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
+#
+#   push to main      installers on three OS and the real-app smoke when the change reaches Spotter (the same plan as ci.yml)
+#   a spotter-v* tag  the gates (ci.yml, only Spotter's legs), then installers, then the Gitea release with latest.json on
+#                     the release and on the moving spotter-latest release, which installed copies update from
+#   nightly           installers again, so a toolchain or runner change shows up the night it happens
+#   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
+#                     also runs Spotter's ci.yml legs first
+#
+# Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
+# system-wide and leave no processes or launch agents behind). Secrets: the family's updater key
+# (PADDOCK_TAURI_SIGNING_PRIVATE_KEY, PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD, PADDOCK_TAURI_UPDATER_PUBKEY), RELEASE_TOKEN
+# (a Gitea access token with write:repository) and, once there is a Developer ID, APPLE_SIGNING_IDENTITY.
+
+name: spotter-release
+
+on:
+  push:
+    branches: [main]
+    tags: ["spotter-v*"]
+  schedule:
+    - cron: "5 1 * * *"
+  workflow_dispatch:
+    inputs:
+      gates:
+        description: "Also run Spotter's gates (ci.yml legs) before the installers"
+        type: boolean
+        default: false
+
+# A newer push to main supersedes the run still going; a tag has its own ref, so a release is never cancelled by a later push. The group differs from ci.yml's (that
+# one is called below and names this workflow too), or the called workflow would cancel its caller.
+concurrency:
+  group: ${{ github.workflow }}-run-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs the rest only when the change reaches Spotter; a push to main whose commit carries a spotter-v* tag is covered by
+  # the tag run.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # affected.mjs for Spotter, and the skip of a main push whose commit carries a spotter-v* tag (the tag run is the gate).
+      # The nightly builds installers even when main's CI nightly was green.
+      - id: plan
+        uses: ./.gitea/actions/plan
+        with:
+          app: spotter
+          tag-pattern: spotter-v*
+          nightly-marker: "false"
+
+  # A tag is gated by exactly Spotter's legs of ci.yml (all of them, both halves, on the tagged commit).
+  gates:
+    name: gates
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/spotter-v') || github.event.inputs.gates == 'true') }}
+    uses: ./.gitea/workflows/ci.yml
+    with:
+      app: spotter
+      # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included, as the old bundles run was.
+      webkit: ${{ github.event_name == 'workflow_dispatch' }}
+
+  release:
+    name: installers + release
+    needs: [plan, gates]
+    if: ${{ !cancelled() && needs.plan.outputs.run == 'true' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))) }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: spotter
+      app-name: Spotter
+      app-dir: apps/spotter/app
+      cargo-dir: apps/spotter
+      tag-prefix: spotter-
+      latest-tag: spotter-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Spotter now updates from the Paddock releases, which a copy installed before this version does not look at."
+      # Spotter's UI imports the shared library from ui/dist, which the app build needs.
+      prepare: npm run build -w ui
+      cliff-config: apps/spotter/cliff.toml
+      cliff-paths: |
+        apps/spotter/**
+        crates/**
+        ui/**
+      # Spotter bundles no sidecar (no bundle.externalBin), so the macOS verify has none to start; the seal, the hardened-runtime
+      # and TeamIdentifier checks on the .app and the DMG still run. A sidecar added later is read from tauri.conf.json.
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}

@@ -1,5 +1,44 @@
 {
-  "$comment": "Spotter's CI contract (scripts/affected.mjs, ADR 0014 §6). Spotter is not a leg of ci.yml: its gates (Rust on several OS, licences, frontend, e2e, installers, the release from a spotter-v* tag) are its own workflow, .gitea/workflows/spotter.yml, whose plan job asks `node scripts/affected.mjs --ci --app spotter`.",
-  "workflow": "spotter.yml",
-  "cargo": "."
+  "$comment": "Spotter's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6; the field list is in .gitea/actions/README.md): a leg of ci.yml on Linux (the app's script tests and icon check; fmt, clippy, nextest under a virtual display with the pinned Chrome for Testing, doc tests, deny; then the frontend: audit, lint, build, unit tests, the Chromium e2e in two parallel legs, `e2e`/`e2eShards`, and the WebKit e2e in a leg of its own, `e2eWebkit`, on main, tags, the nightly and a dispatch with `webkit`; the failure report `e2eArtifacts` is uploaded) and, for the code that is different there (the launch agent, Unix socket, SIGTERM stops, Keychain, SMAppService, the Windows service), the Rust gates on Windows and macOS with the same browser. Commands run from the repo root, one per line of a step; one `cd` holds for the lines after it. Installers and the release are .gitea/workflows/spotter-release.yml (a spotter-v* tag, a push to main, the nightly or a manual run), through the shared app-release.yml.",
+  "cargo": ".",
+  "os": [
+    "ubuntu-latest",
+    "windows-latest",
+    "macos-latest"
+  ],
+  "angularDir": "app",
+  "display": true,
+  "testBrowser": {
+    "envPrefix": "SPOTTER",
+    "catalogue": "apps/spotter/crates/spotter-render/src/chromium-manifest.toml",
+    "noSandboxOnLinux": true
+  },
+  "processPatterns": [
+    "[/\\\\]test-browser-spotter[/\\\\]"
+  ],
+  "checks": [
+    "cd apps/spotter",
+    "node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs",
+    "node scripts/ci/check-icons.mjs"
+  ],
+  "ui": [
+    "npm run build -w ui",
+    "cd apps/spotter/app",
+    "npm audit --omit=dev --audit-level=high",
+    "npm run lint",
+    "npx ng build",
+    "npx ng test --watch=false --coverage"
+  ],
+  "e2e": [
+    "npm run build -w ui",
+    "cd apps/spotter/app",
+    "PW_PORT=$((4369 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=$E2E_SHARD"
+  ],
+  "e2eShards": 2,
+  "e2eArtifacts": "apps/spotter/app/.angular/playwright-results",
+  "e2eWebkit": [
+    "npm run build -w ui",
+    "cd apps/spotter/app",
+    "PW_PORT=4372 npx playwright test --project=webkit --workers=1"
+  ]
 }

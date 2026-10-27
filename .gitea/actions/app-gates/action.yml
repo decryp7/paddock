@@ -19,6 +19,12 @@ inputs:
   ui-checks:
     description: Commands from the repo root for the UI half, one per line (lint, unit tests, Chromium e2e).
     default: ""
+  e2e-checks:
+    description: "Commands from the repo root for an end-to-end leg, one per line; $E2E_SHARD (i/N) and $E2E_INDEX (i) are set. Empty: not an end-to-end leg."
+    default: ""
+  e2e-shard:
+    description: "This leg's shard, i/N (paddock.ci.json e2eShards)."
+    default: ""
   rust:
     description: "'true' runs the Rust half."
     default: "true"
@@ -28,6 +34,9 @@ inputs:
   filter:
     description: "A nextest filterset for a pull request that reaches only part of the workspace (package(=a) | package(=b)); empty runs every test."
     default: ""
+  display:
+    description: "'true' runs the tests on Linux under a virtual display and a session bus (xvfb-run, dbus-run-session): an app whose tests open a real (off-screen) browser window."
+    default: "false"
 runs:
   using: composite
   steps:
@@ -54,6 +63,7 @@ runs:
       env:
         NEXTEST_CONFIG: ${{ inputs.nextest-config }}
         FILTER: ${{ inputs.filter }}
+        DISPLAY_TESTS: ${{ inputs.display }}
       run: |
         set -uo pipefail
         status=0
@@ -65,7 +75,9 @@ runs:
         # Format, advisories and licences do not depend on the OS; clippy is skipped on Windows like the crates leg.
         if [ "$RUNNER_OS" = Linux ]; then step cargo fmt --all --check; fi
         if [ "$RUNNER_OS" != Windows ]; then step cargo clippy --workspace --all-targets -- -D warnings; fi
-        step cargo nextest run --workspace ${config[@]+"${config[@]}"} --profile ci ${filter[@]+"${filter[@]}"}
+        wrap=()
+        if [ "$DISPLAY_TESTS" = true ] && [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session --); fi
+        step ${wrap[@]+"${wrap[@]}"} cargo nextest run --workspace ${config[@]+"${config[@]}"} --profile ci ${filter[@]+"${filter[@]}"}
         step cargo test --workspace --doc
         if [ "$RUNNER_OS" = Linux ]; then step cargo deny --all-features --workspace check; fi
         exit $status
@@ -76,3 +88,13 @@ runs:
       env:
         COMMANDS: ${{ inputs.ui-checks }}
       run: bash -euo pipefail -c "$COMMANDS"
+
+    - name: End-to-end tests (${{ inputs.app }} ${{ inputs.e2e-shard }})
+      if: inputs.e2e-checks != ''
+      shell: bash
+      env:
+        COMMANDS: ${{ inputs.e2e-checks }}
+        E2E_SHARD: ${{ inputs.e2e-shard }}
+      run: |
+        export E2E_INDEX="${E2E_SHARD%%/*}"
+        bash -euo pipefail -c "$COMMANDS"
