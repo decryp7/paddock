@@ -1,6 +1,6 @@
 # 18. Bounded loading everywhere
 
-- Status: Proposed (2026-10-27; the user reviews it before anything is built)
+- Status: Accepted (2026-10-27, by the user)
 - Date: 2026-10-27
 - Related: rule 10 (background work), rule 11 (progress), rule 14 (pipelines), rule 16 (performance budgets), rule 21
   (tunables are Settings), rule 40; ADR 0008 (long operations), ADR 0017 (viewport and selection, whose scrollbar

@@ -1,6 +1,6 @@
 # 17. Viewport and selection survive data refreshes
 
-- Status: Proposed (2026-10-27; the user reviews it before anything is built)
+- Status: Accepted (2026-10-27, by the user)
 - Date: 2026-10-27
 - Related: rule 33 (`@for` with `track`), rule 39 (shared parts live in `paddock-ui`), rule 40 (recurring bugs mean a
   missing design rule), rule 43 (shared behaviour is tested once); ADR 0009 (dialogs as windows), ADR 0013 (workbench);

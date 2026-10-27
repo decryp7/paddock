@@ -1,6 +1,6 @@
 # 19. Limits explain themselves
 
-- Status: Proposed (2026-10-27; the user reviews it before anything is built)
+- Status: Accepted (2026-10-27, by the user)
 - Date: 2026-10-27
 - Related: rule 19 (every "X is not running" has a working Repair), rule 21 (tunables are Settings), rule 40; ADR 0001
   (plugin platform crates), ADR 0010 (notifications with cause keys and service health), ADR 0018 (bounded loading);

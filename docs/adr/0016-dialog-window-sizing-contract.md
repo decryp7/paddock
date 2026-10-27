@@ -1,6 +1,6 @@
 # 16. Dialog window sizing contract
 
-- Status: Proposed (2026-10-27; the user reviews it before anything is built)
+- Status: Accepted (2026-10-27, by the user)
 - Date: 2026-10-27
 - Related: rule 17 (every dialog is a real OS window), rule 39, rule 40 (recurring bugs mean a missing design rule),
   rule 43; ADR 0009 (dialog kinds and declared contracts, which this amends for sizing), ADR 0011 (layout by declared

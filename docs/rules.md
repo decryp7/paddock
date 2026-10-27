@@ -109,6 +109,16 @@ changes here, every app's copy is updated in the same change.
     adopts a shared package it deletes its own copy and the tests that duplicated it, and records test count and time
     before and after.
 
+**Settings and images (user, 2026-10-27; ADRs 0016-0019, rule 40)**
+44. **Every registered settings section has at least one setting,** checked by a test or lint over every section an
+    app registers (engine `SettingsSection`s in `crates/paddock-settings/src/schema.rs` and each app's sections, and
+    UI-only pages in the settings navigation). A status page with only buttons belongs elsewhere (Health, a Repair action,
+    or the feature's own view), or gains its setting. A plugin fallback section that explains why its plugin is missing
+    (Debrief's `unavailable()`) is exempt. Today Debrief's Video page (`@video`) has no setting and must move or gain one.
+45. **Image viewers open in fit mode by default** (the whole image visible, never upscaled past 100 %), with 100 % and
+    zoom as explicit choices; the viewer fits before its first paint rather than after measuring. A shared viewer in
+    `paddock-ui` (rule 39) owns the default; `notes/image/note-image-view.ts` in Debrief starts at scale 1 and must adopt it.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
@@ -124,20 +134,3 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
 - **Rules 39 and 42:** shared code is moved to `crates/` or `ui/` and adopted by the app **in the same change**; there is
   no publish-and-consume step. "Consume the published version" becomes "use the in-tree version".
 - Rule 1 is unchanged: one app at a time is about attention and load, not repos.
-
-## Proposed amendment (2026-10-27; not effective until the user accepts it)
-Proposed with ADRs 0016-0019 (rule 40). Until accepted these are not binding; on acceptance they are numbered after the
-last rule and the "Proposed" heading is removed.
-- **P1. Every registered settings section has at least one setting,** checked by a test or lint over every section an
-  app registers (engine `SettingsSection`s in `crates/paddock-settings/src/schema.rs` and each app's sections, and UI-only
-  pages in the settings navigation). A status page with only buttons belongs elsewhere (Health, a Repair action, or the
-  feature's own view), or gains its setting. Today Debrief's Video page (`@video`,
-  `apps/debrief/app/src/app/video/video-settings.ts`, listed in `settings/settings-model.ts:39-78`) has no setting, and
-  `SettingsSection` `check()` (`crates/paddock-settings/src/schema.rs:240`, Debrief's
-  `crates/debrief-plugin-api/src/settings.rs:235`) only caps the field count from above; the plugin fallback section
-  `unavailable()` (`apps/debrief/crates/debrief-core/src/settings.rs:93`) is exempt because it explains why its plugin
-  is missing.
-- **P2. Image viewers open in fit mode by default** (the whole image visible, never upscaled past 100 %), with 100 % and
-  zoom as explicit choices; the viewer fits before its first paint rather than after measuring. Today
-  `apps/debrief/app/src/app/ai/vision/image-viewer.ts` opens in Fit; `notes/image/note-image-view.ts` starts at scale 1
-  and fits only once its box is measured; a shared viewer in `paddock-ui` (rule 39) should own the default.
