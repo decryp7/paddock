@@ -74,7 +74,7 @@ Every feature, with screenshots, is in [docs/features.md](docs/features.md).
 
 ### Install
 
-Download the installer for your platform from the [**Releases** page](https://dev.decryptology.net/decryp7/debrief/releases) of this repository (the latest release is the one to take; installed copies offer signed updates from the same page):
+Download the installer for your platform from the [**Releases** page](https://dev.decryptology.net/decryp7/paddock/releases) of the Paddock repository (the newest `debrief-v*` release is the one to take; installed copies offer signed updates from there). A copy installed before Debrief moved to the Paddock repository does not update itself: download the newest release once by hand:
 
 | Platform | Package |
 |---|---|

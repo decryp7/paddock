@@ -42,6 +42,11 @@ retries = 0
 failure-output = "immediate-final"
 # A CI job has its runner to itself.
 test-threads = "num-cpus"
+# The time budget of one test (Paddock rule 40, as crates/.config/nextest.toml): reported SLOW after 30 s and stopped,
+# failing the run, after 90 s, so a hung test costs a minute and a half instead of five (CI 6381: a hang in long_ops held
+# the Linux run for 300 s). A test that needs longer is a waiver below: an override with a `# waiver:` line saying why;
+# conformance/test/ci-actions.test.mjs checks both. The longest other tests took 30-40 s on CI (6381).
+slow-timeout = { period = "30s", terminate-after = 3 }
 
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.
@@ -52,3 +57,15 @@ path = "junit.xml"
 [[profile.ci.overrides]]
 filter = 'all()'
 retries = 0
+
+# waiver: the query-language properties generate whole workspaces per case (95-99 s on the Linux runner, 115 s on the Mac
+# host in CI 6381); fewer cases would weaken them.
+[[profile.ci.overrides]]
+filter = "package(debrief-core) & binary(it) & test(/^properties::/)"
+slow-timeout = { period = "30s", terminate-after = 6 }
+
+# waiver: the DuckDB store answers every query and analysis of the sample workspaces like the reference engine, one profile
+# per test (47-81 s in CI 6381), and the large-folder import measures progress over a generated folder of many files (89 s).
+[[profile.ci.overrides]]
+filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/) | test(/^large_folder::/))"
+slow-timeout = { period = "30s", terminate-after = 6 }

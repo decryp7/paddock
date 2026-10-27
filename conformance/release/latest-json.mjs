@@ -2,7 +2,7 @@
 // Writes latest.json, the release information an app's updater reads, from the signed updater artifacts of a release.
 // Shared by every Paddock app (@decryp7/paddock-conformance/release); the output is byte-equal to what the apps' own copies wrote.
 //
-//   node scripts/release/latest-json.mjs --dir artifacts --version 1.2.0 \
+//   node conformance/release/latest-json.mjs --dir artifacts --version 1.2.0 \
 //     --base-url https://host/owner/repo/releases/download/v1.2.0 --notes artifacts/RELEASE_NOTES.md \
 //     [--mac-arch aarch64] --out artifacts/latest.json
 //

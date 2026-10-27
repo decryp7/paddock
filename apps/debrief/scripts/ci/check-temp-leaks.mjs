@@ -7,7 +7,7 @@
 
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
 export const PATTERN = /^(debrief|imt)-/;
 
@@ -59,4 +59,4 @@ export function main(argv, log = console) {
   return 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.exit(main(process.argv.slice(2)));
+if (isMain(import.meta.url)) process.exit(main(process.argv.slice(2)));
