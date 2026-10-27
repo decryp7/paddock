@@ -85,7 +85,7 @@ Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 **For.** People who want to know what a machine is doing, now and over time.
 - A background agent keeps history while the window is closed.
 - Live and history views grouped by application, alarms, system facts, a disk map and benchmarks.
-- Strictly read-only: no tuning, no actions and no advice. A small read-only helper reads what only an administrator may see.
+- Strictly read-only: no tuning, no actions and no advice. Dyno needs its small read-only helper, installed with it, to read what only an administrator may see.
 - Extensible with validated declarative packs, no code.
 
 Status: in development. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
@@ -164,7 +164,7 @@ explanations of what it shows (later). Pitcrew does not need it.
   Pitwall, release checks you configure in Spotter, updates of the apps themselves (signed, from `latest.json`).
 - Pitwall listens on loopback only and requires a key per app; keys live in the OS credential store.
 - Apps treat input as hostile: parsers never panic, limits are enforced, UIs never render untrusted text as HTML.
-- Dyno never changes the system. Its small privileged helper answers allow-listed read-only queries only, so it can see every process and the privileged counters.
+- Dyno never changes the system. Its required privileged helper answers allow-listed read-only queries only, so it can see every process and the privileged counters.
 
 ## Pitwall is optional
 

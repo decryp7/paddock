@@ -42,7 +42,7 @@ keeps the runner that executes it on CI healthy. Sighter's run bundle opens next
 locally. A Sighter smoke test checks that your workflow still works on the new build, and **Dyno** watches CPU and memory
 for a regression over the following days. Anything odd opens in Debrief with one click.
 
-**A slow build machine.** **Dyno** shows what the runner is doing, live and over time: an alarm fires, and the process
+**A slow build machine.** **Dyno** shows what the runner is doing, live and over time: an alarm fires, and the process list
 and the disk map show that a background process is taking the runner's disk and CPU. The runner's health shows next to it
 in **Pitcrew**; later Dyno can hand that evidence to **Pitwall** for an explanation. Dyno never changes anything.
 Pitcrew's job logs open in **Debrief** when a build fails.
@@ -58,7 +58,7 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 - **Windows, macOS and Linux are all first-class**, with a native feel on each.
 - **Rust engines, Angular UI, Tauri 2 shell.** The engine is the source of truth; the UI renders what it returns.
 - **Pitwall is always optional.** Every app's core works without it; AI features appear when it is present.
-- **Observe before acting.** Changes need a click or an enabled rule, and have an undo.
+- **Observe before acting.** Apps that change things (Pitcrew's cleanup, Sighter's actions) do so only on a click or an enabled rule, with an undo; Dyno only observes.
 - **Calm by default.** Neutral surfaces, colour for action and the one thing that needs attention.
 
 ## Repository layout
