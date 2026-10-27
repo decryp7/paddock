@@ -1,6 +1,6 @@
 # 20. One shared executor: tasks, periodic checks and leases, with priorities
 
-- Status: Proposed (2026-10-27; not accepted)
+- Status: Accepted (2026-10-27)
 - Date: 2026-10-27
 - Related: rules 10–14 (background work, progress, never time out, bounded parallelism at background priority,
   pipelines), rule 40 (recurring bugs mean a missing design rule), rule 42 (share first), rule 43 (shared behaviour tested
@@ -38,7 +38,7 @@ with subscriber counts. What is missing is one mechanism that uses them together
 This is a rule-40 case: the recurring bug kinds (idle wake-ups, leaked sleeping threads, silent stuck work, work at the
 wrong priority, cancel that waits for a sliced sleep, tests that sleep) come from every site hand-rolling its own loop.
 
-## Decision (proposed)
+## Decision
 
 Add **one executor per process** to `paddock-jobs` (module `exec`). It has three modes and one priority model, and every
 background activity in the family goes through it, except the declared exemptions below.
