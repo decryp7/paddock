@@ -13,6 +13,9 @@ Conventional Commits; one semver tag for the whole repo.
   packages once instead of 256 times.
 - `setup-rust` keeps its channel sync, and a failed `rustup toolchain install` now says why (on Windows, Git Bash's exit
   127 means rustup was ended with an NTSTATUS crash code, run 6460). Pinning the toolchain stays an open ADR 0022 decision.
+- cmd steps wrote `echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"`, which cmd reads as a redirect of handle 8, so the variable was never
+  set on Windows; it is now `(echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"`, and a conformance test rejects a digit directly before
+  a redirect in any workflow or action.
 
 ### No transition release, no update bridge (ADR 0014, last amendment)
 - Every app release from the monorepo is signed with the shared `PADDOCK_TAURI_*` key only; the

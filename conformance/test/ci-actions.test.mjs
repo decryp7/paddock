@@ -1024,3 +1024,21 @@ test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that 
   assert.match(job, /run: npm test/, 'it runs the icon tests');
   assert.match(job, /run: node icons\/tools\/install\.mjs --check/, 'it runs install.mjs --check');
 });
+
+// cmd reads `echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"` as a redirect of handle 8, so the variable was never set (the logs showed
+// `CARGO_BUILD_JOBS=`). A digit directly before `>>` must be written `(echo NAME=8)>>file`.
+test('no cmd echo puts a digit directly before a redirect in a workflow or an action', () => {
+  const files = [
+    ...readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(WORKFLOWS, f)),
+    ...readdirSync(ACTIONS, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && existsSync(join(ACTIONS, d.name, 'action.yml')))
+      .map((d) => join(ACTIONS, d.name, 'action.yml')),
+  ];
+  const bad = [];
+  for (const f of files) {
+    read(f).split('\n').forEach((line, i) => {
+      if (/^\s*echo\s[^()\n]*\d>>?/.test(line)) bad.push(`${f.slice(PADDOCK.length)}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(bad, [], 'write (echo NAME=8)>>"%GITHUB_ENV%" so cmd does not read 8>> as a handle redirect');
+});

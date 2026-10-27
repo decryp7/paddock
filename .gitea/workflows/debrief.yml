@@ -561,7 +561,7 @@ jobs:
           echo npm_config_fund=false>>"%GITHUB_ENV%"
           rem The Windows runner is a developer PC (16 cores, 32 GB) that runs two jobs at once: a debug and a release
           rem build with 16 rustc processes each exhausted its memory. Eight each keeps both inside it.
-          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
       - name: Build jobs (macOS)
         if: runner.os == 'macOS'
@@ -807,7 +807,7 @@ jobs:
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
           rem Two jobs at once on the 16-core, 32 GB developer PC: eight rustc each keeps both inside its memory.
-          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
 
       - name: Build jobs (macOS)
         if: runner.os == 'macOS'
