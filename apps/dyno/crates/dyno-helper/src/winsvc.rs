@@ -1,7 +1,7 @@
 //! The Windows service wrapper: the Service Control Manager starts `dyno-helper.exe service`, which reports Running,
 //! serves, and stops when told. Only this module knows about the SCM; the daemon is [`crate::serve::serve`].
 
-use crate::paths::{HelperPaths, WINDOWS_SERVICE};
+use crate::paths::WINDOWS_SERVICE;
 use std::ffi::OsString;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

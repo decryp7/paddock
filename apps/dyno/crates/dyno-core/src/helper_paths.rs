@@ -30,6 +30,11 @@ pub fn join_windows(base: &Path, tail: &str) -> PathBuf {
     PathBuf::from(format!("{}\\{tail}", base.to_string_lossy().trim_end_matches(['\\', '/'])))
 }
 
+/// `base` and `tail` joined with a slash, whatever system this runs on (`Path::join` would use a backslash on Windows).
+pub fn join_unix(base: &Path, tail: &str) -> PathBuf {
+    PathBuf::from(format!("{}/{tail}", base.to_string_lossy().trim_end_matches('/')))
+}
+
 /// Whether `path` is absolute by the rules of `host` (a drive letter or UNC share on Windows, a slash elsewhere).
 pub fn is_absolute_on(host: TuningHost, path: &Path) -> bool {
     let s = path.to_string_lossy();
@@ -76,7 +81,11 @@ impl HelperPaths {
                     join_windows(&dir, "audit.jsonl"),
                 )
             } else {
-                (dir.join("config.json"), dir.join("token"), dir.join("audit.jsonl"))
+                (
+                    join_unix(&dir, "config.json"),
+                    join_unix(&dir, "token"),
+                    join_unix(&dir, "audit.jsonl"),
+                )
             }
         };
         match host {
@@ -85,7 +94,7 @@ impl HelperPaths {
                 let (config, token, audit) = in_dir(data_dir.clone());
                 HelperPaths {
                     host,
-                    binary: PathBuf::from("/Library/PrivilegedHelperTools").join(MAC_LABEL),
+                    binary: join_unix(Path::new("/Library/PrivilegedHelperTools"), MAC_LABEL),
                     data_dir,
                     config,
                     token,
@@ -184,5 +193,13 @@ mod tests {
             join_windows(Path::new(r"C:\Windows\"), "System32"),
             PathBuf::from(r"C:\Windows\System32")
         );
+        assert_eq!(join_unix(Path::new("/var/lib/"), "token"), PathBuf::from("/var/lib/token"));
+        // The paths of the Unix systems use slashes only, even when computed on Windows.
+        for host in [TuningHost::Macos, TuningHost::Linux] {
+            let p = HelperPaths::for_host(host, &roots());
+            for path in [&p.binary, &p.data_dir, &p.config, &p.token, &p.audit] {
+                assert!(!path.to_string_lossy().contains('\\'), "{path:?}");
+            }
+        }
     }
 }
