@@ -81,5 +81,5 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 </svg><text class="name" x="164" y="136" style="font-size:34px">Debrief</text>
 <text class="h1" x="72" y="268" style="font-size:50px">Make sense of</text><text class="h1" x="72" y="330" style="font-size:50px">any log file.</text>
 <text class="sub" x="72" y="404" style="font-size:20px">An IDE for analysing logs and diagnostic files,</text><text class="sub" x="72" y="434" style="font-size:20px">on your machine.</text>
-<rect x="72" y="549" width="99" height="38" rx="19" class="accfill"/><circle cx="90" cy="568" r="4" class="accline"/><text class="pilltxt" x="104" y="574">v1.0.1</text>
+<rect x="72" y="549" width="99" height="38" rx="19" class="accfill"/><circle cx="90" cy="568" r="4" class="accline"/><text class="pilltxt" x="104" y="574">v1.1.1</text>
 </svg>

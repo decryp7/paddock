@@ -12,7 +12,7 @@ profile, and it never leaves your machine.
 
 </div>
 
-![Debrief: make sense of any log file](docs/images/debrief-hero.svg?v=55ab2bfa)
+![Debrief: make sense of any log file](docs/images/debrief-hero.svg?v=2082cb18)
 
 ## At a glance
 

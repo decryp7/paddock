@@ -18,7 +18,7 @@ anywhere.
 
 All seven live in this repository under [`apps/`](apps/). The old per-app repositories are archived (read-only); their past releases stay downloadable there.
 
-| App | What it does | Status |
+| App| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp;| App | What it does | Status |nbsp; | What it does | Status |
 |---|---|---|
 | <img src="icons/debrief/small/debrief-48.svg?v=c366fad7" width="40" height="40" align="absmiddle" alt=""> **[Debrief](apps/debrief/README.md)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | **v1.1.1 released, 1.2.0 in progress** |
 | <img src="icons/pitcrew/small/pitcrew-48.svg?v=5ef689a0" width="40" height="40" align="absmiddle" alt=""> **[Pitcrew](apps/pitcrew/README.md)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.1 released** |

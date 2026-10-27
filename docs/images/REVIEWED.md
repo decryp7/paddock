@@ -12,9 +12,9 @@ One row per image under `docs/images` that passed an independent review. A chang
 | src/icons/pitwall.svg | 7ceb593d3614652905214f05a1a50b66907a987207e6638eed7e6dc682e63178 | isometric icon switch-over review (Opus) | 2026-10-27 |
 | src/icons/sighter.svg | 272f2acb8869a286585ad1073b2e2842ebe65513c827d0cf9bce46e59f36164e | isometric icon switch-over review (Opus) | 2026-10-27 |
 | src/icons/spotter.svg | 356f2be29f778cef0650ea8712bac68f689959f7881ca888b0d54e351b5489bf | isometric icon switch-over review (Opus) | 2026-10-27 |
-| paddock-ecosystem.svg | 948644b841b98475e2ef9b3ced10523cb519515b3a25dbf52da5df252e310e29 | isometric icon switch-over review (Opus) | 2026-10-27 |
-| paddock-ecosystem-light.png | 127fd5dc1755cb32da352e50043b288667af446b275da9dbe8b9469b817640ea | isometric icon switch-over review (Opus) | 2026-10-27 |
-| paddock-ecosystem-dark.png | fd709a3aa37f980d5d6f0b6155e6251b75f6f0cf4485eca209becb1b75731f59 | isometric icon switch-over review (Opus) | 2026-10-27 |
+| paddock-ecosystem.svg | 80de9834f92721b055ee62f755ffeaa18d7e3c1d0fdcf8486600ce60c9549519 | README monorepo re-review (Opus) | 2026-10-27 |
+| paddock-ecosystem-light.png | f7f6ec3f052e469fcbad39cfd3cfd5372dadd09538d8026563ff973deaf71ff4 | README monorepo re-review (Opus) | 2026-10-27 |
+| paddock-ecosystem-dark.png | ebcad78fbe1dc91f5644760396e4cf82459d7b8e2dcf2ec62de1065b084dd2e7 | README monorepo re-review (Opus) | 2026-10-27 |
 | paddock-integrations.svg | fcd26b68cd05d07fc6bdccd426d9f42ebde906395bc17b9a03cc70485fc6bda8 | independent review 3 (Opus) | 2026-10-25 |
 | paddock-integrations-light.png | 59baa1a04146c9fb3fea89c25589322d493f95a72b8064fcc45c8765cfba3f1f | independent review 3 (Opus) | 2026-10-25 |
 | paddock-integrations-dark.png | 3ae9a8ae9fc3ae8dfdc3b121163936f9fac8923bc627d6977a60a3570d973c56 | independent review 3 (Opus) | 2026-10-25 |
