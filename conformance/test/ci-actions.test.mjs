@@ -899,13 +899,21 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
 
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
-  assert.match(ci, /PADDOCK_WEBKIT: \$\{\{ inputs\.webkit == true && '1' \|\| '' \}\}/, 'a dispatch with webkit reaches the app lines');
   assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}/);
   const step = /- uses: actions\/upload-artifact@\S+ # v3\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
   assert.match(step, /path: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/\$\{\{ matrix\.e2e_artifacts \}\}/, 'under the stable workspace');
   assert.match(step, /name: \$\{\{ matrix\.app \}\}-e2e-results-\$\{\{ strategy\.job-index \}\}/, 'one name per leg');
   assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /E2E_INDEX="\$\{E2E_SHARD%%\/\*\}"/);
   assert.equal(ciContract('spotter').e2eArtifacts, 'apps/spotter/app/.angular/playwright-results', "the folder the old spotter.yml uploaded");
+});
+
+test('a manual ci.yml run can ask for WebKit (workflow_dispatch input), compared as a boolean or a string, and the release dispatch asks for it', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const dispatch = /^  workflow_dispatch:\n((?:    .*\n|\n)+)/m.exec(ci)?.[1] ?? '';
+  assert.match(dispatch, /^      webkit:\n(?:        .*\n)*?        type: boolean\n        default: false/m, 'workflow_dispatch has a webkit input');
+  assert.match(ci, /PADDOCK_WEBKIT: \$\{\{ \(inputs\.webkit == true \|\| inputs\.webkit == 'true'\) && '1' \|\| '' \}\}/);
+  const gates = /^  gates:\n(?:    .*\n|\n)+/m.exec(read(join(WORKFLOWS, 'spotter-release.yml')))?.[0] ?? '';
+  assert.match(gates, /webkit: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/, "the pre-tag dispatch covers WebKit like the old bundles run");
 });
 
 function runNodeCaches(os, env = {}) {

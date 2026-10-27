@@ -23,6 +23,10 @@ on:
         description: "Diff from this commit (empty: run everything)"
         required: false
         default: ""
+      webkit:
+        description: "Also run the WebKit tests (the WebKit job, and an app's WebKit lines)"
+        type: boolean
+        default: false
   # nightly.yml: everything, with WebKit.
   workflow_call:
     inputs:
@@ -521,7 +525,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       # A manual run with `webkit` also runs an app's WebKit end-to-end lines (paddock.ci.json `ui`: $PADDOCK_WEBKIT).
-      PADDOCK_WEBKIT: ${{ inputs.webkit == true && '1' || '' }}
+      PADDOCK_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
 
