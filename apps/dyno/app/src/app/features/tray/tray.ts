@@ -27,7 +27,7 @@ import { SettingsStore } from '../../state/settings.store';
     <dy-popover [maxHeight]="560">
       <main class="tray">
         <header>
-          <img src="dyno-logo.svg" alt="" width="20" height="20" />
+          <img src="brand/dyno-16.svg" alt="" width="16" height="16" />
           <strong>Dyno</strong>
           <span class="spacer"></span>
           @if (health.report(); as r) {

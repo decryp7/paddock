@@ -87,6 +87,14 @@ Angular at least 80 % overall and near 100 % for stores, services and pure utili
 Tests never leave processes behind, never touch real user folders and are timezone-independent (CI runs the unit tests once
 with another `TZ`).
 
+## App icon
+
+The icon set is not drawn in this repo. It comes from Paddock's `icons/dyno` (the family's isometric icon) and is copied in by
+`node icons/tools/install.mjs` (run in the Paddock checkout): `app/src-tauri/icons` (the Tauri set and the tray PNGs the tray code embeds),
+the in-app copies under `app/public`, and `docs/images/dyno-icon.svg` for the README header. `install.mjs --check` (and the `check-icons`
+script) fail when a copy differs from the build. Never run `tauri icon` on a local source and never keep a local icon source: it would
+revert the family icon. To change the icon, change it in Paddock (`icons/tools/iso-family.mjs`), rebuild there and install again. The in-app logo is `app/public/dyno-logo.svg` (the Windows master).
+
 ## CI/CD
 
 `.gitea/workflows/dyno.yml (repo root)` (see the header comment for the runner labels):

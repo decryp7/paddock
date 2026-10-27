@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Paddock (Graphite)</title>
+  <defs>
+    <linearGradient id="k1bg" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4A525E"/><stop offset="0.55" stop-color="#2B3038"/><stop offset="1" stop-color="#1E2228"/>
+    </linearGradient>
+    <radialGradient id="k1sheen" cx="304.32000000000005" cy="40" r="802.4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.22"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="k1edge" x1="0" y1="40" x2="0" y2="984" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.3" stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0"/><stop offset="1" stop-color="#000000" stop-opacity="0.18"/>
+    </linearGradient>
+    <clipPath id="k1clip"><path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z"/></clipPath>
+    <filter id="k1gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="11.46" stdDeviation="13.75" flood-color="#07080A" flood-opacity="0.32"/></filter>
+    
+    
+  </defs>
+  <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="url(#k1bg)"/>
+  <g clip-path="url(#k1clip)">
+    <path d="M0 965.12L965.12 0L1097.2800000000002 0L0 1097.2800000000002Z" fill="#FFFFFF" opacity="0.08"/>
+    <path d="M0 1163.36L1163.36 0L1201.12 0L0 1201.12Z" fill="#FFFFFF" opacity="0.08800000000000001"/>
+    <rect x="40" y="40" width="944" height="944" fill="url(#k1sheen)"/>
+    <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="none" stroke="url(#k1edge)" stroke-width="6.87"/>
+    <path d="M240 40H784A200 200 0 0 1 984 240V784A200 200 0 0 1 784 984H240A200 200 0 0 1 40 784V240A200 200 0 0 1 240 40Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="4.58"/>
+  </g>
+  <g filter="url(#k1gs)" transform="translate(512 512) scale(1.15) translate(-512 -512)"><path d="M284.52 270H739.48A14.52 14.52 0 0 1 754 284.52V328.08A14.52 14.52 0 0 1 739.48 342.6H284.52A14.52 14.52 0 0 1 270 328.08V284.52A14.52 14.52 0 0 1 284.52 270ZM270 342.6H318.4A0 0 0 0 1 318.4 342.6V754A0 0 0 0 1 318.4 754H270A0 0 0 0 1 270 754V342.6A0 0 0 0 1 270 342.6ZM705.6 342.6H754A0 0 0 0 1 754 342.6V754A0 0 0 0 1 754 754H705.6A0 0 0 0 1 705.6 754V342.6A0 0 0 0 1 705.6 342.6Z" fill="#FFFFFF"/><path d="M347.44 342.6H676.56A4.84 4.84 0 0 1 681.4 347.44V386.16A4.84 4.84 0 0 1 676.56 391H347.44A4.84 4.84 0 0 1 342.6 386.16V347.44A4.84 4.84 0 0 1 347.44 342.6ZM347.44 415.2H676.56A4.84 4.84 0 0 1 681.4 420.04V458.76A4.84 4.84 0 0 1 676.56 463.6H347.44A4.84 4.84 0 0 1 342.6 458.76V420.04A4.84 4.84 0 0 1 347.44 415.2ZM347.44 487.8H676.56A4.84 4.84 0 0 1 681.4 492.64V531.36A4.84 4.84 0 0 1 676.56 536.2H347.44A4.84 4.84 0 0 1 342.6 531.36V492.64A4.84 4.84 0 0 1 347.44 487.8ZM347.44 560.4H676.56A4.84 4.84 0 0 1 681.4 565.24V603.96A4.84 4.84 0 0 1 676.56 608.8H347.44A4.84 4.84 0 0 1 342.6 603.96V565.24A4.84 4.84 0 0 1 347.44 560.4Z" fill="#FFFFFF"/></g>
+</svg>

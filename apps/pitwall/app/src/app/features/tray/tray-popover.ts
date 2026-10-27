@@ -16,7 +16,7 @@ import { UpdatesStore } from '../updates/updates.store';
   template: `
     <div class="tray">
       <header>
-        <mat-icon class="logo" svgIcon="pw:logo" aria-hidden="true" />
+        <img class="logo" src="brand/pitwall-macos.svg" alt="" width="24" height="24" />
         <h1>Pitwall</h1>
         <div class="title">
           @if (live.server(); as s) {

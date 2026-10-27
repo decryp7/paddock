@@ -11,6 +11,20 @@ type Opt = Record<string, unknown> & { series: Record<string, unknown>[] };
 const ev = (kind: PitwallEvent['kind'], reason: PitwallEvent['reason'], at = NOW - 1000): PitwallEvent => ({ id: 1, at, kind, severity: 'info', message: 'm <b>', modelId: null, appId: null, reason });
 
 describe('chart options', () => {
+  it('does not animate for a user who prefers reduced motion (and so a documentation shot is the same every run)', () => {
+    const real = window.matchMedia;
+    const stub = (reduce: boolean) =>
+      (window.matchMedia = ((q: string) => ({ matches: reduce && q.includes('prefers-reduced-motion'), media: q }) as MediaQueryList) as typeof window.matchMedia);
+    try {
+      stub(true);
+      expect((memoryChart({ points: h.points, events: h.events, range: '1h', stepMs: h.stepMs, zoom: true }, t) as unknown as Opt)['animation']).toBe(false);
+      stub(false);
+      expect((memoryChart({ points: h.points, events: h.events, range: '1h', stepMs: h.stepMs, zoom: true }, t) as unknown as Opt)['animation']).toBe(true);
+    } finally {
+      window.matchMedia = real;
+    }
+  });
+
   it('labels time by range', () => {
     const at = new Date(2026, 9, 22, 9, 5).getTime();
     expect(timeLabel('1h')(at)).toBe('09:05');

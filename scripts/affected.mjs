@@ -533,6 +533,7 @@ async function ci(env, { app = null } = {}) {
     eslint: plan.eslint,
     conformance: plan.conformance,
     tools: plan.tools,
+    icons: plan.icons,
     apps: JSON.stringify(legs),
     any_app: legs.length > 0,
   };

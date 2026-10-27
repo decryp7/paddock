@@ -35,7 +35,9 @@ pub fn icon_bytes(state: TrayState, dark_taskbar: bool) -> &'static [u8] {
             }
         };
     }
-    icons!(Idle => "ok", Busy => "busy", Paused => "paused", Unavailable => "error")
+    // The family's team-radio glyph (paddock icons/pitwall/tray): normal is the plain glyph, working a ring, paused two
+    // bars, a stopped server a cross.
+    icons!(Idle => "normal", Busy => "busy", Paused => "paused", Unavailable => "error")
 }
 
 /// Whether the taskbar is dark (read-only registry lookup on Windows; dark when unknown, the Windows 11 default, and

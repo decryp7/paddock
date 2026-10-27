@@ -1,3 +1,5 @@
+<img src="docs/images/spotter-icon.svg?v=110d7e34" alt="Spotter icon" width="96" height="96">
+
 # Spotter
 
 Spotter watches for new releases anywhere and tells you the moment one appears. It is a desktop app (Windows, macOS,
@@ -6,7 +8,7 @@ in a local database on your machine.
 
 **Status: v1.0.0.** Releases are built and published by the tag workflow; the roadmap lists what is still open ([docs/roadmap.md](docs/roadmap.md)).
 
-![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=7947a55b)
+![Spotter: Know the moment a release lands](docs/images/spotter-hero.svg?v=ee8054b5)
 
 
 ![Spotter architecture: release places and a supervised Chromium outside; the engine schedules checks, fetches politely, renders JavaScript pages, decides and notifies; the app shows and controls it; a pure Rust core holds the rules](docs/diagrams/spotter-overview.svg)
@@ -14,9 +16,9 @@ in a local database on your machine.
 
 ## What it does
 
-![Spotter features](docs/images/spotter-features.svg?v=568acb7a)
+![Spotter features](docs/images/spotter-features.svg?v=6b1303ce)
 
-![How Spotter works](docs/images/spotter-how-it-works.svg?v=f925ddcf)
+![How Spotter works](docs/images/spotter-how-it-works.svg?v=0ba02b09)
 
 ## What it watches
 

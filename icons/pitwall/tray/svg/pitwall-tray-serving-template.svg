@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <title>Pitwall tray (serving)</title>
-  <defs><mask id="t1im0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M5 6V7.5M8 4.5V9M11 6V7.5" fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></mask><mask id="t1ik" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#fff"/><path d="M8.85 12.75a3.9 3.9 0 1 1 7.8 0a3.9 3.9 0 1 1 -7.8 0Z" fill="#000"/></mask></defs>
-  <g mask="url(#t1ik)"><path d="M4.5 2H11.5A3 3 0 0 1 14.5 5V8.5A3 3 0 0 1 11.5 11.5H4.5A3 3 0 0 1 1.5 8.5V5A3 3 0 0 1 4.5 2ZM3.5 10L8 11L3 14.5Z" fill="#000000" mask="url(#t1im0)"/></g>
-  <circle cx="12.75" cy="12.75" r="2.6" fill="#000000"/>
-</svg>

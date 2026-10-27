@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Pitwall 16px</title>
   <defs>
-    <linearGradient id="p1bbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient>
-    <mask id="p1bm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M5.5 6.75V7.75M8 5.5V9M10.5 6.75V7.75" fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></mask>
+    <linearGradient id="pitwall-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient>
+    <mask id="pitwall-16-m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M5 6H11V9H5Z" fill="#000"/><path d="M5 10H11V11H5Z" fill="#000"/><path d="M5 12H11V13H5Z" fill="#000"/></mask>
   </defs>
-  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#p1bbg)"/>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#pitwall-16-bg)"/>
   <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#24094F" stroke-opacity="0.35" stroke-width="0.5"/>
-  <path d="M5.25 3H10.75A2.75 2.75 0 0 1 13.5 5.75V8.75A2.75 2.75 0 0 1 10.75 11.5H5.25A2.75 2.75 0 0 1 2.5 8.75V5.75A2.75 2.75 0 0 1 5.25 3ZM4 10L8 11L3.5 14Z" fill="#FFFFFF" mask="url(#p1bm0)"/>
+  <path d="M4 5H12V15H4Z" fill="#FFFFFF" mask="url(#pitwall-16-m0)" shape-rendering="crispEdges"/><path d="M6 8h1v1h-1ZM8 7h1v2h-1ZM10 6h1v3h-1ZM5 1H6V5H5ZM9 4H11V5H9Z" fill="#FFFFFF" shape-rendering="crispEdges"/>
 </svg>

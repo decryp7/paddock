@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <title>Pitwall 32px</title>
+  <defs>
+    <linearGradient id="p1dbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient>
+    <mask id="p1dm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M11.5 13.5V16.5M14 12V18M16.5 11V19M19 12V18M21.5 13.5V16.5" fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#p1dbg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#24094F" stroke-opacity="0.35" stroke-width="0.5"/>
+  <path d="M11 7.5H21A5 5 0 0 1 26 12.5V17.5A5 5 0 0 1 21 22.5H11A5 5 0 0 1 6 17.5V12.5A5 5 0 0 1 11 7.5ZM8.5 20L14 22L8 26Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round" mask="url(#p1dm0)"/>
+</svg>

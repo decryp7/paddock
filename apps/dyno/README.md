@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="app/src-tauri/icons-src/dyno-macos.svg" alt="Dyno icon" width="96" height="96">
+<img src="docs/images/dyno-icon.svg?v=0a2d5050" alt="Dyno icon" width="96" height="96">
 
 # Dyno
 
@@ -12,7 +12,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=1082b5ab)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=de37f1cf)
 
 
 > **Status: v0.1.0, unreleased.** The agent (sampling, history, process actions with undo, rules engine, diagnosis,
@@ -48,9 +48,9 @@ Task managers show numbers; cleaners and "boosters" change things behind your ba
 
 ## Key features
 
-![Dyno features](docs/images/dyno-features.svg?v=e6189128)
+![Dyno features](docs/images/dyno-features.svg?v=6d630e38)
 
-![How Dyno works](docs/images/dyno-how-it-works.svg?v=21435d87)
+![How Dyno works](docs/images/dyno-how-it-works.svg?v=532d471f)
 
 Every feature, with its state, is in [docs/features.md](docs/features.md). Built today:
 

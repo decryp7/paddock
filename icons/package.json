@@ -8,7 +8,8 @@
     "shoot": "node tools/shoot.mjs",
     "all": "node tools/build.mjs && node tools/preview.mjs && node tools/shoot.mjs",
     "cvd": "node tools/cvd.mjs",
-    "test": "node --test tools/scan.test.mjs"
+    "test": "node --test tools/scan.test.mjs tools/iso-family.test.mjs",
+    "install-icons": "node tools/install.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2",

@@ -133,7 +133,7 @@ describe('AboutDialog', () => {
 
   it('never renders file text as HTML', async () => {
     const f = await setup({ load: async () => '<img src=x onerror=alert(1)>' });
-    expect(all(f, 'img')).toHaveLength(0);
+    expect(all(f, 'img:not(debrief-app-logo img)')).toHaveLength(0);
     expect(rows(f)).toEqual(['<img src=x onerror=alert(1)>']);
   });
 });

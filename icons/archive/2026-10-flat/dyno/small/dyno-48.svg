@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 32 32">
+  <title>Dyno 48px</title>
+  <defs>
+    <linearGradient id="d1vbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#DE559F"/><stop offset="1" stop-color="#A0226A"/></linearGradient>
+    
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#d1vbg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#5E0E3C" stroke-opacity="0.35" stroke-width="0.5"/>
+  <g opacity="0.6"><path d="M7.77 22.25A9.5 9.5 0 1 1 24.23 22.25" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></g><path d="M7.77 22.25A9.5 9.5 0 0 1 23.06 11.14" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17.5L20.46 13.49" fill="none" stroke="#FFFFFF" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/><path d="M13.4 17.5a2.6 2.6 0 1 1 5.2 0a2.6 2.6 0 1 1 -5.2 0Z" fill="#FFFFFF"/>
+</svg>

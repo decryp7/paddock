@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Paddock (pit building) 16px</title>
+  <defs>
+    <linearGradient id="k4bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
+    
+  </defs>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#k4bg)"/>
+  <path d="M4 1H12A3 3 0 0 1 15 4V12A3 3 0 0 1 12 15H4A3 3 0 0 1 1 12V4A3 3 0 0 1 4 1Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1"/>
+  <path d="M1 3h2v2h-2Z" fill="#5590FF"/><path d="M3 3h2v2h-2Z" fill="#8A5AE6"/><path d="M5 3h2v2h-2Z" fill="#BFA2EE"/><path d="M7 3h2v2h-2Z" fill="#DE559F"/><path d="M9 3h2v2h-2Z" fill="#FF8A4C"/><path d="M11 3h2v2h-2Z" fill="#FFD257"/><path d="M13 3h2v2h-2Z" fill="#C2A845"/><path d="M3 5h1v8h-1ZM12 5h1v8h-1ZM5 5h6v1h-6ZM5 7h6v1h-6ZM5 9h6v1h-6Z" fill="#FFFFFF"/>
+</svg>

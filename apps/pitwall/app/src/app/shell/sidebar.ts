@@ -42,7 +42,7 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="brand" data-tauri-drag-region>
-      <mat-icon class="logo" svgIcon="pw:logo" aria-hidden="true" />
+      <img class="logo" src="brand/pitwall-macos.svg" alt="" width="24" height="24" />
       <span class="product" data-tauri-drag-region>Pitwall</span>
       @if (live.server(); as s) {
         <span class="state" [attr.data-state]="s.serving" [matTooltip]="servingLabel(s.serving) + ' on port ' + s.port"><span class="dot" aria-hidden="true"></span>{{ servingLabel(s.serving) }}</span>
@@ -120,8 +120,6 @@ const GROUPS: { label: string; items: NavItem[] }[] = [
     .logo {
       width: 24px;
       height: 24px;
-      color: var(--accent);
-      --logo-ink: var(--text-on-accent);
       flex: none;
     }
     .product {

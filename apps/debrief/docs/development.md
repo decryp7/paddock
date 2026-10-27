@@ -180,20 +180,13 @@ commit the regenerated `app/src/app/whats-new/changelog.generated.ts`; a node te
 
 ### App icon
 
-The icon is drawn as SVG in [`app/src-tauri/icons-src/`](../app/src-tauri/icons-src/): a blue tile
-(Debrief's accent) with two log lines, a timeline pulse and an amber marker.
-
-| File | Used for |
-| --- | --- |
-| `debrief-icon.svg` | Master, 1024×1024: every bundle icon from 44 px up (`.icns`, `.ico` 48–256 px, PNGs, Store logos) |
-| `debrief-icon-small.svg` | The same motif snapped to a 16 px grid with heavier strokes: the 16/24/32 px `.ico` entries, `32x32.png`, `Square30x30Logo.png` and the in-app logo |
-| `debrief-tray-template.svg` | Black-on-transparent glyph for the macOS menu bar (`tray-template.png`, 44×44); other platforms use the window icon |
-
-The installed icon set under `app/src-tauri/icons/` comes from the suite's shared icon masters (`suite-icons/debrief`),
-installed by the rename script; the SVGs here are the reference copies. Check any change at 16 px on a light and a dark
-taskbar. The in-app logo (title bar, About) is the inline component
-[`app/src/app/shared/app-logo.ts`](../app/src/app/shared/app-logo.ts), which copies the small variant's
-geometry: change both together.
+The icon set is not drawn in this repo. It comes from Paddock's `icons/debrief` (the family's isometric icon) and is copied in by
+`node icons/tools/install.mjs` (run in the Paddock checkout): `app/src-tauri/icons` (the Tauri set and the tray PNGs the tray code embeds),
+the in-app copies under `app/public`, and `docs/images/debrief-icon.svg` for the README header. `install.mjs --check` (and the `check-icons`
+script) fail when a copy differs from the build. Never run `tauri icon` on a local source and never keep a local icon source: it would
+revert the family icon. To change the icon, change it in Paddock (`icons/tools/iso-family.mjs`), rebuild there and install again. The in-app logo (title bar, About) is the component
+[`app/src/app/shared/app-logo.ts`](../app/src/app/shared/app-logo.ts), which shows the installed master `app/public/brand/debrief-macos.svg`;
+the favicon and the splash use `app/public/favicon.ico` (the 16, 32 and 48 frames). Check any change at 16 px on a light and a dark taskbar.
 
 ## Testing and quality gates
 
