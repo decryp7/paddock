@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// How often progress is sampled and listeners told while jobs are active.
@@ -197,7 +197,7 @@ impl<T, E> JobHandle<T, E> {
         if let Ok(r) = self.rx.recv() {
             // The value is out before the job is recorded as ended: wait for that too, so the caller never sees its
             // finished job still running.
-            self.jobs.wait_end(self.id);
+            self.jobs.wait_recorded(self.id);
             return Ok(r);
         }
         // The work is gone without a value: wait (briefly) for the job to be recorded as ended.
@@ -262,6 +262,8 @@ impl JobOutcome {
 
 struct Shared {
     inner: Mutex<Inner>,
+    /// Signalled (with `inner`) whenever a job is recorded as ended.
+    ended: Condvar,
     clock: Arc<dyn Clock>,
     listeners: Mutex<Vec<Listener>>,
     gates: Mutex<HashMap<JobKind, GateFn>>,
@@ -304,6 +306,7 @@ impl Jobs {
                 waiters: HashMap::new(),
                 quick: std::collections::VecDeque::new(),
             }),
+            ended: Condvar::new(),
             clock,
             listeners: Mutex::new(Vec::new()),
             gates: Mutex::new(HashMap::new()),
@@ -452,21 +455,22 @@ impl Jobs {
         // Held while the gates are asked and their verdicts applied, released before jobs are spawned and listeners
         // told (they may pump again). Gates never pump.
         let one_pump = lock(&self.0.pumping);
-        // Gates run outside the queue's lock: they may ask other services (the AI's health). A gate replaced while
-        // they were asked makes the verdicts stale: ask again.
-        let verdicts = loop {
+        // Gates run outside the queue's lock: they may ask other services (the AI's health). A gate replaced before
+        // the verdicts are applied (checked under the queue's lock, which anything queued after the replacement needs
+        // too) makes them stale: ask again.
+        let (mut inner, verdicts) = loop {
             let generation = self.0.gate_generation.load(Ordering::SeqCst);
             let gates: Vec<(JobKind, GateFn)> = lock(&self.0.gates).iter().map(|(k, g)| (*k, g.clone())).collect();
             let verdicts: Vec<(JobKind, Option<String>)> = gates.into_iter().map(|(k, g)| (k, guarded_gate(&g))).collect();
+            let inner = self.lock();
             if self.0.gate_generation.load(Ordering::SeqCst) == generation {
-                break verdicts;
+                break (inner, verdicts);
             }
         };
         let now = self.now();
         let held = self.starts_held();
         let mut paused = Vec::new();
         let (start, changed) = {
-            let mut inner = self.lock();
             let mut changed = false;
             for (kind, verdict) in verdicts {
                 match verdict {
@@ -497,6 +501,7 @@ impl Jobs {
                 }
             }
             let changed = changed || !start.is_empty();
+            drop(inner);
             (start, changed)
         };
         drop(one_pump);
@@ -558,6 +563,7 @@ impl Jobs {
             });
             (f, waiters)
         };
+        self.0.ended.notify_all();
         match finished {
             Ok(f) => {
                 let outcome = JobOutcome::of(&f.job, raw);
@@ -697,6 +703,15 @@ impl Jobs {
         let n = self.lock().queue.clear_finished(window);
         self.emit(&JobsEvent::Changed);
         n
+    }
+
+    /// Blocks until job `id` is recorded as ended (or is no longer listed). Unlike `wait_end` it registers no waiter,
+    /// so the job's "needs attention" message is not treated as seen by a dialog.
+    fn wait_recorded(&self, id: JobId) {
+        let mut inner = self.lock();
+        while inner.queue.get(id).is_some_and(|j| !j.state().is_finished()) {
+            inner = self.0.ended.wait(inner).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
     }
 
     /// Waits for job `id` to end (blocking): at once when it already ended. A job that ended without needing
@@ -1136,6 +1151,27 @@ pub(crate) mod tests {
         drop(held);
         assert_eq!(waiter.join().unwrap(), Ok(Ok(7)));
         assert!(jobs.state_of(id).is_none_or(|s| s.is_finished()));
+    }
+
+    /// Regression (CI run 6432): waiting through a registered waiter marked the outcome as shown by a dialog, which
+    /// silenced the "needs attention" message of every job whose handle was waited on.
+    #[test]
+    fn waiting_on_a_handle_does_not_hide_the_jobs_attention() {
+        let (jobs, clock) = service();
+        let attention = Arc::new(Mutex::new(Vec::<bool>::new()));
+        let a = attention.clone();
+        jobs.subscribe(move |e| {
+            if let JobsEvent::Finished(done) = e {
+                lock(&a).push(done.attention);
+            }
+        });
+        let (h, go) = gated(&jobs, ai("long"));
+        wait_until("the job to run", || jobs.state_of(h.id) == Some(JobState::Running));
+        clock.advance(ATTENTION_AFTER_MS);
+        go.send(Ok(1)).unwrap();
+        assert_eq!(h.wait(), Ok(Ok(1)));
+        wait_until("the job to be reported", || !lock(&attention).is_empty());
+        assert_eq!(*lock(&attention), [true]);
     }
 
     /// Regression (CI run 6426, macOS): a pump that asked the old gate before `set_gate` replaced it applied that
