@@ -21,3 +21,4 @@
 | [0017](0017-viewport-and-selection-survive-refreshes.md) | Viewport and selection survive data refreshes: row keys, an anchor row, selection by key, scrollbar markers (accepted) |
 | [0018](0018-bounded-loading-everywhere.md) | Bounded loading everywhere: limits or pages on every query, virtualized or capped lists, streaming imports, timeline lane selection (accepted) |
 | [0019](0019-limits-explain-themselves.md) | Limits explain themselves: one typed limit error with the value and the Settings path, Raise it and Retry, a test per limit (accepted) |
+| [0020](0020-shared-executor.md) | One shared executor in `paddock-jobs`: tasks, periodic checks (poller pool) and leases, with priority classes, cooperative abort and a stuck watchdog (proposed) |
