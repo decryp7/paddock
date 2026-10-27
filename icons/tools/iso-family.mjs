@@ -212,7 +212,7 @@ export function trayGlyph(app, status) {
 const withStatus = (svg, status) => (status === 'default' ? svg : svg.replace('tray</title>', `tray (${status})</title>`));
 const RING_KNOCK ='M10 9H15V10H16V15H15V16H10V15H9V10H10Z';
 const KNOCK_BADGE = {
-  paused: { knock: RING_KNOCK, shape: 'M11 10H12V15H11ZM14 10H15V15H14Z', colour: STATUS_COLOURS.paused },
+  paused: { knock: RING_KNOCK, shape: 'M11 10H12V15H11ZM14 10H15V15H14Z', colour: STATUS_COLOURS.paused, lightColour: '#5F6368' },
   warning: { knock: 'M11 8H14V9H15V11H16V16H8V11H9V9H11Z', shape: 'M12 9H13V11H14V13H15V15H9V13H10V11H11V9H12Z', mark: 'M12 11H13V13H12ZM12 14H13V15H12Z', markColour: '#1A1200', colour: STATUS_COLOURS.warning },
   busy: { knock: RING_KNOCK, shape: 'M11 10H14V11H15V14H14V15H11V14H10V11H11ZM11 11V14H14V11Z', colour: STATUS_COLOURS.busy, evenodd: true },
   error: { knock: RING_KNOCK, shape: 'M11 10H14V11H15V14H14V15H11V14H10V11H11Z', mark: 'M11 11H12V12H11ZM13 11H14V12H13ZM12 12H13V13H12ZM11 13H12V14H11ZM13 13H14V14H13Z', markColour: '#FFFFFF', colour: STATUS_COLOURS.error },
@@ -223,7 +223,7 @@ function trayKnockout(app, status, theme, { pt18, uid }) {
   const b = KNOCK_BADGE[status];
   if (!b) return out;
   const ink = theme === 'dark' ? '#FFFFFF' : theme === 'light' ? '#1C1C1E' : '#000000';
-  const col = theme === 'template' ? ink : b.colour;
+  const col = theme === 'template' ? ink : theme === 'light' && b.lightColour ? b.lightColour : b.colour;
   const knock = `<mask id="${uid}tk" maskUnits="userSpaceOnUse" x="-1" y="-1" width="18" height="18"><rect x="-1" y="-1" width="18" height="18" fill="#fff"/><path d="${b.knock}" fill="#000"/></mask>`;
   const markMask = b.mark ? `<mask id="${uid}tm" maskUnits="userSpaceOnUse" x="-1" y="-1" width="18" height="18"><rect x="-1" y="-1" width="18" height="18" fill="#fff"/><path d="${b.mark}" fill="#000"/></mask>` : '';
   const shape = `<path d="${b.shape}" fill="${col}"${b.evenodd ? ' fill-rule="evenodd"' : ''}${b.mark && theme === 'template' ? ` mask="url(#${uid}tm)"` : ''}/>` + (b.mark && theme !== 'template' ? `<path d="${b.mark}" fill="${b.markColour}"/>` : '');

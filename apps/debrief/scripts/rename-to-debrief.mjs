@@ -246,11 +246,6 @@ function main() {
   const iconPlan = [
     ['tauri', 'app/src-tauri/icons', null],
     ['tray/macos/debrief-tray-18ptTemplate@2x.png', 'app/src-tauri/icons/tray-template.png', 'file'],
-    ['debrief-windows.svg', 'app/src-tauri/icons-src/debrief-icon.svg', 'file'],
-    ['small/debrief-32.svg', 'app/src-tauri/icons-src/debrief-icon-small.svg', 'file'],
-    ['tray/svg/debrief-tray-template.svg', 'app/src-tauri/icons-src/debrief-tray-template.svg', 'file'],
-    ['debrief-macos.svg', 'assets/icon/debrief-icon.svg', 'file'],
-    ['debrief-macos-1024.png', 'assets/icon/debrief-icon-1024.png', 'file'],
   ];
   const iconNotes = [];
   if (!existsSync(ICONS)) {

@@ -29,6 +29,7 @@ const COPIES = [
   ['apps/debrief/app/public/brand/debrief-macos.svg', 'debrief/debrief-macos.svg'],
   ['apps/debrief/app/public/favicon.ico', 'debrief/web/favicon.ico'],
   ['apps/pitwall/app/public/brand/pitwall-macos.svg', 'pitwall/pitwall-macos.svg'],
+  ['apps/dyno/app/public/brand/dyno-16.svg', 'dyno/small/dyno-16.svg'],
   ['apps/dyno/app/public/dyno-logo.svg', 'dyno/dyno-windows.svg'],
   ['apps/pitcrew/app/public/brand/pitcrew-macos.svg', 'pitcrew/pitcrew-macos.svg'],
   ['apps/pitcrew/app/public/brand/pitcrew-windows.svg', 'pitcrew/pitcrew-windows.svg'],

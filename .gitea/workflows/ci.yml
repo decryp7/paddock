@@ -48,6 +48,7 @@ jobs:
       eslint: ${{ steps.plan.outputs.eslint }}
       conformance: ${{ steps.plan.outputs.conformance }}
       tools: ${{ steps.plan.outputs.tools }}
+      icons: ${{ steps.plan.outputs.icons }}
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
     steps:
@@ -253,6 +254,30 @@ jobs:
       # The plan's rules and the repo contracts it checks (doc inputs, app CI files, CODEOWNERS, Renovate, one npm lock).
       - name: Affected rules and repo contracts
         run: node --test scripts/affected.test.mjs
+
+  # The family icons (icons/): the pipeline's tests (seam scan, coverage, tray shapes, .icns frames, docs copies) and the check that every
+  # installed copy in the apps and the docs equals the build. Without the second step a hand edit of an app's icons goes unnoticed.
+  icons:
+    name: icons (tests, installed copies)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.icons == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/node-caches
+
+      - name: Install
+        run: npm ci
+
+      - name: Icon tests
+        working-directory: icons
+        run: npm test
+
+      - name: Installed icon copies match the build
+        run: node icons/tools/install.mjs --check
 
   # @decryp7/paddock-eslint (eslint/, plan X11): RuleTester cases per rule and the preset run through ESLint on temp files.
   eslint-preset:

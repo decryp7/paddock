@@ -10,7 +10,10 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { readIcns } from './icns.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { decodePng, readIcns } from './icns.mjs';
 import { FAMILY, GLYPH_KIND, TRAY_STATES, bareSmall, master, small, tray, trayGlyphOnly } from './iso-family.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -85,9 +88,23 @@ for (const app of FAMILY) {
     assert.ok(entries.get('icp4').equals(png(16)), '16 px is the 16 frame');
     assert.ok(entries.get('icp5').equals(png(32)) && entries.get('ic11').equals(png(32)), '32 px and 16 pt at 2x are the 32 frame');
     assert.equal(entries.get('ic12').readUInt32BE(16), 64, '32 pt at 2x is 64 px wide');
-    assert.ok(!entries.has('is32') && !entries.has('il32'), 'the downscaled legacy entries are gone');
+    assert.ok(['is32', 's8mk', 'il32', 'l8mk'].every(t => entries.has(t)), 'the classic entries are there');
     assert.ok(entries.has('ic07') && entries.has('ic10'), 'the large frames stay');
     assert.ok(readFileSync(join(ROOT, app, 'tauri', '32x32.png')).equals(png(32)));
+  });
+
+  test(`${app}: iconutil decodes the .icns 16 and 32 frames to the hand-tuned ones`, { skip: process.platform !== 'darwin' }, () => {
+    const dir = mkdtempSync(join(tmpdir(), 'icns-'));
+    try {
+      execFileSync('iconutil', ['-c', 'iconset', join(ROOT, app, 'tauri', 'icon.icns'), '-o', join(dir, 'x.iconset')]);
+      for (const [name, px] of [['icon_16x16.png', 16], ['icon_16x16@2x.png', 32], ['icon_32x32.png', 32]]) {
+        const got = decodePng(readFileSync(join(dir, 'x.iconset', name))), want = decodePng(readFileSync(join(ROOT, app, 'small', `${app}-${px}.png`)));
+        assert.equal(got.w, px, name);
+        assert.ok(got.rgba.equals(want.rgba), `${app} ${name} differs from the ${px} frame`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test(`${app}: the README header icon in the app is the macOS master`, { skip: !existsSync(join(ROOT, '..', 'apps', app)) }, () => {
@@ -112,4 +129,10 @@ test('the preview sheet references the built SVGs instead of inlining them', () 
   assert.ok(html.length < 100_000, `preview.html is ${html.length} bytes`);
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]);
   assert.equal(new Set(ids).size, ids.length, 'duplicate ids in preview.html');
+});
+
+test('Pitwall paused: the light taskbar badge is dark enough (3:1 on white), the dark one stays light', () => {
+  assert.ok(tray('pitwall', 'paused', 'light').includes('#5F6368'));
+  assert.ok(!tray('pitwall', 'paused', 'light').includes('#9AA0A6'));
+  assert.ok(tray('pitwall', 'paused', 'dark').includes('#9AA0A6'));
 });

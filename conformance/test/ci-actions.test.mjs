@@ -596,3 +596,14 @@ test('node-caches keeps the npm and Angular caches on the host or the container 
   assert.match(bare.stdout, /::notice::no \/sccache mount/);
   assert.match(read(join(PADDOCK, 'ui', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, 'Angular keeps its cache in CI too');
 });
+
+test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that the plan feeds', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  assert.match(ci, /icons: \$\{\{ steps\.plan\.outputs\.icons \}\}/, 'the plan job exports the icons output');
+  const at = ci.indexOf('\n  icons:\n');
+  assert.ok(at > 0, 'ci.yml has an icons job');
+  const job = ci.slice(at + 1, ci.indexOf('\n  # ', at + 1) > 0 ? ci.indexOf('\n  # ', at + 1) : undefined);
+  assert.match(job, /needs\.plan\.outputs\.icons == 'true'/, 'the icons job runs when the plan says icons');
+  assert.match(job, /run: npm test/, 'it runs the icon tests');
+  assert.match(job, /run: node icons\/tools\/install\.mjs --check/, 'it runs install.mjs --check');
+});
