@@ -42,9 +42,10 @@ keeps the runner that executes it on CI healthy. Sighter's run bundle opens next
 locally. A Sighter smoke test checks that your workflow still works on the new build, and **Dyno** watches CPU and memory
 for a regression over the following days. Anything odd opens in Debrief with one click.
 
-**A slow build machine.** **Dyno** explains in plain words that a background process is taking the runner's disk and CPU,
-and shows it next to the runner in **Pitcrew**. A taming rule or cleanup you enable fixes it, with an undo. Pitcrew's
-job logs open in **Debrief** when a build fails.
+**A slow build machine.** **Dyno** shows what the runner is doing, live and over time: an alarm fires, and the process
+and the disk map show that a background process is taking the runner's disk and CPU. The runner's health shows next to it
+in **Pitcrew**; later Dyno can hand that evidence to **Pitwall** for an explanation. Dyno never changes anything.
+Pitcrew's job logs open in **Debrief** when a build fails.
 
 **No AI installed.** Nothing above stops working. Every app does its core job alone; AI features show "Needs local AI,
 set up Pitwall" instead of an error. Install Pitwall later and they light up.

@@ -41,7 +41,7 @@ function app(d, id, x, y, w, h, opts, planned = false) {
     ['debrief', 'Debrief', 'Tauri app', 'AI engine once paired; built-in engine as fallback.', false],
     ['sighter', 'Sighter', 'Tauri app and server', 'Vision, and the agent planner.', true],
     ['spotter', 'Spotter', 'Tauri app', 'What’s-new summaries.', false, true],
-    ['dyno', 'Dyno', 'Tauri app and agent', 'Diagnosis in plain words.', false, true],
+    ['dyno', 'Dyno', 'Tauri app and agent', 'Explains what it shows.', false, true],
   ];
   const NH = Math.max(...apps.map(([, name, tech, desc]) => d.fit(NW, { name, tech, desc })));
   const LIB = { name: 'paddock-pitwall', tech: 'shared Rust crate in each app', desc: 'One client: discovery, pairing, keychain keys, retries, optional-AI state.' };

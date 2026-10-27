@@ -17,7 +17,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
 hero [light](images/paddock-ecosystem-light.png?v=ba281164) and [dark](images/paddock-ecosystem-dark.png?v=79f12b8e), integrations
-[light](images/paddock-integrations-light.png?v=59baa1a0) and [dark](images/paddock-integrations-dark.png?v=3ae9a8ae), hand-offs
+[light](images/paddock-integrations-light.png?v=3c747334) and [dark](images/paddock-integrations-dark.png?v=bc507980), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
 `CHROME` to override).
@@ -85,7 +85,7 @@ Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 **For.** People who want to know what a machine is doing, now and over time.
 - A background agent keeps history while the window is closed.
 - Live and history views grouped by application, alarms, system facts, a disk map and benchmarks.
-- Strictly read-only: no tuning, no actions and no advice, so nothing needs a privileged helper.
+- Strictly read-only: no tuning, no actions and no advice. A small read-only helper reads what only an administrator may see.
 - Extensible with validated declarative packs, no code.
 
 Status: in development. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
@@ -128,7 +128,7 @@ Status: **planned**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/bra
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=fcd26b68" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter and Dyno reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app; Pitwall runs llama.cpp as a child process, keeps keys in the OS credential store, and its tool router is an MCP client of the read-only MCP servers of Pacenotes, Debrief and Sighter, which other MCP clients can use too" width="100%">
+  <img src="images/paddock-integrations.svg?v=0eef0eff" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter and Dyno reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app; Pitwall runs llama.cpp as a child process, keeps keys in the OS credential store, and its tool router is an MCP client of the read-only MCP servers of Pacenotes, Debrief and Sighter, which other MCP clients can use too" width="100%">
 </picture>
 
 <picture>
@@ -155,7 +155,7 @@ The apps never depend on each other to do their own job. They meet in a few well
 
 What each app uses Pitwall for (the dotted lines in the hero): Debrief, its AI engine once paired (from 1.1; the built-in engine is the fallback); Pacenotes, answers, explanations and
 embeddings (a two-way link: it is an MCP server, Pitwall is the client); Sighter, vision; Spotter, "What's new" summaries; Dyno,
-diagnosis. Pitcrew does not need it.
+explanations of what it shows (later). Pitcrew does not need it.
 
 ## Data and privacy
 
@@ -164,7 +164,7 @@ diagnosis. Pitcrew does not need it.
   Pitwall, release checks you configure in Spotter, updates of the apps themselves (signed, from `latest.json`).
 - Pitwall listens on loopback only and requires a key per app; keys live in the OS credential store.
 - Apps treat input as hostile: parsers never panic, limits are enforced, UIs never render untrusted text as HTML.
-- System changes (Dyno) happen only through a privileged helper on a click or an enabled rule, with an undo.
+- Dyno never changes the system. Its small privileged helper answers allow-listed read-only queries only, so it can see every process and the privileged counters.
 
 ## Pitwall is optional
 
