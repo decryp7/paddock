@@ -907,10 +907,19 @@ pub(crate) mod test_support {
         remove_process_scratch();
     }
 
-    /// Removes every folder [`process_scratch_dir`] made (what the exit handler does).
+    /// Removes every folder [`process_scratch_dir`] made (what the exit handler does). A store thread may still be
+    /// writing a file into one while it goes (the removal then finds the folder not empty): asked again a few times.
     pub fn remove_process_scratch() {
         let dirs = std::mem::take(&mut *crate::sync::lock(&PROCESS_SCRATCH));
-        drop(dirs);
+        for dir in dirs {
+            let path = dir.path().to_path_buf();
+            drop(dir);
+            for _ in 0..20 {
+                if !path.exists() || std::fs::remove_dir_all(&path).is_ok() {
+                    break;
+                }
+            }
+        }
     }
 
     /// A fresh empty folder named `debrief-<prefix>-...` in the OS temp folder, removed when the test process exits.
