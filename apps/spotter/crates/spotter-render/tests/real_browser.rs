@@ -171,6 +171,68 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     assert_no_leftovers(&marker);
 }
 
+/// A load that something else replaces before it commits (Chrome answers `Page.navigate` with `net::ERR_ABORTED`) says
+/// which navigation took over, instead of a bare error code. The replacement is made on purpose here: the first request
+/// is held at the server until the second navigation starts, so the order is fixed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_load_replaced_by_another_navigation_names_it() {
+    let _turn = serial();
+    let Some(b) = browser() else { return };
+    let (arrived, first_request) = std::sync::mpsc::channel();
+    let port = serve(move |p| match p {
+        "/held" => {
+            let _ = arrived.send(());
+            Reply::Hang
+        }
+        _ => Reply::Html("<title>Other</title><p>other</p>".into()),
+    })
+    .await;
+    let base = tempfile::tempdir().unwrap();
+    let marker = base.path().to_string_lossy().to_string();
+    let dir = base.path().to_path_buf();
+    let e = tokio::task::spawn_blocking(move || {
+        let mut opts = LaunchOptions::new(&dir);
+        opts.extra_args = test_browser_flags();
+        opts.mode = Mode::Headless;
+        let c = Chromium::launch(&b, &opts).unwrap();
+        let page = c.new_page().unwrap();
+        std::thread::scope(|s| {
+            let first = s.spawn(|| page.navigate(&format!("http://127.0.0.1:{port}/held"), Duration::from_secs(40)));
+            first_request
+                .recv_timeout(Duration::from_secs(40))
+                .expect("the first load reached the server");
+            page.navigate(&format!("http://127.0.0.1:{port}/other"), Duration::from_secs(40))
+                .unwrap();
+            first.join().unwrap().unwrap_err()
+        })
+    })
+    .await
+    .unwrap();
+    let m = e.to_string();
+    assert!(
+        m.contains("replaced") && m.contains(&format!("http://127.0.0.1:{port}/other")),
+        "{m}"
+    );
+    assert_no_leftovers(&marker);
+}
+
+/// An address that answers with a file is reported as a download, not as a page that "did not load: net::ERR_ABORTED".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_download_address_is_reported_as_a_download() {
+    let _turn = serial();
+    let Some(b) = browser() else { return };
+    let port = serve(|_| Reply::Bytes(b"PK\x05\x06".to_vec())).await;
+    let base = tempfile::tempdir().unwrap();
+    let marker = base.path().to_string_lossy().to_string();
+    let r = renderer(b, base.path());
+    let e = r
+        .render(&format!("http://127.0.0.1:{port}/release.zip"), None, Duration::from_secs(40))
+        .await
+        .unwrap_err();
+    assert!(matches!(&e, RenderError::Failed(m) if m.contains("download")), "{e:?}");
+    assert_no_leftovers(&marker);
+}
+
 #[test]
 fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
     let _turn = serial();

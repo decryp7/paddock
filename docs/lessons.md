@@ -511,3 +511,15 @@ they stay in the resident size until the kernel needs them, and are not in the f
 `tree_memory` (Linux PSS, macOS `ri_phys_footprint`, Windows private working set), never `sysinfo`'s `memory()`; a test
 frees pages the way mimalloc does and asserts the figure is far below the resident size and the child survives a cap
 between the two.
+
+## `net::ERR_ABORTED` from `Page.navigate` names no cause (2026-10-28, Spotter)
+
+A Windows CI run failed `a_missing_element_times_out_as_failed` with "the page did not load: net::ERR_ABORTED"; 20 earlier
+Windows runs and 240 stressed local renders never showed it, and the error said nothing about why. Measured on Chrome for
+Testing 156: Chrome answers `Page.navigate` with `ERR_ABORTED` for every load it cancels before the page commits: a
+response that is a download (`isDownload: true`) or a 204, and a load that another navigation in the same frame replaced.
+A dead renderer is reloaded, not aborted; a closed or reset connection is `ERR_EMPTY_RESPONSE`. The replacing navigation's
+`Page.frameStartedNavigating` arrives just *after* the cancelled one's reply, so a check right at the reply misses it.
+**Rule:** the driver turns `errorText` into a reason (download; replaced by a navigation to <url>, found after one more
+browser-side call as an ordering barrier; otherwise the code), so the next failure names its cause instead of being
+retried or guessed at.
