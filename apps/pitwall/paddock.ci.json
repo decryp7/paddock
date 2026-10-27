@@ -31,7 +31,7 @@
     "PW_E2E_PORT=$((4390 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=$E2E_SHARD"
   ],
   "e2eShards": 2,
-  "e2eArtifacts": "apps/pitwall/app/playwright-report",
+  "e2eArtifacts": "apps/pitwall/app/.angular/playwright-results",
   "e2eWebkit": [
     "cd apps/pitwall/app",
     "PW_E2E_PORT=4393 npx playwright test --project=webkit --workers=1"

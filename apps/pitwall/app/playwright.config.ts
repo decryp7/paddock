@@ -11,6 +11,7 @@ export default defineConfig({
   forbidOnly: CI,
   retries: CI ? 2 : 0,
   workers: 1,
+  outputDir: './.angular/playwright-results',
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${PORT}`,
