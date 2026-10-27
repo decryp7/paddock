@@ -82,8 +82,6 @@ export const ICONS: Record<string, string> = {
   vector: s('<circle cx="12" cy="5.5" r="2"/><circle cx="5.5" cy="17.5" r="2"/><circle cx="18.5" cy="17.5" r="2"/><path d="m11 7.3-4.6 8.4M13 7.3l4.6 8.4M7.5 17.5h9"/>'),
   sort: s('<path d="M4 6h16M4 12h11M4 18h6"/>'),
   activity: s('<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>'),
-  // The Pitwall brand mark (suite-icons/pitwall/small/pitwall-32.svg): Enamel purple tile, white radio bubble.
-  logo: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><defs><linearGradient id="pwLogoBg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient><mask id="pwLogoMask" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M11.5 13.5V16.5M14 12V18M16.5 11V19M19 12V18M21.5 13.5V16.5" fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></mask></defs><path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#pwLogoBg)"/><path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#24094F" stroke-opacity="0.35" stroke-width="0.5"/><path d="M11 7.5H21A5 5 0 0 1 26 12.5V17.5A5 5 0 0 1 21 22.5H11A5 5 0 0 1 6 17.5V12.5A5 5 0 0 1 11 7.5ZM8.5 20L14 22L8 26Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round" mask="url(#pwLogoMask)"/></svg>',
 };
 
 /** Registers {@link ICONS} with Material's icon registry. */

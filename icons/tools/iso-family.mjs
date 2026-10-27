@@ -19,15 +19,15 @@ const DIRECT = { spotter: binoculars, pacenotes: tablet, dyno: pod };
 const DIRECT_WEIGHT = { spotter: 0.65, pacenotes: 0.64, dyno: 0.68 };
 
 /**
- * Tray states per app, as the apps load them. Pitwall: idle (the whole glyph dimmed), serving (dot), busy (ring), warning
- * (triangle), error (cross); Pitcrew: ok, busy, warning, error; Spotter: normal, new (corner square); Dyno: normal, high (the needle
+ * Tray states per app, as the apps load them. Pitwall: normal (the plain glyph), busy (ring), paused (two bars),
+ * error (cross); Pitcrew: ok, busy, warning, error; Spotter: normal, new (corner square); Dyno: normal, high (the needle
  * at the redline, corner square).
  */
 export const TRAY_STATES = {
   debrief: ['default'],
   pitcrew: ['ok', 'busy', 'warning', 'error'],
   spotter: ['normal', 'new'],
-  pitwall: ['idle', 'serving', 'busy', 'warning', 'error'],
+  pitwall: ['normal', 'busy', 'paused', 'error'],
   dyno: ['normal', 'high'],
   sighter: ['default'],
   pacenotes: ['default'],
@@ -152,7 +152,7 @@ const SCENE_FLAT = {
     { kind: 'fill', d: px([[4, 6, 2], [6, 4, 1, 2], [7, 3], [8, 4, 1, 4], [9, 7], [10, 6, 2]]), tone: 'primary', crisp: true },
     { kind: 'fill', d: 'M2 11H14V12H2Z', tone: 'primary', crisp: true },
   ],
-  // The radio, the same glyph in every state (idle dims all of it): the body with the screen showing a signal-strength run and two
+  // The radio, the same glyph in every state : the body with the screen showing a signal-strength run and two
   // grille slots, the antenna and the knob.
   pitwall: [
     { kind: 'fill', d: 'M4 5H12V15H4Z', tone: 'primary', cut: ['M5 6H11V9H5Z', 'M5 10H11V11H5Z', 'M5 12H11V13H5Z'], crisp: true },
@@ -205,22 +205,21 @@ export function trayGlyph(app, status) {
 
 /**
  * Whole-pixel badges with a knock-out (Debrief, Pitwall, Sighter, Pitcrew): the glyph is cut by a knock-out one pixel wider than the
- * badge. Serving: a 4 x 4 rounded dot. Warning: a 7-wide triangle with the mark cut out. Busy: a 1 px ring (5 x 5 with its corners
+ * badge. Paused: two 1-unit bars. Warning: a 7-wide triangle with the mark cut out. Busy: a 1 px ring (5 x 5 with its corners
  * off); error: a filled 5 x 5 with a cross cut out. Colours on the Windows themes from STATUS_COLOURS; the template is alpha only.
  */
 /** The tray title with the state: the badge is drawn here, so traySvg renders the 'default' state. */
 const withStatus = (svg, status) => (status === 'default' ? svg : svg.replace('tray</title>', `tray (${status})</title>`));
 const RING_KNOCK ='M10 9H15V10H16V15H15V16H10V15H9V10H10Z';
 const KNOCK_BADGE = {
-  serving: { knock: 'M11 10H15V11H16V15H15V16H11V15H10V11H11Z', shape: 'M12 11H14V12H15V14H14V15H12V14H11V12H12Z', colour: STATUS_COLOURS.serving },
+  paused: { knock: RING_KNOCK, shape: 'M11 10H12V15H11ZM14 10H15V15H14Z', colour: STATUS_COLOURS.paused },
   warning: { knock: 'M11 8H14V9H15V11H16V16H8V11H9V9H11Z', shape: 'M12 9H13V11H14V13H15V15H9V13H10V11H11V9H12Z', mark: 'M12 11H13V13H12ZM12 14H13V15H12Z', markColour: '#1A1200', colour: STATUS_COLOURS.warning },
   busy: { knock: RING_KNOCK, shape: 'M11 10H14V11H15V14H14V15H11V14H10V11H11ZM11 11V14H14V11Z', colour: STATUS_COLOURS.busy, evenodd: true },
   error: { knock: RING_KNOCK, shape: 'M11 10H14V11H15V14H14V15H11V14H10V11H11Z', mark: 'M11 11H12V12H11ZM13 11H14V12H13ZM12 12H13V13H12ZM11 13H12V14H11ZM13 13H14V14H13Z', markColour: '#FFFFFF', colour: STATUS_COLOURS.error },
 };
 function trayKnockout(app, status, theme, { pt18, uid }) {
   const base = withStatus(traySvg(app, 'default', theme, { glyph: trayGlyph(app, status), pt18, uid }), status);
-  // Idle (Pitwall): the whole glyph dimmed to 70 %, the one allowed partial alpha.
-  const out = status === 'idle' ? base.replace(/<g>/, '<g opacity="0.7">') : base;
+  const out = base;
   const b = KNOCK_BADGE[status];
   if (!b) return out;
   const ink = theme === 'dark' ? '#FFFFFF' : theme === 'light' ? '#1C1C1E' : '#000000';
@@ -228,7 +227,7 @@ function trayKnockout(app, status, theme, { pt18, uid }) {
   const knock = `<mask id="${uid}tk" maskUnits="userSpaceOnUse" x="-1" y="-1" width="18" height="18"><rect x="-1" y="-1" width="18" height="18" fill="#fff"/><path d="${b.knock}" fill="#000"/></mask>`;
   const markMask = b.mark ? `<mask id="${uid}tm" maskUnits="userSpaceOnUse" x="-1" y="-1" width="18" height="18"><rect x="-1" y="-1" width="18" height="18" fill="#fff"/><path d="${b.mark}" fill="#000"/></mask>` : '';
   const shape = `<path d="${b.shape}" fill="${col}"${b.evenodd ? ' fill-rule="evenodd"' : ''}${b.mark && theme === 'template' ? ` mask="url(#${uid}tm)"` : ''}/>` + (b.mark && theme !== 'template' ? `<path d="${b.mark}" fill="${b.markColour}"/>` : '');
-  return out.replace('<defs>', `<defs>${knock}${markMask}`).replace(/<g( opacity="0.7")?>/, m => m.replace('<g', `<g mask="url(#${uid}tk)"`)).replace(/<\/svg>\s*$/, `${shape}\n</svg>\n`);
+  return out.replace('<defs>', `<defs>${knock}${markMask}`).replace(/<g>/, `<g mask="url(#${uid}tk)">`).replace(/<\/svg>\s*$/, `${shape}\n</svg>\n`);
 }
 /** A 3 x 3 square in a corner the glyph leaves free (Spotter 'new', Dyno 'high'), so the silhouette stays whole. */
 function trayCorner(app, status, theme, { pt18, uid }) {

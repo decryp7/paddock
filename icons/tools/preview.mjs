@@ -1,16 +1,17 @@
-// Writes preview.html: a self-contained review sheet with inline SVGs (each icon's ids carry its app, size and state).
+// Writes preview.html: the review sheet. It references the built SVGs in icons/<app>/ with <img> (open it from this folder), so it stays small.
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { APPS, UMBRELLA, NAMES, PALETTE, INK } from './design.mjs';
-import { TRAY_STATES as STATUSES, master, small as isoSmall, tray as isoTray } from './iso-family.mjs';
+import { TRAY_STATES as STATUSES } from './iso-family.mjs';
 import { check, contrast } from './cvd.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const sized = (svg, px) => svg.replace(/<svg ([^>]*?)width="\d+" height="\d+"/, `<svg $1width="${px}" height="${px}"`);
-const mac = (a, px) => sized(master(a), px);
-const win = (a, px) => sized(master(a, { platform: 'windows' }), px);
-const small = (a, s, px = s) => sized(isoSmall(a, s), px);
-const tray = (a, st, theme, px = 16) => sized(isoTray(a, st, theme), px);
+/** The sheet references the built files (an `<img>` each) instead of inlining every SVG: small, and no duplicate ids. */
+const img = (src, px) => `<img src="${src}" width="${px}" height="${px}" alt="">`;
+const mac = (a, px) => img(`${a}/${a}-macos.svg`, px);
+const win = (a, px) => img(`${a}/${a}-windows.svg`, px);
+const small = (a, s, px = s) => img(`${a}/small/${a}-${s}.svg`, px);
+const tray = (a, st, theme, px = 16) => img(`${a}/tray/svg/${st === 'default' ? `${a}-tray` : `${a}-tray-${st}`}-${theme}${theme === 'template' && px === 18 ? '-18pt' : ''}.svg`, px);
 
 const CONCEPT = {
   debrief: "An engineer's laptop with a telemetry trace on the screen: the debrief after the race.",
@@ -45,7 +46,7 @@ const taskbar = theme => `
     <div class="taskbar">
       <div class="tb-apps"><span class="start" title="Start (neutral placeholder)"><i></i></span>${APPS.map((a, i) => `<span class="tbitem${i === 0 ? ' active' : ''}">${small(a, 24)}</span>`).join('')}</div>
       <div class="tb-tray">
-        ${tray('pitcrew', 'busy', theme)}${tray('spotter', 'new', theme)}${tray('pitwall', 'serving', theme)}${tray('dyno', 'normal', theme)}${tray('debrief', 'default', theme)}
+        ${tray('pitcrew', 'busy', theme)}${tray('spotter', 'new', theme)}${tray('pitwall', 'normal', theme)}${tray('dyno', 'normal', theme)}${tray('debrief', 'default', theme)}
         <span class="clock">09:41<br>22/10/2026</span>
       </div>
     </div>
@@ -93,7 +94,7 @@ const html = `<!doctype html>
   .stack { display:grid; grid-template-columns:1fr; gap:16px; }
   .panel { border-radius:18px; padding:28px; background:var(--card); border:1px solid var(--line); overflow:hidden; }
   .panel.dark { background:var(--dark); border-color:#24262B; color:#E9EAED; }
-  .hero { display:flex; gap:28px; overflow-x:auto; padding-bottom:12px; }
+  .hero { display:flex; flex-wrap:wrap; justify-content:center; gap:20px; padding-bottom:12px; }
   .hero figure { margin:0; flex:none; text-align:center; }
   .hero figcaption, .label { font-weight:600; font-size:13px; }
   .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:20px; }
@@ -111,7 +112,7 @@ const html = `<!doctype html>
   .menubar { display:flex; align-items:center; gap:16px; height:30px; padding:0 14px; font-size:13px; backdrop-filter:blur(20px); }
   .mac.light .menubar { background:rgba(255,255,255,.55); color:#111; }
   .mac.dark .menubar { background:rgba(30,30,34,.55); color:#F2F2F2; }
-  .mac.dark .tpl svg { filter:invert(1); }
+  .mac.dark .tpl img { filter:invert(1); }
   .menubar .spacer { flex:1; }
   .menubar .tpl { display:flex; opacity:.9; }
   .apple { width:12px; height:14px; border-radius:6px 6px 5px 5px; background:currentColor; opacity:.85; }
@@ -119,7 +120,7 @@ const html = `<!doctype html>
   .mac.light .dock { background:rgba(255,255,255,.38); border:1px solid rgba(255,255,255,.55); }
   .mac.dark .dock { background:rgba(40,40,46,.45); border:1px solid rgba(255,255,255,.12); }
   .dockitem { position:relative; }
-  .dockitem svg { display:block; }
+  .dockitem img { display:block; }
   .dockitem i { position:absolute; left:50%; bottom:-8px; width:4px; height:4px; border-radius:50%; margin-left:-2px; background:currentColor; opacity:.6; }
   .mac.light .dockitem i { color:#222; } .mac.dark .dockitem i { color:#fff; }
   /* Windows mock */
@@ -142,7 +143,7 @@ const html = `<!doctype html>
   .trayfig { margin:0; text-align:center; }
   .chips { display:flex; gap:4px; }
   .chip { width:34px; height:34px; border-radius:8px; display:grid; place-items:center; }
-  .chip.mac-l { background:#ECECEC; } .chip.mac-d { background:#2A2A2E; } .chip.mac-d svg { filter:invert(1); }
+  .chip.mac-l { background:#ECECEC; } .chip.mac-d { background:#2A2A2E; } .chip.mac-d img { filter:invert(1); }
   .chip.win-l { background:#F3F3F3; border:1px solid #E2E2E2; } .chip.win-d { background:#202020; }
   .trayfig figcaption { font-size:11px; color:var(--muted); margin-top:4px; }
   .legend { font-size:12px; color:var(--muted); margin-top:10px; }
@@ -168,8 +169,8 @@ const html = `<!doctype html>
 
 <section>
   <h2>1024 px masters (macOS grid)</h2>
-  <p class="sub">An 824 px continuous-corner body centred on the 1024 canvas, with the standard drop shadow. Scroll sideways to see all seven at full size.</p>
-  <div class="hero">${APPS.map(a => `<figure>${mac(a, 1024)}<figcaption>${NAMES[a]}</figcaption></figure>`).join('')}</div>
+  <p class="sub">An 824 px continuous-corner body centred on the 1024 canvas, with the standard drop shadow. Shown at 440 px, all seven in view (the files are 1024).</p>
+  <div class="hero">${APPS.map(a => `<figure>${mac(a, 440)}<figcaption>${NAMES[a]}</figcaption></figure>`).join('')}</div>
 </section>
 
 <section>
@@ -202,7 +203,7 @@ const html = `<!doctype html>
 
 <section>
   <h2>In context: Windows 11</h2>
-  <p class="sub">The taskbar at 100% scale uses the hand-tuned 24 px frame. The notification area shows Pitcrew (busy), Spotter (new release), Pitwall (serving), Dyno and Debrief.</p>
+  <p class="sub">The taskbar at 100% scale uses the hand-tuned 24 px frame. The notification area shows Pitcrew (busy), Spotter (new release), Pitwall (normal), Dyno and Debrief.</p>
   <div class="split">${taskbar('light')}${taskbar('dark')}</div>
 </section>
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="app/src-tauri/icons-src/pitcrew-icon.svg" alt="Pitcrew icon" width="96" height="96">
+<img src="docs/images/pitcrew-icon.svg" alt="Pitcrew icon" width="96" height="96">
 
 # Pitcrew
 

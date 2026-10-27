@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/icon-512.png?v=1dbef222" alt="Pacenotes icon (draft)" width="128">
+<img src="docs/images/pacenotes-icon.svg" alt="Pacenotes icon" width="96" height="96">
 
 # Pacenotes
 

@@ -71,7 +71,7 @@ const LIGHT_TILE = new Set(['spotter', 'shell-demo']);
 /** Tiles close to a white desktop: a 1 px inner rim (8 % black) keeps their outline on white without the shadow. */
 const RIMMED = new Set(['shell-demo']);
 
-export const STATUS_COLOURS = { busy: '#2F8FFF', warning: '#F5A524', error: '#E5484D', new: '#E5484D', serving: '#2FB36B', high: '#F2711C' };
+export const STATUS_COLOURS = { busy: '#2F8FFF', warning: '#F5A524', error: '#E5484D', new: '#E5484D', serving: '#2FB36B', paused: '#9AA0A6', high: '#F2711C' };
 
 // ---------- geometry helpers ----------
 const f = n => +n.toFixed(2);

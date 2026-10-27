@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/pitwall-icon.svg" alt="Pitwall icon" width="96" height="96">
+
 # Pitwall
 
 **The private, local AI server your apps talk to.**

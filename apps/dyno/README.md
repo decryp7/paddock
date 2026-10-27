@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="app/src-tauri/icons-src/dyno-macos.svg" alt="Dyno icon" width="96" height="96">
+<img src="docs/images/dyno-icon.svg" alt="Dyno icon" width="96" height="96">
 
 # Dyno
 

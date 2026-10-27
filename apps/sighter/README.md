@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/sighter-icon.svg" alt="Sighter icon" width="96" height="96">
+
 # Sighter
 
 **Vision-based UI automation for apps with or without accessibility: record, label, train, and let your tests find any element.**

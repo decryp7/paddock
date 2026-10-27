@@ -1,3 +1,5 @@
+<img src="docs/images/spotter-icon.svg" alt="Spotter icon" width="96" height="96">
+
 # Spotter
 
 Spotter watches for new releases anywhere and tells you the moment one appears. It is a desktop app (Windows, macOS,

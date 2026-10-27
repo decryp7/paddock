@@ -4,12 +4,13 @@
 // Then: node tools/preview.mjs && node tools/shoot.mjs
 import { Resvg } from '@resvg/resvg-js';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { ALL, UMBRELLA, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
 import { FAMILY, TRAY_STATES, master, small as isoSmall, tray as isoTray } from './iso-family.mjs';
 import { writeIco } from './ico.mjs';
+import { withSmallFrames } from './icns.mjs';
 import { render, scanSeams } from './scan.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -125,12 +126,17 @@ for (const app of ONLY) {
   for (const f of readdirSync(tmp)) if (/^(Square\d+x\d+Logo|StoreLogo)\.png$/.test(f)) copyFileSync(join(tmp, f), join(tauri, f));
   for (const extra of ['android', 'ios']) rmSync(join(tauri, extra), { recursive: true, force: true });
   save(join(tauri, 'icon.ico'), writeIco(R.ico(smallPng, win)));
+  // The small frames are the hand-tuned ones, not downscales of the master: 16 and 32 as drawn, 64 the 32 frame at an exact 2x.
+  const small64 = png(R.small(32), 64);
+  save(join(tauri, 'icon.icns'), withSmallFrames(readFileSync(join(tauri, 'icon.icns')), { 16: smallPng[16], 32: smallPng[32], 64: small64 }));
+  save(join(tauri, '32x32.png'), smallPng[32]);
+  // The favicon of a page that shows the app (the splash, the browser tab): the 16, 32 and 48 frames.
+  save(join(dir(app, 'web'), 'favicon.ico'), writeIco([16, 32, 48].map(s => ({ size: s, png: smallPng[s] }))));
 
   // 5. Web set for the umbrella mark (it has no app bundle of its own): favicon, avatar and social images.
   if (UMBRELLA.includes(app)) {
     const web = dir(app, 'web');
     save(join(web, 'favicon.svg'), R.small(32));
-    save(join(web, 'favicon.ico'), writeIco([16, 32, 48].map(s => ({ size: s, png: smallPng[s] }))));
     save(join(web, 'apple-touch-icon.png'), png(win, 180));
     save(join(web, `${app}-512.png`), png(mac, 512));
     // Avatar (Gitea/GitHub repo and org avatars, social cards): the near-full-bleed Windows master, which fills a square crop.

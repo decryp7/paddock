@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/icon/debrief-icon.svg" alt="Debrief icon" width="96" height="96">
+<img src="docs/images/debrief-icon.svg" alt="Debrief icon" width="96" height="96">
 
 # Debrief
 

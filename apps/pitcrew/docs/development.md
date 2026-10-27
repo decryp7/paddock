@@ -108,9 +108,11 @@ Coverage of the core: `cargo llvm-cov -p pitcrew-core --summary-only` (target â‰
 
 ## App icon
 
-The icon is `app/src-tauri/icons-src/pitcrew-icon.svg`; regenerate the set with
-`cd app && npx tauri icon src-tauri/icons-src/pitcrew-icon.svg -o src-tauri/icons`, then delete the `android`, `ios`
-and `Square*`/`StoreLogo` files (Pitcrew ships no mobile or Store packages).
+The icon set is not drawn in this repo. It comes from Paddock's `icons/pitcrew` (the family's isometric icon) and is copied in by
+`node icons/tools/install.mjs` (run in the Paddock checkout): `app/src-tauri/icons` (the Tauri set and the tray PNGs the tray code embeds),
+the in-app copies under `app/public`, and `docs/images/pitcrew-icon.svg` for the README header. `install.mjs --check` (and the `check-icons`
+script) fail when a copy differs from the build. Never run `tauri icon` on a local source and never keep a local icon source: it would
+revert the family icon. To change the icon, change it in Paddock (`icons/tools/iso-family.mjs`), rebuild there and install again. Pitcrew ships no mobile or Store packages, so the installed set keeps only the files its bundle uses.
 
 ## CI/CD
 

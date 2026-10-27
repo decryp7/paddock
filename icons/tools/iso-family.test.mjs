@@ -1,13 +1,16 @@
 // Checks of the family's isometric sets (STYLE.md section 9) that a machine can make:  node --test tools/iso-family.test.mjs
 //   - coverage at 16 and in the tray, the tray measured on its glyph without the state badge (a badge adds ink by design);
-//   - every tray pixel fully opaque or fully transparent, at every shipped size, except a state that dims the whole glyph;
+//   - every tray pixel fully opaque or fully transparent, at every shipped size;
+//   - every tray state of an app has its own shape (a different alpha mask);
+//   - the README header icon and the docs' icon copies equal the built masters;
 //   - the docs' inlined icon copies equal the built 60 frames;
 //   - the SVGs do not depend on what was rendered before them (explicit id prefixes).
 import { Resvg } from '@resvg/resvg-js';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { readIcns } from './icns.mjs';
 import { FAMILY, GLYPH_KIND, TRAY_STATES, bareSmall, master, small, tray, trayGlyphOnly } from './iso-family.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -58,19 +61,39 @@ for (const app of FAMILY) {
         for (const [svg, sizes] of renders) {
           for (const px of sizes) {
             const partial = partialAlpha(svg, px);
-            // The one allowed partial alpha: a state that dims the whole glyph (Pitwall idle, 70 %).
-            const allowed = st === 'idle' ? partial.every(a => Math.abs(a - 0.7 * 255) <= 1) : partial.length === 0;
-            assert.ok(allowed, `${app} tray ${st} ${theme} at ${px} px has partial alpha ${partial.slice(0, 5).join(', ')}`);
+            assert.ok(partial.length === 0, `${app} tray ${st} ${theme} at ${px} px has partial alpha ${partial.slice(0, 5).join(', ')}`);
           }
         }
       }
     }
   });
 
+  test(`${app}: every tray state has a distinct shape (alpha mask)`, () => {
+    const masks = TRAY_STATES[app].map(st => Buffer.from(pixels(tray(app, st, 'template'), 32).filter((_, i) => i % 4 === 3)).toString('hex'));
+    assert.equal(new Set(masks).size, masks.length, `${app}: two tray states share one alpha mask`);
+  });
+
   test(`${app}: SVGs are the same whatever was rendered before them`, () => {
     const first = [master(app, { frame: 'tiny' }), small(app, 32), tray(app, TRAY_STATES[app].at(-1), 'light')];
     master('debrief'); small('dyno', 24); tray('pitcrew', 'busy', 'dark');
     assert.deepEqual([master(app, { frame: 'tiny' }), small(app, 32), tray(app, TRAY_STATES[app].at(-1), 'light')], first);
+  });
+
+  test(`${app}: the .icns small frames and 32x32.png are the hand-tuned frames, not downscales of the master`, () => {
+    const entries = new Map(readIcns(readFileSync(join(ROOT, app, 'tauri', 'icon.icns'))));
+    const png = n => readFileSync(join(ROOT, app, 'small', `${app}-${n}.png`));
+    assert.ok(entries.get('icp4').equals(png(16)), '16 px is the 16 frame');
+    assert.ok(entries.get('icp5').equals(png(32)) && entries.get('ic11').equals(png(32)), '32 px and 16 pt at 2x are the 32 frame');
+    assert.equal(entries.get('ic12').readUInt32BE(16), 64, '32 pt at 2x is 64 px wide');
+    assert.ok(!entries.has('is32') && !entries.has('il32'), 'the downscaled legacy entries are gone');
+    assert.ok(entries.has('ic07') && entries.has('ic10'), 'the large frames stay');
+    assert.ok(readFileSync(join(ROOT, app, 'tauri', '32x32.png')).equals(png(32)));
+  });
+
+  test(`${app}: the README header icon in the app is the macOS master`, { skip: !existsSync(join(ROOT, '..', 'apps', app)) }, () => {
+    const copy = readFileSync(join(ROOT, '..', 'apps', app, 'docs', 'images', `${app}-icon.svg`), 'utf8');
+    assert.equal(copy, readFileSync(join(ROOT, app, `${app}-macos.svg`), 'utf8'), `run node icons/tools/install.mjs`);
+    assert.ok(readFileSync(join(ROOT, '..', 'apps', app, 'README.md'), 'utf8').slice(0, 400).includes(`docs/images/${app}-icon.svg`), 'the README header points at it');
   });
 
   test(`${app}: the docs' inlined icon is the built 60 frame`, () => {
@@ -82,4 +105,11 @@ for (const app of FAMILY) {
 test('the tray coverage rule excludes the badge: Pitcrew with its warning badge is over the filled limit, its glyph within it', () => {
   assert.ok(trayCoverage(tray('pitcrew', 'warning', 'template')) > COVERAGE.filled[1]);
   assert.ok(trayCoverage(trayGlyphOnly('pitcrew', 'warning')) <= COVERAGE.filled[1]);
+});
+
+test('the preview sheet references the built SVGs instead of inlining them', () => {
+  const html = readFileSync(join(ROOT, 'preview.html'), 'utf8');
+  assert.ok(html.length < 100_000, `preview.html is ${html.length} bytes`);
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(new Set(ids).size, ids.length, 'duplicate ids in preview.html');
 });

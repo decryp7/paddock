@@ -17,7 +17,7 @@ import { WatchesStore } from '../../state/watches.store';
   template: `
     <pd-tray-popover label="Spotter" [platform]="platform" (dismissed)="close()">
       <div slot="header" class="head">
-        <img src="brand/spotter-small.svg" alt="" width="20" height="20" />
+        <img src="brand/spotter-16.svg" alt="" width="16" height="16" />
         <strong>Spotter</strong>
         @if (unseen().length) {
           <span class="pill" role="status">{{ store.unseen().length }} new</span>
