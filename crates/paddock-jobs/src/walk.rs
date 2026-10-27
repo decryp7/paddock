@@ -74,6 +74,9 @@ pub struct WalkOptions {
     pub issue_cap: usize,
     /// The ignore-rules hook; see [`WalkOptions::with_filter`].
     pub filter: Option<Filter>,
+    /// Entries read in a directory between two looks at the cancel token ([`CANCEL_CHECK_ITEMS`]; 0 counts as 1). A
+    /// parameter so a test proves promptness with a handful of files instead of thousands.
+    pub cancel_check_items: usize,
 }
 
 impl Default for WalkOptions {
@@ -86,6 +89,7 @@ impl Default for WalkOptions {
             with_size: false,
             issue_cap: 1000,
             filter: None,
+            cancel_check_items: CANCEL_CHECK_ITEMS,
         }
     }
 }
@@ -143,8 +147,8 @@ fn guard<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Walks `root` on a bounded pool of workers (directories are the unit of work, so the walk stays busy on wide and deep trees),
 /// adding 1 to `found` per reported entry as it is discovered (a live "12,345 found"), and checking `cancel` at least every
-/// [`CANCEL_CHECK_ITEMS`] entries. Unreadable directories are collected in [`WalkResult::issues`]; only a missing or unreadable
-/// root is an error.
+/// [`WalkOptions::cancel_check_items`] entries. Unreadable directories are collected in [`WalkResult::issues`]; only a
+/// missing or unreadable root is an error.
 pub fn par_walk(
     root: &Path,
     opts: &WalkOptions,
@@ -270,7 +274,7 @@ impl Walk<'_> {
         let mut reported = 0u64;
         for item in rd {
             seen += 1;
-            if seen.is_multiple_of(CANCEL_CHECK_ITEMS) {
+            if seen.is_multiple_of(self.opts.cancel_check_items.max(1)) {
                 self.flush(&mut local, &mut reported);
                 if self.cancel.is_cancelled() {
                     return subdirs;

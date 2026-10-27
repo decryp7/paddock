@@ -276,32 +276,71 @@ mod unix {
     }
 }
 
-#[test]
-fn cancel_stops_a_big_walk_promptly() {
-    let t = tempfile::tempdir().unwrap();
-    for d in 0..40 {
-        let dir = t.path().join(format!("d{d}"));
+/// Cancels at the first entries reported and counts what is reported in all.
+struct CancelAtFirst<'a>(&'a CancelToken, AtomicU64);
+
+impl Counter for CancelAtFirst<'_> {
+    fn add(&self, n: u64) {
+        self.1.fetch_add(n, Ordering::SeqCst);
+        self.0.cancel();
+    }
+}
+
+fn files(root: &Path, dirs: usize, per_dir: usize) {
+    for d in 0..dirs {
+        let dir = root.join(format!("d{d}"));
         fs::create_dir(&dir).unwrap();
-        for f in 0..300 {
+        for f in 0..per_dir {
             fs::write(dir.join(format!("{f}.txt")), "").unwrap();
         }
     }
+}
+
+#[test]
+fn cancel_stops_a_big_walk_promptly() {
+    // Promptness is counted in entries, never in wall-clock time, with the check interval as a parameter: a handful of
+    // files prove it (thousands of files only measured the file system, and timed out on Windows).
+    let every = 4;
+    // Inside one directory: the first look at the token after the cancel ends the walk.
+    let t = tempfile::tempdir().unwrap();
+    files(t.path(), 1, 40);
     let cancel = CancelToken::new();
-    struct CancelAt<'a>(&'a CancelToken, AtomicU64);
-    impl Counter for CancelAt<'_> {
-        fn add(&self, n: u64) {
-            if self.1.fetch_add(n, Ordering::SeqCst) + n >= 1000 {
-                self.0.cancel();
-            }
-        }
-    }
-    let c = CancelAt(&cancel, AtomicU64::new(0));
-    let r = par_walk(t.path(), &WalkOptions::default(), &cancel, &c);
+    let c = CancelAtFirst(&cancel, AtomicU64::new(0));
+    let o = WalkOptions {
+        workers: Workers::one(),
+        cancel_check_items: every,
+        ..WalkOptions::default()
+    };
+    let r = par_walk(t.path(), &o, &cancel, &c);
     assert!(matches!(r, Err(JobError::Cancelled(CancelReason::User))));
-    // Promptness is counted in entries, never in wall-clock time.
     assert!(
-        c.1.load(Ordering::SeqCst) < 12_000,
-        "did not finish the tree"
+        c.1.load(Ordering::SeqCst) <= every as u64,
+        "{}",
+        c.1.load(Ordering::SeqCst)
+    );
+    // Across workers and directories: every report cancels, and a worker looks at the token right after each report, so
+    // each worker reports at most one batch.
+    let t = tempfile::tempdir().unwrap();
+    files(t.path(), 20, 20);
+    let cancel = CancelToken::new();
+    let c = CancelAtFirst(&cancel, AtomicU64::new(0));
+    let workers = 2;
+    let o = WalkOptions {
+        workers: Workers::new(workers),
+        cancel_check_items: every,
+        ..WalkOptions::default()
+    };
+    let r = par_walk(t.path(), &o, &cancel, &c);
+    assert!(matches!(r, Err(JobError::Cancelled(CancelReason::User))));
+    let reported = c.1.load(Ordering::SeqCst);
+    assert!(reported <= (workers * every) as u64, "{reported} of 400");
+}
+
+#[test]
+fn the_walk_looks_at_the_cancel_token_every_cancel_check_items_entries_by_default() {
+    assert_eq!(
+        WalkOptions::default().cancel_check_items,
+        paddock_jobs::CANCEL_CHECK_ITEMS
     );
 }
 
