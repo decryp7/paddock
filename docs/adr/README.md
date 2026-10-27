@@ -16,3 +16,7 @@
 | [0012](0012-paddock-app-shell.md) | Paddock app shell: one shell for every app (frame, startup, notifications and health, dialogs, jobs, settings, updates, menu, pages, test kit) (proposed) |
 | [0013](0013-paddock-workbench.md) | Paddock workbench: the docked IDE layer on the shell for Debrief, Pacenotes and Sighter (proposed) |
 | [0014](0014-monorepo-under-paddock.md) | One monorepo under `paddock`: layout, history import, per-app tags and releases, one updater endpoint per app (no bridge: old installs reinstall once), affected CI, task runner (accepted) |
+| [0016](0016-dialog-window-sizing-contract.md) | Dialog window sizing contract: measured content size, one dialog frame with a fixed footer, checked over every dialog at three scales (accepted) |
+| [0017](0017-viewport-and-selection-survive-refreshes.md) | Viewport and selection survive data refreshes: row keys, an anchor row, selection by key, scrollbar markers (accepted) |
+| [0018](0018-bounded-loading-everywhere.md) | Bounded loading everywhere: limits or pages on every query, virtualized or capped lists, streaming imports, timeline lane selection (accepted) |
+| [0019](0019-limits-explain-themselves.md) | Limits explain themselves: one typed limit error with the value and the Settings path, Raise it and Retry, a test per limit (accepted) |

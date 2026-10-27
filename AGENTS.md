@@ -170,3 +170,4 @@ Apply these deliberately. They are not decoration:
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper models.
   Keep architecture and review on the main model.
 - Share first (rule 42): check Paddock's crates and packages before writing anything an app copy would duplicate.
+- Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus); see `.claude/agents/`.

@@ -109,6 +109,16 @@ changes here, every app's copy is updated in the same change.
     adopts a shared package it deletes its own copy and the tests that duplicated it, and records test count and time
     before and after.
 
+**Settings and images (user, 2026-10-27; ADRs 0016-0019, rule 40)**
+44. **Every registered settings section has at least one setting,** checked by a test or lint over every section an
+    app registers (engine `SettingsSection`s in `crates/paddock-settings/src/schema.rs` and each app's sections, and
+    UI-only pages in the settings navigation). A status page with only buttons belongs elsewhere (Health, a Repair action,
+    or the feature's own view), or gains its setting. A plugin fallback section that explains why its plugin is missing
+    (Debrief's `unavailable()`) is exempt. Today Debrief's Video page (`@video`) has no setting and must move or gain one.
+45. **Image viewers open in fit mode by default** (the whole image visible, never upscaled past 100 %), with 100 % and
+    zoom as explicit choices; the viewer fits before its first paint rather than after measuring. A shared viewer in
+    `paddock-ui` (rule 39) owns the default; `notes/image/note-image-view.ts` in Debrief starts at scale 1 and must adopt it.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
