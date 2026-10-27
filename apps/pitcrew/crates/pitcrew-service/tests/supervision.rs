@@ -32,12 +32,17 @@ fn fake_runner() -> PathBuf {
                 .unwrap()
                 .join("examples")
                 .join(format!("fake_runner{EXE}"));
-            // `cargo test` builds examples, `cargo test --test supervision` does not.
-            let status = std::process::Command::new(env!("CARGO"))
-                .args(["build", "--quiet", "-p", "pitcrew-service", "--example", "fake_runner"])
-                .status()
-                .unwrap();
-            assert!(status.success() && path.exists(), "the fake runner could not be built");
+            // `cargo test` and `cargo nextest run` build examples, `cargo test --test supervision` does not. Build it only
+            // when it is missing: nextest runs every test in a process of its own, and one `cargo build` per test queued
+            // on cargo's build lock until the tests ran out of time (and missed a build folder set by `--config`).
+            if !path.exists() {
+                let status = std::process::Command::new(env!("CARGO"))
+                    .args(["build", "--quiet", "-p", "pitcrew-service", "--example", "fake_runner"])
+                    .status()
+                    .unwrap();
+                assert!(status.success(), "the fake runner could not be built");
+            }
+            assert!(path.exists(), "the fake runner is missing: {}", path.display());
             path
         })
         .clone()
