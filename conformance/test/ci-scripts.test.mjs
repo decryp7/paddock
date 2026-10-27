@@ -211,6 +211,21 @@ test('tauri-bundle: --root is where npm ci runs, and the build-folder action\'s 
   assert.match(r.stdout + r.stderr, /No updater signing secrets/);
 });
 
+test('tauri-bundle: --prepare runs in --root after npm ci and before the build; a failing one stops the build', () => {
+  const root = bundleRepo();
+  mkdirSync(join(root, 'ws'), { recursive: true });
+  writeFileSync(join(root, 'bin/npm'), '#!/bin/bash\necho "npm $* in $(basename "$PWD")" >> "$BIN_LOG"\n');
+  const r = bundle(root, ['deb', '--app-dir', 'app', '--root', 'ws', '--prepare', 'npm run build -w ui']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const log = readFileSync(join(root, 'calls.log'), 'utf8').split('\n');
+  assert.deepEqual(log.slice(0, 2), ['npm ci in ws', 'npm run build -w ui in ws']);
+  assert.match(log[2], /^npx tauri build/);
+  const bad = bundleRepo();
+  const failed = bundle(bad, ['deb', '--prepare', 'exit 3']);
+  assert.notEqual(failed.status, 0);
+  assert.doesNotMatch(readFileSync(join(bad, 'calls.log'), 'utf8'), /npx tauri build/);
+});
+
 test('tauri-bundle: a real macOS signing identity turns the hardened runtime back on; ad hoc or unset does not', { skip: process.platform !== 'darwin' && 'the script adds it on macOS only' }, () => {
   const real = bundleRepo();
   assert.equal(bundle(real, ['deb'], { APPLE_SIGNING_IDENTITY: 'Developer ID Application: Example (ABCDE12345)' }).status, 0);

@@ -555,6 +555,42 @@ jobs:
       - uses: ./.gitea/actions/host-tools
         if: runner.os != 'Linux'
 
+      # An app whose tests drive a real browser (paddock.ci.json `testBrowser`): the pinned Chrome for Testing, never an installed
+      # one (rule 7). The image has it on Linux; on a host it is kept in a folder of the app under the runner user's home.
+      - name: Test browser folder (macOS, Windows)
+        if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
+        shell: bash
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          home="$HOME"
+          if command -v cygpath >/dev/null; then home="$(cygpath -w "$HOME")"; fi
+          echo "PADDOCK_TEST_BROWSER_DIR=$home/.paddock-ci/test-browser-$APP" >> "$GITHUB_ENV"
+
+      - name: Chrome for Testing (macOS, Windows)
+        if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
+        uses: ./.gitea/actions/install-test-browser
+        with:
+          catalogue: ${{ github.workspace }}/${{ matrix.test_browser_catalogue }}
+          env-prefix: ${{ matrix.test_browser_prefix }}
+          dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
+
+      # Points the app's tests at that browser; a missing one fails the run instead of skipping the tests. The Linux container
+      # runs as root, where Chrome refuses to start with its sandbox: tests only (`noSandboxOnLinux`).
+      - name: The tests' browser
+        if: matrix.test_browser_prefix != ''
+        shell: bash
+        env:
+          PREFIX: ${{ matrix.test_browser_prefix }}
+          NO_SANDBOX: ${{ matrix.test_browser_no_sandbox }}
+        run: |
+          if [ -z "${CHROMIUM_TEST_PATH:-}" ]; then echo "::error::no Chrome for Testing (CHROMIUM_TEST_PATH is empty)"; exit 1; fi
+          {
+            echo "${PREFIX}_TEST_BROWSER=$CHROMIUM_TEST_PATH"
+            echo "${PREFIX}_REQUIRE_TEST_BROWSER=1"
+            if [ "$NO_SANDBOX" = true ]; then echo "${PREFIX}_TEST_BROWSER_NO_SANDBOX=1"; fi
+          } >> "$GITHUB_ENV"
+
       - uses: ./.gitea/actions/node-caches
         if: runner.os == 'Linux'
         with:
@@ -576,6 +612,7 @@ jobs:
           rust: ${{ matrix.rust }}
           ui: ${{ matrix.ui }}
           filter: ${{ matrix.filter }}
+          display: ${{ matrix.display }}
 
       # Nothing may stay behind on a host: no fake runners or test sockets of the app's tests (paddock.ci.json `processes`).
       - uses: ./.gitea/actions/host-cleanup

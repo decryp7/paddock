@@ -10,6 +10,9 @@ inputs:
   root:
     description: "Where `npm ci` runs (default: app-dir; in the monorepo the repository root, whose one lock installs every app)."
     default: ""
+  prepare:
+    description: "A command run in `root` right after `npm ci` (an app whose UI imports the shared library builds it: npm run build -w ui)."
+    default: ""
   apple-signing-identity:
     description: "APPLE_SIGNING_IDENTITY (a secret). Empty or unset keeps the ad-hoc seal (rule 23); a real identity turns the hardened runtime on."
     default: ""
@@ -30,8 +33,9 @@ runs:
         BUNDLES: ${{ inputs.bundles }}
         APP_DIR: ${{ inputs.app-dir }}
         ROOT: ${{ inputs.root }}
+        PREPARE: ${{ inputs.prepare }}
         APPLE_SIGNING_IDENTITY: ${{ inputs.apple-signing-identity }}
         TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.signing-private-key }}
         TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.signing-key-password }}
         TAURI_UPDATER_PUBKEY: ${{ inputs.updater-pubkey }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/tauri-bundle.sh" "$BUNDLES" --app-dir "$APP_DIR" --root "${ROOT:-$APP_DIR}"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/tauri-bundle.sh" "$BUNDLES" --app-dir "$APP_DIR" --root "${ROOT:-$APP_DIR}" --prepare "$PREPARE"

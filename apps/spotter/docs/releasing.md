@@ -1,11 +1,15 @@
 # Releasing Spotter (and signed updates)
 
-A `v*` tag on `main` runs `.gitea/workflows/spotter.yml (repo root)`: the `bundle` jobs build the installers (Windows NSIS, the macOS `.dmg` on the `macos-latest` host runner, and Linux `.deb` and AppImage), and the `release` job publishes a Gitea release with the
-installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Spotter's
-updater reads. Installers are also built for the nightly run of `main` and manual runs (`workflow_dispatch`).
+A `spotter-v*` tag on `main` runs `.gitea/workflows/spotter-release.yml` (repo root): Spotter's legs of `ci.yml` gate the tag
+(Rust on Linux, Windows and macOS, the frontend with the Chromium and WebKit e2e), then the shared `app-release.yml` builds the
+installers (Windows NSIS, the macOS `.dmg` sealed ad hoc and verified, Linux `.deb` and AppImage) and publishes a Gitea release
+with the installers, release notes (`RELEASE_NOTES.md`, from git-cliff) and `latest.json`, the release information Spotter's
+updater reads. It also puts `latest.json` on the moving `spotter-latest` release, which installed copies read. Installers are
+also built for pushes to `main` that reach Spotter, the nightly run and manual runs (`workflow_dispatch`, no release; `gates: true`
+also runs Spotter's `ci.yml` legs first).
 
 ```sh
-git tag v1.0.0 && git push origin v0.2.0
+git tag spotter-v1.0.0 && git push origin spotter-v1.0.0
 ```
 
 The version in the tag must match `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`. Pre-releases are
@@ -24,8 +28,8 @@ This is about **Spotter's own** updates, not the releases Spotter watches for.
 - **Signatures are mandatory.** Every update is verified with the minisign public key built into the app before it
   is installed, and `requireSignedVersion` binds each signature to its version (GHSA-j38x-g3m3-95fr). A build without
   the public key says "Updates are not available in this build" and never checks.
-- `latest.json` is written by `scripts/release/latest-json.mjs` from the signed installers (`*.sig` next to each);
-  `node --test scripts/release/latest-json.test.mjs` tests it.
+- `latest.json` is written by the shared `conformance/release/latest-json.mjs` from the signed installers (`*.sig` next to
+  each); `node --test conformance/test/latest-json.test.mjs` (repo root) tests it.
 
 ## One-time set-up: Spotter's own signing key
 
@@ -72,9 +76,10 @@ linker-signed has no sealed resources and a quarantined download is reported as 
 **hardened runtime is off** (`"hardenedRuntime": false`, Paddock rule 23): ad-hoc code under the hardened runtime
 enforces library validation and cannot load a library signed by its vendor ("different Team IDs"). When the
 `APPLE_SIGNING_IDENTITY` secret names a real identity, the CI bundle step passes
-`{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). `scripts/ci/macos-verify-bundle.sh` fails the
-build when an ad-hoc Mach-O has the hardened runtime on, when bundled Mach-Os disagree on their TeamIdentifier, or
-when a sidecar does not start from the built app (`--version`), on the `.app` and on the copy inside the DMG.
+`{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). the shared `conformance/release/macos-verify-bundle.sh` (the `macos-verify` action) fails the
+build when an ad-hoc Mach-O has the hardened runtime on or when bundled Mach-Os disagree on their TeamIdentifier, on the `.app`
+and on the copy inside the DMG. Spotter bundles no sidecar today; one added to `bundle.externalBin` is started from the built app
+by the same step (and `conformance/test/ci-actions.test.mjs` fails until `spotter-release.yml` lists it).
 
 ## First launch note
 

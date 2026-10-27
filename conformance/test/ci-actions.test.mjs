@@ -397,7 +397,7 @@ test('every job that builds Rust on a host sets its build folder with the build-
       assert.equal(ignored.status, 0, `${ws[1]}/.cargo/ci.toml is git-ignored`);
     }
   }
-  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle', ...['spotter', 'dyno', 'pitwall'].flatMap((a) => [`${a}.yml:rust`, `${a}.yml:bundle`])]) {
+  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle', ...['dyno', 'pitwall'].flatMap((a) => [`${a}.yml:rust`, `${a}.yml:bundle`])]) {
     assert.ok(uses.includes(want), `${want} sets its build folder with the action (found: ${uses.join(', ')})`);
   }
   const copies = spawnSync('git', ['ls-files', 'apps/*/scripts/ci/build-folder.sh'], { cwd: PADDOCK, encoding: 'utf8' });
@@ -578,7 +578,7 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
 test('the test browser of a host job lives in a kept folder of the runner user, outside the checkout that stable-workspace moves', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
-  assert.equal(dirs.length, 2, 'one per host OS');
+  assert.equal(dirs.length, 3, 'one per host OS in the crate job, and the app leg\'s own (per app, under $HOME)');
   for (const d of dirs) {
     assert.doesNotMatch(d, /GITHUB_WORKSPACE|\.\./, `${d}: a path relative to the checkout dies when the checkout moves`);
     assert.match(d, /\.paddock-ci[\\/]test-browser/, d);
@@ -663,14 +663,14 @@ test('the host-tools pin is a release version with SHA-256 sums', () => {
   for (const sum of read(join(ACTIONS, 'host-tools', 'action.yml')).matchAll(/SUM=(\S+);/g)) assert.match(sum[1], /^[0-9a-f]{64}$/);
 });
 
-// ---- The imported apps' own workflows (spotter, dyno, pitwall; each the app's old build.yml; Pitcrew is on the kit) ----
+// ---- The imported apps' own workflows (dyno, pitwall; each the app's old build.yml; Pitcrew is on the kit) ----
 // They follow Paddock's CI: the paddock-ci image, the shared actions, workspace-wide steps, nextest's ci profile, sharded e2e,
 // installers and the real-app smoke only on full runs, and the family's signing keys stripped before the bundler.
 import { parseJobs } from '../src/util/workflows.mjs';
 
-const APP_WORKFLOWS = ['spotter', 'dyno', 'pitwall'];
+const APP_WORKFLOWS = ['dyno', 'pitwall'];
 // Apps on the shared kit (ci.yml's app leg through paddock.ci.json, <app>-release.yml through app-release.yml), not yet every app.
-const KIT_APPS = ['pitcrew'];
+const KIT_APPS = ['pitcrew', 'spotter'];
 const ciContract = (app) => JSON.parse(read(join(PADDOCK, 'apps', app, 'paddock.ci.json')));
 const appWorkflow = (app) => read(join(WORKFLOWS, `${app}.yml`));
 const appJob = (app, id) => parseJobs(appWorkflow(app)).find((j) => j.id === id);
@@ -884,9 +884,16 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
   const spotter = version(read(join(PADDOCK, 'apps', 'spotter', 'crates', 'spotter-render', 'src', 'chromium-manifest.toml')));
   assert.equal(spotter, version(read(join(PADDOCK, 'crates', 'paddock-chromium', 'src', 'chromium.toml'))), 'the image installs paddock-chromium\'s pin');
   assert.match(read(join(PADDOCK, 'ci-image', 'Dockerfile')), new RegExp(`ARG CHROME_VERSION=${spotter.replace(/\./g, '\\.')}\\n`), 'the image carries that build');
-  const job = appJob('spotter', 'rust').text;
-  assert.match(job, /SPOTTER_TEST_BROWSER=\$CHROMIUM_TEST_PATH/, 'the tests launch the pinned build');
-  assert.match(job, /test-browser-spotter/, 'a kept host folder of its own (two jobs may run on a host at once)');
+  const contract = ciContract('spotter');
+  assert.deepEqual(contract.testBrowser, { envPrefix: 'SPOTTER', catalogue: 'apps/spotter/crates/spotter-render/src/chromium-manifest.toml', noSandboxOnLinux: true }, 'the leg installs Spotter\'s pin on the hosts and points SPOTTER_TEST_BROWSER at it');
+  assert.ok(existsSync(join(PADDOCK, contract.testBrowser.catalogue)));
+  assert.equal(contract.display, true, 'the renderer\'s window is a real off-screen one: a virtual display on Linux');
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  assert.match(ci, /echo "\$\{PREFIX\}_TEST_BROWSER=\$CHROMIUM_TEST_PATH"/, 'the tests launch the pinned build');
+  assert.match(ci, /echo "\$\{PREFIX\}_REQUIRE_TEST_BROWSER=1"/, 'a missing browser fails the run');
+  assert.match(ci, /test-browser-\$APP/, 'a kept host folder of the app\'s own (two jobs may run on a host at once)');
+  assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /xvfb-run --auto-servernum .* dbus-run-session --\)/, 'the tests run under a virtual display');
+  assert.match(contract.processPatterns.join('\n'), /test-browser-spotter/, 'host cleanup ends browsers started from the app\'s own test-browser folder');
   assert.match(read(join(PADDOCK, 'apps', 'spotter', '.config', 'nextest.toml')), /filter = "package\(spotter-render\) & binary\(real_browser\)"\ntest-group = "real-browser"/, 'real browsers take turns under nextest too');
 });
 

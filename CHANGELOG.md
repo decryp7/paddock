@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Spotter on the shared CI kit (WP-C3)
+- Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin
+  `spotter-release.yml`; `spotter.yml` and Spotter's copies of `scripts/release/*`, `macos-verify-bundle.sh`, `commit-lint`,
+  `export-diagrams.sh` and `check-index.mjs` are deleted. Kit additions: `paddock.ci.json` `testBrowser` (the pinned Chrome for
+  Testing on the host legs, `<PREFIX>_TEST_BROWSER`/`_REQUIRE_TEST_BROWSER`, and `_NO_SANDBOX` on Linux) and `display` (xvfb for the
+  tests), and `tauri-bundle` `--prepare` (`app-release.yml` input `prepare`: a command after `npm ci`, e.g. building the UI library).
+
 ### Windows CI: tests that measured the runner's disk, and a toolchain step that says why it failed
 - Four tests that timed out on a slow Windows runner (run 6461) prove their behaviour without bulk disk work: the log
   tail is read from a synthetic 1 GiB source that counts the bytes read (a real 1 GiB `set_len` file is a gigabyte of

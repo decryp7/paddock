@@ -1,5 +1,5 @@
 # cargo-nextest settings for spotter's Cargo workspace (the same profiles as crates/.config/nextest.toml). Locally:
-# `cargo nextest run --workspace`; CI (.gitea/workflows/spotter.yml): `--profile ci`. nextest does not run doc tests:
+# `cargo nextest run --workspace`; CI (.gitea/workflows/ci.yml, apps/spotter/paddock.ci.json): `--profile ci`. nextest does not run doc tests:
 # `cargo test --workspace --doc` runs them. nextest runs every test in its own process, so a lock a test file takes
 # around a shared outside resource (a real browser, a port) is a test group here, not only a static Mutex.
 

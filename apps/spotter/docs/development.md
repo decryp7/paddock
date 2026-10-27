@@ -11,7 +11,7 @@ crates/spotter-engine    the engine: watches, scheduler, SQLite store, notificat
 crates/spotter-render    the supervised Chromium renderer behind the PageRenderer trait (ADR 0002)
 app/src-tauri            the Tauri 2 shell: commands, tray, window, updater
 app/src                  the Angular UI (standalone components, signals, SignalStores, BACKEND token)
-scripts/                 commit-lint.mjs, check-index.mjs, release/latest-json.mjs (each with a .test.mjs)
+scripts/                 pin-chromium.mjs, install-test-browser.mjs, ci/check-icons.mjs (each with a .test.mjs); commit lint, latest.json, publish, bundle verify and check-index are the shared kit in conformance/
 docs/adr/                architecture decisions
 .gitea/workflows/        CI
 ```
@@ -51,7 +51,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny --workspace check
-node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs
+node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs   # the app's own
+(cd ../.. && node --test conformance/test/*.test.mjs)   # the shared scripts: commit lint, latest.json, publish, check-index
 (cd app && npm audit --omit=dev --audit-level=high && npm run lint && npx ng build && npx ng test --watch=false)
 (cd app && PW_PORT=4370 npx playwright install --with-deps chromium webkit && PW_PORT=4370 npx playwright test --project=chromium --project=webkit --workers=1)
 ```
@@ -69,14 +70,16 @@ starts is asked to quit (`Browser.close`) and given a few seconds before any kil
 
 ## CI
 
-`.gitea/workflows/spotter.yml (repo root)` runs on pushes to `main` and `wip/**`, `v*` tags, pull requests and manual runs:
-`rust-lint` (format and clippy), `rust-test` (Linux and Windows), `macos` (clippy and tests on the Mac host runner),
-`licences` (commit messages, script tests, cargo-deny), `frontend` (audit, lint, build, unit tests with coverage) and
-`e2e` (Playwright, Chromium and WebKit against the mock backend). `bundle` (NSIS, `.dmg`, `.deb`/AppImage) runs only
-for tags, the nightly schedule and manual runs; `release` publishes for tags. See [releasing.md](releasing.md).
+Spotter is a leg of the monorepo's `ci.yml` (`apps/spotter/paddock.ci.json`, the shared `app-gates` action): on Linux the app's
+script tests and icon check, format, clippy, nextest (profile `ci`, under a virtual display with the pinned Chrome for Testing:
+`SPOTTER_TEST_BROWSER`, `SPOTTER_REQUIRE_TEST_BROWSER=1`), doc tests and `cargo deny`, then the frontend (audit, lint, build,
+unit tests with coverage, the Chromium e2e, and the WebKit e2e on `main`, tags and the nightly); on Windows and macOS the Rust
+gates (clippy not on Windows) with the same browser, for the code that differs there. Commit messages of pull requests are checked
+by `ci.yml`'s `commits` job. `.gitea/workflows/spotter-release.yml` builds the installers (three OS, macOS seal check) and publishes
+`spotter-v*` tags through the shared `app-release.yml`. See [releasing.md](releasing.md).
 
-The workflow expects `app/.nvmrc`, `app/package-lock.json`, an `npm run lint` script, a Playwright config that honours
-`PW_PORT` and defines `chromium` and `webkit` projects, and the three script tests above.
+The e2e needs `app/.nvmrc`, `app/package-lock.json`, an `npm run lint` script and a Playwright config that honours `PW_PORT` and
+defines `chromium` and `webkit` projects.
 
 ## CI image and compile cache
 

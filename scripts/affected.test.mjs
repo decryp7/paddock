@@ -223,6 +223,19 @@ describe('matrix legs', () => {
     assert.throws(() => matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps }), /must include ubuntu-latest/);
   });
 
+  test("an app's test browser and display reach every leg; the sandbox flag and the display are Linux-only", () => {
+    const testBrowser = { envPrefix: 'DEMO', catalogue: 'apps/x/chromium.toml', noSandboxOnLinux: true };
+    const apps = new Map([['x', { dir: 'apps/x', cargo: '.', os: [LINUX, 'windows-latest', 'macos-latest'], display: true, testBrowser }]]);
+    const legs = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps });
+    assert.deepEqual(legs.map((l) => [l.os, l.test_browser_prefix, l.test_browser_catalogue, l.test_browser_no_sandbox, l.display]), [
+      [LINUX, 'DEMO', 'apps/x/chromium.toml', 'true', 'true'],
+      ['windows-latest', 'DEMO', 'apps/x/chromium.toml', 'false', 'false'],
+      ['macos-latest', 'DEMO', 'apps/x/chromium.toml', 'false', 'false'],
+    ]);
+    const plain = matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps: new Map([['x', { dir: 'apps/x', cargo: '.' }]]) });
+    assert.deepEqual([plain[0].test_browser_prefix, plain[0].test_browser_no_sandbox, plain[0].display], ['', 'false', 'false']);
+  });
+
   test("onlyApp (a tag's gates, ci.yml's `app` input) keeps one app, both halves, and no other project", () => {
     const only = onlyApp(affected([], graph, { all: true }), 'pitcrew');
     assert.deepEqual([only.apps, only.kinds, only.crates, only.ui, only.eslint, only.conformance, only.tools, only.icons, only.all], [['pitcrew'], { pitcrew: ['rust', 'ui'] }, false, false, false, false, false, false, false]);
