@@ -386,9 +386,9 @@ pub(crate) mod tests {
     use debrief_core::{PluginRegistry, Profile};
 
     /// A window's state with the store in process (scratch folders under the system temp folder, removed when the test
-    /// ends).
+    /// process exits: a window can be made on any thread).
     pub(crate) fn window_state(label: &str, registry: PluginRegistry) -> WindowState {
-        let root = crate::test_support::scratch_dir("test-stores");
+        let root = crate::test_support::process_scratch_dir("test-stores");
         let engine = Engine::new(crate::engine::local::host(), root, label, Profile::default_profile());
         registry.resolve();
         let host = Host::new(registry, Profile::default_profile()).unwrap();

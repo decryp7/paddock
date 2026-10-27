@@ -528,7 +528,7 @@ mod tests {
     #[test]
     fn apply_sets_args_and_data_folder_on_the_builder() {
         let app = crate::test_support::test_app_with_commands(None);
-        let dir = std::env::temp_dir().join("debrief-dev-overrides-test");
+        let dir = crate::test_support::scratch_dir("dev-overrides");
         let o = Overrides {
             browser_args: Some(WRY_DEFAULT_ARGS.into()),
             data_dir: Some(dir),

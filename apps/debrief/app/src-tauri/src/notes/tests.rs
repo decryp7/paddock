@@ -165,7 +165,7 @@ fn image_regions_are_checked_against_the_image_and_kept_in_the_project() {
         ErrorCode::NotFound
     );
     // Files that are not images, or not chosen, are refused.
-    let other = std::env::temp_dir().join("debrief-notes-not-chosen.png");
+    let other = crate::test_support::scratch_dir("notes-not-chosen").join("other.png");
     std::fs::write(&other, b"x").unwrap();
     assert!(block(notes_image_open(
         main_window(&app),
