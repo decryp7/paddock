@@ -4,16 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### Windows CI: tests that measured the runner's disk, and a toolchain step without a channel sync
+### Windows CI: tests that measured the runner's disk, and a toolchain step that says why it failed
 - Four tests that timed out on a slow Windows runner (run 6461) prove their behaviour without bulk disk work: the log
   tail is read from a synthetic 1 GiB source that counts the bytes read (a real 1 GiB `set_len` file is a gigabyte of
   zeros on NTFS), the walk's cancel test uses the new `WalkOptions::cancel_check_items` (default `CANCEL_CHECK_ITEMS`)
   with a few hundred files instead of 12,000, the assistant store's bounds are `StoreLimits` (`ConversationStore::open_with`,
   defaults `MAX_CONVERSATIONS` and `MAX_FILE_BYTES`, pinned by a test) and the damaged-package property builds its two
   packages once instead of 256 times.
-- `setup-rust` uses a toolchain the runner already has with every requested component and target as it is (no channel
-  sync), and a failed install says why (on Windows, Git Bash's exit 127 means rustup was ended with an NTSTATUS crash code,
-  run 6460).
+- `setup-rust` keeps its channel sync, and a failed `rustup toolchain install` now says why (on Windows, Git Bash's exit
+  127 means rustup was ended with an NTSTATUS crash code, run 6460). Pinning the toolchain stays an open ADR 0022 decision.
 
 ### No transition release, no update bridge (ADR 0014, last amendment)
 - Every app release from the monorepo is signed with the shared `PADDOCK_TAURI_*` key only; the

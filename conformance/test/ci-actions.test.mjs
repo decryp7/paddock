@@ -224,30 +224,6 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
   return { status: r.status, out: r.stdout + r.stderr, calls: existsSync(calls) ? read(calls) : '' };
 }
 
-test('setup-rust uses a toolchain the runner already has with every component and target, without a channel sync', () => {
-  const have = {
-    toolchains: 'stable-x86_64-pc-windows-msvc',
-    components: 'clippy-x86_64-pc-windows-msvc rustfmt-x86_64-pc-windows-msvc rustc-x86_64-pc-windows-msvc',
-    targets: 'x86_64-pc-windows-msvc',
-  };
-  const r = runToolchainStep({}, have);
-  assert.equal(r.status, 0, r.out);
-  assert.doesNotMatch(r.calls, /toolchain install/, 'no network round trip when nothing is missing');
-  assert.match(r.out, /already on this runner/);
-  assert.match(r.out, /rustc 1\.99\.1/);
-  // Anything missing (the toolchain, a component, a target) is installed.
-  for (const [what, over] of [
-    ['toolchain', { ...have, toolchains: 'nightly-x86_64-pc-windows-msvc' }],
-    ['component', { ...have, components: 'rustfmt-x86_64-pc-windows-msvc' }],
-    ['target', { ...have, targets: 'x86_64-pc-windows-msvc' }],
-  ]) {
-    const env = what === 'target' ? { TARGETS: 'aarch64-pc-windows-msvc' } : {};
-    const m = runToolchainStep(env, over);
-    assert.equal(m.status, 0, `${what}: ${m.out}`);
-    assert.match(m.calls, /toolchain install stable --profile minimal --component clippy --component rustfmt/, what);
-  }
-});
-
 test('a failed toolchain install fails the step with a message that names the cause, never a bare exit code', () => {
   const crashed = runToolchainStep({}, { installRc: 127 });
   assert.equal(crashed.status, 1, crashed.out);
