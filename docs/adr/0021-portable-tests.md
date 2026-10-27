@@ -1,6 +1,6 @@
 # 21. Portable tests: one test kit for paths, text, fixtures, waits and tools, and a check over every test
 
-- Status: Proposed
+- Status: Accepted (2026-10-27, by the user; decisions below)
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 8
   (lessons and rules live once), rule 40 (recurring bugs mean a missing design rule), rules 42/43 (share first, shared
@@ -124,7 +124,7 @@ ends at its hang guard. Each module is tested once in the kit on all three OSes 
 | `quote` | `json_str(&Path) -> String` (a JSON string literal, via `serde_json`), `toml_str(&Path) -> String` (a TOML basic string, escaped) | pattern 4 |
 | `fixtures` | `files(dir, n, name)` creates `n` small files and refuses `n > MAX_FIXTURE_FILES` with "make the limit a parameter"; `big_text(lines)` streamed into one file. `MAX_FIXTURE_FILES` (1,000) is **the one threshold** that C38b also uses (the check reads it from the kit's source) | pattern 3 |
 | `wait` | `eventually(what, cond)` polls a condition with a backoff and fails after `HANG_GUARD` (60 s, one constant, never a product interval) naming `what`; product intervals are driven by the shared `Clock` (`FakeClock::advance`) or a subscription that shortens them, never waited out | pattern 7, the 31 local helpers |
-| `fs` | `set_mtime(path, time)` opens a write handle (and the directory flag on Windows) on every OS | pattern 6 |
+| `fs` | `set_mtime(path, time)`, a re-export of `paddock_files::set_mtime` (new in WP-1: opens a write handle, and the directory flag on Windows, on every OS), so production and tests share one implementation (rule 42) | pattern 6 |
 
 The **tool runner lives in `paddock-proc`** behind a `testing` feature, not in the kit (rule 42: `run_bounded` is
 already there, and a kit → proc dependency would form a cycle with `paddock-proc`'s own tests):
@@ -176,13 +176,17 @@ C30 gains one finding: a positive wait (`recv_timeout(..).unwrap()/.is_ok()`, `w
 - Backlog: per-**file**, per-**sub-check** entries in `paddock.waivers.toml` (`check = "C38a"`, `path = "<one file>"`,
   `reason`, `expires = "2026-12-31"`) with an optional **`count`**: the number of findings the file had when the waiver was
   generated. The waiver applies only while the file has at most `count` findings of that sub-check, so **a new finding in
-  an old file still fails**; a lower count after a fix is reported so the waiver is tightened. This needs a small
+  an old file still fails**: when the count is exceeded, the waiver waives nothing and **every** finding of that sub-check
+  in the file is reported (the check cannot tell old from new). A lower count after a fix is reported so the waiver is
+  tightened. This needs a small
   extension of `conformance/src/util/waivers.mjs` (an integer `count` key), useful to every check. Never a glob over an
   app, so a new test file is checked from day one.
 
 **Level and order (CI stays green at every step).** WP-2 generates per-file waivers for **every** current finding — the
-apps **and the shared crates** (38 at-risk paths, the 12,000-file walk, the 50 M spin wait, 12 short positive waits) —
-and for **all 206 C30 findings**, then switches C38 and C30 to strict. WP-5 and WP-7 remove waivers as they migrate. New
+apps **and the shared crates** (38 at-risk paths, the 12,000-file walk, 12 short positive waits) —
+and for **all 206 C30 findings**, then switches C38 and C30 to strict. The 50 M spin wait in
+`crates/paddock-jobs/tests/it/parallel.rs:13` has no sub-check (a dedicated one is not worth its heuristics); it is a
+plain WP-5 fix and needs no waiver. WP-5 and WP-7 remove waivers as they migrate. New
 files and new findings fail from WP-2 on.
 
 ### 3. Clippy for what clippy can see, and xwin before push
@@ -191,7 +195,7 @@ files and new findings fail from WP-2 on.
   in-tests switch for it; [clippy lint configuration](https://doc.rust-lang.org/clippy/lint_configuration.html), read,
   not re-checked this session), so the path, loop and process checks live in C38. The preset (`lint/clippy.toml`,
   copied into the apps by C13) adds only `std::fs::File::set_modified` and `std::fs::File::set_times` (reason:
-  `paddock-files` in production, `testkit::fs::set_mtime` in tests, a write handle on every OS); the 22 current call
+  `paddock_files::set_mtime`, added in WP-1 and re-exported as `testkit::fs::set_mtime`, a write handle on every OS); the 22 current call
   sites are migrated or allowed with a reason first. `Command::output`/`status` and `Child::wait` are **not** added:
   they would fire in every test (hundreds of hits to triage) for little gain over the existing `Command::new` entry plus
   C38d.
@@ -203,12 +207,12 @@ files and new findings fail from WP-2 on.
   `cfg(windows)` code that rotted, Windows-only clippy findings as in 1f701932b). It runs no tests and links nothing for
   the target (build scripts are built for the host), so the `rust-lld.exe` linker setting of `.cargo/config.toml` does
   not apply. A missing `cargo-xwin` is a loud message with the install line, never a silent pass.
-- It is a documented pre-push step in `docs/dev-setup.md` and in every brief; optionally a `pre-push` command in
-  `lefthook.yml` with `glob: "*.rs"` that passes `{push_files}` to the script, so only workspaces with pushed Rust changes
-  are linted (decision for the user below: hook or manual).
+- It is a **manual, documented pre-push step** (`docs/dev-setup.md`), and every agent brief requires it before pushing
+  Rust changes. There is no lefthook hook (user decision 2026-10-27).
 - cargo-xwin (MIT/Apache-2.0, [rust-cross/cargo-xwin](https://github.com/rust-cross/cargo-xwin)) downloads the MSVC CRT
-  and Windows SDK headers and libraries with `xwin` and builds C code with `clang-cl`. Installed on the Mac (0.23.1,
-  verified with `cargo xwin --version`); not yet run against these workspaces (this ADR made no builds).
+  and Windows SDK headers and libraries with `xwin` and builds C code with `clang-cl`. On the Mac: cargo-xwin 0.23.1 and
+  Homebrew LLVM (for `llvm-rc`; `PATH=/opt/homebrew/opt/llvm/bin:$PATH`, which the script sets) are installed, and the
+  full Dyno workspace already passes (reported by the coordinator, 2026-10-27).
 
 ### 4. `.gitattributes` policy
 
@@ -249,11 +253,11 @@ files and new findings fail from WP-2 on.
 
 | WP | Scope | Files | Role | Size |
 |---|---|---|---|---|
-| 1 | `paddock-testkit`: `paths`, `text` (move the golden normaliser), `quote`, `fs`, `fixtures` (`MAX_FIXTURE_FILES`), `wait` (`eventually`, `HANG_GUARD`); `paddock-proc` `testing` feature with `run_tool`/`require_tool`; ≥ 99 % lines; tests run on all three OSes in CI | `crates/paddock-testkit/`, `crates/paddock-proc/` | implementer | M (1 day) |
-| 2 | C38a–g with fixtures and tests (scope and `mod` resolution, nested-bound product, first-argument tool match); C30 positive-wait finding; `count` in the waiver format; generate per-file, per-sub-check waivers with counts for **all** current C38 findings (apps and shared crates) and all 206 C30 findings; then C38 and C30 strict in CI | `conformance/src/checks/C38-portable-tests.mjs`, `C30-wall-clock.mjs`, `conformance/src/util/waivers.mjs`, `conformance/test/`, `paddock.waivers.toml` | implementer (reviewer for the heuristics) | M (1–1.5 days) |
+| 1 | `paddock_files::set_mtime`; `paddock-testkit`: `paths`, `text` (move the golden normaliser), `quote`, `fs` (re-export), `fixtures` (`MAX_FIXTURE_FILES`), `wait` (`eventually`, `HANG_GUARD`); `paddock-proc` `testing` feature with `run_tool`/`require_tool`; ≥ 99 % lines; tests run on all three OSes in CI | `crates/paddock-files/`, `crates/paddock-testkit/`, `crates/paddock-proc/` | implementer | M (1 day) |
+| 2 | C38a–g with fixtures and tests (scope and `mod` resolution, nested-bound product, first-argument tool match); C30 positive-wait finding; `count` in the waiver format with its own test in `conformance/test/` (within, at and over the count; over reports every finding of the sub-check in the file); generate per-file, per-sub-check waivers with counts for **all** current C38 findings (apps and shared crates) and all 206 C30 findings; then C38 and C30 strict in CI | `conformance/src/checks/C38-portable-tests.mjs`, `C30-wall-clock.mjs`, `conformance/src/util/waivers.mjs`, `conformance/test/`, `paddock.waivers.toml` | implementer (reviewer for the heuristics) | M (1–1.5 days) |
 | 3 | `.gitattributes` policy in root and `templates/repo` (golden and snapshot lines before `*.cmd`); renormalise only the `eol=lf` paths; C28 sync of the app files | `.gitattributes`, `templates/repo/.gitattributes`, `apps/*/.gitattributes` | implementer | S |
-| 4 | `scripts/xwin-clippy.sh` (affected workspaces, own target dir, heavy slot), `docs/dev-setup.md`, optional lefthook `pre-push` with `{push_files}`; one cold run per workspace to record time and any `-sys` crate trouble | `scripts/`, `docs/dev-setup.md`, `lefthook.yml` | implementer | S–M |
-| 5 | Migrate the shared crates (38 at-risk paths, 12,000-file walk, 50 M spin wait, 12 short positive waits, their C30 findings) and delete their waivers | `crates/*` | implementer | S |
+| 4 | `scripts/xwin-clippy.sh` (affected workspaces, own target dir, heavy slot, LLVM on `PATH`), `docs/dev-setup.md`, the brief template's pre-push line; one cold run per workspace to record time and any `-sys` crate trouble | `scripts/`, `docs/dev-setup.md`, brief template | implementer | S–M |
+| 5 | Migrate the shared crates (38 at-risk paths, 12,000-file walk, 12 short positive waits, their C30 findings) and delete their waivers; replace the 50 M spin wait with a gate or `FakeClock` (plain fix, no waiver) | `crates/*` | implementer | S |
 | 6 | Clippy preset entries `File::set_modified`, `File::set_times` after migrating or allowing the 22 call sites | `lint/clippy.toml`, app `clippy.toml` | implementer | S |
 | 7 | Per app, one branch each, in the release order: Debrief (largest: 28 at-risk paths, 50,001-file test, 141 `temp_dir`, 155 C30, 9 JSON/TOML), Dyno, Pitcrew, Pitwall, Spotter; delete the local helpers and the app's waivers | `apps/<app>/` | implementer | Debrief L, others S–M |
 | 8 | The new rule under the next free number (46 today, taken at merge) into `docs/rules.md` and the root `AGENTS.md` only (rule 8: rules live once, no per-app copies); the lesson is already recorded | `docs/rules.md`, `AGENTS.md` | coordinator | S |
@@ -269,8 +273,8 @@ before going strict. WP-5 and WP-7 need WP-1 and WP-2; WP-6 after WP-5.
   cross-compile with clang-cl, or take long. Mitigation: WP-4 measures each workspace once; a workspace that cannot be
   linted is listed with the reason and falls back to `cargo check --target x86_64-pc-windows-msvc` for the crates that
   can (the existing AGENTS.md rule).
-- **Microsoft licence:** xwin downloads the MSVC CRT and Windows SDK, whose licence the user accepts on first use
-  (`--accept-license` / `XWIN_ACCEPT_LICENSE`); see the decision below.
+- **Microsoft licence:** xwin downloads the MSVC CRT and Windows SDK; the user accepted the licence for local use
+  (2026-10-27). A CI job using xwin would need its own decision.
 - **`require_tool` skipping** hides a missing tool locally; CI must set `PADDOCK_REQUIRE_TOOLS=1` where tools exist, or the
   tool test never runs anywhere.
 - **Renormalising** the wrong paths would rewrite Debrief's deliberately CRLF inputs and break their parser tests; WP-3
@@ -283,10 +287,11 @@ be dropped from `checks/index.mjs` and its waivers deleted; the testkit modules 
 additive; the `count` waiver key is optional; the `.gitattributes` change is reverted with a renormalise of the same
 paths.
 
-## Decisions for the user
+## Decisions (user, 2026-10-27)
 
-1. Accept this ADR (status Accepted, date) and the new rule under the next free number (46 today, taken at merge):
-   "tests ask the test kit for anything OS-specific; limits are parameters; no wall-clock assertions in unit tests".
-2. xwin clippy as a lefthook `pre-push` command (automatic, minutes on a cold cache) or a manual documented step.
-3. Accept the Microsoft CRT/SDK licence for `xwin` on the Mac (and in a CI job, if one is wanted later).
-4. C38 level: strict after WP-2 with per-file counted waivers for every current finding (proposed) or warn first.
+1. ADR accepted, with the new rule under the next free number (46 today, taken at merge): "tests ask the test kit for
+   anything OS-specific; limits are parameters; no wall-clock assertions in unit tests".
+2. xwin clippy is a manual documented step (`scripts/xwin-clippy.sh`) that every agent brief requires before pushing Rust
+   changes; no lefthook hook.
+3. The Microsoft CRT/SDK licence is accepted for local use.
+4. C38 is strict after WP-2, with per-file, per-sub-check counted waivers for every current finding.
