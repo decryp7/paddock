@@ -215,8 +215,13 @@ jobs:
 
       # The analyses' memory budget (ADR 0014) is the shipped worker's: measured on a release build, Linux only
       # (DuckDB's jemalloc is the allocator there; the test skips itself in debug builds).
+      # Non-blocking until Debrief 1.2 WP D-0 (user decision 2026-10-27): since the permanent entity catalogue the peak is
+      # about 338 MB against 315 and `compare` runs out of DuckDB memory at 64 MB (bisected to the catalogue, already in 1.1.1).
+      # The test still runs and its failure shows as a warning; D-0 fixes the catalogue's memory and removes continue-on-error.
+      # Debrief 1.2.0 does not ship while this step fails.
       - name: Memory budget
         if: ${{ !cancelled() }}
+        continue-on-error: true
         run: cargo test --release -p debrief-store-duck --test analysis_memory -- --nocapture
 
       - uses: ./.gitea/actions/sccache-stats
