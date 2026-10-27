@@ -133,6 +133,13 @@ impl Drop for ChildProcess {
 
 /// Starts the child described by `spec` and hands it `host`'s endpoint and token on stdin.
 pub fn spawn(spec: &ChildSpec, host: &Host) -> io::Result<ChildProcess> {
+    let mut process = start_process(spec)?;
+    // On failure `process` is dropped, which kills the child.
+    send_bootstrap(&mut process, host).map(|_| process)
+}
+
+/// Starts the child without telling it anything yet.
+fn start_process(spec: &ChildSpec) -> io::Result<ChildProcess> {
     // dyno-ipc sits below dyno-platform and applies its rules itself: no console window (below), and the child is
     // bounded by the caller's start timeout, the lifeline and (Windows) the job.
     #[allow(clippy::disallowed_methods)]
@@ -161,12 +168,16 @@ pub fn spawn(spec: &ChildSpec, host: &Host) -> io::Result<ChildProcess> {
         }
     };
     let stdin = child.stdin.take();
-    let mut process = ChildProcess {
+    Ok(ChildProcess {
         child,
         stdin,
         #[cfg(windows)]
         _job: job,
-    };
+    })
+}
+
+/// Writes the bootstrap line to the child's stdin.
+fn send_bootstrap(process: &mut ChildProcess, host: &Host) -> io::Result<()> {
     let bootstrap = Bootstrap {
         endpoint: host.name().to_string(),
         token: host.token().to_hex(),
@@ -174,12 +185,10 @@ pub fn spawn(spec: &ChildSpec, host: &Host) -> io::Result<ChildProcess> {
     };
     let mut line = serde_json::to_string(&bootstrap).map_err(io::Error::other)?;
     line.push('\n');
-    let written = match process.stdin.as_mut() {
+    match process.stdin.as_mut() {
         Some(stdin) => stdin.write_all(line.as_bytes()).and_then(|_| stdin.flush()),
         None => Err(io::Error::other("the child has no stdin")),
-    };
-    // On failure `process` is dropped, which kills the child.
-    written.map(|_| process)
+    }
 }
 
 /// Listens, starts the child, waits up to `start_timeout` for it to connect (giving up early if it exits) and starts
@@ -188,8 +197,31 @@ pub fn launch<B>(spec: &ChildSpec, opts: PeerOptions<B>, start_timeout: Duration
 where
     B: Serialize + DeserializeOwned + Send + 'static,
 {
+    launch_after(spec, opts, start_timeout, |_| {})
+}
+
+/// [`launch`], calling `after_spawn` once the child runs and before it is told how to connect (tests use it to let a
+/// child exit first, which is the race a fast-failing plugin runs into).
+fn launch_after<B>(
+    spec: &ChildSpec,
+    opts: PeerOptions<B>,
+    start_timeout: Duration,
+    after_spawn: impl FnOnce(&mut ChildProcess),
+) -> Result<(ChildProcess, Peer<B>), IpcError>
+where
+    B: Serialize + DeserializeOwned + Send + 'static,
+{
     let mut host = Host::listen_with(spec.limit)?;
-    let mut child = spawn(spec, &host)?;
+    let mut child = start_process(spec)?;
+    after_spawn(&mut child);
+    match send_bootstrap(&mut child, &host) {
+        Ok(()) => {}
+        // A child that has already exited (or closed stdin) cannot be told anything: not an IPC failure of its own.
+        // The wait below reports it as "exited before it connected" with its status, the same as a child that exits a
+        // moment later, instead of racing the write against the exit.
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {}
+        Err(e) => return Err(e.into()),
+    }
     let pid = child.pid();
     let conn = host.accept_inner(Some(pid), Instant::now() + start_timeout, &mut || match child.try_wait() {
         Ok(Some(status)) => Err(IpcError::io(
@@ -257,6 +289,21 @@ mod tests {
         let long = format!("{{\"endpoint\":\"{}\"}}\n", "a".repeat(70_000));
         assert!(ChildLink::read_bootstrap(long.as_bytes()).is_err());
         assert!(matches!(ChildLink::connect(&b), Err(IpcError::Auth(_))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_exited_before_the_bootstrap_is_reported_as_exited_before_it_connected() {
+        let mut spec = ChildSpec::new("/bin/sh");
+        spec.args = vec!["-c".into(), "exit 7".into()];
+        let opts: PeerOptions<String> = PeerOptions::new();
+        let err = launch_after(&spec, opts, Duration::from_secs(20), |child| {
+            // Wait on the condition (the child is gone), so the bootstrap write meets a closed pipe every time.
+            assert!(child.wait_timeout(Duration::from_secs(20)).unwrap().is_some());
+        })
+        .map(|_| ())
+        .unwrap_err();
+        assert!(err.to_string().contains("before it connected"), "{err}");
     }
 
     #[test]
