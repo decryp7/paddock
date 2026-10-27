@@ -40,12 +40,12 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 | App | Status |
 |---|---|
 | Pitcrew | **v1.0.1 released** |
-| Debrief | **v1.0.1 released** (1.1 coming) |
-| Pitwall | **v1.0.3 released** (next after Debrief) |
+| Debrief | **v1.1.1 released** (1.2.0 in progress) |
+| Pitwall | **v1.0.3 released** (1.0.4 in progress) |
 | Dyno | In development |
-| Spotter | Releasing soon |
-| Sighter | In design (after Pitwall) |
-| Pacenotes (understands code in any language) | In design (after Pitwall) |
+| Spotter | In development |
+| Sighter | Planned (design only) |
+| Pacenotes (understands code in any language) | Planned (design only) |
 
 ## The apps
 
@@ -57,7 +57,7 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 - Rust engine with a DuckDB store: flat memory on large folders. Safe on hostile input; saved projects open without the original logs.
 - From 1.1 Pitwall is its AI engine once you pair the two explicitly; the built-in local engine stays as the fallback.
 
-Status: **v1.0.1 released** (1.1 coming). Repo: <https://dev.decryptology.net/decryp7/debrief>
+Status: **v1.1.1 released** (1.2.0 in progress). Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/debrief>
 
 ### Pitcrew
 **Purpose.** Keeps CI runners alive, updated and clean.
@@ -67,7 +67,7 @@ Status: **v1.0.1 released** (1.1 coming). Repo: <https://dev.decryptology.net/de
 - Housekeeping, disk guard, pause windows and notifications, with a dashboard and tray.
 - Runs the CI for every app in this family.
 
-Status: **v1.0.1 released**. Repo: <https://dev.decryptology.net/decryp7/pitcrew>
+Status: **v1.0.1 released**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/pitcrew>
 
 ### Pitwall
 **Purpose.** The private, local AI hub every other app talks to.
@@ -78,7 +78,7 @@ Status: **v1.0.1 released**. Repo: <https://dev.decryptology.net/decryp7/pitcrew
 - MCP client and tool router for tool servers such as Pacenotes.
 - Local only by design: no cloud models, no telemetry; the only traffic is downloads you asked for.
 
-Status: **v1.0.3 released** (next after Debrief). Repo: <https://dev.decryptology.net/decryp7/pitwall>
+Status: **v1.0.3 released** (1.0.4 in progress). Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/pitwall>
 
 ### Dyno
 **Purpose.** Measures, explains and tunes your PC.
@@ -88,7 +88,7 @@ Status: **v1.0.3 released** (next after Debrief). Repo: <https://dev.decryptolog
 - Observe first: changes happen only through rules you enable or a click, each with an undo, via a privileged helper.
 - Extensible with validated declarative packs, no code.
 
-Status: in development. Repo: <https://dev.decryptology.net/decryp7/dyno>
+Status: in development. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
 
 ### Spotter
 **Purpose.** Watches for new releases anywhere and tells you the moment one appears.
@@ -97,7 +97,7 @@ Status: in development. Repo: <https://dev.decryptology.net/decryp7/dyno>
 - Version schemes, filters and soak time as declarative presets; plugins for the rest.
 - Digests, quiet hours and OS notifications; optional "What's new" summaries from Pitwall.
 
-Status: releasing soon. Repo: <https://dev.decryptology.net/decryp7/spotter>
+Status: in development. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/spotter>
 
 ### Sighter
 **Purpose.** Finds any UI element by sight: record, label and train vision models that UI tests can query.
@@ -108,7 +108,7 @@ Status: releasing soon. Repo: <https://dev.decryptology.net/decryp7/spotter>
 - Run bundles (video plus steps) that open next to the app's logs in Debrief.
 - An MCP server (`observe`, `observe_image`, `locate`, `click`, `type`, `launch`, ...) that any family app can drive as an MCP host (Debrief reproduces a bug from a video, Pacenotes drives tests), and an agent mode with Pitwall as the local planner. Targets: this PC, or a remote PC under test over RDP from a controller PC (IP-KVM later). Pitwall stays a model server and optional.
 
-Status: **in design** (after Pitwall). Repo: <https://dev.decryptology.net/decryp7/sighter>
+Status: **planned** (design only). Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/sighter>
 
 ### Pacenotes
 **Purpose.** Understands code in any language (v1 language packs: C, C++, C#, Java, TypeScript/JavaScript, Rust, Python, Go): a dependency graph of every link, code review with your own rules, local semantic search, and a read-only MCP server (also an MCP host) for people and AI tools.
@@ -123,7 +123,7 @@ Status: **in design** (after Pitwall). Repo: <https://dev.decryptology.net/decry
 - Phasing: core, Understand, Review, Debrief bridge and the core language packs first; then Diagrams; then Requirements;
   then Tests and coverage.
 
-Status: **in design** (after Pitwall). Repo: <https://dev.decryptology.net/decryp7/pacenotes>
+Status: **planned** (design only). Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/pacenotes>
 
 ## Integration architecture
 
