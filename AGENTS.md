@@ -17,12 +17,12 @@ copied). Read them before any change; their reasons are in [docs/lessons.md](doc
 ```
 crates/          shared Rust crates, one Cargo workspace (crates/Cargo.toml)
 ui/              @decryp7/paddock-ui, @decryp7/paddock-e2e, the gallery and the demo UIs (one Angular workspace)
-apps/<app>/      one app each, its tree unchanged below its folder, its own Cargo workspace and Cargo.lock, and
-                 paddock.ci.json (its CI leg); apps/shell-demo and apps/workbench-demo are the demos
+apps/<app>/      one app each (debrief, dyno, pacenotes, pitcrew, pitwall, sighter, spotter and the two demos), its tree
+                 unchanged below its folder, its own Cargo workspace and Cargo.lock, and paddock.ci.json (its CI contract)
 conformance/ eslint/ tsconfig/ lint/ icons/ templates/    shared checks, presets, the icon pipeline, new-app templates
 docs/            family docs: rules, lessons, ADRs, plans, research; an app's docs stay in apps/<app>/docs
 scripts/         family scripts: affected.mjs (CI's plan), publish.mjs, new-app.mjs, demo-release.mjs
-.gitea/          ci.yml (plan and affected jobs), nightly.yml, <app>-release.yml, the shared actions
+.gitea/          ci.yml (plan and affected jobs), nightly.yml, each app's <app>.yml, the shared actions
 package.json     the one npm workspace and package-lock.json (ui, eslint, icons, the demos, apps/*/app)
 ```
 
@@ -48,8 +48,13 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   only, or by adding a single declared line.
 - **Shared code (rules 39, 42, 43).** A shared change and its adoption by the apps land in one change; there is no
   publish-and-consume step. A breaking change to a shared crate or package updates every app in the same change.
-- **A new app** gets `apps/<app>/paddock.ci.json` (its CI leg: Cargo workspace, prepare, checks, UI commands), a line in
-  CODEOWNERS and, for releases, `.gitea/workflows/<app>-release.yml`. `scripts/affected.test.mjs` checks the first two.
+- **Workflows are named after their app** (ADR 0014's last amendment): an app with gates on several OS (Debrief, Dyno,
+  Pitcrew, Pitwall, Spotter) has `.gitea/workflows/<app>.yml`, its whole CI and its release from an `<app>-v*` tag, whose
+  plan job asks `node scripts/affected.mjs --ci --app <app>`; extra jobs are `<app>-<what>.yml` (Debrief's fuzz, bench,
+  corpus, mutants). An app whose gates fit one Linux job (the demos) is a leg of ci.yml and releases through
+  `<app>-release.yml`. Any of these files marks only its app in the plan.
+- **A new app** gets `apps/<app>/paddock.ci.json` (`workflow` for its own workflow, or its leg: Cargo workspace,
+  prepare, checks, UI commands), a CODEOWNERS line and its workflow. `scripts/affected.test.mjs` checks all three.
 
 ## Shared code: `crates/` and `ui/`
 
@@ -165,3 +170,4 @@ Apply these deliberately. They are not decoration:
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper models.
   Keep architecture and review on the main model.
 - Share first (rule 42): check Paddock's crates and packages before writing anything an app copy would duplicate.
+- Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus); see `.claude/agents/`.

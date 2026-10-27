@@ -1,0 +1,295 @@
+<pc-load-state what="The runner configuration" [hasValue]="!!store.file()" [error]="store.reply().error" [skeleton]="[48, 240, 160]" (retry)="store.reload()">
+  @if (store.file(); as f) {
+    @if (store.saved(); as s) {
+      <div class="callout success" role="status" data-testid="saved-banner">
+        <mat-icon svgIcon="pc:check-circle" aria-hidden="true" />
+        <div class="callout-body">
+          <strong>
+            @switch (s.restart) {
+              @case ('afterJob') {
+                Saved. The runner restarts after the current job.
+              }
+              @case ('notRunning') {
+                Saved. It will be used the next time the runner starts.
+              }
+              @case ('notNeeded') {
+                Saved. Only comments or layout changed; no restart needed.
+              }
+            }
+          </strong>
+          @if (s.backup) {
+            <span class="muted">The previous file is kept as <code>{{ s.backup }}</code>.</span>
+          }
+        </div>
+        <button type="button" class="btn sm ghost" (click)="store.dismissSaved()">Dismiss</button>
+      </div>
+    }
+    @if (store.conflict(); as c) {
+      <div class="callout warning" role="alert" data-testid="conflict">
+        <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+        <div class="callout-body">
+          <strong>The file changed on disk</strong>
+          <span>{{ c }}</span>
+        </div>
+        <button type="button" class="btn sm" (click)="store.reload()"><mat-icon svgIcon="pc:refresh" aria-hidden="true" />Reload</button>
+      </div>
+    }
+    @if (store.saveError(); as err) {
+      <div class="callout danger" role="alert">
+        <mat-icon svgIcon="pc:x-octagon" aria-hidden="true" />
+        <div class="callout-body">
+          <strong>The configuration was not saved</strong>
+          <span>{{ err.message }}</span>
+        </div>
+      </div>
+    }
+    @if (store.previewError(); as err) {
+      <div class="callout warning" role="status">
+        <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+        <div class="callout-body">
+          <strong>The change could not be checked</strong>
+          <span>{{ err.message }}</span>
+        </div>
+      </div>
+    }
+
+    <section class="card" aria-labelledby="cfg-title">
+      <header class="card-header">
+        <h3 id="cfg-title">Runner configuration</h3>
+        <div class="chips">
+          @if (restartPending()) {
+            <span class="chip pending" data-testid="restart-pending"><mat-icon svgIcon="pc:hourglass" aria-hidden="true" />Restarts after the current job</span>
+          }
+          <span class="chip"><mat-icon svgIcon="pc:folder" aria-hidden="true" />{{ f.backups }} {{ f.backups === 1 ? 'backup' : 'backups' }} kept</span>
+        </div>
+      </header>
+      <div class="card-body stack">
+        <p class="path muted">
+          <code>{{ f.path }}</code>
+          @if (f.text === '') {
+            <span> · does not exist yet; Save creates it from the settings below.</span>
+          }
+        </p>
+
+        @if (store.labelCheck(); as lc) {
+          @if (lc.kind === 'verified') {
+            <div class="callout success compact" role="status" data-testid="label-check">
+              <mat-icon svgIcon="pc:check-circle" aria-hidden="true" />
+              <div class="callout-body">
+                <strong>Labels verified after restart: {{ lc.labels.join(', ') }}</strong>
+                <span class="faint">{{ when(lc.at) }}</span>
+              </div>
+            </div>
+          } @else {
+            <div class="callout warning compact" role="status" data-testid="label-check">
+              <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+              <div class="callout-body">
+                <strong>The runner declared [{{ lc.declared.join(', ') }}] but the file asks for [{{ lc.expected.join(', ') }}]</strong>
+                <span class="faint">{{ when(lc.at) }}. Check the labels below, and that the server accepted the registration.</span>
+              </div>
+            </div>
+          }
+        }
+
+        @if (f.view.unreadable.length > 0) {
+          <div class="callout info compact" role="status">
+            <mat-icon svgIcon="pc:info" aria-hidden="true" />
+            <div class="callout-body">
+              <strong>Some keys are kept as they are</strong>
+              <span>The form cannot show <code>{{ f.view.unreadable.join(', ') }}</code>. Saving leaves them unchanged; edit them under Advanced.</span>
+            </div>
+          </div>
+        }
+
+        <div class="toolbar">
+          <div class="segmented" role="radiogroup" aria-label="Editor">
+            <button type="button" role="radio" [attr.aria-checked]="store.mode() === 'form'" [disabled]="store.rawEdited()" [title]="store.rawEdited() ? 'You edited the file directly; save or discard to use the form again' : ''" (click)="mode('form')">Form</button>
+            <button type="button" role="radio" [attr.aria-checked]="store.mode() === 'raw'" (click)="mode('raw')">Advanced (YAML)</button>
+          </div>
+          <div class="btn-row">
+            @if (store.dirty()) {
+              <button type="button" class="btn ghost" (click)="store.discard()">Discard changes</button>
+            }
+            <button type="button" class="btn primary" [disabled]="!store.canSave()" (click)="review()">
+              <mat-icon svgIcon="pc:file-text" aria-hidden="true" />{{ store.saving() ? 'Saving…' : 'Review changes' }}
+            </button>
+          </div>
+        </div>
+
+        @if (store.mode() === 'form') {
+          @if (store.settings(); as s) {
+            <fieldset class="group">
+              <legend>Jobs</legend>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="cfg-capacity">Capacity</label>
+                  <input class="input" type="number" min="0" id="cfg-capacity" placeholder="1" [value]="s.capacity ?? ''" [attr.aria-invalid]="hasError('runner.capacity')" [attr.aria-describedby]="hasIssue('runner.capacity') ? 'cfg-capacity-issue-0' : null" (input)="setCapacity($any($event.target).value)" />
+                  <span class="hint">Jobs at the same time.</span>
+                  <pc-field-issues [issues]="forPath('runner.capacity')" prefix="cfg-capacity-issue" />
+                </div>
+                @for (t of jobFields; track t.key) {
+                  <div class="field">
+                    <label [for]="'cfg-' + t.key">{{ t.label }}</label>
+                    <input class="input" type="text" [id]="'cfg-' + t.key" [placeholder]="t.placeholder" [value]="s[t.key] ?? ''" [attr.aria-describedby]="hasIssue(t.path) ? 'cfg-' + t.key + '-issue-0' : null" (input)="text(t.key, $any($event.target).value)" />
+                    <span class="hint">{{ t.hint }}</span>
+                    <pc-field-issues [issues]="forPath(t.path)" [prefix]="'cfg-' + t.key + '-issue'" />
+                  </div>
+                }
+              </div>
+            </fieldset>
+
+            <fieldset class="group">
+              <legend>Labels</legend>
+              <p class="hint">Which jobs the runner takes. <code>name:host</code> runs them on this machine, <code>name:docker://image</code> in a container.</p>
+              <pc-string-list label="Labels" inputId="cfg-labels" placeholder="windows:host" [items]="s.labels" (itemsChange)="set({ labels: $event })" />
+              <pc-field-issues [issues]="forPath('runner.labels')" prefix="cfg-labels-issue" />
+            </fieldset>
+
+            <fieldset class="group">
+              <legend>Environment variables</legend>
+              <p class="hint">Extra variables for every job.</p>
+              @for (e of envEntries(); track e[0]) {
+                <div class="env-row">
+                  <code class="env-name">{{ e[0] }}</code>
+                  <input class="input mono" type="text" [attr.aria-label]="'Value of ' + e[0]" [value]="e[1]" (input)="setEnv(e[0], $any($event.target).value)" />
+                  <button type="button" class="btn icon sm ghost" [attr.aria-label]="'Remove ' + e[0]" (click)="removeEnv(e[0])"><mat-icon svgIcon="pc:trash" aria-hidden="true" /></button>
+                </div>
+              }
+              <div class="env-row">
+                <input class="input mono" type="text" aria-label="New variable name" placeholder="NAME" [value]="newEnvName()" (input)="newEnvName.set($any($event.target).value)" (keydown.enter)="addEnv($event)" />
+                <input class="input mono" type="text" aria-label="New variable value" placeholder="value" [value]="newEnvValue()" (input)="newEnvValue.set($any($event.target).value)" (keydown.enter)="addEnv($event)" />
+                <button type="button" class="btn" [disabled]="newEnvName().trim() === ''" (click)="addEnv()"><mat-icon svgIcon="pc:plus" aria-hidden="true" />Add</button>
+              </div>
+              <pc-field-issues [issues]="forPath('runner.envs')" prefix="cfg-envs-issue" />
+            </fieldset>
+
+            <fieldset class="group">
+              <legend>Cache</legend>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="cfg-cacheEnabled">Cache server</label>
+                  <select class="select" id="cfg-cacheEnabled" (change)="setTri('cacheEnabled', $any($event.target).value)">
+                    <option value="default" [selected]="triState(s.cacheEnabled) === 'default'">Default (on)</option>
+                    <option value="on" [selected]="triState(s.cacheEnabled) === 'on'">On</option>
+                    <option value="off" [selected]="triState(s.cacheEnabled) === 'off'">Off</option>
+                  </select>
+                  <span class="hint">Lets jobs use actions/cache.</span>
+                  <pc-field-issues [issues]="forPath('cache.enabled')" prefix="cfg-cacheEnabled-issue" />
+                </div>
+                @for (t of cacheFields; track t.key) {
+                  <div class="field">
+                    <label [for]="'cfg-' + t.key">{{ t.label }}</label>
+                    <input class="input" type="text" [id]="'cfg-' + t.key" [placeholder]="t.placeholder" [value]="s[t.key] ?? ''" [attr.aria-describedby]="hasIssue(t.path) ? 'cfg-' + t.key + '-issue-0' : null" (input)="text(t.key, $any($event.target).value)" />
+                    <span class="hint">{{ t.hint }}</span>
+                    <pc-field-issues [issues]="forPath(t.path)" [prefix]="'cfg-' + t.key + '-issue'" />
+                  </div>
+                }
+              </div>
+            </fieldset>
+
+            <fieldset class="group">
+              <legend>Logging</legend>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="cfg-logLevel">Log level</label>
+                  <select class="select" id="cfg-logLevel" (change)="setLevel($any($event.target).value)">
+                    <option value="" [selected]="s.logLevel === null">Default (info)</option>
+                    @for (l of levels; track l) {
+                      <option [value]="l" [selected]="s.logLevel === l">{{ l }}</option>
+                    }
+                  </select>
+                  <pc-field-issues [issues]="forPath('log.level')" prefix="cfg-logLevel-issue" />
+                </div>
+              </div>
+            </fieldset>
+
+            @if (f.view.containerRunner) {
+              <fieldset class="group" data-testid="containers">
+                <legend>Containers</legend>
+                <pc-field-issues [issues]="forPath('container')" prefix="cfg-container-issue" />
+                <div class="field-grid">
+                  @for (t of containerFields; track t.key) {
+                    <div class="field">
+                      <label [for]="'cfg-' + t.key">{{ t.label }}</label>
+                      <input class="input" type="text" [id]="'cfg-' + t.key" [placeholder]="t.placeholder" [value]="s[t.key] ?? ''" [attr.aria-describedby]="hasIssue(t.path) ? 'cfg-' + t.key + '-issue-0' : null" (input)="text(t.key, $any($event.target).value)" />
+                      <span class="hint">{{ t.hint }}</span>
+                      <pc-field-issues [issues]="forPath(t.path)" [prefix]="'cfg-' + t.key + '-issue'" />
+                    </div>
+                  }
+                  <div class="field">
+                    <label for="cfg-privileged">Privileged containers</label>
+                    <select class="select" id="cfg-privileged" (change)="setTri('containerPrivileged', $any($event.target).value)">
+                      <option value="default" [selected]="triState(s.containerPrivileged) === 'default'">Default (off)</option>
+                      <option value="on" [selected]="triState(s.containerPrivileged) === 'on'">On</option>
+                      <option value="off" [selected]="triState(s.containerPrivileged) === 'off'">Off</option>
+                    </select>
+                    @if (s.containerPrivileged) {
+                      <p class="privileged-warning">
+                        <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+                        <span><strong>Warning:</strong> a privileged job container has almost full access to this machine.</span>
+                      </p>
+                    }
+                    <pc-field-issues [issues]="forPath('container.privileged')" prefix="cfg-privileged-issue" />
+                  </div>
+                </div>
+                <div class="field">
+                  <span class="label" id="cfg-volumes-label">Volumes jobs may use</span>
+                  <pc-string-list label="Allowed volumes" inputId="cfg-volumes" placeholder="/data/cache" [items]="s.containerValidVolumes" (itemsChange)="set({ containerValidVolumes: $event })" />
+                  <pc-field-issues [issues]="forPath('container.valid_volumes')" prefix="cfg-volumes-issue" />
+                </div>
+              </fieldset>
+            }
+          }
+          @if (extra().length > 0) {
+            <div class="other">
+              <pc-field-issues [issues]="extra()" prefix="cfg-other" />
+            </div>
+          }
+        } @else {
+          @if (store.rawEdited()) {
+            <p class="faint small" data-testid="raw-note">You edited the file directly; save or discard to use the form again.</p>
+          }
+          <p class="status" [class.ok]="status2().ok" [class.bad]="!status2().ok" data-testid="yaml-status" role="status">
+            <mat-icon [svgIcon]="status2().ok ? 'pc:check-circle' : 'pc:x-octagon'" aria-hidden="true" />{{ status2().text }}
+          </p>
+          @if (store.issues().length > 0) {
+            <ul class="findings" aria-label="Findings">
+              @for (i of store.issues(); track $index) {
+                <li>
+                  <button type="button" class="finding" [class.error]="i.severity === 'error'" [disabled]="i.line === null" (click)="jump(i.line)">
+                    <mat-icon [svgIcon]="i.severity === 'error' ? 'pc:x-octagon' : 'pc:alert'" aria-hidden="true" />
+                    <span>
+                      <strong>{{ i.severity === 'error' ? 'Error' : 'Warning' }}{{ i.line !== null ? ' on line ' + i.line : '' }}:</strong> {{ i.message }}
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+          <div class="editor" #scroller>
+            <div class="inner">
+              <div class="gutter" aria-hidden="true">
+                @for (l of rawLines(); track $index) {
+                  <span [class.err]="issueLines().has($index + 1)" [class.warn]="warnLines().has($index + 1)">{{ $index + 1 }}</span>
+                }
+              </div>
+              <textarea
+                #editor
+                class="yaml"
+                spellcheck="false"
+                wrap="off"
+                autocapitalize="off"
+                autocomplete="off"
+                aria-label="config.yaml"
+                [style.height.px]="rawLines().length * 20 + 16"
+                [style.width.ch]="longest() + 4"
+                [value]="store.rawText()"
+                (input)="store.setRaw($any($event.target).value)"
+              ></textarea>
+            </div>
+          </div>
+        }
+      </div>
+    </section>
+  }
+</pc-load-state>

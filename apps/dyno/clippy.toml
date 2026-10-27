@@ -1,0 +1,5 @@
+# Every child process Dyno starts goes through `dyno_platform::process::command` (it opens no console window on
+# Windows and always gets a timeout). Tests and build scripts may allow this lint.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "use dyno_platform::process::command: no console window on Windows, always bounded" },
+]

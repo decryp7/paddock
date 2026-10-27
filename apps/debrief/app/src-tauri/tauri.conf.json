@@ -1,0 +1,77 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Debrief",
+  "version": "1.1.1",
+  "identifier": "net.decryptology.debrief",
+  "build": {
+    "frontendDist": "../dist/app/browser",
+    "devUrl": "http://localhost:4200",
+    "beforeDevCommand": "npm run start",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "Debrief",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 680,
+        "resizable": true,
+        "visible": false,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; media-src 'self' media: http://media.localhost; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "deb", "rpm", "appimage", "dmg", "app"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "resources": {
+      "resources/THIRD_PARTY_NOTICES.md": "resources/THIRD_PARTY_NOTICES.md",
+      "../../samples/serilog-clef/": "samples/serilog-clef/",
+      "../../samples/serilog-json/": "samples/serilog-json/",
+      "../../samples/serilog-text/": "samples/serilog-text/",
+      "../../samples/log4net/": "samples/log4net/",
+      "../../samples/csv/": "samples/csv/"
+    },
+    "shortDescription": "Analyse logs and diagnostic files",
+    "fileAssociations": [
+      {
+        "ext": [
+          "debriefz"
+        ],
+        "name": "Debrief Project",
+        "description": "Debrief project: the analysed events, profile, view and reports, shareable without the log files",
+        "role": "Editor",
+        "mimeType": "application/x-debrief-project"
+      }
+    ]
+  },
+  "mainBinaryName": "debrief-app",
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://dev.decryptology.net/decryp7/paddock/releases/download/debrief-latest/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

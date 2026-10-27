@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <title>Paddock (C: foundation) 24px</title>
+  <defs>
+    <linearGradient id="klbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
+    
+  </defs>
+  <path d="M6.25 1H17.75A5.25 5.25 0 0 1 23 6.25V17.75A5.25 5.25 0 0 1 17.75 23H6.25A5.25 5.25 0 0 1 1 17.75V6.25A5.25 5.25 0 0 1 6.25 1Z" fill="url(#klbg)"/>
+  <path d="M6.25 1.25H17.75A5 5 0 0 1 22.75 6.25V17.75A5 5 0 0 1 17.75 22.75H6.25A5 5 0 0 1 1.25 17.75V6.25A5 5 0 0 1 6.25 1.25Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="0.5"/>
+  <path d="M2.5 6H21.5A0.5 0.5 0 0 1 22 6.5V8.5A0.5 0.5 0 0 1 21.5 9H2.5A0.5 0.5 0 0 1 2 8.5V6.5A0.5 0.5 0 0 1 2.5 6Z" fill="#FFFFFF"/><path d="M2 10H4A0 0 0 0 1 4 10V18A0 0 0 0 1 4 18H2A0 0 0 0 1 2 18V10A0 0 0 0 1 2 10Z" fill="#5590FF"/><path d="M5 10H7A0 0 0 0 1 7 10V18A0 0 0 0 1 7 18H5A0 0 0 0 1 5 18V10A0 0 0 0 1 5 10Z" fill="#8A5AE6"/><path d="M8 10H10A0 0 0 0 1 10 10V18A0 0 0 0 1 10 18H8A0 0 0 0 1 8 18V10A0 0 0 0 1 8 10Z" fill="#BFA2EE"/><path d="M11 10H13A0 0 0 0 1 13 10V18A0 0 0 0 1 13 18H11A0 0 0 0 1 11 18V10A0 0 0 0 1 11 10Z" fill="#DE559F"/><path d="M14 10H16A0 0 0 0 1 16 10V18A0 0 0 0 1 16 18H14A0 0 0 0 1 14 18V10A0 0 0 0 1 14 10Z" fill="#FF8A4C"/><path d="M17 10H19A0 0 0 0 1 19 10V18A0 0 0 0 1 19 18H17A0 0 0 0 1 17 18V10A0 0 0 0 1 17 10Z" fill="#FFD257"/><path d="M20 10H22A0 0 0 0 1 22 10V18A0 0 0 0 1 22 18H20A0 0 0 0 1 20 18V10A0 0 0 0 1 20 10Z" fill="#C2A845"/>
+</svg>

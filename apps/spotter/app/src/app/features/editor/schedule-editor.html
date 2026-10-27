@@ -1,0 +1,95 @@
+<div class="stack">
+  <div class="seg-tabs" role="group" aria-label="How to schedule checks">
+    @for (m of modes; track m.id) {
+      <button type="button" [attr.aria-pressed]="schedule().mode === m.id" (click)="setMode(m.id)">{{ m.label }}</button>
+    }
+  </div>
+
+  @if (every(); as e) {
+    <div class="field">
+      <span class="label" id="every-l">Check every</span>
+      <div class="seg-tabs wrap" role="group" aria-labelledby="every-l">
+        @for (p of presets; track p.secs) {
+          <button type="button" [attr.aria-pressed]="e.secs === p.secs" (click)="setEvery(p.secs)">{{ p.label }}</button>
+        }
+      </div>
+    </div>
+    <div class="field">
+      <span class="label" id="custom-l">Or a custom interval{{ isPreset() ? '' : ' (in use)' }}</span>
+      <div class="inline" role="group" aria-labelledby="custom-l">
+        <input class="input narrow" type="number" min="1" step="1" aria-label="Interval" [value]="custom().amount" (change)="setCustom(value($event), custom().unit, input($event))" />
+        <div class="seg-tabs" role="group" aria-label="Interval unit">
+          @for (u of units; track u.id) {
+            <button type="button" [attr.aria-pressed]="custom().unit === u.id" (click)="setCustom('' + custom().amount, u.id)">{{ u.label }}</button>
+          }
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (times(); as t) {
+    <div class="field">
+      <span class="label" id="days-l">On</span>
+      <div class="days" role="group" aria-labelledby="days-l">
+        @for (d of days; track d.id) {
+          <button type="button" class="day" [attr.aria-pressed]="t.days.includes(d.id)" [attr.aria-label]="d.full" (click)="toggle(d.id)">{{ d.label }}</button>
+        }
+      </div>
+    </div>
+    <div class="field">
+      <span class="label" id="times-l">At</span>
+      <div class="times" role="group" aria-labelledby="times-l">
+        @for (time of t.times; track $index) {
+          <span class="time">
+            <input class="input fit" type="time" [attr.aria-label]="'Time ' + ($index + 1)" [value]="time" (change)="change($index, value($event))" />
+            <button type="button" class="btn icon sm" [attr.aria-label]="'Remove time ' + ($index + 1)" [disabled]="t.times.length < 2" (click)="remove($index)"><mat-icon svgIcon="sp:x" aria-hidden="true" /></button>
+          </span>
+        }
+        <button type="button" class="btn sm" (click)="add()"><mat-icon svgIcon="sp:plus" aria-hidden="true" />Add a time</button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="zone">Time zone</label>
+      <input id="zone" class="input narrow" type="text" autocomplete="off" spellcheck="false" placeholder="This computer's" [value]="t.zone ?? ''" (change)="setZone(value($event))" />
+      <span class="help">Leave empty for this computer's time zone, or give an IANA name such as Europe/Berlin.</span>
+    </div>
+  }
+
+  @if (cron(); as c) {
+    <div class="field">
+      <label for="cron">Cron expression</label>
+      <input id="cron" class="input mono" type="text" autocomplete="off" spellcheck="false" placeholder="0 9 * * 1-5" [value]="c.expr" (input)="setExpr(value($event))" />
+      <span class="help">Five fields: minute, hour, day of month, month, day of week. Example: 0 9 * * 1-5 is weekdays at 09:00.</span>
+    </div>
+    <div class="field">
+      <label for="cron-zone">Time zone</label>
+      <input id="cron-zone" class="input narrow" type="text" autocomplete="off" spellcheck="false" placeholder="This computer's" [value]="c.zone ?? ''" (change)="setZone(value($event))" />
+    </div>
+  }
+
+  <div class="preview" aria-live="polite">
+    @if (problems().length) {
+      <ul class="problems" role="alert">
+        @for (p of problems(); track p) {
+          <li>{{ p }}</li>
+        }
+      </ul>
+    } @else if (preview().value; as p) {
+      <p class="next"><strong>Next check</strong> {{ dateTime(nextMs()) }} <span class="muted">({{ nextMs() | ago }})</span></p>
+      <p class="muted">{{ p.description }}</p>
+      @if (schedule().mode !== 'every') {
+        <ol class="runs" aria-label="Upcoming checks">
+          @for (ms of p.nextRunsMs; track $index) {
+            <li>{{ dateTime(ms) }}</li>
+          }
+        </ol>
+        <p class="muted">Times are in {{ p.zone }}.</p>
+      }
+      @for (w of p.warnings; track w) {
+        <p class="warn" role="status">{{ w }}</p>
+      }
+    } @else {
+      <p class="muted">{{ preview().loading ? 'Working out the next check…' : 'Next check: after the watch is saved.' }}</p>
+    }
+  </div>
+</div>

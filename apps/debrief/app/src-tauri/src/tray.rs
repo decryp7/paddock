@@ -1,0 +1,476 @@
+//! The system tray icon: show a window or the window list, new window, recent
+//! projects ([`crate::recent`]), background work with
+//! Stop actions, capture a diagnostic screenshot, quit. The tooltip shows how
+//! many background tasks run.
+//!
+//! The menu is a pure model ([`menu_model`]) turned into a Tauri menu, and is
+//! rebuilt only when that model changes. Without a tray (e.g. Linux without an
+//! app indicator) Debrief degrades: closing the last window quits.
+//!
+//! Recent projects come from [`crate::recent`]. Event: `debrief://capture` (to the target window).
+
+use crate::background::{BackgroundTasks, TaskInfo};
+use crate::window_manager::{list, open_new, quit, reveal, target, WindowInfo};
+use crate::windows::emit_to_window;
+use crate::CmdResult;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager, Runtime};
+
+const TRAY_ID: &str = "debrief";
+/// Event asking a window to capture a diagnostic screenshot.
+pub const CAPTURE_EVENT: &str = "debrief://capture";
+const MAX_TEXT: usize = 80;
+
+/// Managed state: whether the tray exists, and the last menu shown.
+#[derive(Default)]
+pub struct TrayState {
+    available: AtomicBool,
+    shown: Mutex<Option<(Vec<MenuEntry>, String)>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuEntry {
+    Item { id: String, text: String, enabled: bool },
+    Separator,
+    Submenu { text: String, items: Vec<MenuEntry> },
+}
+
+fn item(id: impl Into<String>, text: impl Into<String>) -> MenuEntry {
+    MenuEntry::Item {
+        id: id.into(),
+        text: short(&text.into()),
+        enabled: true,
+    }
+}
+
+fn disabled(text: &str) -> MenuEntry {
+    MenuEntry::Item {
+        id: "none".into(),
+        text: text.into(),
+        enabled: false,
+    }
+}
+
+fn short(text: &str) -> String {
+    let t: String = text.chars().filter(|c| !c.is_control()).collect();
+    if t.chars().count() > MAX_TEXT {
+        format!("{}\u{2026}", t.chars().take(MAX_TEXT - 1).collect::<String>())
+    } else {
+        t
+    }
+}
+
+/// The tray menu for the current windows, recent projects and background work.
+pub fn menu_model(windows: &[WindowInfo], recents: &[crate::recent::RecentProject], tasks: &[TaskInfo]) -> Vec<MenuEntry> {
+    let mut menu = Vec::new();
+    match windows {
+        [] => menu.push(item("new-window", "Show Debrief")),
+        [only] => menu.push(item(format!("window:{}", only.label), "Show Debrief")),
+        many => {
+            for w in many {
+                menu.push(item(format!("window:{}", w.label), format!("Show \u{201c}{}\u{201d}", w.title)));
+            }
+        }
+    }
+    menu.push(MenuEntry::Separator);
+    menu.push(item("new-window", "New window"));
+    let recent_items = if recents.is_empty() {
+        vec![disabled("No recent projects")]
+    } else {
+        recents
+            .iter()
+            .enumerate()
+            .map(|(i, r)| item(format!("recent:{i}"), r.name.clone()))
+            .collect()
+    };
+    menu.push(MenuEntry::Submenu {
+        text: "Recent projects".into(),
+        items: recent_items,
+    });
+    let task_items = if tasks.is_empty() {
+        vec![disabled("Nothing running")]
+    } else {
+        tasks
+            .iter()
+            .map(|t| {
+                if t.stoppable {
+                    item(format!("stop:{}", t.id), format!("Stop {}", t.label))
+                } else {
+                    disabled(&short(&t.label))
+                }
+            })
+            .collect()
+    };
+    menu.push(MenuEntry::Submenu {
+        text: format!("Background work ({})", tasks.len()),
+        items: task_items,
+    });
+    menu.push(MenuEntry::Separator);
+    menu.push(item("capture", "Capture diagnostic screenshot"));
+    menu.push(MenuEntry::Separator);
+    menu.push(item("quit", "Quit Debrief"));
+    menu
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayAction {
+    ShowWindow(String),
+    NewWindow,
+    Recent(usize),
+    Stop(String),
+    Capture,
+    Quit,
+}
+
+/// The action of a menu item id (see [`menu_model`]).
+pub fn parse_action(id: &str) -> Option<TrayAction> {
+    match id {
+        "new-window" => Some(TrayAction::NewWindow),
+        "capture" => Some(TrayAction::Capture),
+        "quit" => Some(TrayAction::Quit),
+        _ => {
+            let (kind, arg) = id.split_once(':')?;
+            match kind {
+                "window" if !arg.is_empty() => Some(TrayAction::ShowWindow(arg.into())),
+                "recent" => arg.parse().ok().map(TrayAction::Recent),
+                "stop" if !arg.is_empty() => Some(TrayAction::Stop(arg.into())),
+                _ => None,
+            }
+        }
+    }
+}
+
+pub fn tooltip(running: usize) -> String {
+    match running {
+        0 => "Debrief".into(),
+        1 => "Debrief \u{2014} 1 background task running".into(),
+        n => format!("Debrief \u{2014} {n} background tasks running"),
+    }
+}
+
+/// Whether a tray icon exists (closing the last window may keep Debrief running in it).
+pub fn available<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.try_state::<TrayState>().is_some_and(|t| t.available.load(Ordering::SeqCst))
+}
+
+#[cfg(test)]
+pub fn set_available<R: Runtime>(app: &AppHandle<R>, on: bool) {
+    if let Some(t) = app.try_state::<TrayState>() {
+        t.available.store(on, Ordering::SeqCst);
+    }
+}
+
+/// Creates the tray icon. A failure (no tray on this desktop) is logged and Debrief runs without one.
+pub fn create<R: Runtime>(app: &AppHandle<R>) {
+    // Without a taskbar (a service session, a CI runner) the tray calls would have nowhere to go.
+    if !host_available() {
+        log::info!("No taskbar to hold a tray icon; Debrief runs without one");
+        return;
+    }
+    if let Err(e) = build(app) {
+        log::warn!("no system tray icon: {e}");
+        return;
+    }
+    if let Some(t) = app.try_state::<TrayState>() {
+        t.available.store(true, Ordering::SeqCst);
+    }
+    refresh(app);
+}
+
+/// Whether the desktop has somewhere to show a tray icon: on Windows the taskbar's window exists (it does
+/// not in session 0 or without Explorer); on Linux GTK is initialised (the tray menu is a GTK menu, and GTK
+/// panics instead of returning an error when it is not: a display alone is not enough, the event loop
+/// initialises GTK, which the test harness's mock runtime never does). Elsewhere, and in Windows tests (the
+/// mock runtime has its own tray), the platform reports failures itself.
+fn host_available() -> bool {
+    #[cfg(all(windows, not(test)))]
+    {
+        use windows::core::w;
+        use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+        // SAFETY: a plain lookup with constant, NUL-terminated class names; nothing is retained.
+        unsafe { FindWindowW(w!("Shell_TrayWnd"), windows::core::PCWSTR::null()) }.is_ok_and(|h| !h.is_invalid())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        gtk::is_initialized()
+    }
+    #[cfg(not(any(all(windows, not(test)), target_os = "linux")))]
+    {
+        true
+    }
+}
+
+fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    use tauri::tray::TrayIconBuilder;
+    let builder = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip(tooltip(0))
+        .menu(&to_menu(app, &menu_model(&[], &[], &[]))?)
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app, event| {
+            if let Some(action) = parse_action(event.id().as_ref()) {
+                handle(app, action);
+            }
+        });
+    // A template image follows the macOS menu bar's light/dark appearance.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray-template.png"))?)
+        .icon_as_template(true);
+    #[cfg(not(target_os = "macos"))]
+    let builder = match app.default_window_icon() {
+        Some(icon) => builder.icon(icon.clone()),
+        None => builder,
+    };
+    builder.build(app)?;
+    Ok(())
+}
+
+fn to_menu<R: Runtime>(app: &AppHandle<R>, model: &[MenuEntry]) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+    let menu = Menu::new(app)?;
+    for entry in model {
+        match entry {
+            MenuEntry::Item { id, text, enabled } => menu.append(&MenuItem::with_id(app, id, text, *enabled, None::<&str>)?)?,
+            MenuEntry::Separator => menu.append(&PredefinedMenuItem::separator(app)?)?,
+            MenuEntry::Submenu { text, items } => {
+                let sub = Submenu::new(app, text, true)?;
+                for i in items {
+                    if let MenuEntry::Item { id, text, enabled } = i {
+                        sub.append(&MenuItem::with_id(app, id, text, *enabled, None::<&str>)?)?;
+                    }
+                }
+                menu.append(&sub)?;
+            }
+        }
+    }
+    Ok(menu)
+}
+
+/// Rebuilds the menu and tooltip when what they show changed, on the main thread soon (coalesced, never
+/// waited for: see [`crate::ui_dispatch`]). Never fails; callable from any thread.
+pub fn refresh<R: Runtime>(app: &AppHandle<R>) {
+    crate::ui_dispatch::post(app, crate::ui_dispatch::Slot::Tray, refresh_now);
+}
+
+/// [`refresh`] on the calling thread (the main thread: tray and window getters wait for it).
+fn refresh_now<R: Runtime>(app: &AppHandle<R>) {
+    let Some(state) = app.try_state::<TrayState>() else { return };
+    if !state.available.load(Ordering::SeqCst) {
+        return;
+    }
+    let tasks = app.try_state::<BackgroundTasks>().map(|t| t.list()).unwrap_or_default();
+    let recents = crate::recent::recents(app).list().projects;
+    let model = menu_model(&list(app), &recents, &tasks);
+    let tip = tooltip(tasks.len());
+    {
+        let mut shown = crate::sync::lock(&state.shown);
+        if shown.as_ref().is_some_and(|(m, t)| *m == model && *t == tip) {
+            return;
+        }
+        *shown = Some((model.clone(), tip.clone()));
+    }
+    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
+    let _ = tray.set_tooltip(Some(&tip));
+    match to_menu(app, &model) {
+        Ok(menu) => {
+            let _ = tray.set_menu(Some(menu));
+        }
+        Err(e) => log::warn!("could not update the tray menu: {e}"),
+    }
+}
+
+/// Runs a tray action.
+pub fn handle<R: Runtime>(app: &AppHandle<R>, action: TrayAction) {
+    let result: CmdResult<()> = match action {
+        TrayAction::ShowWindow(label) => reveal(app, &label),
+        TrayAction::NewWindow => open_new(app, Vec::new())
+            .map(|_| ())
+            .map_err(|e| crate::CmdError::from(crate::err(e))),
+        TrayAction::Recent(i) => {
+            let recent = crate::recent::recents(app).list().projects.get(i).cloned();
+            match recent {
+                Some(r) => {
+                    crate::instance::open_files(app, crate::instance::existing(&[r.path.into()]), false);
+                    Ok(())
+                }
+                None => Err("that recent project is no longer listed".into()),
+            }
+        }
+        TrayAction::Stop(id) => {
+            let handle = app.clone();
+            // Stopping may block briefly (joins a worker, runs logman): off the UI thread.
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Some(tasks) = handle.try_state::<BackgroundTasks>() {
+                    if let Err(e) = tasks.stop(&id) {
+                        log::warn!("could not stop background work: {e:#}");
+                    }
+                }
+            });
+            Ok(())
+        }
+        TrayAction::Capture => match target(app) {
+            Some(label) => {
+                let shown = reveal(app, &label);
+                emit_to_window(app, &label, CAPTURE_EVENT, ());
+                shown
+            }
+            None => Err("there is no window to capture".into()),
+        },
+        TrayAction::Quit => {
+            quit(app);
+            Ok(())
+        }
+    };
+    if let Err(e) = result {
+        log::warn!("tray action failed: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::background::TaskKind;
+    use crate::recent::RecentProject;
+    use crate::test_support::{test_app, window};
+    use tauri::Listener;
+
+    fn win(label: &str, title: &str) -> WindowInfo {
+        WindowInfo {
+            label: label.into(),
+            title: title.into(),
+            focused: false,
+            visible: true,
+        }
+    }
+
+    fn task(id: &str, stoppable: bool) -> TaskInfo {
+        TaskInfo {
+            id: id.into(),
+            label: format!("Task {id}"),
+            kind: TaskKind::LiveTail,
+            window: None,
+            progress: None,
+            stoppable,
+            started_at: 0,
+        }
+    }
+
+    fn ids(menu: &[MenuEntry]) -> Vec<String> {
+        menu.iter()
+            .flat_map(|e| match e {
+                MenuEntry::Item { id, .. } => vec![id.clone()],
+                MenuEntry::Separator => vec!["-".into()],
+                MenuEntry::Submenu { items, .. } => ids(items),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn menu_model_lists_windows_recents_and_tasks() {
+        let empty = menu_model(&[], &[], &[]);
+        assert_eq!(
+            ids(&empty),
+            ["new-window", "-", "new-window", "none", "none", "-", "capture", "-", "quit"]
+        );
+        let one = menu_model(&[win("main", "Debrief")], &[], &[]);
+        assert_eq!(ids(&one)[0], "window:main");
+        let recents = [RecentProject {
+            path: "/p/a.debriefproj".into(),
+            name: "Incident".into(),
+            opened_at: 0,
+        }];
+        let many = menu_model(
+            &[win("main", "A"), win("w-2", &"long".repeat(40))],
+            &recents,
+            &[task("live:main", true), task("x", false)],
+        );
+        assert_eq!(
+            ids(&many),
+            [
+                "window:main",
+                "window:w-2",
+                "-",
+                "new-window",
+                "recent:0",
+                "stop:live:main",
+                "none",
+                "-",
+                "capture",
+                "-",
+                "quit"
+            ]
+        );
+        match &many[1] {
+            MenuEntry::Item { text, .. } => assert!(text.chars().count() <= MAX_TEXT && text.ends_with('\u{2026}')),
+            other => panic!("{other:?}"),
+        }
+        assert!(many.contains(&MenuEntry::Submenu {
+            text: "Background work (2)".into(),
+            items: vec![item("stop:live:main", "Stop Task live:main"), disabled("Task x")],
+        }));
+    }
+
+    #[test]
+    fn actions_and_tooltip() {
+        assert_eq!(parse_action("window:w-2"), Some(TrayAction::ShowWindow("w-2".into())));
+        assert_eq!(parse_action("new-window"), Some(TrayAction::NewWindow));
+        assert_eq!(parse_action("recent:3"), Some(TrayAction::Recent(3)));
+        assert_eq!(parse_action("stop:live:main"), Some(TrayAction::Stop("live:main".into())));
+        assert_eq!(parse_action("capture"), Some(TrayAction::Capture));
+        assert_eq!(parse_action("quit"), Some(TrayAction::Quit));
+        for bad in ["none", "recent:x", "window:", "stop:", "other:1", ""] {
+            assert_eq!(parse_action(bad), None, "{bad}");
+        }
+        assert_eq!(tooltip(0), "Debrief");
+        assert_eq!(tooltip(1), "Debrief \u{2014} 1 background task running");
+        assert_eq!(tooltip(3), "Debrief \u{2014} 3 background tasks running");
+    }
+
+    /// Linux: without GTK initialised (the mock runtime never does, whatever the display) there is no tray, and
+    /// creating one degrades instead of panicking in GTK.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn without_gtk_there_is_no_tray_and_asking_for_one_does_not_panic() {
+        let app = test_app(None);
+        assert!(!gtk::is_initialized(), "the test harness never initialises GTK");
+        create(app.handle());
+        assert!(!available(app.handle()));
+        refresh_now(app.handle());
+    }
+
+    #[test]
+    fn recents_are_listed_and_actions_run() {
+        let app = test_app(None);
+        let h = app.handle().clone();
+        // An absolute folder on every platform (`/p` has no drive on Windows).
+        let root = if cfg!(windows) { "C:/p" } else { "/p" };
+        let main = window(&app, "main");
+        for i in (0..3).rev() {
+            crate::recent::recents(&h).record_project(&format!("{root}/{i}.debriefproj"), &format!("P{i}"));
+        }
+        let recents = crate::recent::recents(&h).list().projects;
+        assert_eq!(recents.len(), 3);
+        assert_eq!(recents[0].name, "P0");
+
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let c = captured.clone();
+        main.listen(CAPTURE_EVENT, move |_| *c.lock().unwrap() += 1);
+        handle(&h, TrayAction::Capture);
+        assert_eq!(*captured.lock().unwrap(), 1);
+        handle(&h, TrayAction::NewWindow);
+        assert!(app.get_webview_window("w-2").is_some());
+        handle(&h, TrayAction::ShowWindow("w-2".into()));
+        handle(&h, TrayAction::Recent(99));
+        // A listed project that does not exist opens nothing.
+        handle(&h, TrayAction::Recent(0));
+        handle(&h, TrayAction::Stop("nothing".into()));
+        // Without a tray, refresh is a no-op; with one (mock), the model is remembered.
+        assert!(!available(&h));
+        refresh(&h);
+        set_available(&h, true);
+        refresh(&h);
+        assert!(app.state::<TrayState>().shown.lock().unwrap().is_some());
+        refresh(&h);
+    }
+}

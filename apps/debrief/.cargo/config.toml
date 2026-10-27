@@ -1,0 +1,8 @@
+# Machine-local settings, both git-ignored: libduckdb.toml written by `cargo xtask libduckdb` (DUCKDB_LIB_DIR,
+# DUCKDB_INCLUDE_DIR), and ci.toml written by the shared build-folder action on CI's host runners (build.target-dir: the
+# job's build folder outside the checkout, as configuration because sccache hashes CARGO_TARGET_DIR).
+include = [{ path = "libduckdb.toml", optional = true }, { path = "ci.toml", optional = true }]
+
+[alias]
+# Repository chores (xtask/): `cargo xtask gen-samples`, `cargo xtask libduckdb`, `cargo xtask help`.
+xtask = "run -p xtask --"

@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 32 32">
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
   <title>Pitwall 24px</title>
   <defs>
-    <linearGradient id="p1cbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient>
-    <mask id="p1cm0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M11.5 13.5V16.5M14 12V18M16.5 11V19M19 12V18M21.5 13.5V16.5" fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></mask>
+    <linearGradient id="pitwall-24-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7B46DB"/><stop offset="1" stop-color="#43198F"/></linearGradient>
+    
   </defs>
-  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#p1cbg)"/>
-  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#24094F" stroke-opacity="0.35" stroke-width="0.5"/>
-  <path d="M11 7.5H21A5 5 0 0 1 26 12.5V17.5A5 5 0 0 1 21 22.5H11A5 5 0 0 1 6 17.5V12.5A5 5 0 0 1 11 7.5ZM8.5 20L14 22L8 26Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1.2" stroke-linejoin="round" mask="url(#p1cm0)"/>
+  <path d="M6.25 1H17.75A5.25 5.25 0 0 1 23 6.25V17.75A5.25 5.25 0 0 1 17.75 23H6.25A5.25 5.25 0 0 1 1 17.75V6.25A5.25 5.25 0 0 1 6.25 1Z" fill="url(#pitwall-24-bg)"/>
+  <path d="M6.25 1.25H17.75A5 5 0 0 1 22.75 6.25V17.75A5 5 0 0 1 17.75 22.75H6.25A5 5 0 0 1 1.25 17.75V6.25A5 5 0 0 1 6.25 1.25Z" fill="none" stroke="#24094F" stroke-opacity="0.35" stroke-width="0.5"/>
+  <path d="M6 19L14 23L14 13L6 9Z" fill="#B5B8C8" shape-rendering="crispEdges"/><path d="M14 23L18 21L18 11L14 13Z" fill="#73798D" shape-rendering="crispEdges"/><path d="M6 9L14 13L18 11L10 7Z" fill="#FFFFFF" shape-rendering="crispEdges"/><path d="M7 15.5L13 18.5L13 13.5L7 10.5Z" fill="#1E1638" shape-rendering="crispEdges"/><path d="M8 15L9 15.5L9 14.5L8 14Z" fill="#EAE4FF" shape-rendering="crispEdges"/><path d="M10 16L11 16.5L11 14.5L10 14Z" fill="#EAE4FF" shape-rendering="crispEdges"/><path d="M12 17L13 17.5L13 14.5L12 14Z" fill="#EAE4FF" shape-rendering="crispEdges"/><path d="M11 9.5L12 10L13 9.5L12 9Z" fill="#B99AF2" shape-rendering="crispEdges"/><path d="M7 17.5L13 20.5L13 19.5L7 16.5Z" fill="#2A2D3D" shape-rendering="crispEdges"/><path d="M8 9L9 9.5L9 4.5L8 4Z" fill="#2F2A3D" shape-rendering="crispEdges"/><path d="M9 9.5L10 9L10 4L9 4.5Z" fill="#1C1826" shape-rendering="crispEdges"/><path d="M13 10.5L15 11.5L15 10.5L13 9.5Z" fill="#2F2A3D" shape-rendering="crispEdges"/><path d="M13 9.5L15 10.5L17 9.5L15 8.5Z" fill="#4A4459" shape-rendering="crispEdges"/>
 </svg>

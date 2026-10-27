@@ -128,8 +128,30 @@ fn a_paired_pitwall_streams_an_answer_through_the_assistant() {
     w.assistant.shutdown();
 }
 
+/// `Echo`, but it runs only once the test opens the gate: the engine asks Pitwall for the next turn right after the
+/// tool returns, so the test must have scripted that answer first (otherwise the fake repeats the tool call).
+struct GatedEcho {
+    echo: Echo,
+    gate: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl AssistantTool for GatedEcho {
+    fn spec(&self) -> ToolSpec {
+        self.echo.spec()
+    }
+    fn budget(&self) -> ToolBudget {
+        self.echo.budget()
+    }
+    fn call(&self, input: &serde_json::Value, cancel: &Cancel) -> ToolOutput {
+        // A dropped sender (the test failed) also opens the gate.
+        let _ = self.gate.lock().unwrap().recv();
+        self.echo.call(input, cancel)
+    }
+}
+
 #[test]
 fn the_tool_protocol_runs_over_pitwalls_chat_api() {
+    let (open_gate, gate) = std::sync::mpsc::channel();
     let runs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let w = world(
         FakeState {
@@ -141,7 +163,10 @@ fn the_tool_protocol_runs_over_pitwalls_chat_api() {
         },
         true,
         1,
-        vec![Arc::new(Echo(runs.clone()))],
+        vec![Arc::new(GatedEcho {
+            echo: Echo(runs.clone()),
+            gate: std::sync::Mutex::new(gate),
+        })],
     );
     let ack = w.assistant.send(ask("echo hi"), w.sink.clone()).unwrap();
     let first = until(&w.rx, |e| matches!(e, AssistantEvent::ToolStarted { .. }));
@@ -158,6 +183,7 @@ fn the_tool_protocol_runs_over_pitwalls_chat_api() {
         .collect();
     assert_eq!(shown, "Checking. ");
     w.fake.state().chat = answer(&["It said hi."]);
+    open_gate.send(()).unwrap();
     let rest = until_end(&w.rx);
     assert_eq!(done(&rest).0, "It said hi.");
     assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);

@@ -1,7 +1,7 @@
 [package]
 name = "paddock-proc"
 version = "0.1.0"
-description = "Child processes for the Paddock apps: commands without a console window, runs with a timeout and an output cap, supervised children whose whole tree ends on drop, a memory cap that counts proportional memory, process memory (PSS on Linux, threads skipped) and the user's login PATH."
+description = "Child processes for the Paddock apps: commands without a console window, runs with a timeout and an output cap, supervised children whose whole tree ends on drop, a memory cap that counts real memory, process memory (PSS on Linux, physical footprint on macOS, private working set on Windows; never RSS) and the user's login PATH."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -15,8 +15,8 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-# The kill-on-close job object of every supervised child (plan X54).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects"] }
+# The kill-on-close job object of every supervised child (plan X54) and the private working set (rule 26).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [dev-dependencies]
 # The never-panics test of the parsers (conformance check C36).

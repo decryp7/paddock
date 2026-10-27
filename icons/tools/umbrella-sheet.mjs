@@ -3,7 +3,9 @@
 import { Resvg } from '@resvg/resvg-js';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { APPS, UMBRELLA, NAMES, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { APPS, UMBRELLA, NAMES } from './design.mjs';
+import { master, small, tray } from './iso-family.mjs';
+const masterSvg = (a, o) => master(a, o), smallSvg = (a, s) => small(a, s), traySvg = (a, st, theme) => tray(a, st, theme);
 
 const out = process.argv[2];
 mkdirSync(out, { recursive: true });
@@ -47,7 +49,7 @@ for (const a of UMBRELLA) {
   // Real-size strips.
   parts.push(`<rect x="10" y="800" width="560" height="40" fill="#ECECEC"/><rect x="10" y="850" width="560" height="40" fill="#2A2A2E"/><rect x="10" y="900" width="560" height="40" fill="#F3F3F3"/><rect x="10" y="950" width="560" height="40" fill="#202020"/>`);
   [16, 18, 32, 36].forEach((px, j) => parts.push(img(png(tpl, px), 30 + j * 60, 820 - px / 2, px), `<g filter="url(#inv)">${img(png(tpl, px), 30 + j * 60, 870 - px / 2, px)}</g>`));
-  [16, 20, 24, 32].forEach((px, j) => parts.push(img(png(lt, px), 30 + j * 60, 920 - px / 2, px), img(png(dk, px), 30 + j * 60, 970 - px / 2, px)));
+  [16, 32].forEach((px, j) => parts.push(img(png(lt, px), 30 + j * 60, 920 - px / 2, px), img(png(dk, px), 30 + j * 60, 970 - px / 2, px)));
   parts.push(txt(420, 825, 'template 16/18/32/36 on light bar', '#16171A'), txt(420, 875, 'template inverted on dark bar', '#E9EAED'), txt(420, 925, 'Windows light 16/20/24/32', '#16171A'), txt(420, 975, 'Windows dark 16/20/24/32', '#E9EAED'));
   writeFileSync(join(out, `${a}-small-tray.png`), new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="1000">${parts.join('')}</svg>`).render().asPng());
   writeFileSync(join(out, `${a}-master-512.png`), png(masterSvg(a), 512));

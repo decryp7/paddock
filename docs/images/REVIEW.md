@@ -301,3 +301,13 @@ hero, legible in both themes. Polish:
   narrow labelled buses so the empty grey area disappears.
 - P3: the "planned" pill crowds the name in the Pacenotes boxes (about 13 px between "Pacenotes" and the pill) and sits on a
   different baseline from it. Put the pill on the name's baseline or widen the gap to 20 px.
+
+## Isometric icon switch-over (2026-10-27, independent Opus review)
+
+Approved, no P1. The 8 `src/icons/*.svg` are byte-identical to `icons/<app>/<app>-60.svg`; the ecosystem SVG and both PNGs
+use only the new isometric frames and match each other in Chromium. P2s for the next diagram pass:
+- `paddock-ecosystem.svg` repeats icon IDs per copy (210 duplicates): prefix IDs per copy in `src/ecosystem.mjs` and add an
+  ID-uniqueness check.
+- The ecosystem SVG has a transparent background: add a themed background rect.
+- Pacenotes' olive tile is the least saturated; Pitwall and Sighter are close at 16–32 px (next icon pass).
+- Right-hand connector labels sit about 5 px off the left-hand ones.

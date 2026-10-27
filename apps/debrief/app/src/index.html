@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Debrief</title>
+  <base href="/">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+</head>
+<body>
+  <!-- The start-up splash (ADR 0058; Paddock lesson): shown until Angular renders the shell, styled by styles.scss (no
+       inline styles: CSP). scripts/ci/check-index.mjs checks it in the built page. -->
+  <debrief-root>
+    <div class="debrief-splash" role="status" data-testid="boot-splash">
+      <img class="debrief-splash-logo" src="brand/debrief-macos.svg" alt="" width="48" height="48">
+      <p>Starting Debrief&hellip;</p>
+    </div>
+  </debrief-root>
+</body>
+</html>

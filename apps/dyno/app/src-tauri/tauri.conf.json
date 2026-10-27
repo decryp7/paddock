@@ -1,0 +1,50 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Dyno",
+  "version": "0.1.0",
+  "identifier": "net.decryptology.dyno",
+  "build": {
+    "frontendDist": "../dist/dyno-app/browser",
+    "devUrl": "http://localhost:4200",
+    "beforeDevCommand": "node src-tauri/scripts/sidecar.mjs --dev && npm run start",
+    "beforeBuildCommand": "node src-tauri/scripts/sidecar.mjs && npm run build && node scripts/check-index.mjs dist/dyno-app/browser/index.html"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "Dyno",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "zoomHotkeysEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "dmg", "app"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "externalBin": ["binaries/dyno-agent", "binaries/dyno-helper", "binaries/dyno"],
+    "category": "Utility",
+    "shortDescription": "Measures, explains and tunes your PC",
+    "longDescription": "Dyno measures your PC, explains why it is slow and tunes it: a background agent keeps the history, the tray icon shows the load, and nothing changes without your say-so."
+  },
+  "mainBinaryName": "dyno-app",
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": ["https://dev.decryptology.net/decryp7/paddock/releases/download/dyno-latest/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

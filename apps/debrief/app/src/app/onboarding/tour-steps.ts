@@ -1,0 +1,56 @@
+/** One stop of the guided tour. */
+export interface TourStep {
+  id: string;
+  title: string;
+  text: string;
+  /** View to open (DockService.show) before looking for the target; none for a centred step. */
+  view?: string;
+  /** CSS selector of the element to spotlight; none for a centred step. */
+  target?: string;
+}
+
+/** The tour of the demo incident: what each part of the screen is for. Every step, the first included, points at its control. */
+export const TOUR_STEPS: readonly TourStep[] = [
+  {
+    id: 'timeline',
+    title: $localize`:@@onboarding.tour.timeline.title:Timeline`,
+    text: $localize`:@@onboarding.tour.timeline.text:This demo is a real-looking incident: an order service crashed on one machine while others kept running. Each lane is one running instance (machine and process); coloured marks are errors, crashes and restarts. Drag across the timeline to zoom into a moment. Six quick stops show where to look: use the arrow keys, or press Escape to leave at any time.`,
+    view: 'timeline',
+    target: 'debrief-timeline-panel',
+  },
+  {
+    id: 'events',
+    title: $localize`:@@onboarding.tour.events.title:Events`,
+    text: $localize`:@@onboarding.tour.events.text:Every event that matches your filters, in time order. Click one to see all of its properties in the inspector; right-click for actions.`,
+    view: 'events',
+    target: 'debrief-events-grid',
+  },
+  {
+    id: 'query',
+    title: $localize`:@@onboarding.tour.query.title:Search or query`,
+    text: $localize`:@@onboarding.tour.query.textField:Type words to search the messages, or ask precise questions like level >= error and MachineName = "WEB01" and press Enter. It completes field names as you type and points at mistakes.`,
+    view: 'events',
+    target: 'debrief-query-field',
+  },
+  {
+    id: 'moment',
+    title: $localize`:@@onboarding.tour.moment.title:Moment`,
+    text: $localize`:@@onboarding.tour.moment.text:What was happening around a point in time, across every source: errors, starts and stops, slow requests. Pick a time on the timeline to fill it.`,
+    view: 'moment',
+    target: 'debrief-moment-view',
+  },
+  {
+    id: 'markers',
+    title: $localize`:@@onboarding.tour.markers.title:Markers`,
+    text: $localize`:@@onboarding.tour.markers.text:Markers label important events (crashes, restarts, deployments) on the timeline. Add your own rules here; they are saved in your profile.`,
+    view: 'markers',
+    target: 'debrief-markers-manager',
+  },
+  {
+    id: 'home',
+    title: $localize`:@@onboarding.tour.home.title:Home`,
+    text: $localize`:@@onboarding.tour.home.text:The dashboard: the numbers, the history of events and the health check, most severe first, each with a button that takes you there. It opens after every import. That is the tour: enjoy exploring!`,
+    view: 'home',
+    target: 'debrief-home-view',
+  },
+];

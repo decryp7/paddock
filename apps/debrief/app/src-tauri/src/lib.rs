@@ -1,0 +1,1335 @@
+//! Tauri shell: exposes the debrief-core workspace to the Angular UI. The command
+//! names and payloads are documented in app/src/app/core/api.types.ts.
+//!
+//! This file is the composition root only. Where things go:
+//! - **Commands**: implement them (async) in a module and add one line to [`command_table!`] with their kind,
+//!   windows and request limit.
+//!   A command that works on a window's workspace takes
+//!   [`windows::CurrentWindow`] (resolved from the calling window's label);
+//!   app-wide state is a `State<'_, T>` of something managed in [`setup`].
+//! - **Per-window state**: a field of [`windows::WindowState`] (created by
+//!   [`AppState::new_window`], dropped when the window is destroyed).
+//! - **App-wide state**: `app.manage(...)` in [`setup`], in the "managed
+//!   state" block.
+//! - **Background work** the user can see and stop (tray, status bar):
+//!   register with [`background::BackgroundTasks`] when it runs until stopped; work that ends is a
+//!   job ([`jobs::run`]), listed in the Jobs pane with progress, Cancel and Retry.
+//! - **Settings sections**: `settings::register(...)` in [`setup`].
+//! - **Events to one window**: [`windows::emit_to_window`]; never `emit` window-specific events to all.
+
+mod activity;
+mod after_first_paint;
+mod agent_commands;
+mod ai;
+mod app_context;
+mod app_dirs;
+mod app_state;
+mod background;
+mod browser;
+mod builtin_sections;
+mod clef;
+mod commands;
+mod config_diff;
+mod config_store;
+mod demo;
+mod dev_overrides;
+mod diagnostics;
+mod dialog_contracts;
+mod dialog_placement;
+mod dialog_windows;
+mod drag_ghost;
+mod dumps;
+mod encodings;
+mod engine;
+mod engine_errors;
+mod error;
+mod file_commands;
+#[cfg(test)]
+mod generated_types;
+mod health;
+mod insights;
+mod instance;
+mod investigate;
+mod jobs;
+mod legal;
+mod lifecycle;
+mod live;
+mod logging;
+mod menu;
+mod names;
+mod native_feel;
+mod notes;
+mod notification_centre;
+mod notify;
+mod opener;
+mod panel_windows;
+mod parsers;
+mod paste;
+mod paths;
+mod performance;
+mod plugin_config;
+mod plugin_packages;
+mod pointer;
+mod profile;
+mod profiling;
+mod query_cancel;
+mod recent;
+mod redacted_copy;
+mod search_everything;
+mod services;
+mod settings;
+mod share;
+mod skew_commands;
+mod smart_search;
+mod snapshots;
+mod startup_timings;
+mod startup_watchdog;
+mod storage;
+mod store_pane;
+mod symbols;
+mod sync;
+mod system;
+mod tools;
+mod tray;
+mod ui_dispatch;
+mod updater;
+mod video;
+mod watched;
+mod window_capture;
+mod window_manager;
+mod window_prefs;
+mod window_scoped;
+mod windows;
+mod workspace_commands;
+
+pub(crate) use app_state::AppState;
+pub(crate) use tauri::State;
+
+use tauri::{Emitter, Manager};
+
+pub(crate) use error::{CmdError, CmdResult, ErrorCode};
+
+pub(crate) fn err(e: impl std::fmt::Display) -> String {
+    format!("{e:#}")
+}
+
+/// One mebibyte, for the table's request limits.
+const MIB: usize = 1024 * 1024;
+
+/// Declares the command table (see [`commands`]): `Kind [windows] (limit <bytes>)? => path,` per command. It
+/// defines [`COMMANDS`] and the `handler!` macro that builds the invoke handler from the same list.
+macro_rules! command_table {
+    ($( $(#[$doc:meta])* $kind:ident [$($win:ident)|+] $(limit $limit:expr)? => $($seg:ident)::+ ),* $(,)?) => {
+        /// Every command the UI can invoke, with its kind, windows and request limit.
+        pub(crate) static COMMANDS: &[commands::Spec] = &[
+            $( commands::Spec {
+                path: stringify!($($seg)::+),
+                kind: commands::Kind::$kind,
+                windows: 0 $(| commands::$win)+,
+                limit: commands::limit(&[$($limit)?]),
+            }, )*
+        ];
+        macro_rules! handler {
+            () => {
+                tauri::generate_handler![ $( $($seg)::+ ),* ]
+            };
+        }
+    };
+}
+
+// Every command the UI can invoke: one line each (ADR 0016). Kind: Query (read-only), Mutation, Quiet
+// (polling and bookkeeping). Windows: MAIN (`main`, `w-*`), POPOUT (`p-*`), DIALOG (`d-*`: opens the command to dialog
+// contracts; a dialog window may call it only when its own contract in `dialog-contracts.json` names it, ADR 0054),
+// WINDOW = MAIN | POPOUT | DIALOG. Limit: the largest request in bytes (default `commands::DEFAULT_LIMIT`).
+command_table! {
+    Query [WINDOW] => workspace_commands::workspace_summary,
+    Mutation [WINDOW] => workspace_commands::open_paths,
+    Mutation [WINDOW] => workspace_commands::remove_source,
+    Mutation [WINDOW] => workspace_commands::clear_workspace,
+    Mutation [WINDOW] => workspace_commands::reload_workspace,
+    Query [WINDOW] => workspace_commands::query_page,
+    Query [WINDOW] => workspace_commands::query_timeline,
+    Query [WINDOW] => workspace_commands::query_facet,
+    Query [WINDOW] => workspace_commands::query_chart,
+    Query [WINDOW] => workspace_commands::preview_extractor,
+    Mutation [WINDOW] => workspace_commands::export_events,
+    Query [WINDOW] => workspace_commands::source_context,
+    Mutation [WINDOW] => file_commands::open_source_file,
+    Quiet [MAIN] => workspace_commands::take_pending_open,
+    Mutation [WINDOW] => workspace_commands::set_live,
+    Mutation [WINDOW] => workspace_commands::set_import_window,
+    Query [WINDOW] => watched::watched_folders,
+    Mutation [WINDOW] => watched::add_watched_folder,
+    Mutation [WINDOW] => watched::remove_watched_folder,
+    Mutation [WINDOW] => watched::set_watched_folder_enabled,
+    Quiet [WINDOW] => workspace_commands::import_progress,
+    Query [WINDOW] => workspace_commands::overview,
+    Query [WINDOW] => workspace_commands::home_summary,
+    Query [WINDOW] => workspace_commands::annotations,
+    Query [WINDOW] => workspace_commands::query_runs,
+    Query [WINDOW] => workspace_commands::preview_spans,
+    Query [WINDOW] => workspace_commands::plugin_events,
+    Query [WINDOW] => workspace_commands::import_problems,
+    Query [WINDOW] limit MIB => workspace_commands::evaluate_fix,
+    Query [WINDOW] => workspace_commands::index_status,
+    Query [WINDOW] => store_pane::store_overview,
+    Query [WINDOW] => store_pane::store_segments,
+    Query [WINDOW] => store_pane::store_fields,
+    Query [WINDOW] => store_pane::store_index,
+    Query [WINDOW] => store_pane::store_memory,
+    Mutation [WINDOW] => store_pane::store_maintenance,
+    Query [WINDOW] => store_pane::sql_schema,
+    Query [WINDOW] => store_pane::sql_run,
+    Query [WINDOW] => store_pane::sql_page,
+    Query [WINDOW] => store_pane::sql_ids,
+    Mutation [WINDOW] => store_pane::sql_export,
+    Mutation [WINDOW] limit 16 * MIB => workspace_commands::save_project,
+    Mutation [WINDOW] => workspace_commands::open_project,
+    Query [WINDOW] => live::tail_status,
+    Query [WINDOW] => live::live_state,
+    Mutation [WINDOW] => live::mute_alerts,
+    Mutation [WINDOW] => live::unmute_alerts,
+    Mutation [WINDOW] => live::open_paths_live,
+    Query [WINDOW] => insights::run_query,
+    Query [WINDOW] => query_cancel::run_query_stream,
+    Query [WINDOW] => smart_search::search_partial,
+    Query [WINDOW] => search_everything::search_everything,
+    Query [WINDOW] => search_everything::find_values,
+    Mutation [WINDOW] => names::names_accept,
+    Mutation [WINDOW] => names::names_reject,
+    Mutation [WINDOW] => names::names_undo,
+    Mutation [WINDOW] => names::names_remove_alias,
+    Query [WINDOW] => insights::check_query,
+    Query [WINDOW] => insights::complete_query,
+    Query [WINDOW] limit MIB => insights::classify_search,
+    Query [WINDOW] => insights::query_patterns,
+    Query [WINDOW] => insights::query_exceptions,
+    Query [WINDOW] => insights::query_anomalies,
+    Query [WINDOW] => insights::query_outliers,
+    Query [WINDOW] => insights::compare_windows,
+    Query [WINDOW] => insights::field_stats,
+    Query [WINDOW] => insights::correlate,
+    Query [WINDOW] => insights::query_traces,
+    Query [WINDOW] => insights::query_requests,
+    Query [WINDOW] => insights::query_moment,
+    Query [WINDOW] limit MIB => insights::preview_parse,
+    Query [WINDOW] limit MIB => insights::infer_regex,
+    Query [WINDOW] => insights::explain_regex,
+    Query [WINDOW] => config_diff::config_diff_formats,
+    Query [WINDOW] => config_diff::diff_configs,
+    Query [WINDOW] limit 4 * MIB => config_diff::diff_snapshots,
+    Mutation [WINDOW] => config_diff::export_config_diff,
+    Mutation [WINDOW] => skew_commands::set_source_offset,
+    Query [WINDOW] => skew_commands::suggest_offsets,
+    Mutation [WINDOW] => profiling::profiling_open,
+    Query [WINDOW] => profiling::profiling_sniff,
+    Query [WINDOW] => profiling::profiling_frame_paths,
+    Query [WINDOW] => profiling::profiling_list,
+    Mutation [WINDOW] => profiling::profiling_close,
+    Query [WINDOW] => profiling::profiling_spans,
+    Query [WINDOW] => profiling::profiling_hotspots,
+    Query [WINDOW] => profiling::profiling_tree,
+    Query [WINDOW] => profiling::profiling_hot_path,
+    Query [WINDOW] => profiling::profiling_butterfly,
+    Query [WINDOW] => profiling::profiling_flame,
+    Query [WINDOW] => profiling::profiling_diff_flame,
+    Query [WINDOW] => profiling::profiling_function_diff,
+    Query [WINDOW] => profiling::profiling_threads,
+    Query [WINDOW] => profiling::profiling_findings,
+    Query [WINDOW] => profiling::profiling_moment,
+    Query [WINDOW] => profiling::profiling_heap_types,
+    Query [WINDOW] => profiling::profiling_heap_diff,
+    Query [WINDOW] => profiling::profiling_heap_growth,
+    Query [WINDOW] => profiling::profiling_heap_dominators,
+    Query [WINDOW] => profiling::profiling_heap_instances,
+    Query [WINDOW] => profiling::profiling_heap_paths,
+    Query [WINDOW] limit 4 * 1024 => profiling::profiling_heap_findings,
+    Query [WINDOW] => video::runtime_commands::video_runtime,
+    Mutation [WINDOW] => video::runtime_commands::video_runtime_install,
+    Mutation [WINDOW] => video::runtime_commands::video_runtime_rollback,
+    Mutation [WINDOW] => video::runtime_commands::video_runtime_delete,
+    Mutation [WINDOW] => video::runtime_commands::video_runtime_set_custom,
+    Mutation [WINDOW] => video::runtime_commands::video_runtime_clear_custom,
+    Query [WINDOW] => video::commands::video_sniff,
+    Query [WINDOW] => video::commands::video_list,
+    Mutation [WINDOW] => video::commands::video_open,
+    Query [WINDOW] => video::commands::video_frame_image,
+    Mutation [WINDOW] => video::commands::video_frame_to_image,
+    Mutation [WINDOW] => video::commands::video_set_alignment,
+    Mutation [WINDOW] => video::commands::video_set_note,
+    Mutation [WINDOW] => video::commands::video_remove_frame,
+    Mutation [WINDOW] => video::commands::video_add_frame,
+    Mutation [WINDOW] => video::commands::video_include,
+    Mutation [WINDOW] => video::commands::video_remove,
+    Mutation [WINDOW] => video::commands::video_describe,
+    Mutation [WINDOW] => video::commands::video_read_clock,
+    Query [WINDOW] => video::commands::video_explain,
+    Query [WINDOW] => dumps::dumps_sniff,
+    Mutation [WINDOW] => dumps::dumps_open,
+    Query [WINDOW] => dumps::dumps_list,
+    Mutation [WINDOW] => dumps::dumps_close,
+    Query [WINDOW] => dumps::dumps_overview,
+    Query [WINDOW] => dumps::dumps_threads,
+    Query [WINDOW] => dumps::dumps_stack,
+    Query [WINDOW] => dumps::dumps_modules,
+    Query [WINDOW] => dumps::dumps_findings,
+    Query [WINDOW] => dumps::dumps_umdh_diff,
+    Query [WINDOW] => dumps::dumps_umdh_stack,
+    Query [WINDOW] => dumps::dumps_umdh_tree,
+    Query [WINDOW] => dumps::dumps_markers,
+    Query [WINDOW] => dumps::dumps_explain,
+    Query [WINDOW] => profile::get_profile,
+    Query [WINDOW] limit MIB => profile::validate_profile,
+    Mutation [WINDOW] limit MIB => profile::save_profile,
+    Query [WINDOW] => profile::profile_history,
+    Query [WINDOW] => profile::profile_version,
+    Mutation [WINDOW] => profile::import_profile,
+    Mutation [WINDOW] limit MIB => profile::export_profile,
+    Query [WINDOW] => parsers::commands::parsers_list,
+    Query [WINDOW] => parsers::commands::parser_get,
+    Query [WINDOW] limit MIB => parsers::commands::parser_validate,
+    Mutation [WINDOW] limit MIB => parsers::commands::parser_save,
+    Mutation [WINDOW] => parsers::commands::parser_duplicate,
+    Mutation [WINDOW] => parsers::commands::parser_remove,
+    Mutation [WINDOW] => parsers::commands::parser_set_enabled,
+    Query [WINDOW] => parsers::commands::parser_import_check,
+    Mutation [WINDOW] => parsers::commands::parser_export,
+    Query [WINDOW] limit MIB => parsers::commands::parser_draft,
+    Mutation [WINDOW] => parsers::commands::parsers_reread,
+    Mutation [WINDOW] => parsers::commands::parser_assign,
+    Mutation [WINDOW] limit 16 * MIB => paste::paste_log,
+    Query [WINDOW] => redacted_copy::redacted_copy_choices,
+    Query [WINDOW] => redacted_copy::redacted_copy_preview,
+    Mutation [WINDOW] limit 64 * MIB => redacted_copy::export_redacted_copy,
+    Query [WINDOW] => encodings::list_encodings,
+    Mutation [WINDOW] => encodings::set_source_encoding,
+    Query [WINDOW] => demo::demo_paths,
+    Mutation [WINDOW] limit 8 * MIB => snapshots::save_error_snapshot,
+    Query [WINDOW] => snapshots::list_error_snapshots,
+    Query [WINDOW] => window_capture::capture_window_image,
+    Query [WINDOW] => snapshots::read_error_snapshot,
+    Mutation [WINDOW] => snapshots::delete_error_snapshot,
+    Mutation [WINDOW] => snapshots::open_snapshots_folder,
+    Mutation [WINDOW] => snapshots::export_diagnostics,
+    Query [WINDOW] => storage::storage_usage,
+    Mutation [MAIN | DIALOG] => storage::storage_clear,
+    Query [WINDOW] => storage::storage_stores,
+    Mutation [MAIN | DIALOG] => storage::storage_stores_clear,
+    Query [WINDOW] => storage::storage_policy,
+    Mutation [MAIN | DIALOG] => storage::storage_set_policy,
+    Mutation [WINDOW] => storage::storage_reveal,
+    Query [WINDOW] limit MIB => activity::report::problem_report_preview,
+    Mutation [WINDOW] limit MIB => activity::report::save_problem_report,
+    Mutation [WINDOW] => activity::report::open_activity_log,
+    Query [WINDOW] => activity::report::open::diagnostics_report,
+    Query [WINDOW] => activity::report::open::diagnostics_report_image,
+    Query [WINDOW] => diagnostics::diagnostics_settings,
+    Mutation [WINDOW] => diagnostics::set_diagnostics_settings,
+    Query [WINDOW] => system::elevation,
+    Mutation [MAIN | DIALOG] => system::restart_elevated,
+    Mutation [WINDOW] => paths::pick_paths,
+    Query [WINDOW] => system::read_file_head,
+    Query [WINDOW] => tools::tools_list,
+    Mutation [WINDOW] limit MIB => tools::tool_invoke,
+    Quiet [WINDOW] limit 64 * 1024 => tools::tool_poll,
+    Query [WINDOW] limit 4 * 1024 => tools::tool_task_job,
+    Query [WINDOW] => agent_commands::agent_schema,
+    Query [WINDOW] => agent_commands::agent_config_load,
+    Query [WINDOW] limit MIB => agent_commands::agent_config_validate,
+    Mutation [WINDOW] limit MIB => agent_commands::agent_config_save,
+    Query [WINDOW] => agent_commands::agent_runs,
+    Query [WINDOW] => agent_commands::agent_run_manifest,
+    Mutation [WINDOW] => agent_commands::agent_open_run,
+    Query [WINDOW] => lifecycle::app_status,
+    Query [WINDOW] => legal::legal_text,
+    Mutation [MAIN | DIALOG] => lifecycle::restart_app,
+    Mutation [MAIN | DIALOG] => plugin_config::plugin_reset,
+    Mutation [MAIN | DIALOG] => plugin_config::plugin_set_enabled,
+    Query [MAIN | DIALOG] => plugin_packages::plugin_packages_list,
+    Query [MAIN | DIALOG] => plugin_packages::plugin_package_inspect,
+    Mutation [MAIN | DIALOG] => plugin_packages::plugin_package_install,
+    Mutation [MAIN | DIALOG] => plugin_packages::plugin_package_remove,
+    Mutation [MAIN | DIALOG] => plugin_packages::plugin_package_set_enabled,
+    Mutation [MAIN | DIALOG] => plugin_packages::plugin_package_set_permissions,
+    Quiet [MAIN] limit 16 * MIB => lifecycle::save_session,
+    Query [MAIN] => lifecycle::last_session,
+    Mutation [MAIN] => lifecycle::restore_windows,
+    Query [WINDOW] => settings::settings_sections,
+    Mutation [WINDOW] limit MIB => settings::set_settings,
+    Mutation [MAIN | DIALOG] => settings::reset_settings,
+    Mutation [WINDOW] => settings::export_settings,
+    Mutation [MAIN | DIALOG] => settings::import_settings,
+    Mutation [WINDOW] => window_manager::new_window,
+    Mutation [WINDOW] => window_manager::close_window,
+    Mutation [WINDOW] => window_manager::quit_app,
+    Query [WINDOW] => window_manager::list_windows,
+    Mutation [WINDOW] => window_manager::focus_window,
+    Quiet [MAIN] => window_manager::set_window_title,
+    Quiet [WINDOW] => startup_watchdog::window_ready,
+    Quiet [MAIN] => startup_timings::startup_mark,
+    Query [WINDOW] => startup_timings::startup_timings,
+    Quiet [WINDOW] => startup_watchdog::window_boot_error,
+    Quiet [MAIN] limit 16 * MIB => startup_watchdog::ui_checkpoint,
+    Mutation [MAIN] => window_manager::resolve_close,
+    Mutation [MAIN] => window_manager::resolve_open,
+    Mutation [MAIN] => panel_windows::popout_panel,
+    Quiet [WINDOW] => pointer::pointer_button_down,
+    Quiet [MAIN] limit 3 * MIB => drag_ghost::drag_ghost_start,
+    Quiet [MAIN] => drag_ghost::drag_ghost_show,
+    Quiet [MAIN] => drag_ghost::drag_ghost_end,
+    Mutation [WINDOW] => panel_windows::dock_panel,
+    Query [WINDOW] => panel_windows::list_popouts,
+    Mutation [WINDOW] => panel_windows::set_popout_on_top,
+    Mutation [MAIN | DIALOG] limit 9 * MIB => dialog_windows::dialog_open,
+    Query [DIALOG] => dialog_windows::dialog_take_input,
+    Mutation [DIALOG] => dialog_windows::dialog_close,
+    Mutation [DIALOG] => dialog_windows::dialog_fit_height,
+    Query [WINDOW] => recent::recent_list,
+    Mutation [WINDOW] => recent::recent_remove,
+    Mutation [WINDOW] => recent::recent_clear,
+    Quiet [MAIN] limit MIB => menu::set_app_menu,
+    Query [WINDOW] => background::background_tasks,
+    Mutation [WINDOW] => background::stop_background_task,
+    Query [WINDOW] => jobs::jobs_list,
+    Mutation [WINDOW] => jobs::jobs_cancel,
+    Mutation [WINDOW] => jobs::jobs_retry,
+    Mutation [WINDOW] => jobs::jobs_move,
+    Mutation [WINDOW] => jobs::jobs_clear_finished,
+    Mutation [WINDOW] => jobs::jobs_mark_seen,
+    Mutation [WINDOW] => jobs::jobs_result,
+    Mutation [WINDOW] => jobs::jobs_reveal,
+    Quiet [WINDOW] => jobs::jobs_record,
+    Mutation [WINDOW] limit 4 * MIB => jobs::jobs_restore,
+    Query [WINDOW] => jobs::jobs_wait,
+    Query [WINDOW] => jobs::jobs_unwait,
+    Query [WINDOW] => notification_centre::notifications_list,
+    Mutation [WINDOW] => notification_centre::notifications_mark_read,
+    Mutation [WINDOW] => notification_centre::notifications_mark_all_read,
+    Mutation [WINDOW] => notification_centre::notifications_dismiss,
+    Quiet [WINDOW] => notification_centre::notifications_record,
+    Mutation [WINDOW] limit 4 * MIB => notification_centre::notifications_restore,
+    Query [WINDOW] => performance::commands::performance_suggest,
+    Query [WINDOW] => performance::commands::performance_preset,
+    Query [WINDOW] => performance::commands::performance_memory,
+    Mutation [WINDOW] => performance::commands::performance_set_plugin_memory,
+    Query [WINDOW] => health::commands::health_snapshot,
+    Mutation [WINDOW] => health::commands::health_repair,
+    Query [WINDOW] => browser::research::ai_research_draft,
+    Mutation [WINDOW] => browser::research::ai_research,
+    Query [WINDOW] => browser::driving::browser_driving,
+    Mutation [WINDOW] => browser::commands::browser_open_and_read,
+    Query [WINDOW] => ai::commands::ai_status,
+    Query [WINDOW] => ai::commands::ai_hardware,
+    Query [WINDOW] => ai::commands::ai_recommend,
+    Query [WINDOW] => ai::commands::ai_refine_fit,
+    Query [WINDOW] => ai::commands::ai_catalog,
+    Query [WINDOW] => ai::commands::ai_setup_plan,
+    Mutation [WINDOW] => ai::commands::ai_setup_run,
+    Mutation [WINDOW] => ai::commands::ai_setup_background,
+    Query [WINDOW] => ai::commands::ai_models,
+    Mutation [WINDOW] => ai::commands::ai_model_activate,
+    Mutation [WINDOW] => ai::commands::ai_model_delete,
+    Mutation [WINDOW] => ai::commands::ai_model_add_local,
+    Mutation [WINDOW] => ai::commands::ai_reset,
+    Mutation [WINDOW] => ai::pitwall::ai_pitwall_connect,
+    Mutation [WINDOW] => ai::pitwall::ai_pitwall_cancel,
+    Mutation [WINDOW] => ai::pitwall::ai_pitwall_forget,
+    Query [WINDOW] => ai::pitwall::ai_pitwall_refresh,
+    Mutation [WINDOW] => ai::pitwall::ai_engine_use_built_in,
+    Mutation [WINDOW] => ai::commands::ai_start,
+    Mutation [WINDOW] => ai::commands::ai_cancel,
+    Query [WINDOW] => ai::folder_setup::folder_survey,
+    Query [WINDOW] => ai::folder_setup::folder_setup_compose,
+    Query [WINDOW] => ai::commands::ai_chat_sessions,
+    Mutation [WINDOW] => ai::commands::ai_chat_new,
+    Query [WINDOW] => ai::commands::ai_chat_get,
+    Mutation [WINDOW] => ai::commands::ai_chat_delete,
+    Mutation [WINDOW] => ai::commands::ai_chat_send,
+    Mutation [WINDOW] => ai::commands::ai_chat_cancel,
+    Quiet [WINDOW] => ai::commands::ai_chat_events_since,
+    Query [WINDOW] => ai::commands::ai_chat_history,
+    Mutation [WINDOW] limit 8 * MIB => ai::commands::ai_chat_restore,
+    Mutation [WINDOW] => ai::commands::ai_chat_export_markdown,
+    Query [WINDOW] => ai::commands::ai_suggested_prompts,
+    Mutation [WINDOW] => ai::commands::ai_open_link,
+    Query [WINDOW] => ai::knowledge::commands::ai_knowledge_list,
+    Query [WINDOW] => ai::knowledge::commands::ai_knowledge_get,
+    Mutation [WINDOW] limit MIB => ai::knowledge::commands::ai_knowledge_create,
+    Mutation [WINDOW] => ai::knowledge::commands::ai_knowledge_import,
+    Mutation [WINDOW] limit MIB => ai::knowledge::commands::ai_knowledge_update,
+    Mutation [WINDOW] => ai::knowledge::commands::ai_knowledge_remove,
+    Mutation [WINDOW] => ai::knowledge::commands::ai_knowledge_export,
+    Query [WINDOW] => ai::knowledge::commands::ai_knowledge_project_record,
+    Mutation [WINDOW] limit 16 * MIB => ai::knowledge::commands::ai_knowledge_project_restore,
+    Query [WINDOW] => notes::commands::notes_list,
+    Mutation [WINDOW] limit MIB => notes::commands::notes_add,
+    Mutation [WINDOW] limit MIB => notes::commands::notes_update,
+    Mutation [WINDOW] => notes::commands::notes_remove,
+    Query [WINDOW] => notes::commands::notes_record,
+    Mutation [WINDOW] limit 16 * MIB => notes::commands::notes_restore,
+    Mutation [WINDOW] => notes::commands::notes_image_open,
+    Query [WINDOW] => notes::commands::notes_image_get,
+    Mutation [WINDOW] => ai::vision::ai_image_open,
+    Mutation [WINDOW] limit 48 * MIB => ai::vision::ai_image_paste,
+    Mutation [WINDOW] => ai::vision::ai_image_close,
+    Mutation [WINDOW] => ai::vision::ai_model_install_projector,
+    Mutation [WINDOW] => ai::vision::ai_model_add_projector,
+    Mutation [WINDOW] => browser::commands::browser_open,
+    Query [WINDOW] => browser::commands::browser_event_query,
+    Mutation [WINDOW] => browser::commands::browser_capture,
+    Query [WINDOW] => browser::commands::browser_sources,
+    Mutation [WINDOW] => browser::commands::browser_discard_sources,
+    Query [WINDOW] => browser::commands::browser_chat_status,
+    Mutation [WINDOW] => browser::commands::browser_set_read_along,
+    Mutation [WINDOW] => browser::commands::browser_set_agent,
+    Mutation [WINDOW] => browser::commands::browser_agent_stop,
+    Mutation [WINDOW] => browser::commands::browser_agent_continue,
+    Mutation [WINDOW] => browser::commands::browser_agent_respond,
+    Mutation [WINDOW] => browser::commands::browser_open_suggested,
+    Mutation [WINDOW] => browser::commands::browser_stop,
+    Mutation [WINDOW] => browser::commands::research_browser_close,
+    Query [WINDOW] => browser::commands::browser_research_profile_status,
+    Mutation [WINDOW] => browser::commands::browser_research_profile_clear,
+    Query [WINDOW] => browser::runtime::browser_runtime_status,
+    Mutation [WINDOW] => browser::runtime::browser_runtime_install,
+    Mutation [WINDOW] => browser::runtime::browser_runtime_remove,
+    Query [WINDOW] => ai::runtime_commands::ai_runtimes,
+    Mutation [WINDOW] => ai::runtime_commands::ai_runtime_install,
+    Mutation [WINDOW] => ai::runtime_commands::ai_runtime_add_archives,
+    Query [WINDOW] => ai::manual::ai_manual_download,
+    Mutation [WINDOW] => ai::manual::ai_manual_download_open,
+    Mutation [WINDOW] => ai::runtime_commands::ai_runtime_delete,
+    Mutation [WINDOW] => ai::runtime_commands::ai_runtime_choose,
+    Query [WINDOW] => ai::update_commands::ai_updates_status,
+    Mutation [WINDOW] => ai::update_commands::ai_updates_check,
+    Mutation [WINDOW] => ai::update_commands::ai_updates_apply,
+    Mutation [WINDOW] => ai::update_commands::ai_updates_skip,
+    Mutation [WINDOW] => ai::update_commands::ai_updates_later,
+    Mutation [WINDOW] => share::set_redacted_view,
+    Query [WINDOW] => share::preview_redaction,
+    Query [WINDOW] => share::redaction_summary,
+    Query [WINDOW] => share::dashboard_tile,
+    Query [WINDOW] => investigate::issues::known_issues_match,
+    Query [WINDOW] => investigate::issues::known_issues_suggest,
+    Query [WINDOW] => investigate::incident::incident_report_build,
+    Query [WINDOW] => investigate::incident::incident_narrative,
+    Query [WINDOW] => investigate::playbooks::playbook_library,
+    Mutation [WINDOW] => investigate::playbooks::playbook_save,
+    Mutation [WINDOW] => investigate::playbooks::playbook_remove,
+    Mutation [WINDOW] => investigate::playbooks::playbook_import,
+    Mutation [WINDOW] => investigate::playbooks::playbook_export,
+    Query [WINDOW] => investigate::playbooks::playbook_run_step,
+    Query [WINDOW] => investigate::playbooks::playbook_start,
+    Query [WINDOW] => investigate::playbooks::playbook_record,
+    Query [WINDOW] => investigate::playbooks::playbook_restore,
+    Mutation [WINDOW] limit 32 * MIB => share::export_report,
+    Mutation [WINDOW] limit 32 * MIB => share::save_visual,
+    Query [WINDOW] => share::estimate_bundle,
+    Mutation [WINDOW] limit 32 * MIB => share::create_bundle,
+    Mutation [WINDOW] => share::open_bundle,
+    Query [WINDOW] => updater::updates_status,
+    Query [WINDOW] => updater::updates_check,
+    Mutation [WINDOW] => updater::updates_download,
+    Mutation [WINDOW] => updater::updates_discard,
+    Mutation [MAIN | DIALOG] => updater::updates_install_on_quit,
+    Mutation [MAIN | DIALOG] => updater::updates_restart,
+    Mutation [WINDOW] => updater::updates_open_releases,
+}
+
+/// Window size and position are remembered per window label; visibility is
+/// not (start in the tray decides it).
+fn window_state_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    use tauri_plugin_window_state::StateFlags;
+    let builder = tauri_plugin_window_state::Builder::default()
+        .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+        .with_filter(|label| !window_manager::is_auxiliary(label));
+    match app_dirs::window_state_file(dev_overrides::current().data_dir.as_deref()) {
+        Some(file) => builder.with_filename(file.to_string_lossy()),
+        None => builder,
+    }
+    .build()
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Whether this process was started as a test's fake browser (`chromium_driver::fake`): such a process must never
+/// build the app or open a window on the user's desktop (Paddock rule 7), whatever binary the fake names.
+fn started_as_fake_browser(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
+    var(chromium_driver::FAKE_CHILD_ENV).is_some()
+}
+
+pub fn run() {
+    if started_as_fake_browser(|k| std::env::var_os(k)) {
+        eprintln!(
+            "Debrief refuses to start as a test's fake browser ({} is set)",
+            chromium_driver::FAKE_CHILD_ENV
+        );
+        std::process::exit(2);
+    }
+    // The start-up timings count from here (rule 16).
+    startup_timings::process_started();
+    // Debug builds only: test-run overrides (browser arguments, data folder, paths to open); a bad value stops here.
+    if let Err(e) = dev_overrides::init() {
+        eprintln!("Debrief cannot start: {e}");
+        std::process::exit(2);
+    }
+    // `debrief-app --export-diagnostics [<path.zip>] [--force]`: the problem report without the UI, then exit.
+    if let Some(code) = activity::report::cli::run_if_requested() {
+        std::process::exit(code);
+    }
+    // `debrief-app [--safe-mode] [--new-instance] [--new-window] <paths...>`
+    let mut launch = instance::parse_args(std::env::args().skip(1), std::env::current_dir().ok().as_deref());
+    launch.paths.extend(dev_overrides::current().open_paths.iter().cloned());
+    let safe_mode_env = std::env::var_os("DEBRIEF_SAFE_MODE").is_some();
+    let single = instance::wants_single_instance(&launch, safe_mode_env);
+    let safe_mode = launch.safe_mode || safe_mode_env;
+
+    let mut context = tauri::generate_context!();
+    // Debug test runs with their own data folder also get their own identifier, which keys the single-instance lock.
+    let identifier = dev_overrides::instance_identifier(&context.config().identifier, dev_overrides::current().data_dir.as_deref());
+    context.config_mut().identifier = identifier;
+
+    let mut builder = tauri::Builder::default();
+    // Must be the first plugin: a second launch hands over and exits before anything else runs.
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    if single {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            instance::on_second_instance(app, argv, cwd)
+        }));
+    }
+    // A crashed WebKit content process is logged (fatal) and its webview reloaded (macOS only in Tauri 2.12).
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        builder = builder.on_web_content_process_terminate(window_manager::web_content_terminated);
+    }
+    builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(window_state_plugin())
+        .plugin(updater::plugin())
+        // The player's videos (ADR 0033 §7): only the calling window's project videos, in bounded ranges.
+        .register_asynchronous_uri_scheme_protocol(video::media::SCHEME, video::media::handler)
+        .setup(move |app| setup(app, &launch, safe_mode, single))
+        // The start-up contract (ADR 0058): a page that does not report ready in time is reloaded, then the user asked.
+        .on_page_load(startup_watchdog::on_page_load)
+        .on_window_event(window_manager::on_window_event)
+        // Every IPC command is logged (with the UI's operation id) before it runs: see `activity`. A web page
+        // in the internal browser gets no command at all: see `browser::guard`.
+        .invoke_handler(commands::guard(activity::logged(handler!())))
+        .build(context)
+        .expect("error while building Debrief")
+        .run(on_run_event);
+}
+
+fn setup(app: &mut tauri::App, launch: &instance::LaunchArgs, safe_mode: bool, single: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let timings = startup_timings::StartupTimings::default();
+    // From the process start to here: argument parsing, the Tauri builder and its plugins, the event loop.
+    timings.step("before setup");
+    // Before any window: its first page load arms the start-up watchdog.
+    app.manage(startup_watchdog::StartupWatchdog::default());
+    create_main_window(app)?;
+    timings.mark(startup_timings::Mark::WindowCreated);
+    timings.step("main window");
+    app.manage(timings);
+    let handle = app.handle().clone();
+    let step = move |name: &'static str| handle.state::<startup_timings::StartupTimings>().step(name);
+    // Debrief's folders and run flags, resolved once (see `app_context`).
+    let ctx = app_context::AppContext::of(app.handle(), safe_mode, single);
+    let diag = diagnostics::load(ctx.config.as_deref());
+    // `tracing` with CLEF to daily files; `log` records pass the activity logger (breadcrumbs, error
+    // dedup) on their way to it, the webview's through the log plugin's command: see `logging`.
+    logging::init(app.handle(), ctx.log.as_deref(), &diag.log)?;
+    activity::set_config(diag.activity);
+    // Child processes' stderr and start/exit lines (for problem reports): `<logs>/children/<name>.log`.
+    if let Some(dir) = &ctx.log {
+        debrief_ipc::child_log::set_dir(activity::report::children_dir(dir));
+        // Old logs are removed in the background (a folder scan the first window does not need).
+        let (dir, days) = (dir.clone(), diag.log.max_age_days);
+        std::thread::spawn(move || diagnostics::prune_old_logs(&dir, days, std::time::SystemTime::now()));
+    }
+    lifecycle::install_panic_logging();
+    step("logging");
+    let life = lifecycle::Lifecycle::begin_in(ctx.data.clone(), ctx.safe_mode, lifecycle::InstanceScope::of(ctx.single_instance));
+    let previous_crash = life.previous_crash;
+    step("lifecycle");
+    log::info!(Version = env!("CARGO_PKG_VERSION"), SafeMode = safe_mode, PreviousCrash = previous_crash, SingleInstance = single; "Application starting — Debrief {}", env!("CARGO_PKG_VERSION"));
+
+    // ---- managed state (app-wide) ----
+    // The store worker's libduckdb ships in the resource folder `lib/` (tauri.sidecars.conf.json).
+    let lib_dir = tauri::Manager::path(app).resource_dir().ok().map(|d| d.join("lib"));
+    let shared = AppState::new(
+        ctx.config.as_ref().map(|d| d.join("profiles")),
+        ctx.data.clone(),
+        lib_dir,
+        ctx.data.as_ref().map(|d| d.join("plugins")),
+        ctx.safe_mode,
+    )?;
+    step("app state");
+    if let Some(problem) = shared.plugins.problem() {
+        log::error!("Plugins are unavailable: {problem}");
+    }
+    // Plugin processes start in the background at once: the stored settings (applied in the background too) talk to
+    // them, and the first import does not wait for one.
+    shared.plugins.warm_up();
+    // The store worker starts in the background once the main window painted (its start would compete with the
+    // window's), so the first query does not wait for it.
+    let after_paint = after_first_paint::AfterFirstPaint::default();
+    {
+        let stores = shared.stores.clone();
+        after_paint.later("store-worker", move || stores.warm_up());
+    }
+    app.manage(after_paint);
+    after_first_paint::arm_fallback(app.handle());
+    // Scratch stores no window or session will use again (left by a crash) are removed in the background.
+    {
+        let (root, keep, config) = (shared.store_root.clone(), life.session_stores(), ctx.config.clone());
+        std::thread::spawn(move || {
+            engine::sweep_scratch(&root, &keep);
+            storage::auto_clean_stores(config, &root, &keep);
+        });
+    }
+    step("plugins warm-up and sweep");
+    app_context::install(app.handle(), ctx);
+    let windows = windows::Windows::new(shared.factory());
+    // The startup window opens the paths given on the command line.
+    windows.get_or_create(windows::MAIN)?.queue(instance::existing(&launch.paths));
+    app.manage(shared);
+    app.manage(windows);
+    app.manage(panel_windows::Popouts::default());
+    app.manage(dialog_windows::Dialogs::default());
+    app.manage(drag_ghost::DragGhosts::default());
+    app.manage(life);
+    step("context and windows");
+    startup_watchdog::start(app.handle());
+    app.manage(background::BackgroundTasks::default());
+    app.manage(window_prefs::SharedPrefs::default());
+    app.manage(notify::Notifier::default());
+    app.manage(tray::TrayState::default());
+    jobs::init(app.handle());
+    step("jobs");
+    notification_centre::init(app.handle());
+    step("notification centre");
+    performance::attach_notifications(app.handle());
+    step("performance");
+    health::commands::init(app.handle());
+    step("health");
+
+    // ---- settings ----
+    settings::init(app.handle());
+    step("settings");
+    symbols::init(app.handle());
+    step("symbols");
+    plugin_packages::init(app.handle());
+    step("plugin packages");
+    window_prefs::register(app.handle())?;
+    step("window prefs");
+    updater::init(app.handle());
+    step("updater");
+    ai::init(app.handle(), safe_mode);
+    step("ai");
+    video::init(app.handle());
+    step("video");
+    browser::init(app.handle());
+    step("browser");
+    snapshots::prune_on_startup(app.handle());
+    step("snapshots");
+
+    // ---- background work, tray and the first window ----
+    let handle = app.handle().clone();
+    app.state::<background::BackgroundTasks>().subscribe(move |tasks| {
+        let _ = handle.emit(background::TASKS_EVENT, tasks);
+        tray::refresh(&handle);
+    });
+    // The tray icon is not needed for the first window: it is created after the first paint, unless Debrief starts in
+    // the tray (then it is the only way back to the window).
+    let start_minimized = app.state::<window_prefs::SharedPrefs>().get().start_minimized;
+    if start_minimized {
+        tray::create(app.handle());
+    } else {
+        let handle = app.handle().clone();
+        app.state::<after_first_paint::AfterFirstPaint>()
+            .later("tray", move || ui_dispatch::run(&handle, tray::create));
+    }
+    step("tray");
+    menu::install(app.handle());
+    step("menu");
+    let in_tray = start_minimized && tray::available(app.handle());
+    if let Some(main) = app.get_window(windows::MAIN) {
+        if !in_tray {
+            main.show()?;
+            let _ = main.set_focus();
+        }
+    }
+    step("show window");
+    session_notices(app.handle(), previous_crash, safe_mode);
+    if previous_crash {
+        notify::notify(
+            app.handle(),
+            notify::NotificationKind::CrashDetected,
+            !in_tray,
+            "Debrief did not close properly",
+            "Open Debrief to restore your last session.",
+        );
+    }
+    step("notices");
+    startup_timings::mark(app, startup_timings::Mark::SetupDone);
+    Ok(())
+}
+
+/// A recovered crash and safe mode are app messages in the notification centre (the lifecycle banner
+/// offers the restore itself).
+fn session_notices<R: tauri::Runtime>(app: &tauri::AppHandle<R>, previous_crash: bool, safe_mode: bool) {
+    use notification_centre::centre::{NewNotice, NoticeScope, NoticeSeverity, NoticeSource};
+    if previous_crash {
+        let n = NewNotice::new(
+            format!("session:crash:{}", activity::session_id()),
+            NoticeSource::Session,
+            NoticeSeverity::Warning,
+            "Debrief did not close properly",
+            NoticeScope::App,
+        )
+        .body("Your last session can be restored; jobs that were running are listed as interrupted, with Retry.");
+        notification_centre::post(app, None, n, None);
+    }
+    if safe_mode {
+        let n = NewNotice::new(
+            format!("session:safe:{}", activity::session_id()),
+            NoticeSource::Session,
+            NoticeSeverity::Info,
+            "Debrief runs in safe mode",
+            NoticeScope::App,
+        )
+        .body("Plugins and the AI are off for this run. Restart Debrief normally to turn them on again.");
+        notification_centre::post(app, None, n, None);
+    }
+}
+
+/// The startup window from `tauri.conf.json` (`create: false` there), built here so it gets the same
+/// [`dev_overrides`] and [`native_feel`] as every other window.
+fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
+    let config = app.config().app.windows.iter().find(|w| w.label == windows::MAIN).cloned();
+    let config = config.ok_or_else(|| tauri::Error::WindowNotFound)?;
+    native_feel::build(tauri::WebviewWindowBuilder::from_config(app, &config)?)?;
+    Ok(())
+}
+
+fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    match event {
+        tauri::RunEvent::ExitRequested { code, .. } => {
+            log::info!(Code = code.unwrap_or_default(); "Exit requested");
+            if let Some(w) = app.try_state::<windows::Windows>() {
+                w.set_exiting();
+            }
+            lifecycle::arm_exit_watchdog(app, code.unwrap_or_default());
+        }
+        tauri::RunEvent::Exit => {
+            log::info!("Exit: tearing down");
+            lifecycle::exit_teardown(app);
+            log::info!("Application is shutting down");
+            // Last: may hand over to the update installer (which ends the process on Windows).
+            updater::on_exit(app);
+        }
+        // Files opened from Finder (double-click, "Open with").
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        tauri::RunEvent::Opened { urls } => {
+            let paths: Vec<std::path::PathBuf> = urls.iter().filter_map(|u| u.to_file_path().ok()).collect();
+            instance::open_files(app, instance::existing(&paths), false);
+        }
+        // The Dock icon was clicked while every window is hidden.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen {
+            has_visible_windows: false,
+            ..
+        } => instance::open_files(app, Vec::new(), false),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod fake_browser_guard_tests {
+    /// Regression: a fake browser that named the app binary instead of the lib test binary started the whole app (a
+    /// window on the user's desktop and every plugin process). `run` now stops before anything is built.
+    #[test]
+    fn the_app_refuses_to_start_as_a_fake_browser() {
+        let set = |k: &str| (k == chromium_driver::FAKE_CHILD_ENV).then(|| "1".into());
+        assert!(super::started_as_fake_browser(set));
+        assert!(!super::started_as_fake_browser(|_| None));
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use std::path::PathBuf;
+    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+
+    pub fn samples() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples")
+    }
+
+    pub struct TempDir(pub PathBuf);
+    impl TempDir {
+        pub fn new(tag: &str) -> TempDir {
+            let p = std::env::temp_dir().join(format!("debrief-app-test-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&p);
+            std::fs::create_dir_all(&p).unwrap();
+            TempDir(p)
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    thread_local! {
+        static SCRATCH: std::cell::RefCell<Vec<tempfile::TempDir>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// A fresh empty folder named `debrief-<prefix>-...` in the OS temp folder, removed when the calling (test) thread
+    /// ends, also after a panic: for folders a helper hands out without a guard the test could keep (a test app's
+    /// scratch stores). CI fails on `debrief-*` folders left behind (docs/testing/temp-leaks.md).
+    pub fn scratch_dir(prefix: &str) -> PathBuf {
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("debrief-{prefix}-"))
+            .tempdir()
+            .expect("create a scratch folder");
+        let path = dir.path().to_path_buf();
+        SCRATCH.with(|k| k.borrow_mut().push(dir));
+        path
+    }
+
+    /// Folders for the whole test process: removed when it exits (an `atexit` handler), for folders that other
+    /// threads keep writing into after the test that made them ended (a test app's scratch stores: the in-process
+    /// store's index and compaction threads), or that code without a test thread asks for (the bundle folder).
+    static PROCESS_SCRATCH: std::sync::Mutex<Vec<tempfile::TempDir>> = std::sync::Mutex::new(Vec::new());
+
+    extern "C" fn remove_process_scratch_at_exit() {
+        remove_process_scratch();
+    }
+
+    /// Removes every folder [`process_scratch_dir`] made (what the exit handler does). A store thread may still be
+    /// writing a file into one while it goes (the removal then finds the folder not empty): asked again a few times.
+    pub fn remove_process_scratch() {
+        let dirs = std::mem::take(&mut *crate::sync::lock(&PROCESS_SCRATCH));
+        for dir in dirs {
+            let path = dir.path().to_path_buf();
+            drop(dir);
+            for _ in 0..20 {
+                if !path.exists() || std::fs::remove_dir_all(&path).is_ok() {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// A fresh empty folder named `debrief-<prefix>-...` in the OS temp folder, removed when the test process exits.
+    pub fn process_scratch_dir(prefix: &str) -> PathBuf {
+        static AT_EXIT: std::sync::Once = std::sync::Once::new();
+        AT_EXIT.call_once(|| {
+            extern "C" {
+                fn atexit(cb: extern "C" fn()) -> std::os::raw::c_int;
+            }
+            // SAFETY: registers a plain `extern "C"` function with the C runtime; it runs once, at exit.
+            let registered = unsafe { atexit(remove_process_scratch_at_exit) };
+            assert_eq!(registered, 0, "atexit failed");
+        });
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("debrief-{prefix}-"))
+            .tempdir()
+            .expect("create a scratch folder");
+        let path = dir.path().to_path_buf();
+        crate::sync::lock(&PROCESS_SCRATCH).push(dir);
+        path
+    }
+
+    #[test]
+    fn process_scratch_folders_live_on_after_their_thread_until_they_are_removed() {
+        let dir = std::thread::spawn(|| process_scratch_dir("probe-process")).join().unwrap();
+        assert!(dir.is_dir(), "kept for later threads");
+        std::fs::write(dir.join("f"), b"x").unwrap();
+        remove_process_scratch();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn scratch_folders_are_removed_when_the_test_thread_ends_even_after_a_panic() {
+        let kept = std::thread::spawn(|| scratch_dir("probe")).join().unwrap();
+        assert!(!kept.exists());
+        let panicked = std::thread::spawn(|| {
+            let p = scratch_dir("probe-panic");
+            std::fs::write(p.join("f"), b"x").unwrap();
+            std::panic::resume_unwind(Box::new(p));
+        })
+        .join()
+        .unwrap_err()
+        .downcast::<PathBuf>()
+        .unwrap();
+        assert!(!panicked.exists());
+    }
+
+    pub fn block<F: std::future::Future>(f: F) -> F::Output {
+        tauri::async_runtime::block_on(f)
+    }
+
+    /// `.now()`: runs a command's future to its end (commands are async; tests call them directly).
+    pub trait Now: std::future::Future + Sized {
+        fn now(self) -> Self::Output {
+            block(self)
+        }
+    }
+
+    impl<F: std::future::Future> Now for F {}
+
+    /// `.json()`: a typed reply as the JSON the UI gets (tests index it like the UI reads it).
+    pub trait Json: serde::Serialize {
+        fn json(&self) -> serde_json::Value {
+            serde_json::to_value(self).unwrap()
+        }
+    }
+
+    impl<T: serde::Serialize> Json for T {}
+
+    /// Imports `paths` into the window's store and waits for it (tests set up a window without the UI).
+    pub fn import(win: &windows::WindowState, paths: &[PathBuf]) -> debrief_core::ports::ImportReport {
+        let store = win.engine.store().unwrap();
+        let report = store.open(paths).unwrap().wait().unwrap();
+        win.set_loaded(true);
+        report
+    }
+
+    /// The window's store summary (what the store has, without the host's parts).
+    pub fn store_summary(win: &windows::WindowState) -> debrief_core::ports::SummaryReply {
+        win.engine.store().unwrap().summary().unwrap()
+    }
+
+    /// Waits for the test app's job `id` to end; how it ended.
+    pub fn job_end(app: &tauri::App<MockRuntime>, id: u64) -> jobs::service::JobOutcome {
+        use tauri::Manager;
+        app.state::<jobs::Jobs>().wait_end(jobs::JobId(id))
+    }
+
+    /// Waits for job `id` to succeed; the line its message shows.
+    pub fn job_done(app: &tauri::App<MockRuntime>, id: u64) -> String {
+        let end = job_end(app, id);
+        assert_eq!(end.state, jobs::JobState::Done, "{end:?}");
+        end.message.unwrap_or_default()
+    }
+
+    /// Waits for job `id`, which a command started and returned (see `jobs::start_value`); the value it ends with, or
+    /// the text of how it failed.
+    pub fn job_value(app: &tauri::App<MockRuntime>, id: u64) -> Result<serde_json::Value, String> {
+        let end = job_end(app, id);
+        match (end.state, end.result) {
+            (jobs::JobState::Done, Some(jobs::JobResult::Value { value })) => Ok(value),
+            (jobs::JobState::Done, Some(jobs::JobResult::File { detail: Some(value), .. })) => Ok(value),
+            (jobs::JobState::Done, Some(jobs::JobResult::Workspace { detail: Some(value) })) => Ok(value),
+            (jobs::JobState::Done, Some(jobs::JobResult::Model { detail: Some(value), .. })) => Ok(value),
+            (state, result) => Err(end
+                .error
+                .unwrap_or_else(|| format!("the job ended {state:?} without a value ({result:?})"))),
+        }
+    }
+
+    /// A started command's result (`CmdResult<job id>`) once its job ended: the job's value, or the command's or the
+    /// job's failure as an error.
+    pub fn finished(app: &tauri::App<MockRuntime>, started: crate::CmdResult<u64>) -> crate::CmdResult<serde_json::Value> {
+        job_value(app, started?).map_err(crate::CmdError::from)
+    }
+
+    /// The commands that start a job and return its id (the job's value is what they used to return).
+    const JOB_COMMANDS: &[&str] = &[
+        "open_paths",
+        "open_paths_live",
+        "reload_workspace",
+        "open_project",
+        "open_bundle",
+        "paste_log",
+        "ai_model_add_local",
+        "ai_model_add_projector",
+    ];
+
+    /// A reply from the IPC of `cmd` as the UI sees it once the job it started has ended: for the commands that start a
+    /// job and return its id, the job's value (or its failure as the error); any other reply as it is.
+    pub fn settle<M: tauri::Manager<MockRuntime>>(
+        m: &M,
+        cmd: &str,
+        reply: Result<serde_json::Value, serde_json::Value>,
+    ) -> Result<serde_json::Value, serde_json::Value> {
+        let id = match &reply {
+            Ok(v) if JOB_COMMANDS.contains(&cmd) => v.as_u64().expect("a job-starting command returns the job's id"),
+            _ => return reply,
+        };
+        let end = m.state::<jobs::Jobs>().wait_end(jobs::JobId(id));
+        match (end.state, end.result) {
+            (jobs::JobState::Done, Some(jobs::JobResult::Workspace { detail: Some(v) })) => Ok(v),
+            (jobs::JobState::Done, Some(jobs::JobResult::Model { detail: Some(v), .. })) => Ok(v),
+            (jobs::JobState::Done, Some(jobs::JobResult::Value { value })) => Ok(value),
+            // A failed job has its message only (not the command error's code), as `jobValue` gives the UI.
+            (state, result) => Err(serde_json::json!({
+                "code": if state == jobs::JobState::Cancelled { "cancelled" } else { "failed" },
+                "message": end.error.unwrap_or_else(|| format!("the job ended {state:?} ({result:?})")),
+                "retryable": true,
+            })),
+        }
+    }
+
+    /// [`finished`], with the job's value as the type the command used to return.
+    pub fn finished_as<T: serde::de::DeserializeOwned>(
+        app: &tauri::App<MockRuntime>,
+        started: crate::CmdResult<u64>,
+    ) -> crate::CmdResult<T> {
+        finished(app, started).map(|v| serde_json::from_value(v).expect("the job's value has the command's type"))
+    }
+
+    /// Runs a command that must only start a job and hands back its output. While it runs no job starts (the test app's job
+    /// service holds them), so a command that waited for its job instead of returning its id would never return: the hang
+    /// detector, not a time bound, ends the test. Deterministic: no wall-clock threshold, so a loaded machine cannot fail
+    /// it (Paddock rule 5). The held jobs start once it returned.
+    pub fn returns_fast<F: std::future::Future>(app: &tauri::AppHandle<MockRuntime>, what: &str, f: F) -> F::Output {
+        let jobs = app.state::<jobs::Jobs>().inner().clone();
+        jobs.hold_starts(true);
+        let out = block(async {
+            tokio::time::timeout(std::time::Duration::from_secs(120), f)
+                .await
+                .unwrap_or_else(|_| panic!("{what} waited for its job instead of returning its id: long work belongs in a job"))
+        });
+        jobs.hold_starts(false);
+        out
+    }
+
+    /// Runs a command that must only start a job, with the window's `kind` queue occupied by a job that cannot finish until the
+    /// command has returned. A command that waited for its job instead of returning its id would never return (the hang
+    /// detector, not a time bound, ends the test). Deterministic: no wall-clock threshold, so a loaded machine cannot fail it.
+    pub fn returns_while_its_job_is_queued<F: std::future::Future>(
+        app: &tauri::App<MockRuntime>,
+        window: &str,
+        kind: jobs::JobKind,
+        what: &str,
+        f: F,
+    ) -> F::Output {
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let gate = std::sync::Mutex::new(gate);
+        let blocker = jobs::spawn(
+            app.handle(),
+            jobs::JobSpec::new(kind, "blocker").window(window),
+            jobs::Controls::default(),
+            move |ctx: &jobs::JobCtx| -> Result<jobs::Done<()>, String> {
+                loop {
+                    if ctx.is_cancelled() {
+                        return Err("cancelled".into());
+                    }
+                    match gate.lock().unwrap().recv_timeout(std::time::Duration::from_millis(5)) {
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        _ => return Ok(jobs::Done::new(())),
+                    }
+                }
+            },
+        )
+        .expect("the blocking job is accepted");
+        jobs::wait_until("the blocking job to run", || {
+            app.state::<jobs::Jobs>().state_of(blocker) == Some(jobs::JobState::Running)
+        });
+        let out = block(async {
+            tokio::time::timeout(std::time::Duration::from_secs(120), f)
+                .await
+                .unwrap_or_else(|_| panic!("{what} waited for its job instead of returning its id"))
+        });
+        let _ = release.send(());
+        out
+    }
+
+    /// The clock of the test app's jobs and notification centre.
+    pub struct TestClock(pub std::sync::Arc<jobs::ManualClock>);
+
+    /// Builds the bundled plugins binary once when it is not next to the test executable (`cargo test -p debrief-app`
+    /// builds only this crate; `cargo nextest run --workspace` in CI builds every binary), so the tests that need
+    /// the plugins run instead of failing on their absence. `DEBRIEF_PLUGINS` names one built elsewhere.
+    fn ensure_plugins_binary() {
+        static BUILT: std::sync::Once = std::sync::Once::new();
+        BUILT.call_once(|| {
+            if std::env::var_os("DEBRIEF_PLUGINS").is_some() || debrief_plugin_host::builtins::default_binary().exists() {
+                return;
+            }
+            let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+            let mut args = vec!["build", "-p", "debrief-plugins"];
+            if !cfg!(debug_assertions) {
+                args.push("--release");
+            }
+            #[allow(clippy::disallowed_methods)]
+            let built = std::process::Command::new(cargo).args(&args).current_dir(env!("CARGO_MANIFEST_DIR")).status();
+            if !built.is_ok_and(|s| s.success()) {
+                eprintln!("could not build the plugins binary (`cargo build -p debrief-plugins`): the tests that need plugins will fail; build it first");
+            }
+        });
+    }
+
+    /// Stops the plugin processes of the apps a test thread built when that thread ends (even when the test panics).
+    /// A test app is never dropped (the job listeners hold its handle), so nothing else would stop them: they kept
+    /// running until the whole test binary exited, hundreds of them at the end of a run.
+    struct PluginsStopWithTheTest(std::cell::RefCell<Vec<std::sync::Arc<debrief_plugin_host::Builtins>>>);
+
+    impl PluginsStopWithTheTest {
+        fn register(plugins: &std::sync::Arc<debrief_plugin_host::Builtins>) {
+            thread_local! {
+                static GUARD: PluginsStopWithTheTest = const { PluginsStopWithTheTest(std::cell::RefCell::new(Vec::new())) };
+            }
+            let _ = GUARD.try_with(|g| g.0.borrow_mut().push(plugins.clone()));
+        }
+    }
+
+    impl Drop for PluginsStopWithTheTest {
+        fn drop(&mut self) {
+            for p in self.0.get_mut().drain(..) {
+                p.shutdown();
+            }
+        }
+    }
+
+    fn manage(app: tauri::App<MockRuntime>, profile_dir: Option<PathBuf>) -> tauri::App<MockRuntime> {
+        manage_in(app, profile_dir, false)
+    }
+
+    fn manage_in(app: tauri::App<MockRuntime>, profile_dir: Option<PathBuf>, safe_mode: bool) -> tauri::App<MockRuntime> {
+        let plugins = std::sync::Arc::new(if safe_mode {
+            debrief_plugin_host::Builtins::none()
+        } else {
+            ensure_plugins_binary();
+            debrief_plugin_host::Builtins::load(&debrief_plugin_host::builtins::default_binary())
+        });
+        // The store in process, scratch stores under the system temp folder (one folder per test app, removed when
+        // the test process exits: the store's background threads may still write after the test).
+        let root = process_scratch_dir("test-stores");
+        PluginsStopWithTheTest::register(&plugins);
+        let stores = engine::local::with_plugins(plugins.clone(), safe_mode);
+        let shared = AppState::with(profile_dir, safe_mode, plugins, stores, root);
+        let windows = windows::Windows::new(shared.factory());
+        windows.get_or_create(windows::MAIN).unwrap();
+        app.manage(shared);
+        app.manage(windows);
+        app.manage(background::BackgroundTasks::default());
+        app.manage(window_prefs::SharedPrefs::default());
+        app.manage(notify::Notifier::default());
+        app.manage(tray::TrayState::default());
+        // Time stands still in tests unless a test moves it (`TestClock`): jobs never cross the visibility
+        // and attention thresholds by accident.
+        let clock = std::sync::Arc::new(jobs::ManualClock::default());
+        app.manage(TestClock(clock.clone()));
+        let jobs = jobs::Jobs::new(clock.clone());
+        jobs::wire(app.handle(), &jobs);
+        app.manage(jobs);
+        app.manage(notification_centre::NotificationCentre::new(None, clock));
+        health::commands::setup(app.handle());
+        // The repository samples count as chosen in the main window (files in a test's own folder do not).
+        paths::allow_under(app.handle(), windows::MAIN, &samples());
+        browser::manage_state(app.handle(), std::sync::Arc::default());
+        app_context::install(app.handle(), app_context::AppContext::for_tests());
+        app
+    }
+
+    /// An app like the real one (managed state, window events), without windows.
+    pub fn test_app(profile_dir: Option<PathBuf>) -> tauri::App<MockRuntime> {
+        let app = mock_builder()
+            .on_window_event(window_manager::on_window_event)
+            .build(mock_context(noop_assets()))
+            .unwrap();
+        manage(app, profile_dir)
+    }
+
+    /// Like [`test_app`], with the real command handler (for IPC routing tests).
+    pub fn test_app_with_commands(profile_dir: Option<PathBuf>) -> tauri::App<MockRuntime> {
+        let app = mock_builder()
+            .on_window_event(window_manager::on_window_event)
+            .invoke_handler(commands::guard(activity::logged(handler!())))
+            .build(mock_context(noop_assets()))
+            .unwrap();
+        manage(app, profile_dir)
+    }
+
+    /// Like [`test_app_with_commands`], in safe mode (no plugins).
+    pub fn test_app_safe_mode() -> tauri::App<MockRuntime> {
+        let app = mock_builder()
+            .on_window_event(window_manager::on_window_event)
+            .invoke_handler(commands::guard(activity::logged(handler!())))
+            .build(mock_context(noop_assets()))
+            .unwrap();
+        manage_in(app, None, true)
+    }
+
+    /// The origin of the app's own pages, which the IPC ACL treats as local: `tauri://localhost`, but
+    /// `http://tauri.localhost` on Windows (and Android), where wry serves custom protocols over http.
+    pub fn ipc_url() -> tauri::Url {
+        let url = if cfg!(any(windows, target_os = "android")) {
+            "http://tauri.localhost"
+        } else {
+            "tauri://localhost"
+        };
+        url.parse().unwrap()
+    }
+
+    /// The main window's state (as a command would get it).
+    pub fn main_window(app: &tauri::App<MockRuntime>) -> windows::CurrentWindow {
+        windows::CurrentWindow::of(app.handle(), windows::MAIN).unwrap()
+    }
+
+    /// A (mock) window with this label, created when missing.
+    pub fn window(app: &tauri::App<MockRuntime>, label: &str) -> tauri::WebviewWindow<MockRuntime> {
+        app.get_webview_window(label).unwrap_or_else(|| {
+            tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::default())
+                .build()
+                .unwrap()
+        })
+    }
+}
+
+#[cfg(test)]
+mod plugin_processes_tests {
+    use crate::test_support::{import, main_window, samples, test_app};
+
+    fn children() -> usize {
+        let out = debrief_core::process::quiet_command("pgrep")
+            .args(["-P", &std::process::id().to_string()])
+            .output()
+            .expect("pgrep runs");
+        String::from_utf8_lossy(&out.stdout).lines().count()
+    }
+
+    /// The scenario, run alone in its own test process (so no other test's plugins count): an app that imported a
+    /// folder has plugin processes while the test runs and none once the test's thread ended.
+    #[test]
+    fn plugin_processes_do_not_outlive_the_test_that_started_them_in_a_lone_process() {
+        if std::env::var_os("DEBRIEF_PLUGIN_LEAK_PROBE").is_none() {
+            return;
+        }
+        assert_eq!(children(), 0, "a fresh test process has no children");
+        let during = std::thread::spawn(|| {
+            let app = test_app(None);
+            import(&main_window(&app), &[samples().join("serilog-clef")]);
+            children()
+        })
+        .join()
+        .unwrap();
+        assert!(during > 0, "the import started plugin processes");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while children() > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(children(), 0, "plugin processes outlived the test thread that started them");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn plugin_processes_do_not_outlive_the_test_that_started_them() {
+        let name = "plugin_processes_tests::plugin_processes_do_not_outlive_the_test_that_started_them_in_a_lone_process";
+        let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads=1", "--nocapture"])
+            .env("DEBRIEF_PLUGIN_LEAK_PROBE", "1")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

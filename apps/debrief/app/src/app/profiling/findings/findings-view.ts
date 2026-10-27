@@ -1,0 +1,125 @@
+import { ChangeDetectionStrategy, Component, effect, inject, untracked } from '@angular/core';
+import { plural } from '../../i18n/locale';
+import { Evidence, EvidenceView, ProfileFinding } from '../../core/api.types';
+import { AnalysisState } from '../../analysis/analysis-state';
+import { AsyncResource } from '../../analysis/async-resource';
+import { SeverityBadge } from '../../live/severity-badge';
+import { ProfileViewState } from '../profile-view-state.store';
+import { ProfilingBackend } from '../profiling-backend';
+import { formatNs, formatPct } from '../profiling-format';
+import { ActiveProfile, ProfilingNavigator } from '../profiling-navigator';
+import { NoCapture, ProfileBar } from '../profiling-shared';
+import { PROFILING_STYLES } from '../profiling-styles';
+import { FindingsExplainer } from './explain-findings';
+
+const VIEW_LABEL: Record<EvidenceView, string> = {
+  hotspots: $localize`:@@profiling.findings.view.hotspots:hotspots`,
+  callTree: $localize`:@@profiling.findings.view.callTree:call tree`,
+  flame: $localize`:@@profiling.findings.view.flame:flame graph`,
+  butterfly: $localize`:@@profiling.findings.view.butterfly:callers and callees`,
+  timeline: $localize`:@@profiling.findings.view.timeline:thread timeline`,
+  diff: $localize`:@@profiling.findings.view.diff:comparison`,
+};
+
+/** Where an evidence link goes, in words ("call tree · OrderRepository.Save · 2 threads"). */
+export function evidenceSummary(e: Evidence): string {
+  const parts = [VIEW_LABEL[e.view]];
+  if (e.frame) parts.push(e.frame.name);
+  else if (e.path.length) parts.push($localize`:@@profiling.findings.pathOf:path of ${e.path.length}:count: frames`);
+  if (e.range) parts.push(`${formatNs(e.range.fromNs)} – ${formatNs(e.range.toNs)}`);
+  if (e.threads?.length) {
+    const n = e.threads.length;
+    parts.push(
+      plural(n, {
+        one: $localize`:@@profiling.findings.threads.one:${n}:count: thread`,
+        other: $localize`:@@profiling.findings.threads.other:${n}:count: threads`,
+      }),
+    );
+  }
+  if (e.eventKind) parts.push($localize`:@@profiling.findings.events:${e.eventKind}:kind: events`);
+  return parts.join(' · ');
+}
+
+/** The engine's automatic findings for the active profile (and baseline), each linking to its evidence. */
+@Component({
+  selector: 'debrief-findings-view',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [AnalysisState, ProfileBar, NoCapture, SeverityBadge],
+  template: `
+    @if (active.profile(); as p) {
+      <debrief-profile-bar [showMetric]="false" />
+      <div class="bar">
+        <span class="section-title" i18n="@@profiling.findings.title">Findings</span>
+        @if (state.baselineId() !== null) { <span class="muted" i18n="@@profiling.findings.regressions">including regressions against the baseline</span> }
+        @if (res.data()?.length) {
+          <span class="spacer"></span>
+          <button class="btn" type="button" (click)="explain(p.name)" data-testid="findings-explain" i18n="@@profiling.findings.explain">Explain with AI</button>
+        }
+      </div>
+      <debrief-analysis-state [loading]="res.loading()" [error]="res.error()" [retryable]="res.retryable()" [hasData]="!!res.data()" [empty]="res.data()?.length === 0" emptyText="No findings: nothing in this view crosses a threshold." i18n-emptyText="@@profiling.findings.empty" (retry)="res.retry()">
+        <ul class="list body" aria-label="Findings" i18n-aria-label="@@profiling.findings.listLabel">
+          @for (f of res.data() ?? []; track f.kind + ':' + f.title) {
+            <li class="finding" [attr.data-kind]="f.kind">
+              <div class="head">
+                <debrief-severity-badge [severity]="f.severity" />
+                <strong class="title">{{ f.title }}</strong>
+                @if (f.valuePct !== null) { <span class="mono muted">{{ pct(f.valuePct) }}</span> }
+              </div>
+              <p class="detail">{{ f.detail }}</p>
+              <div class="foot">
+                <button class="btn" type="button" (click)="open(f)" [attr.aria-label]="evidenceLabel(f)" i18n="@@profiling.findings.openEvidence">Open evidence</button>
+                <span class="muted ellipsis">{{ summary(f.evidence) }}</span>
+              </div>
+            </li>
+          }
+        </ul>
+      </debrief-analysis-state>
+    } @else {
+      <debrief-no-capture text="Open a performance capture to see automatic findings." i18n-text="@@profiling.findings.noCapture" />
+    }
+  `,
+  styles: [
+    PROFILING_STYLES,
+    `
+      .finding { border: 1px solid var(--border-2); border-radius: 6px; background: var(--bg-2); padding: 8px 10px; margin-bottom: 8px; }
+      .head { display: flex; align-items: center; gap: 8px; }
+      .title { color: var(--text); }
+      .detail { margin: 4px 0 6px; color: var(--text-2); }
+      .foot { display: flex; align-items: center; gap: 8px; }
+      .spacer { flex: 1; }
+    `,
+  ],
+})
+export class FindingsView {
+  protected readonly active = inject(ActiveProfile);
+  protected readonly state = inject(ProfileViewState);
+  private readonly backend = inject(ProfilingBackend);
+  private readonly nav = inject(ProfilingNavigator);
+  protected readonly res = new AsyncResource<ProfileFinding[]>();
+  protected readonly pct = formatPct;
+  protected readonly summary = evidenceSummary;
+
+  constructor() {
+    effect(() => {
+      const p = this.active.profile();
+      const baselineId = this.state.baselineId();
+      const view = this.state.view();
+      untracked(() => (p ? void this.res.load(() => this.backend.findings({ profileId: p.id, baselineId: baselineId !== p.id ? baselineId : null, view })) : this.res.reset()));
+    });
+  }
+
+  protected evidenceLabel(f: ProfileFinding): string {
+    return $localize`:@@profiling.findings.evidenceLabel:Open evidence for ${f.title}:title:`;
+  }
+
+  private readonly explainer = inject(FindingsExplainer);
+
+  /** Asks the AI chat about these findings (a compact summary of what the engine found). */
+  protected explain(name: string): void {
+    void this.explainer.explain(name, this.res.data() ?? [], (f) => evidenceSummary(f.evidence));
+  }
+
+  protected open(f: ProfileFinding): void {
+    this.nav.openEvidence(f.evidence);
+  }
+}

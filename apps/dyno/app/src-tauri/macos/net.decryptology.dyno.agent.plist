@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Dyno agent as the user's launch agent (ADR 0010), registered by the app with SMAppService.agent(plistName:)
+     from Contents/Library/LaunchAgents. BundleProgram is relative to the bundle. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>net.decryptology.dyno.agent</string>
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/dyno-agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>dyno-agent</string>
+        <string>run</string>
+    </array>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>net.decryptology.dyno</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+</dict>
+</plist>

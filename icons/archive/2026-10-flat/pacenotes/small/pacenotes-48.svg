@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 32 32">
+  <title>Pacenotes 48px</title>
+  <defs>
+    <linearGradient id="p5bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9A8228"/><stop offset="1" stop-color="#6A5500"/></linearGradient>
+    <mask id="p5m0" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M11.5 4.5H21A2.5 2.5 0 0 1 23.5 7V23A2.5 2.5 0 0 1 21 25.5H11.5A2.5 2.5 0 0 1 9 23V7A2.5 2.5 0 0 1 11.5 4.5Z" fill="#000"/></mask><mask id="p5m1" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M10.5 9a1 1 0 1 1 2 0a1 1 0 1 1 -2 0Z" fill="#000"/><path d="M10.5 15a1 1 0 1 1 2 0a1 1 0 1 1 -2 0Z" fill="#000"/><path d="M10.5 21a1 1 0 1 1 2 0a1 1 0 1 1 -2 0Z" fill="#000"/><path d="M13.5 9.5H21M13.5 12.5H19M14.5 22C14.5 19.5 18.5 20 18.5 17.5C18.5 16 17.5 15.8 17.5 15" fill="none" stroke="#000" stroke-width="1.6" stroke-linecap="round"/></mask>
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#p5bg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#302501" stroke-opacity="0.35" stroke-width="0.5"/>
+  <g opacity="0.6"><path d="M14 6.5H23.5A2.5 2.5 0 0 1 26 9V25A2.5 2.5 0 0 1 23.5 27.5H14A2.5 2.5 0 0 1 11.5 25V9A2.5 2.5 0 0 1 14 6.5Z" fill="#FFFFFF" mask="url(#p5m0)"/></g><path d="M11.5 4.5H21A2.5 2.5 0 0 1 23.5 7V23A2.5 2.5 0 0 1 21 25.5H11.5A2.5 2.5 0 0 1 9 23V7A2.5 2.5 0 0 1 11.5 4.5Z" fill="#FFFFFF" mask="url(#p5m1)"/><path d="M6 9H11.5M6 15H11.5M6 21H11.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

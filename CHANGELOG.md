@@ -4,6 +4,43 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### No transition release, no update bridge (ADR 0014, last amendment)
+- Every app release from the monorepo is signed with the shared `PADDOCK_TAURI_*` key only; the
+  `<APP>_TRANSITION_SIGNING_KEY` path is gone. Nothing is written to an app's old repository:
+  `conformance/release/publish.mjs` loses its `--newest` (bridge) mode, and an app's updater lists only paddock's
+  `<app>-latest`. Copies installed before the monorepo are reinstalled once by hand; every release's First launch notes
+  say so.
+
+### Debrief's CI on the shared actions
+- `debrief.yml` runs its Linux jobs in the paddock-ci image, compiles every Rust job through sccache (setup-rust,
+  sccache-stats), builds host legs from a stable checkout into a kept folder set as cargo configuration (never
+  `CARGO_TARGET_DIR`), keeps npm's and Angular's caches, and runs the end-to-end tests in four shards (Chromium on
+  branch runs, WebKit too on full runs). Installers and the real-app smoke run only on main, `debrief-v*` tags, the
+  nightly run and a manual run with `bundles: true`. Its W0 shell baseline is an opt-in project
+  (`npm run e2e:shell-baseline`), not part of CI. `conformance/test/ci-actions.test.mjs` checks these rules.
+
+### The other six apps imported (ADR 0014)
+- Pacenotes, Sighter, Spotter, Pitcrew, Dyno and Pitwall are in `apps/<app>` with their history (tags `pitcrew-v*`,
+  `pitwall-v*`). Their UIs are workspaces of the root npm lock; Spotter uses `@decryp7/paddock-ui` from `ui/dist`
+  (tsconfig paths) instead of the registry's 0.1.
+- Each of Spotter, Pitcrew, Dyno and Pitwall has `.gitea/workflows/<app>.yml` (its build.yml, gated by
+  `affected.mjs --ci --app <app>`, releasing from `<app>-v*` with `<app>-latest`); their updaters read paddock's
+  `<app>-latest` only (no update bridge, below). Pacenotes and Sighter are docs only.
+- One root `lefthook.yml` (a `root:` per app); Renovate ignores Dyno's plugin template and example.
+- Pitwall: the fake engine counts a start only once it serves, so a port lost at the real bind (a parallel test) is
+  not a second model load (the flaky `a_dead_engine_is_forgotten_and_reloaded`).
+
+### Debrief imported (ADR 0014, Debrief first)
+- Debrief's history is in `apps/debrief` (tags `debrief-v1.0.0`, `-v1.0.1`, `-v1.1.1`), with `test/x50-shell-baseline`
+  and `perf/test-speed` (rebased) merged first. Its UI is the `debrief-app` workspace of the root npm lock; its
+  notices generator reads the workspace's production closure from that lock.
+- Its CI is `.gitea/workflows/debrief.yml` (from its build.yml, gated by `affected.mjs --ci --app debrief`), with
+  `debrief-bench`, `-corpus`, `-fuzz`, `-mutants` and `-runner-check`. A `debrief-v*` tag releases here and moves
+  `debrief-latest`, the app's one updater endpoint.
+- `affected.mjs`: an app's own workflows (`<app>.yml`, `<app>-*.yml`, `release-<app>.yml`) mark only that app; an app with
+  `workflow` in its `paddock.ci.json` is not a ci.yml leg. `conformance/release/publish.mjs` takes `<app>-vX.Y.Z` and
+  `<app>-latest` tags and `--replace`.
+
 ### Monorepo frame (ADR 0014 §11 steps 1 and 2)
 - One npm workspace at the root (`package.json`, one `package-lock.json` for `ui`, `eslint`, `icons`, the two demos and
   `apps/*/app`); the five package locks are gone, with every resolved version of `ui/`'s lock kept. `npm ci` runs at the

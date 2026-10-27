@@ -14,7 +14,7 @@ const PREFIX: &str = "CHILD:";
 
 /// What the re-executed binary does.
 #[derive(Clone, Copy)]
-#[cfg_attr(windows, allow(dead_code))] // some modes are driven by Unix-only tests
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // some modes are driven by Unix- or macOS-only tests
 pub enum Mode {
     /// Wait for [`LIFETIME`].
     Sleep,
@@ -34,7 +34,14 @@ pub enum Mode {
     IgnoreTerm,
     /// Print `ready`, sleep; exits cleanly on SIGTERM (the default action).
     Polite,
+    /// Touch [`FREED_BYTES`] of fresh pages, give them back the way mimalloc does (`MADV_FREE_REUSABLE`, they stay
+    /// resident until the kernel needs them), print `ready`, sleep (macOS).
+    Freed,
 }
+
+/// How much the [`Mode::Freed`] child touches and frees.
+#[cfg(target_os = "macos")]
+pub const FREED_BYTES: usize = 512 << 20;
 
 impl Mode {
     fn name(self) -> &'static str {
@@ -48,6 +55,7 @@ impl Mode {
             Mode::Exit3 => "exit3",
             Mode::IgnoreTerm => "ignore_term",
             Mode::Polite => "polite",
+            Mode::Freed => "freed",
         }
     }
 }
@@ -119,6 +127,12 @@ fn helper_main() {
         "ignore_term" => {
             #[cfg(unix)]
             crate::sys::ignore_sigterm();
+            say("ready");
+            sleep_out();
+        }
+        #[cfg(target_os = "macos")]
+        "freed" => {
+            crate::sys::touch_and_free(FREED_BYTES);
             say("ready");
             sleep_out();
         }

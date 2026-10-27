@@ -1,0 +1,5 @@
+# Every child process Pitcrew starts goes through `pitcrew_service::process::command` (it opens no console window on
+# Windows and always gets a timeout or a supervisor). Tests and build scripts may allow this lint.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "use the service's process helper: no console window on Windows, always bounded" },
+]

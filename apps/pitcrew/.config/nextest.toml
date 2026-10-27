@@ -1,0 +1,23 @@
+# cargo-nextest settings for pitcrew's Cargo workspace (the same profiles as crates/.config/nextest.toml). Locally:
+# `cargo nextest run --workspace`; CI (.gitea/workflows/pitcrew.yml): `--profile ci`. nextest does not run doc tests:
+# `cargo test --workspace --doc` runs them. nextest runs every test in its own process, so a lock a test file takes
+# around a shared outside resource (a real browser, a port) is a test group here, not only a static Mutex.
+
+[profile.default]
+# One test per core but one (rules.md 13), so a full run leaves the machine usable.
+test-threads = -1
+slow-timeout = { period = "30s", terminate-after = 10 }
+
+# CI: every failure reported, no retries (rules.md 5: a flaky test is fixed, not retried), a JUnit report.
+[profile.ci]
+fail-fast = false
+retries = 0
+failure-output = "immediate-final"
+# A CI job has its runner to itself.
+test-threads = "num-cpus"
+# The time budget of one test (rule 40): reported SLOW after 30 s and stopped, failing the run, after 60 s. A test that
+# needs longer is a waiver below: an override with a `# waiver:` line saying why (conformance/test/ci-actions.test.mjs).
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+[profile.ci.junit]
+path = "junit.xml"

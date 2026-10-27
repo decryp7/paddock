@@ -1,0 +1,371 @@
+/* Pages, cards, badges, callouts, tables, meters, skeletons, menus, dialogs and tooltips. */
+
+.page {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+  padding: var(--space-6) var(--space-8) var(--space-10);
+  max-width: 1440px;
+  animation: pc-fade-in var(--duration-slow) var(--ease-out);
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+
+  .subtitle {
+    margin-top: var(--space-1);
+    color: var(--text-2);
+  }
+}
+
+.card {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) 0;
+  min-height: 44px;
+
+  h2,
+  h3 {
+    font-size: var(--text-md);
+    font-weight: var(--weight-semibold);
+  }
+
+  .meta {
+    color: var(--text-3);
+    font-size: var(--text-sm);
+  }
+}
+
+.card-body {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.section-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  color: var(--neutral);
+  background: var(--neutral-soft);
+
+  .mat-icon {
+    width: 13px;
+    height: 13px;
+  }
+
+  @each $tone in success, info, warning, danger {
+    &.#{$tone} {
+      color: var(--#{$tone});
+      background: var(--#{$tone}-soft);
+    }
+  }
+
+  /* "Update available" is information, not a warning and not the accent: a neutral pill with an up arrow. */
+  &.update {
+    color: var(--text-2);
+    background: var(--surface-3);
+
+    &::before {
+      content: '\2191';
+      font-weight: var(--weight-semibold);
+    }
+  }
+
+  &.outline {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-2);
+  }
+}
+
+a.badge {
+  text-decoration: none;
+
+  &:hover {
+    filter: brightness(0.96);
+  }
+}
+
+@each $tone in success, info, warning, danger, neutral {
+  .tone-#{$tone} {
+    color: var(--#{$tone});
+  }
+}
+
+.callout {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--neutral) 25%, transparent);
+  background: var(--neutral-soft);
+  color: var(--text);
+
+  > .mat-icon {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+    color: var(--neutral);
+  }
+
+  .callout-body {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  strong {
+    font-weight: var(--weight-semibold);
+  }
+
+  @each $tone in success, info, warning, danger {
+    &.#{$tone} {
+      border-color: color-mix(in srgb, var(--#{$tone}) 30%, transparent);
+      background: var(--#{$tone}-soft);
+
+      > .mat-icon {
+        color: var(--#{$tone});
+      }
+    }
+  }
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th {
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-3);
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  td {
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  tr:last-child td,
+  tbody tr:last-child th {
+    border-bottom: 0;
+  }
+
+  tbody tr:hover {
+    background: var(--hover);
+  }
+
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+}
+
+.meter {
+  position: relative;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-3);
+  overflow: hidden;
+
+  > span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: inherit;
+    background: var(--chart-1);
+    transition: width var(--duration-slow) var(--ease-out);
+  }
+
+  &.warning > span {
+    background: var(--warning);
+  }
+
+  &.danger > span {
+    background: var(--danger);
+  }
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+
+  dt {
+    color: var(--text-2);
+  }
+
+  dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.skeleton {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--skeleton) linear-gradient(90deg, transparent, var(--skeleton-shine), transparent) no-repeat;
+  background-size: 200px 100%;
+  animation: pc-shimmer 1.4s ease-in-out infinite;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.pulse {
+  animation: pc-pulse 1.8s ease-in-out infinite;
+}
+
+.spin {
+  animation: pc-spin 0.9s linear infinite;
+}
+
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  padding: var(--space-10) var(--space-6);
+  text-align: center;
+  color: var(--text-2);
+
+  > .mat-icon {
+    width: 32px;
+    height: 32px;
+    color: var(--text-3);
+  }
+
+  h3 {
+    color: var(--text);
+    font-size: var(--text-lg);
+  }
+
+  p {
+    max-width: 44ch;
+  }
+}
+
+/* CDK menu */
+.pc-menu {
+  display: grid;
+  min-width: 200px;
+  padding: var(--space-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: pc-fade-in var(--duration) var(--ease-out);
+}
+
+.pc-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  .mat-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--text-2);
+  }
+
+  &:hover:not([aria-disabled='true']),
+  &:focus-visible,
+  &.cdk-menu-item-active {
+    background: var(--hover);
+    outline: none;
+  }
+
+  &[aria-disabled='true'],
+  &:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  &.danger,
+  &.danger .mat-icon {
+    color: var(--danger);
+  }
+}
+
+.pc-menu-separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--border);
+}
+
+/* CDK dialog */
+.pc-dialog-backdrop {
+  background: var(--scrim);
+}
+
+.pc-dialog-panel {
+  display: block;
+  max-height: calc(100vh - 48px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  overflow: auto;
+  animation: pc-fade-in var(--duration-slow) var(--ease-out);
+}
+
+/* Material tooltip through tokens */
+.mat-mdc-tooltip {
+  --mat-tooltip-container-color: var(--text);
+  --mat-tooltip-supporting-text-color: var(--surface);
+  --mat-tooltip-supporting-text-font: var(--font-sans);
+  --mat-tooltip-supporting-text-size: var(--text-sm);
+  --mat-tooltip-container-shape: var(--radius-sm);
+}

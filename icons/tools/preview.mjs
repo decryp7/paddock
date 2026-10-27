@@ -1,25 +1,26 @@
-// Writes preview.html: a self-contained review sheet with inline SVGs (unique ids per instance).
+// Writes preview.html: the review sheet. It references the built SVGs in icons/<app>/ with <img> (open it from this folder), so it stays small.
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { APPS, UMBRELLA, NAMES, PALETTE, INK, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { APPS, UMBRELLA, NAMES, PALETTE, INK } from './design.mjs';
+import { TRAY_STATES as STATUSES } from './iso-family.mjs';
 import { check, contrast } from './cvd.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const sized = (svg, px) => svg.replace(/<svg ([^>]*?)width="\d+" height="\d+"/, `<svg $1width="${px}" height="${px}"`);
-const mac = (a, px) => sized(masterSvg(a), px);
-const win = (a, px) => sized(masterSvg(a, { platform: 'windows' }), px);
-const small = (a, s, px = s) => sized(smallSvg(a, s), px);
-const tray = (a, st, theme, px = 16) => sized(traySvg(a, st, theme), px);
-const carbon = (a, px) => sized(masterSvg(a, { concept: 'carbon' }), px);
+/** The sheet references the built files (an `<img>` each) instead of inlining every SVG: small, and no duplicate ids. */
+const img = (src, px) => `<img src="${src}" width="${px}" height="${px}" alt="">`;
+const mac = (a, px) => img(`${a}/${a}-macos.svg`, px);
+const win = (a, px) => img(`${a}/${a}-windows.svg`, px);
+const small = (a, s, px = s) => img(`${a}/small/${a}-${s}.svg`, px);
+const tray = (a, st, theme, px = 16) => img(`${a}/tray/svg/${st === 'default' ? `${a}-tray` : `${a}-tray-${st}`}-${theme}${theme === 'template' && px === 18 ? '-18pt' : ''}.svg`, px);
 
 const CONCEPT = {
-  debrief: 'Log lines with a telemetry trace and an event marker: the evolution of the IMT icon, now the debrief after the race.',
-  pitcrew: 'A wheel nut inside a cycle arrow: the crew that keeps runners turning, swaps them safely and tidies up.',
-  spotter: 'Spotter binoculars with a spark: it watches everywhere and calls the moment a release appears.',
-  pitwall: 'A radio bubble with the voice kept inside it: the private, local model every app radios to.',
-  dyno: 'A dynamometer gauge with the needle near the redline: health, load and tuning at a glance.',
-  sighter: 'A pointer inside a sighting reticle: it finds any UI element by sight.',
-  pacenotes: 'A spiral notebook with a route curve and a code mark: notes on the shape of a codebase.',
+  debrief: "An engineer's laptop with a telemetry trace on the screen: the debrief after the race.",
+  pitcrew: 'An impact wrench with its socket and wheel nut: the crew that keeps runners turning.',
+  spotter: "A spotter's binoculars with an amber lens glint: it watches everywhere and calls the moment a release appears.",
+  pitwall: 'A team radio with its status LED: the private, local model every app radios to.',
+  dyno: 'A tachometer pod with the redline and the shift lights: health, load and tuning at a glance.',
+  sighter: 'A camera on a tripod: it finds any UI element by sight.',
+  pacenotes: 'A tablet with the route and a stylus: notes on the shape of a codebase.',
 };
 
 const cvd = check(Object.fromEntries(APPS.map(a => [a, PALETTE[a].base])));
@@ -45,7 +46,7 @@ const taskbar = theme => `
     <div class="taskbar">
       <div class="tb-apps"><span class="start" title="Start (neutral placeholder)"><i></i></span>${APPS.map((a, i) => `<span class="tbitem${i === 0 ? ' active' : ''}">${small(a, 24)}</span>`).join('')}</div>
       <div class="tb-tray">
-        ${tray('pitcrew', 'busy', theme)}${tray('spotter', 'new', theme)}${tray('pitwall', 'serving', theme)}${tray('dyno', 'normal', theme)}${tray('debrief', 'default', theme)}
+        ${tray('pitcrew', 'busy', theme)}${tray('spotter', 'new', theme)}${tray('pitwall', 'normal', theme)}${tray('dyno', 'normal', theme)}${tray('debrief', 'default', theme)}
         <span class="clock">09:41<br>22/10/2026</span>
       </div>
     </div>
@@ -93,7 +94,7 @@ const html = `<!doctype html>
   .stack { display:grid; grid-template-columns:1fr; gap:16px; }
   .panel { border-radius:18px; padding:28px; background:var(--card); border:1px solid var(--line); overflow:hidden; }
   .panel.dark { background:var(--dark); border-color:#24262B; color:#E9EAED; }
-  .hero { display:flex; gap:28px; overflow-x:auto; padding-bottom:12px; }
+  .hero { display:flex; flex-wrap:wrap; justify-content:center; gap:20px; padding-bottom:12px; }
   .hero figure { margin:0; flex:none; text-align:center; }
   .hero figcaption, .label { font-weight:600; font-size:13px; }
   .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:20px; }
@@ -111,7 +112,7 @@ const html = `<!doctype html>
   .menubar { display:flex; align-items:center; gap:16px; height:30px; padding:0 14px; font-size:13px; backdrop-filter:blur(20px); }
   .mac.light .menubar { background:rgba(255,255,255,.55); color:#111; }
   .mac.dark .menubar { background:rgba(30,30,34,.55); color:#F2F2F2; }
-  .mac.dark .tpl svg { filter:invert(1); }
+  .mac.dark .tpl img { filter:invert(1); }
   .menubar .spacer { flex:1; }
   .menubar .tpl { display:flex; opacity:.9; }
   .apple { width:12px; height:14px; border-radius:6px 6px 5px 5px; background:currentColor; opacity:.85; }
@@ -119,7 +120,7 @@ const html = `<!doctype html>
   .mac.light .dock { background:rgba(255,255,255,.38); border:1px solid rgba(255,255,255,.55); }
   .mac.dark .dock { background:rgba(40,40,46,.45); border:1px solid rgba(255,255,255,.12); }
   .dockitem { position:relative; }
-  .dockitem svg { display:block; }
+  .dockitem img { display:block; }
   .dockitem i { position:absolute; left:50%; bottom:-8px; width:4px; height:4px; border-radius:50%; margin-left:-2px; background:currentColor; opacity:.6; }
   .mac.light .dockitem i { color:#222; } .mac.dark .dockitem i { color:#fff; }
   /* Windows mock */
@@ -142,7 +143,7 @@ const html = `<!doctype html>
   .trayfig { margin:0; text-align:center; }
   .chips { display:flex; gap:4px; }
   .chip { width:34px; height:34px; border-radius:8px; display:grid; place-items:center; }
-  .chip.mac-l { background:#ECECEC; } .chip.mac-d { background:#2A2A2E; } .chip.mac-d svg { filter:invert(1); }
+  .chip.mac-l { background:#ECECEC; } .chip.mac-d { background:#2A2A2E; } .chip.mac-d img { filter:invert(1); }
   .chip.win-l { background:#F3F3F3; border:1px solid #E2E2E2; } .chip.win-d { background:#202020; }
   .trayfig figcaption { font-size:11px; color:var(--muted); margin-top:4px; }
   .legend { font-size:12px; color:var(--muted); margin-top:10px; }
@@ -163,13 +164,13 @@ const html = `<!doctype html>
 </svg>
 <header>
   <h1>App icon family</h1>
-  <p class="lead">Debrief, Pitcrew, Spotter, Pitwall and Dyno. <b>Chosen direction: Enamel</b>: one saturated hue per app on a shared tile, one bold glyph per app, a faint diagonal livery sweep that runs across the whole family, and the same light from above. The alternative direction, Carbon, is at the bottom.</p>
+  <p class="lead">The seven apps and Paddock as isometric motorsport objects (STYLE.md): one saturated hue per app on the shared enamel tile, one rendered object per app in true 30 degree isometric under one key light from the top left, one accent from the app's own hue. Small sizes are hand-drawn: 2:1 pixel isometric at 32 and 24, a flat symbol at 16 and in the tray. The flat set this replaced is in <code>archive/2026-10-flat/</code>.</p>
 </header>
 
 <section>
   <h2>1024 px masters (macOS grid)</h2>
-  <p class="sub">An 824 px continuous-corner body centred on the 1024 canvas, with the standard drop shadow. Scroll sideways to see all five at full size.</p>
-  <div class="hero">${APPS.map(a => `<figure>${mac(a, 1024)}<figcaption>${NAMES[a]}</figcaption></figure>`).join('')}</div>
+  <p class="sub">An 824 px continuous-corner body centred on the 1024 canvas, with the standard drop shadow. Shown at 440 px, all seven in view (the files are 1024).</p>
+  <div class="hero">${APPS.map(a => `<figure>${mac(a, 440)}<figcaption>${NAMES[a]}</figcaption></figure>`).join('')}</div>
 </section>
 
 <section>
@@ -187,7 +188,7 @@ const html = `<!doctype html>
 
 <section>
   <h2>Small sizes</h2>
-  <p class="sub">macOS masters scaled down to 64, 32 and 16 px, next to the hand-tuned Windows frames (48, 32, 24 and 16 px), which snap to the pixel grid and drop detail. These frames go into icon.ico.</p>
+  <p class="sub">macOS masters scaled down to 64, 32 and 16 px, next to the hand-tuned frames (48: the simple frame on the small tile; 32 and 24: pixel isometric; 16: the flat symbol), which snap to the pixel grid and drop detail. These frames go into icon.ico.</p>
   <div class="stack">
     <div class="panel"><div class="grid5">${sizeRow((a, s) => mac(a, s), [64, 32, 16])}</div><div class="grid5" style="margin-top:22px">${sizeRow((a, s) => small(a, s), [48, 32, 24, 16])}</div></div>
     <div class="panel dark"><div class="grid5">${sizeRow((a, s) => mac(a, s), [64, 32, 16])}</div><div class="grid5" style="margin-top:22px">${sizeRow((a, s) => small(a, s), [48, 32, 24, 16])}</div></div>
@@ -202,13 +203,13 @@ const html = `<!doctype html>
 
 <section>
   <h2>In context: Windows 11</h2>
-  <p class="sub">The taskbar at 100% scale uses the hand-tuned 24 px frame. The notification area shows Pitcrew (busy), Spotter (new release), Pitwall (serving), Dyno and Debrief.</p>
+  <p class="sub">The taskbar at 100% scale uses the hand-tuned 24 px frame. The notification area shows Pitcrew (busy), Spotter (new release), Pitwall (normal), Dyno and Debrief.</p>
   <div class="split">${taskbar('light')}${taskbar('dark')}</div>
 </section>
 
 <section>
   <h2>Tray and menu-bar icons</h2>
-  <p class="sub">Each status has four tiles: the macOS template on a light and a dark menu bar, then the Windows icon on a light and a dark taskbar. Status badges sit in the bottom-right corner and cut a gap into the glyph. On Windows they are coloured, and each status also has its own shape (ring, triangle, cross, dot), so colour is never the only cue.</p>
+  <p class="sub">Each status has four tiles: the macOS template on a light and a dark menu bar, then the Windows icon on a light and a dark taskbar. Badges are whole pixels: Debrief, Pitwall, Sighter and Pitcrew cut a gap into the glyph in the bottom-right corner, Spotter and Dyno set a 3 x 3 square in a corner the glyph leaves free; Pitwall idle dims the whole glyph. On Windows they are coloured, and each status also has its own shape (dot, ring, triangle, cross), so colour is never the only cue.</p>
   <div class="panel">${trayGallery()}</div>
 </section>
 
@@ -221,18 +222,9 @@ const html = `<!doctype html>
   </div>
 </section>
 
-<section class="alt">
-  <h2>Alternative direction: Carbon</h2>
-  <p class="sub">A graphite tile with the glyph lit in the app's hue and a coloured livery sweep. It is moody and premium at large sizes.</p>
-  <div class="split">
-    <div class="panel"><div class="grid5">${APPS.map(a => `<div class="cell">${carbon(a, 180)}<div class="sizes">${carbon(a, 32)}${carbon(a, 16)}</div></div>`).join('')}</div></div>
-    <div class="panel dark"><div class="grid5">${APPS.map(a => `<div class="cell">${carbon(a, 180)}<div class="sizes">${carbon(a, 32)}${carbon(a, 16)}</div></div>`).join('')}</div>
-      <p class="note">Why it was not chosen: all five tiles share one dark body, so at 16 to 32 px only a thin coloured glyph tells them apart, and on a dark Windows taskbar or in the dark Dock the tiles sink into the background. Enamel puts the identity hue on the whole tile, so it holds up at every size and on every background.</p></div>
-  </div>
-</section>
 <section>
   <h2>The Paddock mark (umbrella)</h2>
-  <p class="sub">Not an app: the family and its shared foundation. Pit garages under one roof striped in the seven app hues, on an asphalt-graphite tile with no hue of its own. Shown beside Debrief for scale, then the hand-tuned frames and the tray template.</p>
+  <p class="sub">Not an app: the family and its shared foundation. A pit building (four lit bays, a canopy with a pinstripe in the seven app hues, the hospitality floor, the chequered pit wall) on the asphalt-graphite tile with no hue of its own. Shown beside Debrief for scale, then the hand-tuned frames (the 16 px canopy is the seven-hue band) and the tray template (the slatted garage door).</p>
   <div class="split">
     ${['panel', 'panel dark'].map(c => `<div class="${c}"><div class="sizes">${UMBRELLA.map(a => `<figure>${mac(a, 200)}<figcaption>${NAMES[a]}</figcaption></figure>`).join('')}<figure>${mac('debrief', 200)}<figcaption>Debrief</figcaption></figure></div>
       <div class="sizes" style="margin-top:18px">${UMBRELLA.map(a => [64, 32, 16].map(s => `<figure>${mac(a, s)}<figcaption>${s}</figcaption></figure>`).join('') + [48, 32, 24, 16].map(s => `<figure>${small(a, s)}<figcaption>${s}</figcaption></figure>`).join('')).join('')}</div></div>`).join('')}

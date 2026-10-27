@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
   <title>Paddock 16px</title>
   <defs>
-    <linearGradient id="k2bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
-    <linearGradient id="k2fam0" x1="0.5" y1="0" x2="15.5" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0.0000" stop-color="#5590FF"/><stop offset="0.1429" stop-color="#5590FF"/><stop offset="0.1429" stop-color="#8A5AE6"/><stop offset="0.2857" stop-color="#8A5AE6"/><stop offset="0.2857" stop-color="#BFA2EE"/><stop offset="0.4286" stop-color="#BFA2EE"/><stop offset="0.4286" stop-color="#DE559F"/><stop offset="0.5714" stop-color="#DE559F"/><stop offset="0.5714" stop-color="#FF8A4C"/><stop offset="0.7143" stop-color="#FF8A4C"/><stop offset="0.7143" stop-color="#FFD257"/><stop offset="0.8571" stop-color="#FFD257"/><stop offset="0.8571" stop-color="#C2A845"/><stop offset="1.0000" stop-color="#C2A845"/></linearGradient>
+    <linearGradient id="paddock-16-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
+    
   </defs>
-  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#k2bg)"/>
-  <path d="M4 0.75H12A3.25 3.25 0 0 1 15.25 4V12A3.25 3.25 0 0 1 12 15.25H4A3.25 3.25 0 0 1 0.75 12V4A3.25 3.25 0 0 1 4 0.75Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="0.5"/>
-  <path d="M1.5 5.75L8 2.75L14.5 5.75" fill="none" stroke="url(#k2fam0)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 7H7A0 0 0 0 1 7 7V11A0 0 0 0 1 7 11H3A0 0 0 0 1 3 11V7A0 0 0 0 1 3 7ZM9 7H13A0 0 0 0 1 13 7V11A0 0 0 0 1 13 11H9A0 0 0 0 1 9 11V7A0 0 0 0 1 9 7Z" fill="#FFFFFF"/><path d="M2.5 12H13.5A1 1 0 0 1 14.5 13V13A1 1 0 0 1 13.5 14H2.5A1 1 0 0 1 1.5 13V13A1 1 0 0 1 2.5 12Z" fill="#FFFFFF"/>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#paddock-16-bg)"/>
+  <path d="M4 1H12A3 3 0 0 1 15 4V12A3 3 0 0 1 12 15H4A3 3 0 0 1 1 12V4A3 3 0 0 1 4 1Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1"/>
+  <path d="M1 3h2v2h-2Z" fill="#5590FF"/><path d="M3 3h2v2h-2Z" fill="#8A5AE6"/><path d="M5 3h2v2h-2Z" fill="#BFA2EE"/><path d="M7 3h2v2h-2Z" fill="#DE559F"/><path d="M9 3h2v2h-2Z" fill="#FF8A4C"/><path d="M11 3h2v2h-2Z" fill="#FFD257"/><path d="M13 3h2v2h-2Z" fill="#C2A845"/><path d="M3 5h1v8h-1ZM12 5h1v8h-1ZM5 5h6v1h-6ZM5 7h6v1h-6ZM5 9h6v1h-6Z" fill="#FFFFFF"/>
 </svg>

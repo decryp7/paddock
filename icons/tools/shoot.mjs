@@ -15,7 +15,7 @@ try {
     const sfx = dpr === 1 ? '' : '@2x';
     if (dpr === 1) await page.screenshot({ path: join(out, 'preview-full.png'), fullPage: true });
     const sections = await page.$$('section');
-    const names = ['masters-1024', 'family-256', 'small-sizes', 'macos-dock', 'windows-taskbar', 'tray', 'palette-cvd', 'alternative-carbon', 'umbrella-paddock'];
+    const names = ['masters-1024', 'family-256', 'small-sizes', 'macos-dock', 'windows-taskbar', 'tray', 'palette-cvd', 'umbrella-paddock'];
     for (let i = 0; i < sections.length; i++) await sections[i].screenshot({ path: join(out, `${names[i] ?? `section-${i}`}${sfx}.png`) });
     await page.close();
   }

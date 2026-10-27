@@ -3,7 +3,14 @@
   "description": "Renovate for the whole Paddock monorepo (ADR 0014 §8): every Cargo workspace, the one npm workspace and the workflows. One weekly PR for ordinary updates; Angular and Tauri each as one PR across all workspaces; Rust patch updates and lock maintenance per workspace, so an app in release freeze can hold its own; security fixes at any time.",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "schedule": ["before 6am on monday"],
-  "ignorePaths": ["**/node_modules/**", "apps/*/target/**", "**/target/**", "templates/**"],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "apps/*/target/**",
+    "**/target/**",
+    "templates/**",
+    "apps/dyno/templates/**",
+    "apps/dyno/plugins/dyno-plugin-example/**"
+  ],
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 6am on monday"],

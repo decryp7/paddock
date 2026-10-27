@@ -1,0 +1,18 @@
+{
+  "url": "https://www.google.com/search?q=System.TimeoutException",
+  "title": "System.TimeoutException - Google Search",
+  "readyState": "complete",
+  "quietMs": 900,
+  "regionFound": true,
+  "total": 9,
+  "text": "About 120,000 results",
+  "links": [
+    { "href": "https://www.google.com/search?q=System.TimeoutException&tbm=isch", "text": "Images", "region": false, "heading": false },
+    { "href": "https://accounts.google.com/ServiceLogin?hl=en", "text": "Sign in", "region": false, "heading": false },
+    { "href": "https://docs.example.org/api/system.timeoutexception", "text": "TimeoutException Class (System)", "region": true, "heading": true },
+    { "href": "https://www.google.com/url?q=https%3A%2F%2Fqa.example.net%2Fq%2F4242&sa=U", "text": "Why does my request throw System.TimeoutException?", "region": true, "heading": true },
+    { "href": "https://tracker.example.com/runtime/issues/101", "text": "Timeouts after 100 seconds", "region": true, "heading": true },
+    { "href": "https://www.google.com/search?q=System.TimeoutException+retry", "text": "People also search for", "region": true, "heading": false },
+    { "href": "https://blog.example.io/footer", "text": "Footer partner", "region": false, "heading": false }
+  ]
+}

@@ -1,0 +1,45 @@
+# Rust
+/target/
+/app/src-tauri/target/
+debug/
+**/*.rs.bk
+*.pdb
+
+# Node / Angular
+node_modules/
+app/dist/
+app/.angular/
+app/coverage/
+app/test-results/
+app/playwright-report/
+*.tsbuildinfo
+.npm
+.eslintcache
+
+# Tauri generated schemas
+app/src-tauri/gen/schemas/
+
+# Logs and local runtime data (never commit history databases, snapshots, quarantine or keys)
+*.log
+/logs/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.key
+*.key.pub
+.env
+.env.*
+
+# Editors and OS metadata
+.idea/
+.vscode/
+.claude/
+.DS_Store
+._*
+
+# Private build folders (coverage, agents)
+/target-*/
+
+# Written by the build-folder CI action on host runners.
+.cargo/ci.toml

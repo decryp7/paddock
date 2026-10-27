@@ -1,0 +1,116 @@
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { cellText, downloadText, SortDir, sortRows, toCsv } from './table-utils';
+import { QuerySession } from './query-session';
+
+/** The table produced by a `stats` query: sortable columns and a client-side CSV export. */
+@Component({
+  selector: 'debrief-query-results-view',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <div class="bar">
+      @if (table(); as t) {
+        <span class="faint" i18n="@@analysis.queryResults.size">{t.rows.length, plural, =1 {1 row} other {{{ t.rows.length }} rows}} · {t.columns.length, plural, =1 {1 column} other {{{ t.columns.length }} columns}}</span>
+      }
+      <span class="spacer"></span>
+      <button class="btn" type="button" [disabled]="!table()" (click)="exportCsv()" i18n="@@analysis.queryResults.exportCsv">Export CSV</button>
+    </div>
+    @if (stale(); as why) {
+      <div class="stale-banner" role="status" data-testid="query-results-stale">
+        @if (why === 'error') {
+          <ng-container i18n="@@analysis.queryResults.staleError">Results of the previous query — fix the error and run again.</ng-container>
+        } @else {
+          <ng-container i18n="@@analysis.queryResults.staleEdited">Results of the previous query — run the query again to update them.</ng-container>
+        }
+      </div>
+    }
+    @if (table(); as t) {
+      <div class="body" [class.stale]="!!stale()" tabindex="0" role="region" aria-label="Query result table" i18n-aria-label="@@analysis.queryResults.region">
+        <table class="grid">
+          <caption class="sr" i18n="@@analysis.queryResults.caption">Result of the last stats query</caption>
+          <thead>
+            <tr>
+              @for (c of t.columns; track $index; let i = $index) {
+                <th scope="col" [class.num]="numericColumn(i)" [attr.aria-sort]="ariaSort(i)">
+                  <button type="button" (click)="sortBy(i)">{{ c }}<span aria-hidden="true">{{ marker(i) }}</span></button>
+                </th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of rows(); track $index) {
+              <tr>
+                @for (cell of row; track $index) {
+                  <td [class.num]="isNumber(cell)">{{ text(cell) }}</td>
+                }
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <div class="empty" role="status" i18n="@@analysis.queryResults.empty">Run a query with a <code class="mono">stats</code> stage (for example <code class="mono">stats count() by source</code>) to see its table here.</div>
+    }
+  `,
+  styles: [
+    `
+      :host { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-1); color: var(--text-2); font-size: var(--fs-sm); }
+      .bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+      .spacer { flex: 1; }
+      .body { flex: 1; min-height: 0; overflow: auto; }
+      .stale-banner { flex: none; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--ann-warning); color: var(--warn-text); }
+      .body.stale { opacity: 0.55; }
+      .empty { padding: 28px 16px; color: var(--muted); text-align: center; }
+      .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+      table.grid { border-collapse: collapse; width: 100%; }
+      table.grid th, table.grid td { padding: 4px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+      table.grid th { position: sticky; top: 0; background: var(--bg-2); color: var(--muted); font-weight: 600; }
+      table.grid th button { all: unset; cursor: pointer; display: inline-flex; gap: 4px; }
+      table.grid th button:focus-visible { outline: 2px solid var(--focus-ring); }
+      table.grid th.num { text-align: right; }
+      table.grid td.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    `,
+  ],
+})
+export class QueryResultsView {
+  private readonly session = inject(QuerySession);
+  protected readonly table = this.session.table;
+  protected readonly stale = this.session.tableStale;
+  protected readonly sort = signal<{ col: number; dir: SortDir } | null>(null);
+  protected readonly rows = computed(() => {
+    const t = this.table();
+    const s = this.sort();
+    if (!t) return [];
+    return s ? sortRows(t.rows, s.col, s.dir) : t.rows;
+  });
+  protected readonly text = cellText;
+
+  /** A column is numeric (its header aligns right with its cells) when its first non-empty cell is a number. */
+  protected numericColumn(col: number): boolean {
+    const cell = this.rows().map((r) => r[col]).find((v) => v !== null && v !== undefined);
+    return typeof cell === 'number';
+  }
+
+  protected isNumber(v: unknown): boolean {
+    return typeof v === 'number';
+  }
+
+  protected sortBy(col: number): void {
+    const s = this.sort();
+    this.sort.set(s?.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' });
+  }
+
+  protected ariaSort(col: number): 'ascending' | 'descending' | null {
+    const s = this.sort();
+    return s?.col === col ? (s.dir === 'asc' ? 'ascending' : 'descending') : null;
+  }
+
+  protected marker(col: number): string {
+    const s = this.sort();
+    return s?.col === col ? (s.dir === 'asc' ? '▲' : '▼') : '';
+  }
+
+  protected exportCsv(): void {
+    const t = this.table();
+    if (t) downloadText('query-result.csv', toCsv(t.columns, this.rows()));
+  }
+}

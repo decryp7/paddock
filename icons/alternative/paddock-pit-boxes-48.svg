@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 32 32">
+  <title>Paddock (B: pit boxes from above) 48px</title>
+  <defs>
+    <linearGradient id="kebg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
+    
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#kebg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="0.5"/>
+  <path d="M2 5H29A0 0 0 0 1 29 5V7A0 0 0 0 1 29 7H2A0 0 0 0 1 2 7V5A0 0 0 0 1 2 5Z" fill="#FFFFFF"/><path d="M2 9H5A0 0 0 0 1 5 9V20A0 0 0 0 1 5 20H2A0 0 0 0 1 2 20V9A0 0 0 0 1 2 9Z" fill="#5590FF"/><path d="M6 9H9A0 0 0 0 1 9 9V20A0 0 0 0 1 9 20H6A0 0 0 0 1 6 20V9A0 0 0 0 1 6 9Z" fill="#8A5AE6"/><path d="M10 9H13A0 0 0 0 1 13 9V20A0 0 0 0 1 13 20H10A0 0 0 0 1 10 20V9A0 0 0 0 1 10 9Z" fill="#BFA2EE"/><path d="M14 9H17A0 0 0 0 1 17 9V20A0 0 0 0 1 17 20H14A0 0 0 0 1 14 20V9A0 0 0 0 1 14 9Z" fill="#DE559F"/><path d="M18 9H21A0 0 0 0 1 21 9V20A0 0 0 0 1 21 20H18A0 0 0 0 1 18 20V9A0 0 0 0 1 18 9Z" fill="#FF8A4C"/><path d="M22 9H25A0 0 0 0 1 25 9V20A0 0 0 0 1 25 20H22A0 0 0 0 1 22 20V9A0 0 0 0 1 22 9Z" fill="#FFD257"/><path d="M26 9H29A0 0 0 0 1 29 9V20A0 0 0 0 1 29 20H26A0 0 0 0 1 26 20V9A0 0 0 0 1 26 9Z" fill="#C2A845"/><g opacity="0.6"><path d="M3 22H6V23H3ZM9 22H12V23H9ZM15 22H18V23H15ZM21 22H24V23H21ZM27 22H28V23H27Z" fill="#FFFFFF"/></g><path d="M2 25H29A0 0 0 0 1 29 25V27A0 0 0 0 1 29 27H2A0 0 0 0 1 2 27V25A0 0 0 0 1 2 25Z" fill="#FFFFFF"/>
+</svg>

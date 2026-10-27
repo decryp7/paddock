@@ -1,0 +1,233 @@
+<div class="page">
+  <header class="page-header">
+    <div>
+      <h1>Updates</h1>
+      <p class="subtitle">{{ subtitle() }}</p>
+    </div>
+    @if (updatable().length > 0) {
+      <button type="button" class="btn primary" (click)="updateAll()">
+        <mat-icon svgIcon="pc:download" aria-hidden="true" />{{ updateAllLabel() }}
+      </button>
+    }
+  </header>
+
+  @if (status.status() && status.runners().length === 0) {
+    <section class="card"><pc-empty-state icon="updates" title="No runners" text="Register a runner to manage its updates here." /></section>
+  } @else if (status.runners().length > 0) {
+    <div class="layout" [class.with-panel]="detail()">
+      <section class="card table-card" aria-label="Runner updates">
+        <table class="table updates">
+          <thead>
+            <tr>
+              <th scope="col" class="name">Runner</th>
+              <th scope="col">Installed</th>
+              <th scope="col">Latest</th>
+              <th scope="col" class="state">Status</th>
+              <th scope="col">Checked</th>
+              <th scope="col" class="act"><span class="visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of rows(); track r.name) {
+              @let s = state(r);
+              <tr [attr.data-runner]="r.name" tabindex="0" [class.selected]="selected() === r.name" [attr.aria-current]="selected() === r.name ? 'true' : null"
+                  (click)="onRowClick($event, r.name)" (keydown.enter)="onRowKey($event, r.name)">
+                <th scope="row" class="name">
+                  <span class="runner-name truncate" [title]="r.name">{{ r.name }}</span>
+                  <span class="faint small truncate">{{ mode(r) }}</span>
+                </th>
+                <td class="ver">{{ r.currentVersion ?? '—' }}</td>
+                <td class="ver">
+                  @if (r.updateTarget) {
+                    <span class="newer" title="Newer than installed"><mat-icon svgIcon="pc:chevron-up" aria-label="Newer than installed" />{{ r.updateTarget }}</span>
+                  } @else {
+                    {{ r.latestVersion ?? '—' }}
+                  }
+                </td>
+                <td class="state" [title]="s.tip ?? ''">
+                  <span class="status"><span class="dot {{ s.tone }}" aria-hidden="true"></span><span class="status-text">{{ s.text }}</span></span>
+                </td>
+                <td class="when small muted">{{ r.checkedAt ? ago(r.checkedAt) : 'never' }}</td>
+                <td class="act">
+                  <span class="row-actions">
+                    @if (canUpdate(r)) {
+                      <button type="button" class="btn sm update-btn" (click)="update(r)" [attr.aria-label]="'Update ' + r.name + ' to ' + r.updateTarget">Update</button>
+                    }
+                    @if (r.managedBinary) {
+                      <button type="button" class="btn sm ghost icon more" [cdkMenuTriggerFor]="menu" [attr.aria-label]="'Actions for ' + r.name">
+                        <mat-icon svgIcon="pc:more" aria-hidden="true" />
+                      </button>
+                    }
+                  </span>
+                  <ng-template #menu>
+                    <div class="pc-menu" cdkMenu>
+                      @if (r.updateTarget && r.updatePhase.phase === 'idle') {
+                        <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="skip(r)">
+                          <mat-icon svgIcon="pc:skip" aria-hidden="true" />Skip this version
+                        </button>
+                      }
+                      @if (r.updatePolicy.pinned) {
+                        <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="pinOrFollow(r)">
+                          <mat-icon svgIcon="pc:follow" aria-hidden="true" />Follow latest
+                        </button>
+                      } @else if (r.currentVersion) {
+                        <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="pinOrFollow(r)">
+                          <mat-icon svgIcon="pc:pin" aria-hidden="true" />Pin {{ r.currentVersion }}
+                        </button>
+                      }
+                      <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="check(r)">
+                        <mat-icon svgIcon="pc:refresh" aria-hidden="true" />Check now
+                      </button>
+                      @if (cancellable(r)) {
+                        <button type="button" class="pc-menu-item" cdkMenuItem [cdkMenuItemDisabled]="busy(r)" (cdkMenuItemTriggered)="cancel(r)">
+                          <mat-icon svgIcon="pc:x" aria-hidden="true" />Cancel update
+                        </button>
+                      }
+                      <div class="pc-menu-separator" role="separator"></div>
+                      <button type="button" class="pc-menu-item" cdkMenuItem (cdkMenuItemTriggered)="history(r)">
+                        <mat-icon svgIcon="pc:clock" aria-hidden="true" />View history
+                      </button>
+                    </div>
+                  </ng-template>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </section>
+
+      @if (detail(); as r) {
+        @let s = state(r);
+        <aside #panel class="panel card" tabindex="-1" role="complementary" [attr.aria-label]="'Update details for ' + r.name">
+          <header class="panel-head">
+            <div class="truncate">
+              <h2 class="truncate">{{ r.name }}</h2>
+              <span class="status small"><span class="dot {{ s.tone }}" aria-hidden="true"></span>{{ s.text }}</span>
+            </div>
+            <button type="button" class="btn sm ghost icon" aria-label="Close details" (click)="close()"><mat-icon svgIcon="pc:x" aria-hidden="true" /></button>
+          </header>
+
+          <dl class="kv">
+            <dt>Installed</dt><dd class="ver">{{ r.currentVersion ?? '—' }}</dd>
+            <dt>Latest</dt><dd class="ver">{{ r.latestVersion ?? '—' }}</dd>
+            <dt>Checked</dt><dd class="small">{{ r.checkedAt ? ago(r.checkedAt) : 'never' }}</dd>
+            <dt>Policy</dt><dd class="small">{{ mode(r) }}</dd>
+          </dl>
+
+          @if (r.updatePhase.phase !== 'idle') {
+            <pc-update-progress [phase]="r.updatePhase" [now]="clock.now()" />
+          }
+          @if (r.updateLoop; as l) {
+            <section class="block-sec" aria-label="Update loop">
+              <h3>Updating to {{ l.target }} keeps failing</h3>
+              <p class="small">{{ l.cause }}</p>
+              <p class="faint small">{{ plural(l.attempts, 'attempt') }} so far.</p>
+            </section>
+          }
+          @if (deadlineNote(r); as note) {
+            <section class="block-sec" aria-label="Deadline">
+              <h3>{{ deadline(r)?.text }}</h3>
+              <p class="small muted">{{ note }}</p>
+            </section>
+          }
+          @if (look(r); as l) {
+            <section class="block-sec" aria-label="Last update">
+              <h3>Last update: {{ l.label.toLowerCase() }}</h3>
+              <p class="small muted">{{ l.detail }}</p>
+              <p class="faint small">{{ when(r.lastUpdate!.finishedAt) }}</p>
+              @if (failure(r); as f) {
+                <button type="button" class="btn sm" (click)="copy(f)"><mat-icon svgIcon="pc:copy" aria-hidden="true" />{{ copied() ? 'Copied' : 'Copy failure text' }}</button>
+              }
+            </section>
+          }
+
+          @if (r.managedBinary) {
+            <div class="btn-row">
+              @if (canUpdate(r)) {
+                <button type="button" class="btn sm" (click)="update(r)">Update to {{ r.updateTarget }}</button>
+              }
+              @if (r.updateTarget && r.updatePhase.phase === 'idle') {
+                <button type="button" class="btn sm" [disabled]="busy(r)" (click)="skip(r)">Skip this version</button>
+              }
+              @if (r.updatePolicy.pinned) {
+                <button type="button" class="btn sm" [disabled]="busy(r)" (click)="pinOrFollow(r)">Follow latest</button>
+              } @else if (r.currentVersion) {
+                <button type="button" class="btn sm" [disabled]="busy(r)" (click)="pinOrFollow(r)">Pin {{ r.currentVersion }}</button>
+              }
+              <button type="button" class="btn sm" [disabled]="busy(r)" (click)="check(r)">Check now</button>
+              <a class="btn sm ghost" [routerLink]="['/runners', r.name]" [queryParams]="{ tab: 'updates' }">View history</a>
+            </div>
+          }
+        </aside>
+      }
+    </div>
+  }
+
+  <div class="two">
+    <section class="card" aria-labelledby="sched-title">
+      <header class="card-header">
+        <h2 id="sched-title">Default schedule</h2>
+        <span class="meta">for runners without their own policy</span>
+      </header>
+      <div class="card-body">
+        <pc-load-state what="Settings" [hasValue]="!!settings.config()" [error]="settings.settings().error" [skeleton]="[60, 30, 30]" (retry)="settings.load()">
+          @if (settings.config(); as c) {
+            <pc-update-policy-editor id="defaults-upd" [policy]="c.defaults.update" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="saveDefaults($event)" />
+          }
+        </pc-load-state>
+      </div>
+    </section>
+
+    <section class="card self" aria-labelledby="self-title">
+      <header class="card-header">
+        <h2 id="self-title">Pitcrew</h2>
+        @if (app().value; as a) {
+          <span class="meta num">version {{ a.currentVersion }}</span>
+        }
+      </header>
+      <div class="card-body body">
+        <pc-load-state what="Pitcrew's update status" [hasValue]="!!app().value" [error]="app().error" [skeleton]="[20, 30]" (retry)="loadApp()">
+          @if (app().value; as a) {
+            @if (!a.available) {
+              <div class="callout">
+                <mat-icon svgIcon="pc:info" aria-hidden="true" />
+                <div class="callout-body">
+                  <strong>Self-update is off</strong>
+                  <span class="muted">{{ a.reason ?? 'Updates are not available in this build.' }}</span>
+                </div>
+              </div>
+            } @else {
+              <p class="muted">Pitcrew checks its signed releases and installs them when you say so. The service and runners keep running.</p>
+              @if (found() === null) {
+                <p class="tone-success">Pitcrew is up to date.</p>
+              } @else if (found(); as f) {
+                <div class="callout info">
+                  <mat-icon svgIcon="pc:sparkle" aria-hidden="true" />
+                  <div class="callout-body">
+                    <strong>Pitcrew {{ f.version }} is available</strong>
+                    @if (f.notes) {
+                      <span class="muted notes">{{ f.notes }}</span>
+                    }
+                  </div>
+                </div>
+              }
+              <div class="btn-row">
+                <button type="button" class="btn" (click)="checkApp()" [disabled]="appBusy() !== null">
+                  <mat-icon svgIcon="pc:refresh" aria-hidden="true" [class.spin]="appBusy() === 'check'" />Check for updates
+                </button>
+                @if (found()) {
+                  <button type="button" class="btn primary" (click)="installApp()" [disabled]="appBusy() !== null">
+                    <mat-icon svgIcon="pc:download" aria-hidden="true" />{{ appBusy() === 'install' ? 'Installing…' : 'Install and restart' }}
+                  </button>
+                }
+              </div>
+            }
+            @if (appError(); as e) {
+              <p class="tone-danger small" role="alert">{{ e.message }}</p>
+            }
+          }
+        </pc-load-state>
+      </div>
+    </section>
+  </div>
+</div>

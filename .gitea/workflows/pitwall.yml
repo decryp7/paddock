@@ -1,0 +1,557 @@
+# Pitwall's CI and release in the Paddock monorepo (ADR 0014; moved from decryp7/pitwall's build.yml): every step runs in
+# apps/pitwall. The plan job runs the rest only when the change reaches Pitwall (scripts/affected.mjs --ci --app pitwall).
+#
+# Built like Paddock's own CI (ci.yml): the paddock-ci image on Linux (Rust, Tauri's libraries, Node, Playwright's browsers,
+# cargo-nextest, cargo-llvm-cov and cargo-deny baked in), one Rust leg per OS through the shared actions (setup-rust:
+# sccache on local disk; stable-workspace and a kept build folder on the host runners, set as cargo configuration by the
+# build-folder action, never CARGO_TARGET_DIR; host-tools: the pinned cargo-nextest), nextest's ci profile with its per-test time budget
+# (apps/pitwall/.config/nextest.toml) plus the doc tests, the npm and Angular caches (node-caches), and the Chromium e2e in
+# two shards.
+#
+# Where each check runs:
+#   rust (Linux)                  format, clippy (workspace), tests (nextest; the server's privacy test and the API
+#                                 contract tests included), pitwall-core coverage >= 99 % lines, tests in another time
+#                                 zone, the Tauri shell's tests, doc tests
+#   rust (Windows, macOS)         clippy and tests of core, loopback, server (with the Windows service code) and cli, doc tests
+#   licences                      cargo deny, commit messages (pull requests), script tests, icons, privacy (reqwest only
+#                                 in egress.rs)
+#   frontend                      npm audit, lint, ng build, index.html without inline elements, unit tests, UI coverage >= 80 %
+#   e2e (2 shards)                Playwright, Chromium, mock backend
+#   e2e-webkit                    Playwright, WebKit (full runs only)
+#   bundle (3 OS)                 installers; the real-app smoke: macOS seal, run path, sidecars started from the built app
+#                                 (full runs)
+#   release                       a pitwall-v* tag (gated on every job above): notes, latest.json, the Gitea release
+# A full run is a push to main, a pitwall-v* tag, the nightly run, or a manual run with `bundles: true`; other branches and
+# pull requests run Chromium only and build no installers (rule 3).
+#
+# Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
+# system-wide and leave no processes or launch agents behind).
+# Releases need RELEASE_TOKEN (a Gitea access token with write:repository scope); signed updates need the family's updater
+# key, PADDOCK_TAURI_SIGNING_PRIVATE_KEY, PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD and PADDOCK_TAURI_UPDATER_PUBKEY.
+# Installed copies update from the moving pitwall-latest release here; copies installed before the move to the monorepo
+# are reinstalled once by hand (no transition release).
+
+name: pitwall
+
+on:
+  push:
+    branches: [main]
+    tags: ["pitwall-v*"]
+  pull_request:
+  schedule:
+    - cron: "45 1 * * *"
+  workflow_dispatch:
+    inputs:
+      bundles:
+        description: "Full run: also the installers, the real-app smoke and the WebKit e2e"
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+# A newer push to the same branch supersedes the run still going; tags have their own ref, so releases are never
+# cancelled by later pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+# Every step runs in the app's folder unless it says otherwise.
+defaults:
+  run:
+    working-directory: apps/pitwall
+
+jobs:
+  # Runs the rest only when the change reaches Pitwall (the same plan as ci.yml); a push to main whose commit carries a
+  # pitwall-v* tag is covered by the tag run. `full`: the installers, the real-app smoke and WebKit run too.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: .
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      full: ${{ steps.plan.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide
+        id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          BUNDLES: ${{ github.event.inputs.bundles }}
+          PLAN_TOKEN: ${{ github.token }}
+        run: |
+          run=$(node scripts/affected.mjs --ci --app pitwall)
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+            tag=$(git ls-remote --tags origin 'refs/tags/pitwall-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
+            if [ -n "$tag" ]; then run=false; echo "::notice::commit is tagged $tag; the tag run is the gate."; fi
+          fi
+          full=false
+          case "$EVENT" in
+            schedule) full=true ;;
+            workflow_dispatch) if [ "$BUNDLES" = true ]; then full=true; fi ;;
+            push) case "$REF" in refs/heads/main|refs/tags/pitwall-v*) full=true ;; esac ;;
+          esac
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
+  # One leg per OS, as Paddock's crate job: the whole workspace on Linux; on the Windows and Mac host runners the crates that
+  # build there (the server with its Windows service code and macOS launch agent code). Every step runs even after another
+  # failed; nextest names the crate of every failure.
+  rust:
+    name: rust (${{ matrix.os }})
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The Tauri shell is tested apart, after the rest: tauri-build copies its placeholder sidecar over
+          # target/debug/pitwall-server, which the server's end-to-end tests start as a child process.
+          - os: ubuntu-latest
+            clippy: --workspace
+            tests: --workspace --exclude pitwall-app
+          - os: windows-latest
+            clippy: -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli
+            tests: -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli
+          - os: macos-latest
+            clippy: -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli
+            tests: -p pitwall-core -p pitwall-loopback -p pitwall-server -p pitwall-cli
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: |
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # The same physical checkout path every run on the host runners, so sccache hits the workspace crates too.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: pitwall-${{ github.job }}-${{ runner.os }}
+
+      # The build folder as cargo configuration (.cargo/ci.toml): target/ here on Linux, a kept folder on the hosts.
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+          name: pitwall-${{ github.job }}
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy rustfmt
+
+      - uses: ./.gitea/actions/host-tools
+
+      # Cheap and first: a formatting slip fails in seconds.
+      - name: Format
+        if: runner.os == 'Linux'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        shell: bash
+        run: cargo clippy ${{ matrix.clippy }} --all-targets -- -D warnings
+
+      # Includes crates/pitwall-server/tests/privacy.rs (ADR 0001: only egress.rs may use reqwest) and the API contract
+      # tests against the fake engine.
+      - name: Tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        shell: bash
+        run: cargo nextest run ${{ matrix.tests }} --profile ci
+
+      # AGENTS.md: pitwall-core >= 99% lines.
+      - name: Core coverage guard (>= 99% lines)
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        run: cargo llvm-cov nextest -p pitwall-core --profile ci --summary-only --fail-under-lines 99
+
+      # Tests are timezone-independent (docs/suite-lessons.md); the binaries are built already.
+      - name: Tests in another time zone
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        env:
+          TZ: Pacific/Auckland
+        run: cargo nextest run -p pitwall-core -p pitwall-server --profile ci
+
+      - name: Tauri shell tests
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        run: cargo nextest run -p pitwall-app --profile ci
+
+      # nextest does not run doc tests.
+      - name: Doc tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        shell: bash
+        run: cargo test ${{ matrix.clippy }} --doc
+
+      - name: Clean up test processes and temp dirs (macOS)
+        if: always() && runner.os == 'macOS'
+        run: bash scripts/ci/macos-cleanup.sh
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+  licences:
+    name: licences, scripts + commits
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so pull requests can check every commit message.
+          fetch-depth: 0
+
+      - name: Commit messages follow Conventional Commits
+        if: github.event_name == 'pull_request'
+        run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
+
+      - name: Script tests
+        run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/ci/*.test.mjs
+
+      - name: App icons fill the canvas
+        run: node scripts/ci/check-icons.mjs
+
+      # ADR 0001: reqwest is referenced only in crates/pitwall-server/src/egress.rs (the privacy test runs with the rest in
+      # the rust job).
+      - name: Privacy (outbound HTTP only through egress.rs)
+        run: bash scripts/ci/privacy-check.sh
+
+      # cargo-deny comes with the image.
+      - name: Licences, advisories and sources
+        run: cargo deny --workspace check
+
+  frontend:
+    name: frontend build, lint + unit tests
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: apps/pitwall/app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/pitwall/app
+          name: pitwall-${{ github.job }}
+
+      - name: Install
+        run: |
+          (cd ../../.. && npm ci)
+          npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npx ng lint
+
+      - name: Build
+        run: npx ng build
+
+      # Tauri adds a CSP nonce for inline <style>/<script>, which blocks Angular's runtime styles (suite lessons).
+      - name: index.html has no inline elements
+        working-directory: apps/pitwall
+        run: node scripts/ci/check-index.mjs app/dist/app/browser/index.html
+
+      - name: Unit tests
+        run: npx ng test --watch=false --coverage
+
+      - name: UI coverage guard (>= 80% lines)
+        working-directory: apps/pitwall
+        run: node scripts/ci/ui-coverage-guard.mjs --min 80 --dir app/coverage
+
+  # Browser flows against `ng serve` with the mock backend in Chromium, in two shards that run at the same time (one worker
+  # each; --fully-parallel lets a shard take part of a file). Playwright's browsers come with the image. One port per
+  # shard: another job may hold a port on the same runner.
+  e2e:
+    name: e2e chromium (shard ${{ matrix.shard }}/2)
+    if: needs.plan.outputs.run == 'true'
+    needs: [plan]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    defaults:
+      run:
+        working-directory: apps/pitwall/app
+    env:
+      PW_E2E_PORT: ${{ matrix.shard == 1 && '4390' || '4391' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/pitwall/app
+          name: pitwall-e2e-${{ matrix.shard }}
+
+      - name: Install
+        run: (cd ../../.. && npm ci)
+
+      - name: End-to-end tests (Chromium)
+        run: npx playwright test --project=chromium --workers=1 --fully-parallel --shard=${{ matrix.shard }}/2
+
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: playwright-report-chromium-${{ matrix.shard }}
+          path: apps/pitwall/app/playwright-report
+          if-no-files-found: ignore
+
+  # WebKit (the engine of the macOS app's WKWebView) on full runs only (rule 3: branches run Chromium).
+  e2e-webkit:
+    name: e2e webkit
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
+    needs: [plan]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: apps/pitwall/app
+    env:
+      PW_E2E_PORT: "4392"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/pitwall/app
+          name: pitwall-e2e-webkit
+
+      - name: Install
+        run: (cd ../../.. && npm ci)
+
+      - name: End-to-end tests (WebKit)
+        run: npx playwright test --project=webkit --workers=1
+
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: playwright-report-webkit
+          path: apps/pitwall/app/playwright-report
+          if-no-files-found: ignore
+
+  # Installers and the real-app smoke (the macOS seal, sidecars started from the built app) on full runs only.
+  bundle:
+    name: bundle (${{ matrix.os }})
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-latest
+            bundles: app,dmg
+          - os: ubuntu-latest
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # The same physical checkout path every run on the host runners (sccache keys a compile on its folder), and the
+      # release build folder as cargo configuration (.cargo/ci.toml), which the Tauri build reads like every cargo command:
+      # target/ on Linux, a kept folder on the hosts.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: pitwall-${{ github.job }}-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+          name: pitwall-${{ github.job }}
+
+      - uses: ./.gitea/actions/setup-rust
+
+      # Host runners keep their own Node; fail fast when it is missing or not the major version the repo root .nvmrc asks for.
+      - name: Host Node matches .nvmrc
+        if: runner.os != 'Linux'
+        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        run: |
+          want=$(tr -d ' v\r\n' < ../../.nvmrc | cut -d. -f1)
+          if ! command -v node >/dev/null; then
+            if [ -x "/c/Program Files/nodejs/node.exe" ]; then
+              echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
+              export PATH="/c/Program Files/nodejs:$PATH"
+            else
+              echo "::error::Node.js is not installed on this runner: install Node $want (.nvmrc at the repo root)."
+              exit 1
+            fi
+          fi
+          have=$(node -p 'process.versions.node.split(".")[0]')
+          if [ "$have" != "$want" ]; then
+            echo "::error::The runner has Node $(node --version) but the repo root .nvmrc asks for Node $want."
+            exit 1
+          fi
+
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/pitwall/app
+          name: pitwall-bundle
+
+      # Rule 25 (C06): the family's updater keys, whitespace out, for the following steps.
+      - uses: ./.gitea/actions/strip-signing-keys
+        with:
+          signing-private-key: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+          updater-pubkey: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+
+      - name: Build installers
+        shell: bash
+        env:
+          # Tauri's DMG step skips Finder window scripting on CI (no Automation prompt on the host).
+          CI: "true"
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        run: bash scripts/ci/tauri-bundle.sh "${{ matrix.bundles }}"
+
+      # The real-app smoke: signingIdentity "-" must leave an ad-hoc sealed bundle (no hardened runtime while ad hoc, one
+      # Team ID, sidecars that start from the built app); native libraries resolve by run path.
+      - name: Verify the .app and the DMG (seal, no hardened runtime while ad hoc, Team IDs, sidecars start, run path)
+        if: runner.os == 'macOS'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        run: bash scripts/ci/macos-verify-bundle.sh
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      # Gitea Actions supports upload/download-artifact v3.
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pitwall-${{ runner.os }}
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall/dist/*
+          if-no-files-found: error
+
+      - name: Clean up (macOS)
+        if: always() && runner.os == 'macOS'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+        run: bash scripts/ci/macos-cleanup.sh --build-outputs
+
+  release:
+    name: release
+    if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/pitwall-v'))
+    # Gated: a tag publishes only when every check job and every installer build passed (a skipped or failed need blocks it).
+    needs: [plan, bundle, rust, licences, frontend, e2e, e2e-webkit]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v3
+        with:
+          path: apps/pitwall/artifacts
+
+      - name: Installers are present
+        run: |
+          if ! find artifacts -type f | grep -q .; then
+            echo "::error::No installers were built: nothing to release."
+            exit 1
+          fi
+
+      - name: Release notes (git-cliff)
+        run: |
+          cargo install git-cliff --locked
+          git cliff -r ../.. --config cliff.toml --tag-pattern 'pitwall-v.*' --include-path 'apps/pitwall/**' --include-path 'crates/**' --include-path 'ui/**' --latest --strip header -o artifacts/RELEASE_NOTES.md
+          # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
+          cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
+
+          ### First launch
+
+          Pitwall is not code-signed yet, so your system may warn the first time you open it.
+
+          - **Existing installs:** download this version once by hand. Pitwall now updates from the Paddock releases, which a copy installed before this version does not look at.
+          - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Pitwall > **Open Anyway**.
+          - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
+          FIRST_LAUNCH
+
+      # latest.json for the updater: version, notes, pub_date and, per platform, the installer's URL, signature and
+      # size. Installed apps fetch it from the moving pitwall-latest release.
+      - name: Updater manifest (latest.json)
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          # Public URL, not github.server_url: inside the runners that is the internal http address, and the updater
+          # requires https.
+          BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        run: |
+          node --test scripts/release/latest-json.test.mjs
+          if ! find artifacts -name '*.sig' | grep -q .; then
+            echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
+            exit 0
+          fi
+          node scripts/release/latest-json.mjs --dir artifacts --version "${TAG#pitwall-}" --notes artifacts/RELEASE_NOTES.md \
+            --base-url "$BASE_URL" --out artifacts/latest.json
+          find artifacts -name '*.sig' -delete
+          cat artifacts/latest.json
+
+      # Plain API calls instead of gitea.com/actions/release-action, which is a Go action and the runner image has no Go.
+      - name: Publish the release
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          node --test scripts/release/publish.test.mjs
+          publish=../../conformance/release/publish.mjs
+          api="${{ github.server_url }}/api/v1"
+          node "$publish" --api "$api" --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
+          if [ ! -f artifacts/latest.json ]; then exit 0; fi
+          # The updater's one endpoint (tauri.conf.json): the moving pitwall-latest release here.
+          mkdir -p "$RUNNER_TEMP/latest" && cp artifacts/latest.json "$RUNNER_TEMP/latest/"
+          node "$publish" --api "$api" --repo "${{ github.repository }}" --tag pitwall-latest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace

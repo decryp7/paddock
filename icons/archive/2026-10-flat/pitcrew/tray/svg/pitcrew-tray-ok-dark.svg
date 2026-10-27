@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <title>Pitcrew tray (ok)</title>
+  <defs><mask id="tlm2" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M6.8 8a1.2 1.2 0 1 1 2.4 0a1.2 1.2 0 1 1 -2.4 0Z" fill="#000"/></mask></defs>
+  <g><path d="M12.6 4.14A6 6 0 1 1 3.4 4.14" fill="none" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="butt" stroke-linejoin="round"/><path d="M5.2 2L1.41 2.47L5.39 5.81Z" fill="#FFFFFF"/><path d="M11.03 9.75L8 11.5L4.97 9.75L4.97 6.25L8 4.5L11.03 6.25Z" fill="#FFFFFF" mask="url(#tlm2)"/></g>
+  
+</svg>

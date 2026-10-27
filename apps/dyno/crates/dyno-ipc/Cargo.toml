@@ -1,0 +1,45 @@
+[package]
+name = "dyno-ipc"
+description = "Dyno's one IPC: length-prefixed postcard frames on a private local stream, with a token handshake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+# A child process for this crate's own tests (echo, exit at once, never connect, wrong token). Never shipped.
+[[bin]]
+name = "dyno-ipc-test-child"
+path = "src/bin/test_child.rs"
+test = false
+doc = false
+
+[dependencies]
+getrandom = "0.3"
+postcard.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subtle = "2.6"
+thiserror.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

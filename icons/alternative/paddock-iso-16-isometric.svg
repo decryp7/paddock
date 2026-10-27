@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Paddock (isometric) 16px</title>
+  <defs>
+    <linearGradient id="k7bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A525E"/><stop offset="1" stop-color="#1E2228"/></linearGradient>
+    
+  </defs>
+  <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#k7bg)"/>
+  <path d="M4 1H12A3 3 0 0 1 15 4V12A3 3 0 0 1 12 15H4A3 3 0 0 1 1 12V4A3 3 0 0 1 4 1Z" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1"/>
+  <path d="M2 9L11 13.5L11 10L2 5.5Z" fill="#C9D0D9" shape-rendering="crispEdges"/><path d="M11 13.5L14 12L14 8.5L11 10Z" fill="#8E98A5" shape-rendering="crispEdges"/><path d="M3 9.5L6 11L6 8.5L3 7ZM7 11.5L10 13L10 10.5L7 9Z" fill="#14181D" shape-rendering="crispEdges"/><path d="M1 5.5L11 10.5L11 9.5L1 4.5Z" fill="#DCE1E7" shape-rendering="crispEdges"/><path d="M11 10.5L15 8.5L15 7.5L11 9.5Z" fill="#9AA3AF" shape-rendering="crispEdges"/><path d="M1 4.5L11 9.5L15 7.5L5 2.5Z" fill="#FFFFFF" shape-rendering="crispEdges"/>
+</svg>

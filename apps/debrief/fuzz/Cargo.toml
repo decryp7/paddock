@@ -1,0 +1,361 @@
+[package]
+name = "debrief-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# A separate workspace: fuzzing needs nightly and libFuzzer and must not affect the main build.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+debrief-core = { path = "../crates/debrief-core" }
+debrief-ipc = { path = "../crates/debrief-ipc" }
+debrief-notes = { path = "../crates/debrief-notes" }
+debrief-plugin-api = { path = "../crates/debrief-plugin-api" }
+debrief-plugin-package = { path = "../crates/debrief-plugin-package" }
+debrief-ai = { path = "../crates/debrief-ai" }
+debrief-ai-worker = { path = "../crates/debrief-ai-worker" }
+debrief-plugin-registry = { path = "../crates/debrief-plugin-registry" }
+debrief-plugin-windows = { path = "../crates/debrief-plugin-windows" }
+debrief-plugin-web = { path = "../crates/debrief-plugin-web" }
+debrief-plugin-formats = { path = "../crates/debrief-plugin-formats" }
+debrief-plugin-otel = { path = "../crates/debrief-plugin-otel" }
+debrief-plugin-syslog = { path = "../crates/debrief-plugin-syslog" }
+debrief-profile = { path = "../crates/debrief-profile" }
+debrief-plugin-profiling = { path = "../crates/debrief-plugin-profiling", default-features = false }
+debrief-dump = { path = "../crates/debrief-dump" }
+debrief-plugin-dumps = { path = "../crates/debrief-plugin-dumps", default-features = false }
+debrief-etw = { path = "../crates/debrief-etw" }
+debrief-symbols = { path = "../crates/debrief-symbols", default-features = false }
+debrief-plugin-dotnet = { path = "../crates/debrief-plugin-dotnet", default-features = false }
+serde_json = "1"
+chrono = "0.4"
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_archive"
+path = "fuzz_targets/fuzz_archive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_csv"
+path = "fuzz_targets/fuzz_csv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_evtx"
+path = "fuzz_targets/fuzz_evtx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_json"
+path = "fuzz_targets/fuzz_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_otel"
+path = "fuzz_targets/fuzz_otel.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_perfmon_csv"
+path = "fuzz_targets/fuzz_perfmon_csv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_profile_toml"
+path = "fuzz_targets/fuzz_profile_toml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_ql"
+path = "fuzz_targets/fuzz_ql.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_registry"
+path = "fuzz_targets/fuzz_registry.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_syslog"
+path = "fuzz_targets/fuzz_syslog.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_text"
+path = "fuzz_targets/fuzz_text.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_timestamp"
+path = "fuzz_targets/fuzz_timestamp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_w3c_access_har"
+path = "fuzz_targets/fuzz_w3c_access_har.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_speedscope"
+path = "fuzz_targets/fuzz_prof_speedscope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_folded"
+path = "fuzz_targets/fuzz_prof_folded.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_cpuprofile"
+path = "fuzz_targets/fuzz_prof_cpuprofile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_chrome_trace"
+path = "fuzz_targets/fuzz_prof_chrome_trace.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_pprof"
+path = "fuzz_targets/fuzz_prof_pprof.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_perf_script"
+path = "fuzz_targets/fuzz_prof_perf_script.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_nettrace"
+path = "fuzz_targets/fuzz_prof_nettrace.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_heapsnapshot"
+path = "fuzz_targets/fuzz_prof_heapsnapshot.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_procmon_csv"
+path = "fuzz_targets/fuzz_procmon_csv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_log4j_xml"
+path = "fuzz_targets/fuzz_log4j_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sql_errorlog"
+path = "fuzz_targets/fuzz_sql_errorlog.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_docker_json"
+path = "fuzz_targets/fuzz_docker_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_cri"
+path = "fuzz_targets/fuzz_cri.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_minidump"
+path = "fuzz_targets/fuzz_minidump.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_eventlog"
+path = "fuzz_targets/fuzz_eventlog.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_ipc_frame"
+path = "fuzz_targets/fuzz_ipc_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_plugin_request"
+path = "fuzz_targets/fuzz_plugin_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_dotnet_ipc"
+path = "fuzz_targets/fuzz_dotnet_ipc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_plugin_reply"
+path = "fuzz_targets/fuzz_plugin_reply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_ai_request"
+path = "fuzz_targets/fuzz_ai_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_worker_http"
+path = "fuzz_targets/fuzz_worker_http.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_prof_nettrace_heap"
+path = "fuzz_targets/fuzz_prof_nettrace_heap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_native_etw"
+path = "fuzz_targets/fuzz_native_etw.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_image"
+path = "fuzz_targets/fuzz_image.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_native_pe"
+path = "fuzz_targets/fuzz_native_pe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_vision_facts"
+path = "fuzz_targets/fuzz_vision_facts.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_dump_minidump"
+path = "fuzz_targets/fuzz_dump_minidump.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_dump_umdh"
+path = "fuzz_targets/fuzz_dump_umdh.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_dump_wire"
+path = "fuzz_targets/fuzz_dump_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_plugin_package"
+path = "fuzz_targets/fuzz_plugin_package.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_parser_toml"
+path = "fuzz_targets/fuzz_parser_toml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_project"
+path = "fuzz_targets/fuzz_project.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_notes_knowledge"
+path = "fuzz_targets/fuzz_notes_knowledge.rs"
+test = false
+doc = false
+bench = false

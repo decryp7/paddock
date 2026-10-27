@@ -1,0 +1,392 @@
+<div class="page">
+  <header class="page-head">
+    <div>
+      <h1>Settings</h1>
+      <p class="sub">Stored on this machine. Changes apply when you save.</p>
+    </div>
+  </header>
+
+  @if (store.error() && !d()) {
+    <pw-panel heading="Settings" icon="settings" [error]="store.error()" [ready]="false" (retry)="store.load()" />
+  }
+
+  <div class="layout">
+    <nav class="subnav" aria-label="Settings sections">
+      @for (s of sections; track s.id) {
+        <button type="button" [class.active]="active() === s.id" [attr.aria-current]="active() === s.id ? 'true' : null" (click)="go(s.id)">
+          <mat-icon [svgIcon]="'pw:' + s.icon" aria-hidden="true" />{{ s.label }}
+        </button>
+      }
+    </nav>
+
+    <div class="cards">
+      @if (store.loading() && !d()) {
+        <pw-panel heading="General" icon="sliders" [loading]="true" [ready]="false" [skeletonLines]="6" />
+      }
+      @if (!d()) {
+        <!-- The service is the app's own business: it renders without the server, so it can be repaired when the server is down. -->
+        <pw-service-panel />
+      }
+      @if (d(); as s) {
+        <!-- General -->
+        <pw-panel id="set-general" heading="General" icon="sliders">
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-theme">Theme</span><p class="hint">System follows your OS light or dark setting.</p></div>
+            <div class="seg" role="radiogroup" aria-labelledby="lbl-theme">
+              @for (t of themes; track t.value) {
+                <button type="button" role="radio" [attr.aria-checked]="s.general.theme === t.value" (click)="setTheme(t.value)">
+                  <mat-icon [svgIcon]="'pw:' + t.icon" aria-hidden="true" />{{ t.label }}
+                </button>
+              }
+            </div>
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-login">Start at login</span><p class="hint">Start Pitwall in the tray when you sign in. This is your computer's own login item, so it applies at once.</p></div>
+            @if (service.autostart() !== null) {
+              <mat-slide-toggle hideIcon aria-labelledby="lbl-login" [checked]="service.autostart() === true" [disabled]="service.isBusy()('autostart')" (change)="service.setAutostart($event.checked)" />
+            } @else {
+              <span class="faint">Unavailable</span>
+            }
+          </div>
+          <div class="row">
+            <div class="lbl">
+              <span class="name" id="lbl-quit">When you quit Pitwall</span>
+              <p class="hint">Closing the window never stops serving; Pitwall stays in the tray. This is about Quit. The background service stays registered either way.</p>
+            </div>
+            <div class="seg" role="radiogroup" aria-labelledby="lbl-quit">
+              @for (o of quitOptions; track o.value) {
+                <button type="button" role="radio" [attr.aria-checked]="s.general.onQuit === o.value" (click)="store.edit('general', { onQuit: o.value })">{{ o.label }}</button>
+              }
+            </div>
+          </div>
+        </pw-panel>
+
+        <!-- Server -->
+        <pw-panel id="set-server" heading="Server" icon="server" sub="Local API on 127.0.0.1">
+          <div class="row">
+            <div class="lbl"><label class="name" for="srv-port">Port</label><p class="hint">Apps find it in the discovery file; changing it restarts the server.</p></div>
+            <div class="unit-input"><input id="srv-port" class="input num w-sm" type="number" min="1024" max="65535" [value]="s.server.port" (change)="setPort(value($event))" /><span></span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="srv-max">Largest request</label><p class="hint">Bigger requests are refused (images, long prompts).</p></div>
+            <div class="unit-input"><input id="srv-max" class="input num w-sm" type="number" min="1" [value]="mb(s.server.maxRequestBytes)" (change)="setMaxRequest(value($event))" /><span>MB</span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="srv-timeout">Request timeout</label><p class="hint">A request running longer is cancelled.</p></div>
+            <div class="unit-input"><input id="srv-timeout" class="input num w-sm" type="number" min="5" [value]="s.server.requestTimeoutSecs" (change)="setTimeoutSecs(value($event))" /><span>s</span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="srv-conc">Requests at once</label><p class="hint">More wait in the queue by priority.</p></div>
+            <div class="unit-input"><input id="srv-conc" class="input num w-sm" type="number" min="1" max="64" [value]="s.server.maxConcurrent" (change)="setMaxConcurrent(value($event))" /><span></span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-keyless">Accept local requests without a key</span><p class="hint">For tools that speak the Ollama API and can't send a key.</p></div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-keyless" [checked]="s.server.allowKeylessLocal" (change)="store.edit('server', { allowKeylessLocal: $event.checked })" />
+          </div>
+          @if (s.server.allowKeylessLocal) {
+            <div class="note warn" role="note">
+              <mat-icon svgIcon="pw:alert" aria-hidden="true" />
+              <span>Any program on this computer can then use your models without asking, and its requests are not attributed to an app. Leave it off unless a tool needs it.</span>
+            </div>
+          }
+        </pw-panel>
+
+        <!-- Memory -->
+        <pw-panel id="set-memory" heading="Memory" icon="memory" sub="When models are loaded and released">
+          <div class="presets" role="radiogroup" aria-label="Memory preset">
+            @for (p of presets; track p) {
+              <button type="button" role="radio" class="preset" [attr.aria-checked]="s.memory.preset === p" [disabled]="store.saving()" (click)="store.applyPreset(p)">
+                <span class="p-name">{{ presetLabel[p] }}</span>
+                <span class="p-hint">{{ presetHint[p] }}</span>
+              </button>
+            }
+            <div class="preset custom" [class.on]="s.memory.preset === 'custom'" aria-hidden="true">
+              <span class="p-name">Custom</span>
+              <span class="p-hint">Your own values below</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="mem-idle">Release a model after idle</label><p class="hint">Per-model overrides are in Models.</p></div>
+            <div class="unit-input"><input id="mem-idle" class="input num w-sm" type="number" min="0.5" step="0.5" [value]="minutes(s.memory.idleUnloadSecs)" (change)="setIdleMinutes('idleUnloadSecs', value($event))" /><span>min</span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="mem-deep">Stop engines after idle</label><p class="hint">Deep idle: every engine process exits and gives back all memory.</p></div>
+            <div class="unit-input"><input id="mem-deep" class="input num w-sm" type="number" min="1" [value]="minutes(s.memory.deepIdleSecs)" (change)="setIdleMinutes('deepIdleSecs', value($event))" /><span>min</span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-ctx">Release the context first</span><p class="hint">Free the KV cache early and keep the weights until the idle limit.</p></div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-ctx" [checked]="s.memory.releaseContextFirst" (change)="store.edit('memory', { releaseContextFirst: $event.checked })" />
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="mem-pressure">Memory pressure</label><p class="hint">Release idle models when free RAM drops below this share.</p></div>
+            <div class="unit-input"><input id="mem-pressure" class="input num w-sm" type="number" min="1" max="90" [value]="s.memory.pressureAvailablePercent" (change)="setPressure(value($event))" /><span>%</span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="mem-min">Always keep free</label><p class="hint">A load never leaves less than this for your other apps.</p></div>
+            <div class="unit-input"><input id="mem-min" class="input num w-sm" type="number" min="0" step="0.5" [value]="gb(s.memory.minFreeBytes)" (change)="setMinFree(value($event))" /><span>GB</span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="mem-hot">Hot models at once</label><p class="hint">The least recently used one is released to make room.</p></div>
+            <div class="unit-input"><input id="mem-hot" class="input num w-sm" type="number" min="1" max="16" [value]="s.memory.maxHotModels" (change)="setMaxHot(value($event))" /><span></span></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-cap">Memory for hot models</span><p class="hint">Together, across RAM and VRAM.</p></div>
+            <div class="cap">
+              <div class="seg" role="radiogroup" aria-labelledby="lbl-cap">
+                <button type="button" role="radio" [attr.aria-checked]="s.memory.hotCapBytes === null" (click)="setCapMode(true)">What fits</button>
+                <button type="button" role="radio" [attr.aria-checked]="s.memory.hotCapBytes !== null" (click)="setCapMode(false)">Limit</button>
+              </div>
+              @if (s.memory.hotCapBytes !== null) {
+                <div class="unit-input"><input class="input num w-xs" type="number" min="1" aria-label="Memory limit for hot models in GB" [value]="gb(s.memory.hotCapBytes)" (change)="setHotCap(value($event))" /><span>GB</span></div>
+              }
+            </div>
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-yield">Yield to full-screen apps</span><p class="hint">Release idle models when a game or full-screen app is in front.</p></div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-yield" [checked]="s.memory.yieldToForeground" (change)="store.edit('memory', { yieldToForeground: $event.checked })" />
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-notify">Notify when memory is released</span><p class="hint">A quiet notification says which model and why.</p></div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-notify" [checked]="s.memory.notifyOnRelease" (change)="store.edit('memory', { notifyOnRelease: $event.checked })" />
+          </div>
+        </pw-panel>
+
+        <!-- Caching -->
+        <pw-panel id="set-cache" heading="Caching" icon="bolt" sub="Three layers, all on this computer">
+          <div class="note info" role="note">
+            <mat-icon svgIcon="pw:shield" aria-hidden="true" />
+            <span>
+              <b>Prompt reuse</b> is automatic: the engine keeps the start of a conversation so the next message does not reprocess it.
+              <b>Cached answers</b> are opt-in for each app and each preset, and only for deterministic requests (temperature 0 or a fixed seed, no tools).
+              <b>Embeddings</b> are cached by default because the same text always gives the same vector.
+            </span>
+          </div>
+
+          <h3 class="group">Prompt reuse</h3>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-affinity">Keep a conversation on one slot</span><p class="hint">Sends a conversation's requests to the same engine slot so its saved prompt is found.</p></div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-affinity" [checked]="s.cache.prefixAffinity" (change)="store.edit('cache', { prefixAffinity: $event.checked })" />
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-prompt-cache">Prompt cache size</span><p class="hint">Host memory each model may use to keep prompts. Automatic sizes it from this computer's memory.</p></div>
+            <div class="cap">
+              <div class="seg" role="radiogroup" aria-labelledby="lbl-prompt-cache">
+                <button type="button" role="radio" [attr.aria-checked]="s.cache.promptCacheMib === null" (click)="setPromptCacheAuto(true)">Automatic</button>
+                <button type="button" role="radio" [attr.aria-checked]="s.cache.promptCacheMib !== null" (click)="setPromptCacheAuto(false)">Set size</button>
+              </div>
+              @if (s.cache.promptCacheMib !== null) {
+                <div class="unit-input"><input class="input num w-sm" type="number" min="0" aria-label="Prompt cache size in MiB" [value]="s.cache.promptCacheMib" (change)="setPromptCacheMib(value($event))" /><span>MiB</span></div>
+              }
+            </div>
+          </div>
+
+          @for (k of cacheKinds; track k.id) {
+            <h3 class="group">{{ k.title }}</h3>
+            <p class="hint pad-h">{{ k.about }}</p>
+            @if (k.id === 'embeddings') {
+              <div class="row">
+                <div class="lbl"><span class="name" id="lbl-emb-on">Cache embeddings</span><p class="hint">Off means every embedding request runs the model.</p></div>
+                <mat-slide-toggle hideIcon aria-labelledby="lbl-emb-on" [checked]="s.cache.embeddings" (change)="store.edit('cache', { embeddings: $event.checked })" />
+              </div>
+            }
+            <div class="row">
+              <div class="lbl"><span class="name" [id]="'lbl-' + k.id + '-storage'">Storage</span><p class="hint">On disk keeps it across restarts. Memory only forgets it when Pitwall stops.</p></div>
+              <div class="seg" role="radiogroup" [attr.aria-labelledby]="'lbl-' + k.id + '-storage'">
+                <button type="button" role="radio" [attr.aria-checked]="storage(k.id) === 'memory'" (click)="setStorage(k.id, 'memory')">Memory only</button>
+                <button type="button" role="radio" [attr.aria-checked]="storage(k.id) === 'disk'" (click)="setStorage(k.id, 'disk')">On disk</button>
+              </div>
+            </div>
+            <div class="row">
+              <div class="lbl"><label class="name" [for]="'cache-' + k.id + '-max'">Largest size</label><p class="hint">The oldest entries go first when it is full.</p></div>
+              <div class="unit-input"><input [id]="'cache-' + k.id + '-max'" class="input num w-sm" type="number" min="1" [value]="maxMib(k.id)" (change)="setMaxMib(k.id, value($event))" /><span>MiB</span></div>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="name" [id]="'lbl-' + k.id + '-ttl'">Expires after</span><p class="hint">{{ k.ttlHint }}</p></div>
+              <pw-select [options]="ttlChoices(k.id)" [value]="'' + ttl(k.id)" [label]="k.title + ' expiry'" (changed)="setTtl(k.id, $event)" />
+            </div>
+            @if (store.cacheInfo(); as ci) {
+              @let info = ci[k.id];
+              @if (info.diskError) {
+                <p class="note warn" role="alert"><mat-icon svgIcon="pw:alert" aria-hidden="true" /><span>The disk cache is not in use, so this cache is memory only for now: {{ info.diskError }}</span></p>
+              }
+              <dl class="cache-stats" [attr.aria-label]="k.title + ' statistics'">
+                <div><dt>Entries</dt><dd class="num">{{ intText(info.entries) }}</dd></div>
+                <div><dt>Size</dt><dd class="num">{{ cacheSize(info) }}</dd></div>
+                <div><dt>Hits</dt><dd class="num">{{ intText(info.hits) }}</dd></div>
+                <div><dt>Oldest entry</dt><dd class="num">{{ oldest(info) }}</dd></div>
+                <div><dt>Expires after</dt><dd>{{ expiry(info) }}</dd></div>
+              </dl>
+            }
+            <div class="row actions">
+              <div class="lbl"><span class="hint">Removes every {{ k.noun }} now.</span></div>
+              <button type="button" class="btn" [disabled]="store.clearing()" (click)="clear({ kind: k.id }, k.title)">Clear now</button>
+            </div>
+          }
+
+          <h3 class="group">Kept-warm prompts</h3>
+          <div class="row">
+            <div class="lbl"><label class="name" for="cache-keep-warm">Keep unused files for</label><p class="hint">A preset's system prompt can be saved when its model unloads and restored on load. Files unused for this long are deleted.</p></div>
+            <div class="unit-input"><input id="cache-keep-warm" class="input num w-sm" type="number" min="1" max="3650" [value]="s.cache.keepWarmDays" (change)="setKeepWarmDays(value($event))" /><span>days</span></div>
+          </div>
+
+          @if (store.cacheError(); as e) {
+            <p class="note warn" role="alert"><mat-icon svgIcon="pw:alert" aria-hidden="true" /><span>Could not read the cache figures: {{ e.message }} <button type="button" class="btn sm" (click)="store.loadCacheInfo()">Retry</button></span></p>
+          }
+          @if (store.cacheInfo(); as ci) {
+            <div class="row">
+              <div class="lbl"><span class="name">Next clean-up</span><p class="hint">Expired entries are removed on this schedule. Kept-warm prompts: {{ ci.keepWarmFiles }} {{ ci.keepWarmFiles === 1 ? 'file' : 'files' }}, {{ sizeOf(ci.keepWarmBytes) }}.</p></div>
+              <span class="num" data-testid="next-sweep">{{ nextSweep(ci.nextSweepAt) }}</span>
+            </div>
+          }
+          <div class="row actions">
+            <div class="lbl"><span class="name">Clear all caches</span><p class="hint">Cached answers, embeddings and kept-warm prompts. Apps work as before, just slower at first.</p></div>
+            <button type="button" class="btn" [disabled]="store.clearing()" (click)="clear({ kind: 'all' }, 'all caches')">Clear all caches</button>
+          </div>
+
+          <div class="note info" role="note">
+            <mat-icon svgIcon="pw:lock" aria-hidden="true" />
+            <span>
+              Cached answers and embeddings are stored on this computer, in Pitwall's data folder (<code>cache.sqlite</code>), readable only by your account. They are never sent anywhere.
+              Answers are cached only for apps and presets you opt in. Choose Memory only to keep them off the disk.
+            </span>
+          </div>
+        </pw-panel>
+
+        <!-- Network -->
+        <pw-panel id="set-network" heading="Network" icon="globe">
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-offline">Offline mode</span><p class="hint">No network requests at all: no model search, downloads or engine updates.</p></div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-offline" [checked]="s.network.offline" (change)="store.edit('network', { offline: $event.checked })" />
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="name" id="lbl-lan">Serve other devices on your network</span><p class="hint">Off by default. Pitwall only listens on this computer.</p></div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-lan" [checked]="s.network.lanEnabled" (change)="store.edit('network', { lanEnabled: $event.checked })" />
+          </div>
+          @if (s.network.lanEnabled) {
+            <div class="note info" role="note">
+              <mat-icon svgIcon="pw:shield" aria-hidden="true" />
+              <span>
+                Other devices connect over HTTPS with a certificate Pitwall creates for this computer. Because no public authority signs it, each device pins its
+                fingerprint once: compare the fingerprint below with the one the device shows. Every device still needs its own app key.
+              </span>
+            </div>
+            <div class="row">
+              <div class="lbl"><label class="name" for="net-port">Network port</label></div>
+              <div class="unit-input"><input id="net-port" class="input num w-sm" type="number" min="1024" max="65535" [value]="s.network.lanPort" (change)="setLanPort(value($event))" /><span></span></div>
+            </div>
+            @if (lan(); as l) {
+              @if (l.enabled && l.url) {
+                <dl class="lan">
+                  <dt>Address</dt>
+                  <dd><code>{{ l.url }}</code><button type="button" class="btn ghost icon sm" aria-label="Copy address" (click)="copy(l.url)"><mat-icon svgIcon="pw:copy" aria-hidden="true" /></button></dd>
+                  @if (l.certFingerprint) {
+                    <dt>Certificate SHA-256</dt>
+                    <dd><code class="fp">{{ l.certFingerprint }}</code><button type="button" class="btn ghost icon sm" aria-label="Copy fingerprint" (click)="copy(l.certFingerprint)"><mat-icon svgIcon="pw:copy" aria-hidden="true" /></button></dd>
+                  }
+                </dl>
+              } @else {
+                <p class="faint pad">The address and certificate fingerprint appear here once you save.</p>
+              }
+            }
+          }
+        </pw-panel>
+
+        <!-- Model updates -->
+        <pw-panel id="set-model-updates" heading="Model updates" icon="download" sub="Newer revisions and better quantisations of the models you downloaded" [loading]="updates.loading()" [error]="updates.status() ? null : updates.error()" [ready]="!!updates.status()" [skeletonLines]="3" (retry)="updates.load()">
+          @if (updates.status(); as u) {
+            <div class="row">
+              <div class="lbl"><span class="name" id="lbl-model-updates">Check for model updates</span><p class="hint">Off until you turn it on. Pitwall asks {{ u.host }} on a schedule and tells you what it finds. It never downloads anything by itself.</p></div>
+              <mat-slide-toggle hideIcon aria-labelledby="lbl-model-updates" [checked]="u.settings.enabled" [disabled]="updates.saving()" (change)="updates.setCheck($event.checked, u.settings.schedule)" />
+            </div>
+            <div class="row">
+              <div class="lbl"><label class="name" for="model-updates-schedule">How often</label><p class="hint">Once a day or once a week. The first check runs as soon as you turn it on.</p></div>
+              <pw-select inputId="model-updates-schedule" label="How often" [options]="scheduleOptions" [value]="u.settings.schedule" [disabled]="!u.settings.enabled || updates.saving()" (changed)="setSchedule($event)" />
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="name">Status</span><p class="hint" aria-live="polite">{{ updateSummary() }}</p></div>
+              <button type="button" class="btn" [disabled]="updates.checking() || u.offline" (click)="updates.checkNow()"><mat-icon svgIcon="pw:refresh" aria-hidden="true" />{{ updates.checking() ? 'Checking…' : 'Check now' }}</button>
+            </div>
+            @if (updates.lastResult(); as r) {
+              <p class="hint pad" role="status">{{ r.message }}</p>
+            }
+            <div class="note info" role="note">
+              <mat-icon svgIcon="pw:shield" aria-hidden="true" />
+              <span>
+                A check sends {{ u.host }} only the repository ids (like <code>owner/name</code>) of models you already downloaded, in the address of an ordinary file-list request:
+                no prompts, file contents, usage or identifiers, and at most {{ u.maxRepos }} repositories per check. Offline mode stops it completely.
+              </span>
+            </div>
+          }
+        </pw-panel>
+
+        <!-- Privacy -->
+        <pw-panel id="set-privacy" heading="Privacy" icon="lock" sub="Nothing leaves this computer">
+          <div class="row">
+            <div class="lbl">
+              <span class="name" id="lbl-content">Keep request content</span>
+              <p class="hint">Off by default: the inspector records timings and token counts only. On: prompts and answers are kept on this computer so you can open them in Requests.</p>
+            </div>
+            <mat-slide-toggle hideIcon aria-labelledby="lbl-content" [checked]="s.privacy.keepRequestContent" (change)="store.edit('privacy', { keepRequestContent: $event.checked })" />
+          </div>
+          <div class="row">
+            <div class="lbl"><label class="name" for="prv-ret">Keep metrics and history for</label><p class="hint">Older data is deleted.</p></div>
+            <div class="unit-input"><input id="prv-ret" class="input num w-sm" type="number" min="1" max="365" [value]="s.privacy.metricsRetentionDays" (change)="setRetention(value($event))" /><span>days</span></div>
+          </div>
+        </pw-panel>
+
+        <!-- Service -->
+        <pw-service-panel />
+
+        <!-- Updates -->
+        <pw-panel id="set-updates" heading="Updates" icon="download">
+          @if (service.updateStatus(); as u) {
+            <div class="row">
+              <div class="lbl">
+                <span class="name">Pitwall {{ u.currentVersion }}</span>
+                <p class="hint">
+                  @if (service.update(); as up) {
+                    Version {{ up.version }} is ready to install. {{ up.notes ?? '' }}
+                  } @else if (!u.available) {
+                    {{ u.reason ?? 'Updates are off in this build.' }}
+                  } @else if (service.upToDate()) {
+                    You have the latest version.
+                  } @else {
+                    Pitwall only looks for updates when you ask; nothing is sent until then.
+                  }
+                </p>
+              </div>
+              <span class="status" [attr.data-tone]="service.update() ? 'info' : u.available ? (service.upToDate() ? 'ok' : 'muted') : 'muted'">{{
+                service.update() ? 'Update available' : u.available ? (service.upToDate() ? 'Up to date' : 'Not checked') : 'Not configured'
+              }}</span>
+            </div>
+            @if (u.available) {
+              <div class="row">
+                <div class="lbl"><span class="name">{{ service.update() ? 'Install ' + service.update()!.version : 'Check for updates' }}</span><p class="hint">{{ service.update() ? 'Pitwall restarts. The server restarts itself when it is idle.' : 'Asks the release server whether a newer version exists.' }}</p></div>
+                @if (service.update()) {
+                  <button type="button" class="btn primary" [disabled]="service.isBusy()('apply')" (click)="service.applyUpdate()">{{ service.isBusy()('apply') ? 'Installing…' : 'Install and restart' }}</button>
+                } @else {
+                  <button type="button" class="btn" [disabled]="service.isBusy()('check')" (click)="service.checkUpdate()">{{ service.isBusy()('check') ? 'Checking…' : 'Check for updates' }}</button>
+                }
+              </div>
+            }
+          } @else {
+            <p class="faint pad">Could not ask for updates.</p>
+          }
+        </pw-panel>
+      }
+    </div>
+  </div>
+</div>
+
+@if (store.dirty() || store.saveError()) {
+  <div class="savebar" role="region" aria-label="Unsaved changes">
+    @if (store.saveError(); as e) {
+      <mat-icon class="err" svgIcon="pw:error" aria-hidden="true" />
+      <span class="msg" role="alert">{{ e.message }}</span>
+    } @else {
+      <span class="msg">You have unsaved changes.</span>
+    }
+    <button type="button" class="btn" [disabled]="store.saving()" (click)="discard()">Discard</button>
+    <button type="button" class="btn primary" [disabled]="store.saving() || !store.dirty()" (click)="store.save()">{{ store.saving() ? 'Saving…' : 'Save changes' }}</button>
+  </div>
+}

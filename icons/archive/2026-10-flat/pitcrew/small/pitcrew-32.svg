@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <title>Pitcrew 32px</title>
+  <defs>
+    <linearGradient id="pfbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF8A4C"/><stop offset="1" stop-color="#D4440D"/></linearGradient>
+    <mask id="pfm2" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M14 16a2 2 0 1 1 4 0a2 2 0 1 1 -4 0Z" fill="#000"/></mask>
+  </defs>
+  <path d="M8 1H24A7 7 0 0 1 31 8V24A7 7 0 0 1 24 31H8A7 7 0 0 1 1 24V8A7 7 0 0 1 8 1Z" fill="url(#pfbg)"/>
+  <path d="M8 1.25H24A6.75 6.75 0 0 1 30.75 8V24A6.75 6.75 0 0 1 24 30.75H8A6.75 6.75 0 0 1 1.25 24V8A6.75 6.75 0 0 1 8 1.25Z" fill="none" stroke="#8A2A04" stroke-opacity="0.35" stroke-width="0.5"/>
+  <g opacity="0.6"><path d="M23.55 8.71A10.5 10.5 0 1 1 8.45 8.71" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.23 5.83L5.86 6.21L11.04 11.21Z" fill="#FFFFFF"/></g><path d="M21.2 19L16 22L10.8 19L10.8 13L16 10L21.2 13Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round" mask="url(#pfm2)"/>
+</svg>

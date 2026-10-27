@@ -1,0 +1,5 @@
+{
+  "$comment": "Debrief's CI contract (scripts/affected.mjs, ADR 0014 §6). Debrief is not a leg of ci.yml: its gates (Rust on Linux and macOS, plugin SDK, licences, frontend, e2e, real-app smoke on three OS, installers, the release) are its own workflow, .gitea/workflows/debrief.yml, whose plan job asks `node scripts/affected.mjs --ci --app debrief`. Its nightly jobs are debrief-bench, -corpus, -fuzz and -mutants.yml.",
+  "workflow": "debrief.yml",
+  "cargo": "."
+}

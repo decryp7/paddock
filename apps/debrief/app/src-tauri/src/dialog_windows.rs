@@ -1,0 +1,1175 @@
+//! Dialogs as real OS windows (ADR 0050): every dialog of Debrief (setup wizards, Settings, managers, About,
+//! export and share wizards, pickers, confirmations that need more than a message box) is a window of its own,
+//! owned by the Debrief window that opened it.
+//!
+//! A dialog belongs to a host window: its label is `d-<host>-<n>`, it has no workspace of its own
+//! ([`crate::panel_windows::resolve`] gives it the host's, so every command works unchanged from inside it), it
+//! hears the host's events and never outlives the host. One dialog window exists per dialog id and host: opening
+//! it again focuses the existing one. A dialog can open dialogs of its own (a confirmation from Settings); the
+//! answer goes to the window that opened it.
+//!
+//! * **Modal** dialogs disable their parent while they are open (owner window on Windows, child window on macOS,
+//!   transient window on Linux; the UI also puts a scrim over the parent) and stay above it. On macOS the parent is
+//!   NOT disabled natively: tao implements that as a sheet on the parent, and a child window of a parent that carries a
+//!   sheet is never key, so the dialog showed greyed out and the app froze. There the UI scrim blocks the parent.
+//! * **Modeless** dialogs are owned too (they stay above the parent and minimise with it) but the parent stays usable.
+//!   Except on macOS, where a child window is confined to its parent's screen and vanishes when dragged to another
+//!   display: modeless dialogs are independent windows there (see [`Parenting`]).
+//!
+//! Data never travels through window globals: the input is validated and parked here at open
+//! (`dialog_take_input` hands it to the dialog's own webview) and the result goes back through `dialog_close`
+//! as the `debrief://dialog-result` event of the host.
+//!
+//! Commands: `dialog_open`, `dialog_take_input`, `dialog_close`.
+//! Events: `debrief://dialog-result`, `debrief://dialog-closed` (to the host), `debrief://dialog-close-requested` (to the dialog).
+
+pub use crate::dialog_contracts::Modality;
+use crate::dialog_contracts::{Contract, Contracts, Size};
+use crate::dialog_placement::{self as placement, Monitor, Placement, Rect, Remembered};
+use crate::panel_windows::{valid_view_id, Bounds};
+use crate::window_manager::clean_title;
+use crate::{err, CmdResult};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder, Window};
+
+/// Labels of dialog windows: `d-<host>-<n>`.
+pub const LABEL_PREFIX: &str = "d-";
+/// More dialog windows per host than this are refused.
+pub const MAX_DIALOGS: usize = 8;
+/// To the window that opened the dialog: it answered. Payload: [`DialogResult`].
+pub const RESULT_EVENT: &str = "debrief://dialog-result";
+/// To the window that opened the dialog: it is gone (with or without a result). Payload: [`DialogClosed`].
+pub const CLOSED_EVENT: &str = "debrief://dialog-closed";
+/// To the dialog: the user asked to close it (title bar, Cmd+W); the dialog decides and calls `dialog_close`.
+pub const CLOSE_REQUESTED_EVENT: &str = "debrief://dialog-close-requested";
+
+/// The largest input a dialog is opened with, and the largest result it answers with.
+pub const MAX_INPUT_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_RESULT_BYTES: usize = 1024 * 1024;
+const MIN_SIZE: (f64, f64) = (320.0, 200.0);
+const MAX_SIZE: f64 = 4096.0;
+const DEFAULT_SIZE: (f64, f64) = (640.0, 520.0);
+/// A dialog that did not answer a close request this long is closed anyway (a hung webview must not trap the user).
+const CLOSE_GRACE: Duration = Duration::from_millis(1500);
+
+/// How a dialog window is attached to its parent natively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Parenting {
+    /// Owned / child / transient window: above the parent, minimised with it.
+    Owned,
+    /// An independent window (it can be dragged to any display).
+    Independent,
+}
+
+impl Parenting {
+    /// The parenting of a dialog of `modality` on the OS `os` (`std::env::consts::OS`).
+    pub fn of(modality: Modality, os: &str) -> Parenting {
+        match (os, modality) {
+            ("macos", Modality::Modeless) => Parenting::Independent,
+            _ => Parenting::Owned,
+        }
+    }
+}
+
+/// Whether opening a modal dialog disables its parent window natively (`set_enabled(false)`). Not on macOS, where that
+/// begins a sheet on the parent and blocks the dialog's own window from becoming key.
+pub fn disables_parent_natively(os: &str) -> bool {
+    os != "macos"
+}
+
+/// The host of a dialog label (`d-main-3` -> `main`, `d-w-2-1` -> `w-2`), or `None`.
+pub fn host_of(label: &str) -> Option<&str> {
+    let rest = label.strip_prefix(LABEL_PREFIX)?;
+    let (host, n) = rest.rsplit_once('-')?;
+    let numeric = !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit());
+    (numeric && !host.is_empty() && !host.starts_with(LABEL_PREFIX) && !host.starts_with(crate::panel_windows::LABEL_PREFIX))
+        .then_some(host)
+}
+
+pub fn is_dialog(label: &str) -> bool {
+    host_of(label).is_some()
+}
+
+/// What the UI asks for when opening a dialog. The kind, modality, required choice and minimum size are not asked for:
+/// they come from the dialog's declared contract ([`Contracts`]), which Rust owns.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DialogRequest {
+    pub dialog_id: String,
+    /// Tells apart the windows of a dialog that is open once per input (a hash of the input; letters and digits).
+    #[serde(default)]
+    pub instance: Option<String>,
+    pub title: String,
+    /// The typed input of the dialog, handed to its webview through `dialog_take_input`.
+    #[serde(default)]
+    pub input: Option<Value>,
+    #[serde(default)]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub height: Option<f64>,
+    #[serde(default)]
+    pub min_width: Option<f64>,
+    #[serde(default)]
+    pub min_height: Option<f64>,
+    /// What the UI remembered of this dialog: its size and its offset from the parent window (never an absolute
+    /// screen position). The shell decides where it goes ([`crate::dialog_placement::place`]).
+    #[serde(default)]
+    pub remembered: Option<Remembered>,
+}
+
+/// A dialog window as the UI sees it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogInfo {
+    pub label: String,
+    pub dialog_id: String,
+    /// The window existed already and was focused.
+    pub existing: bool,
+}
+
+/// What a dialog's own webview needs to render.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogStart {
+    pub dialog_id: String,
+    pub title: String,
+    pub modality: Modality,
+    pub input: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogResult {
+    pub label: String,
+    pub dialog_id: String,
+    pub result: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogClosed {
+    pub label: String,
+    pub dialog_id: String,
+    /// Its size and its offset from the parent window when it closed (logical px), for remembering.
+    pub remembered: Option<Remembered>,
+}
+
+#[derive(Debug, Clone)]
+struct Entry {
+    host: String,
+    parent: String,
+    dialog_id: String,
+    instance: Option<String>,
+    title: String,
+    modality: Modality,
+    required_choice: bool,
+    input: Option<Value>,
+    bounds: Option<Bounds>,
+    asked: Option<Instant>,
+    /// The window watchdog found its page not answering: nobody can make the required choice, so the OS close may.
+    unresponsive: bool,
+}
+
+/// Which dialog windows exist, keyed by label. Managed as Tauri state.
+pub struct Dialogs {
+    map: Mutex<BTreeMap<String, Entry>>,
+    next: AtomicU32,
+    contracts: std::sync::Arc<Contracts>,
+}
+
+/// Debrief's dialog contracts: the file generated from the registry (`dialog-registry.ts`), embedded and parsed once.
+/// This is the one line of Debrief glue; the rest of the module takes its contracts as a parameter.
+pub fn debrief_contracts() -> std::sync::Arc<Contracts> {
+    static CONTRACTS: std::sync::OnceLock<std::sync::Arc<Contracts>> = std::sync::OnceLock::new();
+    CONTRACTS
+        .get_or_init(|| {
+            // The embedded file is validated by a test (and by the TypeScript spec that generates it); a broken one is
+            // a build defect, so the app starts with no dialogs rather than with unchecked ones.
+            std::sync::Arc::new(Contracts::parse(include_str!("../dialog-contracts.json")).unwrap_or_else(|e| {
+                log::error!("{e}");
+                Contracts::empty()
+            }))
+        })
+        .clone()
+}
+
+impl Default for Dialogs {
+    /// The contracts embedded in this build (`dialog-contracts.json`).
+    fn default() -> Self {
+        Self::with_contracts(debrief_contracts())
+    }
+}
+
+impl Dialogs {
+    /// Dialogs governed by `contracts`.
+    pub fn with_contracts(contracts: std::sync::Arc<Contracts>) -> Self {
+        Self {
+            map: Mutex::default(),
+            next: AtomicU32::default(),
+            contracts,
+        }
+    }
+
+    /// The contracts and dialog id behind a dialog window's label: what the command guard checks its calls against.
+    pub fn grant_of(&self, label: &str) -> Option<(std::sync::Arc<Contracts>, String)> {
+        self.get(label).map(|e| (self.contracts.clone(), e.dialog_id))
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Entry>> {
+        crate::sync::lock(&self.map)
+    }
+
+    /// The window of `dialog_id` opened by `parent`, if there is one (the parent is the one waiting for the answer).
+    fn find(&self, parent: &str, dialog_id: &str, instance: Option<&str>) -> Option<String> {
+        self.lock()
+            .iter()
+            .find(|(_, e)| e.parent == parent && e.dialog_id == dialog_id && e.instance.as_deref() == instance)
+            .map(|(l, _)| l.clone())
+    }
+
+    fn reserve(&self, entry: Entry) -> anyhow::Result<String> {
+        let mut map = self.lock();
+        if map.values().filter(|e| e.host == entry.host).count() >= MAX_DIALOGS {
+            anyhow::bail!("At most {MAX_DIALOGS} dialogs can be open at once; close one first");
+        }
+        let label = format!("{LABEL_PREFIX}{}-{}", entry.host, self.next.fetch_add(1, Ordering::SeqCst) + 1);
+        map.insert(label.clone(), entry);
+        Ok(label)
+    }
+
+    fn remove(&self, label: &str) -> Option<Entry> {
+        self.lock().remove(label)
+    }
+
+    fn get(&self, label: &str) -> Option<Entry> {
+        self.lock().get(label).cloned()
+    }
+
+    /// Labels of the host's dialogs.
+    pub fn of_host(&self, host: &str) -> Vec<String> {
+        self.lock().iter().filter(|(_, e)| e.host == host).map(|(l, _)| l.clone()).collect()
+    }
+
+    fn modal_children_of(&self, parent: &str) -> usize {
+        self.lock()
+            .values()
+            .filter(|e| e.parent == parent && e.modality == Modality::Modal)
+            .count()
+    }
+}
+
+/// The URL a dialog loads: the app, routed to the dialog shell.
+pub fn dialog_url(dialog_id: &str, host: &str, label: &str) -> String {
+    format!("index.html#/dialog?id={dialog_id}&host={host}&label={label}")
+}
+
+/// A size within what a window can sensibly be; `None` for a value that is not a number.
+fn clamp_size(v: Option<f64>, min: f64, default: f64) -> f64 {
+    match v {
+        Some(v) if v.is_finite() => v.clamp(min, MAX_SIZE),
+        _ => default.max(min),
+    }
+}
+
+/// The validated window geometry of a request: (width, height, min width, min height). The dialog's kind sets a floor
+/// ([`Contract::min_size`]: a viewer is never smaller than 680x560) that a request cannot go below.
+pub fn geometry(r: &DialogRequest, contract: &Contract) -> (f64, f64, f64, f64) {
+    let floor = contract.min_size.unwrap_or(Size {
+        width: MIN_SIZE.0,
+        height: MIN_SIZE.1,
+    });
+    let min_w = clamp_size(r.min_width, MIN_SIZE.0, MIN_SIZE.0).max(floor.width);
+    let min_h = clamp_size(r.min_height, MIN_SIZE.1, MIN_SIZE.1).max(floor.height);
+    (
+        clamp_size(r.width, min_w, DEFAULT_SIZE.0),
+        clamp_size(r.height, min_h, DEFAULT_SIZE.1),
+        min_w,
+        min_h,
+    )
+}
+
+/// Validates a request: a plausible dialog id, a title, an input within the cap.
+pub fn validate(r: &DialogRequest) -> anyhow::Result<()> {
+    if !valid_view_id(&r.dialog_id) {
+        anyhow::bail!("not a dialog id: {:?}", r.dialog_id.chars().take(64).collect::<String>());
+    }
+    if r.instance
+        .as_ref()
+        .is_some_and(|i| i.is_empty() || i.len() > 16 || !i.bytes().all(|b| b.is_ascii_alphanumeric()))
+    {
+        anyhow::bail!("not an instance key");
+    }
+    if r.input.as_ref().is_some_and(|i| i.to_string().len() > MAX_INPUT_BYTES) {
+        anyhow::bail!("the dialog input is larger than {MAX_INPUT_BYTES} bytes");
+    }
+    Ok(())
+}
+
+/// A window's outer rectangle in physical px.
+fn outer_rect<R: Runtime>(w: &Window<R>) -> Option<Rect> {
+    let pos = w.outer_position().ok()?;
+    let size = w.outer_size().ok()?;
+    Some(Rect {
+        x: f64::from(pos.x),
+        y: f64::from(pos.y),
+        width: f64::from(size.width),
+        height: f64::from(size.height),
+    })
+}
+
+/// A monitor's work area and scale as the placement policy reads them (also the research browser's placement).
+pub(crate) fn monitor_rect(m: &tauri::Monitor) -> Monitor {
+    let a = m.work_area();
+    Monitor {
+        work: Rect {
+            x: f64::from(a.position.x),
+            y: f64::from(a.position.y),
+            width: f64::from(a.size.width),
+            height: f64::from(a.size.height),
+        },
+        scale: m.scale_factor(),
+    }
+}
+
+/// The monitor `w` is on, with its name for the log: the platform's answer, else the monitor it overlaps most or is
+/// nearest to. Never the primary display unless the window is there.
+fn monitor_of_window<R: Runtime>(w: &Window<R>) -> Option<(Monitor, String)> {
+    let named = |m: &tauri::Monitor| (monitor_rect(m), m.name().cloned().unwrap_or_default());
+    if let Some(m) = w.current_monitor().ok().flatten() {
+        return Some(named(&m));
+    }
+    let all = w.available_monitors().ok()?;
+    let rects: Vec<Monitor> = all.iter().map(monitor_rect).collect();
+    let i = placement::monitor_of(&outer_rect(w)?, &rects)?;
+    all.get(i).map(named)
+}
+
+fn bounds_of<R: Runtime>(w: &Window<R>) -> Option<Bounds> {
+    let scale = w.scale_factor().ok()?;
+    let pos = w.outer_position().ok()?.to_logical::<f64>(scale);
+    let size = w.inner_size().ok()?.to_logical::<f64>(scale);
+    Some(Bounds {
+        x: pos.x,
+        y: pos.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+/// Opens the dialog `request.dialog_id` for the window `caller` (a Debrief window or one of its dialogs), or
+/// focuses the one already open for its host.
+pub fn open<R: Runtime>(app: &AppHandle<R>, caller: &str, request: DialogRequest) -> anyhow::Result<DialogInfo> {
+    validate(&request)?;
+    let host = crate::panel_windows::resolve(caller).to_string();
+    let dialogs = app
+        .try_state::<Dialogs>()
+        .ok_or_else(|| anyhow::anyhow!("Debrief is not ready yet"))?;
+    // Only dialogs with a declared contract open; the contract (not the webview) decides kind, modality and floor.
+    let contract = dialogs
+        .contracts
+        .get(&request.dialog_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("this version of Debrief has no dialog {:?}", request.dialog_id))?;
+    if request.instance.is_some() && !contract.instanced {
+        anyhow::bail!("the dialog {} does not take an instance key", request.dialog_id);
+    }
+    let modality = contract.modality;
+    if let Some(existing) = dialogs.find(caller, &request.dialog_id, request.instance.as_deref()) {
+        if let Some(w) = app.get_window(&existing) {
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+        return Ok(DialogInfo {
+            label: existing,
+            dialog_id: request.dialog_id,
+            existing: true,
+        });
+    }
+    let parent_window = app
+        .get_webview_window(caller)
+        .or_else(|| app.get_webview_window(&host))
+        .ok_or_else(|| anyhow::anyhow!("the window was closed"))?;
+    let title = clean_title(&request.title);
+    let label = dialogs.reserve(Entry {
+        host: host.clone(),
+        parent: parent_window.label().to_string(),
+        dialog_id: request.dialog_id.clone(),
+        instance: request.instance.clone(),
+        title: title.clone(),
+        modality,
+        required_choice: contract.required_choice,
+        input: request.input.clone(),
+        bounds: None,
+        asked: None,
+        unresponsive: false,
+    })?;
+    let (w, h, min_w, min_h) = geometry(&request, &contract);
+    // The placement policy (ADR 0054): on the parent's monitor, sized by the kind's rule.
+    let parent_os_window = parent_window.as_ref().window();
+    let monitor = monitor_of_window(&parent_os_window);
+    let remembered = placement::memory_for(contract.kind, request.height.is_none(), request.remembered, h);
+    let place = placement::place(
+        outer_rect(&parent_os_window),
+        monitor.as_ref().map(|m| m.0),
+        remembered,
+        (w, h),
+        (min_w, min_h),
+    );
+    log_placement(&request.dialog_id, monitor.as_ref(), &place);
+    let (lw, lh) = place.logical_size();
+    let built = build_window(
+        app,
+        &label,
+        &host,
+        &request.dialog_id,
+        &title,
+        &place,
+        (min_w.min(lw), min_h.min(lh)),
+        &parent_window,
+        modality,
+    );
+    if let Err(e) = built {
+        dialogs.remove(&label);
+        anyhow::bail!("could not open the dialog window: {e}");
+    }
+    if modality == Modality::Modal && disables_parent_natively(std::env::consts::OS) {
+        let _ = parent_window.set_enabled(false);
+    }
+    log::info!(Dialog = request.dialog_id.as_str(), Host = host.as_str(); "Dialog window opened");
+    Ok(DialogInfo {
+        label,
+        dialog_id: request.dialog_id,
+        existing: false,
+    })
+}
+
+/// Every placement is logged, so a user's log shows where a dialog went and why.
+fn log_placement(dialog_id: &str, monitor: Option<&(Monitor, String)>, p: &Placement) {
+    let (name, work) = monitor.map_or(("unknown".to_string(), "unknown".to_string()), |(m, name)| {
+        (
+            name.clone(),
+            format!("{},{} {}x{} @{}", m.work.x, m.work.y, m.work.width, m.work.height, m.scale),
+        )
+    });
+    log::info!(
+        Dialog = dialog_id,
+        Monitor = name.as_str(),
+        WorkArea = work.as_str(),
+        Placed = format!("{},{} {}x{} @{}", p.x, p.y, p.width, p.height, p.scale).as_str(),
+        Remembered = p.remembered;
+        "Dialog window placed"
+    );
+}
+
+/// The builder configuration of a dialog window, separate from the build so a test can check it without a window.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowConfig {
+    pub url: String,
+    pub title: String,
+    pub inner: (f64, f64),
+    pub position: (f64, f64),
+    pub min_inner: (f64, f64),
+    pub resizable: bool,
+    pub owned: bool,
+    /// The native close button: none (see [`title_buttons`]).
+    pub closable: bool,
+    /// The native minimise button: none.
+    pub minimizable: bool,
+    /// The native zoom / maximise button: none.
+    pub maximizable: bool,
+}
+
+/// The title-bar buttons of a dialog window: (closable, minimizable, maximizable). None: every dialog, modal or
+/// modeless, closes from its content (a Close or Cancel button, Escape, Cmd/Ctrl+W), and a window-manager close
+/// request reaches the dialog as its own Close/Cancel ([`close_requested`]). Modeless windows stay resizable and movable.
+pub fn title_buttons(_modality: Modality) -> (bool, bool, bool) {
+    (false, false, false)
+}
+
+pub fn window_config(
+    label: &str,
+    host: &str,
+    dialog_id: &str,
+    title: &str,
+    place: (f64, f64, f64, f64),
+    min: (f64, f64),
+    modality: Modality,
+) -> WindowConfig {
+    let (closable, minimizable, maximizable) = title_buttons(modality);
+    WindowConfig {
+        closable,
+        minimizable,
+        maximizable,
+        url: dialog_url(dialog_id, host, label),
+        title: title.to_string(),
+        inner: (place.2, place.3),
+        position: (place.0, place.1),
+        min_inner: min,
+        resizable: true,
+        owned: true,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_window<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    host: &str,
+    dialog_id: &str,
+    title: &str,
+    place: &Placement,
+    min: (f64, f64),
+    parent: &tauri::WebviewWindow<R>,
+    modality: Modality,
+) -> anyhow::Result<()> {
+    let at = placement::screen_position(place, std::env::consts::OS);
+    let (w, h) = place.logical_size();
+    let c = window_config(label, host, dialog_id, title, (at.logical.0, at.logical.1, w, h), min, modality);
+    // A native title bar with the dialog's title: dialogs are ordinary OS windows.
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(c.url.clone().into()))
+        .title(c.title.clone())
+        .inner_size(c.inner.0, c.inner.1)
+        .position(c.position.0, c.position.1)
+        .min_inner_size(c.min_inner.0, c.min_inner.1)
+        .resizable(c.resizable)
+        .closable(c.closable)
+        .minimizable(c.minimizable)
+        .maximizable(c.maximizable)
+        .focused(true);
+    let builder = if Parenting::of(modality, std::env::consts::OS) == Parenting::Owned {
+        owned_by(builder, parent)?
+    } else {
+        builder
+    };
+    let window = crate::native_feel::build(builder).map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Where logical coordinates are not one global space (Windows, Linux with mixed DPI), the builder converted them
+    // with some monitor's scale: set the exact physical place (on the parent's monitor) and size now.
+    if let Some((x, y)) = at.physical {
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        let _ = window.set_size(tauri::PhysicalSize::new(
+            place.width.round().max(1.0) as u32,
+            place.height.round().max(1.0) as u32,
+        ));
+    }
+    Ok(())
+}
+
+/// An owned window of `owner`: above it, minimised and hidden with it (Windows: owner; macOS: child; Linux: transient).
+#[cfg(not(test))]
+fn owned_by<'a, R: Runtime, M: Manager<R>>(
+    b: WebviewWindowBuilder<'a, R, M>,
+    owner: &tauri::WebviewWindow<R>,
+) -> anyhow::Result<WebviewWindowBuilder<'a, R, M>> {
+    b.parent(owner).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+/// The mock runtime has no native windows to own: tests check the bookkeeping only.
+#[cfg(test)]
+fn owned_by<'a, R: Runtime, M: Manager<R>>(
+    b: WebviewWindowBuilder<'a, R, M>,
+    _owner: &tauri::WebviewWindow<R>,
+) -> anyhow::Result<WebviewWindowBuilder<'a, R, M>> {
+    Ok(b)
+}
+
+/// The user (or the OS: Cmd/Ctrl+W, a window-manager close) asked to close a dialog window. The window itself has no
+/// close button when modal, so a request on a modal means Cancel: the dialog decides (unsaved edits), and one that does
+/// not answer in time is closed anyway. A required-choice modal ignores it. Returns whether the close may go ahead now.
+pub fn close_requested<R: Runtime>(app: &AppHandle<R>, label: &str) -> bool {
+    let Some(dialogs) = app.try_state::<Dialogs>() else { return true };
+    let mut map = dialogs.lock();
+    let Some(entry) = map.get_mut(label) else { return true };
+    if entry.required_choice {
+        // No Cancel to map the request to: the dialog stays until it is answered, unless its page cannot answer.
+        return entry.unresponsive;
+    }
+    let now = Instant::now();
+    if entry.asked.is_some_and(|t| now.duration_since(t) >= CLOSE_GRACE) {
+        return true;
+    }
+    entry.asked = Some(now);
+    drop(map);
+    let _ = app.emit_to(label, CLOSE_REQUESTED_EVENT, ());
+    false
+}
+
+/// The window watchdog (ADR 0058) found a dialog's page not answering, or answering again. A required-choice dialog
+/// whose page hangs can then be closed by the OS close (rule 19: the way out never depends on the hung page).
+/// Called by [`crate::startup_watchdog`] (`gave_up`, `answered`).
+pub fn page_unresponsive<R: Runtime>(app: &AppHandle<R>, label: &str, unresponsive: bool) {
+    if let Some(d) = app.try_state::<Dialogs>() {
+        if let Some(e) = d.lock().get_mut(label) {
+            e.unresponsive = unresponsive;
+        }
+    }
+}
+
+/// A dialog moved or was resized: remember where it is.
+pub fn moved<R: Runtime>(app: &AppHandle<R>, window: &Window<R>) {
+    if let Some(d) = app.try_state::<Dialogs>() {
+        if let Some(e) = d.lock().get_mut(window.label()) {
+            e.bounds = bounds_of(window);
+        }
+    }
+}
+
+/// A dialog window is gone: forget it, re-enable and refocus its parent, tell the host.
+pub fn on_destroyed<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    let Some(entry) = app.try_state::<Dialogs>().and_then(|d| d.remove(label)) else {
+        return;
+    };
+    log::info!(Dialog = entry.dialog_id.as_str(), Host = entry.host.as_str(); "Dialog window closed");
+    if app.try_state::<crate::windows::Windows>().is_some_and(|w| w.exiting()) {
+        return;
+    }
+    let dialogs = app.state::<Dialogs>();
+    if let Some(parent) = app.get_webview_window(&entry.parent) {
+        if entry.modality == Modality::Modal
+            && disables_parent_natively(std::env::consts::OS)
+            && dialogs.modal_children_of(&entry.parent) == 0
+        {
+            let _ = parent.set_enabled(true);
+        }
+        let _ = parent.set_focus();
+    }
+    if let Some(parent) = app.get_window(&entry.parent) {
+        let parent_at = parent
+            .scale_factor()
+            .ok()
+            .and_then(|s| Some(parent.outer_position().ok()?.to_logical::<f64>(s)))
+            .map(|p| (p.x, p.y));
+        let _ = app.emit_to(
+            entry.parent.as_str(),
+            CLOSED_EVENT,
+            DialogClosed {
+                label: label.to_string(),
+                dialog_id: entry.dialog_id,
+                remembered: entry.bounds.zip(parent_at).and_then(|(b, p)| placement::remembered_of(b, p)),
+            },
+        );
+    }
+}
+
+/// The host is gone: close its dialogs.
+pub fn close_all_of<R: Runtime>(app: &AppHandle<R>, host: &str) -> usize {
+    let Some(dialogs) = app.try_state::<Dialogs>() else { return 0 };
+    let labels = dialogs.of_host(host);
+    for label in &labels {
+        dialogs.remove(label);
+        if let Some(w) = app.get_window(label) {
+            let _ = w.destroy();
+        }
+    }
+    labels.len()
+}
+
+/// Hides or shows the host's dialogs with it (the host went to the tray, or came back).
+pub fn set_visible<R: Runtime>(app: &AppHandle<R>, host: &str, visible: bool) {
+    let Some(dialogs) = app.try_state::<Dialogs>() else { return };
+    for label in dialogs.of_host(host) {
+        if let Some(w) = app.get_window(&label) {
+            let _ = if visible { w.show() } else { w.hide() };
+        }
+    }
+}
+
+/// Opens a dialog window for the calling window. Async: a window must not be created from a synchronous command.
+#[tauri::command]
+pub async fn dialog_open<R: Runtime>(app: AppHandle<R>, window: Window<R>, request: DialogRequest) -> CmdResult<DialogInfo> {
+    crate::error::lift(open(&app, window.label(), request).map_err(err))
+}
+
+/// The calling dialog's start data (its id, title and input). Only a dialog window has any.
+#[tauri::command]
+pub async fn dialog_take_input<R: Runtime>(app: AppHandle<R>, window: Window<R>) -> CmdResult<DialogStart> {
+    let entry = app
+        .try_state::<Dialogs>()
+        .and_then(|d| d.get(window.label()))
+        .ok_or("this is not a dialog window")?;
+    Ok(DialogStart {
+        dialog_id: entry.dialog_id,
+        title: entry.title,
+        modality: entry.modality,
+        input: entry.input,
+    })
+}
+
+/// Closes the calling dialog, answering its host with `result` (none when it was dismissed).
+#[tauri::command]
+pub async fn dialog_close<R: Runtime>(app: AppHandle<R>, window: Window<R>, result: Option<Value>) -> CmdResult<()> {
+    let label = window.label().to_string();
+    let entry = app
+        .try_state::<Dialogs>()
+        .and_then(|d| d.get(&label))
+        .ok_or("this is not a dialog window")?;
+    if result.as_ref().is_some_and(|r| r.to_string().len() > MAX_RESULT_BYTES) {
+        return Err(format!("the dialog result is larger than {MAX_RESULT_BYTES} bytes").into());
+    }
+    if result.is_some() {
+        let _ = app.emit_to(
+            entry.parent.as_str(),
+            RESULT_EVENT,
+            DialogResult {
+                label: label.clone(),
+                dialog_id: entry.dialog_id.clone(),
+                result,
+            },
+        );
+    }
+    crate::error::lift(window.destroy().map_err(err))
+}
+
+/// The window height (logical px) that fits `content` px of dialog content: within the minimum and `max` (the work
+/// area's height less a margin), `None` for a value that is not a number.
+pub fn fitted_height(content: f64, max: f64) -> Option<f64> {
+    if !content.is_finite() || !max.is_finite() {
+        return None;
+    }
+    Some(content.ceil().clamp(MIN_SIZE.1, max.clamp(MIN_SIZE.1, MAX_SIZE)))
+}
+
+/// The height a dialog window is set to when its content measures `content` px: fitted, but never below the dialog's
+/// own floor (a viewer opens at 560 and is not fitted down to its first short state) and, for a viewer, never below
+/// the height it has (a result being read does not shrink under the reader, even when the user made it taller).
+pub fn fit_target(kind: crate::dialog_contracts::Kind, content: f64, max: f64, floor: f64, current: f64) -> Option<f64> {
+    let fitted = fitted_height(content, max)?.max(floor);
+    Some(if kind == crate::dialog_contracts::Kind::Viewer {
+        fitted.max(current)
+    } else {
+        fitted
+    })
+}
+
+/// Sizes the calling dialog window to its content: the dialog measured `content` px and asks for that height (the
+/// width stays). Dialogs that name a height (tools, forms with a fixed size) do not call this; a viewer only grows.
+#[tauri::command]
+pub async fn dialog_fit_height<R: Runtime>(app: AppHandle<R>, window: Window<R>, content: f64) -> CmdResult<()> {
+    let dialogs = app.try_state::<Dialogs>();
+    let entry = dialogs.as_ref().and_then(|d| d.get(window.label()));
+    let Some(entry) = entry else {
+        return Err("this is not a dialog window".to_string().into());
+    };
+    let contract = dialogs.as_ref().and_then(|d| d.contracts.get(&entry.dialog_id));
+    let kind = contract.map_or(crate::dialog_contracts::Kind::Form, |c| c.kind);
+    let floor = contract.and_then(|c| c.min_size).map_or(MIN_SIZE.1, |s| s.height);
+    let scale = window.scale_factor().unwrap_or(1.0);
+    // The monitor the dialog is on (its own: the shell placed it on the parent's); its work area bounds the fit.
+    let monitor = monitor_of_window(&window).map(|m| m.0);
+    let max = monitor.map_or(MAX_SIZE, |m| m.work.height / m.scale() - placement::TITLE_BAR);
+    let size = window.inner_size().map_err(err)?.to_logical::<f64>(scale);
+    // The title bar is not part of the measured content: the inner size is what the content fills.
+    let Some(height) = fit_target(kind, content, max, floor, size.height) else {
+        return Err("the content height is not a number".to_string().into());
+    };
+    if (height - size.height).abs() < 0.5 {
+        return Ok(());
+    }
+    let outer = outer_rect(&window);
+    window.set_size(tauri::LogicalSize::new(size.width, height)).map_err(err)?;
+    // A taller window must not hang off the bottom of its monitor: it moves up, on the same monitor.
+    if let Some((x, y)) = outer.and_then(|o| placement::keep_on_monitor(o, height, monitor)) {
+        let p = Placement {
+            x,
+            y,
+            width: 0.0,
+            height: 0.0,
+            scale: monitor.map_or(1.0, |m| m.scale()),
+            remembered: false,
+        };
+        let at = placement::screen_position(&p, std::env::consts::OS);
+        let moved = match at.physical {
+            Some((px, py)) => window.set_position(tauri::PhysicalPosition::new(px, py)),
+            None => window.set_position(tauri::LogicalPosition::new(at.logical.0, at.logical.1)),
+        };
+        moved.map_err(err)?;
+    }
+    log::info!(Dialog = entry.dialog_id.as_str(), Content = content, Height = height; "Dialog window fitted to its content");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{test_app, window};
+    use crate::windows::MAIN;
+    use std::sync::Arc;
+    use tauri::test::MockRuntime;
+    use tauri::Listener;
+
+    /// Contracts for the ids these tests open (the real ones are checked against the table in `commands.rs`).
+    fn test_contracts() -> std::sync::Arc<Contracts> {
+        let entry = |id: &str, kind: &str, modality: &str, required: bool, instanced: bool, min: &str| {
+            format!(
+                r#""{id}": {{ "kind": "{kind}", "modality": "{modality}", "requiredChoice": {required}, "instanced": {instanced}, "minSize": {min}, "commands": [] }}"#
+            )
+        };
+        let mut e = vec![
+            entry("ai-setup", "form", "modeless", false, true, "null"),
+            entry("settings", "tool", "modeless", false, false, "null"),
+            entry("about", "viewer", "modeless", false, false, r#"{ "width": 680, "height": 560 }"#),
+            entry("close-prompt", "decision", "modal", true, false, "null"),
+            entry("unsaved-changes", "decision", "modal", false, false, "null"),
+            entry("a", "form", "modeless", false, false, "null"),
+            entry("b", "decision", "modal", false, false, "null"),
+            entry("x", "decision", "modal", false, false, "null"),
+            entry("confirm-x", "decision", "modal", false, false, "null"),
+            entry("too-many", "form", "modeless", false, false, "null"),
+        ];
+        e.extend((0..MAX_DIALOGS).map(|i| entry(&format!("d{i}"), "form", "modeless", false, false, "null")));
+        let json = format!(r#"{{ "version": 1, "base": [], "dialogs": {{ {} }} }}"#, e.join(","));
+        std::sync::Arc::new(Contracts::parse(&json).expect("test contracts"))
+    }
+
+    fn contract(id: &str) -> Contract {
+        test_contracts().get(id).expect("test contract").clone()
+    }
+
+    fn request(id: &str) -> DialogRequest {
+        DialogRequest {
+            dialog_id: id.into(),
+            instance: None,
+            title: "Set up the AI assistant".into(),
+            input: Some(serde_json::json!({ "modelId": "m1" })),
+            width: Some(760.0),
+            height: None,
+            min_width: None,
+            min_height: None,
+            remembered: None,
+        }
+    }
+
+    fn app() -> tauri::App<MockRuntime> {
+        let app = test_app(None);
+        app.manage(Dialogs::with_contracts(test_contracts()));
+        window(&app, MAIN);
+        app
+    }
+
+    fn recorder(w: &tauri::WebviewWindow<MockRuntime>, event: &str) -> Arc<Mutex<Vec<String>>> {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let s = seen.clone();
+        w.listen(event, move |e| s.lock().unwrap().push(e.payload().to_string()));
+        seen
+    }
+
+    #[test]
+    fn a_dialog_window_is_fitted_to_its_content_within_bounds() {
+        assert_eq!(fitted_height(180.2, 900.0), Some(MIN_SIZE.1.max(181.0)));
+        assert_eq!(fitted_height(50.0, 900.0), Some(MIN_SIZE.1));
+        assert_eq!(fitted_height(5000.0, 700.0), Some(700.0));
+        assert_eq!(fitted_height(f64::NAN, 700.0), None);
+        assert_eq!(fitted_height(300.0, f64::INFINITY), None);
+    }
+
+    #[test]
+    fn a_viewer_is_never_fitted_below_its_floor_or_shrunk_and_a_decision_fits_exactly() {
+        use crate::dialog_contracts::Kind::{Decision, Viewer};
+        // A viewer opened at 560 with a short first state stays 560; it grows with the content; it never shrinks.
+        assert_eq!(fit_target(Viewer, 300.0, 900.0, 560.0, 560.0), Some(560.0));
+        assert_eq!(fit_target(Viewer, 700.0, 900.0, 560.0, 560.0), Some(700.0));
+        assert_eq!(
+            fit_target(Viewer, 600.0, 900.0, 560.0, 800.0),
+            Some(800.0),
+            "the user made it taller"
+        );
+        assert_eq!(fit_target(Viewer, 5000.0, 700.0, 560.0, 560.0), Some(700.0), "up to the screen");
+        // A decision is exactly its content (the shell only ever asks to grow).
+        assert_eq!(fit_target(Decision, 181.0, 900.0, MIN_SIZE.1, 520.0), Some(MIN_SIZE.1.max(181.0)));
+        assert_eq!(fit_target(Decision, f64::NAN, 900.0, MIN_SIZE.1, 520.0), None);
+    }
+
+    #[test]
+    fn macos_modeless_dialogs_are_independent_and_macos_never_disables_the_parent_natively() {
+        use Modality::*;
+        assert_eq!(Parenting::of(Modeless, "macos"), Parenting::Independent);
+        assert_eq!(Parenting::of(Modal, "macos"), Parenting::Owned);
+        for os in ["windows", "linux"] {
+            assert_eq!(Parenting::of(Modeless, os), Parenting::Owned);
+            assert!(disables_parent_natively(os));
+        }
+        assert!(!disables_parent_natively("macos"));
+    }
+
+    #[test]
+    fn labels_parse_to_their_host_and_are_not_popouts() {
+        assert_eq!(host_of("d-main-1"), Some("main"));
+        assert_eq!(host_of("d-w-2-13"), Some("w-2"));
+        for not in [
+            "main",
+            "d-",
+            "d-main",
+            "d-main-x",
+            "d-d-main-1-2",
+            "d-p-main-1-2",
+            "p-main-1",
+            "x-main-1",
+        ] {
+            assert_eq!(host_of(not), None, "{not}");
+        }
+        assert!(is_dialog("d-main-1") && !is_dialog("p-main-1"));
+        assert_eq!(crate::panel_windows::resolve("d-w-2-4"), "w-2");
+        assert!(!crate::panel_windows::is_popout("d-main-1"));
+    }
+
+    #[test]
+    fn requests_are_validated_and_sizes_bounded() {
+        assert!(validate(&request("ai-setup")).is_ok());
+        for bad in ["", "../x", "a b", "x?y", &"x".repeat(65)] {
+            assert!(validate(&request(bad)).is_err(), "{bad}");
+        }
+        let mut big = request("ai-setup");
+        big.input = Some(Value::String("x".repeat(MAX_INPUT_BYTES + 1)));
+        assert!(validate(&big).unwrap_err().to_string().contains("larger"));
+        for bad in ["", "a b", "../x", &"x".repeat(17)] {
+            let mut r = request("a");
+            r.instance = Some(bad.to_string());
+            assert!(validate(&r).is_err(), "{bad}");
+        }
+        let mut r = request("a");
+        r.width = Some(f64::NAN);
+        r.height = Some(1e9);
+        r.min_width = Some(10.0);
+        assert_eq!(geometry(&r, &contract("a")), (DEFAULT_SIZE.0, MAX_SIZE, MIN_SIZE.0, MIN_SIZE.1));
+        // The kind's floor wins over a smaller request: a viewer is never below 680x560.
+        // A remembered place is an offset from the parent; absolute bounds are refused.
+        assert!(serde_json::from_value::<DialogRequest>(
+            serde_json::json!({ "dialogId": "a", "title": "t", "bounds": { "x": 1, "y": 1, "width": 400, "height": 300 } })
+        )
+        .is_err());
+        let r: DialogRequest = serde_json::from_value(
+            serde_json::json!({ "dialogId": "a", "title": "t", "remembered": { "dx": 1, "dy": 2, "width": 400, "height": 300 } }),
+        )
+        .unwrap();
+        assert_eq!(r.remembered.map(|m| (m.dx, m.dy)), Some((1.0, 2.0)));
+        let mut small = request("about");
+        small.width = Some(400.0);
+        small.height = Some(300.0);
+        small.min_width = Some(320.0);
+        small.min_height = Some(200.0);
+        assert_eq!(geometry(&small, &contract("about")), (680.0, 560.0, 680.0, 560.0));
+        assert!(serde_json::from_value::<DialogRequest>(serde_json::json!({ "dialogId": "a", "title": "t", "evil": 1 })).is_err());
+        // The webview cannot choose its own modality or required choice: those come from the contract.
+        for field in ["modality", "requiredChoice"] {
+            let mut v = serde_json::json!({ "dialogId": "a", "title": "t" });
+            v[field] = serde_json::json!("modal");
+            assert!(serde_json::from_value::<DialogRequest>(v).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn no_dialog_window_has_title_bar_buttons_but_modeless_ones_stay_resizable() {
+        let place = (0.0, 0.0, 500.0, 400.0);
+        for (id, modality) in [("unsaved-changes", Modality::Modal), ("settings", Modality::Modeless)] {
+            let c = window_config("d-main-1", "main", id, "t", place, (320.0, 200.0), modality);
+            assert_eq!((c.closable, c.minimizable, c.maximizable), (false, false, false), "{id}");
+            assert!(c.resizable, "{id}");
+        }
+    }
+
+    #[test]
+    fn the_window_config_is_an_owned_resizable_window() {
+        let c = window_config(
+            "d-main-1",
+            "main",
+            "ai-setup",
+            "Set up",
+            (1.0, 2.0, 760.0, 520.0),
+            (400.0, 300.0),
+            Modality::Modeless,
+        );
+        assert_eq!(c.url, "index.html#/dialog?id=ai-setup&host=main&label=d-main-1");
+        assert!(c.owned && c.resizable);
+        assert_eq!((c.inner, c.position, c.min_inner), ((760.0, 520.0), (1.0, 2.0), (400.0, 300.0)));
+    }
+
+    #[test]
+    fn opening_twice_focuses_the_one_window_and_hands_the_input_to_it_only() {
+        let app = app();
+        let h = app.handle().clone();
+        let first = open(&h, MAIN, request("ai-setup")).unwrap();
+        assert_eq!((first.label.as_str(), first.existing), ("d-main-1", false));
+        assert!(h.get_webview_window("d-main-1").is_some());
+        let mut other = request("ai-setup");
+        other.instance = Some("abc1".into());
+        assert!(!open(&h, MAIN, other.clone()).unwrap().existing, "another input is another window");
+        assert!(open(&h, MAIN, other).unwrap().existing);
+        let again = open(&h, MAIN, request("ai-setup")).unwrap();
+        assert_eq!((again.label.as_str(), again.existing), ("d-main-1", true));
+        // A second dialog is a second window; a dialog can open another one for the same host.
+        let nested = open(&h, "d-main-1", request("confirm-x")).unwrap();
+        assert_eq!(nested.label, "d-main-3");
+        let start = crate::test_support::Now::now(dialog_take_input(h.clone(), window(&app, "d-main-1").as_ref().window()));
+        assert_eq!(start.unwrap().input, Some(serde_json::json!({ "modelId": "m1" })));
+        assert!(crate::test_support::Now::now(dialog_take_input(h.clone(), window(&app, MAIN).as_ref().window())).is_err());
+        assert!(open(&h, "w-9", request("x")).unwrap_err().to_string().contains("closed"));
+    }
+
+    #[test]
+    fn only_dialogs_with_a_contract_open_and_the_contract_decides_modality() {
+        let app = app();
+        let h = app.handle().clone();
+        let e = open(&h, MAIN, request("not-a-dialog")).unwrap_err().to_string();
+        assert!(e.contains("no dialog"), "{e}");
+        let mut keyed = request("about");
+        keyed.instance = Some("k1".into());
+        assert!(
+            open(&h, MAIN, keyed).unwrap_err().to_string().contains("instance"),
+            "only an instanced dialog takes a key"
+        );
+        // The close prompt is a modal required choice by contract, whatever the webview asks.
+        open(&h, MAIN, request("close-prompt")).unwrap();
+        assert!(h
+            .state::<Dialogs>()
+            .get("d-main-1")
+            .is_some_and(|e| e.modality == Modality::Modal && e.required_choice));
+        // The command guard asks which dialog a window shows: the engine's own record, never the webview's word.
+        let (contracts, id) = h.state::<Dialogs>().grant_of("d-main-1").expect("an open dialog has a grant");
+        assert_eq!(id, "close-prompt");
+        assert!(contracts.get("close-prompt").is_some());
+        assert!(h.state::<Dialogs>().grant_of("d-main-9").is_none(), "an unknown window has none");
+        assert!(h.state::<Dialogs>().grant_of(MAIN).is_none());
+    }
+
+    #[test]
+    fn the_embedded_contracts_open_every_dialog_the_registry_defines() {
+        let app = test_app(None);
+        app.manage(Dialogs::default());
+        window(&app, MAIN);
+        let h = app.handle().clone();
+        let contracts = debrief_contracts();
+        // MAX_DIALOGS per host: open and close in turn.
+        for id in contracts.ids() {
+            let info = open(&h, MAIN, request(id)).unwrap_or_else(|e| panic!("{id}: {e}"));
+            let c = contracts.get(id).unwrap();
+            let entry = h.state::<Dialogs>().get(&info.label).unwrap();
+            assert_eq!((entry.modality, entry.required_choice), (c.modality, c.required_choice), "{id}");
+            close_all_of(&h, MAIN);
+        }
+    }
+
+    #[test]
+    fn at_most_eight_dialogs_per_host() {
+        let app = app();
+        let h = app.handle().clone();
+        for i in 0..MAX_DIALOGS {
+            open(&h, MAIN, request(&format!("d{i}"))).unwrap();
+        }
+        assert!(open(&h, MAIN, request("too-many")).unwrap_err().to_string().contains("At most 8"));
+    }
+
+    #[test]
+    fn a_result_goes_to_the_host_and_closing_reports_where_the_window_was() {
+        let app = app();
+        let h = app.handle().clone();
+        let main = window(&app, MAIN);
+        let results = recorder(&main, RESULT_EVENT);
+        let closed = recorder(&main, CLOSED_EVENT);
+        open(&h, MAIN, request("ai-setup")).unwrap();
+        let dialog = window(&app, "d-main-1");
+        crate::test_support::Now::now(dialog_close(h.clone(), dialog.as_ref().window(), Some(serde_json::json!(true)))).unwrap();
+        crate::window_manager::on_window_event(&dialog.as_ref().window(), &tauri::WindowEvent::Destroyed);
+        let r: Value = serde_json::from_str(&results.lock().unwrap()[0]).unwrap();
+        assert_eq!(
+            r,
+            serde_json::json!({ "label": "d-main-1", "dialogId": "ai-setup", "result": true })
+        );
+        let c: Value = serde_json::from_str(&closed.lock().unwrap()[0]).unwrap();
+        assert_eq!(c["dialogId"], "ai-setup");
+        assert!(h.state::<Dialogs>().of_host(MAIN).is_empty());
+        // The closed event carries the remembered place as an offset from the parent, never absolute bounds.
+        assert!(c.get("bounds").is_none() && c.get("remembered").is_some(), "{c}");
+        // A dialog dismissed (no result) only reports closing.
+        open(&h, MAIN, request("ai-setup")).unwrap();
+        let d2 = window(&app, "d-main-2");
+        crate::test_support::Now::now(dialog_close(h.clone(), d2.as_ref().window(), None)).unwrap();
+        crate::window_manager::on_window_event(&d2.as_ref().window(), &tauri::WindowEvent::Destroyed);
+        assert_eq!(results.lock().unwrap().len(), 1);
+        assert_eq!(closed.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn oversized_results_are_refused_and_only_dialogs_may_close() {
+        let app = app();
+        let h = app.handle().clone();
+        open(&h, MAIN, request("ai-setup")).unwrap();
+        let big = Some(Value::String("x".repeat(MAX_RESULT_BYTES + 1)));
+        let dialog = window(&app, "d-main-1");
+        assert!(crate::test_support::Now::now(dialog_close(h.clone(), dialog.as_ref().window(), big)).is_err());
+        assert!(crate::test_support::Now::now(dialog_close(h.clone(), window(&app, MAIN).as_ref().window(), None)).is_err());
+    }
+
+    #[test]
+    fn a_close_request_goes_to_the_dialog_first_and_a_hung_dialog_is_closed_anyway() {
+        let app = app();
+        let h = app.handle().clone();
+        open(&h, MAIN, request("settings")).unwrap();
+        let asked = recorder(&window(&app, "d-main-1"), CLOSE_REQUESTED_EVENT);
+        assert!(!close_requested(&h, "d-main-1"), "the dialog decides");
+        assert_eq!(asked.lock().unwrap().len(), 1);
+        std::thread::sleep(CLOSE_GRACE + Duration::from_millis(50));
+        assert!(close_requested(&h, "d-main-1"), "no answer: closed anyway");
+        assert!(close_requested(&h, "d-main-9"), "unknown windows just close");
+    }
+
+    #[test]
+    fn a_required_choice_modal_ignores_close_requests_and_a_plain_modal_gets_them_as_cancel() {
+        let app = app();
+        let h = app.handle().clone();
+        open(&h, MAIN, request("close-prompt")).unwrap();
+        let asked = recorder(&window(&app, "d-main-1"), CLOSE_REQUESTED_EVENT);
+        assert!(!close_requested(&h, "d-main-1"));
+        std::thread::sleep(CLOSE_GRACE + Duration::from_millis(50));
+        assert!(!close_requested(&h, "d-main-1"), "never closed behind the user's back");
+        assert!(
+            asked.lock().unwrap().is_empty(),
+            "nothing to cancel, so the dialog is not even asked"
+        );
+        // A dialog that is not a required choice gets the request as its Cancel or Close.
+        open(&h, MAIN, request("settings")).unwrap();
+        let asked2 = recorder(&window(&app, "d-main-2"), CLOSE_REQUESTED_EVENT);
+        assert!(!close_requested(&h, "d-main-2"));
+        assert_eq!(asked2.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_required_choice_modal_whose_page_hangs_can_still_be_closed() {
+        let app = app();
+        let h = app.handle().clone();
+        open(&h, MAIN, request("close-prompt")).unwrap();
+        assert!(!close_requested(&h, "d-main-1"), "a live page keeps its required choice");
+        // The window watchdog decided the page does not answer: nothing could ever answer the choice.
+        page_unresponsive(&h, "d-main-1", true);
+        assert!(close_requested(&h, "d-main-1"), "the OS close ends it");
+        // A page that answers again keeps its choice.
+        page_unresponsive(&h, "d-main-1", false);
+        assert!(!close_requested(&h, "d-main-1"));
+        page_unresponsive(&h, "d-main-9", true);
+    }
+
+    #[test]
+    fn the_startup_watchdog_giving_up_on_a_required_choice_lets_the_os_close_end_it() {
+        let app = app();
+        let h = app.handle().clone();
+        open(&h, MAIN, request("close-prompt")).unwrap();
+        assert!(!close_requested(&h, "d-main-1"));
+        crate::startup_watchdog::gave_up(&h, "d-main-1");
+        assert!(close_requested(&h, "d-main-1"), "the watchdog gave up: the OS close ends it");
+        crate::startup_watchdog::answered(&h, "d-main-1");
+        assert!(!close_requested(&h, "d-main-1"), "ready again: the choice is required again");
+    }
+
+    #[test]
+    fn closing_the_host_closes_its_dialogs() {
+        let app = app();
+        let h = app.handle().clone();
+        open(&h, MAIN, request("a")).unwrap();
+        open(&h, MAIN, request("b")).unwrap();
+        assert_eq!(close_all_of(&h, MAIN), 2);
+        assert!(h.state::<Dialogs>().of_host(MAIN).is_empty());
+    }
+}

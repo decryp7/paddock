@@ -1,0 +1,44 @@
+# Built-in presets (real public projects). Spotter reads each project's public release list; nothing is sent about you.
+
+[[preset]]
+id = "serde"
+name = "serde (crates.io)"
+description = "The Rust serialisation framework, as a package-registry example."
+category = "Package registries"
+source = { kind = "package", values = { registry = "crates-io", package = "serde" } }
+
+[[preset]]
+id = "typescript"
+name = "TypeScript (npm)"
+description = "The TypeScript compiler on npm."
+category = "Package registries"
+source = { kind = "package", values = { registry = "npm", package = "typescript" } }
+
+[[preset]]
+id = "django"
+name = "Django (PyPI)"
+description = "The Django web framework on PyPI."
+category = "Package registries"
+source = { kind = "package", values = { registry = "pypi", package = "Django" } }
+
+[[preset]]
+id = "nginx-image"
+name = "nginx (Docker Hub)"
+description = "Tags of the official nginx image."
+category = "Container images"
+source = { kind = "container", values = { image = "nginx" } }
+
+[[preset]]
+id = "postgres-image"
+name = "PostgreSQL (Docker Hub)"
+description = "Tags of the official postgres image."
+category = "Container images"
+source = { kind = "container", values = { image = "postgres" } }
+
+[[preset]]
+id = "rust-blog"
+name = "Rust blog"
+description = "Announcements of the Rust project (a feed, as an example of a blog)."
+category = "Blogs and feeds"
+source = { kind = "feed", values = { url = "https://blog.rust-lang.org/feed.xml" } }
+

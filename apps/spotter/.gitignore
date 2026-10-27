@@ -1,0 +1,40 @@
+# Rust
+target/
+debug/
+**/*.rs.bk
+*.pdb
+
+# Node / Angular
+node_modules/
+app/dist/
+app/.angular/
+app/coverage/
+app/test-results/
+app/playwright-report/
+*.tsbuildinfo
+.npm
+.eslintcache
+
+# Tauri generated schemas
+app/src-tauri/gen/schemas/
+
+# Logs, keys and local runtime data
+*.log
+logs/
+*.key
+*.key.pub
+.env
+.env.*
+
+# Editors and OS metadata
+.idea/
+.vscode/
+.claude/
+.DS_Store
+._*
+
+# Diagram PNG exports (review copies; the SVGs are committed)
+/docs/diagrams/png/
+
+# Written by the build-folder CI action on host runners.
+.cargo/ci.toml

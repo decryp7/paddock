@@ -1,0 +1,21 @@
+[package]
+name = "spotter-sources"
+description = "Spotter's source adapters (ADR 0001): reading folders and shares, HTTP with bounded bodies and registry tokens, and downloads with checksum verification and resume"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[dependencies]
+spotter-core.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

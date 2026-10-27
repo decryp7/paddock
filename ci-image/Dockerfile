@@ -35,6 +35,10 @@ ARG MACHETE_SHA256_ARM64=6f96c3e6026a5bdd241b6ae600c6fb86c9197c6e189a894f91371ba
 ARG DUCKDB_VERSION=1.5.6
 ARG DUCKDB_SHA256_AMD64=b845005f5132a7d8180057c35e14a7626632258782f871a90861b19c1c03841b
 ARG DUCKDB_SHA256_ARM64=b72ed9f05003f5e9d2015f7ceada6416b377d9dd33169cdde3c9e33897856eee
+# renovate: datasource=github-releases depName=koalaman/shellcheck
+ARG SHELLCHECK_VERSION=0.11.0
+ARG SHELLCHECK_SHA256_AMD64=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+ARG SHELLCHECK_SHA256_ARM64=12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588
 # Chrome for Testing: the build the apps download (crates/paddock-chromium/src/chromium.toml, linux-x86_64; scripts/ci-image.test.mjs
 # checks they agree), so tests drive what users get. Playwright keeps its own bundled Chromium beside it. Google publishes no
 # Linux arm64 build; the image is amd64 only for Chrome.
@@ -66,6 +70,11 @@ RUN set -eu; \
       "$(pick "$MACHETE_SHA256_AMD64" "$MACHETE_SHA256_ARM64")" /tmp/dl/machete.tar.gz; \
     tar -xzf /tmp/dl/machete.tar.gz -C /tmp/dl --strip-components=1 --wildcards '*/cargo-machete'; \
     install -m 0755 /tmp/dl/cargo-machete /out/bin/cargo-machete; \
+    # shellcheck (the same pin as engineering-rules' ci.yml)
+    fetch-verified "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.$(pick x86_64 aarch64).tar.xz" \
+      "$(pick "$SHELLCHECK_SHA256_AMD64" "$SHELLCHECK_SHA256_ARM64")" /tmp/dl/shellcheck.tar.xz; \
+    tar -xJf /tmp/dl/shellcheck.tar.xz -C /tmp/dl --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"; \
+    install -m 0755 /tmp/dl/shellcheck /out/bin/shellcheck; \
     # libduckdb (library and header only)
     fetch-verified "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/libduckdb-linux-${A}.zip" \
       "$(pick "$DUCKDB_SHA256_AMD64" "$DUCKDB_SHA256_ARM64")" /tmp/dl/libduckdb.zip; \
@@ -89,6 +98,7 @@ ARG PLAYWRIGHT_VERSION=1.64.1
 ARG CHROME_VERSION=156.0.8078.47
 ARG DUCKDB_VERSION=1.5.6
 ARG SCCACHE_VERSION=0.19.0
+ARG SHELLCHECK_VERSION=0.11.0
 
 # sccache at the exact pin replaces whatever the base carries; the cargo tools sit beside the base's.
 COPY --from=fetch /out/bin/ /usr/local/bin/
@@ -112,7 +122,7 @@ COPY verify.sh /usr/local/bin/paddock-ci-verify
 # The build fails here when the image is not what the jobs expect; on success the manifest is /etc/paddock-ci-release.
 # (Chrome is checked on amd64 only: Google publishes no Linux arm64 build.)
 RUN EXPECT_NODE_MAJOR="${NODE_MAJOR}" EXPECT_SCCACHE="${SCCACHE_VERSION}" EXPECT_PLAYWRIGHT="${PLAYWRIGHT_VERSION}" \
-    EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
+    EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_SHELLCHECK="${SHELLCHECK_VERSION}" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
     paddock-ci-verify
 
 LABEL org.opencontainers.image.title="paddock-ci" \

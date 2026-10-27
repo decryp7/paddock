@@ -214,6 +214,7 @@ where an OS cannot do something (e.g. Dyno's Windows-only performance counters s
 - Never await IPC or the backend before the first paint: an app initializer that awaits a Tauri command with no timeout left Pitcrew's reopened window blank for good (the first IPC call in a freshly created window can go unanswered). Initializers start work in the background and return void; anything start-up must know gets a short timeout and a local fallback (e.g. platform from the user agent).
 - Never show an empty window while the UI loads: put a plain splash (logo + "Starting <App>…") in index.html, styled from the global stylesheet (no inline style/script, CSP), replaced by Angular, fading in after ~400 ms. Do not create the window hidden and show it on "ready": macOS throttles hidden web views, so "ready" may never come.
 - Tests never use the production names of anything: pipes, sockets, ports, data folders, keychain entries. The CI runner itself may run the installed app (Pitcrew supervises the runners), so a test that binds the real pipe fails with access denied. Derive names from the data folder (installed folder → production name; anything else → name-<hash>).
+- Tests that pass on the Mac fail on Windows when they bake in the author's OS: `/tmp` and `/definitely/not/here` are not absolute there, CRLF checkouts change `\n`, 50,000 files time out on NTFS + Defender, hand-written JSON breaks on backslashes, `File::open` cannot set a file time, a wait equal to a 10 s product interval races it (CI 6419–6430; fixed one at a time on three branches plus two commits). **Rule:** ask `paddock-testkit` for paths, text comparison, quoting, fixtures, waits and tools; limits are parameters; C38 checks every test; `cargo xwin clippy` before push (ADR 0021).
 - Tray/menu-bar popups must look native: frameless transparent window with rounded corners (~12 px macOS, 8 px Windows 11 via DWMWCP_ROUND), the OS material (NSVisualEffectView popover/menu; Acrylic/Mica), hairline border, soft shadow, height fitted to content (no empty gap), anchored to the tray icon, close on blur/Escape, quick fade (none with reduced motion). A square opaque web page in a box looks wrong (Dyno feedback).
 
 ## Angular and SignalStore (research 2026-10)
@@ -412,6 +413,29 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   folder out of sccache's key (it hashes every `CARGO_*` variable) set it as cargo configuration
   (`--config build.target-dir='...'`), not with `CARGO_TARGET_DIR`. nextest still writes its own store (junit) under the
   default `target/nextest`.
+- Moving a suite from `cargo test` to nextest changes one thing tests can notice: every test is its own process. A static
+  `Mutex` that made tests take turns on an outside resource (Spotter's real-browser tests, which starve each other when
+  several Chromes start at once) serialises nothing any more; the turn-taking becomes a nextest test group
+  (`max-threads = 1`) in the workspace's `.config/nextest.toml`. Grep for `static .*Mutex<()>` in tests before switching.
+- Tests that need a build in a particular order (Pitwall: tauri-build copies a placeholder sidecar over
+  `target/debug/pitwall-server`, which the server's tests start) stay two nextest runs, the shell's last.
+- The imported apps' workflows (2026-10-25): installers, the real-app smoke and WebKit only on full runs (main, the app's
+  tag, nightly, a manual run with `bundles: true`); the image's Chrome for Testing and Playwright browsers instead of a
+  download per job; one port per e2e shard across every workflow (ci-actions.test.mjs checks it). `tauri build` asks
+  cargo where the build is, so a `--config` flag on the cargo commands does not reach it; the shared build-folder action
+  writes the folder to the workspace's `.cargo/ci.toml` (included by its `.cargo/config.toml`), which every cargo command
+  and `tauri build` read, and nothing sets CARGO_TARGET_DIR.
+- A live history view whose window ends at `now()`, exclusive, misses what was recorded in the same millisecond (Dyno's
+  network timeline flake): a live window ends just after now. An accept loop with short windows must give a client that
+  connected late the whole handshake time, or it drops the client unread and the client sees a reset (Dyno's helper).
+- A Unix socket on a loaded Mac (load 30-90) sometimes fails with no one at fault (Dyno's agent tests, 1 run in 15): `recv`
+  returns EBADF on an open, healthy socket (an interposed trace of every open, socket, accept, dup and close showed
+  nothing closed it; `fcntl` and `SO_ERROR` were fine, `kern.ipc.sodefunct_calls` did not move, data was waiting and the
+  same call made again worked), and now and then a fresh pair starts broken (the host's first call on its end EINVAL, the
+  client's read EBADF). A plain C loop of the same handshake did not reproduce it, so the trigger is not known yet. Dyno's
+  IPC tries a read or write again while the descriptor is still open (bounded, unit-tested), which cut the failures by
+  about two thirds; the broken-from-the-start pairs remain open work. Find a descriptor's history with a
+  `DYLD_INSERT_LIBRARIES` interposer before blaming a double close.
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for
@@ -477,3 +501,13 @@ With a dozen agents each told to build only while the 1-minute load was under 20
 and started at once — load swung between 10 and 70 all night. **Rule:** heavy steps take a slot from one machine-wide
 semaphore (a few mkdir-lock slots under the shared build volume, stale slots reclaimed by pid) instead of each watching
 the load; the slot count is the rule-41 cap. Load watching stays for deciding how many agents to run, not when to build.
+
+## Resident size counts freed pages on macOS (2026-10-27, Debrief)
+
+A Debrief store worker with a physical footprint of 535 MB showed 1,965 MB of resident size (RSS) and was killed at its
+2 GiB cap. mimalloc gives freed pages back with `MADV_FREE_REUSABLE` and tags them (vmmap: "IOAccelerator", tag 100);
+they stay in the resident size until the kernel needs them, and are not in the footprint. Rule 26 only covered Linux
+(PSS), so macOS fell back to RSS. **Rule:** every cap, budget and display uses `paddock_proc::process_memory` /
+`tree_memory` (Linux PSS, macOS `ri_phys_footprint`, Windows private working set), never `sysinfo`'s `memory()`; a test
+frees pages the way mimalloc does and asserts the figure is far below the resident size and the child survives a cap
+between the two.

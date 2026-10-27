@@ -1,0 +1,218 @@
+<div class="page">
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a routerLink="/runners">Runners</a>
+    <mat-icon svgIcon="pc:chevron-right" aria-hidden="true" />
+    <span aria-current="page">{{ name() }}</span>
+  </nav>
+
+  @if (runner(); as r) {
+    <header class="page-header head">
+      <div class="title">
+        <h1>{{ r.name }}</h1>
+        <pc-runner-status [status]="r.status" />
+        <span class="faint kind">{{ r.kind }}{{ r.currentVersion ? ' ' + r.currentVersion : '' }}</span>
+        @if (r.leftovers > 0) {
+          <a class="leftover-link" routerLink="." [queryParams]="{ tab: 'processes' }">{{ leftoverText() }}</a>
+        }
+      </div>
+      <div class="btn-row">
+        <button type="button" class="btn" (click)="status.act(r.name, 'restart')" [disabled]="r.status === 'notRegistered'"><mat-icon svgIcon="pc:refresh" aria-hidden="true" />Restart</button>
+        <pc-runner-actions [runner]="r" [allowRemove]="true" />
+      </div>
+    </header>
+
+    <div class="tabs" role="tablist" aria-label="Runner sections">
+      @for (t of tabs; track t.key; let i = $index) {
+        <button
+          type="button"
+          role="tab"
+          [id]="'tab-' + t.key"
+          [attr.aria-selected]="current() === t.key"
+          [attr.aria-controls]="'panel-' + t.key"
+          [tabIndex]="current() === t.key ? 0 : -1"
+          (click)="select(t.key)"
+          (keydown)="onTabKey($event, i)"
+        >
+          {{ t.label }}@if (tabCounts()[t.key]; as n) {<span class="count" [attr.aria-label]="n + ' pending'">{{ n }}</span>}
+        </button>
+      }
+    </div>
+
+    <div role="tabpanel" [id]="'panel-' + current()" [attr.aria-labelledby]="'tab-' + current()" class="panel">
+      @switch (current()) {
+        @case ('overview') {
+          @if (r.problem) {
+            <div class="callout danger" role="status">
+              <mat-icon svgIcon="pc:x-octagon" aria-hidden="true" />
+              <div class="callout-body">
+                <strong>Needs attention</strong>
+                <span>{{ r.problem }}</span>
+                @if (r.nextStartAt) {
+                  <span class="muted">Next start {{ ago(r.nextStartAt) }}.</span>
+                }
+              </div>
+            </div>
+          }
+          @if (serviceAccountWarning(); as w) {
+            <div class="callout warning" role="status">
+              <mat-icon svgIcon="pc:alert" aria-hidden="true" />
+              <div class="callout-body">
+                <strong>Runs without a desktop</strong>
+                <span>{{ w }}</span>
+              </div>
+            </div>
+          }
+
+          <div class="grid">
+            <section class="card span-2" aria-labelledby="job-title">
+              <header class="card-header">
+                <h3 id="job-title">Current job</h3>
+                @if (pending(); as p) {
+                  <span class="badge warning">{{ p }}</span>
+                }
+              </header>
+              <div class="card-body">
+                @if (r.currentJob; as job) {
+                  <div class="job">
+                    <div class="elapsed num"><span class="dot pulse tone-info" aria-hidden="true"></span>{{ elapsed(job.startedAt) }}</div>
+                    <dl class="kv">
+                      <dt>Repository</dt>
+                      <dd>{{ job.info.repository ?? '—' }}</dd>
+                      <dt>Job</dt>
+                      <dd>{{ job.info.job ?? '—' }}</dd>
+                      @if (details(); as d) {
+                        <dt>Run</dt>
+                        <dd>{{ d.title ?? '—' }}</dd>
+                        <dt>Workflow</dt>
+                        <dd>{{ d.workflow ?? '—' }}{{ d.event ? ' · ' + d.event : '' }}</dd>
+                        <dt>Branch</dt>
+                        <dd>{{ d.branch ?? '—' }}</dd>
+                      }
+                      <dt>Started</dt>
+                      <dd>{{ when(job.startedAt) }}</dd>
+                      <dt>IDs</dt>
+                      <dd class="faint num">run #{{ job.info.runNumber ?? '—' }} · job {{ job.info.jobId ?? '—' }} · task {{ job.info.taskId ?? '—' }}</dd>
+                    </dl>
+                    @if (details()?.url; as url) {
+                      <button type="button" class="btn" (click)="openRun(url)">Open run in the browser<mat-icon svgIcon="pc:external" aria-hidden="true" /></button>
+                    } @else {
+                      <p class="faint small">Add a Gitea read token in Settings to see the run’s title, workflow and link.</p>
+                    }
+                  </div>
+                } @else {
+                  <p class="muted">No job is running.</p>
+                }
+              </div>
+            </section>
+
+            <section class="card where" aria-labelledby="where-title">
+              <header class="card-header"><h3 id="where-title">Where it runs</h3></header>
+              <div class="card-body">
+                <dl class="kv">
+                  <dt>Session</dt>
+                  <dd>{{ session() }}</dd>
+                  <dt>Mode</dt>
+                  <dd>{{ r.sessionMode === 'interactive' ? 'Logged-on user’s desktop' : 'Service session' }}</dd>
+                  <dt>Nobody logged on</dt>
+                  <dd>{{ loggedOff() }}</dd>
+                  <dt>Up for</dt>
+                  <dd class="num">{{ duration(r.runningSince) }}</dd>
+                  <dt>Restarts</dt>
+                  <dd class="num">{{ r.restarts24h }} in 24 h</dd>
+                </dl>
+              </div>
+            </section>
+
+            <section class="card span-3" aria-labelledby="use-title">
+              <header class="card-header">
+                <h3 id="use-title">CPU and memory</h3>
+                <span class="meta">this runner and every process it started · last 24 h</span>
+              </header>
+              <div class="card-body use">
+                @if (usageNow(); as u) {
+                  <div class="hero">
+                    <p class="big num">{{ u.cpu }}</p>
+                    <p class="cap faint">CPU now, peak {{ u.peakCpu }}</p>
+                  </div>
+                  <div class="hero">
+                    <p class="big num">{{ u.mem }}</p>
+                    <p class="cap faint">Memory now</p>
+                  </div>
+                  <div class="hero">
+                    <p class="big num">{{ u.processes }}</p>
+                    <p class="cap faint">Processes</p>
+                  </div>
+                } @else {
+                  <p class="muted span-all">Not running, so nothing is used.</p>
+                }
+                @if (usagePeak()) {
+                  <div class="chart cpu">
+                    <pc-usage-chart style="color: var(--chart-4)" [values]="usageCpu()" [max]="1000" [peak]="cpuPeak()" [peakLabel]="cpuPeakLabel()" topLabel="100%" />
+                  </div>
+                  <div class="chart mem">
+                    <pc-usage-chart style="color: var(--chart-1)" [values]="usageMem()" [max]="memPeak() ?? 1" [peak]="memPeak()" [peakLabel]="memPeakLabel()" [topLabel]="memTop()" />
+                  </div>
+                }
+              </div>
+            </section>
+
+            <section class="card span-3" aria-labelledby="config-title">
+              <header class="card-header">
+                <h3 id="config-title">Configuration</h3>
+                <a class="meta" routerLink="/activity" [queryParams]="{ runner: r.name }">Activity history →</a>
+              </header>
+              <div class="card-body">
+                <dl class="kv">
+                  <dt>Folder</dt>
+                  <dd class="folder">
+                    <span class="mono">{{ r.dir }}</span>
+                    <button type="button" class="btn sm ghost" (click)="reveal()"><mat-icon svgIcon="pc:folder" aria-hidden="true" />Show logs folder</button>
+                  </dd>
+                  <dt>Server</dt>
+                  <dd>{{ r.serverUrl ?? 'Not registered' }}</dd>
+                  <dt>Labels</dt>
+                  <dd>
+                    <div class="chips">
+                      @for (l of r.labels; track l) {
+                        <span class="chip"><mat-icon svgIcon="pc:tag" aria-hidden="true" />{{ l }}</span>
+                      } @empty {
+                        <span class="faint">None</span>
+                      }
+                    </div>
+                  </dd>
+                  <dt>Binary</dt>
+                  <dd>{{ r.managedBinary ? 'Managed by Pitcrew (verified downloads, automatic roll-back)' : 'Provided by you: ' + (config()?.binary_path ?? 'custom path') }}</dd>
+                  <dt>Enabled</dt>
+                  <dd>{{ r.enabled ? 'Yes' : 'No — Pitcrew does not start it' }}</dd>
+                </dl>
+              </div>
+            </section>
+          </div>
+        }
+        @case ('updates') {
+          <pc-runner-update-panel [runner]="r" />
+          <p class="xlink"><a routerLink="/updates">View all runners’ updates</a></p>
+        }
+        @case ('processes') {
+          <pc-processes-panel [runner]="r.name" />
+        }
+        @case ('config') {
+          <pc-config-panel [runner]="r.name" />
+        }
+        @case ('disk') {
+          <pc-disk-panel [runner]="r.name" />
+          <p class="xlink"><a routerLink="/storage">See Storage</a></p>
+        }
+      }
+    </div>
+  } @else if (status.status()) {
+    <section class="card">
+      <pc-empty-state icon="runner" [title]="'No runner named ' + name()" text="It may have been removed.">
+        <a class="btn" routerLink="/runners">Back to runners</a>
+      </pc-empty-state>
+    </section>
+  } @else {
+    <span class="skeleton" style="height: 32px; width: 40%"></span>
+    <span class="skeleton" style="height: 240px"></span>
+  }
+</div>

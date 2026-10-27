@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Paddock (isometric) tray</title>
+  <defs><mask id="t9m1" maskUnits="userSpaceOnUse" x="-2000" y="-2000" width="5000" height="5000"><rect x="-2000" y="-2000" width="5000" height="5000" fill="#fff"/><path d="M3 9.5L6.25 11.125L6.25 8.125L3 6.5ZM7.75 11.875L11 13.5L11 10.5L7.75 8.875Z" fill="#000"/><path d="M12 15L12 10M0 4.5L12 10.5L17 8" fill="none" stroke="#000" stroke-width="1" stroke-linecap="butt"/></mask></defs>
+  <g><path d="M1 3.5L12 9L16 7L5 1.5ZM1 5L12 10.5L12 9L1 3.5ZM12 10.5L16 8.5L16 7L12 9Z" fill="#1C1C1E"/><path d="M2 9L12 14L12 10L2 5ZM12 14L15 12.5L15 8.5L12 10Z" fill="#1C1C1E" mask="url(#t9m1)"/></g>
+  
+</svg>

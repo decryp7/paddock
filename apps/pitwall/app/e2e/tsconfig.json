@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["node"], "module": "esnext", "moduleResolution": "bundler", "noPropertyAccessFromIndexSignature": false },
+  "include": ["**/*.ts", "../playwright.config.ts"]
+}

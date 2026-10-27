@@ -1,0 +1,24 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions for the webview of every Debrief window (main, and w-2, w-3, ... opened later) and of panels popped out of them (p-main-1, p-w-2-3, ...), scoped by webview label (never by window) so no other webview gets them; the core permissions are the ones the UI uses (events; monitors, bounds and maximised state for pop-out placement; set-fullscreen backs Window > Full screen), listed one by one instead of core:default",
+  "webviews": [
+    "main",
+    "w-*",
+    "p-*",
+    "d-*"
+  ],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-available-monitors",
+    "core:window:allow-primary-monitor",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-scale-factor",
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-fullscreen",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "log:default"
+  ]
+}

@@ -1,0 +1,15 @@
+# Source text is stored with LF; checkouts may use the platform's line endings.
+* text=auto
+
+# Test inputs are byte-exact. Never convert their line endings.
+crates/*/tests/fixtures/** -text
+
+# Shell scripts must keep LF to run on macOS and Linux.
+*.sh text eol=lf
+
+# Binary formats.
+*.png binary
+*.ico binary
+*.icns binary
+*.gz binary
+*.zip binary

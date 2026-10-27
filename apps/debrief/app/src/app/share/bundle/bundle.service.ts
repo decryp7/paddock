@@ -1,0 +1,86 @@
+import { inject, Injectable, Injector, signal } from '@angular/core';
+import { BundleManifest } from '../../core/api.types';
+import { Platform } from '../../core/platform';
+import { WorkspaceStore } from '../../core/workspace.store';
+import { UiStateRegistry } from '../../lifecycle/ui-state';
+import { ProjectService } from '../../projects/project.service';
+import { baseName, errorMessage } from '../../tools/tool-errors';
+import { ReportStore } from '../report/report.store';
+import { ShareBackend } from '../share-backend';
+
+export const BUNDLE_EXTENSION = '.debriefz';
+export const BUNDLE_FILTERS = [{ name: $localize`:@@share.bundle.filterName:Debrief bundle`, extensions: ['debriefz'] }];
+
+export function isBundlePath(path: string): boolean {
+  return path.toLowerCase().endsWith(BUNDLE_EXTENSION);
+}
+
+/** The bundle the window shows (read-only), for the banner. */
+export interface OpenedBundle {
+  path: string;
+  name: string;
+  manifest: BundleManifest | null;
+}
+
+/**
+ * Sharing: a saved project (`.debriefz`) is self-contained and opens anywhere, so "share" saves the project. Old share
+ * bundles still open read-only, and can be left or saved as a project.
+ */
+@Injectable({ providedIn: 'root' })
+export class BundleService {
+  private readonly injector = inject(Injector);
+  /** Resolved on use, so hosts that never share (e.g. the banners in tests) need no share backend. */
+  private get share(): ShareBackend {
+    return this.injector.get(ShareBackend);
+  }
+  private readonly store = inject(WorkspaceStore);
+  private readonly registry = inject(UiStateRegistry);
+  private readonly reports = inject(ReportStore);
+  private readonly projects = inject(ProjectService);
+  private readonly platform = inject(Platform);
+
+  /** The open bundle; null when the window shows a normal project. */
+  readonly opened = signal<OpenedBundle | null>(null);
+  readonly busy = signal(false);
+
+  /** Shares the workspace: saves it as a project file (Save As), which opens anywhere without the original files. */
+  async create(): Promise<void> {
+    await this.projects.saveAs();
+  }
+
+  async openFromDialog(): Promise<void> {
+    const path = await this.platform.pickOpenPath($localize`:@@share.bundleService.openTitle:Open bundle`, BUNDLE_FILTERS);
+    if (path) await this.open(path);
+  }
+
+  /** Opens a bundle read-only: its profile, files, UI state and reports; saving asks for a new project file. */
+  async open(path: string): Promise<boolean> {
+    this.busy.set(true);
+    try {
+      const o = await this.share.openBundle(path);
+      this.store.profileSaved(o.summary);
+      this.registry.restore(o.ui);
+      this.reports.replace(o.reports);
+      this.projects.adoptReadOnly(o.name || baseName(path).replace(/\.debriefz$/i, ''), o.missing);
+      this.opened.set({ path, name: o.name || baseName(path), manifest: o.bundle });
+      this.store.setNotice($localize`:@@share.bundleService.opened:Opened ${baseName(path)}:file: (read-only)`);
+      return true;
+    } catch (e) {
+      this.store.setError($localize`:@@share.bundleService.openFailed:Could not open the bundle: ${errorMessage(e)}:error:`);
+      return false;
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  /** Saves what the bundle shows as a project of its own. */
+  async saveAsProject(): Promise<void> {
+    if (await this.projects.saveAs()) this.opened.set(null);
+  }
+
+  /** Leaves the bundle: an empty, untitled project. */
+  async close(): Promise<void> {
+    this.opened.set(null);
+    await this.projects.newProject();
+  }
+}

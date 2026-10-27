@@ -4,17 +4,17 @@ One row per image under `docs/images` that passed an independent review. A chang
 
 | image | sha256 | reviewer | date |
 |---|---|---|---|
-| src/icons/debrief.svg | fed3d77ff96afe97b28671a5ae2ba75aedd86ae971257b807bb62baf418c6006 | icons sRGB rebuild review (Opus) | 2026-10-25 |
-| src/icons/dyno.svg | c9cb2cf2d5065fc983f8b92d816ff20fb6791ceaec83d6f693a9446cf47d3211 | icons sRGB rebuild review (Opus) | 2026-10-25 |
-| src/icons/pacenotes.svg | 68bfea4f508bae80d458c2e1655eb9f350f7cba599a96f9bc7fb6a2188d71e3e | icons sRGB rebuild review (Opus) | 2026-10-25 |
-| src/icons/paddock.svg | 32ffecdffb004795b7b39c7615186cf21a60a17aa0db1dae198a0620b88f4f17 | icons sRGB rebuild review (Opus) | 2026-10-25 |
-| src/icons/pitcrew.svg | d24bb573f2ff292932fb392b67324e67e0cddfc090cc7c9f2c945ee43b98bb91 | icons sRGB rebuild review (Opus) | 2026-10-25 |
-| src/icons/pitwall.svg | ecd6af6bf0242040f2d6b38c80aec566c83948794294b3c226b27cabe3251bb2 | icons sRGB rebuild review (Opus) | 2026-10-25 |
-| src/icons/sighter.svg | a9f17f11443a04aff43c2195665b776969c9e72f743ea141a440f1ec42334284 | icons sRGB rebuild review (Opus) | 2026-10-25 |
-| src/icons/spotter.svg | 938f1edac5d51d3ad20c42021a0fe3a53944a4c461e4e4012a60898386edb8a8 | icons sRGB rebuild review (Opus) | 2026-10-25 |
-| paddock-ecosystem.svg | 0adea082337f59c84af2f3fa49e7f25435e6d94245aa1a0f5a18a980ef66e6ce | independent review 3 (Opus) | 2026-10-25 |
-| paddock-ecosystem-light.png | 7fe5625be9baddf668afd0650e47cfe3b15c663d99159fe5a8de48fcc1584457 | independent review 3 (Opus) | 2026-10-25 |
-| paddock-ecosystem-dark.png | 4c682bd002c24920a97540b9779db0e15e9edbd566d02ede801065df9d0263d3 | independent review 3 (Opus) | 2026-10-25 |
+| src/icons/debrief.svg | 49547ca582956b9ff485adc23f0e949998ba5760cdb94260187998a5496832b0 | isometric icon switch-over review (Opus) | 2026-10-27 |
+| src/icons/dyno.svg | 89027f91c247f0c41d4b0ee2c79915a4d5b0b0b2c6908cedfb28bc84d864365d | isometric icon switch-over review (Opus) | 2026-10-27 |
+| src/icons/pacenotes.svg | 1c9162f9e8828179d4498c22ba52b6fe418e60789402ed57f04cc2c3e274673c | isometric icon switch-over review (Opus) | 2026-10-27 |
+| src/icons/paddock.svg | 31e9c96cc5bbd5184768cb701bf5458e0e1fa79befb56d2ab2394b8f1029c6cc | isometric icon switch-over review (Opus) | 2026-10-27 |
+| src/icons/pitcrew.svg | e3a8389dc8557f776e6e4c60c0c218df390f667fd1804247f78ef9a8d06b9784 | isometric icon switch-over review (Opus) | 2026-10-27 |
+| src/icons/pitwall.svg | 7ceb593d3614652905214f05a1a50b66907a987207e6638eed7e6dc682e63178 | isometric icon switch-over review (Opus) | 2026-10-27 |
+| src/icons/sighter.svg | 272f2acb8869a286585ad1073b2e2842ebe65513c827d0cf9bce46e59f36164e | isometric icon switch-over review (Opus) | 2026-10-27 |
+| src/icons/spotter.svg | 356f2be29f778cef0650ea8712bac68f689959f7881ca888b0d54e351b5489bf | isometric icon switch-over review (Opus) | 2026-10-27 |
+| paddock-ecosystem.svg | 948644b841b98475e2ef9b3ced10523cb519515b3a25dbf52da5df252e310e29 | isometric icon switch-over review (Opus) | 2026-10-27 |
+| paddock-ecosystem-light.png | 127fd5dc1755cb32da352e50043b288667af446b275da9dbe8b9469b817640ea | isometric icon switch-over review (Opus) | 2026-10-27 |
+| paddock-ecosystem-dark.png | fd709a3aa37f980d5d6f0b6155e6251b75f6f0cf4485eca209becb1b75731f59 | isometric icon switch-over review (Opus) | 2026-10-27 |
 | paddock-integrations.svg | fcd26b68cd05d07fc6bdccd426d9f42ebde906395bc17b9a03cc70485fc6bda8 | independent review 3 (Opus) | 2026-10-25 |
 | paddock-integrations-light.png | 59baa1a04146c9fb3fea89c25589322d493f95a72b8064fcc45c8765cfba3f1f | independent review 3 (Opus) | 2026-10-25 |
 | paddock-integrations-dark.png | 3ae9a8ae9fc3ae8dfdc3b121163936f9fac8923bc627d6977a60a3570d973c56 | independent review 3 (Opus) | 2026-10-25 |

@@ -1,0 +1,755 @@
+/* Debrief global theme. Colours are tokens; components only use var(--…). */
+
+/* Fonts are bundled (offline desktop app; CSP allows no remote resources). */
+/* Calm: Inter + JetBrains Mono. Console: Geist + Geist Mono. Precision: IBM Plex Sans + Plex Mono. A face is only
+   loaded when a theme uses it; the default interface font is the operating system's (ADR 0028). */
+@use '@fontsource/inter/latin-400' as inter-400;
+@use '@fontsource/inter/latin-500' as inter-500;
+@use '@fontsource/inter/latin-600' as inter-600;
+@use '@fontsource/inter/latin-700' as inter-700;
+@use '@fontsource/jetbrains-mono/latin-400' as jetbrains-mono-400;
+@use '@fontsource/jetbrains-mono/latin-500' as jetbrains-mono-500;
+@use '@fontsource/geist-sans/latin-400' as geist-400;
+@use '@fontsource/geist-sans/latin-500' as geist-500;
+@use '@fontsource/geist-sans/latin-600' as geist-600;
+@use '@fontsource/geist-sans/latin-700' as geist-700;
+@use '@fontsource/geist-mono/latin-400' as geist-mono-400;
+@use '@fontsource/geist-mono/latin-500' as geist-mono-500;
+@use '@fontsource/ibm-plex-sans/latin-400' as plex-400;
+@use '@fontsource/ibm-plex-sans/latin-500' as plex-500;
+@use '@fontsource/ibm-plex-sans/latin-600' as plex-600;
+@use '@fontsource/ibm-plex-sans/latin-700' as plex-700;
+@use '@fontsource/ibm-plex-mono/latin-400' as plex-mono-400;
+@use '@fontsource/ibm-plex-mono/latin-500' as plex-mono-500;
+@use '@angular/material' as mat;
+
+/* The tokens (colours, type, spacing, radii, motion, sizes) are not defined here: a theme is data
+   (app/src/app/theme, ADR 0018) and ThemeService sets its tokens on <html> as custom properties, with data-theme,
+   data-scheme, data-density and one data-* attribute per trait. Until it runs, the page follows the system colours. */
+:root {
+  color-scheme: light dark;
+}
+
+/* Reduced motion: no decorative animation or transition; the duration tokens collapse (they beat the inline tokens). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms !important;
+    --dur-med: 0ms !important;
+    --dur-slow: 0ms !important;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Start-up splash (Paddock lesson; ADR 0058): shown inside <debrief-root> until Angular replaces it; fades in after ~400 ms so a
+   fast start never flashes it. No inline style or script (CSP); colours follow the system until the theme is set. */
+.debrief-splash {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg-1, Canvas);
+  color: var(--text-2, GrayText);
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: var(--fs-sm, 13px);
+  opacity: 0;
+  animation: debrief-splash-in 200ms ease 400ms forwards;
+
+  p {
+    margin: 0;
+  }
+}
+
+@keyframes debrief-splash-in {
+  to {
+    opacity: 1;
+  }
+}
+
+/* While the shell captures the window for an error snapshot (ADR 0034), toasts stay out of the picture. */
+html[data-snapshot-capturing] [data-snapshot-ignore] {
+  visibility: hidden !important;
+}
+
+/* Trait: tabular figures where the theme asks for them (counts and times line up). */
+:root[data-numerals='tabular'] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Angular Material theme: Material 3 system tokens (--mat-sys-*) resolve to Debrief's tokens, so any
+   Material component follows Debrief's look in every theme and scheme. The mapping is declared once; it follows
+   the theme because ThemeService redefines the Debrief tokens it reads on :root. */
+:root {
+  /* Typography, shape and state layers from Material, in Debrief's font. No colour palette is
+     generated: every colour role is mapped below. */
+  @include mat.theme(
+    (
+      typography: (
+        plain-family: var(--font-sans),
+        brand-family: var(--font-sans),
+      ),
+      density: 0,
+    )
+  );
+
+  --mat-sys-primary: var(--accent);
+  --mat-sys-on-primary: var(--accent-ink);
+  --mat-sys-primary-container: var(--chip-bg);
+  --mat-sys-on-primary-container: var(--chip-text);
+  --mat-sys-inverse-primary: var(--accent);
+  --mat-sys-primary-fixed: var(--chip-bg);
+  --mat-sys-primary-fixed-dim: var(--chip-border);
+  --mat-sys-on-primary-fixed: var(--chip-text);
+  --mat-sys-on-primary-fixed-variant: var(--chip-text);
+  --mat-sys-surface-tint: var(--accent);
+
+  --mat-sys-secondary: var(--text-2);
+  --mat-sys-on-secondary: var(--bg-1);
+  --mat-sys-secondary-container: var(--bg-active);
+  --mat-sys-on-secondary-container: var(--text);
+  --mat-sys-secondary-fixed: var(--bg-active);
+  --mat-sys-secondary-fixed-dim: var(--bg-sel);
+  --mat-sys-on-secondary-fixed: var(--text);
+  --mat-sys-on-secondary-fixed-variant: var(--text-2);
+
+  --mat-sys-tertiary: var(--accent);
+  --mat-sys-on-tertiary: var(--accent-ink);
+  --mat-sys-tertiary-container: var(--accent-soft);
+  --mat-sys-on-tertiary-container: var(--chip-text);
+  --mat-sys-tertiary-fixed: var(--chip-bg);
+  --mat-sys-tertiary-fixed-dim: var(--chip-border);
+  --mat-sys-on-tertiary-fixed: var(--chip-text);
+  --mat-sys-on-tertiary-fixed-variant: var(--chip-text);
+
+  --mat-sys-error: var(--danger-text);
+  --mat-sys-on-error: var(--bg-1);
+  --mat-sys-error-container: var(--ann-critical);
+  --mat-sys-on-error-container: var(--danger-text);
+
+  --mat-sys-background: var(--bg-1);
+  --mat-sys-on-background: var(--text);
+  --mat-sys-surface: var(--bg-1);
+  --mat-sys-on-surface: var(--text);
+  --mat-sys-surface-variant: var(--bg-2);
+  --mat-sys-on-surface-variant: var(--muted);
+  --mat-sys-surface-dim: var(--bg-0);
+  --mat-sys-surface-bright: var(--bg-3);
+  --mat-sys-surface-container-lowest: var(--bg-0);
+  --mat-sys-surface-container-low: var(--bg-1);
+  --mat-sys-surface-container: var(--bg-2);
+  --mat-sys-surface-container-high: var(--bg-3);
+  --mat-sys-surface-container-highest: var(--tooltip-bg);
+  --mat-sys-inverse-surface: var(--text);
+  --mat-sys-inverse-on-surface: var(--bg-1);
+  --mat-sys-neutral10: var(--text);
+  --mat-sys-neutral-variant20: var(--text-2);
+
+  --mat-sys-outline: var(--border-3);
+  --mat-sys-outline-variant: var(--border-2);
+  --mat-sys-shadow: var(--scrim);
+  --mat-sys-scrim: var(--scrim);
+
+  --mat-sys-level0: none;
+  --mat-sys-level1: var(--shadow);
+  --mat-sys-level2: var(--shadow);
+  --mat-sys-level3: var(--shadow);
+  --mat-sys-level4: var(--shadow);
+  --mat-sys-level5: var(--shadow);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-1);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  /* Desktop feel (ADR 0028): the window is application chrome, not a page. Nothing selects, drags, highlights on
+     tap or rubber-bands unless it opts in below; the pointer stays an arrow. */
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+img,
+svg,
+a {
+  -webkit-user-drag: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Content the user copies opts in to selection (ADR 0028): text fields and editors, grid cells, code, and anything
+   marked `.debrief-selectable` (log rows, inspector values, AI messages, notes, error details). Errors and notes
+   (`role=alert`, `role=note`) select by nature, so a message can be copied into a bug report. */
+input,
+textarea,
+[contenteditable]:not([contenteditable='false']),
+[role='textbox'],
+[role='gridcell'],
+[role='alert'],
+[role='note'],
+pre,
+code,
+.debrief-panel-error,
+.debrief-selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Chrome inside selectable content (buttons on a row, tabs in a message) still does not select. */
+button,
+label,
+[role='button'],
+[role='tab'],
+[role='tablist'],
+[role='toolbar'],
+[role='menubar'],
+[role='menu'],
+[role='menuitem'],
+[role='menuitemcheckbox'],
+[role='menuitemradio'],
+[role='columnheader'],
+debrief-title-bar,
+debrief-popout-title-bar,
+debrief-status-bar,
+debrief-activity-bar,
+.dv-tabs-and-actions-container,
+.debrief-dock-actions,
+.section-title,
+.btn,
+.icon-btn {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Text fields show the text cursor; everything else keeps the arrow, as in a native app. */
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='button'], [type='submit']),
+textarea,
+[contenteditable]:not([contenteditable='false']) {
+  cursor: text;
+}
+
+/* Focus rings for the keyboard only: a mouse click does not leave one behind. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Thin scrollbars like the platforms' overlay bars, in the theme's colours: a slim thumb that widens on hover. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-3);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  min-height: 24px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--faint);
+  border-width: 1px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.section-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+}
+.faint {
+  color: var(--faint);
+}
+
+.btn {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-3);
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  &:hover {
+    background: var(--bg-hover);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  &.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+    font-weight: 600;
+    /* A disabled primary is a plain neutral button in both themes (a dimmed accent reads as half-enabled on dark, as pale on light). */
+    &:disabled {
+      background: var(--bg-3);
+      border-color: var(--border-3);
+      color: var(--faint);
+      opacity: 0.8;
+    }
+  }
+  &.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    &:hover {
+      color: var(--text);
+      background: var(--bg-hover);
+    }
+  }
+  &.dashed {
+    background: transparent;
+    border-style: dashed;
+    color: var(--muted);
+  }
+  &.active {
+    background: var(--bg-active);
+    color: var(--text);
+  }
+}
+
+.icon-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  padding: 0;
+  &:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+  }
+}
+
+.input,
+.select {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-2);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  outline: none;
+  min-width: 0;
+  &:focus {
+    border-color: var(--accent);
+  }
+}
+
+textarea.input {
+  height: auto;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.chip {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 12px;
+  background: var(--chip-bg);
+  border: 1px solid var(--chip-border);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-active);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.popover {
+  position: absolute;
+  z-index: 50;
+  padding: 10px;
+  border-radius: var(--r-3);
+  background: var(--tooltip-bg);
+  border: 1px solid var(--border-3);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-sm);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+
+/* A level is never colour alone: its dot has a shape too (fatal diamond, error square, warning triangle; information
+   and below stay round), and where the user's colours override ours the dot and the lane bar stay visible. */
+[data-level='Fatal'] .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+[data-level='Error'] .dot {
+  border-radius: 1px;
+}
+[data-level='Warning'] .dot {
+  width: 9px;
+  height: 8px;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+[data-level='Debug'] .dot,
+[data-level='Verbose'] .dot {
+  width: 5px;
+  height: 5px;
+}
+
+@media (forced-colors: active) {
+  .dot {
+    forced-color-adjust: none;
+    background: CanvasText !important;
+  }
+  [data-level='Debug'] .dot,
+  [data-level='Verbose'] .dot {
+    background: Canvas !important;
+    box-shadow: inset 0 0 0 1px CanvasText;
+  }
+  /* Quiet levels keep their code visible when colours cannot carry the level. */
+  .lvl .sr {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    clip-path: none !important;
+  }
+  .lane-label::before {
+    forced-color-adjust: none;
+    background: CanvasText !important;
+  }
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lvl-Verbose { --lvl: var(--lvl-verbose); }
+.lvl-Debug { --lvl: var(--lvl-debug); }
+.lvl-Information { --lvl: var(--lvl-info); }
+.lvl-Warning { --lvl: var(--lvl-warn); }
+.lvl-Error { --lvl: var(--lvl-error); }
+.lvl-Fatal { --lvl: var(--lvl-fatal); }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.empty-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  text-align: center;
+  padding: 24px;
+}
+
+/* Dockview theme: maps dockview's variables onto the Debrief tokens (follows dark/light automatically). */
+.debrief-dockview {
+  --dv-group-view-background-color: var(--bg-1);
+  --dv-tabs-and-actions-container-background-color: var(--tabs-bg);
+  --dv-tabs-and-actions-container-height: var(--tab-h);
+  --dv-tabs-and-actions-container-font-size: var(--fs-md);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg-1);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--tabs-bg);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--bg-1);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--tabs-bg);
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted);
+  --dv-tab-divider-color: var(--border);
+  --dv-separator-border: var(--border);
+  --dv-paneview-header-border-color: var(--border);
+  --dv-paneview-active-outline-color: var(--accent);
+  --dv-icon-hover-background-color: var(--bg-hover);
+  --dv-drag-over-background-color: var(--accent-soft);
+  --dv-drag-over-border-color: var(--accent);
+  --dv-edge-dock-indicator-color: var(--accent);
+  --dv-sash-color: var(--border);
+  --dv-active-sash-color: var(--accent);
+  --dv-floating-box-shadow: var(--shadow);
+  --dv-floating-border: 1px solid var(--border-3);
+  /* dockview's own themes set it; without it its popovers (the tab overflow list) have no z-index and open under the tabs. */
+  --dv-overlay-z-index: 999;
+  --dv-tab-font-size: var(--fs-md);
+  --dv-tabs-container-scrollbar-color: var(--border-3);
+  --dv-context-menu-background-color: var(--tooltip-bg);
+  --dv-context-menu-color: var(--text);
+  color-scheme: inherit;
+  font-family: var(--font-sans);
+
+  .dv-tab { color: var(--muted); transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+  .dv-tab:hover { color: var(--text-2); }
+  /* The active tab is underlined at the bottom, joining it to its panel. */
+  .dv-tab.dv-active-tab { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+  .dv-tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+  .dv-tabs-and-actions-container { border-bottom: 1px solid var(--border); }
+  .dv-groupview { background: var(--bg-1); }
+  .dv-groupview:focus-within .dv-tab.dv-active-tab { color: var(--text); }
+}
+
+/* Trait surface = cards: each group is a soft card on the canvas, its tabs are pills in the card's header. Only leaf
+   views get the gap (a split inside a split would double it); dockview's geometry stays as it is. */
+:root[data-surface='cards'] .debrief-dockview {
+  --dv-tabs-and-actions-container-background-color: var(--bg-1);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--bg-1);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--bg-1);
+  --dv-separator-border: transparent;
+  --dv-sash-color: transparent;
+  background: var(--bg-0);
+
+  .dv-view:has(> .dv-groupview) { padding: 3px; }
+  .dv-groupview { border-radius: var(--r-3); border: 1px solid var(--border); box-shadow: var(--shadow-1); overflow: hidden; }
+  .dv-tabs-and-actions-container { border-bottom-color: var(--border); padding: 0 var(--s-1); }
+  .dv-tab { margin: 5px 2px; padding: 0; border-radius: var(--r-2); }
+  .dv-tab.dv-active-tab { box-shadow: none; background: var(--bg-active); }
+}
+
+.debrief-panel {
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  color: var(--text);
+}
+.debrief-panel-error { padding: 16px; color: var(--muted); }
+/* Narrow panels (< 420 px, set by the panel renderer): secondary columns and long descriptions drop out (their text is
+   in a tooltip), action rows wrap, and wide tables scroll inside the panel instead of being clipped. */
+.debrief-panel[data-narrow] .narrow-hide { display: none; }
+.debrief-panel[data-narrow] .narrow-wrap { flex-wrap: wrap; white-space: normal; }
+.debrief-panel[data-narrow] table.narrow-scroll { display: block; overflow-x: auto; }
+
+.debrief-dock-actions { display: flex; align-items: center; gap: 2px; padding: 0 6px; height: 100%; }
+/* dockview's "N hidden tabs" chip: a 24 px target like the header buttons. */
+.dv-tabs-overflow-dropdown-default { min-width: 24px; min-height: 24px; }
+.debrief-dock-action {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.debrief-dock-action:hover { background: var(--bg-hover); color: var(--text); }
+.debrief-dock-action:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+.debrief-tab { display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 8px 0 12px; white-space: nowrap; }
+.debrief-tab-close { width: 16px; height: 16px; line-height: 15px; text-align: center; border-radius: 4px; font-size: var(--fs-lg); color: var(--faint); visibility: hidden; }
+.dv-tab:hover .debrief-tab-close, .dv-tab.dv-active-tab .debrief-tab-close, .dv-tab:focus-visible .debrief-tab-close { visibility: visible; }
+.debrief-tab-close:hover { background: var(--bg-hover); color: var(--text); }
+
+/* The main window's toasts (errors, notices, live alerts, error snapshots), one above the other (ui/toast-stack.ts). */
+.debrief-toast-stack { position: fixed; right: 16px; bottom: 32px; z-index: 2000; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-height: calc(100vh - 96px); pointer-events: none; }
+.debrief-toast-stack > * { pointer-events: auto; }
+.debrief-toast-stack:empty { display: none; }
+.debrief-toast-overflow { display: none !important; }
+
+/* A region focused with F6 (shell/regions.ts) shows where the keyboard is. */
+[data-debrief-region]:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* The selected segment of a segmented control (Light / Dark, Compact / Comfortable…) is a tint with accent text: only a dialog's one primary button is filled. */
+.seg > .btn[aria-pressed='true'],
+.seg > .btn[aria-checked='true'] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+
+/* Native controls, themed once for every screen (B7). The popup list of a select is drawn by the OS; the closed control, the
+   checkbox, the radio and the number field are Debrief's. Components add `.input` / `.select` for sizing; these rules give a bare
+   control the same look so none of them leaks the platform default. Immediate on/off settings use <debrief-switch> instead. */
+select:not([multiple], [size]) {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 28px;
+  padding: 0 24px 0 8px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-2);
+  background-color: var(--bg-3);
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 12px, calc(100% - 9px) 12px;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  &:focus {
+    border-color: var(--accent);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+input[type='number'] {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-2);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+  &::-webkit-inner-spin-button,
+  &::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  &:focus {
+    border-color: var(--accent);
+    outline: none;
+  }
+}
+
+input[type='checkbox']:not([role='switch']),
+input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  vertical-align: -3px;
+  border: 1px solid var(--border-3);
+  background: var(--bg-3);
+  cursor: pointer;
+  &:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  &::after {
+    content: '';
+    position: absolute;
+    display: none;
+  }
+  &:checked,
+  &:indeterminate {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  &:checked::after,
+  &:indeterminate::after {
+    display: block;
+  }
+}
+input[type='checkbox']:not([role='switch']) {
+  border-radius: 4px;
+  &:checked::after {
+    left: 4px;
+    top: 1px;
+    width: 3px;
+    height: 7px;
+    border: solid var(--accent-ink);
+    border-width: 0 1.6px 1.6px 0;
+    transform: rotate(45deg);
+  }
+  &:indeterminate::after {
+    left: 3px;
+    top: 5.5px;
+    width: 6px;
+    height: 1.6px;
+    background: var(--accent-ink);
+  }
+}
+input[type='radio'] {
+  border-radius: 50%;
+  &:checked::after {
+    left: 3px;
+    top: 3px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-ink);
+  }
+}
