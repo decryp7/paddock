@@ -257,10 +257,8 @@ mod tests {
     #[test]
     fn a_wrong_token_never_reaches_the_dispatcher() {
         let rig = Rig::start(this_user(), "/opt/dyno/dyno-agent");
-        assert!(matches!(
-            Client::connect(&rig.name, &Token::from_bytes([9; 32])),
-            Err(IpcError::Auth(_))
-        ));
+        let got = Client::connect(&rig.name, &Token::from_bytes([9; 32]));
+        assert!(matches!(got, Err(IpcError::Auth(_))), "{:?}", got.as_ref().err());
         // The daemon is still serving.
         assert!(rig.call(HelperRequest::Info).is_ok());
         rig.stop();
