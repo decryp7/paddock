@@ -12,7 +12,7 @@ use super::persist::JobsRecord;
 use super::queue::{Cancel, Finished, JobEnd, JobInfo, JobQueue, JobsSnapshot, QueueError, Refusal};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -195,6 +195,9 @@ impl<T, E> JobHandle<T, E> {
     /// Blocks until the job ended. A job cancelled while queued (or dropped at exit) gives `Stopped`.
     pub fn wait(self) -> Result<Result<T, E>, Stopped> {
         if let Ok(r) = self.rx.recv() {
+            // The value is out before the job is recorded as ended: wait for that too, so the caller never sees its
+            // finished job still running.
+            self.jobs.wait_end(self.id);
             return Ok(r);
         }
         // The work is gone without a value: wait (briefly) for the job to be recorded as ended.
@@ -262,6 +265,9 @@ struct Shared {
     clock: Arc<dyn Clock>,
     listeners: Mutex<Vec<Listener>>,
     gates: Mutex<HashMap<JobKind, GateFn>>,
+    /// Counts `set_gate` calls: a pump that asked a gate before it was replaced asks again instead of applying a
+    /// verdict from the old one.
+    gate_generation: AtomicU64,
     /// One pump judges the gates and applies their verdicts at a time: a verdict asked earlier never lands after a
     /// newer one (a stale "healthy" resumed a queue a later pump had paused).
     pumping: Mutex<()>,
@@ -301,6 +307,7 @@ impl Jobs {
             clock,
             listeners: Mutex::new(Vec::new()),
             gates: Mutex::new(HashMap::new()),
+            gate_generation: AtomicU64::new(0),
             pumping: Mutex::new(()),
             retry: Mutex::new(HashMap::new()),
             ticking: AtomicBool::new(false),
@@ -345,6 +352,7 @@ impl Jobs {
     /// Lets `gate` pause and resume `kind`'s queue (checked before jobs of that kind start).
     pub fn set_gate(&self, kind: JobKind, gate: impl Fn() -> Option<String> + Send + Sync + 'static) {
         lock(&self.0.gates).insert(kind, Arc::new(gate));
+        self.0.gate_generation.fetch_add(1, Ordering::SeqCst);
     }
 
     /// How Retry runs a job of `kind` again.
@@ -444,9 +452,16 @@ impl Jobs {
         // Held while the gates are asked and their verdicts applied, released before jobs are spawned and listeners
         // told (they may pump again). Gates never pump.
         let one_pump = lock(&self.0.pumping);
-        let gates: Vec<(JobKind, GateFn)> = lock(&self.0.gates).iter().map(|(k, g)| (*k, g.clone())).collect();
-        // Gates run outside the queue's lock: they may ask other services (the AI's health).
-        let verdicts: Vec<(JobKind, Option<String>)> = gates.into_iter().map(|(k, g)| (k, guarded_gate(&g))).collect();
+        // Gates run outside the queue's lock: they may ask other services (the AI's health). A gate replaced while
+        // they were asked makes the verdicts stale: ask again.
+        let verdicts = loop {
+            let generation = self.0.gate_generation.load(Ordering::SeqCst);
+            let gates: Vec<(JobKind, GateFn)> = lock(&self.0.gates).iter().map(|(k, g)| (*k, g.clone())).collect();
+            let verdicts: Vec<(JobKind, Option<String>)> = gates.into_iter().map(|(k, g)| (k, guarded_gate(&g))).collect();
+            if self.0.gate_generation.load(Ordering::SeqCst) == generation {
+                break verdicts;
+            }
+        };
         let now = self.now();
         let held = self.starts_held();
         let mut paused = Vec::new();
@@ -1096,6 +1111,66 @@ pub(crate) mod tests {
         let (later, _go) = gated(&jobs, ai("later"));
         assert_eq!(jobs.state_of(later.id), Some(JobState::Queued));
         assert!(jobs.snapshot(None).paused[0].reason.contains("crashed"));
+    }
+
+    /// Regression (CI run 6426): `wait` returned as soon as the job's value was out, before the job was recorded as
+    /// ended, so a caller that checked the service right after (is a research still active?) saw the job running.
+    #[test]
+    fn wait_returns_only_once_the_job_is_recorded_as_ended() {
+        let (jobs, _) = service();
+        let (h, go) = gated(&jobs, JobSpec::new(JobKind::Export, "x"));
+        let id = h.id;
+        // While the test holds the service's state, the job can send its value but cannot be recorded as ended.
+        let held = jobs.lock();
+        go.send(Ok(7)).unwrap();
+        let (returned, was_returned) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let r = h.wait();
+            let _ = returned.send(());
+            r
+        });
+        assert!(
+            was_returned.recv_timeout(Duration::from_millis(300)).is_err(),
+            "wait returned while the job was still recorded as running"
+        );
+        drop(held);
+        assert_eq!(waiter.join().unwrap(), Ok(Ok(7)));
+        assert!(jobs.state_of(id).is_none_or(|s| s.is_finished()));
+    }
+
+    /// Regression (CI run 6426, macOS): a pump that asked the old gate before `set_gate` replaced it applied that
+    /// stale "healthy" verdict afterwards and started a job the new gate would have paused.
+    #[test]
+    fn a_gate_replaced_during_a_pump_is_asked_again_before_jobs_start() {
+        let (jobs, _) = service();
+        let (asked, was_asked) = mpsc::channel::<()>();
+        let (release, may_answer) = mpsc::channel::<()>();
+        let may_answer = Mutex::new(may_answer);
+        jobs.set_gate(JobKind::Ai, move || {
+            let _ = asked.send(());
+            let _ = lock(&may_answer).recv();
+            None
+        });
+        let pumping = jobs.clone();
+        let first = std::thread::spawn(move || pumping.pump());
+        was_asked.recv().unwrap();
+        // The old gate is mid-question: replace it and queue a job, which waits for the pump in flight.
+        jobs.set_gate(JobKind::Ai, || Some("paused by the new gate".to_string()));
+        let submitting = jobs.clone();
+        let second = std::thread::spawn(move || {
+            let (_h, _go) = gated(&submitting, ai("later"));
+            submitting.pump();
+        });
+        let queued = || jobs.lock().queue.has_active();
+        while !queued() {
+            std::thread::yield_now();
+        }
+        release.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        let snapshot = jobs.snapshot(None);
+        assert_eq!(snapshot.paused[0].reason, "paused by the new gate");
+        assert_eq!(jobs.state_of(JobId(1)), Some(JobState::Queued), "the stale verdict started the job");
     }
 
     /// Regression (the AI quarantine test hung under load): a pump whose gate said "healthy" before the worker was
