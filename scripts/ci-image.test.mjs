@@ -127,9 +127,10 @@ describe('the workflow and ci.yml', () => {
     assert.ok(wf.includes('platforms: linux/amd64'));
   });
 
-  test('the setup-rust action skips the toolchain install inside the image', () => {
+  test('the setup-rust action skips the toolchain install inside the image (and on any runner that has the toolchain)', () => {
+    // The behaviour is run with a shim rustup in conformance/test/ci-actions.test.mjs.
     const action = read('.gitea/actions/setup-rust/action.yml');
-    assert.ok(action.includes('/etc/paddock-ci-release'));
+    assert.match(action, /if have; then\n\s+echo "Rust toolchain \$TOOLCHAIN already on this runner/);
   });
 });
 

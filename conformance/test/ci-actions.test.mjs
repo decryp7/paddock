@@ -187,6 +187,78 @@ test('a sccache server that cannot start or answer leaves RUSTC_WRAPPER unset an
   }
 });
 
+// Run 6460 (job 12206): on the Windows host `rustup toolchain install stable` ended 0.4 s into "syncing channel updates" with
+// exit 127 and no message (Git Bash reports 127 for a program Windows ended with an NTSTATUS crash code), the same step that
+// passed 17 minutes earlier. Run the real step with a shim rustup.
+function runToolchainStep(env, { toolchains = '', components = '', targets = '', installRc = 0 } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'paddock-rustup-'));
+  const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  const at = text.indexOf('- name: Rust toolchain\n');
+  const block = text.slice(at, text.indexOf('- name: Install sccache', at));
+  const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+  mkdirSync(join(dir, 'bin'));
+  const calls = join(dir, 'calls');
+  const lines = (v) => v.split(' ').filter(Boolean).join('\\n');
+  writeFileSync(
+    join(dir, 'bin', 'rustup'),
+    [
+      '#!/bin/sh',
+      `echo "$*" >> '${calls}'`,
+      'case "$1 $2" in',
+      `  "toolchain list") printf '${lines(toolchains)}\\n' ;;`,
+      `  "component list") printf '${lines(components)}\\n' ;;`,
+      `  "target list") printf '${lines(targets)}\\n' ;;`,
+      `  "toolchain install") echo "info: syncing channel updates" >&2; exit ${installRc} ;;`,
+      'esac',
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+  for (const tool of ['rustc', 'cargo']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho ${tool} 1.99.1\n`);
+  for (const f of ['rustup', 'rustc', 'cargo']) chmodSync(join(dir, 'bin', f), 0o755);
+  writeFileSync(join(dir, 'step.sh'), body);
+  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
+    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, HOME: dir, RUNNER_OS: 'Windows', TOOLCHAIN: 'stable', COMPONENTS: 'clippy rustfmt', TARGETS: '', ...env },
+    encoding: 'utf8',
+  });
+  return { status: r.status, out: r.stdout + r.stderr, calls: existsSync(calls) ? read(calls) : '' };
+}
+
+test('setup-rust uses a toolchain the runner already has with every component and target, without a channel sync', () => {
+  const have = {
+    toolchains: 'stable-x86_64-pc-windows-msvc',
+    components: 'clippy-x86_64-pc-windows-msvc rustfmt-x86_64-pc-windows-msvc rustc-x86_64-pc-windows-msvc',
+    targets: 'x86_64-pc-windows-msvc',
+  };
+  const r = runToolchainStep({}, have);
+  assert.equal(r.status, 0, r.out);
+  assert.doesNotMatch(r.calls, /toolchain install/, 'no network round trip when nothing is missing');
+  assert.match(r.out, /already on this runner/);
+  assert.match(r.out, /rustc 1\.99\.1/);
+  // Anything missing (the toolchain, a component, a target) is installed.
+  for (const [what, over] of [
+    ['toolchain', { ...have, toolchains: 'nightly-x86_64-pc-windows-msvc' }],
+    ['component', { ...have, components: 'rustfmt-x86_64-pc-windows-msvc' }],
+    ['target', { ...have, targets: 'x86_64-pc-windows-msvc' }],
+  ]) {
+    const env = what === 'target' ? { TARGETS: 'aarch64-pc-windows-msvc' } : {};
+    const m = runToolchainStep(env, over);
+    assert.equal(m.status, 0, `${what}: ${m.out}`);
+    assert.match(m.calls, /toolchain install stable --profile minimal --component clippy --component rustfmt/, what);
+  }
+});
+
+test('a failed toolchain install fails the step with a message that names the cause, never a bare exit code', () => {
+  const crashed = runToolchainStep({}, { installRc: 127 });
+  assert.equal(crashed.status, 1, crashed.out);
+  assert.match(crashed.out, /::error::rustup could not install the stable toolchain \(exit 127/);
+  assert.match(crashed.out, /NTSTATUS/, 'on Windows, 127 is a crash of rustup, not a missing command');
+  const failed = runToolchainStep({ RUNNER_OS: 'Linux' }, { installRc: 1 });
+  assert.equal(failed.status, 1, failed.out);
+  assert.match(failed.out, /::error::rustup could not install the stable toolchain \(exit 1\)/);
+  assert.doesNotMatch(failed.out, /NTSTATUS/);
+});
+
 test('setup-rust installs a pinned, checksum-verified sccache when the runner has none, for every supported OS and architecture', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const install = text.slice(text.indexOf('- name: Install sccache'), text.indexOf('- name: sccache\n'));

@@ -34,23 +34,35 @@ runs:
       run: |
         set -euo pipefail
         command -v rustup >/dev/null || { echo "::error::rustup is not installed on this runner"; exit 1; }
-        # In the Paddock CI image (it writes /etc/paddock-ci-release) the stable toolchain and its components are already
-        # there: skip the network round trip unless this job asks for extra targets or a component the image lacks.
-        if [ -f /etc/paddock-ci-release ] && [ "$TOOLCHAIN" = stable ] && [ -z "$TARGETS" ]; then
-          installed=$(rustup component list --installed 2>/dev/null || true)
-          missing=0
-          for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
-          if [ "$missing" = 0 ]; then
-            echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
-            rustc --version
-            cargo --version
-            exit 0
+        # A runner that already has the toolchain with every component and target uses it as it is: no channel sync, so no
+        # network round trip (the Paddock CI image bakes stable in; the host runners keep theirs). A sync crashed rustup on
+        # the Windows host in run 6460 (exit 127, no message). A runner's stable is updated on the runner, not by a job.
+        have() {
+          rustup toolchain list 2>/dev/null | grep -q "^$TOOLCHAIN-" || return 1
+          local installed c t
+          installed=$(rustup component list --installed --toolchain "$TOOLCHAIN" 2>/dev/null) || return 1
+          for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || return 1; done
+          installed=$(rustup target list --installed --toolchain "$TOOLCHAIN" 2>/dev/null) || return 1
+          for t in $TARGETS; do printf '%s\n' "$installed" | grep -qx "$t" || return 1; done
+        }
+        if have; then
+          echo "Rust toolchain $TOOLCHAIN already on this runner (components: ${COMPONENTS:-none}; targets: ${TARGETS:-host}); no channel sync"
+        else
+          args=(--profile minimal)
+          for c in $COMPONENTS; do args+=(--component "$c"); done
+          for t in $TARGETS; do args+=(--target "$t"); done
+          rc=0
+          rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
+          if [ "$rc" != 0 ]; then
+            why="exit $rc"
+            # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
+            if [ "$rc" = 127 ] && [ "$RUNNER_OS" = Windows ]; then
+              why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+            fi
+            echo "::error::rustup could not install the $TOOLCHAIN toolchain ($why). Run 'rustup toolchain install $TOOLCHAIN' on the runner to see why; its toolchains are as they were."
+            exit 1
           fi
         fi
-        args=(--profile minimal)
-        for c in $COMPONENTS; do args+=(--component "$c"); done
-        for t in $TARGETS; do args+=(--target "$t"); done
-        rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update
         rustup default "$TOOLCHAIN"
         rustc --version
         cargo --version
