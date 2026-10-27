@@ -87,3 +87,7 @@ an injected line that gets written into memory is replayed into every later prom
 - **Central memory in Pitwall**: rejected; Pitwall is optional and would leak between apps.
 - **Preferences as memories**: rejected by the user; they are Settings.
 - **A family-wide profile**: rejected by the user.
+- **Turso Database (formerly Limbo, the Rust rewrite of SQLite)**: considered, **deferred**. It is in beta and not
+  production-ready per the latest coverage, may have gaps in FTS5 and SQLite compatibility, and brings no gain for a small
+  single-writer store like this one. The store sits behind the `MemoryStore` port, so a later swap is contained in one
+  adapter. Revisit when Turso reaches a stable 1.0 with full-text search, then benchmark it against the SQLite adapter.
