@@ -1,10 +1,11 @@
 // Builds dyno-agent, dyno-helper and the dyno command (crate dyno-cli) and puts them where Tauri's `externalBin` expects them:
 // app/src-tauri/binaries/<name>-<target triple>[.exe]. Run by `beforeBuildCommand` / `beforeDevCommand`
-// (tauri.conf.json); `--dev` builds the debug profile. Honours CARGO_TARGET_DIR and TAURI_ENV_TARGET_TRIPLE.
+// (tauri.conf.json); `--dev` builds the debug profile. Honours CARGO_TARGET_DIR, a build.target-dir in the cargo configuration (CI's .cargo/ci.toml) and TAURI_ENV_TARGET_TRIPLE.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cargoTargetDir } from '../../../../../conformance/src/sidecar/sidecar.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const dev = process.argv.includes('--dev');
@@ -17,7 +18,7 @@ const sidecars = [['dyno-agent', 'dyno-agent'], ['dyno-helper', 'dyno-helper'], 
 const args = ['build', ...sidecars.flatMap(([, pkg]) => ['-p', pkg]), '--profile', profile];
 if (triple !== host) args.push('--target', triple);
 execFileSync('cargo', args, { cwd: root, stdio: 'inherit' });
-const targetDir = process.env.CARGO_TARGET_DIR ? resolve(process.env.CARGO_TARGET_DIR) : join(root, 'target');
+const targetDir = cargoTargetDir(root);
 const exe = triple.includes('windows') ? '.exe' : '';
 for (const [name] of sidecars) {
   const built = join(targetDir, ...(triple !== host ? [triple] : []), dev ? 'debug' : 'dist', `${name}${exe}`);

@@ -21,6 +21,22 @@ export function hostTriple(exec = (cmd, args) => execFileSync(cmd, args, { encod
 
 const TRIPLES = { 'universal-apple-darwin': ['aarch64-apple-darwin', 'x86_64-apple-darwin'] };
 
+/**
+ * Cargo's build folder for the workspace at `root`: CARGO_TARGET_DIR when set, else what `cargo metadata` reports, which honours a
+ * `build.target-dir` in the cargo configuration (CI's host runners set it in `.cargo/ci.toml`: sccache puts every CARGO_* variable into
+ * its cache key, so CI never sets CARGO_TARGET_DIR), else `<root>/target`. Every sidecar script resolves the folder through this.
+ */
+export function cargoTargetDir(root, env = process.env, metadata = () => execFileSync('cargo', ['metadata', '--no-deps', '--format-version', '1'], { cwd: root, env, encoding: 'utf8', maxBuffer: 64 << 20, timeout: 120000 })) {
+  if (env.CARGO_TARGET_DIR) return resolve(env.CARGO_TARGET_DIR);
+  try {
+    const dir = JSON.parse(metadata()).target_directory;
+    if (typeof dir === 'string' && dir) return dir;
+  } catch {
+    // No cargo or an unreadable answer: the default folder (the build itself reports what is wrong).
+  }
+  return join(root, 'target');
+}
+
 /** The folder cargo writes a profile into. */
 export function profileDir(profile) {
   return profile === 'dev' || profile === 'debug' ? 'debug' : profile;
@@ -135,7 +151,7 @@ export function main(argv, io = {}) {
       const sidecars = flags.sidecar.map(parseSidecarSpec);
       const profile = bools.has('dev') ? 'debug' : (flags.profile ?? env['PADDOCK_CARGO_PROFILE'] ?? 'release');
       const target = flags.target ?? env['TAURI_ENV_TARGET_TRIPLE'] ?? host;
-      const targetDir = env['CARGO_TARGET_DIR'] ? resolve(env['CARGO_TARGET_DIR']) : undefined;
+      const targetDir = cargoTargetDir(root, env);
       const written = buildSidecars({ root, out: resolve(flags.out ?? join(root, 'binaries')), sidecars, target, host, profile, targetDir, manifestPath: flags['manifest-path'], ops: { ...io.ops, log } });
       return written.length ? 0 : 1;
     }

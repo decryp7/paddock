@@ -20,6 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cargoTargetDir } from '../../../../conformance/src/sidecar/sidecar.mjs';
 import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 import { fetchLibduckdb } from './libduckdb.mjs';
 
@@ -35,22 +36,6 @@ export function adhocSign(file, exec = (cmd, args) => execFileSync(cmd, args, { 
   if (platform !== 'darwin') return false;
   exec('codesign', ['--force', '--sign', '-', '--timestamp=none', file]);
   return true;
-}
-
-/**
- * Cargo's build folder for the workspace at `root`: CARGO_TARGET_DIR when set, else what `cargo metadata` reports, which
- * honours a `build.target-dir` in the cargo configuration (CI's host runners set it in .cargo/ci.toml: sccache puts every
- * CARGO_* variable into its cache key, so CI never sets CARGO_TARGET_DIR), else `<root>/target`.
- */
-export function cargoTargetDir(root, env = process.env, metadata = () => execFileSync('cargo', ['metadata', '--no-deps', '--format-version', '1'], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 })) {
-  if (env.CARGO_TARGET_DIR) return env.CARGO_TARGET_DIR;
-  try {
-    const dir = JSON.parse(metadata()).target_directory;
-    if (typeof dir === 'string' && dir) return dir;
-  } catch {
-    // No cargo or an unreadable answer: the default folder (the build itself reports what is wrong).
-  }
-  return join(root, 'target');
 }
 
 /** The file name of the prebuilt libduckdb for a target triple. */
