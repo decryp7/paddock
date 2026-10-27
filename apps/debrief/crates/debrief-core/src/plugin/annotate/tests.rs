@@ -161,8 +161,8 @@ fn reading(n: usize) -> Vec<Registered> {
 fn annotators_in_parallel_store_what_the_sequential_run_stores_and_count_what_they_read() {
     let annotators = reading(9);
     let store = Store::default();
-    let last = Mutex::new(None);
-    let record = |p: AnnotateProgress| *last.lock().unwrap() = Some(p);
+    let seen = Mutex::new(Vec::new());
+    let record = |p: AnnotateProgress| seen.lock().unwrap().push(p);
     let never = || false;
     let ctl = RunControl {
         cancelled: &never,
@@ -182,7 +182,14 @@ fn annotators_in_parallel_store_what_the_sequential_run_stores_and_count_what_th
         all.iter().map(|a| (&a.annotator, a.from)).collect::<Vec<_>>(),
         want.iter().map(|a| (&a.annotator, a.from)).collect::<Vec<_>>()
     );
-    let p = last.lock().unwrap().unwrap();
+    let seen = seen.into_inner().unwrap();
+    // Regression: reports from the workers reached the caller out of order (the last one seen said 5 of 9).
+    assert!(
+        seen.windows(2)
+            .all(|w| w[0].annotators_done <= w[1].annotators_done && w[0].events_read <= w[1].events_read),
+        "progress never goes backwards: {seen:?}"
+    );
+    let p = *seen.last().unwrap();
     assert_eq!((p.annotators_done, p.annotators_total), (9, 9));
     assert_eq!(p.events_read, 9 * 3 * 5, "n of m events: every record the annotators were given");
 }

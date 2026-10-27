@@ -238,19 +238,23 @@ impl Store {
         let total = due.len();
         let events = AtomicU64::new(0);
         let finished = AtomicUsize::new(0);
-        let report = |done: usize| {
+        // Reports come from every worker: one at a time, each reading the counters under the lock, so they reach the
+        // caller in order and never go backwards (a report read before another finished used to arrive after it).
+        let reporting = std::sync::Mutex::new(());
+        let report = || {
+            let _one = reporting.lock().unwrap_or_else(|p| p.into_inner());
             (ctl.progress)(AnnotateProgress {
-                annotators_done: done,
+                annotators_done: finished.load(Ordering::SeqCst),
                 annotators_total: total,
-                events_read: events.load(Ordering::Relaxed),
+                events_read: events.load(Ordering::SeqCst),
             })
         };
-        report(0);
+        report();
         let controlled = ControlledView {
             inner: view,
             cancelled: ctl.cancelled,
             events: &events,
-            on_read: &|| report(finished.load(Ordering::Relaxed)),
+            on_read: &report,
         };
         let run_one = |a: &&Registered| -> Option<Result<Vec<Annotation>>> {
             if (ctl.cancelled)() {
@@ -260,7 +264,8 @@ impl Store {
                 Some(g) => g.call(CallKind::Annotate, "annotate", || a.annotator.annotate(&controlled, since)),
                 None => a.annotator.annotate(&controlled, since),
             };
-            report(finished.fetch_add(1, Ordering::Relaxed) + 1);
+            finished.fetch_add(1, Ordering::SeqCst);
+            report();
             Some(result)
         };
         let threads = crate::threads::threads(crate::threads::WorkKind::Cpu, None)
