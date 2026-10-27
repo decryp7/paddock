@@ -8,9 +8,9 @@ export const CODEBASE_TOOL = 'Pacenotes';
 export const STATUS = {
   pitcrew: { text: 'v1.0.1', tone: 'ok' },
   pitwall: { text: 'v1.0.3', tone: 'ok' },
-  debrief: { text: 'v1.0.1', tone: 'ok' }, // 1.1 is coming
-  spotter: { text: 'Releasing soon', tone: 'soon' },
+  debrief: { text: 'v1.1.1', tone: 'ok' },
+  spotter: { text: 'In development', tone: 'dev' },
   dyno: { text: 'In development', tone: 'dev' },
-  sighter: { text: 'In design', tone: 'design' },
-  pacenotes: { text: 'In design', tone: 'design' },
+  sighter: { text: 'Planned', tone: 'design' },
+  pacenotes: { text: 'Planned', tone: 'design' },
 };

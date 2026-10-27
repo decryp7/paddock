@@ -12,12 +12,12 @@ One row per image under `docs/images` that passed an independent review. A chang
 | src/icons/pitwall.svg | 7ceb593d3614652905214f05a1a50b66907a987207e6638eed7e6dc682e63178 | isometric icon switch-over review (Opus) | 2026-10-27 |
 | src/icons/sighter.svg | 272f2acb8869a286585ad1073b2e2842ebe65513c827d0cf9bce46e59f36164e | isometric icon switch-over review (Opus) | 2026-10-27 |
 | src/icons/spotter.svg | 356f2be29f778cef0650ea8712bac68f689959f7881ca888b0d54e351b5489bf | isometric icon switch-over review (Opus) | 2026-10-27 |
-| paddock-ecosystem.svg | 948644b841b98475e2ef9b3ced10523cb519515b3a25dbf52da5df252e310e29 | isometric icon switch-over review (Opus) | 2026-10-27 |
-| paddock-ecosystem-light.png | 127fd5dc1755cb32da352e50043b288667af446b275da9dbe8b9469b817640ea | isometric icon switch-over review (Opus) | 2026-10-27 |
-| paddock-ecosystem-dark.png | fd709a3aa37f980d5d6f0b6155e6251b75f6f0cf4485eca209becb1b75731f59 | isometric icon switch-over review (Opus) | 2026-10-27 |
-| paddock-integrations.svg | fcd26b68cd05d07fc6bdccd426d9f42ebde906395bc17b9a03cc70485fc6bda8 | independent review 3 (Opus) | 2026-10-25 |
-| paddock-integrations-light.png | 59baa1a04146c9fb3fea89c25589322d493f95a72b8064fcc45c8765cfba3f1f | independent review 3 (Opus) | 2026-10-25 |
-| paddock-integrations-dark.png | 3ae9a8ae9fc3ae8dfdc3b121163936f9fac8923bc627d6977a60a3570d973c56 | independent review 3 (Opus) | 2026-10-25 |
+| paddock-ecosystem.svg | f79ff99ea358b6889625378867f981c2c07aa2d3cf636698ee1b48d62df4162a | read-only Dyno wording review r4 (Opus) | 2026-10-27 |
+| paddock-ecosystem-light.png | ba28116487a080497b471e1cf4fddfef6e59e912b7ee584a1074208224fce145 | read-only Dyno wording review r4 (Opus) | 2026-10-27 |
+| paddock-ecosystem-dark.png | 79f12b8e2b377d2e10fa759ed34b9be11afa6107d0688e894f51c28537594c18 | read-only Dyno wording review r4 (Opus) | 2026-10-27 |
+| paddock-integrations.svg | 0eef0eff8824105c0b731017aad19fb1933775918bfe9cf563f66c233aea0887 | read-only Dyno wording review r4 (Opus) | 2026-10-27 |
+| paddock-integrations-light.png | 3c747334390bcd21a2c5e1da26716b9a150ea3580c383d89fe5cec4695057ff4 | read-only Dyno wording review r4 (Opus) | 2026-10-27 |
+| paddock-integrations-dark.png | bc5079808248432defecb0642130b13479ca24f3417b9718b37e8ecde8295b9e | read-only Dyno wording review r4 (Opus) | 2026-10-27 |
 | paddock-handoffs.svg | 63c551718d2222fd0778e9df07e3c2475182fc496cfa4fc2ca15db22fd784cf5 | independent review 3 (Opus) | 2026-10-25 |
 | paddock-handoffs-light.png | e754dcb5f269d48595318fbf95414dc71ba47aa7bd93f3752d9a5a5568c3b76a | independent review 3 (Opus) | 2026-10-25 |
 | paddock-handoffs-dark.png | ce5abde7675081a91948e6a60acdc07fb4f84360e190c0d11a6683fdd1283784 | independent review 3 (Opus) | 2026-10-25 |
