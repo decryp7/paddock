@@ -1,9 +1,21 @@
 name: plan
-description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one, a push to main whose commit is tagged is covered by the tag run."
+description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one, a push to main whose commit is tagged is covered by the tag run, and for an app's own workflow (`app`) the change must reach that app (scripts/affected.mjs --ci --app; needs fetch-depth 0)."
 inputs:
   main-ref:
     description: The default branch ref.
     default: refs/heads/main
+  app:
+    description: "An app of the monorepo: the run is needed only when the change reaches it (affected.mjs). Empty: no such check."
+    default: ""
+  tag-pattern:
+    description: "Tags of the push-to-main skip (git ls-remote pattern): v* for the repository's, pitcrew-v* for an app."
+    default: "v*"
+  nightly-marker:
+    description: "'false' ignores the green-nightly marker: an app's nightly installers run even when main's CI nightly was green."
+    default: "true"
+  token:
+    description: Token for the Gitea API (the last green ci.yml run of main is the diff base of a push).
+    default: ${{ github.token }}
 outputs:
   run:
     description: "'true' or 'false'; later jobs use if: needs.plan.outputs.run == 'true'."
@@ -14,7 +26,7 @@ runs:
     # The caller checks out with fetch-depth 1 on pushes to main (only `git ls-remote` is used: credentials and remote URL).
     # Exact-key lookup only: nothing is downloaded. The marker is saved by nightly-mark after a fully green run.
     - id: green
-      if: github.event_name == 'schedule'
+      if: github.event_name == 'schedule' && inputs.nightly-marker == 'true'
       uses: actions/cache/restore@v4
       with:
         path: .nightly-green
@@ -28,10 +40,19 @@ runs:
         SHA: ${{ github.sha }}
         MAIN_REF: ${{ inputs.main-ref }}
         GREEN: ${{ steps.green.outputs.cache-hit }}
+        APP: ${{ inputs.app }}
+        TAG_PATTERN: ${{ inputs.tag-pattern }}
+        PLAN_TOKEN: ${{ inputs.token }}
       run: |
         TAGS=""
         if [ "$EVENT" = push ] && [ "$REF" = "$MAIN_REF" ]; then
-          TAGS=$(git ls-remote --tags origin 'refs/tags/v*' || true)
+          TAGS=$(git ls-remote --tags origin "refs/tags/$TAG_PATTERN" || true)
         fi
         export TAGS
-        node "${{ github.action_path }}/../../../conformance/ci/plan.mjs"
+        out=$(mktemp)
+        GITHUB_OUTPUT="$out" node "${{ github.action_path }}/../../../conformance/ci/plan.mjs"
+        run=$(sed -n 's/^run=//p' "$out")
+        if [ "$run" = true ] && [ -n "$APP" ]; then
+          run=$(node "${{ github.action_path }}/../../../scripts/affected.mjs" --ci --app "$APP")
+        fi
+        echo "run=$run" >> "$GITHUB_OUTPUT"

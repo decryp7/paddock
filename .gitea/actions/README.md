@@ -53,9 +53,9 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
    An app with host legs needs `include = [{ path = "ci.toml", optional = true }]` in its `.cargo/config.toml` and `.cargo/ci.toml`
    in its `.gitignore` (`build-folder` fails the leg otherwise).
 2. **`.gitea/workflows/<app>-release.yml`** is the thin caller (copy `pitcrew-release.yml`): triggers (push to main, `<app>-v*` tag,
-   nightly, manual), a `plan` job (`affected.mjs --ci --app <app>`; skips a main push whose commit carries the tag), a `gates` job that
-   calls `ci.yml` with `app: <app>` for a tag (every leg of that app, both halves, nothing else), and a `release` job that calls
-   `app-release.yml` with the app's facts (`app-dir`, `cargo-dir`, `tag-prefix`, `latest-tag`, `sidecars`, `cliff-config`, `cliff-paths`,
+   nightly, manual), a `plan` job (the shared `plan` action with `app`, `tag-pattern: <app>-v*`: affected.mjs for the app, and the skip of a main push whose commit carries the tag), a `gates` job that
+   calls `ci.yml` with `app: <app>` for a tag (every leg of that app, both halves, nothing else), and a `release` job that runs only when `needs.gates.result == 'success'` (`skipped` is allowed only when there is no tag: `!startsWith(github.ref, 'refs/tags/')`, so a tag never publishes past skipped gates) and calls
+   `app-release.yml` with the app's facts (`app-dir`, `cargo-dir`, `tag-prefix`, `latest-tag`, `sidecars` (empty: every `bundle.externalBin`, with `--self-test`), `setup-node` (false in the Paddock CI image), `cliff-config`, `cliff-paths`,
    `notes-extra`) and maps the family's `PADDOCK_TAURI_*` secrets to the names the kit declares. The workflow's name marks only that
    app in the plan (`appOfWorkflow`).
 3. **Delete the copies**, after checking each is the kit's (diff it; port any behaviour the copy has and the kit lacks into the kit as a
@@ -71,3 +71,14 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
 6. **Verify before the deletion merges**: the local checks (`node --test scripts/*.test.mjs conformance/test/*.test.mjs`), then on the
    branch: a dispatch of `ci.yml` (everything or a base), a dispatch of `<app>-release.yml` (installers, no release; with `gates: true`
    for the app's legs), and, for the first release, a tag on a throw-away fork or the real tag.
+
+### Changes to the kit that affect callers
+
+- `app-release.yml`: **`cargo-dir` is now required** (the Cargo workspace whose `.cargo/config.toml` includes `ci.toml`; the build folder is the
+  `build-folder` action's, `CARGO_TARGET_DIR` is gone). New inputs: `root`, `tag-prefix`, `latest-tag`, `notes-extra`, `cliff-config`,
+  `cliff-paths`, `setup-node`; new optional secret `APPLE_SIGNING_IDENTITY`. The release job runs for `<tag-prefix>v*` tags (was `v*`), and the
+  bundle job checks the tag's version against the app's `tauri.conf.json` first (`conformance/ci/check-tag.mjs`). Artifacts are uploaded
+  from `$PADDOCK_WORKSPACE/dist` (a contract test pins this for every job that uses `stable-workspace`).
+- `plan` action: inputs `app`, `tag-pattern`, `nightly-marker`, `token`. `macos-verify`: `tauri-conf`. `host-cleanup`: `process-patterns`
+  (`pkill -f`; scope each to the app's own temp path, never `gitea-runner`, which is the real runner). `publish-release`: `tag-prefix`,
+  `latest-tag` (skipped for a pre-release tag), `notes-extra`. `tauri-bundle`: `root`, `apple-signing-identity`.

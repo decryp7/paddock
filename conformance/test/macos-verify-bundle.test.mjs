@@ -24,8 +24,15 @@ function program(name, code) {
 }
 
 let n = 0;
+/** A program that would run for a minute (a sidecar that hangs on a lock). */
+function hangingProgram() {
+  const out = join(work, 'hang');
+  execFileSync('cc', ['-x', 'c', '-', '-o', out], { input: '#include <unistd.h>\nint main(void) { sleep(60); return 0; }\n' });
+  return out;
+}
+
 /** Builds and signs a .app with a main executable and one sidecar. */
-function bundle({ hardened = false, sidecarExit = 0 } = {}) {
+function bundle({ hardened = false, sidecarExit = 0, sidecar = 'fake-sidecar', hang = false } = {}) {
   const app = join(work, `b${n++}`, 'Fake.app');
   const macos = join(app, 'Contents', 'MacOS');
   mkdirSync(macos, { recursive: true });
@@ -38,9 +45,9 @@ function bundle({ hardened = false, sidecarExit = 0 } = {}) {
 </dict></plist>
 `);
   execFileSync('cp', [program('app', 0), join(macos, 'fake-app')]);
-  execFileSync('cp', [program('sidecar', sidecarExit), join(macos, 'fake-sidecar')]);
+  execFileSync('cp', [hang ? hangingProgram() : program('sidecar', sidecarExit), join(macos, sidecar)]);
   const opts = hardened ? ['--options', 'runtime'] : [];
-  execFileSync('codesign', ['--force', '-s', '-', ...opts, join(macos, 'fake-sidecar')], { stdio: 'pipe' });
+  execFileSync('codesign', ['--force', '-s', '-', ...opts, join(macos, sidecar)], { stdio: 'pipe' });
   execFileSync('codesign', ['--force', '-s', '-', ...opts, app], { stdio: 'pipe' });
   return app;
 }
@@ -52,7 +59,7 @@ function vendorTeamShim() {
   const shim = join(bin, 'codesign');
   writeFileSync(shim, `#!/bin/bash
 out=$(/usr/bin/codesign "$@" 2>&1); rc=$?
-case "$*" in *fake-sidecar*) out=$(printf '%s\\n' "$out" | sed 's/^TeamIdentifier=.*/TeamIdentifier=VENDOR1234/') ;; esac
+case "$*" in *fake-sidecar*|*a-sidecar*) out=$(printf '%s\\n' "$out" | sed 's/^TeamIdentifier=.*/TeamIdentifier=VENDOR1234/') ;; esac
 printf '%s\\n' "$out" >&2
 exit $rc
 `);
@@ -129,4 +136,32 @@ test('a relative bundle path is resolved before the script changes folder', { sk
     env: { ...process.env, CARGO_TARGET_DIR: join(work, 'no-target') },
   });
   assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+});
+
+test('the main executable is the one Info.plist names, even when a sidecar sorts before it', { skip }, () => {
+  // a-sidecar is found first by `find`/glob order; judged against it, the real main executable would be the odd one out.
+  const r = verify(bundle({ sidecar: 'a-sidecar' }), { args: ['--sidecar', 'a-sidecar:--version'], env: { PATH: `${vendorTeamShim()}:${process.env.PATH}` } });
+  assert.notEqual(r.status, 0, r.out);
+  assert.match(r.out, /a-sidecar has Team ID 'VENDOR1234', the app has ''/);
+  assert.equal(verify(bundle({ sidecar: 'a-sidecar' }), { args: ['--sidecar', 'a-sidecar:--version'] }).status, 0);
+});
+
+test('a sidecar that hangs is stopped after SIDECAR_TIMEOUT and fails the bundle', { skip }, () => {
+  const started = Date.now();
+  const r = verify(bundle({ hang: true }), { env: { SIDECAR_TIMEOUT: '1' } });
+  assert.notEqual(r.status, 0, r.out);
+  assert.match(r.out, /sidecar fake-sidecar of .* does not start/);
+  assert.ok(Date.now() - started < 30000, 'the 60-second sleep was cut short');
+});
+
+test('--tauri-conf starts every bundle.externalBin when no --sidecar is given; an explicit --sidecar wins', { skip }, () => {
+  const conf = join(work, 'tauri.conf.json');
+  writeFileSync(conf, JSON.stringify({ bundle: { externalBin: ['binaries/fake-sidecar', 'binaries/not-there'] } }));
+  const missing = verify(bundle(), { args: ['--tauri-conf', conf] });
+  assert.notEqual(missing.status, 0, missing.out);
+  assert.match(missing.out, /started: fake-sidecar --self-test/);
+  assert.match(missing.out, /sidecar not-there is missing or not executable/);
+  const explicit = verify(bundle(), { args: ['--tauri-conf', conf, '--sidecar', 'fake-sidecar:--version'] });
+  assert.equal(explicit.status, 0, explicit.out);
+  assert.equal(verify(bundle(), { args: ['--tauri-conf', join(work, 'nope.json')] }).status, 2);
 });

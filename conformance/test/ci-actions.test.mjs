@@ -115,6 +115,27 @@ test('the release workflow cannot publish from anything but its own v* tag, and 
   assert.match(action, /version="\$\{tag#"\$PREFIX"\}"/, 'latest.json gets the version after the prefix');
 });
 
+// A host job's work folder is not where the build ran: on Windows stable-workspace keeps a clone at the stable path and the work
+// folder stays, so a relative `dist/*` finds nothing and the bundle job fails after building (or uploads the wrong files).
+test('in a job that moves the checkout (stable-workspace), every upload-artifact path starts at PADDOCK_WORKSPACE', () => {
+  const stable = /uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/stable-workspace/;
+  let checked = 0;
+  for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      if (!stable.test(job.text)) continue;
+      for (const step of parseSteps(job.text).filter((st) => /actions\/upload-artifact@/.test(st.uses ?? ''))) {
+        const path = /^\s+path: (.+)$/m.exec(step.text)?.[1] ?? '';
+        // A path that is not a build output (a failure report under the app, uploaded `if: failure()`) is judged by its step.
+        if (/if: failure\(\)/.test(step.text)) continue;
+        if (/^\$\{\{ runner\.temp \}\}\//.test(path)) continue; // outside the checkout by construction
+        assert.match(path, /^\$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\//, `${file} ${job.id}: upload-artifact path "${path}" must start with the stable workspace`);
+        checked += 1;
+      }
+    }
+  }
+  assert.ok(checked >= 1, 'app-release.yml at least');
+});
+
 test('the shared actions follow the repo rules: no AI attribution text, Gitea-compatible artifact actions', () => {
   for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => join(WORKFLOWS, w))]) {
     const text = read(f);
@@ -789,6 +810,14 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
       assert.equal(existsSync(join(PADDOCK, 'apps', app, copy)), false, `${app}: ${copy} is the kit's (rule 42/43)`);
     }
     const wf = read(join(WORKFLOWS, `${app}-release.yml`));
+    // A release never publishes past skipped gates on a tag: skipped is fine only when there is no tag to publish.
+    assert.match(wf, /if: \$\{\{ !cancelled\(\) && needs\.plan\.outputs\.run == 'true' && \(needs\.gates\.result == 'success' \|\| \(needs\.gates\.result == 'skipped' && !startsWith\(github\.ref, 'refs\/tags\/'\)\)\) \}\}/, `${app}: the release job needs green gates on a tag`);
+    assert.match(wf, new RegExp(`gates:\\n(?:.*\\n)*?\\s+if: .*startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\)`), `${app}: a tag always runs the gates`);
+    assert.match(wf, /cancel-in-progress: true/, `${app}: a newer push supersedes (a tag has its own ref)`);
+    // Every sidecar the bundle carries (bundle.externalBin) is started from the built macOS app.
+    const tauriConf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
+    const listed = (/sidecars: (.+)/.exec(wf)?.[1] ?? '').split(/\s+/).map((x) => x.split(':')[0]);
+    for (const bin of tauriConf.bundle.externalBin ?? []) assert.ok(listed.includes(bin.split('/').pop()), `${app}: ${bin} is started by the macOS verify (sidecars: ${listed})`);
     assert.match(wf, new RegExp(`tags: \\["${app}-v\\*"\\]`), `${app}: its own tag`);
     assert.match(wf, /uses: \.\/\.gitea\/workflows\/app-release\.yml\n\s+with:\n\s+paddock-ref: \$\{\{ github\.sha \}\}/, `${app}: the shared release, from this commit`);
     assert.match(wf, new RegExp(`tag-prefix: ${app}-\\n\\s+latest-tag: ${app}-latest`), `${app}: its tags and the moving release the updater reads`);

@@ -348,7 +348,7 @@ describe('contracts', () => {
     assert.match(text, /uses: \.\/\.gitea\/workflows\/ci\.yml\n\s+with:\n\s+app: pitcrew/);
     assert.match(text, /uses: \.\/\.gitea\/workflows\/app-release\.yml/);
     assert.match(text, /tags: \["pitcrew-v\*"\]/);
-    assert.match(text, /affected\.mjs --ci --app pitcrew/);
+    assert.match(text, /uses: \.\/\.gitea\/actions\/plan\n\s+with:\n\s+app: pitcrew\n\s+tag-pattern: pitcrew-v\*/, 'the shared plan action asks affected.mjs for Pitcrew');
   });
 
   test('Debrief: its crates mark only Debrief, its UI only the UI half, and a shared crate reaches it only through the crates it depends on by path', () => {

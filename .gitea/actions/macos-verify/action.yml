@@ -7,6 +7,9 @@ inputs:
   sidecars:
     description: "Sidecars to start from the built app, one per line: name or name:args (default argument --self-test)."
     default: ""
+  tauri-conf:
+    description: "The app's tauri.conf.json: with no sidecars given, every bundle.externalBin is started with --self-test."
+    default: ""
 runs:
   using: composite
   steps:
@@ -14,10 +17,12 @@ runs:
       env:
         BUNDLE_DIR: ${{ inputs.bundle-dir }}
         SIDECARS: ${{ inputs.sidecars }}
+        TAURI_CONF: ${{ inputs.tauri-conf }}
       run: |
         set -euo pipefail
         args=()
         if [ -n "$BUNDLE_DIR" ]; then args+=(--bundle-dir "$BUNDLE_DIR"); fi
+        if [ -n "$TAURI_CONF" ]; then args+=(--tauri-conf "$TAURI_CONF"); fi
         while IFS= read -r s; do
           if [ -n "$s" ]; then args+=(--sidecar "$s"); fi
         done <<< "$SIDECARS"

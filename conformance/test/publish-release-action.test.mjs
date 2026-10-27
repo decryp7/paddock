@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -158,6 +159,54 @@ test('publish-release: without signatures there is no latest.json and no moving 
     assert.notEqual(branch.status, 0);
   } finally {
     await gitea.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('publish-release: a pre-release tag is published but never replaces pitcrew-latest/latest.json', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'publish-release-'));
+  const gitea = await fakeGitea({ 'pitcrew-latest': ['latest.json'] });
+  try {
+    artifacts(dir);
+    const r = await run(gitea.url, dir, { expr: { 'github.server_url': gitea.url, 'github.ref': 'refs/tags/pitcrew-v1.1.0-rc.1', 'github.ref_name': 'pitcrew-v1.1.0-rc.1' } });
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /is a pre-release: pitcrew-latest keeps its latest\.json/);
+    assert.equal(gitea.releases.get('pitcrew-v1.1.0-rc.1').prerelease, true);
+    assert.deepEqual(gitea.releases.get('pitcrew-latest').assets.map((a) => a.name), ['latest.json']);
+    assert.ok(!gitea.calls.some((c) => c.startsWith('DELETE')), 'the moving release was not touched');
+  } finally {
+    await gitea.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The plan action (shared by every app's release workflow): a main push whose commit carries the app's tag is skipped.
+test('plan action: the tag pattern is the app\'s, and a tagged main commit is skipped; an untagged one runs', async () => {
+  const { chmodSync } = await import('node:fs');
+  const { spawnSync } = await import('node:child_process');
+  const text = readFileSync(join(PADDOCK, '.gitea', 'actions', 'plan', 'action.yml'), 'utf8');
+  const body = text.slice(text.lastIndexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n')
+    .replace(/\$\{\{ github\.action_path \}\}/g, join(PADDOCK, '.gitea', 'actions', 'plan'));
+  const dir = mkdtempSync(join(tmpdir(), 'plan-action-'));
+  try {
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'bin', 'git'), '#!/bin/sh\necho "$@" >> "$GIT_LOG"\nprintf "%s\\n" "$TAGGED"\n');
+    chmodSync(join(dir, 'bin', 'git'), 0o755);
+    const run = (env) => {
+      const out = join(dir, 'out');
+      writeFileSync(out, '');
+      const r = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', body], {
+        env: { PATH: `${join(dir, 'bin')}:${dirname(process.execPath)}:/usr/bin:/bin`, EVENT: 'push', REF: 'refs/heads/main', SHA: 'abc123', MAIN_REF: 'refs/heads/main', GREEN: '', APP: '', TAG_PATTERN: 'pitcrew-v*', GIT_LOG: join(dir, 'git.log'), GITHUB_OUTPUT: out, ...env },
+        encoding: 'utf8',
+      });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      return readFileSync(out, 'utf8').trim();
+    };
+    assert.equal(run({ TAGGED: 'abc123\trefs/tags/pitcrew-v1.0.3' }), 'run=false');
+    assert.match(readFileSync(join(dir, 'git.log'), 'utf8'), /ls-remote --tags origin refs\/tags\/pitcrew-v\*/, 'only the app\'s tags are asked for');
+    assert.equal(run({ TAGGED: 'def456\trefs/tags/pitcrew-v1.0.2' }), 'run=true');
+    assert.equal(run({ TAGGED: 'abc123\trefs/tags/pitcrew-v1.0.3', REF: 'refs/heads/feature' }), 'run=true', 'only a push to main is covered by the tag run');
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

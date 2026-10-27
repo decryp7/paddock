@@ -6,8 +6,10 @@
 # library; rule 23, it comes back with a real signing identity), executables resolve bundled libraries by run path, and
 # every sidecar starts from the built app (bounded by SIDECAR_TIMEOUT seconds, default 30).
 #
-#   macos-verify-bundle.sh [--bundle-dir <dir with macos/ and dmg/>] [--sidecar name[:arg ...]]... [path/to/App.app]
+#   macos-verify-bundle.sh [--bundle-dir <dir with macos/ and dmg/>] [--sidecar name[:arg ...]]... [--tauri-conf <tauri.conf.json>] [path/to/App.app]
 #
+# --tauri-conf f   with no --sidecar, starts every bundle.externalBin of f (file stem) with --self-test: a sidecar added to the
+#                  bundle is verified without anyone remembering to list it
 # --sidecar worker:--self-test   starts Contents/MacOS/worker with the arguments after the colon (default --self-test)
 # Default bundle dir: ${PADDOCK_BUILD_FOLDER:-${CARGO_TARGET_DIR:-target}}/dist/bundle (the build-folder action's, else cargo's). Output of every command is captured before it is matched:
 # `cmd | grep -q` under pipefail fails when grep exits early and the writer gets SIGPIPE (docs/lessons.md).
@@ -22,15 +24,23 @@ has() { grep -Eq -- "$2" <<<"$1"; }
 bundle="${PADDOCK_BUILD_FOLDER:-${CARGO_TARGET_DIR:-target}}/dist/bundle"
 timeout_s="${SIDECAR_TIMEOUT:-30}"
 sidecars=()
+tauri_conf=""
 app=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --bundle-dir) bundle="${2:?--bundle-dir needs a path}"; shift 2 ;;
     --sidecar) sidecars+=("${2:?--sidecar needs name[:args]}"); shift 2 ;;
+    --tauri-conf) tauri_conf="${2:?--tauri-conf needs a path}"; shift 2 ;;
     -*) echo "::error::unknown option $1"; exit 2 ;;
     *) app="$1"; shift ;;
   esac
 done
+if [ ${#sidecars[@]} -eq 0 ] && [ -n "$tauri_conf" ]; then
+  [ -f "$tauri_conf" ] || { echo "::error::--tauri-conf $tauri_conf does not exist"; exit 2; }
+  while IFS= read -r name; do
+    if [ -n "$name" ]; then sidecars+=("$name"); fi
+  done < <(node -p "(require(require('path').resolve(process.argv[1])).bundle?.externalBin ?? []).map((p) => p.split('/').pop()).join('\n')" "$tauri_conf")
+fi
 [ -n "$app" ] || app=$(first find "$bundle/macos" -maxdepth 1 -name '*.app')
 [ -d "${app:-}" ] || { echo "::error::no .app bundle found (looked in $bundle/macos)"; exit 1; }
 

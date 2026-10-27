@@ -76,6 +76,10 @@ on:
         description: "Paths whose commits belong in the app's changelog, one glob per line (apps/pitcrew/**). Empty: all commits."
         type: string
         default: ""
+      setup-node:
+        description: "Install Node from .nvmrc on Linux. False for an image that has the repo's Node baked in (the Paddock CI image)."
+        type: boolean
+        default: true
       sidecars:
         description: "Sidecar programs started from the built macOS app, one per line: name or name:args (default argument --self-test)."
         type: string
@@ -151,9 +155,8 @@ jobs:
 
       - uses: ./.paddock/.gitea/actions/setup-rust
 
-      # The Paddock CI image has the repo's Node baked in; another image (the garage default) gets it from .nvmrc.
       - uses: ./.paddock/.gitea/actions/setup-node
-        if: runner.os == 'Linux' && !contains(inputs.image, '/paddock-ci:')
+        if: runner.os == 'Linux' && inputs.setup-node
         with:
           app-dir: ${{ inputs.root }}
 
@@ -185,6 +188,16 @@ jobs:
           angular-dir: ${{ inputs.app-dir }}
           name: ${{ inputs.app-id }}-bundle
 
+      # A tag names the version the installers carry: fail before three OS build the wrong one.
+      - name: The tag names the app's version
+        if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix))
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          PREFIX: ${{ inputs.tag-prefix }}
+          CONF: ${{ inputs.app-dir }}/src-tauri/tauri.conf.json
+        run: node .paddock/conformance/ci/check-tag.mjs --tag "$TAG" --prefix "$PREFIX" --conf "$CONF"
+
       - uses: ./.paddock/.gitea/actions/build-env
 
       - uses: ./.paddock/.gitea/actions/tauri-bundle
@@ -203,6 +216,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           sidecars: ${{ inputs.sidecars }}
+          tauri-conf: ${{ inputs.app-dir }}/src-tauri/tauri.conf.json
 
       - uses: ./.paddock/.gitea/actions/sccache-stats
         if: always()
@@ -210,7 +224,8 @@ jobs:
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         with:
           name: ${{ inputs.app-id }}-${{ runner.os }}
-          path: dist/*
+          # Where tauri-bundle.sh wrote it: the stable checkout on a host (on Windows the work folder stays a separate clone).
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/dist/*
           if-no-files-found: error
 
       - uses: ./.paddock/.gitea/actions/host-cleanup

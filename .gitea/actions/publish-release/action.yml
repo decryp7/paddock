@@ -55,7 +55,10 @@ runs:
           echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
         fi
         node "$P/release/publish.mjs" --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" --tag "$tag" --notes "$DIR/RELEASE_NOTES.md" --dir "$DIR"
-        if [ -n "$LATEST_TAG" ] && [ -f "$DIR/latest.json" ]; then
+        # A pre-release (1.2.0-rc.1) never becomes what installed apps update to.
+        if [ -n "$LATEST_TAG" ] && [[ "$version" == *-* ]]; then
+          echo "::notice::$tag is a pre-release: $LATEST_TAG keeps its latest.json."
+        elif [ -n "$LATEST_TAG" ] && [ -f "$DIR/latest.json" ]; then
           # The updater's one endpoint (tauri.conf.json): the moving release, its latest.json replaced.
           moving="${RUNNER_TEMP:-/tmp}/latest-json-$$"
           mkdir -p "$moving" && cp "$DIR/latest.json" "$moving/"

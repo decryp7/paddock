@@ -24,13 +24,7 @@ Apple Silicon builds an arm64 app; on an Intel Mac it is x86_64. Two things in t
   While the build is ad hoc the **hardened runtime is off** (`"hardenedRuntime": false`, Paddock rule 23): ad-hoc code
   under the hardened runtime enforces library validation and cannot load a library signed by its vendor ("different
   Team IDs"). When the `APPLE_SIGNING_IDENTITY` secret names a real identity, the CI bundle step passes
-  `{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). the shared `conformance/release/macos-verify-bundle.sh` (the `macos-verify` action) fails
-  the build when an ad-hoc Mach-O has the hardened runtime on, when bundled Mach-Os disagree on their TeamIdentifier,
-  or when a sidecar does not start from the built app (`pitcrew-service --version`), on the `.app` and on the copy inside the DMG.
-  While the build is ad hoc the **hardened runtime is off** (`"hardenedRuntime": false`, Paddock rule 23): ad-hoc code
-  under the hardened runtime enforces library validation and cannot load a library signed by its vendor ("different
-  Team IDs"). When the `APPLE_SIGNING_IDENTITY` secret names a real identity, the CI bundle step passes
-  `{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). the shared `conformance/release/macos-verify-bundle.sh` (the `macos-verify` action) fails
+  `{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). The shared `conformance/release/macos-verify-bundle.sh` (the `macos-verify` action) fails
   the build when an ad-hoc Mach-O has the hardened runtime on, when bundled Mach-Os disagree on their TeamIdentifier,
   or when a sidecar does not start from the built app (`pitcrew-service --version`), on the `.app` and on the copy inside the DMG.
 - **`index.html` must not contain inline `<style>` or `<script>`.** Tauri adds a nonce or hash for each to the CSP, and
