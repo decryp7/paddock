@@ -29,7 +29,8 @@ debrief-core = { path = "../debrief-core" }
 serde.workspace = true
 serde_json.workspace = true
 getrandom.workspace = true
-sysinfo = { workspace = true, features = ["system"] }
+# Real process memory (rule 26), shared with the other apps (rule 42).
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

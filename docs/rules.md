@@ -66,7 +66,7 @@ changes here, every app's copy is updated in the same change.
     register) and repair a stale registration automatically.
 25. **Before tagging:** `cargo deny check advisories`, one CI build with bundles, the icon check, strip whitespace from
     signing secrets, and the release notes' First launch section (until the apps are signed).
-26. **Process memory on Linux:** skip sysinfo thread entries and measure PSS (`smaps_rollup`).
+26. **Process memory is measured as real memory per OS:** Linux PSS (`smaps_rollup`, skipping thread entries), macOS physical footprint (`ri_phys_footprint`), Windows private working set; never RSS. Caps, budgets and displays use this one measure from `paddock-proc`.
 
 ## Angular and SignalStore (approved 2026-10-23; reasons: [research](research/2026-10-angular-and-signalstore.md))
 27. Zoneless only. No `zone.js` in any app, no `provideZoneChangeDetection`. Every component declares `changeDetection: ChangeDetectionStrategy.OnPush` explicitly (v22 defaults to it, but explicit survives a lint or a future default change); `Eager` requires a comment.

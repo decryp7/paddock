@@ -61,11 +61,11 @@ pub fn end_all() -> usize {
     global_registry().end_all()
 }
 
-/// How memory is measured for a cap: bytes used by the tree rooted at the pid. Defaults to proportional memory
+/// How memory is measured for a cap: bytes used by the tree rooted at the pid. Defaults to real memory
 /// ([`usage::tree_memory`]); tests and hosts with a better figure pass their own.
 pub type Sampler = Arc<dyn Fn(u32) -> u64 + Send + Sync>;
 
-/// A memory cap for a supervised child: the whole tree's memory (PSS on Linux, so shared pages count once) may not
+/// A memory cap for a supervised child: the whole tree's memory (real memory per OS, rule 26: PSS on Linux so shared pages count once, the physical footprint on macOS) may not
 /// exceed `limit`; it is warned at 80% and ended over the cap (rule 26: a 17 GB idle browser).
 #[derive(Clone)]
 pub struct MemoryCap {
@@ -591,5 +591,54 @@ mod tests {
         assert_eq!(s.stopped_over_memory(), None);
         s.kill();
         assert!(!global_registry().pids().contains(&pid));
+    }
+
+    /// Regression (macOS): a child whose freed pages stay resident is not over a cap that lies between its footprint and its
+    /// resident size.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_child_whose_freed_pages_stay_resident_is_not_stopped_under_a_cap_between_footprint_and_resident_size()
+     {
+        use std::sync::atomic::AtomicBool;
+        let cap_bytes = (crate::testchild::FREED_BYTES / 2) as u64;
+        // The child really holds the memory while it touches it: the watcher looks only once it said `ready`.
+        let ready = Arc::new(AtomicBool::new(false));
+        let looks = Arc::new(AtomicU64::new(0));
+        let (r2, l2) = (ready.clone(), looks.clone());
+        let (cap, heard) = capped(cap_bytes, move |pid| {
+            if !r2.load(Ordering::SeqCst) {
+                return 0;
+            }
+            l2.fetch_add(1, Ordering::SeqCst);
+            usage::tree_memory(pid)
+        });
+        let mut cmd = piped(Mode::Freed);
+        cmd.stdin(Stdio::null());
+        let mut s = Supervised::spawn_in(&Registry::new(), cmd, Some(cap)).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        let mut l = String::new();
+        loop {
+            l.clear();
+            assert!(
+                r.read_line(&mut l).unwrap() > 0,
+                "the child ended before it was ready"
+            );
+            if lines(&l).first().is_some_and(|p| *p == "ready") {
+                break;
+            }
+        }
+        let rss = usage::snapshot().get(&s.id().unwrap()).map_or(0, |e| e.1);
+        assert!(
+            rss > cap_bytes,
+            "precondition: the resident size {rss} is over the cap {cap_bytes}"
+        );
+        ready.store(true, Ordering::SeqCst);
+        // Several looks after `ready`, counted instead of waited for.
+        while looks.load(Ordering::SeqCst) < 5 && s.stopped_over_memory().is_none() {
+            std::thread::yield_now();
+        }
+        assert_eq!(s.stopped_over_memory(), None, "{:?}", heard.lock().unwrap());
+        assert!(s.is_running());
+        assert!(s.memory_peak() < cap_bytes, "peak {}", s.memory_peak());
     }
 }

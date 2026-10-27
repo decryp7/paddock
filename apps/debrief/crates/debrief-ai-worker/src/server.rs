@@ -127,16 +127,9 @@ fn engine(m: impl Into<String>) -> RpcError {
     RpcError::new(code::ENGINE, m)
 }
 
-/// Total resident memory of the worker and its llama-server.
+/// Total real memory of the worker and its llama-server (`paddock_proc::process_memory`, rule 26).
 fn rss_with(child_pid: Option<u32>) -> u64 {
-    let mut total = current_rss_bytes();
-    if let Some(pid) = child_pid {
-        let pid = sysinfo::Pid::from_u32(pid);
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-        total += sys.process(pid).map(|p| p.memory()).unwrap_or(0);
-    }
-    total
+    current_rss_bytes() + child_pid.and_then(paddock_proc::process_memory).unwrap_or(0)
 }
 
 impl ServerBackend {

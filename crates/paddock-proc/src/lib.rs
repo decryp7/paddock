@@ -7,8 +7,8 @@
 //!   is ended (T03).
 //! - [`Supervised`]: a long-running child whose whole tree ends on drop, on [`Supervised::terminate`] and when it exceeds
 //!   a memory cap ([`MemoryCap`]); a [`Registry`] ends every supervised tree at shutdown ([`end_all`]).
-//! - [`process_memory`], [`tree_memory`]: proportional memory (PSS from `smaps_rollup`) on Linux, resident size
-//!   elsewhere, thread entries skipped (R07, rule 26).
+//! - [`process_memory`], [`tree_memory`]: real memory, never the resident size: PSS (`smaps_rollup`, thread entries
+//!   skipped) on Linux, the physical footprint on macOS, the private working set on Windows (R07, rule 26).
 //! - [`login_path`]: the `PATH` of the user's login shell, for a service started by launchd or systemd.
 //!
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).

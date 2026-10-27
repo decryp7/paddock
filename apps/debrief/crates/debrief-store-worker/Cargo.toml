@@ -33,3 +33,4 @@ chrono.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 tempfile.workspace = true
 sysinfo = { workspace = true, features = ["system"] }
+paddock-proc = { path = "../../../../crates/paddock-proc" }

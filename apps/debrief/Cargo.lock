@@ -1654,9 +1654,9 @@ dependencies = [
  "debrief-core",
  "getrandom 0.4.3",
  "libc",
+ "paddock-proc",
  "serde",
  "serde_json",
- "sysinfo",
  "tempfile",
  "windows",
 ]
@@ -1901,11 +1901,11 @@ dependencies = [
  "getrandom 0.4.3",
  "landlock",
  "libc",
+ "paddock-proc",
  "postcard",
  "proptest",
  "serde",
  "serde_json",
- "sysinfo",
  "tempfile",
  "tokio",
  "windows",
@@ -2295,6 +2295,7 @@ dependencies = [
  "debrief-store-duck",
  "getrandom 0.4.3",
  "log",
+ "paddock-proc",
  "serde",
  "serde_json",
  "sysinfo",
@@ -2609,6 +2610,15 @@ name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
+
+[[package]]
+name = "email_address"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "embed-resource"
@@ -5314,6 +5324,90 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fbd56f7631767e61784dc43f8580f403f4475bd4aaa4da003e6295e1bab4a7e"
 dependencies = [
  "stable_deref_trait",
+]
+
+[[package]]
+name = "paddock-proc"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "paddock-workspace-hack",
+ "sysinfo",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "paddock-workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "bitflags 2.13.2",
+ "block2",
+ "cairo-sys-rs",
+ "chrono",
+ "crc32fast",
+ "deranged",
+ "digest 0.11.3",
+ "email_address",
+ "flate2",
+ "futures-core",
+ "getrandom 0.3.4",
+ "getrandom 0.4.3",
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "http",
+ "httparse",
+ "idna",
+ "libc",
+ "linux-raw-sys 0.12.1",
+ "log",
+ "memchr",
+ "mio",
+ "num",
+ "num-traits",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "once_cell",
+ "percent-encoding",
+ "proc-macro2",
+ "quote",
+ "rand 0.10.3",
+ "regex",
+ "regex-automata",
+ "regex-syntax",
+ "rustix 1.1.5",
+ "security-framework-sys",
+ "semver",
+ "serde",
+ "serde_core",
+ "serde_json",
+ "slab",
+ "smallvec",
+ "socket2",
+ "subtle",
+ "syn 2.0.119",
+ "syn 3.0.9",
+ "sysinfo",
+ "tar",
+ "thiserror 2.0.21",
+ "time",
+ "time-macros",
+ "toml_datetime 1.1.2+spec-1.1.0",
+ "toml_parser",
+ "tracing",
+ "tracing-core",
+ "typenum",
+ "url",
+ "uuid",
+ "windows",
+ "windows-core",
+ "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
+ "winnow 1.0.4",
+ "zlib-rs",
 ]
 
 [[package]]

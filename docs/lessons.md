@@ -477,3 +477,13 @@ With a dozen agents each told to build only while the 1-minute load was under 20
 and started at once — load swung between 10 and 70 all night. **Rule:** heavy steps take a slot from one machine-wide
 semaphore (a few mkdir-lock slots under the shared build volume, stale slots reclaimed by pid) instead of each watching
 the load; the slot count is the rule-41 cap. Load watching stays for deciding how many agents to run, not when to build.
+
+## Resident size counts freed pages on macOS (2026-10-27, Debrief)
+
+A Debrief store worker with a physical footprint of 535 MB showed 1,965 MB of resident size (RSS) and was killed at its
+2 GiB cap. mimalloc gives freed pages back with `MADV_FREE_REUSABLE` and tags them (vmmap: "IOAccelerator", tag 100);
+they stay in the resident size until the kernel needs them, and are not in the footprint. Rule 26 only covered Linux
+(PSS), so macOS fell back to RSS. **Rule:** every cap, budget and display uses `paddock_proc::process_memory` /
+`tree_memory` (Linux PSS, macOS `ri_phys_footprint`, Windows private working set), never `sysinfo`'s `memory()`; a test
+frees pages the way mimalloc does and asserts the figure is far below the resident size and the child survives a cap
+between the two.
