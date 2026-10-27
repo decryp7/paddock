@@ -6,7 +6,7 @@ use paddock_diag::*;
 use paddock_env::{AppDirs, AppId, MapVars, Os};
 use paddock_jobs::{CancelToken, Counter};
 use serde_json::json;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -213,13 +213,17 @@ fn the_description_is_written_as_typed_and_capped() {
 }
 
 #[test]
-fn a_one_gigabyte_log_is_cut_to_the_window() {
+fn a_log_longer_than_the_window_is_cut_to_it() {
+    // Four windows of real lines: the cut is the behaviour here; that the cost does not grow with the file is the seek
+    // proven in `window::tests` (a 1 GiB file written for real costs a gigabyte of zeros on NTFS, which is not sparse).
     let (_root, d) = machine();
     let big = d.logs().join("demo.2026-10-23.log");
     let mut f = std::fs::File::create(&big).unwrap();
-    f.set_len(1 << 30).unwrap();
-    f.seek(SeekFrom::End(0)).unwrap();
-    f.write_all(b"\n{\"@m\":\"the very last line\"}\n").unwrap();
+    let line = b"{\"@m\":\"an older line of the log, long enough to fill the window quickly\"}\n";
+    for _ in 0..(4 * 64 * 1024) / line.len() {
+        f.write_all(line).unwrap();
+    }
+    f.write_all(b"{\"@m\":\"the very last line\"}\n").unwrap();
     drop(f);
     let sections: Vec<Arc<dyn Section>> = vec![Arc::new(builtin::Logs::with_window(64 * 1024))];
     let collected = Collected::collect(&app_info(), &d, &sections, &redactor(), now());
