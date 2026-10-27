@@ -1,16 +1,23 @@
 # Debrief's CI and release in the Paddock monorepo (ADR 0014, imported from decryp7/debrief's build.yml): every job runs in
 # apps/debrief. The plan job runs only when the change reaches Debrief (scripts/affected.mjs: Debrief's own files, a shared
 # input, or a global one); Debrief is not a leg of ci.yml because its gates span three OS, real-app smoke tests and the
-# installers. Installers are built only for debrief-v* tags (which also publish the Gitea release, the moving
-# debrief-latest release the app's updater reads, and the bridge latest.json in the old repo), the nightly run and
-# manual runs (see the bundle job).
+# installers.
 #
-# Runner labels: ubuntu-latest, windows-latest, macos-latest. Adjust `runs-on`
-# if your act_runner instances use other labels.
-# Linux jobs run in the garage image (Node for JavaScript actions, git,
-# and sudo-free root), since the runner's default ubuntu-latest image has no Node.
-# Releases need a repository secret RELEASE_TOKEN (a Gitea access token with
-# write:repository scope).
+# Branch and pull request runs are the checks: Rust (Linux and macOS), plugin SDK, licences, frontend and the end-to-end
+# tests in Chromium. A full run adds the real-app smoke tests on three OS, the installers and the end-to-end tests in WebKit
+# (Paddock rule 3: WebKit and the slow legs run on the combined result). Full runs are pushes to main, debrief-v* tags
+# (which also publish the Gitea release and the moving debrief-latest release the app's updater reads), the nightly run and
+# a manual run with `bundles: true` (the plan job's `full` output).
+#
+# Speed (Paddock lessons, "Test and build speed"): Linux jobs run in the paddock-ci image (Rust, nextest, Tauri's libraries,
+# Node, Playwright's browsers, Chrome for Testing and libduckdb baked in); every Rust job compiles through sccache on local
+# disk (setup-rust: the runner's /sccache mount in a container, ~/.paddock-ci/sccache on a host); host runners build from a
+# fixed checkout path (stable-workspace) into a kept build folder set as cargo configuration (the build-folder action),
+# never CARGO_TARGET_DIR, which sccache hashes; npm's and Angular's caches are kept (node-caches).
+#
+# Runner labels: ubuntu-latest (jobs in the paddock-ci image), windows-latest and macos-latest (host runners).
+# Releases need a repository secret RELEASE_TOKEN (a Gitea access token with write:repository scope) and the family's
+# updater key (PADDOCK_TAURI_SIGNING_PRIVATE_KEY, _PASSWORD and PADDOCK_TAURI_UPDATER_PUBKEY).
 
 name: debrief
 
@@ -24,6 +31,11 @@ on:
   schedule:
     - cron: "30 0 * * *"
   workflow_dispatch:
+    inputs:
+      bundles:
+        description: "Full run: also the installers, the real-app smoke tests and the end-to-end tests in WebKit"
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -48,6 +60,8 @@ jobs:
   # the change does not reach Debrief (scripts/affected.mjs, the same plan as ci.yml);
   # a push to main whose commit carries a debrief-v* tag is covered by the tag run;
   # a nightly run is skipped while main is unchanged since the last green one.
+  # And whether it is a full run (`full`): installers, real-app smoke and WebKit only for main, tags, nightly and
+  # `bundles: true`, never for a branch or pull request run.
   plan:
     name: plan
     runs-on: ubuntu-latest
@@ -58,6 +72,7 @@ jobs:
         working-directory: .
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      full: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
     steps:
       # The whole history: the plan's base can be any older commit.
       - uses: actions/checkout@v4
@@ -98,9 +113,8 @@ jobs:
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
 
-  # The checks run as parallel jobs; the installers and smoke tests wait for all of them. Cargo caches are
-  # restored and saved separately (actions/cache/restore + save with `if: always()`), so a failing run still
-  # warms the cache for the next one; a cache is saved again when Cargo.lock changes. Each job keys its own cache.
+  # The checks run as parallel jobs; the installers and smoke tests (full runs only) wait for rust-lint. Each Rust job ends
+  # with sccache-stats (the hit rate in its log).
 
   rust-lint:
     name: rust format + clippy
@@ -108,71 +122,28 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      # garage: the Paddock CI image (dev.decryptology.net/decryp7/garage) with Rust tools, Tauri libraries, Node 24 and Playwright browsers pre-installed
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.gitea/actions/setup-rust
         with:
-          components: clippy, rustfmt
+          components: clippy rustfmt
 
       # Cheap and first: a formatting slip fails in seconds.
       - name: Format
         run: cargo fmt --all --check
 
-      - name: Linux dependencies for Tauri
-        run: |
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf cmake
+      # The store crates link the official prebuilt libduckdb (ADR 0014): the image's when it has the pinned version, else
+      # the pinned, SHA-256-checked download (every job that builds the workspace links it).
+      - name: libduckdb
+        run: bash scripts/ci/libduckdb-env.sh
 
-      - uses: actions/cache/restore@v4
-        id: cargo-cache
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/debrief/target
-            !apps/debrief/target/debug/incremental
-          key: clippy-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
-          restore-keys: clippy-${{ runner.os }}-
-
-      # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
-      # so every job that builds the workspace links it (a test that is skipped still has to link).
-      - uses: actions/cache@v4
-        if: runner.os != 'Windows'
-        with:
-          path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
-
-      - name: libduckdb (prebuilt, pinned SHA-256)
-        shell: bash
-        run: |
-          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
-          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
-          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
-          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
-          case "$RUNNER_OS" in
-            Linux) echo "LD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-            macOS) echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-            Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
-          esac
-
-      - name: Clippy
+      - name: Clippy (workspace)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # Saved only when the dependencies changed (no exact hit): the workspace's own crates rebuild anyway, and
-      # uploading the whole target folder on every run cost about a minute per job.
-      - uses: actions/cache/save@v4
-        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/debrief/target
-            !apps/debrief/target/debug/incremental
-          key: clippy-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   rust-test:
     name: rust tests
@@ -180,77 +151,48 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      # A missing test browser fails the real-browser tests instead of skipping them.
+      DEBRIEF_REQUIRE_TEST_BROWSER: "1"
+      # Chromium refuses to run as root, which the job's container is: the explicit root-only opt-in to start without the
+      # sandbox (a user's browser keeps it). The window needs a display: the Tests step runs on a virtual one.
+      DEBRIEF_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.gitea/actions/setup-rust
 
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
+      # The pinned cargo-nextest (the image's; the step fails when it is another version).
+      - uses: ./.gitea/actions/host-tools
 
-      # mold links the test binaries (docs/development.md, "Fast test runs"); it rides on this apt run, which costs nothing
-      # extra. x86_64 Linux already links with rust-lld (the default since Rust 1.90), so the gain is small.
-      - name: Linux dependencies for Tauri, and mold
+      - name: libduckdb
+        run: bash scripts/ci/libduckdb-env.sh
+
+      # The pinned Chrome for Testing build (the one the app may download, runtime.rs), never an installed browser (Paddock
+      # rule 7): the image's (CHROMIUM_TEST_PATH) when it is Debrief's pin, else the pin, installed into the job's temp.
+      - name: Pinned test browser
         run: |
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf cmake xvfb mold
-          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
+          want=$(sed -n 's/.*PINNED_VERSION: &str = "\([^"]*\)".*/\1/p' app/src-tauri/src/browser/runtime.rs)
+          have=$("${CHROMIUM_TEST_PATH:-/nonexistent}" --version 2>/dev/null | awk '{ print $NF }' || true)
+          if [ -n "$want" ] && [ "$have" = "$want" ]; then
+            echo "Chrome for Testing $have from the CI image: $CHROMIUM_TEST_PATH"
+            exit 0
+          fi
+          echo "::notice::the CI image has Chrome for Testing ${have:-none}, Debrief pins ${want:-?}: installing the pin."
+          out=$(node ../../conformance/ci/install-test-browser.mjs --rust-source app/src-tauri/src/browser/runtime.rs \
+            --dir "$RUNNER_TEMP/debrief-test-browser" --env-prefix DEBRIEF)
+          printf '%s\n' "$out"
+          case "$out" in *CHROMIUM_TEST_PATH=*) ;; *) echo "::error::the test browser installer printed no CHROMIUM_TEST_PATH"; exit 1 ;; esac
 
-      # Only the downloaded crates: the test build folder was 5.6-10 GB, took 72-163 s to restore or save and
-      # evicted the other jobs' caches on the shared runners. A new key so the old target caches are not restored.
-      - uses: actions/cache/restore@v4
-        id: cargo-cache
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
-          restore-keys: test-registry-${{ runner.os }}-
-
-      # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
-      # so every job that builds the workspace links it (a test that is skipped still has to link).
-      - uses: actions/cache@v4
-        if: runner.os != 'Windows'
-        with:
-          path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
-
-      - name: libduckdb (prebuilt, pinned SHA-256)
-        shell: bash
-        run: |
-          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
-          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
-          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
-          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
-          case "$RUNNER_OS" in
-            Linux) echo "LD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-            macOS) echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-            Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
-          esac
+      - name: Temp folders before the tests
+        run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
       # nextest runs every test in its own process, in parallel across crates, and reports every failure;
       # .config/nextest.toml serialises the tests that time real child processes. The ci profile never retries (a flaky
-      # test is fixed, not retried) and writes a JUnit report.
-      - name: Temp folders before the tests
-        shell: bash
-        run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
-
-      # The pinned Chrome for Testing build (the one the app may download, runtime.rs), never an installed browser: the
-      # real-browser tests skip without it, and DEBRIEF_REQUIRE_TEST_BROWSER makes a missing browser a failure instead.
-      - name: Pinned test browser
-        shell: bash
-        run: |
-          node scripts/ci/install-test-browser.mjs "$RUNNER_TEMP/debrief-test-browser"
-          echo "DEBRIEF_REQUIRE_TEST_BROWSER=1" >> "$GITHUB_ENV"
-          # Chromium refuses to run as root, which the job's container is: the explicit root-only opt-in to start without
-          # the sandbox (a user's browser keeps it). The window needs a display: the Tests step runs on a virtual one.
-          echo "DEBRIEF_BROWSER_NO_SANDBOX=1" >> "$GITHUB_ENV"
-
+      # test is fixed, not retried), stops a test after its time budget and writes a JUnit report.
       # xvfb-run: a virtual display (no screen, no desktop) for the real-browser tests' windows.
-      - name: Tests
+      - name: Tests (workspace)
         run: xvfb-run -a cargo nextest run --workspace --profile ci
 
       - name: Test report (JUnit)
@@ -261,92 +203,97 @@ jobs:
           path: apps/debrief/target/nextest/ci/junit.xml
           if-no-files-found: ignore
 
-      # nextest does not run doc tests.
-      - name: Doc tests
+      # nextest does not run doc tests. This step and the next ones run even after the tests failed (each names what broke).
+      - name: Doc tests (workspace)
+        if: ${{ !cancelled() }}
         run: cargo test --workspace --doc
 
       # Tests clean up after themselves (docs/testing/temp-leaks.md): a debrief-* / imt-* folder left behind fails the job.
       - name: No temp folders left behind
-        shell: bash
+        if: ${{ !cancelled() }}
         run: node scripts/ci/check-temp-leaks.mjs --check "$RUNNER_TEMP/temp-leaks.json"
 
       # The analyses' memory budget (ADR 0014) is the shipped worker's: measured on a release build, Linux only
       # (DuckDB's jemalloc is the allocator there; the test skips itself in debug builds).
       - name: Memory budget
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() }}
         run: cargo test --release -p debrief-store-duck --test analysis_memory -- --nocapture
 
-      # Saved only when the dependencies changed (no exact hit).
-      - uses: actions/cache/save@v4
-        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # The same tests on the macOS host runner: the contained-plugin sandbox (sandbox-exec profiles, the private socket,
   # symlinked temp paths) and other platform code only run here; a macOS-only bug once passed the Linux-only suite.
-  # Host mode: the build folder stays on the host between runs; libduckdb as on Linux, through DYLD_LIBRARY_PATH (set
-  # in GITHUB_ENV, never under `nice`/`env`, which macOS's SIP would strip it from).
+  # Host mode: the checkout moves to a fixed path (stable-workspace, so sccache hits the workspace crates too) and builds into
+  # a kept folder outside it (the build-folder action); libduckdb as on Linux, through DYLD_LIBRARY_PATH (set in
+  # GITHUB_ENV, never under `nice`/`env`, which macOS's SIP would strip it from).
   rust-test-macos:
     name: rust tests (macOS)
     needs: [plan]
     if: needs.plan.outputs.run == 'true'
     runs-on: macos-latest
     timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/debrief
     steps:
       - uses: actions/checkout@v4
 
-      - name: A persistent build folder on the host
-        shell: bash
-        run: |
-          echo "CARGO_TARGET_DIR=$HOME/.debrief-ci/target-$GITHUB_JOB" >> "$GITHUB_ENV"
-          # The Mac runner is shared with other jobs: two rustc at a time keeps its load reasonable.
-          echo "CARGO_BUILD_JOBS=2" >> "$GITHUB_ENV"
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: taiki-e/install-action@v2
+      - uses: ./.gitea/actions/stable-workspace
         with:
-          tool: cargo-nextest
+          name: debrief-${{ github.job }}-${{ runner.os }}
 
-      - uses: actions/cache@v4
+      - uses: ./.gitea/actions/setup-rust
+
+      - uses: ./.gitea/actions/host-tools
+
+      # The build folder outside the checkout, as cargo configuration (the shared build-folder action).
+      - uses: ./.gitea/actions/build-folder
         with:
-          path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+          name: debrief-${{ github.job }}
 
-      - name: libduckdb (prebuilt, pinned SHA-256)
-        shell: bash
+      # The Mac runner is shared with other jobs: four rustc at a time, as Paddock's crate job.
+      - name: Build jobs and the test browser's folder
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
-          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
-          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
-          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
-          echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+          # Outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it.
+          echo "DEBRIEF_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser-debrief" >> "$GITHUB_ENV"
+
+      - name: libduckdb
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+        run: bash scripts/ci/libduckdb-env.sh
+
+      # The pinned Chrome for Testing (runtime.rs), never the host's installed Chrome (Paddock rule 7); kept on the host and
+      # downloaded once per pin. Sets CHROMIUM_TEST_PATH and DEBRIEF_REQUIRE_TEST_BROWSER=1.
+      - uses: ./.gitea/actions/install-test-browser
+        with:
+          rust-source: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app/src-tauri/src/browser/runtime.rs
+          env-prefix: DEBRIEF
+          dir: ${{ env.DEBRIEF_TEST_BROWSER_DIR }}
 
       - name: Temp folders before the tests
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: node scripts/ci/check-temp-leaks.mjs --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
-      # The pinned Chrome for Testing build, never the host's installed Chrome (Paddock rule 7).
-      - name: Pinned test browser
-        shell: bash
-        run: |
-          node scripts/ci/install-test-browser.mjs "$RUNNER_TEMP/debrief-test-browser"
-          echo "DEBRIEF_REQUIRE_TEST_BROWSER=1" >> "$GITHUB_ENV"
-
-      - name: Tests
-        shell: bash
+      - name: Tests (workspace)
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: cargo nextest run --workspace --profile ci
 
-      - name: Doc tests
-        shell: bash
+      - name: Doc tests (workspace)
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: cargo test --workspace --doc
 
       - name: No temp folders left behind
-        shell: bash
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: node scripts/ci/check-temp-leaks.mjs --check "$RUNNER_TEMP/temp-leaks.json"
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # The plugin SDK as an author uses it: a project of every kind from `cargo debrief-plugin new` builds, and one of them
   # passes `cargo debrief-plugin test` (conformance in the sandbox, then its own tests). The examples themselves are
@@ -357,33 +304,28 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
-    env:
-      CARGO_TARGET_DIR: /tmp/debrief-sdk-target
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.gitea/actions/setup-rust
 
-      - uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
-          restore-keys: test-registry-${{ runner.os }}-
+      # The new projects share one build folder, as cargo configuration above them (never CARGO_TARGET_DIR: sccache hashes
+      # it), so their common dependencies build once.
+      - name: One build folder for the new projects
+        run: |
+          mkdir -p /tmp/plugins/.cargo
+          printf "[build]\ntarget-dir = '/tmp/debrief-sdk-target'\n" > /tmp/plugins/.cargo/config.toml
 
       - name: Install cargo debrief-plugin
-        run: cargo install --path crates/cargo-debrief-plugin --locked --debug
+        run: cargo install --path crates/cargo-debrief-plugin --locked --debug --target-dir /tmp/debrief-sdk-target
 
       - name: New projects of every kind build
-        shell: bash
         run: |
           set -e
-          mkdir -p /tmp/plugins
           for kind in importer transform tool collector annotator; do
             cargo debrief-plugin new "my-$kind" --kind "$kind" --dir /tmp/plugins --sdk-path .
-            cargo build --manifest-path "/tmp/plugins/my-$kind/Cargo.toml" --all-targets
+            (cd "/tmp/plugins/my-$kind" && cargo build --all-targets)
           done
 
       - name: A new importer passes cargo debrief-plugin test, packages and signs
@@ -394,41 +336,38 @@ jobs:
           cargo debrief-plugin package --sign ci.secret-key
           cargo debrief-plugin inspect my-importer-0.1.0.debriefplugin
 
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
   licences:
     name: licences, notices + commits
     needs: [plan]
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
         with:
           # Full history so pull requests can check every commit message.
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
-
+      # cargo-deny comes with the image; cargo-about does not.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-about,cargo-deny
+          tool: cargo-about
 
-      # cargo about reads every crate's licence from its sources and cargo deny clones the advisory database:
-      # without a cache both download everything on every run.
+      # cargo about reads every crate's licence from its sources and cargo deny clones the advisory database: without a
+      # cache both download everything on every run. The image's CARGO_HOME is /usr/local/cargo. Saved on every run (a
+      # new key each time), so the advisory database stays fresh.
       - uses: actions/cache/restore@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
-          restore-keys: licences-${{ runner.os }}-
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: apps/debrief/app/.nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/advisory-dbs
+          key: debrief-licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
+          restore-keys: debrief-licences-${{ runner.os }}-
 
       - name: Commit messages follow Conventional Commits
         if: github.event_name == 'pull_request'
@@ -441,7 +380,7 @@ jobs:
 
       - name: Third-party notices are up to date
         run: |
-          node --test scripts/notices/generate.test.mjs app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/install-test-browser.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs app/e2e/retried-reporter.test.mjs
+          node --test scripts/notices/generate.test.mjs app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs scripts/ci/libduckdb-env.test.mjs app/e2e/retried-reporter.test.mjs
           node scripts/ci/check-quarantine.mjs
           node scripts/ci/scan-fixtures.mjs
           node scripts/ci/check-icons.mjs
@@ -452,10 +391,10 @@ jobs:
         if: always()
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}-${{ github.run_id }}
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/advisory-dbs
+          key: debrief-licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}-${{ github.run_id }}
 
   frontend:
     name: frontend build, lint + unit tests
@@ -463,18 +402,18 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: apps/debrief/app
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      # npm's download cache and the Angular build cache kept on the runner's /sccache mount (Node is the image's).
+      - uses: ./.gitea/actions/node-caches
         with:
-          node-version-file: apps/debrief/app/.nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
+          angular-dir: apps/debrief/app
+          name: debrief-frontend
 
       # One npm workspace for the monorepo (ADR 0014 §1): the root lock installs every package.
       - name: Install
@@ -519,50 +458,45 @@ jobs:
           npx ng test --watch=false --coverage
           node ../scripts/ci/check-temp-leaks.mjs --check "${RUNNER_TEMP:-/tmp}/temp-leaks-ui.json"
 
+  # Four shards that run at the same time, each with its own production build (Angular's cache kept per shard) and port.
+  # Playwright's Chromium and WebKit come with the image: nothing is downloaded. Branch and pull request runs test in
+  # Chromium only; full runs (main, tags, nightly, `bundles: true`) in Chromium and WebKit (Paddock rule 3).
   e2e:
-    name: end-to-end (shard ${{ matrix.shard }}/2)
+    name: end-to-end (shard ${{ matrix.shard }}/4)
     needs: [plan]
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: apps/debrief/app
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: ./.gitea/actions/node-caches
         with:
-          node-version-file: apps/debrief/app/.nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          angular-dir: apps/debrief/app
+          name: debrief-e2e-${{ matrix.shard }}
 
       - name: Install
-        run: |
-          (cd ../../.. && npm ci)
-          npx playwright install --with-deps chromium webkit
+        run: (cd ../../.. && npm ci)
 
-      # One production build serves every project (Chromium, WebKit) of this shard, under the Tauri CSP.
+      # One production build serves every project of this shard, under the Tauri CSP.
       - name: Production build for the end-to-end tests
         run: npx ng build
 
       - name: Frontend end-to-end tests
         env:
           CI: "true"
-          # Required by playwright.config.ts in CI (no default port, no reused server).
-          DEBRIEF_E2E_PORT: "4355"
+          # Required by playwright.config.ts in CI (no default port, no reused server): one per shard, as jobs may share a host.
+          DEBRIEF_E2E_PORT: "435${{ matrix.shard }}"
           DEBRIEF_E2E_PREBUILT: "1"
-        run: npx playwright test --shard=${{ matrix.shard }}/2
+        run: npx playwright test --shard=${{ matrix.shard }}/4 ${{ needs.plan.outputs.full != 'true' && '--project=chromium' || '' }}
 
       - name: Upload Playwright report
         if: failure()
@@ -573,12 +507,13 @@ jobs:
           if-no-files-found: ignore
 
   # A few WebdriverIO smoke tests of the real app (engine + shell + production UI, no mock), through
-  # tauri-driver: msedgedriver for WebView2 on Windows, WebKitWebDriver (webkit2gtk-driver) under Xvfb on Linux.
-  # macOS has no WKWebView driver. Locally: see docs/testing-manual.md ("Smoke tests of the real app").
+  # tauri-driver: msedgedriver for WebView2 on Windows, WebKitWebDriver under Xvfb on Linux (both in place: the image's,
+  # the host's). macOS has no WKWebView driver. Locally: see docs/testing-manual.md ("Smoke tests of the real app").
+  # Full runs only (main, debrief-v* tags, nightly, `bundles: true`), never on branch or pull request runs.
   tauri-smoke:
     name: real-app smoke (${{ matrix.os }})
     needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -587,35 +522,33 @@ jobs:
         # because no macOS job ever started the sidecars.
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # Linux legs run in the act image (Node and the usual tools); Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/debrief
     # Windows runners usually run as administrator, where WebView2 ignores WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS (how
     # msedgedriver enables remote debugging); the debug build hands those arguments to WebView2 itself, so both legs
     # are required. Each run keeps Debrief's folders in a temp DEBRIEF_DATA_DIR (see app/e2e-tauri/wdio.conf.ts).
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runners may not have Git's bash on PATH; actions (rust-toolchain) and `shell: bash` need it.
-      # Also keeps the Rust build folder outside the job's checkout, so the next run builds incrementally instead of
-      # from scratch (host runners keep their disk; the Linux legs use the cache instead).
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      # Host-mode Windows runners may not have Git's bash on PATH; actions and `shell: bash` need it. The npm cache lives in
+      # a host folder that outlives the job (npm ci then installs from disk).
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         # cmd, not PowerShell: runners with a restricted execution policy refuse the .ps1 act writes for a step.
         shell: cmd
+        working-directory: .
         run: |
           rem Which account runs the job: WebView2 smoke tests cannot run as SYSTEM (its temp is C:\Windows\SystemTemp).
           whoami
           echo TEMP=%TEMP%
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          rem Host folders that outlive the job (RUNNER_TOOL_CACHE is inside each job's work folder on this runner,
-          rem which is deleted afterwards). One build folder per job: the smoke (debug) and installer (release)
-          rem jobs run at the same time and would otherwise wait for each other on the cargo lock. The npm cache
-          rem is shared: npm ci then installs from disk instead of downloading every package again.
-          set "DEBRIEF_CI=%USERPROFILE%\.debrief-ci"
-          echo CARGO_TARGET_DIR=%DEBRIEF_CI%\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
-          echo npm_config_cache=%DEBRIEF_CI%\npm-cache>>"%GITHUB_ENV%"
+          echo npm_config_cache=%USERPROFILE%\.debrief-ci\npm-cache>>"%GITHUB_ENV%"
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
@@ -623,38 +556,38 @@ jobs:
           rem build with 16 rustc processes each exhausted its memory. Eight each keeps both inside it.
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      - name: Linux dependencies for Tauri and WebDriver
-        if: runner.os == 'Linux'
-        run: |
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf cmake \
-            webkit2gtk-driver xvfb dbus dbus-x11 mold
-          # mold links the debug app (docs/development.md, "Fast test runs").
-          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> "$GITHUB_ENV"
-
-      # Linux only: on the Windows host restoring this cache took about 13.5 minutes and saving it 26 more, while the
-      # host keeps the build folder (CARGO_TARGET_DIR above) and ~/.cargo between jobs anyway.
-      - uses: actions/cache@v4
-        if: runner.os != 'Windows'
+      # Host runners: the same checkout path every run, so sccache hits the workspace crates (after Git bash on Windows).
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin/tauri-driver
-            ~/.cargo/bin/tauri-driver.exe
-            apps/debrief/target
-          key: smoke-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
-          restore-keys: smoke-${{ runner.os }}-
+          name: debrief-${{ github.job }}-${{ runner.os }}
 
-      # Windows runs on the host, which keeps its own Node: setup-node downloaded Node again on every job and its
-      # npm cache took about 7 minutes to restore (the npm cache already lives in %USERPROFILE%\.debrief-ci). Fail fast
-      # when the host's Node is missing or not the major version app/.nvmrc asks for.
-      - name: Host Node matches app/.nvmrc (Windows)
-        if: runner.os == 'Windows'
+      - uses: ./.gitea/actions/setup-rust
+
+      # One kept build folder per job on a host (the smoke and installer jobs run at the same time and would otherwise wait
+      # for each other on the cargo lock), as cargo configuration (the shared build-folder action): PADDOCK_BUILD_FOLDER and
+      # DEBRIEF_E2E_APP for the steps below.
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+          name: debrief-${{ github.job }}
+
+      # The debug app the real-app smoke starts (wdio), in the job's build folder.
+      - name: The smoke's app binary
         shell: bash
+        run: |
+          ext=; if [ "$RUNNER_OS" = Windows ]; then ext=.exe; fi
+          echo "DEBRIEF_E2E_APP=$PADDOCK_BUILD_FOLDER/debug/debrief-app$ext" >> "$GITHUB_ENV"
+
+      # Host runners keep their own Node: fail fast when it is missing or not the major version app/.nvmrc asks for.
+      - name: Host Node matches app/.nvmrc
+        if: runner.os != 'Linux'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
           want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
           if ! command -v node >/dev/null; then
@@ -662,48 +595,31 @@ jobs:
               echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
               export PATH="/c/Program Files/nodejs:$PATH"
             else
-              echo "::error::Node.js is not installed on this Windows runner: install Node $want (app/.nvmrc) on the host and put it on PATH."
+              echo "::error::Node.js is not installed on this runner: install Node $want (app/.nvmrc) on the host and put it on PATH."
               exit 1
             fi
           fi
           have=$(node -p 'process.versions.node.split(".")[0]')
           if [ "$have" != "$want" ]; then
-            echo "::error::The Windows runner has Node $(node --version) but app/.nvmrc asks for Node $want: install Node $want on the host."
+            echo "::error::The runner has Node $(node --version) but app/.nvmrc asks for Node $want: install Node $want on the host."
             exit 1
           fi
           node --version
 
-      - uses: actions/setup-node@v4
+      # npm's and Angular's caches (the /sccache mount on Linux, ~/.paddock-ci on macOS). Windows reuses a whole
+      # node_modules instead (below).
+      - uses: ./.gitea/actions/node-caches
         if: runner.os != 'Windows'
         with:
-          node-version-file: apps/debrief/app/.nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
+          angular-dir: apps/debrief/app
+          name: debrief-smoke
 
-      # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
-      # so every job that builds the workspace links it (a test that is skipped still has to link).
-      - uses: actions/cache@v4
-        if: runner.os != 'Windows'
-        with:
-          path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
-
-      - name: libduckdb (prebuilt, pinned SHA-256)
-        shell: bash
-        run: |
-          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
-          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
-          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
-          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
-          case "$RUNNER_OS" in
-            Linux) echo "LD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-            macOS) echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-            Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
-          esac
+      - name: libduckdb
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+        run: bash scripts/ci/libduckdb-env.sh
 
       - name: tauri-driver
         if: runner.os != 'macOS'
-        shell: bash
         run: command -v tauri-driver || cargo install tauri-driver --locked
 
       # The Edge WebDriver must match the runner's WebView2 runtime exactly: the script reads the runtime's
@@ -711,42 +627,21 @@ jobs:
       # https://msedgedriver.microsoft.com/<version>/edgedriver_win64.zip into app/e2e-tauri/.drivers/.
       - name: Edge WebDriver matching WebView2
         if: runner.os == 'Windows'
-        working-directory: apps/debrief/app
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         run: node e2e-tauri/scripts/fetch-msedgedriver.mjs
 
       # Windows host: unpacking ~900 packages into a fresh node_modules took 7–14 min per job even with the npm cache
       # on disk. A finished node_modules per package-lock.json lives in %USERPROFILE%\.debrief-ci and is linked into the
       # job's checkout (a directory junction); npm ci runs only when the lockfile changed. The last step removes the
-      # junction before the runner deletes the work folder, so its cleanup never walks into the shared copy (if a
-      # killed job skips that step, the worst case is one reinstall).
+      # junction, so no cleanup ever walks into the shared copy (a junction a killed job left is removed here first).
       - name: Reuse node_modules for this lockfile (Windows)
         if: runner.os == 'Windows'
-        shell: bash
-        working-directory: .
-        run: |
-          # The monorepo's one lock and node_modules at the repo root (ADR 0014 §1).
-          key=$(sha256sum package-lock.json | cut -c1-16)
-          base="$USERPROFILE/.debrief-ci"
-          # <hash>/node_modules, not node_modules-<hash>: Node resolves packages from the junction's real path, so it
-          # must still contain a folder named node_modules (else e.g. @tauri-apps/cli cannot find its native binary).
-          cached="$base/node-cache/$key/node_modules"
-          mkdir -p "$base/node-cache/$key"
-          if [ ! -f "$cached/.complete" ]; then
-            rm -rf "$cached"
-            npm ci
-            mv node_modules "$cached"
-            touch "$cached/.complete"
-          fi
-          powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '$(cygpath -w "$PWD/node_modules")' -Target '$(cygpath -w "$cached")' | Out-Null"
-          # Older lockfiles' copies go (and the first layout's node_modules-<hash> folders).
-          for old in "$base"/node-cache/*; do [ "$old" = "$base/node-cache/$key" ] || rm -rf "$old"; done
-          rm -rf "$base"/node_modules-*
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: bash apps/debrief/scripts/ci/windows-node-modules.sh link
 
       - name: Debug app binary
         if: runner.os != 'macOS'
-        working-directory: apps/debrief/app
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         run: |
           [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
           npm run e2e:tauri:build
@@ -755,8 +650,7 @@ jobs:
       # layout the installer ships; then the signature/Team-ID/load checks and the launch-and-quit smoke.
       - name: Debug .app (macOS)
         if: runner.os == 'macOS'
-        working-directory: apps/debrief/app
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         env:
           DEBRIEF_CARGO_PROFILE: debug
         run: |
@@ -765,9 +659,9 @@ jobs:
 
       - name: Smoke test, sidecars and quit within 10 s (macOS)
         if: runner.os == 'macOS'
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          app=$(find "${CARGO_TARGET_DIR:-target}/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
           [ -d "$app" ] || { echo "::error::no debug .app was built"; exit 1; }
           node --test scripts/ci/macos-smoke.test.mjs
           bash scripts/ci/macos-verify-bundle.sh "$app"
@@ -775,8 +669,7 @@ jobs:
 
       - name: Smoke tests (Windows)
         if: runner.os == 'Windows'
-        working-directory: apps/debrief/app
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         # Keep Debrief's folders so a failure can show the app's own logs (next step).
         env:
           DEBRIEF_E2E_KEEP_DATA: "1"
@@ -784,8 +677,7 @@ jobs:
 
       - name: Debrief logs of the failed smoke run (Windows)
         if: failure() && runner.os == 'Windows'
-        working-directory: apps/debrief/app
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         run: |
           for f in $(find e2e-tauri/.tmp -path '*debrief-e2e-*' -name '*.log' 2>/dev/null | sort); do
             echo "::group::$f"; tail -n 150 "$f"; echo "::endgroup::"
@@ -821,7 +713,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: tauri-smoke-${{ runner.os }}
-          path: apps/debrief/app/e2e-tauri/.artifacts
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app/e2e-tauri/.artifacts
           if-no-files-found: ignore
 
       # The live search test (docs/development.md, "Live search test"): research against the real Google, Bing and
@@ -829,7 +721,7 @@ jobs:
       # pull requests: engines rate-limit automated traffic and change their pages.
       - name: Live search test
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'macOS'
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         env:
           DEBRIEF_LIVE_SEARCH: "1"
           DEBRIEF_E2E_LIVE_SEARCH_OUT: ${{ runner.temp }}/live-search
@@ -840,9 +732,9 @@ jobs:
       # Nightly and manual runs only. macOS has measured budgets; Linux reports until its first nightly numbers are in.
       - name: Start-up benchmark (macOS)
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'macOS'
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          app=$(find "${CARGO_TARGET_DIR:-target}/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
           node --test scripts/ci/startup-bench.test.mjs
           node scripts/ci/startup-bench.mjs "$app" --runs 5 --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
@@ -855,7 +747,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" \
-            node scripts/ci/startup-bench.mjs "${CARGO_TARGET_DIR:-target}/debug/debrief-app" --runs 5 --report-only \
+            node scripts/ci/startup-bench.mjs "$PADDOCK_BUILD_FOLDER/debug/debrief-app" --runs 5 --report-only \
             --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
       - name: Start-up timings
@@ -878,17 +770,18 @@ jobs:
       # Unlink the shared node_modules (rmdir on a junction removes the link only, never the target's files).
       - name: Unlink the shared node_modules (Windows)
         if: always() && runner.os == 'Windows'
-        shell: cmd
-        working-directory: .
-        run: if exist node_modules rmdir node_modules
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: bash apps/debrief/scripts/ci/windows-node-modules.sh unlink
 
-  # Installers only for v* tags, the nightly run and manual runs (workflow_dispatch), never for pushes or pull
-  # requests: they are the slowest jobs and the Windows leg runs on a developer PC. A change that breaks the
-  # installers still shows up within 24 hours, in the nightly run.
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+  # Installers only on full runs: debrief-v* tags, pushes to main, the nightly run and manual runs with `bundles: true`; never
+  # for branch or pull request runs. They are the slowest jobs and the Windows leg runs on a developer PC.
   bundle:
     name: bundle (${{ matrix.os }})
     needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -900,65 +793,53 @@ jobs:
           - os: macos-latest
             bundles: dmg
     runs-on: ${{ matrix.os }}
-    # Linux legs run in the act image (Node and the usual tools); Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
+    # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/debrief
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runners may not have Git's bash on PATH; actions (rust-toolchain) and `shell: bash` need it.
-      # Also keeps the Rust build folder outside the job's checkout, so the next run builds incrementally instead of
-      # from scratch (host runners keep their disk; the Linux legs use the cache instead).
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      # Host-mode Windows runners may not have Git's bash on PATH; actions and `shell: bash` need it.
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         # cmd, not PowerShell: runners with a restricted execution policy refuse the .ps1 act writes for a step.
         shell: cmd
+        working-directory: .
         run: |
-          rem Which account runs the job: WebView2 smoke tests cannot run as SYSTEM (its temp is C:\Windows\SystemTemp).
           whoami
-          echo TEMP=%TEMP%
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          rem Host folders that outlive the job (RUNNER_TOOL_CACHE is inside each job's work folder on this runner,
-          rem which is deleted afterwards). One build folder per job: the smoke (debug) and installer (release)
-          rem jobs run at the same time and would otherwise wait for each other on the cargo lock. The npm cache
-          rem is shared: npm ci then installs from disk instead of downloading every package again.
-          set "DEBRIEF_CI=%USERPROFILE%\.debrief-ci"
-          echo CARGO_TARGET_DIR=%DEBRIEF_CI%\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
-          echo npm_config_cache=%DEBRIEF_CI%\npm-cache>>"%GITHUB_ENV%"
+          echo npm_config_cache=%USERPROFILE%\.debrief-ci\npm-cache>>"%GITHUB_ENV%"
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
-          rem The Windows runner is a developer PC (16 cores, 32 GB) that runs two jobs at once: a debug and a release
-          rem build with 16 rustc processes each exhausted its memory. Eight each keeps both inside it.
+          rem Two jobs at once on the 16-core, 32 GB developer PC: eight rustc each keeps both inside its memory.
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      - name: Linux dependencies for Tauri
-        if: runner.os == 'Linux'
-        run: |
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf rpm cmake
-
-      # Linux only: on the Windows host restoring this cache took about 13.5 minutes and saving it 26 more, while the
-      # host keeps the build folder (CARGO_TARGET_DIR above) and ~/.cargo between jobs anyway.
-      - uses: actions/cache@v4
-        if: runner.os != 'Windows'
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/debrief/target
-          key: bundle-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
-          restore-keys: bundle-${{ runner.os }}-
+          name: debrief-${{ github.job }}-${{ runner.os }}
 
-      # Windows runs on the host, which keeps its own Node: setup-node downloaded Node again on every job and its
-      # npm cache took about 7 minutes to restore (the npm cache already lives in %USERPROFILE%\.debrief-ci). Fail fast
-      # when the host's Node is missing or not the major version app/.nvmrc asks for.
-      - name: Host Node matches app/.nvmrc (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
+      - uses: ./.gitea/actions/setup-rust
+
+      # The release build folder as cargo configuration (the shared build-folder action): PADDOCK_BUILD_FOLDER.
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+          name: debrief-${{ github.job }}
+
+      - name: Host Node matches app/.nvmrc
+        if: runner.os != 'Linux'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
           want=$(tr -d ' v\r\n' < app/.nvmrc | cut -d. -f1)
           if ! command -v node >/dev/null; then
@@ -966,44 +847,31 @@ jobs:
               echo 'C:\Program Files\nodejs' >> "$GITHUB_PATH"
               export PATH="/c/Program Files/nodejs:$PATH"
             else
-              echo "::error::Node.js is not installed on this Windows runner: install Node $want (app/.nvmrc) on the host and put it on PATH."
+              echo "::error::Node.js is not installed on this runner: install Node $want (app/.nvmrc) on the host and put it on PATH."
               exit 1
             fi
           fi
           have=$(node -p 'process.versions.node.split(".")[0]')
           if [ "$have" != "$want" ]; then
-            echo "::error::The Windows runner has Node $(node --version) but app/.nvmrc asks for Node $want: install Node $want on the host."
+            echo "::error::The runner has Node $(node --version) but app/.nvmrc asks for Node $want: install Node $want on the host."
             exit 1
           fi
           node --version
 
-      - uses: actions/setup-node@v4
+      - uses: ./.gitea/actions/node-caches
         if: runner.os != 'Windows'
         with:
-          node-version-file: apps/debrief/app/.nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
+          angular-dir: apps/debrief/app
+          name: debrief-bundle
 
-      # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
-      # so every job that builds the workspace links it (a test that is skipped still has to link).
-      - uses: actions/cache@v4
-        if: runner.os != 'Windows'
-        with:
-          path: ~/.cache/debrief-libduckdb
-          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+      - name: libduckdb
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+        run: bash scripts/ci/libduckdb-env.sh
 
-      - name: libduckdb (prebuilt, pinned SHA-256)
-        shell: bash
-        run: |
-          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
-          : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
-          echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
-          echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
-          case "$RUNNER_OS" in
-            Linux) echo "LD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-            macOS) echo "DYLD_LIBRARY_PATH=$DUCKDB_LIB_DIR:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-            Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
-          esac
+      - name: Reuse node_modules for this lockfile (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: bash apps/debrief/scripts/ci/windows-node-modules.sh link
 
       # No cargo-about and no notices regeneration here: the licences job fails when the committed notices
       # (app/src-tauri/resources, app/src/app/about/generated) are out of date, and a release needs that job.
@@ -1013,23 +881,20 @@ jobs:
       # v1 zips) and the public key is built into the app. Without them (forks, pull requests) the app has no
       # update key and reports "updates are not available in this build".
       - name: Build installers
-        working-directory: apps/debrief/app
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         env:
-          # One updater key for the family (ADR 0014, amendment): the app is built with the shared public key. The first
-          # monorepo release is the transition release: signed with Debrief's old key (DEBRIEF_TRANSITION_SIGNING_KEY,
-          # copied from decryp7/debrief's secrets), so installed copies accept it; delete that secret after it shipped and
-          # every later release is signed with the shared key.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.DEBRIEF_TRANSITION_SIGNING_KEY || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.DEBRIEF_TRANSITION_SIGNING_KEY && secrets.DEBRIEF_TRANSITION_SIGNING_KEY_PASSWORD || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # One updater key for the family (ADR 0014, amendment): every release is signed with the shared key only. Copies
+          # installed before the move cannot verify it and are reinstalled once by hand (the release notes say so).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
           # Installers use the size-optimised `dist` profile (thin LTO, one codegen unit, stripped); the sidecars match.
           DEBRIEF_CARGO_PROFILE: dist
         run: |
-          (cd ../../.. && npm ci)
-          # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's
-          # (signed) installer can never be collected into this release.
-          target="${CARGO_TARGET_DIR:-../target}"
+          [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
+          # Host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
+          # installer can never be collected into this release.
+          target="$PADDOCK_BUILD_FOLDER"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
           bundles='${{ matrix.bundles }}'
@@ -1061,9 +926,9 @@ jobs:
       # reaches the packaged library, so a change to the bundle layout cannot ship a worker that fails to start.
       - name: Packaged store worker finds libduckdb by run path (Linux, macOS)
         if: runner.os != 'Windows'
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          bundle="${CARGO_TARGET_DIR:-target}/dist/bundle"
+          bundle="$PADDOCK_BUILD_FOLDER/dist/bundle"
           if [ "$RUNNER_OS" = Linux ]; then
             deb=$(find "$bundle/deb" -name '*.deb' | head -n 1)
             tree=$(mktemp -d)
@@ -1096,15 +961,15 @@ jobs:
       # (opens and reopens a tiny store) and the plugin host from the bundle, so dyld's library validation is exercised.
       - name: Verify the .app and the DMG are ad-hoc sealed and load (macOS)
         if: runner.os == 'macOS'
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: bash scripts/ci/macos-verify-bundle.sh
 
       - name: Collect installers
-        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
           mkdir -p dist
-          dir="${CARGO_TARGET_DIR:-target}"
-          # Git bash on Windows: turn C:\... into a path find understands.
+          dir="$PADDOCK_BUILD_FOLDER"
+          # Git bash on Windows: turn C:/... into a path find understands.
           if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
           find "$dir/dist/bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*-setup.exe' -o -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;
           ls -la dist
@@ -1117,8 +982,16 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: debrief-${{ runner.os }}
-          path: apps/debrief/dist/*
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/dist/*
           if-no-files-found: error
+
+      - name: Unlink the shared node_modules (Windows)
+        if: always() && runner.os == 'Windows'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: bash apps/debrief/scripts/ci/windows-node-modules.sh unlink
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   release:
     name: release
@@ -1126,7 +999,7 @@ jobs:
     needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1136,53 +1009,49 @@ jobs:
         with:
           path: apps/debrief/artifacts
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: apps/debrief/app/.nvmrc
-
+      # git-cliff comes with the image.
       - name: Release notes (git-cliff)
         run: |
-          cargo install git-cliff --locked
+          command -v git-cliff >/dev/null || cargo install git-cliff --locked
           # Debrief's commits and the shared ones it ships (ADR 0014 §4), between its own debrief-v* tags.
           git cliff -r ../.. --config cliff.toml --tag-pattern 'debrief-v.*' --include-path 'apps/debrief/**' \
             --include-path 'crates/**' --include-path 'ui/**' --latest --strip header -o artifacts/RELEASE_NOTES.md
-          # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch.
+          # Not signed or notarized yet (decision 2026-10-23): every release explains the first launch. Copies installed
+          # before the move to the monorepo cannot verify the family's updater key: they are reinstalled once by hand.
           cat >> artifacts/RELEASE_NOTES.md <<'FIRST_LAUNCH'
 
           ### First launch
 
           Debrief is not code-signed yet, so your system may warn the first time you open it.
 
+          - **Existing installs:** download this version once by hand and install it over the old one. Copies installed before Debrief moved to the Paddock repository cannot update themselves to it; later versions update as usual.
           - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Debrief > **Open Anyway**.
           - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
           FIRST_LAUNCH
 
+      # cargo-cyclonedx comes with the image.
       - name: SBOMs (CycloneDX)
         run: |
-          cargo install cargo-cyclonedx --locked
+          command -v cargo-cyclonedx >/dev/null || cargo install cargo-cyclonedx --locked
           cargo cyclonedx --manifest-path app/src-tauri/Cargo.toml --format json --override-filename debrief-rust.cdx
           cp app/src-tauri/debrief-rust.cdx.json artifacts/
           (cd ../.. && npm ci && npx --yes @cyclonedx/cyclonedx-npm --workspace debrief-app --omit dev --output-file apps/debrief/artifacts/debrief-ui.cdx.json)
 
-      # latest.json for the updater: version, notes from RELEASE_NOTES.md, pub_date and, per platform, the
+      # latest.json for the updater (the shared conformance/release/latest-json.mjs, tested there): version, notes from RELEASE_NOTES.md, pub_date and, per platform, the
       # installer's URL in this release, its signature (.sig) and size. Installed apps fetch
-      # releases/download/latest/latest.json, i.e. from the latest (non-pre-release) release.
+      # releases/download/debrief-latest/latest.json (tauri.conf.json), the moving release published below.
       - name: Updater manifest (latest.json)
-        shell: bash
         env:
           # The public address installed apps download from. Inside the runners github.server_url is Gitea's internal
           # http address, which the updater must never be given.
           BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
-          node --test scripts/release/latest-json.test.mjs
           if ! find artifacts -name '*.sig' | grep -q .; then
             echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
             exit 0
           fi
           tag='${{ github.ref_name }}'
-          node scripts/release/latest-json.mjs --dir artifacts --version "${tag#debrief-}" --notes artifacts/RELEASE_NOTES.md \
+          node ../../conformance/release/latest-json.mjs --dir artifacts --version "${tag#debrief-}" --notes artifacts/RELEASE_NOTES.md \
             --base-url "$BASE_URL" --out artifacts/latest.json
           # The signatures are in latest.json; the .sig files are not release assets.
           find artifacts -name '*.sig' -delete
@@ -1190,24 +1059,19 @@ jobs:
 
       # Plain API calls instead of gitea.com/actions/release-action, which is a Go action and the runner image has no Go.
       - name: Publish the release
-        shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          OLD_REPO: decryp7/debrief
         run: |
           publish=../../conformance/release/publish.mjs
           api="${{ github.server_url }}/api/v1"
           node "$publish" --api "$api" --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" \
             --notes artifacts/RELEASE_NOTES.md --dir artifacts
           if [ ! -f artifacts/latest.json ]; then exit 0; fi
-          # The updater's two endpoints (ADR 0014 §4): the moving debrief-latest release in this repo, which installed
-          # copies read from now on, and the bridge, the old repo's newest release, which copies installed before the
-          # move read (Gitea resolves its releases/download/latest/ to the newest release). Both get only latest.json,
-          # which points at the installers here.
+          # The updater's one endpoint: the moving debrief-latest release in this repo gets this release's latest.json,
+          # which points at the installers here. Nothing is written to the old repo (no update bridge: installs from
+          # before the move are reinstalled by hand).
           mkdir -p "$RUNNER_TEMP/latest" && cp artifacts/latest.json "$RUNNER_TEMP/latest/"
           node "$publish" --api "$api" --repo "${{ github.repository }}" --tag debrief-latest \
-            --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace
-          node "$publish" --api "$api" --repo "$OLD_REPO" --newest \
             --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace
 
   # Records a fully green scheduled run for this commit; `plan` skips the next scheduled run while main is unchanged.
@@ -1218,7 +1082,7 @@ jobs:
     if: github.event_name == 'schedule' && success()
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: .

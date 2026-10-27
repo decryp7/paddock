@@ -6,7 +6,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMain } from '../../../conformance/src/util/is-main.mjs';
 
 export const TYPES = ['feat', 'fix', 'perf', 'refactor', 'test', 'docs', 'ci', 'chore', 'build', 'style', 'revert'];
 const HEADER = new RegExp(`^(${TYPES.join('|')})(\\([a-z0-9][a-z0-9._/-]*\\))?!?: \\S.*$`);
@@ -64,4 +64,4 @@ function main(argv) {
   return bad ? 1 : 0;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.exit(main(process.argv.slice(2)));
+if (isMain(import.meta.url)) process.exit(main(process.argv.slice(2)));

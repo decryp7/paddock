@@ -642,7 +642,11 @@ fn set_startup(shared: &Arc<Shared>, id: &str, state: StartupState) -> Result<Ac
 }
 
 fn history(shared: &Shared, range: dyno_core::history::HistoryRange, end: Option<Timestamp>) -> Result<History, AgentError> {
-    let w = window(range, end.unwrap_or_else(now));
+    // A live view (no end) includes this very millisecond: a change recorded just before the question is in the answer.
+    let w = match end {
+        Some(end) => window(range, end),
+        None => dyno_core::history::live_window(range, now()),
+    };
     let core = lock(&shared.core);
     let s = &core.store;
     let raw = s.points(w.tier, w.from, w.to).map_err(internal)?;

@@ -119,7 +119,7 @@ impl Host {
                 Err(e) => return Err(e.into()),
             }
         };
-        let left = deadline.saturating_duration_since(Instant::now()).max(Duration::from_millis(1));
+        let left = handshake_timeout(deadline, Instant::now());
         stream.set_read_timeout(Some(left))?;
         let hello = match read_frame::<Frame<()>>(&mut stream, self.limit) {
             Ok(Some(f)) => f,
@@ -181,6 +181,14 @@ impl Host {
     }
 }
 
+/// How long an accepted client has to send its Hello. The wait for a client ends at `deadline`; a client that connected just
+/// before it still gets the whole handshake time (as long as a client waits for the answer), instead of what was left of the
+/// wait. Otherwise a client that arrived in the last moment of a short accept window was dropped before its Hello was read
+/// and saw a reset connection instead of an answer (the helper accepts in 500 ms windows).
+fn handshake_timeout(deadline: Instant, now: Instant) -> Duration {
+    deadline.saturating_duration_since(now).max(CONNECT_TIMEOUT)
+}
+
 /// The connecting side.
 pub struct Client;
 
@@ -240,6 +248,22 @@ mod tests {
         let h = Host::listen().unwrap();
         let (name, token) = (h.name().to_string(), h.token().clone());
         (h, name, token)
+    }
+
+    #[test]
+    fn a_client_that_connects_at_the_end_of_the_wait_gets_the_whole_handshake_time() {
+        let now = Instant::now();
+        assert_eq!(handshake_timeout(now, now), CONNECT_TIMEOUT);
+        assert_eq!(
+            handshake_timeout(now, now + Duration::from_secs(1)),
+            CONNECT_TIMEOUT,
+            "a wait already over"
+        );
+        assert_eq!(
+            handshake_timeout(now + Duration::from_secs(60), now),
+            Duration::from_secs(60),
+            "a longer wait is kept"
+        );
     }
 
     #[test]
@@ -360,16 +384,13 @@ mod tests {
     }
 
     #[test]
-    fn nobody_connecting_or_saying_nothing_times_out() {
+    fn nobody_connecting_times_out_and_a_client_that_hangs_up_unheard_is_refused() {
         let (mut h, name, _) = host();
         assert!(matches!(h.accept(Duration::from_millis(80)), Err(IpcError::Timeout(_))));
-        let silent = std::thread::spawn(move || {
-            let s = Stream::connect(&name, Duration::from_secs(5)).unwrap();
-            std::thread::sleep(Duration::from_millis(400));
-            drop(s);
-        });
-        assert!(matches!(h.accept(Duration::from_millis(200)), Err(IpcError::Timeout(_))));
-        silent.join().unwrap();
+        // Connected and gone before saying anything: an error, never a connection (closed, or on macOS the socket option
+        // refused on a socket whose peer left). A silent client that stays is bounded by handshake_timeout.
+        drop(Stream::connect(&name, Duration::from_secs(5)).unwrap());
+        assert!(h.accept(Duration::from_millis(80)).is_err());
     }
 
     #[test]

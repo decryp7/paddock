@@ -412,6 +412,29 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   folder out of sccache's key (it hashes every `CARGO_*` variable) set it as cargo configuration
   (`--config build.target-dir='...'`), not with `CARGO_TARGET_DIR`. nextest still writes its own store (junit) under the
   default `target/nextest`.
+- Moving a suite from `cargo test` to nextest changes one thing tests can notice: every test is its own process. A static
+  `Mutex` that made tests take turns on an outside resource (Spotter's real-browser tests, which starve each other when
+  several Chromes start at once) serialises nothing any more; the turn-taking becomes a nextest test group
+  (`max-threads = 1`) in the workspace's `.config/nextest.toml`. Grep for `static .*Mutex<()>` in tests before switching.
+- Tests that need a build in a particular order (Pitwall: tauri-build copies a placeholder sidecar over
+  `target/debug/pitwall-server`, which the server's tests start) stay two nextest runs, the shell's last.
+- The imported apps' workflows (2026-10-25): installers, the real-app smoke and WebKit only on full runs (main, the app's
+  tag, nightly, a manual run with `bundles: true`); the image's Chrome for Testing and Playwright browsers instead of a
+  download per job; one port per e2e shard across every workflow (ci-actions.test.mjs checks it). `tauri build` asks
+  cargo where the build is, so a `--config` flag on the cargo commands does not reach it; the shared build-folder action
+  writes the folder to the workspace's `.cargo/ci.toml` (included by its `.cargo/config.toml`), which every cargo command
+  and `tauri build` read, and nothing sets CARGO_TARGET_DIR.
+- A live history view whose window ends at `now()`, exclusive, misses what was recorded in the same millisecond (Dyno's
+  network timeline flake): a live window ends just after now. An accept loop with short windows must give a client that
+  connected late the whole handshake time, or it drops the client unread and the client sees a reset (Dyno's helper).
+- A Unix socket on a loaded Mac (load 30-90) sometimes fails with no one at fault (Dyno's agent tests, 1 run in 15): `recv`
+  returns EBADF on an open, healthy socket (an interposed trace of every open, socket, accept, dup and close showed
+  nothing closed it; `fcntl` and `SO_ERROR` were fine, `kern.ipc.sodefunct_calls` did not move, data was waiting and the
+  same call made again worked), and now and then a fresh pair starts broken (the host's first call on its end EINVAL, the
+  client's read EBADF). A plain C loop of the same handshake did not reproduce it, so the trigger is not known yet. Dyno's
+  IPC tries a read or write again while the descriptor is still open (bounded, unit-tested), which cut the failures by
+  about two thirds; the broken-from-the-start pairs remain open work. Find a descriptor's history with a
+  `DYLD_INSERT_LIBRARIES` interposer before blaming a double close.
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for

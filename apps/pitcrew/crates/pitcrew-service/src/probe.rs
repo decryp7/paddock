@@ -236,9 +236,11 @@ mod tests {
     #[test]
     fn sees_its_own_process_and_the_machine() {
         let mut p = Probe::new();
+        // Other processes may run this test binary at the same time (nextest runs every test in its own process), so
+        // the binary is found running, and the excluded process is never the answer.
         let exe = std::env::current_exe().unwrap();
-        assert_eq!(p.running_binary(&exe, None), Some(std::process::id()));
-        assert_eq!(p.running_binary(&exe, Some(std::process::id())), None);
+        assert!(p.running_binary(&exe, None).is_some());
+        assert_ne!(p.running_binary(&exe, Some(std::process::id())), Some(std::process::id()));
         assert!(!p.has_job_children(u32::MAX));
         let m = p.machine(Timestamp(1), &std::env::temp_dir());
         assert!(m.mem_total_bytes > 0);

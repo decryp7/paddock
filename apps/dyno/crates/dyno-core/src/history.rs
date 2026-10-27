@@ -166,6 +166,12 @@ pub fn window(range: HistoryRange, end: Timestamp) -> Window {
     }
 }
 
+/// The window of a live view (no end chosen) asked for at `now`: it ends just after `now`, so a change recorded in the same
+/// millisecond as the question is in the answer (a window's end is exclusive).
+pub fn live_window(range: HistoryRange, now: Timestamp) -> Window {
+    window(range, now.plus(1))
+}
+
 /// A point from one instantaneous sample.
 pub fn point_from(s: &SystemSample) -> HistoryPoint {
     let (rx, tx) = s.network_totals();
@@ -410,6 +416,18 @@ mod tests {
             assert!(w.resolution_ms >= w.tier.step_ms());
         }
         assert_eq!(Tier::ALL.map(Tier::step_ms), [5_000, 60_000, 900_000, 3_600_000]);
+    }
+
+    #[test]
+    fn a_live_window_holds_what_happened_in_the_millisecond_it_was_asked() {
+        let now = Timestamp(100 * DAY);
+        for r in [HistoryRange::Hour, HistoryRange::Day, HistoryRange::Week, HistoryRange::Month] {
+            let w = live_window(r, now);
+            assert!(w.from <= now && now < w.to, "{r:?}: {w:?}");
+            // A plain window ending at `now` leaves `now` out: the live view once missed a change made a moment before.
+            assert!(now >= window(r, now).to);
+            assert_eq!(w.to.since(w.from), window(r, now).to.since(window(r, now).from));
+        }
     }
 
     #[test]

@@ -11,6 +11,7 @@ node_modules/
 # Generated from scss/ by `npm run build:css`.
 /ui/projects/paddock-ui/css/
 /crates/target/
+/crates/.cargo/ci.toml
 .DS_Store
 
 # Icon set build deps

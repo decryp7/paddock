@@ -10,7 +10,8 @@
 //   node scripts/ci/scan-fixtures.mjs [root ...]      (default: samples and every crates/*/tests/fixtures)
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -120,4 +121,4 @@ export function main(argv, log = console) {
   return bad ? 1 : 0;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.exit(main(process.argv.slice(2)));
+if (isMain(import.meta.url)) process.exit(main(process.argv.slice(2)));

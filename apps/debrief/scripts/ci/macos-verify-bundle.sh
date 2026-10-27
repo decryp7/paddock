@@ -6,7 +6,8 @@
 #   scripts/ci/macos-verify-bundle.sh [path/to/Debrief.app]   (also checks the .dmg next to it, when there is one)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-dir="${CARGO_TARGET_DIR:-target}"
+# The build folder: PADDOCK_BUILD_FOLDER in CI (the shared build-folder action), else CARGO_TARGET_DIR or target/.
+dir="${PADDOCK_BUILD_FOLDER:-${CARGO_TARGET_DIR:-target}}"
 bundle="$dir/dist/bundle"
 app="${1:-$(find "$bundle/macos" -maxdepth 1 -name '*.app' -print -quit 2>/dev/null)}"
 [ -d "${app:-}" ] || { echo "::error::no .app bundle found (looked in $bundle/macos)"; exit 1; }

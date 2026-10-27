@@ -8,7 +8,8 @@
 //   node scripts/ci/check-index.mjs [path/to/index.html ...]   (default: app/dist/app/browser/**/index.html)
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
 /** Inline `<style>` / `<script>` opening tags (a script with a `src` is external and fine). */
 export function inlineElements(html) {
@@ -67,4 +68,4 @@ export function main(argv, log = console) {
   return bad ? 1 : 0;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) process.exit(main(process.argv.slice(2)));
+if (isMain(import.meta.url)) process.exit(main(process.argv.slice(2)));

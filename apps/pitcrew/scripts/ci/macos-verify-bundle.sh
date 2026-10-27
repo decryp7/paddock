@@ -13,7 +13,8 @@ set -euo pipefail
 app="${1:-}"
 [ -z "$app" ] || [ ! -d "$app" ] || app="$(cd "$app" && pwd)"
 cd "$(dirname "$0")/../.."
-dir="${CARGO_TARGET_DIR:-target}"
+# The build folder: the CI build-folder action's, else cargo's variable, else target/.
+dir="${PADDOCK_BUILD_FOLDER:-${CARGO_TARGET_DIR:-target}}"
 [ -n "$app" ] || app="$(find "$dir/dist/bundle/macos" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)"
 [ -d "${app:-}" ] || { echo "::error::no .app bundle found (looked in ${1:-$dir/dist/bundle/macos})"; exit 1; }
 app="$(cd "$app" && pwd)"

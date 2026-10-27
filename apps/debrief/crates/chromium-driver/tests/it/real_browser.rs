@@ -12,7 +12,7 @@ use std::time::Duration;
 fn browser_or_skip() -> Option<chromium_driver::BrowserExe> {
     let found = find();
     if found.is_none() && std::env::var_os("DEBRIEF_REQUIRE_TEST_BROWSER").is_some_and(|v| !v.is_empty() && v != "0") {
-        panic!("DEBRIEF_REQUIRE_TEST_BROWSER is set but no pinned test browser was found: run scripts/ci/install-test-browser.mjs and set CHROMIUM_TEST_PATH");
+        panic!("DEBRIEF_REQUIRE_TEST_BROWSER is set but no pinned test browser was found: install the pin with conformance/ci/install-test-browser.mjs --rust-source app/src-tauri/src/browser/runtime.rs and set CHROMIUM_TEST_PATH");
     }
     found
 }

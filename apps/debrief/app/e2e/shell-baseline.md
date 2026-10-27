@@ -2,8 +2,23 @@
 
 `shell-baseline.e2e.ts` holds the screenshot baseline of the shell and workbench layer, taken before any code moves to
 Paddock. The matrix is documented at the top of the spec: 30 screenshots per browser (Chromium and WebKit have their
-own, named per project and platform in `shell-baseline.e2e.ts-snapshots/`, darwin only for now). Refresh with
-`npx playwright test shell-baseline --update-snapshots` and review every PNG.
+own, named per browser and platform in `shell-baseline.e2e.ts-snapshots/`, darwin only).
+
+It is a manual migration baseline, not a CI check: the pixels are compared on the Mac the baseline was taken on (fonts
+and rendering differ between macOS and the Linux CI image, so a Linux run has no baseline to compare with; CI 6381 failed
+all 30 Chromium screenshots with "A snapshot doesn't exist ... -chromium-linux.png"). The default run
+(`npx playwright test`, CI) leaves the spec out; it runs only in its own two projects, which exist when
+`DEBRIEF_SHELL_BASELINE=1` is set:
+
+```sh
+cd apps/debrief/app
+npm run e2e:shell-baseline                          # compare with the committed darwin baseline (macOS)
+npm run e2e:shell-baseline -- --update-snapshots    # take it again; review every PNG before committing
+npx playwright test --project=shell-baseline-chromium   # one browser (with DEBRIEF_SHELL_BASELINE=1 set)
+```
+
+The projects keep the snapshot names (`<shot>-chromium-darwin.png`, `<shot>-webkit-darwin.png`) through their
+`snapshotPathTemplate`. The workbench migration (plan M5) runs this before and after each step.
 
 Known app nondeterminism, handled in the spec: the dock's first layout races the status bar and the data load, so the
 Timeline/Events splitter ends 3 px off on a loaded machine (Chromium 300 or 303 px; WebKit 282 px). Each dock

@@ -11,9 +11,13 @@ import { openAppWith } from './mock-url';
  * Shell baseline (Paddock X50, plan package W0): screenshots of the shell and workbench layer taken BEFORE any
  * workbench code moves out of Debrief, so the migration (plan M5) can prove "no behaviour change" by pixel diff.
  * Browser build with the mock backend; every shot runs with reduced motion, animations off and the mock's
- * deterministic demo data. Chromium and WebKit each have their own snapshots (named per project and platform, in
- * `shell-baseline.e2e.ts-snapshots/`); create or refresh them with
- * `npx playwright test shell-baseline --update-snapshots` and commit the PNGs.
+ * deterministic demo data. Chromium and WebKit each have their own snapshots (named per browser and platform, in
+ * `shell-baseline.e2e.ts-snapshots/`, darwin only).
+ *
+ * Opt-in, never in the default run or CI: a manual migration baseline, compared on the Mac it was taken on (fonts and
+ * rendering differ per platform; CI runs Linux). Run it with `npm run e2e:shell-baseline` (DEBRIEF_SHELL_BASELINE=1 adds
+ * the projects `shell-baseline-chromium` and `shell-baseline-webkit`, playwright.config.ts); create or refresh the
+ * snapshots with `npm run e2e:shell-baseline -- --update-snapshots` and commit the PNGs. See shell-baseline.md.
  *
  * Matrix per browser (30 screenshots, 60 with Chromium and WebKit; the full cross product is not needed):
  *  - Layouts x sizes: the default layout (Investigate perspective) in dark AND light, the fullest layout and the
@@ -118,6 +122,9 @@ async function confirmLayout(page: Page, name: string): Promise<void> {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, now);
     return;
+  }
+  if (!existsSync(file)) {
+    throw new Error(`no layout baseline ${file}: the W0 baseline exists for darwin only (run on the Mac, or with --update-snapshots)`);
   }
   const expected = readFileSync(file, 'utf8');
   if (now !== expected) throw new Error(`pixels: layout race in ${name}: ${now} (expected ${expected})`);

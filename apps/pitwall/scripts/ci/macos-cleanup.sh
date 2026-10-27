@@ -8,7 +8,8 @@ pkill -x llama-server 2>/dev/null || true
 pkill -f 'fake[-_]engine' 2>/dev/null || true
 rm -rf "${TMPDIR:-/tmp}"/pitwall-* 2>/dev/null || true
 if [ "${1:-}" = "--build-outputs" ]; then
-  rm -rf "${CARGO_TARGET_DIR:-}/dist" "${CARGO_TARGET_DIR:-}/debug" 2>/dev/null || true
+  dir="${PADDOCK_BUILD_FOLDER:-${CARGO_TARGET_DIR:-}}"
+  if [ -n "$dir" ]; then rm -rf "$dir/dist" "$dir/debug" 2>/dev/null || true; fi
   rm -rf dist app/dist app/coverage app/playwright-report 2>/dev/null || true
 fi
 exit 0

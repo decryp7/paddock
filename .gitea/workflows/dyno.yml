@@ -1,22 +1,34 @@
 # Dyno's CI and release in the Paddock monorepo (ADR 0014; moved from decryp7/dyno's build.yml): every step runs in
 # apps/dyno. The plan job runs the rest only when the change reaches Dyno (scripts/affected.mjs --ci --app dyno).
-# Installers are built for dyno-v* tags (which publish the Gitea release here, the moving dyno-latest release the app's
-# updater reads and the bridge latest.json in the old repo), the nightly run and manual runs.
 #
-# Checks Dyno on every push and pull request. Installers are built only for v* tags (which also publish a Gitea
-# release with them attached), the nightly run and manual runs (see the bundle job).
+# Built like Paddock's own CI (ci.yml): the paddock-ci image on Linux (Rust, Tauri's libraries, Node, Playwright's browsers,
+# cargo-nextest and cargo-deny baked in), one Rust leg per OS through the shared actions (setup-rust: sccache on local disk;
+# stable-workspace and a kept build folder on the host runners, set as cargo configuration by the build-folder action, never CARGO_TARGET_DIR;
+# host-tools: the pinned cargo-nextest), nextest's ci profile with its per-test time budget (apps/dyno/.config/nextest.toml)
+# plus the doc tests, the npm and Angular caches (node-caches), and the Chromium e2e in two shards.
 #
-# Runner labels: ubuntu-latest, windows-latest, macos-latest. The Windows and macOS runners are host runners on the
-# owner's machines: one job at a time, so those jobs stay lean. They install nothing system-wide, keep their build
-# output in one folder outside the workspace (pruned when it grows past a cap, scripts/ci-prune.sh) and leave no
-# processes, launch agents or temp folders behind. Dyno's tests act only on dummy processes and temp folders they
-# create themselves (AGENTS.md "Safety"), which matters most on the macOS runner: it is a person's real Mac.
-# Linux jobs run in the garage image (https://dev.decryptology.net/decryp7/garage): Rust, Tauri libraries, Node, Playwright
-# browsers and sccache pre-installed, root, no sudo.
-# Releases need a repository secret RELEASE_TOKEN (a Gitea access token with write:repository scope); signed
-# updates need TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD and TAURI_UPDATER_PUBKEY
-# (docs/releasing.md). Without them everything still builds, unsigned and without update support.
-# Actions are referenced by tag; Renovate (renovate.json, helpers:pinGitHubActionDigests) pins them to digests.
+# Where each check runs:
+#   rust (Linux, Windows, macOS)  format (Linux), clippy (all three), tests (nextest), doc tests, the Linux adapters against
+#                                 the container's real /proc (Linux), the agent's one real measurement (macOS, full runs)
+#   licences                      cargo deny, commit messages (pull requests), script tests, Tauri capabilities and CSP
+#   frontend                      npm audit, lint, ng build, index.html without inline elements, unit tests with coverage,
+#                                 unit tests in another time zone
+#   e2e (2 shards)                Playwright, Chromium, mock backend
+#   e2e-webkit                    Playwright, WebKit (full runs only)
+#   bundle (3 OS)                 installers; the real-app smoke: run paths and seals of the packaged binaries, on macOS
+#                                 the seal and sidecars started from the built app (full runs)
+#   release                       a dyno-v* tag: notes, latest.json, the Gitea release
+# A full run is a push to main, a dyno-v* tag, the nightly run, or a manual run with `bundles: true`; other branches and
+# pull requests run Chromium only and build no installers (rule 3).
+#
+# Dyno's tests act only on dummy processes and temp folders they create themselves (AGENTS.md "Safety"), which matters most
+# on the macOS runner: it is a person's real Mac. The host runners keep their build folders within a cap (scripts/ci-prune.sh).
+# Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
+# system-wide and leave no processes or launch agents behind).
+# Releases need RELEASE_TOKEN (a Gitea access token with write:repository scope); signed updates need the family's updater
+# key, PADDOCK_TAURI_SIGNING_PRIVATE_KEY, PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD and PADDOCK_TAURI_UPDATER_PUBKEY.
+# Installed copies update from the moving dyno-latest release here; copies installed before the move to the monorepo
+# are reinstalled once by hand (no transition release).
 
 name: dyno
 
@@ -28,6 +40,11 @@ on:
   schedule:
     - cron: "45 0 * * *"
   workflow_dispatch:
+    inputs:
+      bundles:
+        description: "Full run: also the installers, the real-app smoke and the WebKit e2e"
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -46,7 +63,7 @@ defaults:
 
 jobs:
   # Runs the rest only when the change reaches Dyno (the same plan as ci.yml); a push to main whose commit carries a
-  # dyno-v* tag is covered by the tag run.
+  # dyno-v* tag is covered by the tag run. `full`: the installers, the real-app smoke and WebKit run too.
   plan:
     name: plan
     runs-on: ubuntu-latest
@@ -57,6 +74,7 @@ jobs:
         working-directory: .
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      full: ${{ steps.plan.outputs.full }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,6 +86,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
+          BUNDLES: ${{ github.event.inputs.bundles }}
           PLAN_TOKEN: ${{ github.token }}
         run: |
           run=$(node scripts/affected.mjs --ci --app dyno)
@@ -75,193 +94,123 @@ jobs:
             tag=$(git ls-remote --tags origin 'refs/tags/dyno-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
             if [ -n "$tag" ]; then run=false; echo "::notice::commit is tagged $tag; the tag run is the gate."; fi
           fi
+          full=false
+          case "$EVENT" in
+            schedule) full=true ;;
+            workflow_dispatch) if [ "$BUNDLES" = true ]; then full=true; fi ;;
+            push) case "$REF" in refs/heads/main|refs/tags/dyno-v*) full=true ;; esac ;;
+          esac
           echo "run=$run" >> "$GITHUB_OUTPUT"
-  rust-lint:
-    name: rust format + clippy
-    if: needs.plan.outputs.run == 'true'
-    needs: [plan]
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
-    steps:
-      - uses: actions/checkout@v4
+          echo "full=$full" >> "$GITHUB_OUTPUT"
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-
-      # Cheap and first: a formatting slip fails in seconds.
-      - name: Format
-        run: cargo fmt --all --check
-
-      - name: Linux dependencies for Tauri
-        run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
-
-      - uses: actions/cache/restore@v4
-        id: cargo-cache
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/dyno/target
-            !apps/dyno/target/debug/incremental
-          key: clippy-garage-${{ runner.os }}-${{ hashFiles('apps/dyno/Cargo.lock') }}
-          restore-keys: clippy-garage-${{ runner.os }}-
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - uses: actions/cache/save@v4
-        if: always() && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            apps/dyno/target
-            !apps/dyno/target/debug/incremental
-          key: clippy-garage-${{ runner.os }}-${{ hashFiles('apps/dyno/Cargo.lock') }}
-
-  rust-test:
-    name: rust tests (${{ matrix.os }})
+  # One leg per OS, as Paddock's crate job: the macOS code for real (launch agent, Unix sockets, SIGSTOP/SIGCONT duty cycles,
+  # lsof, codesign) on the Mac host runner, the Windows adapters where they run (cross-checking them from Linux needs a
+  # Windows C toolchain for the bundled SQLite). Every step runs even after another
+  # failed; nextest names the crate of every failure.
+  rust:
+    name: rust (${{ matrix.os }})
     if: needs.plan.outputs.run == 'true'
     needs: [plan]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
-    env:
-      RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
-      SCCACHE_DIR: /sccache
-      SCCACHE_CACHE_SIZE: 5G
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runner: Git's bash on PATH (actions and `shell: bash` need it) and a build folder that
-      # outlives the job, so the next run builds incrementally.
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
+        working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.dyno-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Linux dependencies for Tauri
-        if: runner.os == 'Linux'
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        working-directory: .
         run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+          echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      # sccache compile cache for the Linux build (docs/development.md: a runner volume is the faster option).
-      - name: Restore the sccache compile cache
-        if: runner.os == 'Linux'
-        id: sccache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # The same physical checkout path every run on the host runners, so sccache hits the workspace crates too.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
         with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/dyno/**/Cargo.lock') }}
-          restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
+          name: dyno-${{ github.job }}-${{ runner.os }}
 
-      - uses: actions/cache/restore@v4
-        if: runner.os == 'Linux'
-        id: cargo-cache
+      # The build folder as cargo configuration (.cargo/ci.toml): target/ here on Linux, a kept folder on the hosts.
+      - uses: ./.gitea/actions/build-folder
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/dyno/Cargo.lock') }}
-          restore-keys: test-registry-${{ runner.os }}-
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+          name: dyno-${{ github.job }}
 
-      # The Windows adapters are linted where they run: cross-checking them from Linux needs a Windows C toolchain
-      # for the bundled SQLite, which the Linux container does not have.
-      - name: Clippy (Windows)
-        if: runner.os == 'Windows'
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy rustfmt
+
+      - uses: ./.gitea/actions/host-tools
+
+      # Cheap and first: a formatting slip fails in seconds.
+      - name: Format
+        if: runner.os == 'Linux'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+        shell: bash
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --no-fail-fast
-
-      # The Linux adapters against this container's real /proc and /sys (the run above already includes them; this
-      # names them in the log). scripts/linux-verify.sh also runs them as uid 1000 on a developer machine, where
-      # "other users' processes are out of sight" shows.
-      - name: Linux adapter tests (real /proc)
-        if: runner.os == 'Linux'
-        run: "cargo test -p dyno-platform -- linux:: parse::"
-
-      - name: sccache statistics
-        if: always() && runner.os == 'Linux'
-        run: sccache --show-stats
-
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/dyno/**/Cargo.lock') }}
-
-      - uses: actions/cache/save@v4
-        if: always() && runner.os == 'Linux' && steps.cargo-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: test-registry-${{ runner.os }}-${{ hashFiles('apps/dyno/Cargo.lock') }}
-
-      # Nothing may stay behind on the host: cap the persistent build folder, remove test temp folders.
-      - name: Prune the build folder (Windows)
-        if: always() && runner.os == 'Windows'
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         shell: bash
-        run: |
-          bash scripts/ci-prune.sh "$(cygpath -u "$USERPROFILE")/.dyno-ci" 20 || true
-          rm -rf "$(cygpath -u "${TEMP:-/tmp}")"/dyno-* || true
+        run: cargo nextest run --workspace --profile ci
 
-  # The macOS code for real (launch agent, Unix sockets, SIGSTOP/SIGCONT duty cycles, lsof, codesign): clippy and
-  # the tests on the Mac host runner. The platform tests spawn their own dummy processes and act only on those.
-  macos:
-    name: macOS clippy + tests
-    if: needs.plan.outputs.run == 'true'
-    needs: [plan]
-    runs-on: macos-latest
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/../.dyno-ci-target
-      CARGO_BUILD_JOBS: "4"
-    steps:
-      - uses: actions/checkout@v4
+      # The Linux adapters against this container's real /proc and /sys (the run above already includes them; this names
+      # them in the log). scripts/linux-verify.sh also runs them as uid 1000 on a developer machine.
+      - name: Linux adapter tests (real /proc)
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+        run: cargo nextest run -p dyno-platform --profile ci -E 'test(/linux::/) | test(/parse::/)'
 
-      - name: Toolchain present
-        run: |
-          rustc --version && cargo --version
-          cargo clippy --version || { echo "::error::clippy is missing on the Mac runner (rustup component add clippy)"; exit 1; }
+      # nextest does not run doc tests.
+      - name: Doc tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+        shell: bash
+        run: cargo test --workspace --doc
 
-      - name: Clippy (macOS)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Tests (macOS)
-        run: cargo test --workspace --no-fail-fast
-
-      # The agent's own CLI on the real machine: one measurement, read-only.
+      # The real-app smoke on the Mac: the agent's own CLI on the real machine, one measurement, read-only (full runs).
       - name: Agent measures once (macOS)
+        if: ${{ !cancelled() && runner.os == 'macOS' && needs.plan.outputs.full == 'true' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         run: |
           out="${TMPDIR:-/tmp}/dyno-once-ci.json"
           cargo run -q -p dyno-agent -- once > "$out"
           head -c 400 "$out"
           rm -f "$out"
 
-      - name: Clean up test leftovers
-        if: always()
+      # Nothing may stay behind on the host: cap the kept build folder, remove test temp folders.
+      - name: Prune the build folder (host runners)
+        if: always() && runner.os != 'Linux'
+        shell: bash
         run: |
-          bash scripts/ci-prune.sh "$CARGO_TARGET_DIR" 20 || true
-          rm -rf "${TMPDIR:-/tmp}"/dyno-* || true
+          if [ "$RUNNER_OS" = Windows ]; then
+            bash scripts/ci-prune.sh "$(cygpath -u "$PADDOCK_BUILD_FOLDER")" 20 || true
+            rm -rf "$(cygpath -u "${TEMP:-/tmp}")"/dyno-* || true
+          else
+            bash scripts/ci-prune.sh "$PADDOCK_BUILD_FOLDER" 20 || true
+            rm -rf "${TMPDIR:-/tmp}"/dyno-* || true
+          fi
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   licences:
     name: licences, scripts + commits
@@ -269,31 +218,12 @@ jobs:
     needs: [plan]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
         with:
           # Full history so pull requests can check every commit message.
           fetch-depth: 0
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('apps/dyno/Cargo.lock') }}
-          restore-keys: licences-${{ runner.os }}-
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
 
       - name: Commit messages follow Conventional Commits
         if: github.event_name == 'pull_request'
@@ -307,17 +237,9 @@ jobs:
       - name: Tauri capabilities and CSP
         run: node scripts/check-capabilities.mjs
 
+      # cargo-deny comes with the image.
       - name: Licences, advisories and sources
         run: cargo deny --all-features --workspace check
-
-      - uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/advisory-dbs
-          key: licences-${{ runner.os }}-${{ hashFiles('apps/dyno/Cargo.lock') }}-${{ github.run_id }}
 
   frontend:
     name: frontend build, lint + unit tests
@@ -325,18 +247,17 @@ jobs:
     needs: [plan]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     defaults:
       run:
         working-directory: apps/dyno/app
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: ./.gitea/actions/node-caches
         with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
+          angular-dir: apps/dyno/app
+          name: dyno-${{ github.job }}
 
       - name: Install
         run: |
@@ -362,59 +283,89 @@ jobs:
       - name: Tests are timezone-independent
         run: TZ=Pacific/Auckland npx ng test --watch=false
 
-  # The browser flows against the mock backend (ng serve): Chromium, and WebKit where the browser installs.
+  # Browser flows against `ng serve` with the mock backend in Chromium, in two shards that run at the same time (one worker
+  # each; --fully-parallel lets a shard take part of a file). Playwright's browsers come with the image. One port per
+  # shard: another job may hold a port on the same runner.
   e2e:
-    name: playwright (${{ matrix.project }})
+    name: e2e chromium (shard ${{ matrix.shard }}/2)
     if: needs.plan.outputs.run == 'true'
     needs: [plan]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     strategy:
       fail-fast: false
       matrix:
-        project: [chromium, webkit]
+        shard: [1, 2]
     defaults:
       run:
         working-directory: apps/dyno/app
+    env:
+      PW_PORT: ${{ matrix.shard == 1 && '4360' || '4361' }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: ./.gitea/actions/node-caches
         with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          angular-dir: apps/dyno/app
+          name: dyno-e2e-${{ matrix.shard }}
 
       - name: Install
-        run: |
-          (cd ../../.. && npm ci)
-          npx playwright install --with-deps ${{ matrix.project }}
+        run: (cd ../../.. && npm ci)
 
-      - name: Browser flows
-        env:
-          CI: "true"
-        run: npx playwright test --workers=1 --project=${{ matrix.project }}
+      - name: End-to-end tests (Chromium)
+        run: npx playwright test --project=chromium --workers=1 --fully-parallel --shard=${{ matrix.shard }}/2
 
-      - name: Upload Playwright report
+      - uses: actions/upload-artifact@v3
         if: failure()
-        uses: actions/upload-artifact@v3
         with:
-          name: playwright-report-${{ matrix.project }}
+          name: playwright-results-chromium-${{ matrix.shard }}
           path: |
             apps/dyno/app/playwright-report
             apps/dyno/app/.angular/playwright-results
           if-no-files-found: ignore
 
+  # WebKit (the engine of the macOS app's WKWebView) on full runs only (rule 3: branches run Chromium).
+  e2e-webkit:
+    name: e2e webkit
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
+    needs: [plan]
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: apps/dyno/app
+    env:
+      PW_PORT: "4362"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/dyno/app
+          name: dyno-e2e-webkit
+
+      - name: Install
+        run: (cd ../../.. && npm ci)
+
+      - name: End-to-end tests (WebKit)
+        run: npx playwright test --project=webkit --workers=1
+
+      - uses: actions/upload-artifact@v3
+        if: failure()
+        with:
+          name: playwright-results-webkit
+          path: |
+            apps/dyno/app/playwright-report
+            apps/dyno/app/.angular/playwright-results
+          if-no-files-found: ignore
+
+  # Installers and the real-app smoke (the macOS seal, sidecars started from the built app) on full runs only.
   bundle:
     name: bundle (${{ matrix.os }})
-    needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    needs: [plan]
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -426,62 +377,45 @@ jobs:
           - os: ubuntu-latest
             bundles: deb,appimage
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
-    env:
-      RUSTC_WRAPPER: ${{ matrix.os == 'ubuntu-latest' && 'sccache' || '' }}
-      SCCACHE_DIR: /sccache
-      SCCACHE_CACHE_SIZE: 5G
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     steps:
       - uses: actions/checkout@v4
 
-      # The WebKitGTK, GTK and appindicator packages the app links against, and what the AppImage bundler needs.
-      - name: Linux dependencies for Tauri and the bundles
-        if: runner.os == 'Linux'
-        run: |
-          if [ -f /etc/garage-release ]; then echo "garage image: the system packages are installed"; exit 0; fi
-          SUDO=$(command -v sudo || true)
-          $SUDO apt-get update
-          $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf file xdg-utils binutils
-
-      # sccache compile cache for the Linux build (docs/development.md: a runner volume is the faster option).
-      - name: Restore the sccache compile cache
-        if: runner.os == 'Linux'
-        id: sccache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/dyno/**/Cargo.lock') }}
-          restore-keys: sccache-${{ runner.os }}-${{ github.job }}-
-
-      - uses: actions/setup-node@v4
-        if: runner.os == 'Linux'
-        with:
-          node-version-file: .nvmrc
-
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
+        working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.dyno-ci\target-%GITHUB_JOB%>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      # The Mac host runner keeps its own toolchain (nothing is installed there); its build folder lives outside the
-      # workspace so the runner's workspace clean-up never has to walk it.
-      - name: Persistent build folder (macOS)
+      - name: Build jobs (macOS)
         if: runner.os == 'macOS'
         run: |
-          echo "CARGO_TARGET_DIR=${{ github.workspace }}/../.dyno-ci-target-bundle" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
-      - uses: dtolnay/rust-toolchain@stable
-        if: runner.os != 'macOS'
+      # The same physical checkout path every run on the host runners (sccache keys a compile on its folder), and the
+      # release build folder as cargo configuration (.cargo/ci.toml), which the Tauri build reads like every cargo command:
+      # target/ on Linux, a kept folder on the hosts.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: dyno-${{ github.job }}-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+          name: dyno-${{ github.job }}
+
+      - uses: ./.gitea/actions/setup-rust
 
       # Host runners keep their own Node; fail fast when it is missing or not the major version the repo root .nvmrc asks for.
-      - name: Host Node matches app/.nvmrc
+      - name: Host Node matches .nvmrc
         if: runner.os != 'Linux'
         shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         run: |
           want=$(tr -d ' v\r\n' < ../../.nvmrc | cut -d. -f1)
           if ! command -v node >/dev/null; then
@@ -499,37 +433,38 @@ jobs:
             exit 1
           fi
 
-      # Signed updater artifacts (docs/releasing.md): with the signing secrets set, Tauri writes a .sig next to every
-      # installer and the public key is built into the app. Without them (forks, pull requests) the app reports
-      # "Updates are not available in this build". The macOS bundle is ad-hoc signed (tauri.macos.conf.json,
-      # signingIdentity "-", hardenedRuntime false): SMAppService and launch agents refuse a linker-signed bundle.
+      - uses: ./.gitea/actions/node-caches
+        with:
+          angular-dir: apps/dyno/app
+          name: dyno-bundle
+
+      # Rule 25 (C06): the family's updater keys, whitespace out, for the following steps.
+      - uses: ./.gitea/actions/strip-signing-keys
+        with:
+          signing-private-key: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+          updater-pubkey: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+
+      # Signed updater artifacts: with the keys set, Tauri writes a .sig next to every installer and the public key is built
+      # into the app. Without them (forks, pull requests) the app reports "Updates are not available in this build".
       - name: Build installers
-        working-directory: apps/dyno/app
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno/app
         shell: bash
         env:
           # Tauri's DMG step skips Finder window scripting on CI (no Automation permission prompt on the host).
           CI: "true"
           # linuxdeploy runs without FUSE inside a container.
           APPIMAGE_EXTRACT_AND_RUN: "1"
-          # One updater key for the family (ADR 0014, amendment): built with the shared public key; the first monorepo
-          # release is the transition release, signed with the app's old key (DYNO_TRANSITION_SIGNING_KEY, copied from the
-          # old repo's secrets; delete it after that release), every later one with the shared key.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.DYNO_TRANSITION_SIGNING_KEY || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.DYNO_TRANSITION_SIGNING_KEY && secrets.DYNO_TRANSITION_SIGNING_KEY_PASSWORD || secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           BUNDLES: ${{ matrix.bundles }}
         run: |
           (cd ../../.. && npm ci)
-          # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's
-          # (signed) installer can never be collected into this release.
-          target="${CARGO_TARGET_DIR:-../target}"
+          # The host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
+          # installer can never be collected into this release.
+          target="$PADDOCK_BUILD_FOLDER"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
-          # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
-          export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"
-          export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"
           bundles="$BUNDLES"
           # The DMG step removes the .app it packed unless the app bundle is requested too; the bundle check and the
           # macOS updater both need it.
@@ -543,9 +478,8 @@ jobs:
             echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
             extra=(--config ../target/hardened.conf.json)
           fi
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then
             mkdir -p ../target
-            # A secret pasted with a trailing newline is not valid base64: strip all whitespace.
             node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY.replace(/\s+/g, "") } } }))' > ../target/updater.conf.json
             npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
           else
@@ -554,29 +488,24 @@ jobs:
             npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
 
-      # Run paths of the packaged binaries, the macOS seal and the executables a package must carry
+      # The real-app smoke: run paths of the packaged binaries, the macOS seal and the executables a package must carry
       # (scripts/check-bundle.sh; on macOS also scripts/ci/macos-verify-bundle.sh: no hardened runtime while ad hoc, one
       # TeamIdentifier, every sidecar starts from the built .app and DMG): a layout change cannot ship a binary that fails to start.
       - name: Packaged binaries have sound run paths and seals (Linux, macOS)
         if: runner.os != 'Windows'
         shell: bash
-        run: bash scripts/check-bundle.sh "${CARGO_TARGET_DIR:-target}/dist/bundle"
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+        run: bash scripts/check-bundle.sh "$PADDOCK_BUILD_FOLDER/dist/bundle"
 
-      - name: sccache statistics
-        if: always() && runner.os == 'Linux'
-        run: sccache --show-stats
-
-      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        if: always() && runner.os == 'Linux' && steps.sccache.outputs.cache-hit != 'true'
-        with:
-          path: /sccache
-          key: sccache-${{ runner.os }}-${{ github.job }}-${{ hashFiles('apps/dyno/**/Cargo.lock') }}
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
       - name: Collect installers
         shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         run: |
           mkdir -p dist
-          dir="${CARGO_TARGET_DIR:-target}"
+          dir="$PADDOCK_BUILD_FOLDER"
           if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
           find "$dir/dist/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;
           ls -la dist
@@ -589,15 +518,16 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: dyno-${{ runner.os }}
-          path: apps/dyno/dist/*
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno/dist/*
           if-no-files-found: error
 
       # Host runners: keep the build folder within its cap; remove bundles that already went into the artifact.
       - name: Prune the build folder (host runners)
         if: always() && runner.os != 'Linux'
         shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         run: |
-          dir="${CARGO_TARGET_DIR:-}"
+          dir="$PADDOCK_BUILD_FOLDER"
           if [ -n "$dir" ]; then
             if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
             rm -rf "$dir/dist/bundle" || true
@@ -607,10 +537,10 @@ jobs:
   release:
     name: release
     if: needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/dyno-v'))
-    needs: [plan, bundle, rust-lint, rust-test, macos, licences, frontend, e2e]
+    needs: [plan, bundle, rust, licences, frontend, e2e, e2e-webkit]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
         with:
@@ -619,12 +549,6 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           path: apps/dyno/artifacts
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
 
       - name: Release notes (git-cliff)
         run: |
@@ -637,17 +561,19 @@ jobs:
 
           Dyno is not code-signed yet, so your system may warn the first time you open it.
 
+          - **Existing installs:** download this version once by hand. Dyno now updates from the Paddock releases, which a copy installed before this version does not look at.
           - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Dyno > **Open Anyway**.
           - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
           FIRST_LAUNCH
 
       # latest.json for the updater: version, notes, pub_date and, per platform, the installer's URL, signature and
-      # size. Installed apps fetch releases/download/latest/latest.json (the latest non-pre-release release).
+      # size. Installed apps fetch it from the moving dyno-latest release.
       - name: Updater manifest (latest.json)
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
-          # Public URL, not github.server_url: inside Gitea runners that is the internal http address.
+          # Public URL, not github.server_url: inside the runners that is the internal http address, and the updater
+          # requires https.
           BASE_URL: https://dev.decryptology.net/${{ github.repository }}/releases/download/${{ github.ref_name }}
         run: |
           node --test scripts/release/latest-json.test.mjs
@@ -665,15 +591,12 @@ jobs:
         shell: bash
         env:
           GITEA_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          OLD_REPO: decryp7/dyno
         run: |
           node --test scripts/release/publish.test.mjs
           publish=../../conformance/release/publish.mjs
           api="${{ github.server_url }}/api/v1"
           node "$publish" --api "$api" --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" --notes artifacts/RELEASE_NOTES.md --dir artifacts
           if [ ! -f artifacts/latest.json ]; then exit 0; fi
-          # The updater's two endpoints (ADR 0014 §4): the moving dyno-latest release here, and the bridge, the old repo's newest
-          # release (its releases/download/latest/ resolves there), for copies installed before the move.
+          # The updater's one endpoint (tauri.conf.json): the moving dyno-latest release here.
           mkdir -p "$RUNNER_TEMP/latest" && cp artifacts/latest.json "$RUNNER_TEMP/latest/"
           node "$publish" --api "$api" --repo "${{ github.repository }}" --tag dyno-latest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace
-          node "$publish" --api "$api" --repo "$OLD_REPO" --newest --notes artifacts/RELEASE_NOTES.md --dir "$RUNNER_TEMP/latest" --replace

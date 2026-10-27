@@ -40,7 +40,7 @@
   "plugins": {
     "updater": {
       "pubkey": "",
-      "endpoints": ["https://dev.decryptology.net/decryp7/paddock/releases/download/pitcrew-latest/latest.json", "https://dev.decryptology.net/decryp7/Pitcrew/releases/download/latest/latest.json"],
+      "endpoints": ["https://dev.decryptology.net/decryp7/paddock/releases/download/pitcrew-latest/latest.json"],
       "requireSignedVersion": true,
       "windows": {
         "installMode": "passive"

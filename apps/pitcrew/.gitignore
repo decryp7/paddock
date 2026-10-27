@@ -41,3 +41,6 @@ app/src-tauri/binaries/
 
 # Exported diagram PNGs (2x, for local review); the SVGs are the committed exports
 docs/diagrams/png/
+
+# Written by the build-folder CI action on host runners.
+.cargo/ci.toml

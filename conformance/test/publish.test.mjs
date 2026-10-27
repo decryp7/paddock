@@ -15,10 +15,9 @@ test('arguments are parsed and checked', () => {
   // The monorepo's tags (ADR 0014 §4): an app's version tag and its moving latest release.
   assert.equal(parseArgs([...args.slice(0, 4), '--tag', 'debrief-v1.2.0', ...args.slice(6)]).tag, 'debrief-v1.2.0');
   assert.equal(parseArgs([...args.slice(0, 4), '--tag', 'debrief-latest', ...args.slice(6), '--replace']).replace, true);
-  const newest = parseArgs([...args.slice(0, 4), '--newest', ...args.slice(6)]);
-  assert.deepEqual([newest.newest, newest.tag], [true, undefined]);
-  assert.throws(() => parseArgs([...args, '--newest']), /--tag or --newest/);
-  assert.throws(() => parseArgs([...args.slice(0, 4), ...args.slice(6)]), /--tag or --newest/);
+  assert.throws(() => parseArgs([...args.slice(0, 4), ...args.slice(6)]), /--tag is required/);
+  // No update bridge (ADR 0014, amendment 2026-10-25): the old repositories' newest release is never a target.
+  assert.throws(() => parseArgs([...args.slice(0, 4), '--newest', ...args.slice(6)]), /unknown/);
   assert.throws(() => parseArgs(['--bogus', 'x']), /unknown/);
 });
 
@@ -91,25 +90,5 @@ test('--replace deletes and uploads again a file the release has (the moving <ap
     'POST https://h/api/v1/repos/o/r/releases/9/assets?name=latest.json',
     'POST https://h/api/v1/repos/o/r/releases/9/assets?name=App_1.2.0_x64-setup.exe',
   ]);
-});
-
-test('--newest writes to the newest published release of an old repo (the update bridge), and never creates one', async () => {
-  const dir = fixture();
-  const calls = [];
-  const json = (status, body) => ({ status, ok: status < 300, json: async () => body, text: async () => JSON.stringify(body) });
-  const fetchImpl = async (url, init) => {
-    calls.push(`${init.method} ${url}`);
-    if (init.method === 'GET') return json(200, [{ id: 3, tag_name: 'v1.1.1', html_url: 'old', assets: [{ name: 'latest.json', id: 5 }] }]);
-    return init.method === 'DELETE' ? json(204, null) : json(201, {});
-  };
-  const url = await publish({ api: 'https://h/api/v1', repo: 'o/old', notes: join(dir, 'n.md'), dir: join(dir, 'a'), replace: true, newest: true }, 't', fetchImpl, () => {});
-  assert.equal(url, 'old');
-  assert.deepEqual(calls.slice(0, 3), [
-    'GET https://h/api/v1/repos/o/old/releases?draft=false&pre-release=false&limit=1',
-    'DELETE https://h/api/v1/repos/o/old/releases/3/assets/5',
-    'POST https://h/api/v1/repos/o/old/releases/3/assets?name=latest.json',
-  ]);
-  const none = async () => json(200, []);
-  await assert.rejects(publish({ api: 'https://h/api/v1', repo: 'o/old', notes: join(dir, 'n.md'), dir: join(dir, 'a'), newest: true }, 't', none, () => {}), /no published release/);
 });
 

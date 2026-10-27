@@ -3,6 +3,12 @@
 What changed for people who use Debrief, one section per release. This file is curated by hand (the in-app "What's new"
 panel reads it at build time); `git cliff` lists every commit if you need the full history.
 
+## Unreleased
+
+### Changed
+
+- **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
+
 ## 1.1.1 (2026-10-24)
 
 ### Added

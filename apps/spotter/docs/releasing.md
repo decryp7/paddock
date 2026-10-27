@@ -19,7 +19,7 @@ This is about **Spotter's own** updates, not the releases Spotter watches for.
   manual check always works. (The checking UI is not built yet; the updater plugin is wired and the app reports
   whether the build can update.)
 - **One endpoint.** A check is one HTTPS GET of
-  `https://dev.decryptology.net/decryp7/spotter/releases/download/latest/latest.json`
+  `https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json` (the moving `spotter-latest` release of the Paddock monorepo; copies installed before the move are reinstalled once by hand)
   (`plugins.updater.endpoints` in `tauri.conf.json`). It carries no identifier or usage data.
 - **Signatures are mandatory.** Every update is verified with the minisign public key built into the app before it
   is installed, and `requireSignedVersion` binds each signature to its version (GHSA-j38x-g3m3-95fr). A build without
