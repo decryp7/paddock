@@ -27,7 +27,7 @@ describe('pins', () => {
     const sums = [...dockerfile.matchAll(/^ARG (\w+_SHA256_(AMD64|ARM64))=(\S+)$/gm)];
     assert.ok(sums.length >= 9, `only ${sums.length} checksums found`);
     for (const [, name, , value] of sums) assert.match(value, /^[0-9a-f]{64}$/, name);
-    for (const tool of ['SCCACHE', 'HAKARI', 'MACHETE', 'DUCKDB']) {
+    for (const tool of ['SCCACHE', 'HAKARI', 'MACHETE', 'DUCKDB', 'SHELLCHECK']) {
       assert.ok(dockerfile.includes(`ARG ${tool}_SHA256_AMD64=`) && dockerfile.includes(`ARG ${tool}_SHA256_ARM64=`), tool);
       assert.match(arg(`${tool}_VERSION`), /^\d+\.\d+\.\d+$/);
     }
@@ -50,6 +50,12 @@ describe('pins', () => {
     assert.ok(action.includes(arg('SCCACHE_SHA256_ARM64')), 'arm64 checksum differs from the action');
   });
 
+  test('shellcheck is the v0.11.0 release pin shared with engineering-rules, fetched only through the verified download', () => {
+    assert.equal(arg('SHELLCHECK_VERSION'), '0.11.0');
+    assert.equal(arg('SHELLCHECK_SHA256_AMD64'), '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198');
+    assert.match(dockerfile, /fetch-verified "https:\/\/github\.com\/koalaman\/shellcheck\/releases\/download\/v\$\{SHELLCHECK_VERSION\}\//);
+  });
+
   test('Node is the .nvmrc major', () => {
     const nvmrc = read('.nvmrc').trim().replace(/^v/, '').split('.')[0];
     assert.equal(arg('NODE_MAJOR'), nvmrc);
@@ -66,7 +72,7 @@ describe('pins', () => {
 
   test('the base is the garage image and the stage-2 copies of the version ARGs agree', () => {
     assert.match(arg('GARAGE_IMAGE').replace('dev.decryptology.net/decryp7/', ''), /^garage:ubuntu-24\.04-\d{8}-r\d+$/);
-    for (const name of ['CHROME_VERSION', 'DUCKDB_VERSION', 'SCCACHE_VERSION']) {
+    for (const name of ['CHROME_VERSION', 'DUCKDB_VERSION', 'SCCACHE_VERSION', 'SHELLCHECK_VERSION']) {
       const values = new Set([...dockerfile.matchAll(new RegExp(`^ARG ${name}=(\\S+)$`, 'gm'))].map((m) => m[1]));
       assert.equal(values.size, 1, `${name} differs between stages`);
     }
@@ -77,7 +83,7 @@ describe('pins', () => {
     assert.ok(!/\|\s*(ba)?sh\b/.test(dockerfile.replace(/^#.*$/gm, '')), 'a download piped into a shell');
     const last = dockerfile.lastIndexOf('paddock-ci-verify');
     assert.ok(last > dockerfile.indexOf('COPY verify.sh'), 'verify.sh is copied and then run');
-    for (const e of ['EXPECT_NODE_MAJOR', 'EXPECT_SCCACHE', 'EXPECT_PLAYWRIGHT', 'EXPECT_DUCKDB', 'EXPECT_CHROME']) assert.ok(dockerfile.includes(e), e);
+    for (const e of ['EXPECT_NODE_MAJOR', 'EXPECT_SCCACHE', 'EXPECT_PLAYWRIGHT', 'EXPECT_DUCKDB', 'EXPECT_SHELLCHECK', 'EXPECT_CHROME']) assert.ok(dockerfile.includes(e), e);
   });
 });
 
@@ -189,7 +195,7 @@ describe('verify.sh', () => {
     const put = (name, text) => { writeFileSync(join(bin, name), `#!/bin/bash\n${text}\n`); chmodSync(join(bin, name), 0o755); };
     const tools = {
       rustc: 'echo "rustc 1.99.1 (x 2026-10-13)"', cargo: 'case "$1" in clippy) echo "clippy 0.1.99";; nextest) echo "cargo-nextest 0.9.149";; llvm-cov) echo "cargo-llvm-cov 0.9.1";; deny) echo "cargo-deny 0.20.2";; hakari) echo "cargo-hakari 0.9.39";; machete) echo "0.9.2";; *) echo "cargo 1.99.1";; esac',
-      rustfmt: 'echo "rustfmt 1.10.0-stable"', sccache: 'echo "sccache 0.18.0"', node: 'echo "v24.19.0"', npm: 'echo "11.17.0"', 'xvfb-run': 'true',
+      rustfmt: 'echo "rustfmt 1.10.0-stable"', sccache: 'echo "sccache 0.18.0"', shellcheck: 'printf "ShellCheck - tool\\nversion: 0.11.0\\n"', node: 'echo "v24.19.0"', npm: 'echo "11.17.0"', 'xvfb-run': 'true',
       'pkg-config': 'case "$2" in webkit2gtk-4.1) [ "$1" = "--modversion" ] && echo 2.52.6; exit 0;; gtk+-3.0) exit 0;; esac; exit 1',
       ...over.tools,
     };
@@ -206,7 +212,7 @@ describe('verify.sh', () => {
     chmodSync(chrome, 0o755);
     const env = {
       PATH: bin, PLAYWRIGHT_BROWSERS_PATH: pw, DUCKDB_LIB_DIR: duck, CHROMIUM_TEST_PATH: chrome,
-      EXPECT_NODE_MAJOR: '24', EXPECT_SCCACHE: '0.18.0', EXPECT_PLAYWRIGHT: '1.64.1', EXPECT_DUCKDB: '1.5.6', EXPECT_CHROME: '156.0.8078.47', ...over.env,
+      EXPECT_NODE_MAJOR: '24', EXPECT_SCCACHE: '0.18.0', EXPECT_PLAYWRIGHT: '1.64.1', EXPECT_DUCKDB: '1.5.6', EXPECT_SHELLCHECK: '0.11.0', EXPECT_CHROME: '156.0.8078.47', ...over.env,
     };
     return { m, env, manifest: join(m, 'release') };
   }
@@ -217,7 +223,7 @@ describe('verify.sh', () => {
     const r = run(mc);
     assert.equal(r.code, 0, r.out);
     const text = readFileSync(mc.manifest, 'utf8');
-    for (const s of ['rustc 1.99.1', 'cargo-nextest 0.9.149', 'cargo-hakari 0.9.39', 'cargo-machete: 0.9.2', 'sccache: sccache 0.18.0', 'node: v24.19.0', 'chrome for testing: Google Chrome for Testing 156.0.8078.47', 'libduckdb 1.5.6', 'playwright chromium', 'webkit2gtk-4.1: 2.52.6']) {
+    for (const s of ['rustc 1.99.1', 'cargo-nextest 0.9.149', 'cargo-hakari 0.9.39', 'cargo-machete: 0.9.2', 'sccache: sccache 0.18.0', 'node: v24.19.0', 'chrome for testing: Google Chrome for Testing 156.0.8078.47', 'libduckdb 1.5.6', 'shellcheck: 0.11.0', 'playwright chromium', 'webkit2gtk-4.1: 2.52.6']) {
       assert.ok(text.includes(s), `${s}\n${text}`);
     }
   });
@@ -237,6 +243,11 @@ describe('verify.sh', () => {
     const r = run(machine({ chrome: 'echo "Google Chrome for Testing 150.0.1.2"' }));
     assert.equal(r.code, 1);
     assert.match(r.out, /Chrome for Testing is 'Google Chrome for Testing 150\.0\.1\.2', the image pins 156\.0\.8078\.47/);
+  });
+
+  test('shellcheck missing or off its pin fails', () => {
+    assert.match(run(machine({ tools: { shellcheck: null } })).out, /shellcheck is missing/);
+    assert.match(run(machine({ tools: { shellcheck: 'printf "ShellCheck\\nversion: 0.9.0\\n"' } })).out, /shellcheck is '0\.9\.0', the image pins 0\.11\.0/);
   });
 
   test('missing Chrome, libduckdb, browsers and Tauri libraries are each reported', () => {
