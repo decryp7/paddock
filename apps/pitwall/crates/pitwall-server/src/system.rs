@@ -59,7 +59,7 @@ pub fn host_memory() -> MemoryReader {
     Arc::new(read_system)
 }
 
-/// [`room`] over a memory reading already taken.
+/// The room a fit check has over a memory reading already taken (see [`read_system`]).
 pub fn room_from(sys: &System, hw: &Hardware, releasable: u64) -> Room {
     Room {
         ram_total: sys.total,
