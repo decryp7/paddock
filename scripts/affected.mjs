@@ -625,17 +625,23 @@ async function ci(env, { app = null } = {}) {
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summary(plan, reason, legs));
 }
 
+/** The command line (without `--ci`): `--files a,b`, `--all`, `--explain` and up to two positional commits, base then head. */
+export function parseArgs(args) {
+  const fi = args.indexOf('--files');
+  const files = fi >= 0 ? (args[fi + 1] ?? '').split(',').filter(Boolean) : null;
+  // The value after --files is not positional; with no --files there is nothing to skip (fi + 1 would be 0, the base).
+  const [base = null, head = 'HEAD'] = args.filter((a, i) => !a.startsWith('--') && (fi < 0 || i !== fi + 1));
+  return { files, base, head, all: args.includes('--all'), explain: args.includes('--explain') };
+}
+
 if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
-  const flag = (n) => args.includes(n);
   try {
-    if (flag('--ci')) await ci(process.env, { app: args.includes('--app') ? args[args.indexOf('--app') + 1] : null });
+    if (args.includes('--ci')) await ci(process.env, { app: args.includes('--app') ? args[args.indexOf('--app') + 1] : null });
     else {
-      const fi = args.indexOf('--files');
-      const files = fi >= 0 ? (args[fi + 1] ?? '').split(',').filter(Boolean) : null;
-      const [base, head = 'HEAD'] = args.filter((a, i) => !a.startsWith('--') && i !== fi + 1);
-      if (!files && !base && !flag('--all')) throw new Error('usage: affected.mjs <base> [<head>] | --files a,b | --all | --ci  [--explain]');
-      const { plan } = planFor({ base, head, files, all: flag('--all'), explain: flag('--explain') });
+      const { files, base, head, all, explain } = parseArgs(args);
+      if (!files && !base && !all) throw new Error('usage: affected.mjs <base> [<head>] | --files a,b | --all | --ci  [--explain]');
+      const { plan } = planFor({ base, head, files, all, explain });
       process.stdout.write(`${JSON.stringify(plan)}\n`);
     }
   } catch (e) {

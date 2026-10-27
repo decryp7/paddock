@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -460,3 +460,15 @@ describe('contracts', () => {
   });
 });
 
+
+describe('command line', () => {
+  test('`<base>` alone and `<base> <head>` keep the base; the --files value and flags are not positional', () => {
+    assert.deepEqual(parseArgs(['abc']), { files: null, base: 'abc', head: 'HEAD', all: false, explain: false });
+    assert.equal(parseArgs(['abc', 'def', '--explain']).base, 'abc');
+    assert.equal(parseArgs(['abc', 'def', '--explain']).head, 'def');
+    assert.equal(parseArgs(['--explain', 'abc']).base, 'abc');
+    const f = parseArgs(['--files', 'a,b', '--explain']);
+    assert.deepEqual([f.files, f.base], [['a', 'b'], null]);
+    assert.equal(parseArgs(['--all']).base, null);
+  });
+});
