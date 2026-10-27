@@ -7,7 +7,7 @@ Conventional Commits; one semver tag for the whole repo.
 ### Windows CI: tests that measured the runner's disk, and a toolchain step that says why it failed
 - Four tests that timed out on a slow Windows runner (run 6461) prove their behaviour without bulk disk work: the log
   tail is read from a synthetic 1 GiB source that counts the bytes read (a real 1 GiB `set_len` file is a gigabyte of
-  zeros on NTFS), the walk's cancel test uses the new `WalkOptions::cancel_check_items` (default `CANCEL_CHECK_ITEMS`)
+  zeros on NTFS), the walk's cancel test uses the new `WalkOptions::cancel_check_items` (default `CANCEL_CHECK_ITEMS`; breaking for `paddock-jobs` callers that build `WalkOptions` with a struct literal, which must add the field or use `..Default::default()`)
   with a few hundred files instead of 12,000, the assistant store's bounds are `StoreLimits` (`ConversationStore::open_with`,
   defaults `MAX_CONVERSATIONS` and `MAX_FILE_BYTES`, pinned by a test) and the damaged-package property builds its two
   packages once instead of 256 times.
