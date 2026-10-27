@@ -12,10 +12,12 @@ const ROOT = resolve(import.meta.dirname, '..'), ALT = join(ROOT, 'alternative')
 const png = (svg, px) => new Resvg(svg, { fitTo: { mode: 'width', value: px }, shapeRendering: 2, textRendering: 0 }).render().asPng();
 const palette = PADDOCK_FAMILY.palettes.graphite, flat = PADDOCK_SYMBOLS.slats, title = 'Paddock (pit building)';
 // Small sizes: the pit building in pixel isometric at 32 and 24, the flat slatted door at 16 and in the tray.
-// At 16 on the tile, a 1 px band of the seven app hues above the door (one pixel each, x 4 to 10, row 2) keeps the family cue; the
-// tray template stays one tone.
-const band16 = STRIPE.map((app, k) => ({ kind: 'fill', d: `M${4 + k} 2h1v1h-1Z`, tone: 'primary', app }));
-const glyphs = { 16: [...flat.g16, ...band16], 24: PIT_SMALL[24], 32: PIT_SMALL[32] };
+// At 16 on the tile, the canopy is the family band: the seven app hues, 2 x 2 px each, across x 1 to 15 on rows 3 and 4 (a 1 px row
+// was a speck). Under it the door as in the flat symbol: posts at x 3 and 12, the shutter hanging from the canopy (slats on rows 5, 7
+// and 9), the bay open below. Whole pixels; about 24 % coverage. The tray template stays one tone (flat.tray has no band).
+const band16 = STRIPE.map((app, k) => ({ kind: 'fill', d: `M${1 + 2 * k} 3h2v2h-2Z`, tone: 'primary', app }));
+const door16 = [{ kind: 'fill', d: 'M3 5h1v8h-1ZM12 5h1v8h-1ZM5 5h6v1h-6ZM5 7h6v1h-6ZM5 9h6v1h-6Z', tone: 'primary' }];
+const glyphs = { 16: [...band16, ...door16], 24: PIT_SMALL[24], 32: PIT_SMALL[32] };
 const prevGlyphs = { 16: flat.g16, 24: ISO_SMALL[24], 32: ISO_SMALL[32] };
 
 // ---------- the set ----------

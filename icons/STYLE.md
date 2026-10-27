@@ -132,7 +132,7 @@ No icon uses another shadow colour, blur or opacity.
 | 60 | the simple frame without any texture that turns grey (Paddock drops the chequer), fitted about 8 % larger so the mass matches the others |
 | 48 | the simple frame scaled onto the small tile |
 | 32, 24 | 2:1 pixel isometric with `pixelIso` and `pixelLayer` (flat colours, crisp, one pixel per part, whole-pixel widths for repeats), or a simplified object if the isometric one cannot be read; keep the defining parts even at 24, and end faces at least 3 px |
-| 16 | the flat symbol: one tone, whole pixels; coverage 18 to 26 % for line glyphs, up to 30 % for filled silhouettes. Paddock: the slatted door with a 1 px band of the seven hues above it |
+| 16 | the flat symbol: one tone, whole pixels; coverage 18 to 26 % for line glyphs, up to 30 % for filled silhouettes. Paddock: the slatted door under a canopy that is the band of the seven hues, 2 x 2 px each across x 1 to 15 |
 | Tray | the flat symbol as a template, x 2 to 14, with light and dark variants made from it. Whole pixels only: crisp edges (badges included), no partial alpha anywhere except a deliberate dim of the whole glyph for a state. Sizes: 16 pt and 18 pt templates at 1x and 2x (18 pt is the 16 grid padded by one unit, never a resample), Windows light and dark at 16 and 32. The apps load the 18 pt @2x template (36 px) and the 32 px light and dark PNGs |
 
 Rule: a part that cannot be drawn on whole pixels at a size is dropped at that size, never blurred.
