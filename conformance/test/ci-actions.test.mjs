@@ -857,7 +857,7 @@ test('app-gates reports every failed check: the steps after a failed check still
   for (const name of ['Rust checks', 'Rust (', 'UI (', 'End-to-end tests']) {
     const at = gates.indexOf(`- name: ${name}`);
     assert.ok(at > 0, name);
-    assert.match(gates.slice(at, at + 300), /if: \$\{\{ !cancelled\(\) && /, `${name} runs after an earlier check failed`);
+    assert.match(gates.slice(at, at + 300), /if: \$\{\{ !cancelled\(\) && steps\.prepare\.outcome != 'failure' && /, `${name} runs after an earlier check failed`);
   }
 });
 

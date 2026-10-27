@@ -413,6 +413,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false, webkit = false }
         ui_checks: linux ? (app.ui ?? []).join('\n') : '',
         angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
         last_packages: (app.lastPackages ?? []).join(' '),
+        windows_clippy: app.windowsClippy ? 'true' : 'false',
         processes: (app.processes ?? []).join(' '),
         process_patterns: (app.processPatterns ?? []).join('\n'),
         test_browser_prefix: app.testBrowser?.envPrefix ?? '',

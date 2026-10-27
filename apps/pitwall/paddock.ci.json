@@ -4,6 +4,7 @@
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
   "lastPackages": ["pitwall-app"],
+  "windowsClippy": true,
   "processPatterns": ["[/\\\\]\\.paddock-ci[/\\\\]target-pitwall-app[/\\\\]debug[/\\\\]pitwall-server(\\.exe)? .*--fake-engine"],
   "checks": [
     "cd apps/pitwall",

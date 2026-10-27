@@ -618,6 +618,7 @@ jobs:
           rust: ${{ matrix.rust }}
           ui: ${{ matrix.ui }}
           last-packages: ${{ matrix.last_packages }}
+          windows-clippy: ${{ matrix.windows_clippy }}
           filter: ${{ matrix.filter }}
           display: ${{ matrix.display }}
           e2e-checks: ${{ matrix.e2e_checks }}

@@ -322,7 +322,14 @@ describe('contracts', () => {
     assert.match(leg.rust_checks, /cargo llvm-cov nextest -p pitwall-core/);
     assert.equal(leg.rust, true);
     for (const l of matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.os !== LINUX)) assert.equal(l.rust_checks, '', 'host legs run the Rust gates only');
-    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /if: \$\{\{ !cancelled\(\) && inputs\.rust-checks != '' && inputs\.rust == 'true' \}\}/, 'the action skips them with the Rust half');
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /if: \$\{\{ !cancelled\(\) && steps\.prepare\.outcome != 'failure' && inputs\.rust-checks != '' && inputs\.rust == 'true' \}\}/, 'the action skips them with the Rust half');
+  });
+
+  test('windowsClippy is opt-in: Pitwall lints its Windows-only code, an app without the field keeps the default', () => {
+    const win = (app) => matrix(run(`apps/${app}/crates/${app}-core/src/lib.rs`), graph).filter((l) => l.os === 'windows-latest').map((l) => l.windows_clippy);
+    assert.deepEqual([...new Set(win('pitwall'))], ['true']);
+    assert.deepEqual([...new Set(win('pitcrew'))], ['false']);
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /"\$RUNNER_OS" != Windows \] \|\| \[ "\$WINDOWS_CLIPPY" = true \]; then step cargo clippy/);
   });
 
   test("an app's last packages reach every leg, so a host leg and the Linux leg agree on what is tested apart", () => {
