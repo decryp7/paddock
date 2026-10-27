@@ -28,7 +28,15 @@ mib = 256
 reason = "buffers"
 "#;
 
+/// The two packages the damage property starts from, built once: every case damages a copy of the same bytes, so building
+/// (temporary folder, key, archive on disk) 256 times only cost file-system time (over 60 s on a loaded Windows runner).
 fn package(signed: bool) -> (Vec<u8>, String) {
+    static BUILT: std::sync::LazyLock<[(Vec<u8>, String); 2]> =
+        std::sync::LazyLock::new(|| [build_package(false), build_package(true)]);
+    BUILT[usize::from(signed)].clone()
+}
+
+fn build_package(signed: bool) -> (Vec<u8>, String) {
     let t = tempfile::tempdir().unwrap();
     let prog = t.path().join("prop.exe");
     std::fs::write(&prog, vec![7u8; 3000]).unwrap();
