@@ -35,3 +35,6 @@ logs/
 
 # Diagram PNG exports (review copies; the SVGs are committed)
 /docs/diagrams/png/
+
+# Written by the build-folder CI action on host runners.
+.cargo/ci.toml

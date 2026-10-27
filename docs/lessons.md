@@ -420,9 +420,13 @@ that enforces it ([conformance-proposal.md](conformance-proposal.md)).
   `target/debug/pitwall-server`, which the server's tests start) stay two nextest runs, the shell's last.
 - The imported apps' workflows (2026-10-25): installers, the real-app smoke and WebKit only on full runs (main, the app's
   tag, nightly, a manual run with `bundles: true`); the image's Chrome for Testing and Playwright browsers instead of a
-  download per job; one port per e2e shard across every workflow (ci-actions.test.mjs checks it). `tauri build` needs
-  CARGO_TARGET_DIR (it asks cargo where the build is), so the bundle jobs keep it, at one fixed path per app, which keeps
-  sccache's key stable from run to run.
+  download per job; one port per e2e shard across every workflow (ci-actions.test.mjs checks it). `tauri build` asks
+  cargo where the build is, so a `--config` flag on the cargo commands does not reach it; the shared build-folder action
+  writes the folder to the workspace's `.cargo/ci.toml` (included by its `.cargo/config.toml`), which every cargo command
+  and `tauri build` read, and nothing sets CARGO_TARGET_DIR.
+- A live history view whose window ends at `now()`, exclusive, misses what was recorded in the same millisecond (Dyno's
+  network timeline flake): a live window ends just after now. An accept loop with short windows must give a client that
+  connected late the whole handshake time, or it drops the client unread and the client sees a reset (Dyno's helper).
 - A Node script's "am I the main module" check must compare real paths: Node gives `import.meta.url` the resolved path
   and leaves `process.argv[1]` as given, so through a symlink (a CI work folder linked to a stable one, `node_modules`)
   `import.meta.url === pathToFileURL(process.argv[1]).href` is false and the script exits 0 doing nothing (the Chrome for

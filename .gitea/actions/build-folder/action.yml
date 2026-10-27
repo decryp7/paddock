@@ -1,0 +1,17 @@
+name: build-folder
+description: "A job's Rust build folder as cargo configuration (never CARGO_TARGET_DIR, which sccache hashes): the workspace's target/ in a Linux container; on a host runner a kept folder ~/.paddock-ci/target-<name>, written to <workspace>/.cargo/ci.toml, which the workspace's .cargo/config.toml includes. Every cargo command, `tauri build` included, then uses it. Sets PADDOCK_BUILD_FOLDER."
+inputs:
+  workspace:
+    description: "The Cargo workspace folder (absolute; on a host runner the stable path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/<app>)."
+    required: true
+  name:
+    description: "The kept folder's name on a host runner, one per app and job (<app>-<job>): two jobs must not build into one folder at once."
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        WORKSPACE: ${{ inputs.workspace }}
+        NAME: ${{ inputs.name }}
+      run: bash "${{ github.action_path }}/../../../conformance/ci/build-folder.sh" "$WORKSPACE" "$NAME"

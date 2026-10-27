@@ -3,7 +3,7 @@
 #
 # Built like Paddock's own CI (ci.yml): the paddock-ci image on Linux (Rust, Tauri's libraries, Node, Playwright's browsers,
 # cargo-nextest and cargo-deny baked in), one Rust leg per OS through the shared actions (setup-rust: sccache on local disk;
-# stable-workspace and a kept build folder on the host runners, set as cargo configuration, never CARGO_TARGET_DIR;
+# stable-workspace and a kept build folder on the host runners, set as cargo configuration by the build-folder action, never CARGO_TARGET_DIR;
 # host-tools: the pinned cargo-nextest), nextest's ci profile with its per-test time budget (apps/dyno/.config/nextest.toml)
 # plus the doc tests, the npm and Angular caches (node-caches), and the Chromium e2e in two shards.
 #
@@ -120,23 +120,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it), a build folder that outlives the job as cargo
-      # configuration (PADDOCK_CARGO_TARGET; CARGO_TARGET_DIR would enter sccache's key), eight build jobs.
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo PADDOCK_CARGO_TARGET=--config=build.target-dir='%USERPROFILE%\.paddock-ci\target-dyno-%GITHUB_JOB%'>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      - name: Persistent build folder (macOS)
+      - name: Build jobs (macOS)
         if: runner.os == 'macOS'
         working-directory: .
         run: |
-          echo "PADDOCK_CARGO_TARGET=--config=build.target-dir='$HOME/.paddock-ci/target-dyno-$GITHUB_JOB'" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
       # The same physical checkout path every run on the host runners, so sccache hits the workspace crates too.
@@ -144,6 +141,12 @@ jobs:
         if: runner.os != 'Linux'
         with:
           name: dyno-${{ github.job }}-${{ runner.os }}
+
+      # The build folder as cargo configuration (.cargo/ci.toml): target/ here on Linux, a kept folder on the hosts.
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+          name: dyno-${{ github.job }}
 
       - uses: ./.gitea/actions/setup-rust
         with:
@@ -161,13 +164,13 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         shell: bash
-        run: cargo clippy $PADDOCK_CARGO_TARGET --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         shell: bash
-        run: cargo nextest run $PADDOCK_CARGO_TARGET --workspace --profile ci
+        run: cargo nextest run --workspace --profile ci
 
       # The Linux adapters against this container's real /proc and /sys (the run above already includes them; this names
       # them in the log). scripts/linux-verify.sh also runs them as uid 1000 on a developer machine.
@@ -181,7 +184,7 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         shell: bash
-        run: cargo test $PADDOCK_CARGO_TARGET --workspace --doc
+        run: cargo test --workspace --doc
 
       # The real-app smoke on the Mac: the agent's own CLI on the real machine, one measurement, read-only (full runs).
       - name: Agent measures once (macOS)
@@ -189,7 +192,7 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         run: |
           out="${TMPDIR:-/tmp}/dyno-once-ci.json"
-          cargo run $PADDOCK_CARGO_TARGET -q -p dyno-agent -- once > "$out"
+          cargo run -q -p dyno-agent -- once > "$out"
           head -c 400 "$out"
           rm -f "$out"
 
@@ -199,10 +202,10 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Windows ]; then
-            bash scripts/ci-prune.sh "$(cygpath -u "$USERPROFILE")/.paddock-ci/target-dyno-$GITHUB_JOB" 20 || true
+            bash scripts/ci-prune.sh "$(cygpath -u "$PADDOCK_BUILD_FOLDER")" 20 || true
             rm -rf "$(cygpath -u "${TEMP:-/tmp}")"/dyno-* || true
           else
-            bash scripts/ci-prune.sh "$HOME/.paddock-ci/target-dyno-$GITHUB_JOB" 20 || true
+            bash scripts/ci-prune.sh "$PADDOCK_BUILD_FOLDER" 20 || true
             rm -rf "${TMPDIR:-/tmp}"/dyno-* || true
           fi
 
@@ -378,23 +381,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The host runners keep the release build folder between runs. `tauri build` finds the build folder through cargo's
-      # environment, so here it is CARGO_TARGET_DIR, at one fixed path per app (a fixed value keeps sccache's key stable).
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-dyno-bundle>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      - name: Persistent build folder (macOS)
+      - name: Build jobs (macOS)
         if: runner.os == 'macOS'
         run: |
-          echo "CARGO_TARGET_DIR=$HOME/.paddock-ci/target-dyno-bundle" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # The same physical checkout path every run on the host runners (sccache keys a compile on its folder), and the
+      # release build folder as cargo configuration (.cargo/ci.toml), which the Tauri build reads like every cargo command:
+      # target/ on Linux, a kept folder on the hosts.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: dyno-${{ github.job }}-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+          name: dyno-${{ github.job }}
 
       - uses: ./.gitea/actions/setup-rust
 
@@ -402,6 +415,7 @@ jobs:
       - name: Host Node matches .nvmrc
         if: runner.os != 'Linux'
         shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         run: |
           want=$(tr -d ' v\r\n' < ../../.nvmrc | cut -d. -f1)
           if ! command -v node >/dev/null; then
@@ -433,7 +447,7 @@ jobs:
       # Signed updater artifacts: with the keys set, Tauri writes a .sig next to every installer and the public key is built
       # into the app. Without them (forks, pull requests) the app reports "Updates are not available in this build".
       - name: Build installers
-        working-directory: apps/dyno/app
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno/app
         shell: bash
         env:
           # Tauri's DMG step skips Finder window scripting on CI (no Automation permission prompt on the host).
@@ -448,7 +462,7 @@ jobs:
           (cd ../../.. && npm ci)
           # The host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
           # installer can never be collected into this release.
-          target="${CARGO_TARGET_DIR:-../target}"
+          target="$PADDOCK_BUILD_FOLDER"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
           bundles="$BUNDLES"
@@ -480,16 +494,18 @@ jobs:
       - name: Packaged binaries have sound run paths and seals (Linux, macOS)
         if: runner.os != 'Windows'
         shell: bash
-        run: bash scripts/check-bundle.sh "${CARGO_TARGET_DIR:-target}/dist/bundle"
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
+        run: bash scripts/check-bundle.sh "$PADDOCK_BUILD_FOLDER/dist/bundle"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
       - name: Collect installers
         shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         run: |
           mkdir -p dist
-          dir="${CARGO_TARGET_DIR:-target}"
+          dir="$PADDOCK_BUILD_FOLDER"
           if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
           find "$dir/dist/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;
           ls -la dist
@@ -502,15 +518,16 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: dyno-${{ runner.os }}
-          path: apps/dyno/dist/*
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno/dist/*
           if-no-files-found: error
 
       # Host runners: keep the build folder within its cap; remove bundles that already went into the artifact.
       - name: Prune the build folder (host runners)
         if: always() && runner.os != 'Linux'
         shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/dyno
         run: |
-          dir="${CARGO_TARGET_DIR:-}"
+          dir="$PADDOCK_BUILD_FOLDER"
           if [ -n "$dir" ]; then
             if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
             rm -rf "$dir/dist/bundle" || true

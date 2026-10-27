@@ -37,3 +37,6 @@ logs/
 
 # Diagram PNG exports are for local review (see docs/diagrams/src/README.md)
 docs/diagrams/png/
+
+# Written by the build-folder CI action on host runners.
+.cargo/ci.toml

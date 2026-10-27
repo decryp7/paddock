@@ -3,8 +3,8 @@
 #
 # Built like Paddock's own CI (ci.yml): the paddock-ci image on Linux (Rust, Tauri's libraries, Node, Playwright's browsers,
 # cargo-nextest, cargo-llvm-cov and cargo-deny baked in), one Rust leg per OS through the shared actions (setup-rust:
-# sccache on local disk; stable-workspace and a kept build folder on the host runners, set as cargo configuration, never
-# CARGO_TARGET_DIR; host-tools: the pinned cargo-nextest), nextest's ci profile with its per-test time budget
+# sccache on local disk; stable-workspace and a kept build folder on the host runners, set as cargo configuration by the
+# build-folder action, never CARGO_TARGET_DIR; host-tools: the pinned cargo-nextest), nextest's ci profile with its per-test time budget
 # (apps/pitwall/.config/nextest.toml) plus the doc tests, the npm and Angular caches (node-caches), and the Chromium e2e in
 # two shards.
 #
@@ -131,23 +131,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it), a build folder that outlives the job as cargo
-      # configuration (PADDOCK_CARGO_TARGET; CARGO_TARGET_DIR would enter sccache's key), eight build jobs.
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo PADDOCK_CARGO_TARGET=--config=build.target-dir='%USERPROFILE%\.paddock-ci\target-pitwall-%GITHUB_JOB%'>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      - name: Persistent build folder (macOS)
+      - name: Build jobs (macOS)
         if: runner.os == 'macOS'
         working-directory: .
         run: |
-          echo "PADDOCK_CARGO_TARGET=--config=build.target-dir='$HOME/.paddock-ci/target-pitwall-$GITHUB_JOB'" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
       # The same physical checkout path every run on the host runners, so sccache hits the workspace crates too.
@@ -155,6 +152,12 @@ jobs:
         if: runner.os != 'Linux'
         with:
           name: pitwall-${{ github.job }}-${{ runner.os }}
+
+      # The build folder as cargo configuration (.cargo/ci.toml): target/ here on Linux, a kept folder on the hosts.
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+          name: pitwall-${{ github.job }}
 
       - uses: ./.gitea/actions/setup-rust
         with:
@@ -172,7 +175,7 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
         shell: bash
-        run: cargo clippy $PADDOCK_CARGO_TARGET ${{ matrix.clippy }} --all-targets -- -D warnings
+        run: cargo clippy ${{ matrix.clippy }} --all-targets -- -D warnings
 
       # Includes crates/pitwall-server/tests/privacy.rs (ADR 0001: only egress.rs may use reqwest) and the API contract
       # tests against the fake engine.
@@ -180,7 +183,7 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
         shell: bash
-        run: cargo nextest run $PADDOCK_CARGO_TARGET ${{ matrix.tests }} --profile ci
+        run: cargo nextest run ${{ matrix.tests }} --profile ci
 
       # AGENTS.md: pitwall-core >= 99% lines.
       - name: Core coverage guard (>= 99% lines)
@@ -206,7 +209,7 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
         shell: bash
-        run: cargo test $PADDOCK_CARGO_TARGET ${{ matrix.clippy }} --doc
+        run: cargo test ${{ matrix.clippy }} --doc
 
       - name: Clean up test processes and temp dirs (macOS)
         if: always() && runner.os == 'macOS'
@@ -382,23 +385,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The host runners keep the release build folder between runs. `tauri build` finds the build folder through cargo's
-      # environment, so here it is CARGO_TARGET_DIR, at one fixed path per app (a fixed value keeps sccache's key stable).
-      - name: Git bash on PATH and a persistent build folder (Windows)
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
         shell: cmd
         working-directory: .
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo CARGO_TARGET_DIR=%USERPROFILE%\.paddock-ci\target-pitwall-bundle>>"%GITHUB_ENV%"
           echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
 
-      - name: Persistent build folder (macOS)
+      - name: Build jobs (macOS)
         if: runner.os == 'macOS'
         run: |
-          echo "CARGO_TARGET_DIR=$HOME/.paddock-ci/target-pitwall-bundle" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # The same physical checkout path every run on the host runners (sccache keys a compile on its folder), and the
+      # release build folder as cargo configuration (.cargo/ci.toml), which the Tauri build reads like every cargo command:
+      # target/ on Linux, a kept folder on the hosts.
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: pitwall-${{ github.job }}-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
+          name: pitwall-${{ github.job }}
 
       - uses: ./.gitea/actions/setup-rust
 
@@ -406,6 +419,7 @@ jobs:
       - name: Host Node matches .nvmrc
         if: runner.os != 'Linux'
         shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
         run: |
           want=$(tr -d ' v\r\n' < ../../.nvmrc | cut -d. -f1)
           if ! command -v node >/dev/null; then
@@ -442,12 +456,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Empty until there is a Developer ID: the build stays ad hoc with the hardened runtime off (rule 23).
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
         run: bash scripts/ci/tauri-bundle.sh "${{ matrix.bundles }}"
 
       # The real-app smoke: signingIdentity "-" must leave an ad-hoc sealed bundle (no hardened runtime while ad hoc, one
       # Team ID, sidecars that start from the built app); native libraries resolve by run path.
       - name: Verify the .app and the DMG (seal, no hardened runtime while ad hoc, Team IDs, sidecars start, run path)
         if: runner.os == 'macOS'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
         run: bash scripts/ci/macos-verify-bundle.sh
 
       - uses: ./.gitea/actions/sccache-stats
@@ -457,11 +473,12 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: pitwall-${{ runner.os }}
-          path: apps/pitwall/dist/*
+          path: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall/dist/*
           if-no-files-found: error
 
       - name: Clean up (macOS)
         if: always() && runner.os == 'macOS'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/pitwall
         run: bash scripts/ci/macos-cleanup.sh --build-outputs
 
   release:

@@ -597,30 +597,70 @@ test('the app workflows run on the paddock-ci image and the shared actions, with
   }
 });
 
-test('the app rust legs build like the crate job: stable path, kept build folder as cargo configuration, pinned nextest', () => {
+test('the app rust and bundle jobs build from a stable path into a build folder set as cargo configuration, with the pinned nextest', () => {
   for (const app of APP_WORKFLOWS) {
-    const job = appJob(app, 'rust')?.text ?? '';
-    assert.notEqual(job, '', `${app}: a rust job`);
-    assert.match(job, /os: \[ubuntu-latest, windows-latest, macos-latest\]|- os: ubuntu-latest[\s\S]*- os: windows-latest[\s\S]*- os: macos-latest/, `${app}: one leg per OS`);
-    assert.doesNotMatch(job, /CARGO_(BUILD_)?TARGET_DIR[=:]/, `${app}: the build folder is never CARGO_TARGET_DIR (sccache's key)`);
-    const set = [...job.matchAll(/PADDOCK_CARGO_TARGET=(\S+?)'?(?:"|>>)/g)].map((m) => m[1]);
-    assert.equal(set.length, 2, `${app}: one build folder per host OS`);
-    for (const v of set) assert.match(v, new RegExp(`^--config=build\\.target-dir='.*\\.paddock-ci[\\\\/]target-${app}-`), v);
-    const sw = job.indexOf('uses: ./.gitea/actions/stable-workspace');
-    assert.ok(sw > job.indexOf('Git bash on PATH'), `${app}: stable-workspace after Git bash is on PATH`);
-    assert.match(job.slice(sw, sw + 120), /\n\s+if: runner\.os != 'Linux'/, `${app}: stable-workspace on the hosts only`);
-    assert.match(job, /uses: \.\/\.gitea\/actions\/host-tools/, `${app}: the pinned cargo-nextest`);
-    for (const s of parseSteps(job).filter((st) => /\bcargo (clippy|nextest run|test|build|run|llvm-cov)\b/.test(st.run ?? ''))) {
-      const linuxOnly = /runner\.os == 'Linux'/.test(s.text);
-      if (!linuxOnly) assert.match(s.run, /cargo (clippy|nextest run|test|build|run) \$PADDOCK_CARGO_TARGET /, `${app} "${s.name}": a host step builds in the kept folder`);
-      if (!linuxOnly) assert.match(s.text, /working-directory: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}/, `${app} "${s.name}": builds from the stable path`);
-      assert.doesNotMatch(s.run, /\bcargo test\b(?![^\n]*--doc)/, `${app} "${s.name}": tests run under nextest (cargo test only for doc tests)`);
+    const wf = appWorkflow(app);
+    assert.doesNotMatch(wf.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'), /CARGO_(BUILD_)?TARGET_DIR|PADDOCK_CARGO_TARGET/, `${app}: the build folder is cargo configuration, never a CARGO_* variable (sccache's key)`);
+    const conf = read(join(PADDOCK, 'apps', app, '.cargo', 'config.toml'));
+    assert.match(conf, /^include = \[\{ path = "ci\.toml", optional = true \}\]$/m, `${app}: .cargo/config.toml includes the job's build folder`);
+    assert.match(read(join(PADDOCK, 'apps', app, '.gitignore')), /^\.cargo\/ci\.toml$/m, `${app}: the job's ci.toml is never committed`);
+    for (const id of ['rust', 'bundle']) {
+      const job = appJob(app, id)?.text ?? '';
+      assert.notEqual(job, '', `${app}: a ${id} job`);
+      const gitBash = job.indexOf('Git bash on PATH');
+      const sw = job.indexOf('uses: ./.gitea/actions/stable-workspace');
+      const bf = job.indexOf('uses: ./.gitea/actions/build-folder');
+      assert.ok(gitBash > 0 && gitBash < sw && sw < bf && bf < job.indexOf('uses: ./.gitea/actions/setup-rust'), `${app} ${id}: Git bash, then the stable path, then the build folder, then Rust`);
+      assert.match(job.slice(sw, sw + 120), /\n\s+if: runner\.os != 'Linux'/, `${app} ${id}: stable-workspace on the hosts only`);
+      assert.match(job.slice(bf, bf + 220), new RegExp(`workspace: \\$\\{\\{ env\\.PADDOCK_WORKSPACE \\|\\| github\\.workspace \\}\\}/apps/${app}\\n\\s+name: ${app}-\\$\\{\\{ github\\.job \\}\\}`), `${app} ${id}: one kept folder per app and job, in the stable checkout`);
+      for (const s of parseSteps(job).filter((st) => /\b(cargo (clippy|nextest run|test|build|run|llvm-cov)|tauri build|tauri-bundle\.sh|macos-verify-bundle\.sh|check-bundle\.sh)\b/.test(st.run ?? ''))) {
+        if (/runner\.os == 'Linux'/.test(s.text)) continue;
+        assert.match(s.text, /working-directory: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}/, `${app} ${id} "${s.name}": builds from the stable path`);
+      }
     }
-    assert.match(job, /cargo nextest run \$PADDOCK_CARGO_TARGET [^\n]*--profile ci/, `${app}: nextest with the ci profile`);
-    assert.match(job, /cargo test \$PADDOCK_CARGO_TARGET [^\n]*--doc/, `${app}: doc tests (nextest skips them)`);
+    const job = appJob(app, 'rust').text;
+    assert.match(job, /os: \[ubuntu-latest, windows-latest, macos-latest\]|- os: ubuntu-latest[\s\S]*- os: windows-latest[\s\S]*- os: macos-latest/, `${app}: one leg per OS`);
+    assert.match(job, /uses: \.\/\.gitea\/actions\/host-tools/, `${app}: the pinned cargo-nextest`);
+    for (const s of parseSteps(job).filter((st) => /\bcargo test\b/.test(st.run ?? ''))) assert.match(s.run, /--doc/, `${app} "${s.name}": tests run under nextest (cargo test only for doc tests)`);
+    assert.match(job, /cargo nextest run [^\n]*--profile ci/, `${app}: nextest with the ci profile`);
+    assert.match(job, /cargo test [^\n]*--doc/, `${app}: doc tests (nextest skips them)`);
     assert.match(job, /cargo fmt --all --check/, `${app}: format`);
-    assert.match(job, /cargo clippy \$PADDOCK_CARGO_TARGET [^\n]*-- -D warnings/, `${app}: clippy`);
+    assert.match(job, /cargo clippy [^\n]*-- -D warnings/, `${app}: clippy`);
   }
+});
+
+/** Runs conformance/ci/build-folder.sh for `os` on a scratch Cargo workspace; returns what it wrote. */
+function runBuildFolder(os, { include = true, name = 'spotter-rust' } = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-build-folder-')));
+  const ws = join(root, 'ws');
+  mkdirSync(join(ws, '.cargo'), { recursive: true });
+  writeFileSync(join(ws, '.cargo', 'config.toml'), include ? 'include = [{ path = "ci.toml", optional = true }]\n' : '[alias]\n');
+  writeFileSync(join(ws, '.cargo', 'ci.toml'), '# left by an earlier job\n');
+  const r = spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'build-folder.sh'), ws, name], {
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_ENV: join(root, 'github-env') },
+    encoding: 'utf8',
+  });
+  const env = existsSync(join(root, 'github-env')) ? readFileSync(join(root, 'github-env'), 'utf8') : '';
+  const ci = existsSync(join(ws, '.cargo', 'ci.toml')) ? readFileSync(join(ws, '.cargo', 'ci.toml'), 'utf8') : null;
+  return { ...r, root, ws, env, ci };
+}
+
+test('build-folder keeps a host job\'s build folder outside the checkout as cargo configuration, and target/ in a container', () => {
+  const mac = runBuildFolder('macOS');
+  assert.equal(mac.status, 0, mac.stderr + mac.stdout);
+  const kept = join(mac.root, 'home', '.paddock-ci', 'target-spotter-rust');
+  assert.equal(mac.ci.split('\n').slice(1).join('\n'), `[build]\ntarget-dir = '${kept}'\n`, 'cargo reads the folder from the included ci.toml');
+  assert.match(mac.env, new RegExp(`^PADDOCK_BUILD_FOLDER=${kept}$`, 'm'));
+  assert.ok(existsSync(kept), 'the kept folder exists');
+  const linux = runBuildFolder('Linux');
+  assert.equal(linux.status, 0, linux.stderr + linux.stdout);
+  assert.equal(linux.ci, null, 'no ci.toml in a container (an old one is removed)');
+  assert.match(linux.env, new RegExp(`^PADDOCK_BUILD_FOLDER=${linux.ws}/target$`, 'm'));
+  const missing = runBuildFolder('macOS', { include: false });
+  assert.notEqual(missing.status, 0, 'a workspace whose config does not include ci.toml would silently build elsewhere');
+  assert.match(missing.stdout, /must include the job's build folder/);
+  const bad = runBuildFolder('macOS', { name: 'a b' });
+  assert.notEqual(bad.status, 0);
 });
 
 test('every app workspace has a nextest ci profile that stops a slow test, and every longer budget is a waiver with a reason', () => {

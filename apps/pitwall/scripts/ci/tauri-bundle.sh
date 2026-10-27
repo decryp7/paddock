@@ -13,7 +13,7 @@ if [ ! -f app/src-tauri/Cargo.toml ]; then
   exit 0
 fi
 
-dir="${CARGO_TARGET_DIR:-target}"
+dir="${PADDOCK_BUILD_FOLDER:-${CARGO_TARGET_DIR:-target}}"
 if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
 # The Windows runner keeps its target folder between runs: drop old installers so an earlier version's (signed)
 # installer can never be collected into this release (it once shipped as latest.json's Windows download).
