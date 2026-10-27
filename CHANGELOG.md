@@ -18,6 +18,8 @@ Conventional Commits; one semver tag for the whole repo.
   commit lint, diagram export and check-index are gone. `pitwall-server --version` is started from the built macOS app.
 - New contract field `lastPackages` (`app-gates` input `last-packages`): packages tested apart and last on Linux, left out of host legs
   (Pitwall's Tauri shell, whose build overwrites the server binary the other tests start).
+- Pitwall's server plans loads against a `MemoryReader` (`Serving::set_memory_reader`, the host by default); its tests pin a roomy machine.
+  The eight-slot slots tests answered 503 `insufficient_memory` on a Windows runner with less than about 11 GiB free (run 6456, job 12127).
 
 ### Windows CI: tests that measured the runner's disk, and a toolchain step that says why it failed
 - Four tests that timed out on a slow Windows runner (run 6461) prove their behaviour without bulk disk work: the log

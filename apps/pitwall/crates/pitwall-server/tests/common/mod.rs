@@ -297,7 +297,13 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
         })
     });
     let st = AppState::open(dirs.clone(), Some(engine)).await;
-    let _ = Hardware::default();
+    // Loads are planned against a roomy machine, never the CI runner's free memory (slots.rs pins small ones on purpose).
+    st.serving
+        .set_memory_reader(std::sync::Arc::new(|_: &Hardware| pitwall_core::memory::System {
+            total: 64 << 30,
+            available: 48 << 30,
+            ..Default::default()
+        }));
     let app = pitwall_server::http::router(st.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
