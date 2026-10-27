@@ -1,4 +1,4 @@
-// scripts/ci/build-folder.sh and scripts/ci/libduckdb-env.sh, run in a scratch copy of the app's layout with a fake runner
+// scripts/ci/libduckdb-env.sh, run in a scratch copy of the app's layout with a fake runner
 // environment (no network: the libduckdb download is a shim).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -10,14 +10,15 @@ import { fileURLToPath } from 'node:url';
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** A scratch app folder with the script, .cargo/config.toml and a one-crate workspace. */
+/** A scratch app folder with the script, .cargo/config.toml and a one-crate workspace. (The build folder is the shared
+ * build-folder action's, tested in conformance/test/ci-actions.test.mjs.) */
 function scratch() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'debrief-ci-folder-')));
   const app = join(root, 'app');
   mkdirSync(join(app, 'scripts', 'ci'), { recursive: true });
   mkdirSync(join(app, '.cargo'));
   mkdirSync(join(app, 'src'));
-  for (const s of ['build-folder.sh', 'libduckdb-env.sh']) copyFileSync(join(APP, 'scripts', 'ci', s), join(app, 'scripts', 'ci', s));
+  for (const s of ['libduckdb-env.sh']) copyFileSync(join(APP, 'scripts', 'ci', s), join(app, 'scripts', 'ci', s));
   copyFileSync(join(APP, '.cargo', 'config.toml'), join(app, '.cargo', 'config.toml'));
   writeFileSync(join(app, 'Cargo.toml'), '[package]\nname = "scratch"\nversion = "0.0.0"\nedition = "2021"\n\n[workspace]\n');
   writeFileSync(join(app, 'src', 'lib.rs'), '');
@@ -34,39 +35,6 @@ function run(s, script, env) {
   assert.equal(r.status, 0, r.stderr + r.stdout);
   return { env: readFileSync(join(s.root, 'github-env'), 'utf8'), path: readFileSync(join(s.root, 'github-path'), 'utf8'), stdout: r.stdout };
 }
-
-test('a host job builds in a kept folder outside the checkout, set as cargo configuration that cargo itself reads', () => {
-  const s = scratch();
-  try {
-    const { env } = run(s, 'build-folder.sh', { RUNNER_OS: 'macOS' });
-    const dir = join(s.root, 'home', '.paddock-ci', 'target-debrief-tauri-smoke');
-    assert.match(env, new RegExp(`^DEBRIEF_TARGET=${dir}$`, 'm'));
-    assert.match(env, new RegExp(`^DEBRIEF_E2E_APP=${dir}/debug/debrief-app$`, 'm'));
-    assert.doesNotMatch(env, /CARGO_/, 'no CARGO_* variable: sccache would hash it');
-    assert.ok(existsSync(dir));
-    assert.equal(readFileSync(join(s.app, '.cargo', 'ci.toml'), 'utf8').split('\n').find((l) => l.startsWith('target-dir')), `target-dir = '${dir}'`);
-    // The include in .cargo/config.toml really reaches cargo (tauri build and the sidecar build ask cargo metadata).
-    const meta = spawnSync('cargo', ['metadata', '--no-deps', '--format-version', '1', '--offline'], { cwd: s.app, encoding: 'utf8' });
-    if (!meta.error) {
-      assert.equal(meta.status, 0, meta.stderr);
-      assert.equal(JSON.parse(meta.stdout).target_directory, dir);
-    }
-  } finally {
-    s.done();
-  }
-});
-
-test('a Linux container builds in the checkout and drops a stale ci.toml', () => {
-  const s = scratch();
-  try {
-    writeFileSync(join(s.app, '.cargo', 'ci.toml'), "[build]\ntarget-dir = '/elsewhere'\n");
-    const { env } = run(s, 'build-folder.sh', { RUNNER_OS: 'Linux' });
-    assert.match(env, new RegExp(`^DEBRIEF_TARGET=${join(s.app, 'target')}$`, 'm'));
-    assert.ok(!existsSync(join(s.app, '.cargo', 'ci.toml')));
-  } finally {
-    s.done();
-  }
-});
 
 /** A fake fetch-libduckdb.sh: pins `version` and prints the exports the real one prints, for a folder it makes. */
 function fakeFetch(s, version) {

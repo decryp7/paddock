@@ -164,7 +164,7 @@ mutants.out.old/
 
 # Machine-local Cargo settings written by `cargo xtask libduckdb`
 .cargo/libduckdb.toml
-# The CI job's build folder (scripts/ci/build-folder.sh)
+# The CI job's build folder (the shared build-folder action)
 .cargo/ci.toml
 
 # macOS Finder metadata

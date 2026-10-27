@@ -12,7 +12,7 @@
 # Speed (Paddock lessons, "Test and build speed"): Linux jobs run in the paddock-ci image (Rust, nextest, Tauri's libraries,
 # Node, Playwright's browsers, Chrome for Testing and libduckdb baked in); every Rust job compiles through sccache on local
 # disk (setup-rust: the runner's /sccache mount in a container, ~/.paddock-ci/sccache on a host); host runners build from a
-# fixed checkout path (stable-workspace) into a kept build folder set as cargo configuration (scripts/ci/build-folder.sh),
+# fixed checkout path (stable-workspace) into a kept build folder set as cargo configuration (the build-folder action),
 # never CARGO_TARGET_DIR, which sccache hashes; npm's and Angular's caches are kept (node-caches).
 #
 # Runner labels: ubuntu-latest (jobs in the paddock-ci image), windows-latest and macos-latest (host runners).
@@ -225,7 +225,7 @@ jobs:
   # The same tests on the macOS host runner: the contained-plugin sandbox (sandbox-exec profiles, the private socket,
   # symlinked temp paths) and other platform code only run here; a macOS-only bug once passed the Linux-only suite.
   # Host mode: the checkout moves to a fixed path (stable-workspace, so sccache hits the workspace crates too) and builds into
-  # a kept folder outside it (scripts/ci/build-folder.sh); libduckdb as on Linux, through DYLD_LIBRARY_PATH (set in
+  # a kept folder outside it (the build-folder action); libduckdb as on Linux, through DYLD_LIBRARY_PATH (set in
   # GITHUB_ENV, never under `nice`/`env`, which macOS's SIP would strip it from).
   rust-test-macos:
     name: rust tests (macOS)
@@ -248,11 +248,16 @@ jobs:
 
       - uses: ./.gitea/actions/host-tools
 
+      # The build folder outside the checkout, as cargo configuration (the shared build-folder action).
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+          name: debrief-${{ github.job }}
+
       # The Mac runner is shared with other jobs: four rustc at a time, as Paddock's crate job.
-      - name: Build folder outside the checkout
+      - name: Build jobs and the test browser's folder
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          bash scripts/ci/build-folder.sh
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
           # Outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it.
           echo "DEBRIEF_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser-debrief" >> "$GITHUB_ENV"
@@ -375,7 +380,7 @@ jobs:
 
       - name: Third-party notices are up to date
         run: |
-          node --test scripts/notices/generate.test.mjs app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs scripts/ci/build-folder.test.mjs app/e2e/retried-reporter.test.mjs
+          node --test scripts/notices/generate.test.mjs app/scripts/build-info.test.mjs app/scripts/whats-new.test.mjs app/scripts/build-sidecars.test.mjs app/scripts/libduckdb.test.mjs app/scripts/lint-styles.test.mjs app/scripts/lint-effects.test.mjs app/scripts/window-weight.test.mjs scripts/commit-lint.test.mjs scripts/ci/check-icons.test.mjs scripts/ci/check-temp-leaks.test.mjs scripts/ci/check-index.test.mjs scripts/ci/check-smoke-dialogs.test.mjs scripts/ci/check-quarantine.test.mjs scripts/ci/scan-fixtures.test.mjs scripts/ci/startup-bench.test.mjs scripts/ci/libduckdb-env.test.mjs app/e2e/retried-reporter.test.mjs
           node scripts/ci/check-quarantine.mjs
           node scripts/ci/scan-fixtures.mjs
           node scripts/ci/check-icons.mjs
@@ -565,10 +570,19 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
 
       # One kept build folder per job on a host (the smoke and installer jobs run at the same time and would otherwise wait
-      # for each other on the cargo lock); DEBRIEF_TARGET and DEBRIEF_E2E_APP for the steps below.
-      - name: Build folder
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: bash scripts/ci/build-folder.sh
+      # for each other on the cargo lock), as cargo configuration (the shared build-folder action): PADDOCK_BUILD_FOLDER and
+      # DEBRIEF_E2E_APP for the steps below.
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+          name: debrief-${{ github.job }}
+
+      # The debug app the real-app smoke starts (wdio), in the job's build folder.
+      - name: The smoke's app binary
+        shell: bash
+        run: |
+          ext=; if [ "$RUNNER_OS" = Windows ]; then ext=.exe; fi
+          echo "DEBRIEF_E2E_APP=$PADDOCK_BUILD_FOLDER/debug/debrief-app$ext" >> "$GITHUB_ENV"
 
       # Host runners keep their own Node: fail fast when it is missing or not the major version app/.nvmrc asks for.
       - name: Host Node matches app/.nvmrc
@@ -647,7 +661,7 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          app=$(find "$DEBRIEF_TARGET/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
           [ -d "$app" ] || { echo "::error::no debug .app was built"; exit 1; }
           node --test scripts/ci/macos-smoke.test.mjs
           bash scripts/ci/macos-verify-bundle.sh "$app"
@@ -720,7 +734,7 @@ jobs:
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          app=$(find "$DEBRIEF_TARGET/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
+          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
           node --test scripts/ci/startup-bench.test.mjs
           node scripts/ci/startup-bench.mjs "$app" --runs 5 --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
@@ -733,7 +747,7 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" \
-            node scripts/ci/startup-bench.mjs "$DEBRIEF_TARGET/debug/debrief-app" --runs 5 --report-only \
+            node scripts/ci/startup-bench.mjs "$PADDOCK_BUILD_FOLDER/debug/debrief-app" --runs 5 --report-only \
             --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
       - name: Start-up timings
@@ -817,9 +831,11 @@ jobs:
 
       - uses: ./.gitea/actions/setup-rust
 
-      - name: Build folder
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: bash scripts/ci/build-folder.sh
+      # The release build folder as cargo configuration (the shared build-folder action): PADDOCK_BUILD_FOLDER.
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+          name: debrief-${{ github.job }}
 
       - name: Host Node matches app/.nvmrc
         if: runner.os != 'Linux'
@@ -878,7 +894,7 @@ jobs:
           [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
           # Host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
           # installer can never be collected into this release.
-          target="$DEBRIEF_TARGET"
+          target="$PADDOCK_BUILD_FOLDER"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
           bundles='${{ matrix.bundles }}'
@@ -912,7 +928,7 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
-          bundle="$DEBRIEF_TARGET/dist/bundle"
+          bundle="$PADDOCK_BUILD_FOLDER/dist/bundle"
           if [ "$RUNNER_OS" = Linux ]; then
             deb=$(find "$bundle/deb" -name '*.deb' | head -n 1)
             tree=$(mktemp -d)
@@ -952,7 +968,7 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
           mkdir -p dist
-          dir="$DEBRIEF_TARGET"
+          dir="$PADDOCK_BUILD_FOLDER"
           # Git bash on Windows: turn C:/... into a path find understands.
           if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
           find "$dir/dist/bundle" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*-setup.exe' -o -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;

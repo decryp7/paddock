@@ -293,22 +293,42 @@ test('no script sits between cargo and rustc: RUSTC_WRAPPER is sccache itself, w
   }
 });
 
-// The crate job's host legs keep their build folder outside the checkout. CARGO_TARGET_DIR would put it in sccache's key (every
-// CARGO_* variable is hashed), so it is cargo configuration, passed on every cargo command of the job.
-test('the crate job sets its build folder as cargo configuration on every cargo step, never with CARGO_TARGET_DIR', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
-  const job = ci.match(/^  crate:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
-  assert.notEqual(job, '', 'the crate job exists');
-  assert.doesNotMatch(job, /CARGO_(BUILD_)?TARGET_DIR=/, 'no step sets the build folder variable');
-  const set = [...job.matchAll(/PADDOCK_CARGO_TARGET=(\S+?)'?(?:"|>>)/g)].map((m) => m[1]);
-  assert.equal(set.length, 2, 'one per host OS');
-  for (const v of set) {
-    assert.match(v, /^--config=build\.target-dir='.*\.paddock-ci[\\/]target-/, v);
-    assert.doesNotMatch(v, /GITHUB_WORKSPACE|\.\.|\s/, `${v}: outside the checkout, and no spaces (the variable is expanded unquoted)`);
+// One mechanism sets a job's build folder in every workflow: the shared build-folder action, which writes it to the Cargo
+// workspace's .cargo/ci.toml (a kept folder on a host, target/ in a container). CARGO_TARGET_DIR would put it in sccache's
+// key (every CARGO_* variable is hashed), a --config flag does not reach `tauri build`, and app copies drift (rule 43).
+test('every job that builds Rust on a host sets its build folder with the build-folder action, in a stable checkout', () => {
+  const uses = [];
+  // Still on CARGO_TARGET_DIR, to move next: the release and smoke workflows of the reference apps and the reusable
+  // app-release (shared tauri-bundle.sh and macos-verify-bundle.sh read CARGO_TARGET_DIR). No other workflow may join them.
+  const notYet = ['app-release.yml', 'service-smoke.yml', 'shell-demo-release.yml', 'workbench-demo-release.yml'];
+  for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    const text = read(join(WORKFLOWS, file));
+    const body = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    if (notYet.includes(file)) {
+      assert.match(body, /CARGO_TARGET_DIR/, `${file} moved onto the build-folder action: take it off the not-yet list`);
+      continue;
+    }
+    assert.doesNotMatch(body, /PADDOCK_CARGO_TARGET|build\.target-dir|CARGO_(BUILD_)?TARGET_DIR\s*[=:]/, `${file}: the build folder is the build-folder action's, never a flag or a CARGO_* variable`);
+    assert.doesNotMatch(body, /scripts\/ci\/build-folder\.sh/, `${file}: the shared action, not an app's copy`);
+    for (const job of parseJobs(text)) {
+      const at = job.text.indexOf('uses: ./.gitea/actions/build-folder');
+      if (at < 0) continue;
+      const sw = job.text.indexOf('uses: ./.gitea/actions/stable-workspace');
+      assert.ok(sw >= 0 && sw < at, `${file} ${job.id}: the stable checkout path before the build folder`);
+      const ws = /workspace: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/(\S+)\n\s+name: (\S+)/.exec(job.text.slice(at));
+      assert.ok(ws, `${file} ${job.id}: the workspace in the stable checkout, and a folder name`);
+      uses.push(`${file}:${job.id}`);
+      const conf = read(join(PADDOCK, ws[1], '.cargo', 'config.toml'));
+      assert.match(conf, /^include = \[.*\{ path = "ci\.toml", optional = true \}\]$/m, `${ws[1]}: .cargo/config.toml includes the job's ci.toml`);
+      const ignored = spawnSync('git', ['check-ignore', '-q', join(ws[1], '.cargo', 'ci.toml')], { cwd: PADDOCK });
+      assert.equal(ignored.status, 0, `${ws[1]}/.cargo/ci.toml is git-ignored`);
+    }
   }
-  const cargo = job.split('\n').filter((l) => /^\s*(run: )?cargo (clippy|nextest|test|build|check|llvm-cov)\b/.test(l) && !/--version/.test(l));
-  assert.ok(cargo.length >= 6, `${cargo.length} cargo commands`);
-  for (const l of cargo) assert.match(l, /cargo (clippy|nextest run|test|build|check|llvm-cov) \$PADDOCK_CARGO_TARGET /, l.trim());
+  for (const want of ['ci.yml:crate', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle', ...['spotter', 'pitcrew', 'dyno', 'pitwall'].flatMap((a) => [`${a}.yml:rust`, `${a}.yml:bundle`])]) {
+    assert.ok(uses.includes(want), `${want} sets its build folder with the action (found: ${uses.join(', ')})`);
+  }
+  const copies = spawnSync('git', ['ls-files', 'apps/*/scripts/ci/build-folder.sh'], { cwd: PADDOCK, encoding: 'utf8' });
+  assert.equal(copies.stdout.trim(), '', 'no app keeps its own copy of the build-folder script (rule 43)');
 });
 
 // Run 6365: after stable-workspace linked the macOS work folder, `node <work folder>/.../install-test-browser.mjs` exited 0 and
@@ -810,8 +830,8 @@ test('Debrief builds Rust through sccache in every Rust job, with the build fold
   assert.doesNotMatch(body, /dtolnay\/rust-toolchain|decryp7\/garage:|actions\/setup-node|playwright install/, 'the shared actions and the paddock-ci image');
   // The kept build folder of the host legs is cargo configuration that cargo itself reads (.cargo/ci.toml, included).
   assert.match(read(join(PADDOCK, 'apps', 'debrief', '.cargo', 'config.toml')), /include = \[[^\]]*\{ path = "ci\.toml", optional = true \}/);
-  assert.match(read(join(PADDOCK, 'apps', 'debrief', 'scripts', 'ci', 'build-folder.sh')), /target-dir = /);
-  for (const job of ['rust-test-macos', 'tauri-smoke', 'bundle']) assert.match(jobBlock(yml, job), /\bbash scripts\/ci\/build-folder\.sh\n/, `${job}: the build folder`);
+  for (const job of ['rust-test-macos', 'tauri-smoke', 'bundle']) assert.match(jobBlock(yml, job), /uses: \.\/\.gitea\/actions\/build-folder\n/, `${job}: the build folder (the shared action)`);
+  assert.match(jobBlock(yml, 'tauri-smoke'), /DEBRIEF_E2E_APP=\$PADDOCK_BUILD_FOLDER\/debug\/debrief-app\$ext/, 'the smoke starts the app from the job\'s build folder');
 });
 
 test('Debrief\'s host legs build from a stable checkout path, after Git bash is on PATH on Windows', () => {
