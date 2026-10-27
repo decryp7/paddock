@@ -199,7 +199,12 @@ fn the_number_of_conversations_and_the_file_size_are_bounded_oldest_first() {
     }
     assert_eq!(store.summaries().len(), limits.conversations);
     assert!(store.get(&first).is_none(), "the oldest went first");
-    // Big conversations push the file over its size bound: the oldest go, the newest stays.
+    // Big conversations push the file over its size bound while the count bound is far away: only the byte limit
+    // can evict here, the oldest go, the newest stays.
+    let limits = StoreLimits {
+        conversations: 10,
+        ..limits
+    };
     let store =
         ConversationStore::open_with(dir.path().join("b.json"), Arc::new(clock.clone()), limits);
     let mut ids = vec![];
@@ -216,8 +221,15 @@ fn the_number_of_conversations_and_the_file_size_are_bounded_oldest_first() {
         ids.push(id);
     }
     assert!(std::fs::metadata(dir.path().join("b.json")).unwrap().len() <= limits.file_bytes);
+    assert!(
+        store.summaries().len() < ids.len(),
+        "fewer than the 3 created are left, with room for 10"
+    );
     assert!(store.get(ids.last().unwrap()).is_some());
-    assert!(store.get(&ids[0]).is_none());
+    assert!(
+        store.get(&ids[0]).is_none(),
+        "the oldest went for size, not for count"
+    );
 }
 
 #[test]
