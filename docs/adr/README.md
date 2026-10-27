@@ -16,4 +16,4 @@
 | [0012](0012-paddock-app-shell.md) | Paddock app shell: one shell for every app (frame, startup, notifications and health, dialogs, jobs, settings, updates, menu, pages, test kit) (proposed) |
 | [0013](0013-paddock-workbench.md) | Paddock workbench: the docked IDE layer on the shell for Debrief, Pacenotes and Sighter (proposed) |
 | [0014](0014-monorepo-under-paddock.md) | One monorepo under `paddock`: layout, history import, per-app tags and releases, updater bridge, affected CI, task runner (accepted) |
-| [0015](0015-assistant-memory.md) | Assistant memory: per app, off until enabled, user-confirmed facts and findings, the poisoning rule, SQLite with the app (proposed) |
+| [0015](0015-assistant-memory.md) | Assistant memory: per app, off until enabled, user-confirmed facts and findings, the poisoning rule, SQLite with the app (accepted) |

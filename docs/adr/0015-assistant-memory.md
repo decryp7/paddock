@@ -1,7 +1,6 @@
 # 15. Assistant memory: per app, user-confirmed, poison-proof, stored with the app
 
-- Status: proposed (2026-10-27). The four product choices in "Decision" §1, §3, §4 and §6 were made by the user on
-  2026-10-27; the rest is proposed.
+- Status: Accepted (2026-10-27, by the user)
 - Date: 2026-10-27
 - Research: [2026-10-ai-memory.md](../research/2026-10-ai-memory.md) (patterns, sources, options, work packages M0–M7)
 - Related: rules 1, 10–12, 21, 39, 42, 43; ADR 0004 (`paddock-pitwall`, "Pitwall is optional"), ADR 0013 (workbench assistant
