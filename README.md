@@ -16,15 +16,17 @@ anywhere.
 
 ## The apps
 
+All seven live in this repository under [`apps/`](apps/).
+
 | | App | What it does | Status |
 |---|---|---|---|
-| <img src="icons/debrief/debrief-macos.svg" width="40" alt=""> | **[Debrief](https://dev.decryptology.net/decryp7/debrief)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | **v1.0.1 released** (1.1 coming) |
-| <img src="icons/pitcrew/pitcrew-macos.svg" width="40" alt=""> | **[Pitcrew](https://dev.decryptology.net/decryp7/pitcrew)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.1 released** |
-| <img src="icons/pitwall/pitwall-macos.svg" width="40" alt=""> | **[Pitwall](https://dev.decryptology.net/decryp7/pitwall)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | **v1.0.3 released** (next after Debrief) |
-| <img src="icons/dyno/dyno-macos.svg" width="40" alt=""> | **[Dyno](https://dev.decryptology.net/decryp7/dyno)** | Measures, explains and tunes your PC, observe first. | In development |
-| <img src="icons/spotter/spotter-macos.svg" width="40" alt=""> | **[Spotter](https://dev.decryptology.net/decryp7/spotter)** | Watches for new releases anywhere and tells you the moment one appears. | Releasing soon |
-| <img src="icons/sighter/sighter-macos.svg" width="40" alt=""> | **[Sighter](https://dev.decryptology.net/decryp7/sighter)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | In design (after Pitwall) |
-| <img src="icons/pacenotes/pacenotes-macos.svg" width="40" alt=""> | **[Pacenotes](https://dev.decryptology.net/decryp7/pacenotes)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | In design (after Pitwall) |
+| <img src="icons/debrief/debrief-macos.svg" width="40" alt=""> | **[Debrief](apps/debrief/README.md)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | **v1.1.1 released** (1.2.0 in progress) |
+| <img src="icons/pitcrew/pitcrew-macos.svg" width="40" alt=""> | **[Pitcrew](apps/pitcrew/README.md)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.1 released** |
+| <img src="icons/pitwall/pitwall-macos.svg" width="40" alt=""> | **[Pitwall](apps/pitwall/README.md)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | **v1.0.3 released** (1.0.4 in progress) |
+| <img src="icons/dyno/dyno-macos.svg" width="40" alt=""> | **[Dyno](apps/dyno/README.md)** | Measures, explains and tunes your PC, observe first. | In development |
+| <img src="icons/spotter/spotter-macos.svg" width="40" alt=""> | **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development (1.0.0 not yet tagged) |
+| <img src="icons/sighter/sighter-macos.svg" width="40" alt=""> | **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned (design only) |
+| <img src="icons/pacenotes/pacenotes-macos.svg" width="40" alt=""> | **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned (design only) |
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 
@@ -57,6 +59,17 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 - **Pitwall is always optional.** Every app's core works without it; AI features appear when it is present.
 - **Observe before acting.** Changes need a click or an enabled rule, and have an undo.
 - **Calm by default.** Neutral surfaces, colour for action and the one thing that needs attention.
+
+## Repository layout
+
+```
+apps/<app>/   the seven apps, plus the shell and workbench demos
+crates/       shared Rust crates (Gitea cargo registry)
+ui/           @decryp7/paddock-ui and @decryp7/paddock-e2e
+icons/        the isometric icon family, per app and platform
+conformance/  the shared conformance checks every app runs
+docs/         rules, lessons, ADRs, design guide, ecosystem, images
+```
 
 ## What is in this repo
 
@@ -108,33 +121,35 @@ paddock-jobs = { version = "0.1", registry = "decryp7" }
 
 ## Status and roadmap
 
-Pitcrew v1.0.1 is released. The order of work:
+Debrief 1.1.1, Pitwall 1.0.3 and Pitcrew 1.0.1 are released. The order of work:
 
-1. Debrief v1 release (done: v1.0.0).
-2. Pitwall release.
-3. The shared Paddock crates: the plugin platform and `paddock-pitwall`.
-4. Debrief switches its AI to Pitwall.
-5. Spotter and Dyno finish.
-6. Pitcrew 1.1: local autoscaling.
-7. Pacenotes and Sighter implementation.
+1. Debrief 1.2 (in progress).
+2. The shared Paddock crates: the plugin platform and `paddock-pitwall`.
+3. Debrief switches its AI to Pitwall.
+4. Spotter and Dyno finish.
+5. Pitcrew 1.1: local autoscaling.
+6. Pacenotes and Sighter implementation.
 
 Paddock itself is pre-1.0: a minor bump may change tokens or component APIs, and removed things are deleted rather than
 deprecated.
 
 ## Versioning and releases
 
-One semver tag for the whole repo (`vMAJOR.MINOR.PATCH`). Pushing a `v*` tag runs `.gitea/workflows/publish.yml`, which runs
-the gates again, publishes the changed crates to the Gitea cargo registry and the npm packages (`@decryp7/paddock-ui` with
-its entry points, `@decryp7/paddock-e2e`) to the Gitea npm registry, and creates the release notes. Releases are made only
-by CI. Steps: update the version in `ui/projects/paddock-ui/package.json` and `ui/projects/paddock-e2e/package.json` (they
-move together), bump each changed crate's `version`, update `CHANGELOG.md`, commit, tag, push the tag.
-`node scripts/publish.mjs` (or `cd ui && npm run release`) is the local dry run: it lists every crate, npm package and
-entry point with what the tag would publish, and uploads nothing.
+Every app releases from its own tag in this repository, `<app>-v<version>` (for example `debrief-v1.1.1`,
+`pitwall-v1.0.3`); the tag's CI workflow (`.gitea/workflows/<app>.yml`) builds the installers and creates the release.
+Releases are made only by CI, never from a local machine.
 
-Paddock Shell Demo has its own tags, `shell-demo-v<version>` (its version is `apps/shell-demo/src-tauri/Cargo.toml`'s):
-`.gitea/workflows/shell-demo-release.yml` builds its installers and creates its release. A `v*` tag never builds it, and
-its tag never publishes the packages. Paddock Workbench Demo likewise: `workbench-demo-v<version>`,
-`.gitea/workflows/workbench-demo-release.yml`.
+The shared packages use one semver tag for the whole repo (`vMAJOR.MINOR.PATCH`). Pushing a `v*` tag runs
+`.gitea/workflows/publish.yml`, which runs the gates again, publishes the changed crates to the Gitea cargo registry and
+the npm packages (`@decryp7/paddock-ui` with its entry points, `@decryp7/paddock-e2e`) to the Gitea npm registry, and
+creates the release notes. Steps: update the version in `ui/projects/paddock-ui/package.json` and
+`ui/projects/paddock-e2e/package.json` (they move together), bump each changed crate's `version`, update `CHANGELOG.md`,
+commit, tag, push the tag. `node scripts/publish.mjs` (or `cd ui && npm run release`) is the local dry run: it lists every
+crate, npm package and entry point with what the tag would publish, and uploads nothing.
+
+The demos have their own tags: `shell-demo-v<version>` and `workbench-demo-v<version>` (built by
+`.gitea/workflows/shell-demo-release.yml` and `workbench-demo-release.yml`). A `v*` tag never builds them, and their tags
+never publish the packages.
 
 ## Licence
 
