@@ -1,9 +1,9 @@
 # 22. All tooling in Rust: one developer and CI tool (`paddock-dev`) on shared repository crates, after the CI kit consolidation
 
-- Status: Proposed (2026-10-27). Direction decided by the user on 2026-10-27: everything in Rust (option C below), after
+- Status: Accepted (2026-10-28, after an independent review). Direction decided by the user on 2026-10-27: everything in Rust (option C below), after
   the consolidation WP-C1 to WP-C6, with conformance as a shared Rust rules crate; only the categories shown to lose
   something real stay non-Rust, each with its reason. The five open decisions were taken on 2026-10-28 (Decisions
-  taken). This text awaits a re-review before acceptance.
+  taken).
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 13
   (bounded parallelism), rule 22 (independent review of images), rule 23 (ad-hoc sealing), rule 40 (recurring bugs mean
@@ -209,12 +209,13 @@ run of `dev-tool.yml` (below) publishes for the new compiler within a day.
   `rustc -vV` takes about 35 ms here (measured, through the rustup proxy). The consumer's target triple selects the file
   inside the version (`paddock-dev-<target>[.exe]`). When `git status --porcelain --untracked-files=all -- <inputs>` is
   not empty, the wrapper always builds: a changed tracked file or a new untracked file that `.gitignore` does not exclude
-  (for example a new module under `src/`) is not in `HEAD`'s tree, so the hash cannot describe it. `tools/paddock-dev/target/` is ignored in `.gitignore` (R0), so a local build folder never
-  counts as a change. The tool embeds the hash it was built from and prints it (`./dev self hash` prints both the wrapper's and the
-  binary's), so the wrapper can be tested. `git rev-parse` takes 16 ms (measured). The tool's dev-dependencies change
+  (for example a new module under `src/`) is not in `HEAD`'s tree, so the hash cannot describe it.
+  `tools/paddock-dev/target/` is ignored in `.gitignore` (R0), so a local build folder never counts as a change. The
+  tool embeds the hash it was built from and prints it (`./dev self hash` prints both the wrapper's and the binary's),
+  so the wrapper can be tested. `git rev-parse` takes 16 ms (measured). The tool's dev-dependencies change
   the hash only through `Cargo.lock`; that errs on the side of a rebuild.
-- **Publishing.** `dev-tool.yml` runs on a push to `main` that changes the inputs, and nightly on `main` at 02:35
-  (`35 2 * * *`, a free slot) to catch a new stable, which changes no path. Each runner computes the hash with the same
+- **Publishing.** `dev-tool.yml` runs on a push to `main` that changes the inputs, nightly on `main` at 02:35
+  (`35 2 * * *`, a free slot) to catch a new stable, which changes no path, and on `workflow_dispatch`. Each runner computes the hash with the same
   command and its own compiler. When the package already has this runner's file under that hash, the job ends;
   otherwise it builds in a fresh target folder with `RUSTC_WRAPPER` unset:
 
@@ -383,7 +384,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 
 | Phase | WP | Content | Days | Deletes | Adds |
 |---|---|---|---|---|---|
-| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `./dev` + `dev.cmd`, git input hash with the compiler cargo resolves, `setup-rust`'s image fast path checked against `stable` (notice on a failed check, clear error on a failed install), `self hash`, `inputs.txt` test, `dev-tool.yml` on four runners, on push and nightly, the `dev-build` job and run artifact, the generic package and its cleanup rule, `.gitignore` for `tools/paddock-dev/target/` | 3.5 | – | 1,300 + 900 tests |
+| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `./dev` + `dev.cmd`, git input hash with the compiler cargo resolves, `setup-rust`'s image fast path checked against `stable` (notice on a failed check, clear error on a failed install), `self hash`, `inputs.txt` test, `dev-tool.yml` on the three host runners and the CI image, on push, nightly and `workflow_dispatch`, the `dev-build` job and run artifact, the generic package and its cleanup rule, `.gitignore` for `tools/paddock-dev/target/` | 3.5 | – | 1,300 + 900 tests |
 | | R1 | composite actions' logic (sccache, stable workspace, build folder and env, host tools and cleanup, node caches, sccache stats); actions become one-liners; extend the WP-C6 check (§3.7) with today's baselines; delete the three one-off scripts | 2.5 | 334 shell lines (actions 815 → about 300 YAML), 72, 491 | 900 + 800 tests |
 | | R10 | app workflows' long and OS-branching `run:` blocks into commands or `paddock.ci.json` (Debrief, Dyno, Spotter, Pitcrew, Pitwall) | 2 | about 450 inline shell lines | 500 + 400 tests |
 | **2 Release and downloads** | R2 | release, bundles, sidecars, `verify-macos` with `FakeRunner`, `self-test`, `latest-json`, notes, strip-keys, publish; Debrief `build-sidecars`, macOS dev-signing, Dyno `check-bundle`, demo release | 3 | 1,271 + about 900 test lines | 1,600 + 1,200 tests |
