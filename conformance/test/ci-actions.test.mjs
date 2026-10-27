@@ -566,37 +566,6 @@ test('the host-tools pin is a release version with SHA-256 sums', () => {
   for (const sum of read(join(ACTIONS, 'host-tools', 'action.yml')).matchAll(/SUM=(\S+);/g)) assert.match(sum[1], /^[0-9a-f]{64}$/);
 });
 
-function runNodeCaches(os, env = {}) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-node-caches-')));
-  const text = read(join(ACTIONS, 'node-caches', 'action.yml'));
-  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
-  mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
-  writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
-  writeFileSync(join(root, 'step.sh'), body);
-  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
-    encoding: 'utf8',
-  });
-  assert.equal(r.status, 0, r.stderr + r.stdout);
-  const written = existsSync(join(root, 'github-env')) ? readFileSync(join(root, 'github-env'), 'utf8') : '';
-  return { root, stdout: r.stdout, written };
-}
-
-test('node-caches keeps the npm and Angular caches on the host or the container mount, never failing a job', () => {
-  const host = runNodeCaches('macOS');
-  const kept = join(host.root, 'home', '.paddock-ci');
-  assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm$`, 'm'));
-  assert.equal(realpathSync(join(host.root, 'ws', 'ui', '.angular', 'cache')), join(kept, 'angular', 'e2e-1'), 'one Angular cache per job and shard');
-  const mount = join(host.root, 'mount');
-  mkdirSync(mount);
-  const linux = runNodeCaches('Linux', { PADDOCK_CI_MOUNT: mount });
-  assert.match(linux.written, /^npm_config_cache=.*\/mount\/npm$/m);
-  const bare = runNodeCaches('Linux');
-  assert.equal(bare.written, '');
-  assert.match(bare.stdout, /::notice::no \/sccache mount/);
-  assert.match(read(join(PADDOCK, 'ui', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, 'Angular keeps its cache in CI too');
-});
-
 // ---- The imported apps' own workflows (spotter, pitcrew, dyno, pitwall; each the app's old build.yml) ----
 // They follow Paddock's CI: the paddock-ci image, the shared actions, workspace-wide steps, nextest's ci profile, sharded e2e,
 // installers and the real-app smoke only on full runs, and the family's signing keys stripped before the bundler.
@@ -745,4 +714,35 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
   assert.match(job, /SPOTTER_TEST_BROWSER=\$CHROMIUM_TEST_PATH/, 'the tests launch the pinned build');
   assert.match(job, /test-browser-spotter/, 'a kept host folder of its own (two jobs may run on a host at once)');
   assert.match(read(join(PADDOCK, 'apps', 'spotter', '.config', 'nextest.toml')), /filter = "package\(spotter-render\) & binary\(real_browser\)"\ntest-group = "real-browser"/, 'real browsers take turns under nextest too');
+});
+
+function runNodeCaches(os, env = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-node-caches-')));
+  const text = read(join(ACTIONS, 'node-caches', 'action.yml'));
+  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+  mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
+  writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
+  writeFileSync(join(root, 'step.sh'), body);
+  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  const written = existsSync(join(root, 'github-env')) ? readFileSync(join(root, 'github-env'), 'utf8') : '';
+  return { root, stdout: r.stdout, written };
+}
+
+test('node-caches keeps the npm and Angular caches on the host or the container mount, never failing a job', () => {
+  const host = runNodeCaches('macOS');
+  const kept = join(host.root, 'home', '.paddock-ci');
+  assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm$`, 'm'));
+  assert.equal(realpathSync(join(host.root, 'ws', 'ui', '.angular', 'cache')), join(kept, 'angular', 'e2e-1'), 'one Angular cache per job and shard');
+  const mount = join(host.root, 'mount');
+  mkdirSync(mount);
+  const linux = runNodeCaches('Linux', { PADDOCK_CI_MOUNT: mount });
+  assert.match(linux.written, /^npm_config_cache=.*\/mount\/npm$/m);
+  const bare = runNodeCaches('Linux');
+  assert.equal(bare.written, '');
+  assert.match(bare.stdout, /::notice::no \/sccache mount/);
+  assert.match(read(join(PADDOCK, 'ui', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, 'Angular keeps its cache in CI too');
 });
