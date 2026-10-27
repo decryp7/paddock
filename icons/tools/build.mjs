@@ -62,14 +62,17 @@ for (const app of ONLY) {
     const name = st === 'default' ? `${app}-tray` : `${app}-tray-${st}`;
     const tpl = traySvg(app, st, 'template');
     save(join(traySrc, `${name}-template.svg`), tpl);
-    for (const pt of [16, 18]) {
-      save(join(macTray, `${name}-${pt}ptTemplate.png`), png(tpl, pt));
-      save(join(macTray, `${name}-${pt}ptTemplate@2x.png`), png(tpl, pt * 2));
+    // 16 pt from the 16 grid; 18 pt (what the apps load, at @2x) from the same grid padded by one unit, so both are exact.
+    const tpl18 = traySvg(app, st, 'template', { pt18: true });
+    for (const [pt, svg] of [[16, tpl], [18, tpl18]]) {
+      save(join(macTray, `${name}-${pt}ptTemplate.png`), png(svg, pt));
+      save(join(macTray, `${name}-${pt}ptTemplate@2x.png`), png(svg, pt * 2));
     }
     for (const theme of ['light', 'dark']) {
       const svg = traySvg(app, st, theme);
       save(join(traySrc, `${name}-${theme}.svg`), svg);
-      const frames = [16, 20, 24, 32].map(px => ({ size: px, png: png(svg, px) }));
+      // 16 and 32 only (exact multiples of the 16 grid; the apps load the 32): 20 and 24 were fractional resamples with partial alpha.
+      const frames = [16, 32].map(px => ({ size: px, png: png(svg, px) }));
       frames.forEach(fr => save(join(winTray, `${name}-${theme}-${fr.size}.png`), fr.png));
       save(join(winTray, `${name}-${theme}.ico`), writeIco(frames));
     }

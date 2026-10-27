@@ -204,6 +204,208 @@ const PADDOCK = {
   tray: garages({ x: 1, w: 14, roofY: 1.75, rise: 3.5, roofW: 2, roofTone: 'primary', doorY: 7, doorH: 5, gap: 2, inset: 1, slats: [2.5], slatW: 1, r: 0, slab: 13, slabH: 1, seamW: 0, n: 2 }),
 };
 
+
+/**
+ * Paddock redesign candidates (2026-10-25), kept in alternative/ until one is chosen (tools/paddock-variants.mjs builds them).
+ * Every one avoids the gable (it read as a generic home icon) and stacked bars (they read as a list): the family stripe is a set of
+ * set of hard-stop hues on whole pixels at 16, 24 and 32 px (each variant has its own 24 grid), one per app in STRIPE order.
+ *  - flat-garage (A): a flat canopy in the seven hues with a slight overhang, three wide roll-up doors raised a little (a dark
+ *    opening under each), pillars between the bays and the pit-lane line in front.
+ *  - pit-boxes (B): the pit lane from above: the garage wall, seven coloured pit boxes, the dashed lane line and the pit wall.
+ *  - foundation (C): one course of seven coloured blocks, a neutral slab resting on it.
+ */
+const blocks = (rects, r = 0) => rects.map(([x, y, w, h], k) => ({ kind: 'fill', d: rr(x, y, w, h, r), tone: 'primary', app: STRIPE[k] }));
+const evenRow = (x, y, w, h, gap, n = STRIPE.length) => Array.from({ length: n }, (_, k) => [f(x + k * ((w - (n - 1) * gap) / n + gap)), y, f((w - (n - 1) * gap) / n), h]);
+/**
+ * A: the canopy (one continuous band, a hard stop per hue), pillars between the bays, the doors (slats cut through), the dark openings under them and the
+ * lane line, on any grid. Bays come from `bays` ([x, w] per door) or are spread evenly over bx0..bx1 with `pillar` between them;
+ * `pillars: false` leaves the pillars out (tray: a half-tone pillar would read as disabled in a template image).
+ */
+function flatGarage({ cx0, cx1, cy, ch, cr = 0, bx0, bx1, pillar, n = 3, bays, pillars = true, top, doorTop, doorBottom, bottom, slats = [], slatW = 0, dr = 0, lane, laneW }) {
+  const dw = (bx1 - bx0 - (n + 1) * pillar) / n;
+  const bay = bays ?? Array.from({ length: n }, (_, k) => [bx0 + pillar + k * (dw + pillar), dw]);
+  const posts = [[bx0, bay[0][0] - bx0], ...bay.slice(1).map(([x], k) => [bay[k][0] + bay[k][1], x - bay[k][0] - bay[k][1]]), [bay.at(-1)[0] + bay.at(-1)[1], bx1 - bay.at(-1)[0] - bay.at(-1)[1]]];
+  const cuts = slats.map(y => `M${f(bx0)} ${f(y)}H${f(bx1)}`).join('');
+  return [
+    { kind: 'fill', d: rr(cx0, cy, cx1 - cx0, ch, cr), tone: 'family', x0: cx0, x1: cx1 },
+    ...(pillars ? [{ kind: 'fill', d: posts.map(([x, w]) => rr(x, top, w, bottom - top, 0)).join(''), tone: 'secondary' }] : []),
+    { kind: 'fill', d: bay.map(([x, w]) => rr(x, doorBottom, w, bottom - doorBottom, 0)).join(''), tone: 'primary', colour: '#07080A' },
+    { kind: 'fill', d: bay.map(([x, w]) => rr(x, doorTop, w, doorBottom - doorTop, dr)).join(''), tone: 'primary', ...(slats.length ? { cutStroke: { d: cuts, w: slatW, cap: 'butt' } } : {}) },
+    laneW > 4
+      ? { kind: 'stroke', d: `M${cx0 + laneW / 2} ${lane}H${cx1 - laneW / 2}`, w: laneW, tone: 'primary', cap: 'round' }
+      : { kind: 'fill', d: rr(cx0, lane - laneW / 2, cx1 - cx0, laneW, 0), tone: 'primary' },
+  ];
+}
+export const PADDOCK_VARIANTS = {
+  'flat-garage': {
+    g1024: flatGarage({ cx0: 228, cx1: 796, cy: 312, ch: 76, cr: 22, bx0: 248, bx1: 776, pillar: 20, top: 388, doorTop: 408, doorBottom: 592, bottom: 632,
+      slats: [469, 531], slatW: 8, dr: 6, lane: 696, laneW: 32 }),
+    // 32 px: one slat near the top of each door (more read as a table of cells at this size).
+    g32: flatGarage({ cx0: 2, cx1: 30, cy: 6, ch: 5, cr: 1, bx0: 3, bx1: 29, pillar: 2, top: 11, doorTop: 12, doorBottom: 21, bottom: 24, slats: [14.5], slatW: 1, lane: 26, laneW: 2 }),
+    // 24 px: its own grid, three 4 px doors between 1 px pillars; solid doors (a slat plus the opening read as a 3x3 table here).
+    g24: flatGarage({ cx0: 3, cx1: 21, cy: 4, ch: 3, cr: 0.5, bx0: 4, bx1: 20, bays: [[5, 4], [10, 4], [15, 4]], top: 7, doorTop: 8, doorBottom: 14, bottom: 16,
+      lane: 19, laneW: 2 }),
+    // 16 px: two bays on whole pixels (three would land on half pixels), the canopy one pixel wider than the building on each side.
+    g16: flatGarage({ cx0: 2, cx1: 14, cy: 2, ch: 3, bx0: 3, bx1: 13, bays: [[4, 3], [9, 3]], top: 5, doorTop: 6, doorBottom: 10, bottom: 12, lane: 13.5, laneW: 1 }),
+    // Tray: solid doors (a slat cut turned them into list bars); the openings are the cut-out under them.
+    tray: flatGarage({ cx0: 1, cx1: 15, cy: 1, ch: 3, bx0: 2, bx1: 14, bays: [[2, 5], [9, 5]], pillars: false, top: 4, doorTop: 5, doorBottom: 10, bottom: 12,
+      lane: 13.5, laneW: 1 }),
+  },
+  'pit-boxes': {
+    g1024: [
+      { kind: 'fill', d: rr(244, 292, 536, 44, 22), tone: 'primary' },
+      ...blocks(evenRow(244, 364, 536, 204, 14), 12),
+      { kind: 'stroke', d: 'M272 636H344M408 636H480M544 636H616M680 636H752', w: 26, tone: 'secondary', cap: 'round' },
+      { kind: 'fill', d: rr(244, 692, 536, 44, 22), tone: 'primary' },
+    ],
+    g32: [
+      { kind: 'fill', d: rr(2, 5, 27, 2, 0), tone: 'primary' },
+      ...blocks(evenRow(2, 9, 27, 11, 1)),
+      { kind: 'fill', d: 'M3 22H6V23H3ZM9 22H12V23H9ZM15 22H18V23H15ZM21 22H24V23H21ZM27 22H28V23H27Z', tone: 'secondary' },
+      { kind: 'fill', d: rr(2, 25, 27, 2, 0), tone: 'primary' },
+    ],
+    g16: [
+      { kind: 'fill', d: rr(2, 2, 12, 1, 0), tone: 'primary' },
+      ...blocks(evenRow(1, 4, 14, 6, 0)),
+      { kind: 'fill', d: 'M3 11H5V12H3ZM7 11H9V12H7ZM11 11H13V12H11Z', tone: 'secondary' },
+      { kind: 'fill', d: rr(2, 13, 12, 1, 0), tone: 'primary' },
+    ],
+    g24: [
+      { kind: 'fill', d: rr(2, 4, 20, 1, 0), tone: 'primary' },
+      ...blocks(evenRow(2, 6, 20, 9, 1)),
+      { kind: 'fill', d: 'M3 17H5V18H3ZM8 17H10V18H8ZM14 17H16V18H14ZM19 17H21V18H19Z', tone: 'secondary' },
+      { kind: 'fill', d: rr(2, 19, 20, 1, 0), tone: 'primary' },
+    ],
+    tray: [
+      { kind: 'fill', d: rr(1, 2, 13, 1, 0), tone: 'primary' },
+      ...blocks(evenRow(1, 4, 13, 7, 1)),
+      { kind: 'fill', d: 'M2 12H4V13H2ZM6 12H9V13H6ZM11 12H13V13H11Z', tone: 'primary' },
+      { kind: 'fill', d: rr(1, 14, 13, 1, 0), tone: 'primary' },
+    ],
+  },
+  'foundation': {
+    // One course of seven blocks in the stripe order, the neutral slab resting on it as wide as the base plus a little overhang.
+    g1024: [
+      { kind: 'fill', d: rr(232, 360, 560, 72, 24), tone: 'primary' },
+      ...blocks(evenRow(252, 460, 520, 204, 14), 16),
+    ],
+    g32: [
+      { kind: 'fill', d: rr(3, 8, 27, 4, 1), tone: 'primary' },
+      ...blocks(evenRow(3, 13, 27, 10, 1)),
+    ],
+    g24: [
+      { kind: 'fill', d: rr(2, 6, 20, 3, 0.5), tone: 'primary' },
+      ...blocks(evenRow(2, 10, 20, 8, 1)),
+    ],
+    g16: [
+      { kind: 'fill', d: rr(1, 3, 14, 3, 0), tone: 'primary' },
+      ...blocks(evenRow(1, 7, 14, 6, 0)),
+    ],
+    tray: [
+      { kind: 'fill', d: rr(1, 2, 13, 3, 0), tone: 'primary' },
+      ...blocks(evenRow(1, 6, 13, 8, 1)),
+    ],
+  },
+};
+
+/**
+ * Paddock in the family grammar (2026-10-25; the user picked graphite): its own tile and one bold white glyph, like the seven apps; the
+ * family link is the grammar, not a stripe of their hues. The glyph is PADDOCK_SYMBOLS.slats (below), built by tools/paddock-family.mjs
+ * into alternative/paddock-family-graphite-*. A jade tile (#4AC59D, dark ink) was the only green that kept the family CVD minimums, with
+ * no margin (bottom stop 10.3 deutan, 9.4 tritan); saturated greens and teals with white ink all failed (grass #00A768, teal #00A389).
+ */
+export const PADDOCK_FAMILY = {
+  palettes: {
+    // Graphite: the current mark's tile (no hue of its own; keeps every CVD minimum with margin), white ink 13.3:1.
+    graphite: { top: '#4A525E', base: '#2B3038', bottom: '#1E2228', deep: '#07080A', light: '#8A94A3', rim: '#FFFFFF', rimSmall: 0.45, rimMaster: 0.2, rimWidth16: 1, rimOpacity16: 0.4 },
+    // The rim is raised at small sizes so the tile's base holds on a dark Dock or taskbar: at 16 a full-pixel rim at 40 % (bottom edge
+    // #4E5157 on #1E1E1E, was #2E3239), at 24 to 48 a half-pixel rim at 45 %, at 1024 20 % (the current mark uses 22 % and 14 %).
+  },
+};
+
+/**
+ * Paddock symbol options (2026-10-25, round 2 on graphite): every option is one garage bay or row under a flat roof, drawn per grid
+ * (16, 24, 32 by hand; 1024 maps the 32 grid around the centre, 24.2 per unit, so x 6..26 lands on 270..754). Options:
+ *  - slats (A): one wide bay, the roll-up door down to a low gap, its horizontal slats as the main feature (3 slats at 16).
+ *  - car (B): one bay, the door raised (translucent secondary), a car nose in the opening.
+ *  - tyre (C): one bay, the door raised (translucent secondary), a tyre in the opening.
+ *  - twin (D): two bays with slatted doors under one roof.
+ * The tray takes the 16 grid without the secondary (a half-tone part reads as disabled in a template image), x 2..14.
+ */
+const FRAME = {
+  16: { roof: [2, 3, 12, 2], pillars: [[3, 1], [12, 1]], top: 5, bottom: 13, door: [5, 6], doorTop: 6 },
+  24: { roof: [3, 4, 18, 3], pillars: [[4, 2], [18, 2]], top: 7, bottom: 20, door: [7, 10], doorTop: 8 },
+  32: { roof: [5, 6, 22, 3], pillars: [[6, 2], [24, 2]], top: 9, bottom: 26, door: [9, 14], doorTop: 10 },
+};
+const rect = ([x, y, w, h], r = 0) => rr(x, y, w, h, r);
+const ring = (cx, cy, r, hole) => ({ d: circle(cx, cy, r), cut: [circle(cx, cy, hole)] });
+const SYMBOLS = {
+  // The roof is flush with the pillars (an overhang read as a table or a Pi) and the shutter hangs from it: its top slat touches the
+  // roof, the open gap is at the bottom only (a door with a gap at the top floated as a list).
+  slats: {
+    16: { roof: [3, 3, 10, 2], strips: [5, 7, 9], h: 1 },
+    24: { roof: [4, 4, 16, 3], strips: [7, 10, 13], h: 2 },
+    32: { roof: [6, 6, 20, 3], strips: [9, 12, 15, 18], h: 2 },
+  },
+  car: {
+    16: { raised: 2, car: [[6, 9, 4, 1], [5, 10, 6, 2], [5, 12, 1, 1], [10, 12, 1, 1]] },
+    24: { raised: 3, car: [[10, 13, 4, 2], [8, 15, 8, 3], [8, 18, 2, 2], [14, 18, 2, 2]] },
+    32: { raised: 4, car: [[12, 15.5, 8, 3.5], [10, 19, 12, 4], [11, 23, 3, 3], [18, 23, 3, 3]], lights: [[12.75, 21, 1], [19.25, 21, 1]], screen: [13.5, 16.5, 5, 2] },
+  },
+  tyre: {
+    16: { raised: 2, tyre: [8, 10.5, 2.5, 1] },
+    24: { raised: 3, tyre: [12, 15.5, 3.5, 1.5] },
+    32: { raised: 4, tyre: [16, 20.5, 5, 2] },
+  },
+  twin: {
+    16: { pillars: [[3, 1], [7, 2], [12, 1]], doors: [[4, 3], [9, 3]], strips: [6, 8, 10], h: 1 },
+    24: { pillars: [[4, 2], [11, 2], [18, 2]], doors: [[6, 5], [13, 5]], strips: [8, 11, 14], h: 2 },
+    32: { pillars: [[6, 2], [15, 2], [24, 2]], doors: [[9, 5], [18, 5]], strips: [10, 13, 16, 19], h: 2 },
+  },
+};
+/** Layers of one symbol option on one grid (16, 24, 32), in grid units. `secondary: false` drops the translucent part (tray). */
+function symbolLayers(id, grid, { secondary = true, radius = 0 } = {}) {
+  const F = FRAME[grid], S = SYMBOLS[id][grid], k = radius;
+  const pillars = (S.pillars ?? F.pillars).map(([x, w]) => rect([x, F.top, w, F.bottom - F.top])).join('');
+  const frame = { kind: 'fill', d: rect(S.roof ?? F.roof, k * 0.6) + pillars, tone: 'primary' };
+  const [dx, dw] = F.door;
+  if (id === 'slats' || id === 'twin') {
+    const doors = S.doors ?? [[dx, dw]];
+    return [frame, { kind: 'fill', d: doors.flatMap(([x, w]) => S.strips.map(y => rect([x, y, w, S.h], k * 0.2))).join(''), tone: 'primary' }];
+  }
+  const raised = secondary ? [{ kind: 'fill', d: rect([dx, F.doorTop, dw, S.raised]), tone: 'secondary' }] : [];
+  if (id === 'car') {
+    const [cab, body, ...wheels] = S.car;
+    const cuts = [...(S.lights ?? []).map(([x, y, r]) => circle(x, y, r)), ...(S.screen ? [rect(S.screen, 0.5)] : [])];
+    return [frame, ...raised, { kind: 'fill', d: rect(cab, k * 0.5) + rect(body, k * 0.5) + wheels.map(w => rect(w, k * 0.3)).join(''), tone: 'primary', ...(cuts.length ? { cut: cuts } : {}) }];
+  }
+  const [cx, cy, r, hole] = S.tyre;
+  const t = ring(cx, cy, r, hole);
+  return [frame, ...raised, { kind: 'fill', d: t.d, tone: 'primary', cut: t.cut }];
+}
+/** Map a path from the 32 grid to the 1024 master (24.2 per unit around the centre). */
+const to1024 = d => d.replace(/([MLHVACZmlhvacz])([^MLHVACZmlhvacz]*)/g, (_, c, args) => {
+  const n = args.trim() ? args.trim().split(/[\s,]+/).map(Number) : [];
+  const X = v => f(512 + (v - 16) * 24.2), L = v => f(v * 24.2);
+  let out;
+  switch (c) {
+    case 'M': case 'L': out = n.map((v, i) => (i % 2 ? X(v) : X(v))); break;
+    case 'H': case 'V': out = n.map(X); break;
+    case 'A': out = [L(n[0]), L(n[1]), n[2], n[3], n[4], X(n[5]), X(n[6])]; break;
+    case 'a': out = [L(n[0]), L(n[1]), n[2], n[3], n[4], L(n[5]), L(n[6])]; break;
+    default: out = n;
+  }
+  return c + out.join(' ');
+});
+const layers1024 = layers => layers.map(L => ({ ...L, d: to1024(L.d), ...(L.cut ? { cut: L.cut.map(to1024) } : {}) }));
+export const PADDOCK_SYMBOLS = Object.fromEntries(Object.keys(SYMBOLS).map(id => [id, {
+  g1024: layers1024(symbolLayers(id, 32, { radius: 1 })),
+  g32: symbolLayers(id, 32),
+  g24: symbolLayers(id, 24),
+  g16: symbolLayers(id, 16),
+  tray: symbolLayers(id, 16, { secondary: false }),
+}]));
+
 export { PACENOTES };
 
 /** Master glyphs on the 1024 grid (optical centre 512,512; live area ~ 270..754). */
@@ -410,7 +612,11 @@ const idp = app => (app === 'paddock' ? 'k' : app[0]);
 function renderGlyph(layers, paint, uid) {
   const defs = [], body = [];
   layers.forEach((L, i) => {
-    let fill = paint[L.tone] ?? paint.primary;
+    // `colour`: a literal colour that only exists in colour renders (e.g. a dark door opening); monochrome renders drop the layer.
+    if (L.colour && !paint.family) return;
+    let fill = L.colour ?? paint[L.tone] ?? paint.primary;
+    // `app`: one family stripe hue (STRIPE_COLOUR); plain ink in monochrome renders.
+    if (L.app && paint.family) fill = STRIPE_COLOUR(L.app);
     if (L.tone === 'family' && paint.family) {
       // Hard-stop gradient: one segment per app hue, left to right in STRIPE order.
       const id = `${uid}fam${i}`, n = STRIPE.length;
@@ -429,10 +635,10 @@ function renderGlyph(layers, paint, uid) {
       maskAttr = ` mask="url(#${id})"`;
     }
     if (L.kind === 'stroke') {
-      body.push(`<path d="${L.d}" fill="none" stroke="${fill}" stroke-width="${L.w}" stroke-linecap="${L.cap ?? 'round'}" stroke-linejoin="round"${maskAttr}/>`);
+      body[i] = `<path d="${L.d}" fill="none" stroke="${fill}" stroke-width="${L.w}" stroke-linecap="${L.cap ?? 'round'}" stroke-linejoin="round"${maskAttr}/>`;
     } else {
       const soft = L.round ? ` stroke="${fill}" stroke-width="${L.round * 2}" stroke-linejoin="round"` : '';
-      body.push(`<path d="${L.d}" fill="${fill}"${soft}${maskAttr}/>`);
+      body[i] = `<path d="${L.d}" fill="${fill}"${soft}${maskAttr}${L.crisp ? ' shape-rendering="crispEdges"' : ''}/>`;
     }
   });
   // Consecutive secondary layers share one translucent group so overlaps don't double up.
@@ -441,8 +647,10 @@ function renderGlyph(layers, paint, uid) {
     if (run.length) out += `<g opacity="${paint.secondaryOpacity ?? 1}">${run.join('')}</g>`;
     run = [];
   };
-  body.forEach((b, i) => {
-    if (layers[i].tone === 'secondary') run.push(b);
+  layers.forEach((_, i) => {
+    const b = body[i];
+    if (b === undefined) return;
+    if (layers[i].tone === 'secondary' && !layers[i].app) run.push(b);
     else {
       flush();
       out += b;
@@ -452,15 +660,16 @@ function renderGlyph(layers, paint, uid) {
   return { defs: defs.join(''), body: out };
 }
 
-function inkPaint(app, concept, uid) {
-  const p = PALETTE[app];
+function inkPaint(app, concept, uid, palette) {
+  const p = palette ?? PALETTE[app];
   if (concept === 'carbon') {
     return {
       defs: `<linearGradient id="${uid}ink" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p.light}"/><stop offset="1" stop-color="${p.base}"/></linearGradient>`,
       paint: { primary: `url(#${uid}ink)`, secondary: p.light, accent: p.light, secondaryOpacity: 0.5 },
     };
   }
-  const ink = INK[app];
+  // A palette override may bring its own ink (a light tile takes dark ink, as Spotter and Sighter do).
+  const ink = p.ink ?? INK[app];
   return { defs: '', paint: { primary: ink, secondary: ink, accent: ink, family: true, secondaryOpacity: LIGHT_TILE.has(app) ? 0.55 : 0.6 } };
 }
 
@@ -469,15 +678,18 @@ function inkPaint(app, concept, uid) {
  * platform 'windows': near full-bleed rounded square (margin 40, circular corners), no outer shadow.
  */
 /** `bare` leaves out the glyph and the livery: the tile background alone, for the seam scan (tools/scan.mjs). */
-export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false } = {}) {
-  const p = PALETTE[app];
+export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = newUid(idp(app)), bare = false, glyph: override, title, palette, art: artFn } = {}) {
+  const p = palette ?? PALETTE[app];
+  // `art`: (uid) => { defs, body }, a fully rendered glyph (its own light, shading and shadow) in place of the layer glyph. It is
+  // clipped to the tile, so long shadows never spill past the squircle.
+  const art = artFn ? artFn(uid) : null;
   const mac = platform === 'macos';
   const x = mac ? 100 : 40, s = mac ? 824 : 944;
   const shape = mac ? squircle(x, x, s, s, 185.4) : rr(x, x, s, s, 200);
   const scale = s / 824;
   const carbon = concept === 'carbon';
-  const g = GLYPH_1024[app]();
-  const ink = inkPaint(app, concept, uid);
+  const g = art ? [] : override ?? GLYPH_1024[app]();
+  const ink = inkPaint(app, concept, uid, palette);
   const glyph = renderGlyph(g, ink.paint, uid);
   const top = carbon ? CARBON.top : p.top, bottom = carbon ? CARBON.bottom : p.bottom, mid = carbon ? '#22252B' : p.base;
   const liveryCol = carbon ? p.base : '#FFFFFF';
@@ -485,7 +697,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
   const glyphShadow = carbon ? '#000000' : p.deep;
   const shadowOp = carbon ? 0.5 : LIGHT_TILE.has(app) ? 0.18 : 0.32;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <title>${NAMES[app]}${carbon ? ' (Carbon concept)' : ''}</title>
+  <title>${title ?? NAMES[app]}${carbon ? ' (Carbon concept)' : ''}</title>
   <defs>
     <linearGradient id="${uid}bg" x1="0" y1="${x}" x2="0" y2="${x + s}" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="${top}"/><stop offset="0.55" stop-color="${mid}"/><stop offset="1" stop-color="${bottom}"/>
@@ -500,7 +712,7 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     <clipPath id="${uid}clip"><path d="${shape}"/></clipPath>
     <filter id="${uid}gs" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="${f(10 * scale)}" stdDeviation="${f(12 * scale)}" flood-color="${glyphShadow}" flood-opacity="${shadowOp}"/></filter>
     ${mac ? `<filter id="${uid}ts" color-interpolation-filters="sRGB" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.28"/></filter>` : ''}
-    ${ink.defs}${glyph.defs}
+    ${ink.defs}${glyph.defs}${art ? art.defs : ''}
   </defs>
   <path d="${shape}" fill="url(#${uid}bg)"${mac ? ` filter="url(#${uid}ts)"` : ''}/>
   <g clip-path="url(#${uid}clip)">
@@ -508,32 +720,34 @@ export function masterSvg(app, { platform = 'macos', concept = 'enamel', uid = n
     <path d="M${x - 40} ${x + s * 1.19}L${x + s * 1.19} ${x - 40}L${x + s * 1.23} ${x - 40}L${x - 40} ${x + s * 1.23}Z" fill="${liveryCol}" opacity="${liveryOp * 1.1}"/>`}
     <rect x="${x}" y="${x}" width="${s}" height="${s}" fill="url(#${uid}sheen)"/>
     <path d="${shape}" fill="none" stroke="url(#${uid}edge)" stroke-width="${f(6 * scale)}"/>
-    ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="0.14" stroke-width="${f(4 * scale)}"/>` : ''}${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
+    ${carbon ? `<path d="${shape}" fill="none" stroke="${p.base}" stroke-opacity="0.35" stroke-width="3"/>` : ''}${!carbon && p.rim ? `<path d="${shape}" fill="none" stroke="${p.rim}" stroke-opacity="${p.rimMaster ?? 0.14}" stroke-width="${f(4 * scale)}"/>` : ''}${!carbon && RIMMED.has(app) ? `<path d="${shape}" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="${f(4 * scale)}"/>` : ''}
   </g>
-  ${bare ? '' : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
+  ${bare ? '' : art ? `<g clip-path="url(#${uid}clip)"><g transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${art.body}</g></g>` : `<g filter="url(#${uid}gs)" transform="translate(512 512) scale(${f(scale)}) translate(-512 -512)">${glyph.body}</g>`}
 </svg>
 `;
 }
 
 /** Hand-tuned small app icon (Windows-style near full-bleed tile; used for the .ico 16/24/32/48 frames). */
-export function smallSvg(app, size, { uid = newUid(idp(app)) } = {}) {
-  const p = PALETTE[app];
+export function smallSvg(app, size, { uid = newUid(idp(app)), glyphs, title, palette } = {}) {
+  // `glyphs`: { 16, 32 [, 24] } layer sets that replace GLYPH_SMALL for this render (design variants); `palette` replaces the tile colours.
+  const p = palette ?? PALETTE[app];
   // 16 has its own grid; 24 too where an app draws one (GLYPH_SMALL[24]); otherwise 24, 32 and 48 share the 32 grid.
-  const grid = size === 16 ? 16 : size === 24 && GLYPH_SMALL[24]?.[app] ? 24 : 32;
-  const layers = GLYPH_SMALL[grid][app];
-  const ink = inkPaint(app, 'enamel', uid);
+  const set = glyphs ?? { 16: GLYPH_SMALL[16][app], 24: GLYPH_SMALL[24]?.[app], 32: GLYPH_SMALL[32][app] };
+  const grid = size === 16 ? 16 : size === 24 && set[24] ? 24 : 32;
+  const layers = set[grid];
+  const ink = inkPaint(app, 'enamel', uid, palette);
   const glyph = renderGlyph(layers, ink.paint, uid);
   const inset = grid === 16 ? 0.5 : 1;
   const R = grid === 16 ? 3.5 : grid === 24 ? 5.25 : 7;
   const t = rr(inset, inset, grid - 2 * inset, grid - 2 * inset, R);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${grid} ${grid}">
-  <title>${NAMES[app]} ${size}px</title>
+  <title>${title ?? NAMES[app]} ${size}px</title>
   <defs>
     <linearGradient id="${uid}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p.top}"/><stop offset="1" stop-color="${p.bottom}"/></linearGradient>
     ${glyph.defs}
   </defs>
   <path d="${t}" fill="url(#${uid}bg)"/>
-  <path d="${rr(inset + 0.25, inset + 0.25, grid - 2 * inset - 0.5, grid - 2 * inset - 0.5, R - 0.25)}" fill="none" stroke="${p.rim ?? p.deep}" stroke-opacity="${p.rim ? 0.22 : LIGHT_TILE.has(app) ? 0.45 : 0.35}" stroke-width="0.5"/>
+  ${(() => { const w = grid === 16 ? (p.rimWidth16 ?? 0.5) : 0.5, o = w / 2, op = grid === 16 ? (p.rimOpacity16 ?? p.rimSmall) : p.rimSmall; return `<path d="${rr(inset + o, inset + o, grid - 2 * inset - w, grid - 2 * inset - w, R - o)}" fill="none" stroke="${p.rim ?? p.deep}" stroke-opacity="${p.rim ? (op ?? 0.22) : LIGHT_TILE.has(app) ? 0.45 : 0.35}" stroke-width="${w}"/>`; })()}
   ${glyph.body}
 </svg>
 `;
@@ -655,17 +869,21 @@ function badge(status, ink, theme) {
 /**
  * Tray icon on a 16 grid. theme 'template' = macOS template (black + alpha);
  * 'light' = Windows light taskbar (dark glyph), 'dark' = Windows dark taskbar (white glyph). Badges are coloured on Windows.
+ * Whole pixels only (STYLE.md section 6): crisp edges everywhere, badges included, and no partial alpha except a deliberate dim of
+ * the whole glyph for a state (a glyph drawn entirely in the secondary tone, such as Pitwall idle). `pt18`: the 18 pt menu-bar size,
+ * the 16 grid with one unit of padding on every side (so 18 pt at 1x and 2x are exact multiples, never a resample of 16).
  */
-export function traySvg(app, status, theme, { size = 16, uid = newUid('t') } = {}) {
+export function traySvg(app, status, theme, { size = 16, uid = newUid('t'), glyph: override, title, pt18 = false } = {}) {
   const ink = theme === 'dark' ? '#FFFFFF' : theme === 'light' ? '#1C1C1E' : '#000000';
-  const layers = trayGlyph(app, status);
+  const layers = override ?? trayGlyph(app, status);
   const b = badge(status, ink, theme);
-  const glyph = renderGlyph(layers, { primary: ink, secondary: ink, accent: ink, secondaryOpacity: 0.45 }, uid);
+  const wholeDim = layers.every(L => L.tone === 'secondary');
+  const glyph = renderGlyph(layers, { primary: ink, secondary: ink, accent: ink, secondaryOpacity: wholeDim ? 0.45 : 1 }, uid);
   const knock = b
     ? `<mask id="${uid}k" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><rect width="16" height="16" fill="#fff"/><path d="${b.knock}" fill="#000"/></mask>`
     : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 16 16">
-  <title>${NAMES[app]} tray${status !== 'default' ? ` (${status})` : ''}</title>
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="${pt18 ? '-1 -1 18 18' : '0 0 16 16'}" shape-rendering="crispEdges">
+  <title>${title ?? NAMES[app]} tray${status !== 'default' ? ` (${status})` : ''}</title>
   <defs>${glyph.defs}${knock}</defs>
   <g${b ? ` mask="url(#${uid}k)"` : ''}>${glyph.body}</g>
   ${b ? b.shape.replaceAll('BADGEMASK', `${uid}b`) : ''}

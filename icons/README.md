@@ -37,6 +37,70 @@ normal, 19.7 protan, 19.2 deutan, 19.2 tritan; against the shell demo 75.4 or mo
 copy `workbench-demo/tauri/.` to `apps/workbench-demo/src-tauri/icons`. Side-by-side with the shell demo at 16, 32 and 1024 px:
 `ui/docs/review/x50-workbench/demo-icons-compare.png`.
 
+## Paddock redesign candidates (2026-10-25, awaiting the user's pick)
+
+The current mark's gable reads as a generic home icon, its bays as list icons, and the angled stripe turns into a blob at 16 to 32
+px. Three candidates are in `alternative/` as full sets (macOS and Windows masters with 1024 PNGs, hand-tuned 16/24/32/48 frames, tray
+sources), built by `node tools/paddock-variants.mjs` from `PADDOCK_VARIANTS` in `tools/design.mjs`; `icons/paddock` is unchanged
+until one is chosen. Comparison sheet: `alternative/paddock-variants-sheet.png` (current, A, B, C at 1024, 128, 32 and 16 px on light
+and dark, beside Debrief and Pitwall). In all three the stripe has a hard stop per app in the stripe order, on whole pixels at 16, 24 and 32 px (each has its own 24 grid).
+
+- **A, `paddock-flat-garage`:** one continuous flat canopy in the seven hues with a slight overhang, three wide roll-up doors (slatted,
+  raised a little over a dark opening) between pillars, and the pit-lane line. Two bays at 16 px; the tray doors are solid.
+- **B, `paddock-pit-boxes`:** the pit lane from above: the garage wall, seven coloured pit boxes, the dashed lane line and the pit wall.
+- **C, `paddock-foundation`:** one course of seven coloured blocks with a neutral slab resting on it, a little wider than the base.
+
+## Paddock in the family grammar (2026-10-25, graphite picked; awaiting the user's sign-off on the symbol)
+
+The redesign candidates above keep the seven-colour stripe and many small parts, which break the family grammar (a single-hue tile,
+one bold glyph with at most one translucent secondary, cut-outs in the tile colour, few parts). The new mark keeps the graphite tile
+`#2B3038` (white ink 13.3:1; nearest app 19.5 normal, 17.9 protan, 20.1 deutan, 12.2 tritan) with one white glyph.
+
+- **Hue search:** no saturated green or teal with white ink keeps the family CVD minimums (best about 9.2: grass `#00A768` 9.8 deutan
+  against Pitcrew and 8.5 tritan against Debrief; teal `#00A389` 7.5 deutan against Dyno). The only passing green, jade `#4AC59D` with
+  dark ink, sat on the deutan floor with no margin, so graphite was picked.
+- **Symbol:** four options in `PADDOCK_SYMBOLS` (`tools/design.mjs`), compared in `alternative/paddock-symbols-sheet.png`
+  (`node tools/paddock-symbols.mjs`): A a slatted roll-up door in one bay, B a raised door over a car nose, C a raised door over a tyre,
+  D two slatted bays. An independent review ranked A first: it is the only one crisp at 16 px and in the tray (the car and the tyre
+  blur at 16, two bays read as a grid). The roof is flush with the pillars (an overhang read as a table or a Pi) and the shutter hangs
+  from it with the open gap at the bottom (a gap at the top made the slats float like a list). Ink coverage 21 % at 16.
+- **Rim:** raised at small sizes so the tile's base holds on a dark Dock or taskbar: a full-pixel rim at 40 % at 16, 45 % at 24 to
+  48, 20 % on the master.
+- **Set:** `node tools/paddock-family.mjs` writes `alternative/paddock-family-graphite-*` (macOS and Windows masters with 1024 PNGs,
+  hand-tuned 16/24/32/48) and `alternative/paddock-family-tray-*` (template SVG with 16/18 pt PNGs, light and dark SVG, PNG and .ico,
+  glyph within x 2 to 14), and the sheet `alternative/paddock-family-sheet.png` (the family row at 128, 32 and 16 on light and dark,
+  the row under simulated protanopia, deuteranopia and tritanopia, pixel-exact close-ups and the tray). `icons/paddock` is unchanged.
+
+## Paddock isometric study (2026-10-25, awaiting the user's look)
+
+Where the Paddock mark is shown today: the repo README (`icons/paddock/paddock-macos.svg` at 112 px), the ecosystem diagram
+(`docs/images/src/icons/paddock.svg` at about 60 px, also in the profile repo), the profile README's Paddock heading (`images/paddock.png`
+at 32 px), and the Gitea repo avatar. No Dock, taskbar or tray shows it: no shipped app uses it and the demo apps have their own icons.
+So a richer mark suits it.
+
+`node tools/paddock-iso-sheet.mjs` builds `alternative/paddock-iso-*` from `tools/paddock-iso.mjs` and the sheet
+`alternative/paddock-iso-sheet.png` (the isometric master at 512 and 256 beside the flat mark, Pitwall and Dyno; each version in the
+family row at 128 and hand-tuned 32/16 on light and dark, pixel-exact close-ups and the tray).
+
+- **Master:** a rendered pit building in true 30 degree isometric projection, lit from the top left: a white roof slab with an
+  overhang and a light edge strip, the long wall with four bays (half-open roll-up doors set back in the openings, slatted, dark
+  interiors), darker end walls, a plinth, ambient occlusion under the roof and in the bays, a soft contact shadow. White and cool greys
+  on the graphite tile. `masterSvg` takes it as `art` (a rendered glyph in place of the layer glyph).
+- **128 frame** (`paddock-iso-128`, also the size the README and the diagram show): no slats (they alias to grey), flat doors with a
+  light rail, wider pillars.
+- **Small sizes, two choices:** a hand-drawn 2:1 pixel-isometric block at 32 and 24 with the flat slatted door at 16 and in the tray
+  (`paddock-iso-{16,24,32,48}`, recommended by the review), or isometric down to 16 and in the tray (`paddock-iso-16-isometric`,
+  `paddock-iso-tray-isometric-*`), which blurs.
+
+## Paddock pit building (2026-10-25, round 2 of the isometric study, awaiting the user's look)
+
+`pitBuilding()` in `tools/paddock-iso.mjs`, built by `node tools/paddock-pit-sheet.mjs` into `alternative/paddock-pit-*` and the sheet
+`alternative/paddock-pit-sheet.png`: a motorsport pit building (ground floor with four lit bays and half-raised doors, a cantilevered
+canopy carrying a thin pinstripe in the seven app hues, an upper hospitality floor with dark glass, the roof slab, and in front the
+pit lane and the chequered pit wall), about 72 % of the tile width. A simplified frame (`paddock-pit-128`, also used at 112 and 60:
+three dark bays with doors 40 % down, no slats or mullions, a coarser chequer on a taller wall), pixel-isometric frames at 32 and 24 (`PIT_SMALL`), and the flat slatted door
+at 16 and in the tray. The rendering rules are in `STYLE.md`.
+
 ## Seam scan
 
 `node tools/build.mjs` fails when a master has a hard seam in the tile (`tools/scan.mjs`, tests in `tools/scan.test.mjs`, `npm test`).
