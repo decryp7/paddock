@@ -151,8 +151,9 @@ jobs:
 
       - uses: ./.paddock/.gitea/actions/setup-rust
 
+      # The Paddock CI image has the repo's Node baked in; another image (the garage default) gets it from .nvmrc.
       - uses: ./.paddock/.gitea/actions/setup-node
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !contains(inputs.image, '/paddock-ci:')
         with:
           app-dir: ${{ inputs.root }}
 
