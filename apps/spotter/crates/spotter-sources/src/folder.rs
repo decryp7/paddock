@@ -104,9 +104,14 @@ pub async fn scan_job(req: ScanRequest, job: &Job) -> Result<Scan, SourceError> 
     let halt = Halt { job: job.clone(), abandon };
     // A plain thread rather than the blocking pool: a hung share must not hold a pool thread the app needs.
     std::thread::spawn(move || {
-        let _ = tx.send(scan_now(&req, &halt, spotter_core::limits::MAX_FOLDER_MATCHES));
+        let _ = tx.send(scan_now(&req, &halt, match_cap()));
     });
     await_scan(rx, wait, &path, limits.max_entries, limits.timeout_secs).await
+}
+
+/// The most matches a real scan keeps; tests pass a small cap to `scan_now` instead of creating that many files.
+fn match_cap() -> usize {
+    spotter_core::limits::MAX_FOLDER_MATCHES
 }
 
 struct AbandonOnDrop(Cancel);
@@ -440,7 +445,7 @@ impl Walk<'_> {
                 self.fail(Stop::TooMany);
                 return Vec::new();
             }
-            if scanned.is_multiple_of(256) {
+            if scanned.is_multiple_of(CHECK_EVERY) {
                 self.report();
                 if Instant::now() > self.deadline {
                     self.fail(Stop::TooSlow);
@@ -498,6 +503,9 @@ impl Walk<'_> {
         children
     }
 }
+
+/// The walk reports progress and looks at the deadline every this many entries.
+const CHECK_EVERY: u64 = 256;
 
 type Walked = (Matched, Dirs, ScanStats, Vec<(String, Skip)>, bool);
 
@@ -843,22 +851,23 @@ mod tests {
     #[tokio::test]
     async fn too_many_entries_is_a_message_not_a_silent_miss() {
         let d = tempfile::tempdir().unwrap();
-        for i in 0..150 {
+        for i in 0..15 {
             touch(d.path(), &format!("f{i}.txt"), "x");
         }
         let mut src = source(d.path(), &[]);
-        src.limits.max_entries = 100;
+        src.limits.max_entries = 10;
         let e = scan(request(src.clone())).await.unwrap_err();
         assert!(matches!(e, SourceError::InvalidConfig(_)), "{e:?}");
         assert!(e.message().contains("Too many files") && e.message().contains("Narrow"), "{e}");
-        src.limits.max_entries = 150;
-        assert_eq!(scan(request(src)).await.unwrap().stats.scanned, 150);
+        src.limits.max_entries = 15;
+        assert_eq!(scan(request(src)).await.unwrap().stats.scanned, 15);
     }
 
     #[tokio::test]
     async fn a_slow_listing_stops_at_its_deadline() {
         let d = tempfile::tempdir().unwrap();
-        for i in 0..600 {
+        // Exactly as many entries as it takes for the walk to look at the clock once.
+        for i in 0..CHECK_EVERY {
             touch(d.path(), &format!("f{i}.txt"), "x");
         }
         let mut src = source(d.path(), &[]);
@@ -974,10 +983,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_big_folder_is_prefiltered_cheaply() {
+        // Scale-independent: the entry limit is a parameter, so a few hundred files prove the prefilter and the limit
+        // on every platform (creating 30 000 files took over a minute on Windows). Speed belongs in the benchmark.
         let d = tempfile::tempdir().unwrap();
-        for i in 0..30_000 {
-            let name = if i % 1000 == 0 {
-                format!("Acme-PRO-R3.{:02}.00T01.zip", i / 1000)
+        for i in 0..300 {
+            let name = if i % 100 == 0 {
+                format!("Acme-PRO-R3.{:02}.00T01.zip", i / 100)
             } else {
                 format!("noise-{i}.log")
             };
@@ -985,16 +996,16 @@ mod tests {
         }
         let mut req = request(source(d.path(), &[("extensions", "zip")]));
         req.source.limits.settle_secs = 0;
-        let started = Instant::now();
         let s = scan(req).await.unwrap();
-        let took = started.elapsed();
-        eprintln!("scanned 30000 entries in {took:?}");
-        assert_eq!((s.stats.scanned, s.stats.matched), (30_000, 30));
-        // Lenient: a local folder of this size takes a fraction of a second; only a pathological slowdown fails.
-        assert!(took < Duration::from_secs(30), "{took:?}");
-        let mut capped = request(source(d.path(), &[("maxEntries", "20000")]));
+        assert_eq!((s.stats.scanned, s.stats.matched), (300, 3));
+        let mut capped = request(source(d.path(), &[("maxEntries", "200")]));
         capped.source.limits.settle_secs = 0;
         assert!(matches!(scan(capped).await.unwrap_err(), SourceError::InvalidConfig(_)));
+    }
+
+    #[test]
+    fn a_real_scan_uses_the_production_match_cap() {
+        assert_eq!(match_cap(), spotter_core::limits::MAX_FOLDER_MATCHES);
     }
 
     #[tokio::test]
@@ -1112,14 +1123,20 @@ mod tests {
             for i in 0..files {
                 std::fs::write(d.path().join(format!("f{i}.bin")), b"").unwrap();
             }
-            let halt = Halt { job: Job::none(), abandon: Cancel::new() };
+            let halt = Halt {
+                job: Job::none(),
+                abandon: Cancel::new(),
+            };
             scan_now(&request(source(d.path(), &[("maxEntries", "1000000")])), &halt, cap)
         };
         assert_eq!(scan_with(cap).unwrap().entries.len(), cap, "exactly the cap is fine");
         let stop = scan_with(cap + 1).unwrap_err();
         assert!(matches!(stop, Stop::TooManyMatches));
         let e = explain_stop("/x", stop, 1_000_000, 5);
-        assert!(matches!(&e, SourceError::InvalidConfig(m) if m.contains("Too many matches")), "{e:?}");
+        assert!(
+            matches!(&e, SourceError::InvalidConfig(m) if m.contains("Too many matches")),
+            "{e:?}"
+        );
     }
 
     #[tokio::test]
