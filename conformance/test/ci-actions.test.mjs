@@ -913,7 +913,6 @@ test('a manual ci.yml run can ask for WebKit (workflow_dispatch input), compared
   assert.match(dispatch, /^      webkit:\n(?:        .*\n)*?        type: boolean\n        default: false/m, 'workflow_dispatch has a webkit input');
   assert.match(ci, /PLAN_WEBKIT: \$\{\{ \(inputs\.webkit == true \|\| inputs\.webkit == 'true'\) && '1' \|\| '' \}\}/, 'the plan job turns the input into the WebKit leg');
   assert.match(ci, /name: app-\$\{\{ matrix\.app \}\}\$\{\{ matrix\.e2e_leg != '' && format\('-\{0\}', matrix\.e2e_leg\) \|\| '' \}\}/, 'parallel legs of one app never share an Angular cache');
-  assert.match(ci, /^      CARGO_PROFILE_DEV_DEBUG: line-tables-only$/m, "the app leg keeps Spotter's old line-tables-only debug profile");
   const gates = /^  gates:\n(?:    .*\n|\n)+/m.exec(read(join(WORKFLOWS, 'spotter-release.yml')))?.[0] ?? '';
   assert.match(gates, /webkit: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/, "the pre-tag dispatch covers WebKit like the old bundles run");
 });

@@ -525,8 +525,6 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.apps) }}
     env:
       CARGO_TERM_COLOR: always
-      # Line tables only: smaller, faster debug builds of the app's host legs (Spotter's old workflow set it for every job).
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v4
 

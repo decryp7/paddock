@@ -280,6 +280,9 @@ describe('matrix legs', () => {
       pitcrew: ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter\\chrome-win64\\chrome.exe --headless'],
     };
+    const near = {
+      spotter: ['/Users/x/.paddock-ci/test-browser-spotter-old/chrome', '/Users/x/.paddock-ci/test-browser-spotterx/chrome', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-old\\chrome.exe', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotterx\\chrome.exe'],
+    };
     let checked = 0;
     for (const [name, app] of graph.apps) {
       if (!app.processPatterns?.length) continue;
@@ -287,7 +290,7 @@ describe('matrix legs', () => {
       for (const pat of app.processPatterns) {
         const re = new RegExp(pat);
         for (const line of ours[name]) assert.match(line, re, `${name}: ${pat} misses ${line}`);
-        for (const line of real) assert.doesNotMatch(line, re, `${name}: ${pat} would kill ${line}`);
+        for (const line of [...real, ...(near[name] ?? [])]) assert.doesNotMatch(line, re, `${name}: ${pat} would kill ${line}`);
         checked += 1;
       }
     }
