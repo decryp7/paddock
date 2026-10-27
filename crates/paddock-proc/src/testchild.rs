@@ -14,7 +14,7 @@ const PREFIX: &str = "CHILD:";
 
 /// What the re-executed binary does.
 #[derive(Clone, Copy)]
-#[cfg_attr(windows, allow(dead_code))] // some modes are driven by Unix-only tests
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // some modes are driven by Unix- or macOS-only tests
 pub enum Mode {
     /// Wait for [`LIFETIME`].
     Sleep,

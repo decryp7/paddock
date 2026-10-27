@@ -144,7 +144,7 @@ pub fn private_working_set(pid: u32) -> Option<u64> {
         let cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32;
         let ok = GetProcessMemoryInfo(h, (&raw mut c).cast::<PROCESS_MEMORY_COUNTERS>(), cb);
         CloseHandle(h);
-        (ok != 0).then(|| c.PrivateWorkingSetSize as u64)
+        (ok != 0).then_some(c.PrivateWorkingSetSize as u64)
     }
 }
 
