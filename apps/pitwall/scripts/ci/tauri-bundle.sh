@@ -19,6 +19,9 @@ if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
 # installer can never be collected into this release (it once shipped as latest.json's Windows download).
 rm -rf "$dir/dist/bundle"
 
+# An unset secret arrives as an empty variable, which Tauri lets override signingIdentity "-" (codesign: `Signing with identity ""`).
+[ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
+
 # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, Paddock rule 23): ad-hoc code under it cannot
 # load a vendor-signed library ("different Team IDs"). A real signing identity (APPLE_SIGNING_IDENTITY, not "-") turns it
 # back on, as notarization requires.

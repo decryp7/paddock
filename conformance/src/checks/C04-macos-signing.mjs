@@ -69,6 +69,17 @@ export default {
       out.push(error('C04', 23, ctx.config.workflowsDir, 1, 'CI verifies the .app but not the app inside the DMG (rule 23)', 'Run macos-verify-bundle.sh: it mounts the DMG and verifies the copy inside.'));
     }
 
+    // A secret that is not set arrives as an empty APPLE_SIGNING_IDENTITY, and Tauri lets the (empty) variable override
+    // signingIdentity "-": codesign then fails with `Signing with identity ""`. The job must unset it while it is empty.
+    for (const w of wf) {
+      const own = w.text.replace(/^\s*#.*$/gm, '');
+      if (!/APPLE_SIGNING_IDENTITY\s*:\s*\$\{\{\s*secrets\./.test(own)) continue;
+      const jobText = [own, ...referencedScripts(ctx, w.text).map((p) => (ctx.read(p) ?? '').replace(/^\s*#.*$/gm, ''))].join('\n');
+      if (!/\bunset\s+APPLE_SIGNING_IDENTITY\b/.test(jobText)) {
+        out.push(error('C04', 23, w.file, lineOf(w.text, /APPLE_SIGNING_IDENTITY/), 'APPLE_SIGNING_IDENTITY comes from a secret and reaches tauri build empty while the secret is unset, which overrides signingIdentity "-" with "" (`Signing with identity ""`)', 'Run `[ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY` before tauri build.'));
+      }
+    }
+
     // The lesson: `cmd | grep -q` under pipefail reports a signed bundle as unsigned.
     for (const f of ctx.files().filter((p) => p.endsWith('.sh'))) {
       const text = ctx.read(f) ?? '';
