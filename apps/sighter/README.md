@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/sighter-icon.svg" alt="Sighter icon" width="96" height="96">
+<img src="docs/images/sighter-icon.svg?v=1564b1d6" alt="Sighter icon" width="96" height="96">
 
 # Sighter
 

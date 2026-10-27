@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/pitcrew-icon.svg" alt="Pitcrew icon" width="96" height="96">
+<img src="docs/images/pitcrew-icon.svg?v=9fd403d4" alt="Pitcrew icon" width="96" height="96">
 
 # Pitcrew
 
@@ -13,7 +13,7 @@ updates it between jobs, so the builds keep running.
 
 </div>
 
-![Pitcrew: Keep every CI runner running](docs/images/pitcrew-hero.svg?v=a3c711ad)
+![Pitcrew: Keep every CI runner running](docs/images/pitcrew-hero.svg?v=222220b7)
 
 
 > **Status: v1.0.2.** Supervisor, watchdog, safe updates with roll-back, housekeeping, insights, disk guard, pause

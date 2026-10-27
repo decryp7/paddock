@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/debrief-icon.svg" alt="Debrief icon" width="96" height="96">
+<img src="docs/images/debrief-icon.svg?v=6ec1ea5b" alt="Debrief icon" width="96" height="96">
 
 # Debrief
 
@@ -12,7 +12,7 @@ profile, and it never leaves your machine.
 
 </div>
 
-![Debrief: make sense of any log file](docs/images/debrief-hero.svg?v=dd8f5936)
+![Debrief: make sense of any log file](docs/images/debrief-hero.svg?v=55ab2bfa)
 
 ## At a glance
 

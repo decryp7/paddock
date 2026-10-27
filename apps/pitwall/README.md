@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/pitwall-icon.svg" alt="Pitwall icon" width="96" height="96">
+<img src="docs/images/pitwall-icon.svg?v=dc5d806b" alt="Pitwall icon" width="96" height="96">
 
 # Pitwall
 
@@ -12,7 +12,7 @@ Dyno). Like the pit wall in a race, it is where every car radios in.
 
 </div>
 
-![Pitwall: One private AI for every app](docs/images/pitwall-hero.svg?v=3ff1e756)
+![Pitwall: One private AI for every app](docs/images/pitwall-hero.svg?v=ed62934e)
 
 
 > **Local only.** Nothing you ask and nothing the model answers ever leaves your computer. No cloud models, no
@@ -73,7 +73,7 @@ loaded model in its own engine process; a Tauri app with a tray and an Angular U
 
 ## Features
 
-![Pitwall features](docs/images/pitwall-features.svg?v=57945877)
+![Pitwall features](docs/images/pitwall-features.svg?v=1a921e4c)
 
 ![How Pitwall works](docs/images/pitwall-how-it-works.svg?v=34e3addb)
 

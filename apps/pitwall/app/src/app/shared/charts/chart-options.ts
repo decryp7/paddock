@@ -18,9 +18,12 @@ export function timeLabel(range: HistoryRange): (value: number) => string {
   return range === '1h' || range === '24h' ? (v) => clock(v) : (v) => date(v);
 }
 
+/** Whether the user asked for less motion (ECharts draws on its own clock, so the CSS rule does not reach it). */
+const reducedMotion = (): boolean => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 function base(t: ThemeTokens): EChartsCoreOption {
   return {
-    animation: true,
+    animation: !reducedMotion(),
     animationDuration: 300,
     animationDurationUpdate: 250,
     textStyle: { fontFamily: FONT, color: t.text2, fontSize: 11 },

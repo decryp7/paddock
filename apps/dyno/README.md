@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/dyno-icon.svg" alt="Dyno icon" width="96" height="96">
+<img src="docs/images/dyno-icon.svg?v=0a2d5050" alt="Dyno icon" width="96" height="96">
 
 # Dyno
 
@@ -12,7 +12,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=2501aa5f)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=de37f1cf)
 
 
 > **Status: v0.1.0, unreleased.** The agent (sampling, history, process actions with undo, rules engine, diagnosis,
