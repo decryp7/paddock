@@ -137,7 +137,7 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
   cargo deny --workspace check
-  node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/check-index.test.mjs
+  node --test conformance/test/*.test.mjs   # (repo root) the shared scripts: commit lint, latest.json, publish, check-index
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
   ```
 
@@ -147,7 +147,7 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
   licences). Commit `Cargo.lock` and `package-lock.json`; install with `npm ci` in CI.
 - Renovate updates dependencies and pins CI actions to commit digests. Gitea Actions needs the v3 artifact actions.
 - Use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`) so changelogs can be
-  generated (`cliff.toml`); `scripts/commit-lint.mjs` checks them. Releases are `pitcrew-v*` tags following semver
+  generated (`cliff.toml`); the shared `conformance/src/commit-lint.mjs` checks them (`paddock-conformance commit-lint`). Releases are `pitcrew-v*` tags following semver
   (`docs/releasing.md`).
 - Record significant architecture decisions as ADRs in `docs/adr/` (numbered, with status, context, decision,
   consequences).

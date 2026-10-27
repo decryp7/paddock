@@ -11,7 +11,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 
 | Action | What | Replaces |
 |---|---|---|
-| `app-gates` | one app's matrix leg in the monorepo: its `paddock.ci.json` commands and the Rust gates of its Cargo workspace, only the halves the change reaches (ADR 0014 §6) | the per-app `shell-demo-app`/`workbench-demo-app` jobs and, at import, each app's `build.yml` |
+| `app-gates` | one app's matrix leg in the monorepo: its `paddock.ci.json` commands and the Rust gates of its Cargo workspace, only the halves the change reaches (ADR 0014 §6); on Windows and macOS legs only the Rust gates that one OS cannot decide for all | the per-app `shell-demo-app`/`workbench-demo-app` jobs and, at import, each app's `build.yml` |
 | `plan` | skip a nightly while main is unchanged since a green nightly; skip a main push whose commit is tagged | Debrief's `plan` job |
 | `nightly-mark` | record a fully green nightly (the marker `plan` looks up) | Debrief's `nightly-mark` job |
 | `cache-restore`, `cache-save` | the restore, then save-always cache pattern: a failing run still warms the cache; saved only when the key had no exact hit | the `actions/cache` blocks in every job |
@@ -24,19 +24,50 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
 | `build-env` | `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE` for the About page (`option_env!`) | nothing set them before |
-| `tauri-bundle` | `tauri build` with or without updater signing, installers in `dist/`, version check | Pitwall `scripts/ci/tauri-bundle.sh` |
+| `tauri-bundle` | `tauri build` with or without updater signing (hardened runtime on only with a real Apple identity), `npm ci` at `root`, installers in `dist/`, version check | Pitwall `scripts/ci/tauri-bundle.sh`, Pitcrew's bundle step |
 | `macos-verify` | `codesign --verify --deep --strict` on the .app and the DMG, sidecars with `--self-test` (rule 23) | `macos-verify-bundle.sh` copies |
 | `install-test-browser` | the pinned Chrome for Testing (SHA-256 checked), `<APP>_REQUIRE_TEST_BROWSER=1` | Debrief's `install-test-browser.mjs` |
 | `licences` | `cargo deny`, `npm audit`, commit messages on pull requests | the `licences` job in five workflows |
 | `sidecar-self-test` | rule 23 on Linux and Windows bundles: every sidecar starts with `--self-test` (`paddock-sidecar self-test`); a .deb is unpacked, never installed | the shell demo's release job |
 | `conformance` | `paddock-conformance` with the Paddock checkout, summary in the job | new |
-| `publish-release` | release notes with the First launch block, `latest.json`, the Gitea release | the release job's steps |
+| `publish-release` | release notes with the First launch block (and an app's `notes-extra`), `latest.json`, the Gitea release for `v*` or `<app>-v*` tags, `latest.json` also on the moving `<app>-latest` release | the release job's steps |
 | `host-cleanup` | stray processes, temp folders and build outputs on a host runner | Pitwall `macos-cleanup.sh` |
 
-Reusable workflows: `app-release.yml` (bundles on three platforms, verify, publish), `app-fuzz.yml` (cargo-fuzz shards from a JSON list), `app-mutants.yml` (cargo-mutants, weekly and on the changed lines) and `app-never-panics.yml` (the never-panics tests with many cases; plan X41), `app-e2e.yml` (Chrome for Testing,
+Reusable workflows: `app-release.yml` (bundles on three platforms, verify, publish; in the monorepo called from `<app>-release.yml`, see below), `app-fuzz.yml` (cargo-fuzz shards from a JSON list), `app-mutants.yml` (cargo-mutants, weekly and on the changed lines) and `app-never-panics.yml` (the never-panics tests with many cases; plan X41), `app-e2e.yml` (Chrome for Testing,
 Playwright), `app-licences.yml`. They need the Gitea on dev.decryptology.net to resolve cross-repository `uses:` (plan
 decision D7: a one-hour spike before the first app adopts them); if it does not, an app uses the composite actions only,
 which are the same steps.
 
 Scripts the actions run live in `conformance/ci/` and `conformance/release/` (tested with `node --test`); the actions only wire
 inputs to them.
+
+## Moving an app onto the kit (pattern, pilot: Pitcrew, WP-C1 of docs/research/2026-10-nx-vs-scripts.md)
+
+An app on the kit has no gates workflow of its own and no copy of a kit script. What it keeps is its facts:
+
+1. **`apps/<app>/paddock.ci.json`** is the contract of its legs in `ci.yml` (`scripts/affected.mjs` plans them, `app-gates` runs them).
+   Fields: `cargo` (the Cargo workspace, relative to the app), `os` (default Linux only; add `windows-latest` and `macos-latest` for
+   the code that differs there: those legs run the Rust gates only), `nextestConfig`, `prepare` and `checks` (always, Linux), `ui`
+   (the UI half: audit, lint, build, tests; one `cd` holds for the lines after it), `angularDir` (the Angular cache kept between runs) and
+   `processes` (test processes `host-cleanup` kills on a host). Remove `workflow`: an app with a `workflow` is not a leg.
+   An app with host legs needs `include = [{ path = "ci.toml", optional = true }]` in its `.cargo/config.toml` and `.cargo/ci.toml`
+   in its `.gitignore` (`build-folder` fails the leg otherwise).
+2. **`.gitea/workflows/<app>-release.yml`** is the thin caller (copy `pitcrew-release.yml`): triggers (push to main, `<app>-v*` tag,
+   nightly, manual), a `plan` job (`affected.mjs --ci --app <app>`; skips a main push whose commit carries the tag), a `gates` job that
+   calls `ci.yml` with `app: <app>` for a tag (every leg of that app, both halves, nothing else), and a `release` job that calls
+   `app-release.yml` with the app's facts (`app-dir`, `cargo-dir`, `tag-prefix`, `latest-tag`, `sidecars`, `cliff-config`, `cliff-paths`,
+   `notes-extra`) and maps the family's `PADDOCK_TAURI_*` secrets to the names the kit declares. The workflow's name marks only that
+   app in the plan (`appOfWorkflow`).
+3. **Delete the copies**, after checking each is the kit's (diff it; port any behaviour the copy has and the kit lacks into the kit as a
+   parameter or a default, with a test in `conformance/test/`, never keep the copy): `scripts/release/*` (`conformance/release/`),
+   `scripts/ci/macos-verify-bundle.sh` (`conformance/release/macos-verify-bundle.sh`), `scripts/commit-lint.mjs`
+   (`paddock-conformance commit-lint`, run on pull requests by `ci.yml`'s `commits` job), `scripts/export-diagrams.sh`
+   (`diagrams/scripts/export-diagrams.sh`, run from the app folder with an absolute source), `scripts/check-index.mjs`
+   (`conformance/ci/check-index.mjs`, called from `tauri.conf.json`'s `beforeBuildCommand`), and the old workflow.
+4. **Keep what is the app's own**: `sidecar.mjs` (it uses the shared `cargoTargetDir`), bootstrap and verify scripts for the service
+   (launchd, systemd, Windows), checks of its own as `checks` entries or small scripts.
+5. **Update the pins**: `conformance/test/ci-actions.test.mjs` (`KIT_APPS`), the app's docs (releasing, development, macos) and its
+   `AGENTS.md` test command.
+6. **Verify before the deletion merges**: the local checks (`node --test scripts/*.test.mjs conformance/test/*.test.mjs`), then on the
+   branch: a dispatch of `ci.yml` (everything or a base), a dispatch of `<app>-release.yml` (installers, no release; with `gates: true`
+   for the app's legs), and, for the first release, a tag on a throw-away fork or the real tag.

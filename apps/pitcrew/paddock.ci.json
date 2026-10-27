@@ -1,5 +1,14 @@
 {
-  "$comment": "Pitcrew's CI contract (scripts/affected.mjs, ADR 0014 §6). Pitcrew is not a leg of ci.yml: its gates (Rust on several OS, licences, frontend, e2e, installers, the release from a pitcrew-v* tag) are its own workflow, .gitea/workflows/pitcrew.yml, whose plan job asks `node scripts/affected.mjs --ci --app pitcrew`.",
-  "workflow": "pitcrew.yml",
-  "cargo": "."
+  "$comment": "Pitcrew's CI contract (scripts/affected.mjs, .gitea/actions/app-gates, ADR 0014 §6): a leg of ci.yml on Linux (fmt, clippy, tests, doc tests, deny; then the frontend: audit, lint, build, unit tests) and, for the code that is different there (launch agent, Unix socket, Keychain, SMAppService, named pipe, service), the Rust gates on Windows and macOS. Commands run from the repo root, one per line of a step; one `cd` holds for the lines after it. Installers and the release are .gitea/workflows/pitcrew-release.yml (a pitcrew-v* tag or a manual run), through the shared app-release.yml.",
+  "cargo": ".",
+  "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
+  "angularDir": "app",
+  "processes": ["fake_runner"],
+  "ui": [
+    "cd apps/pitcrew/app",
+    "npm audit --omit=dev --audit-level=high",
+    "npm run lint",
+    "npx ng build",
+    "npx ng test --watch=false --coverage"
+  ]
 }

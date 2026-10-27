@@ -1,5 +1,5 @@
 name: publish-release
-description: "Publishes the Gitea release: release notes (changelog + the First launch block), latest.json for the updater, and the installers in artifacts-dir. Only for a v* tag run (rule 9)."
+description: "Publishes the Gitea release: release notes (changelog + the First launch block), latest.json for the updater, and the installers in artifacts-dir. Only for a v* tag run, or <tag-prefix>v* for an app of the monorepo (rule 9)."
 inputs:
   app-name:
     description: Product name for the First launch block (Pitcrew).
@@ -13,6 +13,15 @@ inputs:
   token:
     description: A Gitea token with write:repository (RELEASE_TOKEN).
     required: true
+  tag-prefix:
+    description: "An app's tag prefix in the monorepo, with the dash (pitcrew-: tags are pitcrew-v1.2.3). Empty: plain v* tags."
+    default: ""
+  latest-tag:
+    description: "The moving release the updater reads latest.json from (pitcrew-latest): latest.json is published there too, replacing the previous one. Empty: none."
+    default: ""
+  notes-extra:
+    description: "A paragraph after the First launch block (an app's transition note, e.g. to reinstall once). Empty: none."
+    default: ""
   public-base-url:
     description: "Where installed apps download from, without the tag (default https://dev.decryptology.net/<repo>/releases/download)."
     default: ""
@@ -26,19 +35,29 @@ runs:
         CHANGELOG: ${{ inputs.changelog }}
         DIR: ${{ inputs.artifacts-dir }}
         BASE: ${{ inputs.public-base-url }}
+        PREFIX: ${{ inputs.tag-prefix }}
+        LATEST_TAG: ${{ inputs.latest-tag }}
+        EXTRA: ${{ inputs.notes-extra }}
       run: |
         set -euo pipefail
         P="${{ github.action_path }}/../../../conformance"
         tag="${{ github.ref_name }}"
-        [[ "${{ github.ref }}" == refs/tags/v* ]] || { echo "::error::releases are published from a v* tag only (rule 9)"; exit 1; }
-        node "$P/ci/release-notes.mjs" --app "$APP_NAME" --changelog "$CHANGELOG" --out "$DIR/RELEASE_NOTES.md"
+        [[ "${{ github.ref }}" == "refs/tags/${PREFIX}v"* ]] || { echo "::error::releases are published from a ${PREFIX}v* tag only (rule 9)"; exit 1; }
+        version="${tag#"$PREFIX"}"
+        node "$P/ci/release-notes.mjs" --app "$APP_NAME" --changelog "$CHANGELOG" --out "$DIR/RELEASE_NOTES.md" --extra "$EXTRA"
         # Inside the runners github.server_url is Gitea's internal http address, which the updater must never be given.
         base="${BASE:-https://dev.decryptology.net/${{ github.repository }}/releases/download}/$tag"
         if find "$DIR" -name '*.sig' | grep -q .; then
-          node "$P/release/latest-json.mjs" --dir "$DIR" --version "$tag" --notes "$DIR/RELEASE_NOTES.md" --base-url "$base" --out "$DIR/latest.json"
+          node "$P/release/latest-json.mjs" --dir "$DIR" --version "$version" --notes "$DIR/RELEASE_NOTES.md" --base-url "$base" --out "$DIR/latest.json"
           # The signatures are in latest.json; the .sig files are not release assets.
           find "$DIR" -name '*.sig' -delete
         else
           echo '::warning::No signed updater artifacts; latest.json is not published (installed apps will not see this release).'
         fi
         node "$P/release/publish.mjs" --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" --tag "$tag" --notes "$DIR/RELEASE_NOTES.md" --dir "$DIR"
+        if [ -n "$LATEST_TAG" ] && [ -f "$DIR/latest.json" ]; then
+          # The updater's one endpoint (tauri.conf.json): the moving release, its latest.json replaced.
+          moving="${RUNNER_TEMP:-/tmp}/latest-json-$$"
+          mkdir -p "$moving" && cp "$DIR/latest.json" "$moving/"
+          node "$P/release/publish.mjs" --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" --tag "$LATEST_TAG" --notes "$DIR/RELEASE_NOTES.md" --dir "$moving" --replace
+        fi

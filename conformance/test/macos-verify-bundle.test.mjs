@@ -1,16 +1,15 @@
-// Tests for macos-verify-bundle.sh on small throwaway .app bundles built in a temp folder (macOS only: it needs
+// Tests for the shared macos-verify-bundle.sh (moved from Pitcrew's copy, rule 43) on small throwaway .app bundles built in a temp folder (macOS only: it needs
 // codesign and a C compiler). Nothing outside the temp folder is touched; every bundle is signed ad hoc.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const script = join(here, 'macos-verify-bundle.sh');
-const root = join(here, '..', '..');
+const script = join(here, '..', 'release', 'macos-verify-bundle.sh');
 const hasCc = process.platform === 'darwin' && spawnSync('cc', ['--version']).status === 0;
 const skip = hasCc ? false : 'needs macOS with codesign and a C compiler';
 
@@ -61,11 +60,8 @@ exit $rc
   return bin;
 }
 
-function verify(app, env = {}) {
-  const r = spawnSync('bash', [script, app], {
-    encoding: 'utf8',
-    env: { ...process.env, CARGO_TARGET_DIR: join(work, 'no-target'), SIDECARS: 'fake-sidecar', ...env },
-  });
+function verify(app, { args = ['--sidecar', 'fake-sidecar:--version'], env = {} } = {}) {
+  const r = spawnSync('bash', [script, ...args, app], { encoding: 'utf8', env: { ...process.env, CARGO_TARGET_DIR: join(work, 'no-target'), ...env } });
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
@@ -83,28 +79,40 @@ test('an ad-hoc bundle with the hardened runtime on fails', { skip }, () => {
 });
 
 test('a bundled Mach-O with another TeamIdentifier fails', { skip }, () => {
-  const r = verify(bundle(), { PATH: `${vendorTeamShim()}:${process.env.PATH}` });
+  const r = verify(bundle(), { env: { PATH: `${vendorTeamShim()}:${process.env.PATH}` } });
   assert.notEqual(r.status, 0, r.out);
-  assert.match(r.out, /fake-sidecar has TeamIdentifier 'VENDOR1234', the app has 'none'/);
+  assert.match(r.out, /fake-sidecar has Team ID 'VENDOR1234', the app has ''/);
 });
 
 test('a sidecar that does not start from the built app fails', { skip }, () => {
   const r = verify(bundle({ sidecarExit: 3 }));
   assert.notEqual(r.status, 0, r.out);
-  assert.match(r.out, /the sidecar fake-sidecar does not start/);
+  assert.match(r.out, /sidecar fake-sidecar of .* does not start/);
 });
 
-test('the sidecars default to bundle.externalBin from tauri.conf.json', { skip }, () => {
-  const conf = JSON.parse(readFileSync(join(root, 'app', 'src-tauri', 'tauri.conf.json'), 'utf8'));
-  const first = (conf.bundle.externalBin ?? [])[0]?.split('/').pop();
-  const { SIDECARS: _, ...env } = process.env;
-  const r = spawnSync('bash', [script, bundle()], { encoding: 'utf8', env: { ...env, CARGO_TARGET_DIR: join(work, 'no-target') } });
-  if (first) {
-    assert.notEqual(r.status, 0, r.stdout);
-    assert.match(`${r.stdout}${r.stderr}`, new RegExp(`the sidecar ${first} is missing`));
-  } else {
-    assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
-  }
+test('a sidecar named but missing from the app fails; with no --sidecar nothing is started', { skip }, () => {
+  const missing = verify(bundle(), { args: ['--sidecar', 'not-there'] });
+  assert.notEqual(missing.status, 0, missing.out);
+  assert.match(missing.out, /sidecar not-there is missing or not executable/);
+  const none = verify(bundle(), { args: [] });
+  assert.equal(none.status, 0, none.out);
+});
+
+test('the default sidecar argument is --self-test', { skip }, () => {
+  const r = verify(bundle(), { args: ['--sidecar', 'fake-sidecar'] });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /started: fake-sidecar --self-test/);
+});
+
+test('the bundle folder comes from --bundle-dir, else the build-folder action, else cargo', { skip }, () => {
+  const app = bundle();
+  const folder = join(work, 'bf');
+  mkdirSync(join(folder, 'dist', 'bundle', 'macos'), { recursive: true });
+  execFileSync('cp', ['-R', app, join(folder, 'dist', 'bundle', 'macos', 'Fake.app')]);
+  const viaFolder = spawnSync('bash', [script], { encoding: 'utf8', env: { ...process.env, PADDOCK_BUILD_FOLDER: folder, CARGO_TARGET_DIR: join(work, 'no-target') } });
+  assert.equal(viaFolder.status, 0, `${viaFolder.stdout}${viaFolder.stderr}`);
+  const viaFlag = spawnSync('bash', [script, '--bundle-dir', join(folder, 'dist', 'bundle')], { encoding: 'utf8', env: { ...process.env, CARGO_TARGET_DIR: join(work, 'no-target') } });
+  assert.equal(viaFlag.status, 0, `${viaFlag.stdout}${viaFlag.stderr}`);
 });
 
 test('a missing bundle fails with a message', { skip }, () => {
@@ -113,18 +121,12 @@ test('a missing bundle fails with a message', { skip }, () => {
   assert.match(r.out, /no \.app bundle found/);
 });
 
-test('the committed macOS bundle is ad hoc with the hardened runtime off (CI turns it on only for a real identity)', () => {
-  const mac = JSON.parse(readFileSync(join(root, 'app', 'src-tauri', 'tauri.macos.conf.json'), 'utf8'));
-  assert.equal(mac.bundle.macOS.signingIdentity, '-');
-  assert.equal(mac.bundle.macOS.hardenedRuntime, false);
-});
-
 test('a relative bundle path is resolved before the script changes folder', { skip }, () => {
   const app = bundle();
-  const r = spawnSync('bash', [script, 'Fake.app'], {
+  const r = spawnSync('bash', [script, '--sidecar', 'fake-sidecar:--version', 'Fake.app'], {
     cwd: dirname(app),
     encoding: 'utf8',
-    env: { ...process.env, CARGO_TARGET_DIR: join(work, 'no-target'), SIDECARS: 'fake-sidecar' },
+    env: { ...process.env, CARGO_TARGET_DIR: join(work, 'no-target') },
   });
   assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
 });

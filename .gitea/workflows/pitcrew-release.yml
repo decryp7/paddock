@@ -1,0 +1,104 @@
+# Pitcrew's installers and release (ADR 0014; moved from decryp7/pitcrew's build.yml). The gates are not here: Pitcrew is a leg
+# of ci.yml (apps/pitcrew/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend), and its bundles, the macOS seal check,
+# the sidecar start and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
+#
+#   push to main      installers on three OS and the real-app smoke when the change reaches Pitcrew (the same plan as ci.yml)
+#   a pitcrew-v* tag  the gates (ci.yml, only Pitcrew's legs), then installers, then the Gitea release with latest.json on
+#                     the release and on the moving pitcrew-latest release, which installed copies update from
+#   nightly           installers again, so a toolchain or runner change shows up the night it happens
+#   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
+#                     also runs Pitcrew's ci.yml legs first
+#
+# Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
+# system-wide and leave no processes or launch agents behind). Secrets: the family's updater key
+# (PADDOCK_TAURI_SIGNING_PRIVATE_KEY, PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD, PADDOCK_TAURI_UPDATER_PUBKEY), RELEASE_TOKEN
+# (a Gitea access token with write:repository) and, once there is a Developer ID, APPLE_SIGNING_IDENTITY.
+
+name: pitcrew-release
+
+on:
+  push:
+    branches: [main]
+    tags: ["pitcrew-v*"]
+  schedule:
+    - cron: "45 0 * * *"
+  workflow_dispatch:
+    inputs:
+      gates:
+        description: "Also run Pitcrew's gates (ci.yml legs) before the installers"
+        type: boolean
+        default: false
+
+# A newer push to main supersedes the run still going; a tag run is never cancelled. The group differs from ci.yml's (that
+# one is called below and names this workflow too), or the called workflow would cancel its caller.
+concurrency:
+  group: ${{ github.workflow }}-run-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  # Runs the rest only when the change reaches Pitcrew; a push to main whose commit carries a pitcrew-v* tag is covered by
+  # the tag run.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide
+        id: plan
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          PLAN_TOKEN: ${{ github.token }}
+        run: |
+          run=$(node scripts/affected.mjs --ci --app pitcrew)
+          if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
+            tag=$(git ls-remote --tags origin 'refs/tags/pitcrew-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
+            if [ -n "$tag" ]; then run=false; echo "::notice::commit is tagged $tag; the tag run is the gate."; fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  # A tag is gated by exactly Pitcrew's legs of ci.yml (all of them, both halves, on the tagged commit).
+  gates:
+    name: gates
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/pitcrew-v') || github.event.inputs.gates == 'true') }}
+    uses: ./.gitea/workflows/ci.yml
+    with:
+      app: pitcrew
+
+  release:
+    name: installers + release
+    needs: [plan, gates]
+    if: ${{ !cancelled() && needs.plan.outputs.run == 'true' && (needs.gates.result == 'success' || needs.gates.result == 'skipped') }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: pitcrew
+      app-name: Pitcrew
+      app-dir: apps/pitcrew/app
+      cargo-dir: apps/pitcrew
+      tag-prefix: pitcrew-
+      latest-tag: pitcrew-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Pitcrew now updates from the Paddock releases, which a copy installed before this version does not look at."
+      cliff-config: apps/pitcrew/cliff.toml
+      cliff-paths: |
+        apps/pitcrew/**
+        crates/**
+        ui/**
+      # --version: Pitcrew's service has no --self-test; its --version loads every library and exits 0.
+      sidecars: pitcrew-service:--version
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, lockDiff, matrix, npmGraph, owners, readApps, ROOT, summary, trackedFiles } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, readApps, ROOT, summary, trackedFiles } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -199,12 +199,34 @@ describe('matrix legs', () => {
     for (const l of matrix(affected([], graph, { all: true }), graph, { narrow: true })) assert.equal(l.filter, '');
   });
 
-  test('everything gives every app both halves, and the summary names each leg', () => {
+  test('everything gives every app both halves on Linux, and the summary names each leg', () => {
     const plan = affected([], graph, { all: true });
     const legs = matrix(plan, graph);
-    assert.deepEqual(legs.map((l) => [l.app, l.rust, l.ui]), LEGS.map((a) => [a, true, true]));
+    assert.deepEqual(legs.filter((l) => l.os === LINUX).map((l) => [l.app, l.rust, l.ui]), LEGS.map((a) => [a, true, true]));
     const md = summary(plan, 'everything', legs);
     for (const a of LEGS) assert.match(md, new RegExp(`app ${a} \\| rust \\+ ui`));
+  });
+
+  test("an app's `os` adds a host leg per OS with the Rust gates only; a UI-only change adds none (Pitcrew)", () => {
+    const rust = matrix(run('apps/pitcrew/crates/pitcrew-core/src/lib.rs'), graph);
+    assert.deepEqual(rust.map((l) => [l.os, l.rust, l.ui]), [['ubuntu-latest', true, false], ['windows-latest', true, false], ['macos-latest', true, false]]);
+    for (const host of rust.filter((l) => l.os !== LINUX)) assert.deepEqual([host.prepare, host.checks, host.ui_checks, host.angular_dir], ['', '', '', ''], 'the host legs carry no commands');
+    assert.ok(rust.every((l) => l.cargo === 'apps/pitcrew' && l.processes === 'fake_runner'), 'the Cargo folder is normalised and the test processes are named');
+    const ui = matrix(run('apps/pitcrew/app/src/main.ts'), graph);
+    assert.deepEqual(ui.map((l) => [l.os, l.rust, l.ui]), [['ubuntu-latest', false, true]]);
+    assert.equal(ui[0].angular_dir, 'apps/pitcrew/app');
+    assert.match(ui[0].ui_checks, /ng build/);
+  });
+
+  test('an `os` list without Linux is refused: Linux carries the commands', () => {
+    const apps = new Map([['x', { dir: 'apps/x', cargo: '.', os: ['macos-latest'] }]]);
+    assert.throws(() => matrix({ apps: ['x'], kinds: { x: ['rust'] }, packages: {} }, { cargo: new Map(), apps }), /must include ubuntu-latest/);
+  });
+
+  test("onlyApp (a tag's gates, ci.yml's `app` input) keeps one app, both halves, and no other project", () => {
+    const only = onlyApp(affected([], graph, { all: true }), 'pitcrew');
+    assert.deepEqual([only.apps, only.kinds, only.crates, only.ui, only.eslint, only.conformance, only.tools, only.icons, only.all], [['pitcrew'], { pitcrew: ['rust', 'ui'] }, false, false, false, false, false, false, false]);
+    assert.deepEqual(matrix(only, graph, { narrow: true }).map((l) => [l.os, l.rust, l.ui, l.filter]), [['ubuntu-latest', true, true, ''], ['windows-latest', true, false, ''], ['macos-latest', true, false, '']]);
   });
 });
 
@@ -282,7 +304,7 @@ describe('contracts', () => {
     const [leg] = matrix(affected([], graph, { all: true }), graph);
     const job = ci.slice(ci.indexOf('\n  app:\n'));
     for (const key of Object.keys(leg).filter((k) => k !== 'dir')) {
-      assert.match(job, new RegExp(`\\$\\{\\{ matrix\\.${key} \\}\\}`), `ci.yml passes matrix.${key}`);
+      assert.match(job, new RegExp(`\\$\\{\\{ matrix\\.${key}( \\|\\| '[^']*')? \\}\\}`), `ci.yml passes matrix.${key}`);
     }
     for (const input of ['app', 'cargo', 'nextest-config', 'prepare', 'checks', 'ui-checks', 'rust', 'ui', 'filter']) assert.match(gates, new RegExp(`\\n  ${input}:\\n`), input);
     assert.match(job, /include: \$\{\{ fromJSON\(needs\.plan\.outputs\.apps\) \}\}/);
@@ -316,6 +338,17 @@ describe('contracts', () => {
       assert.match(readFileSync(join(ROOT, '.gitea/workflows', app.workflow), 'utf8'), new RegExp(`affected\\.mjs --ci --app ${name}`), `${app.workflow} asks the plan`);
       assert.ok(!matrix(affected([], graph, { all: true }), graph).some((l) => l.app === name), `${name} is no leg of ci.yml`);
     }
+  });
+
+  test('Pitcrew is a leg of ci.yml; its release workflow marks only Pitcrew and calls the kit', () => {
+    assert.ok(LEGS.includes('pitcrew') && !graph.apps.get('pitcrew').workflow);
+    const wf = run('.gitea/workflows/pitcrew-release.yml');
+    assert.deepEqual([wf.apps, wf.crates, wf.ui, wf.all], [['pitcrew'], false, false, false]);
+    const text = readFileSync(join(ROOT, '.gitea/workflows/pitcrew-release.yml'), 'utf8');
+    assert.match(text, /uses: \.\/\.gitea\/workflows\/ci\.yml\n\s+with:\n\s+app: pitcrew/);
+    assert.match(text, /uses: \.\/\.gitea\/workflows\/app-release\.yml/);
+    assert.match(text, /tags: \["pitcrew-v\*"\]/);
+    assert.match(text, /affected\.mjs --ci --app pitcrew/);
   });
 
   test('Debrief: its crates mark only Debrief, its UI only the UI half, and a shared crate reaches it only through the crates it depends on by path', () => {

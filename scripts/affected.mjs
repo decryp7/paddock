@@ -27,10 +27,11 @@
 //                        main is not forgotten by the next push; everything when there is none or the API cannot be read
 //   workflow_dispatch    the `base` input when given, else everything
 //   tags, schedule       everything
+//   PLAN_APP=<app>       (ci.yml's `app` input, a release run's gates) only that app's legs, both halves, whatever the event
 // No dependencies; Node 22+.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from '../conformance/src/util/is-main.mjs';
 
@@ -375,33 +376,71 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
   return out;
 }
 
+/** The runner that carries an app's UI half, prepare steps and checks (the others run only the Rust gates). */
+export const LINUX = 'ubuntu-latest';
+
 /**
- * The matrix legs of the affected apps: one object per app with its paddock.ci.json, the halves to run and the nextest
- * filter (only when `narrow`: a pull request whose change reaches part of the app's Cargo workspace; '' runs it all).
+ * The matrix legs of the affected apps: one object per app and operating system (paddock.ci.json `os`, default Linux only)
+ * with the app's contract, the halves to run and the nextest filter (only when `narrow`: a pull request whose change
+ * reaches part of the app's Cargo workspace; '' runs it all). The Linux leg runs everything the change reaches; a Windows or
+ * macOS leg runs only the Rust gates, and only when the change reaches the Rust half.
  */
 export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
   // An app with a workflow of its own (paddock.ci.json `workflow`) is not a leg: its workflow asks `--ci --app`. An app
   // with nothing to run (docs only: no Cargo workspace, no commands) is no leg either.
   const runs = (a) => !a.workflow && (a.cargo || a.prepare?.length || a.checks?.length || a.ui?.length);
-  return plan.apps.filter((name) => runs(apps.get(name))).map((name) => {
+  return plan.apps.filter((name) => runs(apps.get(name))).flatMap((name) => {
     const app = apps.get(name);
-    const cargoDir = app.cargo ? `${app.dir}/${app.cargo}` : '';
+    const oses = app.os?.length ? app.os : [LINUX];
+    if (!oses.includes(LINUX)) throw new Error(`apps/${name}/paddock.ci.json: "os" must include ${LINUX} (it carries the UI half and the checks)`);
+    const cargoDir = app.cargo ? posix.join(app.dir, app.cargo) : '';
     const members = [...cargo.values()].filter((c) => c.workspace === cargoDir).map((c) => c.name);
     const hit = plan.packages[cargoDir] ?? [];
     const filter = narrow && !plan.all && hit.length && hit.length < members.length ? hit.map((n) => `package(=${n})`).join(' | ') : '';
-    return {
-      app: name,
-      dir: app.dir,
-      cargo: cargoDir,
-      nextest_config: app.nextestConfig ?? '',
-      prepare: (app.prepare ?? []).join('\n'),
-      checks: (app.checks ?? []).join('\n'),
-      ui_checks: (app.ui ?? []).join('\n'),
-      rust: (plan.kinds[name] ?? []).includes('rust'),
-      ui: (plan.kinds[name] ?? []).includes('ui'),
-      filter,
-    };
+    const rust = (plan.kinds[name] ?? []).includes('rust');
+    const ui = (plan.kinds[name] ?? []).includes('ui');
+    return oses.filter((os) => os === LINUX || (rust && app.cargo)).map((os) => {
+      const linux = os === LINUX;
+      return {
+        app: name,
+        os,
+        dir: app.dir,
+        cargo: cargoDir,
+        nextest_config: app.nextestConfig ?? '',
+        prepare: linux ? (app.prepare ?? []).join('\n') : '',
+        checks: linux ? (app.checks ?? []).join('\n') : '',
+        ui_checks: linux ? (app.ui ?? []).join('\n') : '',
+        angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
+        processes: (app.processes ?? []).join(' '),
+        rust,
+        ui: linux && ui,
+        filter,
+      };
+    });
   });
+}
+
+/**
+ * The plan of one app only (`--ci` with PLAN_APP, from ci.yml's `app` input): that app's legs with both halves and no
+ * other project. A release run gates a tag with exactly the legs the app's own changes would run (the app's own tag
+ * workflow calls ci.yml for it), not the whole monorepo.
+ */
+export function onlyApp(plan, app) {
+  return {
+    ...plan,
+    all: false,
+    crates: false,
+    ui: false,
+    eslint: false,
+    conformance: false,
+    tools: false,
+    icons: false,
+    ciImage: false,
+    docs: false,
+    apps: [app],
+    kinds: { [app]: ['rust', 'ui'] },
+    packages: {},
+  };
 }
 
 // ------------------------------------------------------------------------------------------------------------- base
@@ -484,7 +523,7 @@ export function summary(plan, reason, legs) {
     '| Project | Runs |',
     '|---|---|',
     ...['crates', 'ui', 'eslint', 'conformance', 'tools'].map((p) => `| ${p} | ${yes(plan[p])} |`),
-    ...legs.map((l) => `| app ${l.app} | ${[l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
+    ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${[l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
   ];
   if (plan.docs && !legs.length && !plan.crates && !plan.ui) lines.push('', 'Docs only: nothing to build.');
   return `${lines.join('\n')}\n`;
@@ -515,9 +554,12 @@ async function ci(env, { app = null } = {}) {
   const ref = env.GITHUB_REF;
   const runs = event === 'push' && ref === 'refs/heads/main' ? await ciRuns(env, log) : null;
   const { base, reason } = chooseBase({ event, ref, inputBase: env.PLAN_BASE, baseRef: env.GITHUB_BASE_REF, runs, contains, mergeBase });
-  const { graph, plan } = planFor({ base, all: !base, explain: true });
-  const legs = matrix(plan, graph, { narrow: event === 'pull_request' });
-  log(`base: ${reason}`);
+  const planned = planFor({ base: env.PLAN_APP ? null : base, all: env.PLAN_APP ? true : !base, explain: true });
+  const { graph } = planned;
+  if (env.PLAN_APP && !graph.apps.has(env.PLAN_APP)) throw new Error(`unknown app ${env.PLAN_APP} (no apps/${env.PLAN_APP}/paddock.ci.json)`);
+  const plan = env.PLAN_APP ? onlyApp(planned.plan, env.PLAN_APP) : planned.plan;
+  const legs = matrix(plan, graph, { narrow: event === 'pull_request' && !env.PLAN_APP });
+  log(env.PLAN_APP ? `base: only ${env.PLAN_APP}, every leg (a tag's gates)` : `base: ${reason}`);
   log(JSON.stringify(plan, null, 2));
   if (app) {
     if (!graph.apps.has(app)) throw new Error(`unknown app ${app} (no apps/${app}/paddock.ci.json)`);

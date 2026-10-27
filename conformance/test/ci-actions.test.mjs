@@ -106,12 +106,13 @@ test('the reusable workflows are workflow_call workflows that use only actions, 
   }
 });
 
-test('the release workflow cannot publish from anything but a v* tag, and signs only with the secrets it declares', () => {
+test('the release workflow cannot publish from anything but its own v* tag, and signs only with the secrets it declares', () => {
   const text = read(join(WORKFLOWS, 'app-release.yml'));
-  assert.match(text, /release:\n(?:.*\n)*?\s+if: startsWith\(github\.ref, 'refs\/tags\/v'\)/);
+  assert.match(text, /release:\n(?:.*\n)*?\s+if: startsWith\(github\.ref, format\('refs\/tags\/\{0\}v', inputs\.tag-prefix\)\)/);
   const action = read(join(ACTIONS, 'publish-release', 'action.yml'));
-  assert.match(action, /refs\/tags\/v\*/);
-  assert.match(action, /releases are published from a v\* tag only \(rule 9\)/);
+  assert.match(action, /refs\/tags\/\$\{PREFIX\}v/);
+  assert.match(action, /releases are published from a \$\{PREFIX\}v\* tag only \(rule 9\)/);
+  assert.match(action, /version="\$\{tag#"\$PREFIX"\}"/, 'latest.json gets the version after the prefix');
 });
 
 test('the shared actions follow the repo rules: no AI attribution text, Gitea-compatible artifact actions', () => {
@@ -298,9 +299,8 @@ test('no script sits between cargo and rustc: RUSTC_WRAPPER is sccache itself, w
 // key (every CARGO_* variable is hashed), a --config flag does not reach `tauri build`, and app copies drift (rule 43).
 test('every job that builds Rust on a host sets its build folder with the build-folder action, in a stable checkout', () => {
   const uses = [];
-  // Still on CARGO_TARGET_DIR, to move next: the release and smoke workflows of the reference apps and the reusable
-  // app-release (shared tauri-bundle.sh and macos-verify-bundle.sh read CARGO_TARGET_DIR). No other workflow may join them.
-  const notYet = ['app-release.yml', 'service-smoke.yml', 'shell-demo-release.yml', 'workbench-demo-release.yml'];
+  // Still on CARGO_TARGET_DIR, to move next: the release and smoke workflows of the reference apps. No other workflow may join them.
+  const notYet = ['service-smoke.yml', 'shell-demo-release.yml', 'workbench-demo-release.yml'];
   for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
     const text = read(join(WORKFLOWS, file));
     const body = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
@@ -311,20 +311,24 @@ test('every job that builds Rust on a host sets its build folder with the build-
     assert.doesNotMatch(body, /PADDOCK_CARGO_TARGET|build\.target-dir|CARGO_(BUILD_)?TARGET_DIR\s*[=:]/, `${file}: the build folder is the build-folder action's, never a flag or a CARGO_* variable`);
     assert.doesNotMatch(body, /scripts\/ci\/build-folder\.sh/, `${file}: the shared action, not an app's copy`);
     for (const job of parseJobs(text)) {
-      const at = job.text.indexOf('uses: ./.gitea/actions/build-folder');
+      // app-release.yml reaches the kit through its .paddock checkout.
+      const at = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-folder/);
       if (at < 0) continue;
-      const sw = job.text.indexOf('uses: ./.gitea/actions/stable-workspace');
+      const sw = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/stable-workspace/);
       assert.ok(sw >= 0 && sw < at, `${file} ${job.id}: the stable checkout path before the build folder`);
-      const ws = /workspace: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/(\S+)\n\s+name: (\S+)/.exec(job.text.slice(at));
+      const ws = /workspace: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/([^\n]+)\n\s+name: (\S+)/.exec(job.text.slice(at));
       assert.ok(ws, `${file} ${job.id}: the workspace in the stable checkout, and a folder name`);
       uses.push(`${file}:${job.id}`);
+      // The kit's jobs (ci.yml's app leg, app-release.yml) take the folder from an input or the matrix: build-folder.sh
+      // checks the include at run time, and the app tests below check every app that lists a host OS.
+      if (ws[1].startsWith('${{')) continue;
       const conf = read(join(PADDOCK, ws[1], '.cargo', 'config.toml'));
       assert.match(conf, /^include = \[.*\{ path = "ci\.toml", optional = true \}\]$/m, `${ws[1]}: .cargo/config.toml includes the job's ci.toml`);
       const ignored = spawnSync('git', ['check-ignore', '-q', join(ws[1], '.cargo', 'ci.toml')], { cwd: PADDOCK });
       assert.equal(ignored.status, 0, `${ws[1]}/.cargo/ci.toml is git-ignored`);
     }
   }
-  for (const want of ['ci.yml:crate', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle', ...['spotter', 'pitcrew', 'dyno', 'pitwall'].flatMap((a) => [`${a}.yml:rust`, `${a}.yml:bundle`])]) {
+  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle', ...['spotter', 'dyno', 'pitwall'].flatMap((a) => [`${a}.yml:rust`, `${a}.yml:bundle`])]) {
     assert.ok(uses.includes(want), `${want} sets its build folder with the action (found: ${uses.join(', ')})`);
   }
   const copies = spawnSync('git', ['ls-files', 'apps/*/scripts/ci/build-folder.sh'], { cwd: PADDOCK, encoding: 'utf8' });
@@ -491,12 +495,15 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
 
 test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
-  const at = ci.indexOf('uses: ./.gitea/actions/stable-workspace');
-  assert.ok(at > 0, 'the crate job uses stable-workspace');
-  assert.match(ci.slice(at, at + 120), /\n\s+if: runner\.os != 'Linux'/, 'host runners only; on Windows `shell: bash` before Git bash is on PATH resolves to WSL');
-  const gitBash = ci.indexOf('Git bash on PATH');
-  assert.ok(gitBash > 0 && gitBash < at, 'Git bash is on PATH before any later step needs bash');
-  assert.equal(ci.split('uses: ./.gitea/actions/stable-workspace').length - 1, 1);
+  const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/stable-workspace'));
+  assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app'], 'the crate job and the apps\' host legs');
+  for (const job of jobs) {
+    const at = job.text.indexOf('uses: ./.gitea/actions/stable-workspace');
+    assert.match(job.text.slice(at, at + 160), /\n\s+if: runner\.os != 'Linux'/, `${job.id}: host runners only; on Windows \`shell: bash\` before Git bash is on PATH resolves to WSL`);
+    const gitBash = job.text.indexOf('Git bash on PATH');
+    assert.ok(gitBash > 0 && gitBash < at, `${job.id}: Git bash is on PATH before any later step needs bash`);
+    assert.equal(job.text.split('uses: ./.gitea/actions/stable-workspace').length - 1, 1);
+  }
 });
 
 test('the test browser of a host job lives in a kept folder of the runner user, outside the checkout that stable-workspace moves', () => {
@@ -587,12 +594,15 @@ test('the host-tools pin is a release version with SHA-256 sums', () => {
   for (const sum of read(join(ACTIONS, 'host-tools', 'action.yml')).matchAll(/SUM=(\S+);/g)) assert.match(sum[1], /^[0-9a-f]{64}$/);
 });
 
-// ---- The imported apps' own workflows (spotter, pitcrew, dyno, pitwall; each the app's old build.yml) ----
+// ---- The imported apps' own workflows (spotter, dyno, pitwall; each the app's old build.yml; Pitcrew is on the kit) ----
 // They follow Paddock's CI: the paddock-ci image, the shared actions, workspace-wide steps, nextest's ci profile, sharded e2e,
 // installers and the real-app smoke only on full runs, and the family's signing keys stripped before the bundler.
 import { parseJobs } from '../src/util/workflows.mjs';
 
-const APP_WORKFLOWS = ['spotter', 'pitcrew', 'dyno', 'pitwall'];
+const APP_WORKFLOWS = ['spotter', 'dyno', 'pitwall'];
+// Apps on the shared kit (ci.yml's app leg through paddock.ci.json, <app>-release.yml through app-release.yml), not yet every app.
+const KIT_APPS = ['pitcrew'];
+const ciContract = (app) => JSON.parse(read(join(PADDOCK, 'apps', app, 'paddock.ci.json')));
 const appWorkflow = (app) => read(join(WORKFLOWS, `${app}.yml`));
 const appJob = (app, id) => parseJobs(appWorkflow(app)).find((j) => j.id === id);
 
@@ -685,7 +695,7 @@ test('build-folder keeps a host job\'s build folder outside the checkout as carg
 });
 
 test('every app workspace has a nextest ci profile that stops a slow test, and every longer budget is a waiver with a reason', () => {
-  for (const app of APP_WORKFLOWS) {
+  for (const app of [...APP_WORKFLOWS, ...KIT_APPS]) {
     const file = join(PADDOCK, 'apps', app, '.config', 'nextest.toml');
     const text = read(file);
     const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
@@ -734,10 +744,6 @@ test('the larger app e2e suites run in Chromium in two shards, each on a port no
     const wf = appWorkflow(app);
     for (const m of wf.matchAll(/PW_(?:E2E_)?PORT: (?:\$\{\{ matrix\.shard == 1 && '(\d+)' \|\| '(\d+)' \}\}|"(\d+)")/g)) ports.push(...m.slice(1).filter(Boolean).map((p) => `${app}:${p}`));
     const e2e = appJob(app, 'e2e');
-    if (app === 'pitcrew') {
-      assert.equal(e2e, undefined, 'Pitcrew has no e2e gate');
-      continue;
-    }
     assert.match(e2e.text, /shard: \[1, 2\]/, `${app}: two shards`);
     assert.match(e2e.text, /npx playwright test --project=chromium [^\n]*--fully-parallel --shard=\$\{\{ matrix\.shard \}\}\/2/, `${app}: Chromium, split by test`);
     assert.match(appJob(app, 'e2e-webkit').text, /--project=webkit/, `${app}: WebKit on full runs`);
@@ -763,6 +769,36 @@ test('the app bundles get the family keys stripped of whitespace (rule 25, C06),
     const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
     assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
     assert.match(wf, /\*\*Existing installs:\*\* download this version once by hand/, `${app}: the First launch section says to reinstall once`);
+  }
+});
+
+// The kit apps: what their old workflow asserted, now asserted on the contract and the thin release caller.
+test('a kit app lists the OS legs its old workflow had, keeps its build folder out of the checkout, and releases through app-release.yml', () => {
+  for (const app of KIT_APPS) {
+    const contract = ciContract(app);
+    assert.ok(!contract.workflow, `${app}: a leg of ci.yml, no workflow of its own`);
+    assert.deepEqual(contract.os, ['ubuntu-latest', 'windows-latest', 'macos-latest'], `${app}: Rust on every OS`);
+    if (contract.os.some((os) => os !== 'ubuntu-latest')) {
+      const dir = join(PADDOCK, 'apps', app, contract.cargo);
+      assert.match(read(join(dir, '.cargo', 'config.toml')), /^include = \[\{ path = "ci\.toml", optional = true \}\]$/m, `${app}: .cargo/config.toml includes the job's build folder`);
+      assert.match(read(join(PADDOCK, 'apps', app, '.gitignore')), /^\.cargo\/ci\.toml$/m, `${app}: the job's ci.toml is never committed`);
+    }
+    assert.match(read(join(PADDOCK, 'apps', app, 'app', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, `${app}: Angular keeps its cache in CI`);
+    assert.equal(existsSync(join(WORKFLOWS, `${app}.yml`)), false, `${app}: no copy of the gates beside ci.yml`);
+    for (const copy of ['scripts/release', 'scripts/ci/macos-verify-bundle.sh', 'scripts/commit-lint.mjs', 'scripts/export-diagrams.sh', 'scripts/check-index.mjs']) {
+      assert.equal(existsSync(join(PADDOCK, 'apps', app, copy)), false, `${app}: ${copy} is the kit's (rule 42/43)`);
+    }
+    const wf = read(join(WORKFLOWS, `${app}-release.yml`));
+    assert.match(wf, new RegExp(`tags: \\["${app}-v\\*"\\]`), `${app}: its own tag`);
+    assert.match(wf, /uses: \.\/\.gitea\/workflows\/app-release\.yml\n\s+with:\n\s+paddock-ref: \$\{\{ github\.sha \}\}/, `${app}: the shared release, from this commit`);
+    assert.match(wf, new RegExp(`tag-prefix: ${app}-\\n\\s+latest-tag: ${app}-latest`), `${app}: its tags and the moving release the updater reads`);
+    for (const k of ['SIGNING_PRIVATE_KEY', 'SIGNING_PRIVATE_KEY_PASSWORD', 'UPDATER_PUBKEY']) {
+      assert.match(wf, new RegExp(`TAURI_${k}: \\$\\{\\{ secrets\\.PADDOCK_TAURI_${k} \\}\\}`), `${app}: the family's ${k} reaches the kit under its Tauri name`);
+    }
+    assert.doesNotMatch(wf, /TRANSITION_SIGNING_KEY|OLD_REPO|--newest/, `${app}: one key for the family, no bridge release in the old repo`);
+    assert.match(wf, /Existing installs/, `${app}: the First launch notes say to reinstall once`);
+    const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
+    assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
   }
 });
 

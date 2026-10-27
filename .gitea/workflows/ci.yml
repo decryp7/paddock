@@ -30,6 +30,10 @@ on:
         description: "Also run the WebKit job"
         type: boolean
         default: false
+      app:
+        description: "Only this app's legs, every half, whatever changed: the gates of an app's own tag (<app>-release.yml)"
+        type: string
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -65,6 +69,7 @@ jobs:
         env:
           PLAN_TOKEN: ${{ github.token }}
           PLAN_BASE: ${{ github.event.inputs.base }}
+          PLAN_APP: ${{ inputs.app }}
         run: node scripts/affected.mjs --ci
 
   ui:
@@ -478,18 +483,37 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # One leg per affected app (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through the shared app-gates
-  # action, only the halves the change reaches (rust, ui). The shell demo (plan S18) and the workbench demo (X50 W8) are
-  # the first legs: their UI is ui/projects/<app> (tested by the ui and e2e jobs), built here because Tauri embeds it
-  # (tauri.conf.json frontendDist). A change to a shell crate or to the UI that breaks an app fails here before a tag.
-  # Installers come from <app>-release.yml (an `<app>-v*` tag or a manual run). The legs run in the paddock-ci image.
-  app:
-    name: app ${{ matrix.app }}
-    needs: [plan]
-    if: ${{ needs.plan.outputs.any_app == 'true' }}
+  # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a pull request, whichever project it touches.
+  # The apps' own workflows had a copy of this step each; the C23 check of "Paddock itself" skips the history before the rule.
+  commits:
+    name: commit messages
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      # Full history so the range from the target branch can be read.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - run: node conformance/bin/paddock-conformance.mjs commit-lint --range "origin/${{ github.base_ref }}..HEAD"
+
+  # One leg per affected app and operating system (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through
+  # the shared app-gates action, only the halves the change reaches (rust, ui). Linux (the paddock-ci image) carries the
+  # whole contract: prepare, checks, the Rust gates and the UI. An app that lists Windows or macOS in `os` also gets a host
+  # leg per OS with the Rust gates only, for the code that differs there (services, launch agents, Keychain). The shell demo
+  # (plan S18) and the workbench demo (X50 W8) are the first legs: their UI is ui/projects/<app> (tested by the ui and e2e
+  # jobs), built here because Tauri embeds it (tauri.conf.json frontendDist). A change to a shell crate or to the UI that
+  # breaks an app fails here before a tag. Installers come from <app>-release.yml (an `<app>-v*` tag or a manual run).
+  # Host legs: the same physical checkout path and a kept build folder every run (stable-workspace, build-folder), the pinned
+  # cargo-nextest (host-tools), nothing left behind (host-cleanup).
+  app:
+    name: app ${{ matrix.app }} (${{ matrix.os }})
+    needs: [plan]
+    if: ${{ needs.plan.outputs.any_app == 'true' }}
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -499,13 +523,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"
+
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: ${{ matrix.app }}-${{ github.job }}-${{ runner.os }}
+
+      # The workspace's .cargo/config.toml must include ci.toml (build-folder checks it): required of an app with host legs.
+      - uses: ./.gitea/actions/build-folder
+        if: runner.os != 'Linux'
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ matrix.cargo }}
+          name: ${{ matrix.app }}-${{ github.job }}
+
       - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy rustfmt
+
+      - uses: ./.gitea/actions/host-tools
+        if: runner.os != 'Linux'
 
       - uses: ./.gitea/actions/node-caches
+        if: runner.os == 'Linux'
         with:
+          angular-dir: ${{ matrix.angular_dir || 'ui' }}
           name: app-${{ matrix.app }}
 
       - name: Install
+        if: runner.os == 'Linux'
         run: npm ci
 
       - uses: ./.gitea/actions/app-gates
@@ -519,6 +576,13 @@ jobs:
           rust: ${{ matrix.rust }}
           ui: ${{ matrix.ui }}
           filter: ${{ matrix.filter }}
+
+      # Nothing may stay behind on a host: no fake runners or test sockets of the app's tests (paddock.ci.json `processes`).
+      - uses: ./.gitea/actions/host-cleanup
+        if: always() && runner.os != 'Linux'
+        with:
+          app-id: ${{ matrix.app }}
+          processes: ${{ matrix.processes }}
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
