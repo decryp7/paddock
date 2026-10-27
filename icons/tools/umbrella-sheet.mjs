@@ -3,7 +3,9 @@
 import { Resvg } from '@resvg/resvg-js';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { APPS, UMBRELLA, NAMES, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { APPS, UMBRELLA, NAMES } from './design.mjs';
+import { master, small, tray } from './iso-family.mjs';
+const masterSvg = (a, o) => master(a, o), smallSvg = (a, s) => small(a, s), traySvg = (a, st, theme) => tray(a, st, theme);
 
 const out = process.argv[2];
 mkdirSync(out, { recursive: true });

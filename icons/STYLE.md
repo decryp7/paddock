@@ -132,7 +132,7 @@ No icon uses another shadow colour, blur or opacity.
 | 60 | the simple frame without any texture that turns grey (Paddock drops the chequer), fitted about 8 % larger so the mass matches the others |
 | 48 | the simple frame scaled onto the small tile |
 | 32, 24 | 2:1 pixel isometric with `pixelIso` and `pixelLayer` (flat colours, crisp, one pixel per part, whole-pixel widths for repeats), or a simplified object if the isometric one cannot be read; keep the defining parts even at 24, and end faces at least 3 px |
-| 16 | the flat symbol: one tone, whole pixels; coverage 18 to 26 % for line glyphs, up to 30 % for filled silhouettes. Paddock: the slatted door under a canopy that is the band of the seven hues, 2 x 2 px each across x 1 to 15 |
+| 16 | the flat symbol: one tone, whole pixels; coverage 18 to 26 % for line glyphs, up to 30 % for filled silhouettes (in the tray measured without the state badge, section 9). Paddock: the slatted door under a canopy that is the band of the seven hues, 2 x 2 px each across x 1 to 15 |
 | Tray | the flat symbol as a template, x 2 to 14, with light and dark variants made from it. Whole pixels only: crisp edges (badges included), no partial alpha anywhere except a deliberate dim of the whole glyph for a state. Sizes: 16 pt and 18 pt templates at 1x and 2x (18 pt is the 16 grid padded by one unit, never a resample), Windows light and dark at 16 and 32. The apps load the 18 pt @2x template (36 px) and the 32 px light and dark PNGs |
 
 Rule: a part that cannot be drawn on whole pixels at a size is dropped at that size, never blurred.
@@ -163,8 +163,9 @@ Rule: a part that cannot be drawn on whole pixels at a size is dropped at that s
 | Contrast | the object's front against the tile base at least 3:1 (Paddock `#C9D0D8` on `#2B3038`: 9.6:1) | `contrast()` in `tools/cvd.mjs` |
 | Face steps | adjacent faces at least 8 L apart | OKLab |
 | Visual weight | fitted with `weight: 0.68`; measured weight 0.68 to 0.78 and ink area within 0.08 of the pit building's | `visibleBox()` in `tools/iso.mjs` |
-| Coverage at 16 | 18 to 26 % (line glyphs), up to 30 % (filled silhouettes) | `coverage()` in `tools/paddock-symbols.mjs` |
-| Tray alpha | every pixel fully opaque or fully transparent (except a whole-glyph state dim) | magnify the template |
+| Coverage at 16 | 18 to 26 % (line glyphs), up to 30 % (filled silhouettes); the class of each glyph is `GLYPH_KIND` in `tools/iso-family.mjs` | `npm test` (`tools/iso-family.test.mjs`) |
+| Tray coverage | the same limits, measured on the tray glyph **without its state badge**: no badge, no knock-out, no dim (`trayGlyphOnly()`). A badge adds ink by design (Pitcrew's busy, warning and error measure 33 to 37 % with it, its glyph 29 %), so the rule judges the symbol and every state shares it | `npm test` |
+| Tray alpha | every pixel fully opaque or fully transparent at every shipped size (except a whole-glyph state dim, Pitwall idle at 70 %) | `npm test` |
 | Whole pixels | 32, 24 and 16 frames have no half-tone edges on repeated parts | sheet close-ups |
 | Seams | the tile background has no step over 3 levels | `npm test` |
 

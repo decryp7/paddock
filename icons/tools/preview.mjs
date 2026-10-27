@@ -1,25 +1,25 @@
-// Writes preview.html: a self-contained review sheet with inline SVGs (unique ids per instance).
+// Writes preview.html: a self-contained review sheet with inline SVGs (each icon's ids carry its app, size and state).
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { APPS, UMBRELLA, NAMES, PALETTE, INK, STATUSES, masterSvg, smallSvg, traySvg } from './design.mjs';
+import { APPS, UMBRELLA, NAMES, PALETTE, INK } from './design.mjs';
+import { TRAY_STATES as STATUSES, master, small as isoSmall, tray as isoTray } from './iso-family.mjs';
 import { check, contrast } from './cvd.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const sized = (svg, px) => svg.replace(/<svg ([^>]*?)width="\d+" height="\d+"/, `<svg $1width="${px}" height="${px}"`);
-const mac = (a, px) => sized(masterSvg(a), px);
-const win = (a, px) => sized(masterSvg(a, { platform: 'windows' }), px);
-const small = (a, s, px = s) => sized(smallSvg(a, s), px);
-const tray = (a, st, theme, px = 16) => sized(traySvg(a, st, theme), px);
-const carbon = (a, px) => sized(masterSvg(a, { concept: 'carbon' }), px);
+const mac = (a, px) => sized(master(a), px);
+const win = (a, px) => sized(master(a, { platform: 'windows' }), px);
+const small = (a, s, px = s) => sized(isoSmall(a, s), px);
+const tray = (a, st, theme, px = 16) => sized(isoTray(a, st, theme), px);
 
 const CONCEPT = {
-  debrief: 'Log lines with a telemetry trace and an event marker: the evolution of the IMT icon, now the debrief after the race.',
-  pitcrew: 'A wheel nut inside a cycle arrow: the crew that keeps runners turning, swaps them safely and tidies up.',
-  spotter: 'Spotter binoculars with a spark: it watches everywhere and calls the moment a release appears.',
-  pitwall: 'A radio bubble with the voice kept inside it: the private, local model every app radios to.',
-  dyno: 'A dynamometer gauge with the needle near the redline: health, load and tuning at a glance.',
-  sighter: 'A pointer inside a sighting reticle: it finds any UI element by sight.',
-  pacenotes: 'A spiral notebook with a route curve and a code mark: notes on the shape of a codebase.',
+  debrief: "An engineer's laptop with a telemetry trace on the screen: the debrief after the race.",
+  pitcrew: 'An impact wrench with its socket and wheel nut: the crew that keeps runners turning.',
+  spotter: "A spotter's binoculars with an amber lens glint: it watches everywhere and calls the moment a release appears.",
+  pitwall: 'A team radio with its status LED: the private, local model every app radios to.',
+  dyno: 'A tachometer pod with the redline and the shift lights: health, load and tuning at a glance.',
+  sighter: 'A camera on a tripod: it finds any UI element by sight.',
+  pacenotes: 'A tablet with the route and a stylus: notes on the shape of a codebase.',
 };
 
 const cvd = check(Object.fromEntries(APPS.map(a => [a, PALETTE[a].base])));
@@ -163,12 +163,12 @@ const html = `<!doctype html>
 </svg>
 <header>
   <h1>App icon family</h1>
-  <p class="lead">Debrief, Pitcrew, Spotter, Pitwall and Dyno. <b>Chosen direction: Enamel</b>: one saturated hue per app on a shared tile, one bold glyph per app, a faint diagonal livery sweep that runs across the whole family, and the same light from above. The alternative direction, Carbon, is at the bottom.</p>
+  <p class="lead">The seven apps and Paddock as isometric motorsport objects (STYLE.md): one saturated hue per app on the shared enamel tile, one rendered object per app in true 30 degree isometric under one key light from the top left, one accent from the app's own hue. Small sizes are hand-drawn: 2:1 pixel isometric at 32 and 24, a flat symbol at 16 and in the tray. The flat set this replaced is in <code>archive/2026-10-flat/</code>.</p>
 </header>
 
 <section>
   <h2>1024 px masters (macOS grid)</h2>
-  <p class="sub">An 824 px continuous-corner body centred on the 1024 canvas, with the standard drop shadow. Scroll sideways to see all five at full size.</p>
+  <p class="sub">An 824 px continuous-corner body centred on the 1024 canvas, with the standard drop shadow. Scroll sideways to see all seven at full size.</p>
   <div class="hero">${APPS.map(a => `<figure>${mac(a, 1024)}<figcaption>${NAMES[a]}</figcaption></figure>`).join('')}</div>
 </section>
 
@@ -187,7 +187,7 @@ const html = `<!doctype html>
 
 <section>
   <h2>Small sizes</h2>
-  <p class="sub">macOS masters scaled down to 64, 32 and 16 px, next to the hand-tuned Windows frames (48, 32, 24 and 16 px), which snap to the pixel grid and drop detail. These frames go into icon.ico.</p>
+  <p class="sub">macOS masters scaled down to 64, 32 and 16 px, next to the hand-tuned frames (48: the simple frame on the small tile; 32 and 24: pixel isometric; 16: the flat symbol), which snap to the pixel grid and drop detail. These frames go into icon.ico.</p>
   <div class="stack">
     <div class="panel"><div class="grid5">${sizeRow((a, s) => mac(a, s), [64, 32, 16])}</div><div class="grid5" style="margin-top:22px">${sizeRow((a, s) => small(a, s), [48, 32, 24, 16])}</div></div>
     <div class="panel dark"><div class="grid5">${sizeRow((a, s) => mac(a, s), [64, 32, 16])}</div><div class="grid5" style="margin-top:22px">${sizeRow((a, s) => small(a, s), [48, 32, 24, 16])}</div></div>
@@ -208,7 +208,7 @@ const html = `<!doctype html>
 
 <section>
   <h2>Tray and menu-bar icons</h2>
-  <p class="sub">Each status has four tiles: the macOS template on a light and a dark menu bar, then the Windows icon on a light and a dark taskbar. Status badges sit in the bottom-right corner and cut a gap into the glyph. On Windows they are coloured, and each status also has its own shape (ring, triangle, cross, dot), so colour is never the only cue.</p>
+  <p class="sub">Each status has four tiles: the macOS template on a light and a dark menu bar, then the Windows icon on a light and a dark taskbar. Badges are whole pixels: Debrief, Pitwall, Sighter and Pitcrew cut a gap into the glyph in the bottom-right corner, Spotter and Dyno set a 3 x 3 square in a corner the glyph leaves free; Pitwall idle dims the whole glyph. On Windows they are coloured, and each status also has its own shape (dot, ring, triangle, cross), so colour is never the only cue.</p>
   <div class="panel">${trayGallery()}</div>
 </section>
 
@@ -221,18 +221,9 @@ const html = `<!doctype html>
   </div>
 </section>
 
-<section class="alt">
-  <h2>Alternative direction: Carbon</h2>
-  <p class="sub">A graphite tile with the glyph lit in the app's hue and a coloured livery sweep. It is moody and premium at large sizes.</p>
-  <div class="split">
-    <div class="panel"><div class="grid5">${APPS.map(a => `<div class="cell">${carbon(a, 180)}<div class="sizes">${carbon(a, 32)}${carbon(a, 16)}</div></div>`).join('')}</div></div>
-    <div class="panel dark"><div class="grid5">${APPS.map(a => `<div class="cell">${carbon(a, 180)}<div class="sizes">${carbon(a, 32)}${carbon(a, 16)}</div></div>`).join('')}</div>
-      <p class="note">Why it was not chosen: all five tiles share one dark body, so at 16 to 32 px only a thin coloured glyph tells them apart, and on a dark Windows taskbar or in the dark Dock the tiles sink into the background. Enamel puts the identity hue on the whole tile, so it holds up at every size and on every background.</p></div>
-  </div>
-</section>
 <section>
   <h2>The Paddock mark (umbrella)</h2>
-  <p class="sub">Not an app: the family and its shared foundation. Pit garages under one roof striped in the seven app hues, on an asphalt-graphite tile with no hue of its own. Shown beside Debrief for scale, then the hand-tuned frames and the tray template.</p>
+  <p class="sub">Not an app: the family and its shared foundation. A pit building (four lit bays, a canopy with a pinstripe in the seven app hues, the hospitality floor, the chequered pit wall) on the asphalt-graphite tile with no hue of its own. Shown beside Debrief for scale, then the hand-tuned frames (the 16 px canopy is the seven-hue band) and the tray template (the slatted garage door).</p>
   <div class="split">
     ${['panel', 'panel dark'].map(c => `<div class="${c}"><div class="sizes">${UMBRELLA.map(a => `<figure>${mac(a, 200)}<figcaption>${NAMES[a]}</figcaption></figure>`).join('')}<figure>${mac('debrief', 200)}<figcaption>Debrief</figcaption></figure></div>
       <div class="sizes" style="margin-top:18px">${UMBRELLA.map(a => [64, 32, 16].map(s => `<figure>${mac(a, s)}<figcaption>${s}</figcaption></figure>`).join('') + [48, 32, 24, 16].map(s => `<figure>${small(a, s)}<figcaption>${s}</figcaption></figure>`).join('')).join('')}</div></div>`).join('')}
