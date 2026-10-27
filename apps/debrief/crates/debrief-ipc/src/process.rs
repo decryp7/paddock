@@ -219,14 +219,13 @@ struct Watched {
     listener: Option<MemoryListener>,
 }
 
-/// Watches the resident memory of the child `pid` and stops it once it uses more than `limit` (the memory cap of its
+/// Watches the real memory (`paddock_proc::process_memory`: PSS, physical footprint or private working set, never the resident
+/// size, which counts pages the allocator freed; rule 26) of the child `pid` and stops it once it uses more than `limit` (the memory cap of its
 /// sandbox), the same way on every platform: rlimits and job commit limits count reservations and commitments that
 /// allocators make up front (see `SandboxSpec::memory_limit`). Tells the listener at 80% of the cap, at the stop and
 /// when the child ends ([`crate::memory_watch`]). Ends with the child.
 fn watch_memory(limit: u64, w: Watched) {
     let spawned = std::thread::Builder::new().name("debrief-child-memory".into()).spawn(move || {
-        let id = sysinfo::Pid::from_u32(w.pid);
-        let mut sys = sysinfo::System::new();
         let mut watch = MemoryWatch::new(limit);
         let mut last = 0;
         let tell = |e: MemoryEvent| {
@@ -240,8 +239,7 @@ fn watch_memory(limit: u64, w: Watched) {
             if ended {
                 return tell(MemoryEvent::Ended(watch.ended(last)));
             }
-            sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[id]), true);
-            last = sys.process(id).map(|p| p.memory()).unwrap_or(0);
+            last = paddock_proc::process_memory(w.pid).unwrap_or(0);
             let verdict = watch.observe(last);
             w.peak.store(watch.peak(), Ordering::Relaxed);
             match verdict {
@@ -626,12 +624,10 @@ fn unix_nice(sandbox: &crate::sandbox::SandboxSpec) -> i32 {
     }
 }
 
-/// Resident memory of this process, in bytes (0 if unknown).
+/// Real memory of this process, in bytes (0 if unknown): `paddock_proc::process_memory`, not the resident size (rule 26). The
+/// name and the `rss_bytes` wire fields predate that; they carry this figure.
 pub fn current_rss_bytes() -> u64 {
-    let Ok(pid) = sysinfo::get_current_pid() else { return 0 };
-    let mut sys = sysinfo::System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-    sys.process(pid).map(|p| p.memory()).unwrap_or(0)
+    paddock_proc::process_memory(std::process::id()).unwrap_or(0)
 }
 
 #[cfg(test)]

@@ -20,7 +20,8 @@ serde_json.workspace = true
 getrandom.workspace = true
 postcard.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
-sysinfo = { workspace = true, features = ["system"] }
+# Real process memory for caps and displays (rule 26), shared with the other apps (rule 42).
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

@@ -57,6 +57,45 @@ mod unix {
         unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) }
     }
 
+    /// The physical footprint of `pid` in bytes (`ri_phys_footprint`, the figure of Activity Monitor's "Memory" column), or
+    /// `None` when the process is gone or not ours to look at. Unlike the resident size it leaves out pages that were
+    /// given back with `MADV_FREE_REUSABLE` (mimalloc does this) but still sit in the process until the kernel needs them.
+    #[cfg(target_os = "macos")]
+    pub fn phys_footprint(pid: u32) -> Option<u64> {
+        let pid = libc::c_int::try_from(pid).ok()?;
+        let mut info = std::mem::MaybeUninit::<libc::rusage_info_v2>::zeroed();
+        // SAFETY: proc_pid_rusage fills a buffer of the size of the flavour asked for (RUSAGE_INFO_V2 is rusage_info_v2); the
+        // buffer is that struct, and the contents are read only when the call returned 0.
+        let rc =
+            unsafe { libc::proc_pid_rusage(pid, libc::RUSAGE_INFO_V2, info.as_mut_ptr().cast()) };
+        // SAFETY: zero-initialised plain integers, filled by the call on success.
+        (rc == 0).then(|| unsafe { info.assume_init() }.ri_phys_footprint)
+    }
+
+    /// Touches `bytes` of fresh pages and gives them back the way mimalloc does (tests).
+    #[cfg(all(test, target_os = "macos"))]
+    pub fn touch_and_free(bytes: usize) {
+        // SAFETY: an anonymous private mapping of `bytes`, written inside its bounds, then advised and left mapped.
+        unsafe {
+            let p = libc::mmap(
+                std::ptr::null_mut(),
+                bytes,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_ANON | libc::MAP_PRIVATE,
+                -1,
+                0,
+            );
+            if p == libc::MAP_FAILED {
+                return;
+            }
+            let base = p.cast::<u8>();
+            for off in (0..bytes).step_by(4096) {
+                base.add(off).write_volatile(1);
+            }
+            libc::madvise(p, bytes, libc::MADV_FREE_REUSABLE);
+        }
+    }
+
     /// Ignores SIGTERM in this process (tests).
     #[cfg(test)]
     pub fn ignore_sigterm() {
@@ -85,6 +124,30 @@ pub fn taskkill(pid: u32, force: bool) -> bool {
 }
 
 /// Makes the child lead its own process group (Unix); Windows trees are ended by `taskkill /T`.
+/// The private working set of `pid` in bytes (the part of the working set that is not shared with other processes), or
+/// `None` when the process is gone or cannot be opened.
+#[cfg(windows)]
+pub fn private_working_set(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX2,
+    };
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: OpenProcess takes plain values; the handle is closed below. GetProcessMemoryInfo fills at most `cb` bytes of a
+    // zero-initialised struct of that size, and it is read only when the call succeeded.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut c: PROCESS_MEMORY_COUNTERS_EX2 = std::mem::zeroed();
+        let cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32;
+        let ok = GetProcessMemoryInfo(h, (&raw mut c).cast::<PROCESS_MEMORY_COUNTERS>(), cb);
+        CloseHandle(h);
+        (ok != 0).then(|| c.PrivateWorkingSetSize as u64)
+    }
+}
+
 #[cfg(not(unix))]
 pub fn own_group(_cmd: &mut std::process::Command) {}
 

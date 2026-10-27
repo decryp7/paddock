@@ -91,11 +91,9 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+/// The real memory of `pid` (rule 26: not the resident size, which counts pages the allocator freed).
 fn rss_of(pid: u32) -> u64 {
-    let pid = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new();
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-    sys.process(pid).map_or(0, |p| p.memory())
+    paddock_proc::process_memory(pid).unwrap_or(0)
 }
 
 fn own_rss() -> u64 {

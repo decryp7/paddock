@@ -1,7 +1,10 @@
-//! Process memory. Linux lists every thread as a process that reports its process's whole resident size again (a browser
-//! with 400 threads would count 400 times over), so thread entries are skipped (rule 26); browser processes also share
-//! large mappings, so on Linux the proportional set size (PSS, from `smaps_rollup`) is used, which divides each page
-//! between the processes that map it. Everywhere else the resident size is the best figure there is.
+//! Process memory, measured as real memory per OS and never as the resident size (rule 26). Linux lists every thread as a
+//! process that reports its process's whole resident size again (a browser with 400 threads would count 400 times over), so
+//! thread entries are skipped; browser processes also share large mappings, so on Linux the proportional set size (PSS,
+//! from `smaps_rollup`) is used, which divides each page between the processes that map it. On macOS it is the physical
+//! footprint (`ri_phys_footprint`, Activity Monitor's "Memory"): the resident size counts pages mimalloc freed but the
+//! kernel has not reclaimed (a worker with a 535 MB footprint showed 1,965 MB). On Windows it is the private working set.
+//! The resident size is only the fallback for a process whose real memory cannot be read.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -99,13 +102,23 @@ fn proportional(pid: u32) -> Option<u64> {
     read_pss(Path::new("/proc"), pid)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+fn proportional(pid: u32) -> Option<u64> {
+    crate::sys::phys_footprint(pid)
+}
+
+#[cfg(windows)]
+fn proportional(pid: u32) -> Option<u64> {
+    crate::sys::private_working_set(pid)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn proportional(_pid: u32) -> Option<u64> {
     None
 }
 
-/// What `pid` really uses, in bytes: PSS on Linux (resident size if it cannot be read), the resident size elsewhere.
-/// `None` when there is no such process (or it is a thread id).
+/// What `pid` really uses, in bytes: PSS on Linux, the physical footprint on macOS, the private working set on Windows (the
+/// resident size if that cannot be read). `None` when there is no such process (or it is a thread id).
 pub fn process_memory(pid: u32) -> Option<u64> {
     let table = snapshot();
     proportional(pid).or_else(|| table.get(&pid).map(|e| e.1))
@@ -255,5 +268,65 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
     #[test]
     fn a_real_linux_process_has_a_readable_pss() {
         assert!(proportional(std::process::id()).is_some_and(|m| m > 0));
+    }
+
+    /// Regression: mimalloc's freed pages stay resident until the kernel needs them, and a store worker with a footprint of
+    /// 535 MB showed 1,965 MB resident and was killed at its 2 GiB cap. Real memory is the physical footprint.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn freed_pages_that_stay_resident_are_not_real_memory() {
+        use crate::testchild::{Mode, child, lines};
+        use std::io::BufRead;
+        let mut cmd = child(Mode::Freed);
+        cmd.stdout(std::process::Stdio::piped());
+        // Ends with the test, whatever it asserts.
+        let mut c = crate::Supervised::spawn(cmd).unwrap();
+        let mut r = std::io::BufReader::new(c.take_stdout().unwrap());
+        let mut l = String::new();
+        loop {
+            l.clear();
+            assert!(
+                r.read_line(&mut l).unwrap() > 0,
+                "the child ended before it was ready"
+            );
+            if lines(&l).first().is_some_and(|p| *p == "ready") {
+                break;
+            }
+        }
+        let pid = c.id().unwrap();
+        let rss = snapshot().get(&pid).map_or(0, |e| e.1);
+        let real = process_memory(pid).unwrap();
+        let tree = tree_memory(pid);
+        assert!(
+            rss >= (crate::testchild::FREED_BYTES as u64) / 2,
+            "the freed pages are still resident: {rss}"
+        );
+        assert!(
+            real < rss / 4,
+            "real memory {real} must be far below the resident size {rss}"
+        );
+        assert!(
+            tree < rss / 4,
+            "the tree of a child without children: {tree}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_footprint_of_this_process_is_readable_and_a_missing_process_has_none() {
+        assert!(crate::sys::phys_footprint(std::process::id()).is_some_and(|m| m > 0));
+        assert_eq!(crate::sys::phys_footprint(u32::MAX - 1), None);
+        assert_eq!(
+            crate::sys::phys_footprint(u32::MAX),
+            None,
+            "a pid that is not a c_int"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_private_working_set_of_this_process_is_readable() {
+        assert!(crate::sys::private_working_set(std::process::id()).is_some_and(|m| m > 0));
+        assert_eq!(crate::sys::private_working_set(u32::MAX - 1), None);
     }
 }
