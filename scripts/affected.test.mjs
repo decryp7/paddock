@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -460,3 +460,48 @@ describe('contracts', () => {
   });
 });
 
+
+describe('command line', () => {
+  test('`<base>` alone and `<base> <head>` keep the base; the --files value and flags are not positional', () => {
+    assert.deepEqual(parseArgs(['abc']), { files: null, base: 'abc', head: 'HEAD', all: false, ci: false, app: null, explain: false });
+    assert.equal(parseArgs(['abc', 'def', '--explain']).base, 'abc');
+    assert.equal(parseArgs(['abc', 'def', '--explain']).head, 'def');
+    assert.equal(parseArgs(['--explain', 'abc']).base, 'abc');
+    const f = parseArgs(['--files', 'a,b', '--explain']);
+    assert.deepEqual([f.files, f.base], [['a', 'b'], null]);
+    assert.equal(parseArgs(['--all']).base, null);
+  });
+});
+
+describe('command line: incomplete or unknown arguments are refused, never planned as nothing', () => {
+  const refused = {
+    '--files without a value': ['--files'],
+    '--files followed by a flag': ['--files', '--explain'],
+    'three positionals': ['a', 'b', 'c'],
+    'an unknown flag': ['a', '--frobnicate'],
+    '--app without --ci': ['a', '--app', 'pitwall'],
+    '--ci --app without a value': ['--ci', '--app'],
+    '--files with a base': ['--files', 'a,b', 'origin/main'],
+    '--all with --files': ['--all', '--files', 'a'],
+    '--all with a base': ['--all', 'origin/main'],
+    '--ci with a positional': ['--ci', 'origin/main'],
+    '--ci with --files': ['--ci', '--files', 'a'],
+    '--ci with --all': ['--ci', '--all'],
+    '--app with an empty value': ['--ci', '--app', ''],
+    '--files with an empty value': ['--files', ''],
+    '--files with an empty list': ['--files', ','],
+    'a repeated --app': ['--ci', '--app', 'x', '--app', 'y'],
+    'a repeated --explain': ['a', '--explain', '--explain'],
+  };
+  for (const [name, args] of Object.entries(refused)) {
+    test(`${name} throws`, () => assert.throws(() => parseArgs(args), /./));
+  }
+  test('every documented form parses', () => {
+    assert.equal(parseArgs(['--ci']).ci, true);
+    const a = parseArgs(['--ci', '--app', 'pitwall']);
+    assert.deepEqual([a.ci, a.app, a.base], [true, 'pitwall', null]);
+    assert.equal(parseArgs(['origin/main', '--explain']).explain, true);
+    assert.deepEqual(parseArgs(['--files', 'a,b', '--explain']).files, ['a', 'b']);
+    assert.equal(parseArgs(['--all']).all, true);
+  });
+});

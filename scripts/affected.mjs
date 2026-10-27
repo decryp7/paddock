@@ -625,21 +625,52 @@ async function ci(env, { app = null } = {}) {
   if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summary(plan, reason, legs));
 }
 
+const USAGE = 'usage: affected.mjs <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain]';
+
+/**
+ * The command line: `--ci [--app x]`, `--files a,b`, `--all`, `--explain` and up to two positional commits, base then head.
+ * Throws (the CLI prints the usage and the reason) for anything incomplete, unknown or contradictory, so a typo never
+ * plans nothing.
+ */
+export function parseArgs(args) {
+  const known = ['--files', '--all', '--ci', '--app', '--explain'];
+  const valueOf = (name) => {
+    const i = args.indexOf(name);
+    if (i < 0) return { i, value: null };
+    const value = args[i + 1];
+    if (value === undefined || value === '' || value.startsWith('--')) throw new Error(`${name} needs a value`);
+    return { i, value };
+  };
+  for (const a of args) if (a.startsWith('--') && !known.includes(a)) throw new Error(`unknown option ${a}`);
+  for (const k of known) if (args.filter((a) => a === k).length > 1) throw new Error(`${k} given more than once`);
+  const { i: fi, value: filesArg } = valueOf('--files');
+  const { i: ai, value: app } = valueOf('--app');
+  const ci = args.includes('--ci');
+  const all = args.includes('--all');
+  if (app !== null && !ci) throw new Error('--app is only valid with --ci');
+  const valueIdx = new Set([fi, ai].filter((i) => i >= 0).map((i) => i + 1));
+  const positional = args.filter((a, i) => !a.startsWith('--') && !valueIdx.has(i));
+  const [base = null, head = 'HEAD'] = positional;
+  if (ci && (filesArg !== null || all || positional.length)) throw new Error('--ci takes no commits, --files or --all');
+  if (positional.length > 2) throw new Error(`too many commits: ${positional.join(' ')}`);
+  if (filesArg !== null && (base !== null || all)) throw new Error('--files cannot be combined with a base or --all');
+  if (all && base !== null) throw new Error('--all cannot be combined with a base');
+  const files = filesArg === null ? null : filesArg.split(',').filter(Boolean);
+  if (files && !files.length) throw new Error('--files needs at least one file');
+  return { files, base, head, all, ci, app, explain: args.includes('--explain') };
+}
+
 if (isMain(import.meta.url)) {
-  const args = process.argv.slice(2);
-  const flag = (n) => args.includes(n);
   try {
-    if (flag('--ci')) await ci(process.env, { app: args.includes('--app') ? args[args.indexOf('--app') + 1] : null });
+    const { files, base, head, all, ci: isCi, app, explain } = parseArgs(process.argv.slice(2));
+    if (isCi) await ci(process.env, { app });
     else {
-      const fi = args.indexOf('--files');
-      const files = fi >= 0 ? (args[fi + 1] ?? '').split(',').filter(Boolean) : null;
-      const [base, head = 'HEAD'] = args.filter((a, i) => !a.startsWith('--') && i !== fi + 1);
-      if (!files && !base && !flag('--all')) throw new Error('usage: affected.mjs <base> [<head>] | --files a,b | --all | --ci  [--explain]');
-      const { plan } = planFor({ base, head, files, all: flag('--all'), explain: flag('--explain') });
+      if (!files && !base && !all) throw new Error('no base, --files or --all given');
+      const { plan } = planFor({ base, head, files, all, explain });
       process.stdout.write(`${JSON.stringify(plan)}\n`);
     }
   } catch (e) {
-    console.error(`affected: ${e.message}`);
+    console.error(`affected: ${e.message}\n${USAGE}`);
     process.exit(1);
   }
 }
