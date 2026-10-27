@@ -27,7 +27,7 @@ describe('pins', () => {
     const sums = [...dockerfile.matchAll(/^ARG (\w+_SHA256_(AMD64|ARM64))=(\S+)$/gm)];
     assert.ok(sums.length >= 9, `only ${sums.length} checksums found`);
     for (const [, name, , value] of sums) assert.match(value, /^[0-9a-f]{64}$/, name);
-    for (const tool of ['SCCACHE', 'HAKARI', 'MACHETE', 'DUCKDB']) {
+    for (const tool of ['SCCACHE', 'HAKARI', 'MACHETE', 'DUCKDB', 'SHELLCHECK']) {
       assert.ok(dockerfile.includes(`ARG ${tool}_SHA256_AMD64=`) && dockerfile.includes(`ARG ${tool}_SHA256_ARM64=`), tool);
       assert.match(arg(`${tool}_VERSION`), /^\d+\.\d+\.\d+$/);
     }
@@ -48,6 +48,12 @@ describe('pins', () => {
     assert.equal(arg('SCCACHE_VERSION'), action.match(/VERSION=(\d+\.\d+\.\d+)/)[1]);
     assert.ok(action.includes(arg('SCCACHE_SHA256_AMD64')), 'amd64 checksum differs from the action');
     assert.ok(action.includes(arg('SCCACHE_SHA256_ARM64')), 'arm64 checksum differs from the action');
+  });
+
+  test('shellcheck is the v0.11.0 release pin shared with engineering-rules, fetched only through the verified download', () => {
+    assert.equal(arg('SHELLCHECK_VERSION'), '0.11.0');
+    assert.equal(arg('SHELLCHECK_SHA256_AMD64'), '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198');
+    assert.match(dockerfile, /fetch-verified "https:\/\/github\.com\/koalaman\/shellcheck\/releases\/download\/v\$\{SHELLCHECK_VERSION\}\//);
   });
 
   test('Node is the .nvmrc major', () => {
