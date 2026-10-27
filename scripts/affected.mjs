@@ -412,6 +412,7 @@ export function matrix(plan, { cargo, apps }, { narrow = false } = {}) {
         ui_checks: linux ? (app.ui ?? []).join('\n') : '',
         angular_dir: linux && app.angularDir ? posix.join(app.dir, app.angularDir) : '',
         processes: (app.processes ?? []).join(' '),
+        process_patterns: (app.processPatterns ?? []).join('\n'),
         rust,
         ui: linux && ui,
         filter,

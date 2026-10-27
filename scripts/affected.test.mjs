@@ -242,6 +242,20 @@ describe('contracts', () => {
     }
   });
 
+  test("an app's process patterns (host-cleanup `pkill -f`) name its own temp folder and never match the real runner", () => {
+    const legs = matrix(run('apps/pitcrew/crates/pitcrew-core/src/lib.rs'), graph);
+    const patterns = graph.apps.get('pitcrew').processPatterns;
+    assert.ok(patterns?.length, 'Pitcrew names the fake runner copy the tests start');
+    assert.ok(legs.every((l) => l.process_patterns === patterns.join('\n')), 'every leg hands the patterns to host-cleanup');
+    const ours = ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'];
+    const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', '/Users/x/pitcrew/runner/bin/gitea-runner daemon', '/tmp/pitcrew-it/gitea-runner', '/tmp/other-1/runner/bin/gitea-runner'];
+    for (const pat of patterns) {
+      const re = new RegExp(pat);
+      for (const line of ours) assert.match(line, re, `${pat} misses the test copy`);
+      for (const line of real) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
+    }
+  });
+
   test('every markdown file that code reads is a declared doc input', () => {
     // include_str!("rel.md") is resolved from its file; quoted repo paths ('docs/x.md', "apps/a/README.md") are taken as is.
     const re = String.raw`include_str!\("[^"]+\.md"\)|['"](docs|apps|crates|ui)/[A-Za-z0-9_./-]+\.md['"]`;

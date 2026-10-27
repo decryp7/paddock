@@ -583,6 +583,7 @@ jobs:
         with:
           app-id: ${{ matrix.app }}
           processes: ${{ matrix.processes }}
+          process-patterns: ${{ matrix.process_patterns }}
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()

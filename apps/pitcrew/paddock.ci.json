@@ -4,6 +4,7 @@
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
   "processes": ["fake_runner"],
+  "processPatterns": ["[/\\\\]pitcrew-it-[^/\\\\]+[/\\\\]runner[/\\\\]bin[/\\\\]gitea-runner"],
   "ui": [
     "cd apps/pitcrew/app",
     "npm audit --omit=dev --audit-level=high",
