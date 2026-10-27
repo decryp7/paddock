@@ -18,8 +18,10 @@ describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
-    assert.deepEqual(r.apps, ['shell-demo', 'workbench-demo']);
+    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too.
+    assert.deepEqual(r.apps, ['debrief', 'shell-demo', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
+    assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
     assert.ok(r.packages['apps/shell-demo/src-tauri'].includes('paddock-shell-demo'));
   });
@@ -316,12 +318,13 @@ describe('contracts', () => {
     }
   });
 
-  test('Debrief: its crates mark only Debrief, its UI only the UI half, and a shared crate does not reach it yet', () => {
+  test('Debrief: its crates mark only Debrief, its UI only the UI half, and a shared crate reaches it only through the crates it depends on by path', () => {
     const core = run('apps/debrief/crates/debrief-core/src/lib.rs');
     assert.deepEqual([core.apps, core.kinds.debrief, core.crates], [['debrief'], ['rust'], false]);
     assert.ok(core.packages.apps_debrief === undefined && core.packages['apps/debrief'].includes('debrief-app'));
     assert.deepEqual(run('apps/debrief/app/src/main.ts').kinds.debrief, ['ui']);
-    assert.ok(!run('crates/paddock-jobs/src/lib.rs').apps.includes('debrief'), 'Debrief uses no shared crate by path today');
+    assert.ok(run('crates/paddock-proc/src/lib.rs').apps.includes('debrief'), 'debrief-store-worker uses paddock-proc by path');
+    assert.deepEqual(run('crates/paddock-proc/src/lib.rs').kinds.debrief, ['rust']);
     assert.deepEqual(run('apps/debrief/docs/ai/sql-views.md').apps, ['debrief']);
     assert.deepEqual(run('apps/debrief/docs/adr/0001-x.md').apps, []);
   });
