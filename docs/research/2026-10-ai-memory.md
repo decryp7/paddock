@@ -15,15 +15,27 @@ shared Paddock design (rule 42) with work packages. Research note, not a decisio
   **`paddock-memory`**. Project-scoped memories travel inside the project record (like Debrief's notes and knowledge files).
   **Not in Pitwall**: Pitwall is optional, local-only and stateless about content by design; it supplies embeddings and
   summaries, never storage.
-- **Retrieval: scope → hybrid search → recency.** Pinned preferences always; then BM25 (FTS5) fused with Model2Vec cosine
+- **Retrieval: scope → hybrid search → recency.** BM25 (FTS5) fused with Model2Vec cosine
   through `paddock-embed` (X55; Qwen3-Embedding via Pitwall as the optional re-ranker), boosted by recency and use, inside
   a fixed slice of the context window. The model can also call a read-only `recall` tool.
 - **The user sees, edits, disables, exports and deletes every memory, per app**, sees which memories each answer used, and
   can chat without memory. Delete is a hard delete.
 - **In Debrief much of "memory" already exists** as engine-owned, typed data: the name book's user facts (ADR 0053),
   knowledge files (ADR 0029), notes (ADR 0021) and known issues (ADR 0039). The new layer adds what is missing (confirmed
-  facts about the user's systems, conclusions of past investigations, preferences) and *links* to the existing records
+  facts about the user's systems, conclusions of past investigations; preferences are Settings) and *links* to the existing records
   instead of copying them.
+
+## Decisions (user, 2026-10-27)
+
+Answers to the open questions of the first draft; they override the proposals in the sections below where they differ.
+The design is drafted as [ADR 0015](../adr/0015-assistant-memory.md) (Proposed).
+
+1. **Memory is off until the user turns it on, per app.** Nothing is remembered, proposed or retrieved in an app until memory
+   is enabled in that app's settings.
+2. **Preferences are Settings (rule 21), not memories.** Memory holds **facts and findings only** (plus links to name-book
+   entries and generated, AI-labelled conversation summaries, which are never treated as facts).
+3. **Exported or shared projects ask whether to include memories, default excluded.**
+4. **No family-wide "about me".** Memory is per app only; nothing is shared between apps.
 
 ## 1. What exists today
 
@@ -76,7 +88,7 @@ edits.
 | **Fact about the user's system** (semantic) | "`svc-gateway` runs on `app03` and `app04`"; "timestamps from the PLC box are local time, UTC+9"; "`0x80070005` at start-up is harmless on our build agents" | Pacenotes: "`core/legacy` is frozen, don't suggest changes"; Sighter: "the gear icon is Settings in ToolX" | The memory, confirmed by the user |
 | **Resolved name** | "graphic builder" = `CompanyA.Graphic.Builder.exe` | Dyno counters, Spotter products | **Name book** (ADR 0053 / `paddock-names`); memory stores a link, not a copy |
 | **Finding of a past investigation** (episodic) | "2026-10-12 outage: pool exhausted after the 3.2 deploy; evidence query `…`" | Pitcrew: "flaky test X is the shared temp dir" | Memory with the project and an evidence query the engine re-runs |
-| **Preference** (semantic, pinned) | "answer in short bullets", "use UTC", "my default lens is Errors" | | Memory (some may be Settings instead; rule 21) |
+| ~~Preference~~ | "answer in short bullets", "use UTC", "my default lens is Errors" | | **Settings** (rule 21; decision 2), not memory |
 | **Procedure** | "for sign-in failures, check the IdP log first" | | Playbooks / known issues (ADR 0039); memory links |
 | **Conversation summary** | 3–5 lines per closed conversation, searchable | all | Generated (Pitwall, background), labelled AI, never treated as fact |
 
@@ -87,9 +99,12 @@ taken from tool output or documents without the user confirming it, secrets and 
 
 ## 4. Privacy and user control
 
-1. **Per app, never shared silently.** Each app has its own memory; nothing crosses apps unless the user exports and
-   imports it. Scopes: *global* (this app, all projects), *project* (stored in the project record, so a shared project carries
-   it, with a "leave memories out" option on export, like ADR 0041 redacted copies), *conversation* (none: that is the chat).
+0. **Off until enabled, per app** (decision 1). With memory off the `remember`/`recall` tools are not offered and the
+   provider adds nothing.
+1. **Per app, never shared** (decision 4). Each app has its own memory; nothing crosses apps unless the user exports and
+   imports it. Scopes: *global* (this app, all projects), *project* (stored in the project record; on export or share the app
+   **asks whether to include memories, default excluded** (decision 3), like ADR 0041 redacted copies), *conversation*
+   (none: that is the chat).
 2. **Only confirmed memories are used.** States: `proposed` (shown in the chat as a card: Save / Edit / Dismiss) →
    `confirmed` → `disabled`. A proposal that is not confirmed is dropped when the conversation closes.
 3. **Writes come from the user's words only.** The `remember` tool may only cite text the user typed in this conversation
@@ -127,7 +142,7 @@ rebuilds beside the old index and swaps (X55's rule).
 
 For each user turn, before the model call (pure function over the store, budgets from settings):
 
-1. **Pinned**: confirmed preferences (≤ ~300 tokens), always.
+1. ~~**Pinned** preferences~~: dropped (decision 2: preferences are Settings, which the app applies itself).
 2. **Candidates**: scope filter (project, then global), state = confirmed, then BM25 over FTS5 and Model2Vec cosine over the
    user's message plus the conversation title, fused by RRF (X55's fusion and weights).
 3. **Score**: fused rank × recency decay (half-life a setting, e.g. 30 days since last use) × small use-count boost; ties by
@@ -152,7 +167,7 @@ paddock-ui: memory page + "memories used" chip + proposal card
 app: chooses scopes, stores the project block, may link domain records (name book, notes, known issues)
 ```
 
-Types (sketch): `Memory { id, scope: Global | Project(ProjectId), kind: Fact | Finding | Preference | NameLink | Summary,
+Types (sketch): `Memory { id, scope: Global | Project(ProjectId), kind: Fact | Finding | NameLink | Summary,
 text, state: Proposed | Confirmed | Disabled, origin: User | AiConfirmed | Generated, quote: Option<String>,
 links: Vec<RecordRef>, created, updated, last_used, uses, source_conversation }`. Illegal states excluded: a `Summary` is
 never `Confirmed` as a fact; `AiConfirmed` requires a quote that the engine matched in a user message.
@@ -161,13 +176,13 @@ never `Confirmed` as a fact; `AiConfirmed` requires a quote that the engine matc
 
 | WP | Scope | Depends | Acceptance | Effort |
 |---|---|---|---|---|
-| **M0** ADR | Paddock ADR "assistant memory": the rules of sections 4–6, decided by the user | this note | accepted | 0.5 |
+| **M0** ADR | [ADR 0015](../adr/0015-assistant-memory.md) "assistant memory" (drafted, Proposed): the rules of sections 4–6 with the user's decisions | this note | accepted by the user | 0.5 |
 | **M1** `paddock-memory` core | types, limits, `MemoryStore` port, SQLite adapter (bundled, FTS5, schema v1, `secure_delete`), in-memory fake, project-block (de)serialiser | `paddock-env` | damaged / newer file tests; hard delete leaves no row, FTS or vector; caps hold; no text in logs (test) | 2 |
 | **M2** retrieval | hybrid BM25 + Model2Vec via `paddock-embed`, recency, budget, deterministic order; benchmark set of invented memories and queries (recall@k) | X55 | Pitwall down → Model2Vec only with a health entry; model change → rebuild and swap; recall@5 target set in M0 | 2 |
 | **M3** assistant wiring | `MemoryProvider` decorator; `remember` (write, approval, quote check) and `recall` (read) tools; "memories used" in `AssistantEvent`; memory-off per conversation | M1, M2, `paddock-assistant` | injection tests: a `remember` citing tool output, log text or a file is refused; a conversation with memory off neither reads nor writes | 2 |
 | **M4** UI | `@decryp7/paddock-ui` memory page, proposal card, used-memories chip, export/import; mock backend | M3 | CDK harness tests; Playwright flow (propose → confirm → used in next chat → delete) in Chromium | 2 |
 | **M5** summaries | conversation summary on close via Pitwall (`background` priority, cancellable job, rule 10–12), labelled AI, searchable | M1, `paddock-pitwall` | no summary without Pitwall and no error; summary never offered as a confirmed fact | 1 |
-| **M6** Debrief adoption | global + project scopes; project block in the project record and redacted-copy option; name-book and notes links; move `KnowledgeProvider` next to `MemoryProvider` (one decorator chain) | M3, M4 | real-engine test: a confirmed fact changes the next answer's context; shared project carries project memories | 1.5 |
+| **M6** Debrief adoption | memory switch (off by default); global + project scopes; project block in the project record; export/share asks "include memories?" (default no); name-book and notes links; move `KnowledgeProvider` next to `MemoryProvider` (one decorator chain) | M3, M4 | real-engine test: a confirmed fact changes the next answer's context; shared project carries project memories | 1.5 |
 | **M7** Pacenotes, Sighter | adopt with their own kinds; Sighter: element aliases as memories feeding the VLM labeller | M6 | app wiring tests only (rule 43) | 1 each |
 
 Order: after X55 (`paddock-embed`) and the current Debrief 1.1 / Pitwall release queue (one app at a time, rule 1);
@@ -175,11 +190,8 @@ M1–M4 can start as soon as X55's port exists.
 
 ## 8. Open questions for the user
 
-1. Default on or off? (Proposal: on, with proposals only; nothing remembered without a click.)
-2. Should preferences be memories or plain Settings (rule 21)? (Proposal: style and wording preferences are memories;
-   anything a control already exists for stays a Setting.)
-3. Should a shared project carry project memories by default, or only when ticked on export?
-4. Is a family-wide "about me" (name, role, time zone) wanted, copied into each app on request, or strictly per app?
+All four were answered on 2026-10-27; see [Decisions](#decisions-user-2026-10-27): off until enabled per app; preferences are
+Settings; export asks, default excluded; per app only, no family-wide "about me".
 
 ## Sources
 
