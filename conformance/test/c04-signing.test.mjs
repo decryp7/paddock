@@ -25,6 +25,18 @@ test('C04 bad: .app verified but not the DMG', async () => {
   assert.match(messages(f), /not the app inside the DMG/);
 });
 
+test('C04 bad: a secret APPLE_SIGNING_IDENTITY reaches tauri build empty (it overrides signingIdentity "-" with "")', async () => {
+  const env = 'jobs:\n  b:\n    steps:\n      - env:\n          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}\n        run: |\n          bash conformance/release/macos-verify-bundle.sh\n          npx tauri build\n';
+  const files = { 'app/src-tauri/tauri.macos.conf.json': macConf({ hardenedRuntime: false }) };
+  const bad = await findingsOf('C04', makeApp({ ...files, [verifyWf]: env }));
+  assert.match(messages(bad), /APPLE_SIGNING_IDENTITY.*empty/);
+  const guarded = env.replace('npx tauri build', '[ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY\n          npx tauri build');
+  assert.deepEqual(await findingsOf('C04', makeApp({ ...files, [verifyWf]: guarded })), []);
+  // The guard may live in a script the workflow runs.
+  const viaScript = env.replace('npx tauri build', 'bash scripts/ci/bundle.sh');
+  assert.deepEqual(await findingsOf('C04', makeApp({ ...files, [verifyWf]: viaScript, 'scripts/ci/bundle.sh': 'unset APPLE_SIGNING_IDENTITY\n' })), []);
+});
+
 test('C04 bad: grep -q after a pipe under pipefail is found, the capture form is not', async () => {
   const bad = 'set -euo pipefail\nsig=$(codesign -dv "$app" 2>&1)\necho "$sig" | grep -q Signature=adhoc\n';
   const good = 'set -euo pipefail\nsig=$(codesign -dv "$app" 2>&1)\ngrep -q Signature=adhoc <<<"$sig"\n';

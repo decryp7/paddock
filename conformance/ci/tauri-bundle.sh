@@ -25,6 +25,9 @@ rm -rf "$dir/dist/bundle"
 # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
 eval "$(node "$here/../release/strip-keys.mjs")"
 
+# An unset secret arrives as an empty variable, which Tauri lets override signingIdentity "-" (codesign: `Signing with identity ""`).
+[ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
+
 (
   cd "$app_dir"
   npm ci

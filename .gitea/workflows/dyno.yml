@@ -469,6 +469,8 @@ jobs:
           # The DMG step removes the .app it packed unless the app bundle is requested too; the bundle check and the
           # macOS updater both need it.
           if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
+          # An unset secret arrives as an empty variable, which Tauri lets override signingIdentity "-" (codesign: `Signing with identity ""`).
+          [ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
           # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, Paddock rule 23): ad-hoc code under it
           # cannot load a vendor-signed library ("different Team IDs"). A real signing identity turns it back on, as
           # notarization requires.
