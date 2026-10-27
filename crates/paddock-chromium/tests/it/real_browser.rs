@@ -74,3 +74,72 @@ fn a_real_browser_reads_a_page_and_closes_cleanly() {
         std::thread::yield_now();
     }
 }
+
+/// Chrome answers `Page.navigate` with `net::ERR_ABORTED` for every load it cancels before the page commits; the driver
+/// says which kind it was. A download is one; a load replaced by another navigation is the other, made on purpose here: the
+/// first request is held at a local server until the second navigation starts, so the order is fixed.
+#[test]
+fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
+    let Some(exe) = find_for_tests() else {
+        let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
+        assert!(
+            !required,
+            "PADDOCK_REQUIRE_TEST_BROWSER is set but CHROMIUM_TEST_PATH names no Chrome for Testing"
+        );
+        return;
+    };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (arrived, first_request) = std::sync::mpsc::channel();
+    // Holds `/held` (the connection stays open until the test ends) and answers everything else with a page.
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for s in listener.incoming() {
+            let Ok(mut s) = s else { return };
+            let mut buf = [0u8; 4096];
+            let n = std::io::Read::read(&mut s, &mut buf).unwrap_or(0);
+            if String::from_utf8_lossy(&buf[..n]).starts_with("GET /held") {
+                let _ = arrived.send(());
+                held.push(s);
+            } else {
+                let _ = std::io::Write::write_all(
+                    &mut s,
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 13\r\nConnection: close\r\n\r\n<p>other</p>\n",
+                );
+            }
+        }
+    });
+    let base = tempfile::tempdir().unwrap();
+    let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
+    let page = b.start_page().unwrap();
+    let e = page
+        .navigate(
+            "data:application/zip;base64,UEsFBg==",
+            Duration::from_secs(30),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("file download"), "{e}");
+    let e = std::thread::scope(|s| {
+        let first = s.spawn(|| {
+            page.navigate(
+                &format!("http://127.0.0.1:{port}/held"),
+                Duration::from_secs(30),
+            )
+        });
+        first_request
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the first load reached the server");
+        page.navigate(
+            &format!("http://127.0.0.1:{port}/other"),
+            Duration::from_secs(30),
+        )
+        .unwrap();
+        first.join().unwrap().unwrap_err().to_string()
+    });
+    assert!(
+        e.contains("replaced") && e.contains(&format!("http://127.0.0.1:{port}/other")),
+        "{e}"
+    );
+    assert!(b.close(), "Browser.close ends it by itself");
+}
