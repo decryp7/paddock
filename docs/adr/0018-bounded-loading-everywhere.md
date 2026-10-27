@@ -179,3 +179,40 @@ hundreds of lanes, or the UI with a large result. Debrief has not adopted `crate
 - **Cap only in the UI.** The engine would still compute and send 500 lanes or 2 M ids; the cost is in the engine.
 - **One global row limit.** Lanes, rows, groups and hits have different costs and different useful defaults; one
   number would be too low for some and too high for others.
+
+## Amendment (user, 2026-10-27): show all lanes, and a Lanes button
+
+### 1. "All" lanes through virtualization
+
+The Setting "Lanes shown by default" accepts a number (default 10) or "All". "All" is supported through
+virtualization, not by raising caps:
+
+- **Vertical virtualization:** only the visible lanes plus a buffer are rendered.
+- **Canvas-drawn lanes:** a lane is drawn on a canvas, not built from DOM nodes per event.
+- **Bucketed summaries at screen resolution:** each visible lane fetches a bucketed summary of the visible time
+  range, about one bucket per pixel column; zooming in fetches finer buckets, and individual events appear only at
+  the deepest zoom.
+- **Cached and lazy:** summaries are cached per lane, zoom and range; off-screen lanes don't query.
+
+Render cost stays flat in the number of lanes. Only the lane list (names, counts) scales with it, and that list is
+paged from the engine.
+
+### 2. A Lanes button and picker
+
+A visible "Lanes" button in the timeline header, with an icon and a count badge such as "10 of 2,341", opens the lane
+picker:
+
+- search;
+- a checkbox per lane;
+- quick choices: "Top N" (N editable), "All", "Pinned only";
+- sort by event count, errors, last activity or name;
+- pin and unpin.
+
+The selection is saved with the project. The picker is an in-app popover (menus and pickers stay in-app) and is fully
+keyboard-accessible.
+
+### 3. Checks
+
+- A Playwright test with a 5,000-lane mock profile: "All" scrolls smoothly (within the frame budget), the DOM holds
+  fewer than 100 lane rows, and the Lanes button's count matches the lanes shown.
+- An engine test that the lane list endpoint is paged.
