@@ -70,7 +70,7 @@ impl Drop for Harness {
 fn old_file(dir: &Path, name: &str) -> PathBuf {
     let p = dir.join(name);
     std::fs::write(&p, name.as_bytes()).unwrap();
-    let f = std::fs::File::open(&p).unwrap();
+    let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap(); // Windows needs write access to set times
     f.set_modified(std::time::SystemTime::now() - Duration::from_secs(5 * 86_400))
         .unwrap();
     p

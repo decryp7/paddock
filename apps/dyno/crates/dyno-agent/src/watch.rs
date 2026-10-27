@@ -530,7 +530,7 @@ mod tests {
         let planned = dry_run(&w, &f.home, real_now(), false).unwrap();
         assert_eq!(planned.due.len(), 1);
         // The re-check compares the modification time it was planned with.
-        let touched = std::fs::File::open(&p).unwrap();
+        let touched = std::fs::OpenOptions::new().write(true).open(&p).unwrap(); // Windows needs write access to set times
         touched
             .set_modified(std::time::SystemTime::now() - Duration::from_secs(3600))
             .unwrap();
