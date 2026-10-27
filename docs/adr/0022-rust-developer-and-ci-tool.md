@@ -38,9 +38,11 @@ list in the inventory note):
 The result is **37 commits**, the one denominator used below. Not counted:
 
 - `ci:` commits, mostly the creation and set-up of the kit;
-- `fix(...)` commits with an app or UI scope that touched a tooling path on the way: 38 more. Of these, `ui` has 7,
-  `icons` 8, `render` 3 and `app` 3. Adding the four borderline scopes `render`, `chromium-driver`, `e2e` and
-  `diagnostics` would give 43.
+- `fix(...)` commits with an app or UI scope that touched a tooling path on the way: 35 more (`icons` 8, `ui` 7,
+  `render` 3 and `app` 3 among them);
+- 3 `fix:` commits without a scope.
+
+Adding the four borderline scopes `render`, `chromium-driver`, `e2e` and `diagnostics` would give 43.
 
 By defect area:
 
@@ -119,7 +121,7 @@ shell**, mostly in the per-app workflows (Debrief 7 long and 4 branching, Dyno 3
 | What moves | nothing | 9,734 lines (117 files) + actions | B + generators, npm glue, draw.io wrappers (12,019 more lines) | the JS gets types; shell stays |
 | Languages left in tooling | JS, bash, PowerShell, Python, YAML shell | Rust + JS generators and glue + bootstrap shell | Rust; TS only for the Playwright suites (and the TS analysis until replaced); ESLint rules; bootstrap shell | as A |
 | Tested on all three OSes | no | most | all but the bootstrap | no |
-| Effort | 0 | about 23 agent-days | **about 45 agent-days** in six phases | about 4 agent-days |
+| Effort | 0 | about 23 agent-days | **about 45 agent-days** in six phases, plus about 1.5 for checkpoints | about 4 agent-days |
 | Real losses | none | none | none, if the three UI-toolchain categories stay (§4) | none |
 | Pacenotes reuse | none | graph, walk, history, rules | + the draw.io emitter | none |
 
@@ -174,8 +176,12 @@ phase 5 (generators and glue) and phase 6 (the alternatives for the lossy catego
 `rust-toolchain.toml`; `setup-rust` installs `stable`, and the CI image brings its own version (this Mac has 1.99.1).
 A binary built by one machine therefore cannot be matched to the compiler of another. The ADR adds a repository-wide
 `rust-toolchain.toml` with an **exact** version (`channel = "1.99.1"` at the time of writing, with `clippy`, `rustfmt`
-and the CI targets). `setup-rust` and the CI image install exactly that version. Renovate bumps it as one PR that runs
-the full suite; whether Renovate has a built-in manager for this file or needs a regex manager is unverified.
+and the CI targets). `setup-rust` and the CI image install exactly that version. `setup-rust`'s fast path for the
+image compares the image's toolchain with the version in `rust-toolchain.toml`, no longer with `stable`.
+
+A bump is one Renovate PR. It changes the file, rebuilds the CI image with the new version (`ci-image.yml`, which the
+planner marks affected), and runs the full suite on the new image. Whether Renovate has a built-in manager for this file
+or needs a regex manager is unverified.
 
 This changes every workspace, not only the tool, and that is intended: a "stable moved overnight" failure becomes a
 reviewed bump. The alternative is a pin in `tools/paddock-dev/` only, with the wrapper building from that folder,
@@ -193,8 +199,9 @@ fallback if the user declines a repository-wide pin.
 
   The hash is `git ls-tree HEAD -- <inputs> | git hash-object --stdin`. The `rustc -Vv` output is not used: its `host:`
   line differs per machine, and the pinned file names the compiler. The consumer's target triple selects the file inside
-  the version (`paddock-dev-<target>[.exe]`). When `git status --porcelain -- <inputs>` is not empty, the wrapper always
-  builds. The tool embeds the hash it was built from and prints it (`./dev self hash` prints both the wrapper's and the
+  the version (`paddock-dev-<target>[.exe]`). When `git status --porcelain --untracked-files=no -- <inputs>` is not empty,
+  the wrapper always builds. `tools/paddock-dev/target/` is ignored in `.gitignore` (R0), so a local build folder never
+  counts as a change. The tool embeds the hash it was built from and prints it (`./dev self hash` prints both the wrapper's and the
   binary's), so the wrapper can be tested. `git rev-parse` takes 16 ms (measured). The tool's dev-dependencies change
   the hash only through `Cargo.lock`; that errs on the side of a rebuild.
 - **Publishing.** A push to `main` that changes the inputs runs `dev-tool.yml`. It computes the hash with the same
@@ -203,7 +210,7 @@ fallback if the user declines a repository-wide pin.
   | Target | Runner |
   |---|---|
   | `x86_64-unknown-linux-gnu` | the CI image on a Linux runner |
-  | `aarch64-unknown-linux-gnu` (agents' Linux containers on the Mac) | a `linux/arm64` container of the multi-arch CI image on the macOS host runner; if that runner set-up is not available, arm64 Linux users build on a miss |
+  | `aarch64-unknown-linux-gnu` (agents' Linux containers on the Mac) | none yet: `ci-image.yml` builds `linux/amd64` only. Until it also builds `linux/arm64` (then: an arm64 container on the macOS host runner), arm64 Linux users build on a miss, as on any branch that changes the tool |
   | `aarch64-apple-darwin` | the macOS host runner |
   | `x86_64-pc-windows-msvc` | the Windows host runner. Not `cargo xwin`, whose output is linked differently from what the Windows runners build and test |
 
@@ -359,7 +366,7 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 
 | Phase | WP | Content | Days | Deletes | Adds |
 |---|---|---|---|---|---|
-| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `rust-toolchain.toml` pin in `setup-rust` and the image, `./dev` + `dev.cmd`, git input hash, `self hash`, `inputs.txt` test, `dev-tool.yml` on four runners, the `dev-build` job and run artifact, the generic package and its cleanup rule | 3.5 | – | 1,300 + 900 tests |
+| **1 Foundation and runner set-up** | R0 | `tools/paddock-dev` skeleton, `paddock-repo-files`, `paddock-repo-graph` (graph, `History` port), `rust-toolchain.toml` pin in `setup-rust` and the image, `./dev` + `dev.cmd`, git input hash, `self hash`, `inputs.txt` test, `dev-tool.yml` on four runners, the `dev-build` job and run artifact, the generic package and its cleanup rule, `.gitignore` for `tools/paddock-dev/target/` | 3.5 | – | 1,300 + 900 tests |
 | | R1 | composite actions' logic (sccache, stable workspace, build folder and env, host tools and cleanup, node caches, sccache stats); actions become one-liners; extend the WP-C6 check (§3.7) with today's baselines; delete the three one-off scripts | 2.5 | 334 shell lines (actions 815 → about 300 YAML), 72, 491 | 900 + 800 tests |
 | | R10 | app workflows' long and OS-branching `run:` blocks into commands or `paddock.ci.json` (Debrief, Dyno, Spotter, Pitcrew, Pitwall) | 2 | about 450 inline shell lines | 500 + 400 tests |
 | **2 Release and downloads** | R2 | release, bundles, sidecars, `verify-macos` with `FakeRunner`, `self-test`, `latest-json`, notes, strip-keys, publish; Debrief `build-sidecars`, macOS dev-signing, Dyno `check-bundle`, demo release | 3 | 1,271 + about 900 test lines | 1,600 + 1,200 tests |
@@ -376,9 +383,9 @@ times the JS it replaces after duplicates collapse, shell about 2 times; tests a
 | | R14 | npm glue: `build-info`, `whats-new`, i18n locales, `tauri-before-build`, `ui-coverage-guard` as `./dev` commands | 1 | 485 + about 300 | 500 + 400 tests |
 | **6 Lossy categories** | R15 | UI lints into the ESLint preset (moved, not deleted); dialog command contract generated from Rust, then the TS analysis deleted | 2.5 | 633 (243 moved) | 400 + 300 tests |
 | | R16 | clean-up: allow-list down to its final form, docs, a lesson in `docs/lessons.md` | 0.5 | about 200 | 200 |
-| | | **Total** | **about 45** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
+| | | **Total** | **about 45, plus about 1.5 for the six checkpoints** | **about 23,900 source and inline shell + about 7,400 test lines** | **about 20,700 Rust + 5,000 data + 14,400 test lines** |
 
-The checkpoints add about 0.25 days per phase.
+The checkpoints add about 0.25 days per phase, about 1.5 in all.
 
 **Per-phase acceptance** (all must hold before the next phase starts):
 

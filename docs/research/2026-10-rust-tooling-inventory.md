@@ -16,10 +16,10 @@ Evidence for [ADR 0022](../adr/0022-rust-developer-and-ci-tool.md). Research onl
   matching `(^|/)\.gitea/(workflows|actions)/`, `(^|/)scripts/`, `^conformance/`, `^tools/`, `^ci-image/`, `^icons/tools/`,
   `^diagrams/(tools|scripts)/`, `^docs/images/src/`, `/docs/diagrams/src/` or `(^|/)xtask/`. The path patterns include the
   apps' pre-import locations (`apps/<app>/.gitea/workflows/build.yml`, crate `scripts/` folders). Result: **37 commits**,
-  listed below. Not counted: `ci:` commits (mostly the kit's creation and set-up), and 38 `fix(...)` commits with an app
-  or UI scope that touched such a path on the way (`icons` 8, `ui` 7, `render` 3, `app` 3, `diagrams` 2, `dialogs` 2,
+  listed below. Not counted: `ci:` commits (mostly the kit's creation and set-up), and 38 other `fix` commits that
+  touched such a path on the way: 35 with an app or UI scope (`icons` 8, `ui` 7, `render` 3, `app` 3, `diagrams` 2, `dialogs` 2,
   `screenshots` 2, `shell-demo` 2, and one each of `service`, `chromium-driver`, `about`, `dialog`, `e2e`, `diagnostics`,
-  plus 3 without a scope). With the borderline scopes `render`, `chromium-driver`, `e2e` and `diagnostics` the count
+  and 3 without a scope). With the borderline scopes `render`, `chromium-driver`, `e2e` and `diagnostics` the count
   would be 43. (The research note's 111 counted `fix:` and `ci:` together.)
 - **OS refs:** occurrences of `win32 darwin windows macos codesign hdiutil xattr pwsh powershell .exe junction mklink
   process.platform RUNNER_OS runner.os uname notarytool spctl lipo otool install_name_tool launchctl systemctl appimage
