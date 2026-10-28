@@ -1,0 +1,56 @@
+# TEMPORARY, spike branch only (ADR 0026 package 1.1-0): runs spikes/dialog-hidden on the Windows host runner, which
+# runs jobs in a desktop session, and prints the probe log. Dispatched once by hand on spike/dialog-hidden-windows;
+# this file is deleted on the branch after the run and never merges to main.
+name: spike-dialog-hidden
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: dialog hidden-window probe (windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Git bash on PATH (Windows)
+        shell: cmd
+        run: |
+          whoami
+          query session 2>nul
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
+
+      - name: Tools
+        run: |
+          rustc --version
+          cargo --version
+          node --version
+          reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" //v pv 2>/dev/null || true
+
+      - name: Build the probe
+        working-directory: spikes/dialog-hidden
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/dialog-spike-target
+        run: cargo build
+
+      - name: Run the probe
+        working-directory: spikes/dialog-hidden
+        env:
+          PROBE_REPS: "3"
+          PROBE_OUT: ${{ runner.temp }}/probe-windows.jsonl
+        run: |
+          set +e
+          timeout 900 "$RUNNER_TEMP/dialog-spike-target/debug/dialog-hidden-spike.exe"
+          echo "probe exit: $?"
+          node summarize.mjs "$PROBE_OUT"
+          echo
+          node summarize.mjs "$PROBE_OUT" --trials
+          echo "=== PROBE JSONL BEGIN ==="
+          cat "$PROBE_OUT"
+          echo "=== PROBE JSONL END ==="
