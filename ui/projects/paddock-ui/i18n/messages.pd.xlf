@@ -2228,6 +2228,9 @@
       <trans-unit id="pd.ui.job.waiting" datatype="html">
         <source>Waiting</source>
       </trans-unit>
+      <trans-unit id="pd.ui.loading" datatype="html">
+        <source>Loading</source>
+      </trans-unit>
       <trans-unit id="pd.ui.metric.down" datatype="html">
         <source>Down</source>
       </trans-unit>
@@ -2242,6 +2245,21 @@
       </trans-unit>
       <trans-unit id="pd.ui.sparkline" datatype="html">
         <source>Trend</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.error" datatype="html">
+        <source>Could not draw the chart</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.share" datatype="html">
+        <source><x id="percent"/> of <x id="parent"/></source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.smaller-many" datatype="html">
+        <source><x id="count"/> smaller items</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.smaller-one" datatype="html">
+        <source>1 smaller item</source>
+      </trans-unit>
+      <trans-unit id="pd.ui.sunburst.up" datatype="html">
+        <source>Up to <x id="parent"/></source>
       </trans-unit>
       <trans-unit id="pd.undo.actionFailed" datatype="html">
         <source><x id="label"/> failed: <x id="cause"/></source>

@@ -64,12 +64,10 @@ arc outline 3 px outside the segment. **The table is the declared accessible equ
 semantics are experimental: WebKit's support for ARIA tree roles on SVG elements is unverified in WKWebView with
 VoiceOver (Dyno's macOS shell), so the tree is a convenience on top, tested per platform, and nothing depends on it.
 
-**Zoom animation (drill in and out).** Each segment's (start angle, end angle, inner, outer radius) is interpolated
-from the old layout to the new one: the clicked segment opens to 360° and moves to ring 1 while its ancestors shrink
-into the centre; out is the reverse. 240 ms, `cubic-bezier(0.3, 0, 0.2, 1)` (move), driven by one `requestAnimationFrame`
-loop over precomputed tweens (no CSS transform per path), labels fade in after the move (100 ms). With
-`prefers-reduced-motion: reduce` or `data-motion="reduce"` the new layout replaces the old in one frame with a ≤ 100 ms
-opacity cross-fade (design guide §9). Live scan updates never animate (§9: "live charts do not animate between ticks").
+**Drill in and out.** For 1.0 the new layout replaces the old in one frame with a 180 ms opacity cross-fade (100 ms with
+`prefers-reduced-motion: reduce` or `data-motion="reduce"`); the geometric zoom (each segment interpolated from the old layout
+to the new, 240 ms) is a later refinement and `pd-sunburst` has no tween yet. Live scan updates never animate (§9: "live charts do
+not animate between ticks").
 
 ## 4. Colour, labels and "never colour alone"
 
@@ -315,4 +313,4 @@ Out of scope for 1.0: incremental rescans from FSEvents/USN/fanotify, colour by 
   on the Windows runner.
 - UI: `pd-sunburst` unit and gallery tests (spec); Dyno page specs per state with the mock backend; Playwright
   screenshots of every state at 1440 x 900, 2x, both themes (UI rule 20); axe clean; keyboard path test (tree and
-  treegrid); reduced-motion test (no tween frames).
+  treegrid); reduced-motion test (cross-fade only, no tween).

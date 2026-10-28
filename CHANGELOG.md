@@ -9,7 +9,7 @@ Conventional Commits; one semver tag for the whole repo.
   `sunburstLayout`: SVG with tree semantics (`treeitem`, `aria-level`, `aria-setsize`, `aria-posinset`, `aria-expanded`), colour by branch over
   the ring-ordered chart tokens, hatched hidden space and a dashed "not counted yet" ghost, folding by angle and count with a segment cap,
   a live mode that coalesces updates to four per second, the tree keyboard model, and loading, empty and error states. Exports are one
-  declared line each in `chart/public-api.ts`; a gallery section shows every state. The tween between centres is a 100 to 180 ms cross-fade
+  declared line each in `chart/public-api.ts`; a gallery section shows every state. Also exported: `branchSlots`, `slotColour` and `PdArc` (a list beside the chart uses the chart's own colours), and `pd-sunburst` has a `highlight` input. `@decryp7/paddock-e2e` gains `clickShape`, `hoverShape` and `pointInShape` (real pointer events on a point inside an SVG shape). The tween between centres is a 100 to 180 ms cross-fade
   (`tweenLayouts` is not built yet); `pd-table` tree rows (spec section 7) are a separate change.
 
 ### Dyno on the shared CI kit (WP-C4)

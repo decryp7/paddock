@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { clickShape, expect, hoverShape, test, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 
 // `pd-sunburst` in the gallery (docs/plans/pd-sunburst.md): drill by click and keyboard, the centre going up, the states, axe in both
@@ -10,11 +10,14 @@ const THEMES = ['dark', 'light'] as const;
 async function open(page: Page, theme: string): Promise<void> {
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto(`/?theme=${theme}&accent=debrief`);
+  // The charts above the section draw late and move it: wait for them, so a point measured on a segment is still there when the mouse goes.
+  await page.locator('section[data-testid="chart"] canvas').first().waitFor();
   await page.locator('section[data-testid="sunburst"] [role=tree]').first().waitFor();
+  await page.waitForTimeout(400);
 }
 
 const box = (page: Page) => page.locator('[data-testid="sunburst-box"]');
-// A segment's box centre is often in the hole of the ring, so pointer events are sent to the segment itself.
+// Real pointer events go to a point inside the segment: the centre of an annular segment's box is usually in the hole of the ring.
 const item = (page: Page, id: string) => box(page).locator(`path[role=treeitem][data-id="${id}"]`);
 const centreName = (page: Page) => box(page).locator('[data-testid="sunburst-centre-name"]');
 
@@ -29,9 +32,11 @@ for (const theme of THEMES) {
 test('sunburst: click drills in, the centre goes up, hover shows the segment', async ({ page }) => {
   await open(page, 'dark');
   await expect(centreName(page)).toHaveText('Macintosh HD');
-  await item(page, 'users').dispatchEvent('mouseenter');
+  await hoverShape(page, item(page, 'users'));
   await expect(centreName(page)).toHaveText('Users');
-  await item(page, 'users').dispatchEvent('click');
+  await clickShape(page, item(page, 'users'));
+  // The pointer is now over a child of Users, which the centre would show: move it away to read the centre itself.
+  await page.mouse.move(0, 0);
   await expect(page.locator('[data-testid="sunburst-centre"]')).toHaveText('Centre: users');
   await expect(centreName(page)).toHaveText('Users');
   await expect(box(page).getByRole('button', { name: 'Up to Macintosh HD' })).toBeVisible();
@@ -62,18 +67,33 @@ test('sunburst: hidden space is hatched, and loading, empty and error are design
   await expect(page.locator('[data-testid="sunburst-error-box"]')).toContainText('The scan stopped');
 });
 
+test('sunburst: at a narrow width the centre text stays inside the circle and labels stay at reading size', async ({ page }) => {
+  await open(page, 'dark');
+  const narrow = page.locator('[data-testid="sunburst-narrow-box"] pd-sunburst');
+  const width = (await narrow.boundingBox())?.width ?? 0;
+  expect(width).toBeLessThan(320);
+  const overruns = await narrow.locator('.pd-centre').evaluate((el) => Array.from(el.children).filter((c) => c.scrollWidth > c.clientWidth + 1).map((c) => `${c.className}: ${c.scrollWidth} > ${c.clientWidth}`));
+  expect(overruns).toEqual([]);
+  const px = await narrow.locator('text.pd-label').evaluateAll((els) => els.map((e) => (e.getBoundingClientRect().height)));
+  expect(px.every((h) => h >= 8)).toBe(true);
+  const design = await page.locator('[data-testid="sunburst-box"] pd-sunburst').boundingBox();
+  expect(design?.width ?? 0).toBeGreaterThan(500);
+});
+
 const shots = process.env['SUNBURST_SHOTS'];
 if (shots) {
   for (const theme of THEMES) {
     test(`sunburst screenshots (${theme})`, async ({ page }) => {
       mkdirSync(shots, { recursive: true });
       await open(page, theme);
+      await page.setViewportSize({ width: 1280, height: 1500 });
       await page.waitForTimeout(400);
       await page.locator('section[data-testid="sunburst"]').screenshot({ path: `${shots}/pd-sunburst-${theme}.png`, animations: 'disabled' });
-      await item(page, 'users').dispatchEvent('click');
-      await item(page, 'alex').dispatchEvent('mouseenter');
+      await clickShape(page, item(page, 'users'));
+      await hoverShape(page, item(page, 'alex'));
       await page.waitForTimeout(400);
       await page.locator('section[data-testid="sunburst"]').screenshot({ path: `${shots}/pd-sunburst-${theme}-drilled-hover.png`, animations: 'disabled' });
+      await page.locator('[data-testid="sunburst-narrow-box"]').screenshot({ path: `${shots}/pd-sunburst-${theme}-narrow.png`, animations: 'disabled' });
     });
   }
 }

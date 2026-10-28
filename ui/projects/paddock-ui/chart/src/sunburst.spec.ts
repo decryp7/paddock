@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, LOCALE_ID, provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PD_CLOCK_SOURCE } from '@decryp7/paddock-ui';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,6 +37,7 @@ const format = (v: number): string => `${v} KB`;
       [state]="state()"
       [live]="live()"
       [motion]="motion()"
+      [highlight]="highlight()"
       [scale]="scale()"
       [colourBy]="colourBy()"
       [rings]="rings()"
@@ -66,6 +67,7 @@ class Host {
   readonly fmt = signal(format);
   readonly state = signal<'ready' | 'loading' | 'empty' | 'error'>('ready');
   readonly live = signal(false);
+  readonly highlight = signal<string | null>(null);
   readonly motion = signal<'auto' | 'reduce'>('auto');
   readonly scale = signal<number | null>(null);
   readonly colourBy = signal<PdSunburstColourBy>('branch');
@@ -105,9 +107,9 @@ describe('pd-sunburst', () => {
     document.body.innerHTML = '';
   });
 
-  async function setup() {
+  async function setup(locale = 'en-US') {
     TestBed.resetTestingModule();
-    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), { provide: PD_CLOCK_SOURCE, useValue: () => now }] });
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), { provide: PD_CLOCK_SOURCE, useValue: () => now }, { provide: LOCALE_ID, useValue: locale }] });
     const f = TestBed.createComponent(Host);
     document.body.appendChild(f.nativeElement);
     await settle(f);
@@ -250,7 +252,7 @@ describe('pd-sunburst', () => {
     const svg = el.querySelector('[role=tree]') as SVGElement;
     const press = async (key: string, init: KeyboardEventInit = {}) => {
       const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
-      svg.dispatchEvent(e);
+      (document.activeElement && document.activeElement !== document.body ? document.activeElement : svg).dispatchEvent(e);
       await settle(f);
       await new Promise((r) => setTimeout(r));
       return e;
@@ -295,12 +297,15 @@ describe('pd-sunburst', () => {
     expect(h.hovers[h.hovers.length - 1]).toBeNull();
   });
 
-  it('opens the menu with the mouse, Shift+F10 and the Menu key, and never for nothing', async () => {
+  it('opens the menu once per right-click (even after a real hover), Shift+F10 and the Menu key, and never for nothing', async () => {
     const { f, h, item, el } = await setup();
     const svg = el.querySelector('[role=tree]') as SVGElement;
+    item('b').dispatchEvent(new MouseEvent('mouseenter'));
+    await settle(f);
     const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 34 });
     item('b').dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(true);
+    expect(h.menus.length).toBe(1);
     expect(h.menus[0]).toMatchObject({ x: 12, y: 34 });
     expect(h.menus[0]?.point.node.id).toBe('b');
     const outside = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
@@ -309,9 +314,9 @@ describe('pd-sunburst', () => {
     expect(h.menus.length).toBe(1);
     item('c').focus();
     await settle(f);
-    svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
-    svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true }));
-    svg.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', bubbles: true }));
+    item('c').dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
+    item('c').dispatchEvent(new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true }));
+    item('c').dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', bubbles: true }));
     expect(h.menus.map((m) => m.point.node.id)).toEqual(['b', 'c', 'c']);
   });
 
@@ -337,27 +342,30 @@ describe('pd-sunburst', () => {
     expect(el.querySelector('[role=tree]')).toBeNull();
   });
 
-  it('draws only the centre for an empty total and survives odd values', async () => {
+  it('shows the empty state when nothing is drawable, and survives odd values', async () => {
     const { f, h, el, items } = await setup();
     h.root.set({ id: 'r', label: 'Disk', value: NaN, children: [leaf('x', -1)] });
     await settle(f);
     expect(items().length).toBe(0);
-    expect(el.querySelector('.pd-centre-value')?.textContent?.trim()).toBe('0 KB');
+    expect(el.querySelector('[data-testid=sunburst-empty]')).not.toBeNull();
+    h.root.set({ id: 'r', label: 'Disk', value: NaN, children: [leaf('x', 3), leaf('y', 1)] });
+    await settle(f);
+    expect(items().length).toBe(2);
     h.fmt.set((v) => String(v));
     await settle(f);
     expect(el.querySelector('.pd-centre-unit')).toBeNull();
-    expect(el.querySelector('.pd-centre-value')?.textContent?.trim()).toBe('0');
+    expect(el.querySelector('.pd-centre-value')?.textContent?.trim()).toBe('4');
     h.root.set({ id: 'r', label: 'Disk', value: 10, children: [leaf('x', 10)] });
     h.rings.set(NaN);
     await settle(f);
     expect(items().length).toBe(1);
   });
 
-  it('words tiny and unit-less shares', async () => {
+  it('words tiny and whole shares', async () => {
     const { f, h, item } = await setup();
-    h.root.set({ id: 'r', label: 'R', value: 1_000_000, children: [leaf('big', 999_999), leaf('sliver', 1, { kind: 'hidden' })] });
+    h.root.set({ id: 'r', label: 'R', value: 1_000_000, children: [leaf('big', 999_999), leaf('sliver', 1)] });
     await settle(f);
-    expect(item('sliver').getAttribute('aria-label')).toBe('SLIVER, 1 KB, <0.1% of R');
+    expect(item('r\u0000folded').getAttribute('aria-label')).toBe('1 smaller item, 1 KB, <0.1% of R');
     expect(item('big').getAttribute('aria-label')).toBe('BIG, 999999 KB, 100% of R');
   });
 
@@ -463,5 +471,134 @@ describe('pd-sunburst', () => {
     expect(item('a')).toBeDefined();
     expect(h.centre()).toBeNull();
     document.documentElement.removeAttribute('data-theme');
+  });
+
+  it('draws a full ring as two circles filled even-odd so it never paints over the ring inside', async () => {
+    const { f, h, item, items } = await setup();
+    h.root.set({ id: 'r', label: 'R', value: 10, children: [leaf('only', 10, { children: [leaf('deep', 10)] })] });
+    await settle(f);
+    expect(item('only').getAttribute('d')?.match(/M /g)?.length).toBe(2);
+    expect(items().every((p) => p.getAttribute('fill-rule') === 'evenodd')).toBe(true);
+  });
+
+  it('keeps the way up in the tab order while a segment is focused, and goes up with Alt+Up, Command+Up and Backspace', async () => {
+    const { f, h, item, el } = await setup();
+    const up = () => el.querySelector<HTMLButtonElement>('.pd-up');
+    expect(up()).toBeNull();
+    const rootKey = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true });
+    item('a').focus();
+    item('a').dispatchEvent(rootKey);
+    expect(rootKey.defaultPrevented).toBe(false);
+    for (const init of [{ key: 'ArrowUp', altKey: true }, { key: 'ArrowUp', metaKey: true }, { key: 'Backspace' }]) {
+      h.centre.set('a');
+      await settle(f);
+      item('a1').focus();
+      await settle(f);
+      expect(up()).not.toBeNull();
+      expect(up()?.getAttribute('tabindex')).toBeNull();
+      const e = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true });
+      item('a1').dispatchEvent(e);
+      await settle(f);
+      await new Promise((r) => setTimeout(r));
+      expect(e.defaultPrevented).toBe(true);
+      expect(h.centre()).toBeNull();
+      expect(document.activeElement).toBe(item('a'));
+    }
+    h.centre.set('a');
+    await settle(f);
+    item('a1').dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', ctrlKey: true, bubbles: true }));
+    item('a1').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, altKey: true, bubbles: true }));
+    expect(h.centre()).toBe('a');
+    up()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(h.centre()).toBe('a');
+  });
+
+  it('hides the up button visually while a segment is hovered, but keeps it in the DOM', async () => {
+    const { f, h, item, el } = await setup();
+    h.centre.set('a');
+    await settle(f);
+    expect(el.querySelector('.pd-up--hidden')).toBeNull();
+    item('a1').dispatchEvent(new MouseEvent('mouseenter'));
+    await settle(f);
+    expect(el.querySelector('.pd-up--hidden')).not.toBeNull();
+  });
+
+  it('keeps the hovered folder lit together with its own descendants', async () => {
+    const { f, item, el } = await setup();
+    item('a').dispatchEvent(new MouseEvent('mouseenter'));
+    await settle(f);
+    expect(item('a1').style.opacity).toBe('');
+    expect(item('a2').style.opacity).toBe('');
+    expect(item('b').style.opacity).toBe('0.32');
+    el.querySelector('.pd-wrap')?.dispatchEvent(new MouseEvent('mouseleave'));
+  });
+
+  it('sizes labels in screen pixels: smaller box, fewer and larger-in-units labels; ring one falls back to the name', async () => {
+    const full = await setup();
+    const count = full.el.querySelectorAll('text.pd-label').length;
+    expect(count).toBeGreaterThan(0);
+    expect((full.el.querySelector('text.pd-label') as SVGTextElement).style.fontSize).toBe('12px');
+    full.h.fmt.set((v) => `${v}000000000000 KB`);
+    await settle(full.f);
+    const names = Array.from(full.el.querySelectorAll('text.pd-label')).map((t) => t.textContent?.trim());
+    expect(names).toContain('C');
+    document.body.innerHTML = '';
+    const box = (width: number) => ({ width, height: width, top: 0, left: 0, right: width, bottom: width, x: 0, y: 0, toJSON: () => ({}) });
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(box(280));
+    const narrow = await setup();
+    const labels = Array.from(narrow.el.querySelectorAll<SVGTextElement>('text.pd-label'));
+    expect(labels.length).toBeGreaterThan(0);
+    labels.forEach((t) => expect(t.style.fontSize).toBe('24px'));
+    document.body.innerHTML = '';
+    spy.mockReturnValue(box(100));
+    const tiny = await setup();
+    expect(tiny.el.querySelectorAll('text.pd-label').length).toBe(0);
+    spy.mockRestore();
+  });
+
+  it('gives folded sectors a pattern of their own and the ghost a visible dash', async () => {
+    const { el, item } = await setup();
+    expect(item('root\u0000folded').style.fill).toContain('-other');
+    expect(item('oth').style.fill).toContain('-other');
+    expect(el.querySelector('pattern[id$="-other"]')).not.toBeNull();
+  });
+
+  it('emits folded once per change, words folded items in the locale, and keeps the cap on the DOM', async () => {
+    const { f, h, items } = await setup('de');
+    const many = (n: number): PdSunburstNode => ({ id: 'r', label: 'R', value: 100_000, children: [leaf('big', 100_000 - n), ...Array.from({ length: n }, (_, i) => leaf(`s${i}`, 1))] });
+    h.root.set(many(1234));
+    await settle(f);
+    expect(items().find((p) => p.getAttribute('data-id')?.endsWith('folded'))?.getAttribute('aria-label')).toContain('1.234 smaller items');
+    h.maxSegments.set(2);
+    h.root.set({ id: 'r', label: 'R', value: 4000, children: Array.from({ length: 200 }, (_, i) => leaf(`k${i}`, 20)) });
+    await settle(f);
+    const n = h.foldeds.length;
+    expect(n).toBeGreaterThan(0);
+    h.root.set({ id: 'r', label: 'R', value: 4000, children: Array.from({ length: 200 }, (_, i) => leaf(`k${i}`, 20)) });
+    await settle(f);
+    expect(h.foldeds.length).toBe(n);
+    expect(items().length).toBeLessThanOrEqual(2);
+  });
+
+  it('marks a highlighted segment like a hover without emitting, and lets a real hover win', async () => {
+    const { f, h, item, el } = await setup();
+    h.highlight.set('a1');
+    await settle(f);
+    expect(item('a1').classList.contains('pd-arc--active')).toBe(true);
+    expect(item('b').style.opacity).toBe('0.32');
+    expect(el.querySelector('[data-testid=sunburst-centre-name]')?.textContent).toBe('A1');
+    expect(h.hovers.length).toBe(0);
+    item('c').dispatchEvent(new MouseEvent('mouseenter'));
+    await settle(f);
+    expect(item('c').classList.contains('pd-arc--active')).toBe(true);
+    expect(h.hovers.length).toBe(1);
+    el.querySelector('.pd-wrap')?.dispatchEvent(new MouseEvent('mouseleave'));
+    await settle(f);
+    expect(item('a1').classList.contains('pd-arc--active')).toBe(true);
+    h.highlight.set('missing');
+    await settle(f);
+    expect(el.querySelector('.pd-arc--active')).toBeNull();
+    h.highlight.set(null);
+    await settle(f);
   });
 });

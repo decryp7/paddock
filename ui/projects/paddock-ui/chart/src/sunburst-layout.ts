@@ -77,11 +77,13 @@ export interface PdSunburstLayoutOptions {
   readonly maxChildren?: number;
   /** Sectors before `minAngle` rises (default 1000, hard 2000). */
   readonly maxSegments?: number;
-  /** Fixed denominator, so sectors only grow while a total fills; null: the centre's value. */
+  /** Fixed denominator, so sectors only grow while a total fills; null: the centre's value. Applies only while the root is the centre. */
   readonly scale?: number | null;
   readonly colourBy?: PdSunburstColourBy;
   /** Palette slots for the five largest branches, from {@link branchSlots}. */
   readonly order?: readonly number[];
+  /** The label of a folded sector for `n` items (default English; the component passes a localised one). */
+  readonly foldedLabel?: (n: number) => string;
 }
 
 export interface PdSunburstLayout {
@@ -105,6 +107,20 @@ const KIND_RANK: Readonly<Record<PdSunburstKind, number>> = { item: 0, other: 1,
 /** A value as a size: finite and not negative, else 0. */
 export function sizeOf(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/**
+ * The size of a node: its value when that is a positive finite number, else the sum of its children's sizes (a root whose total
+ * is 0, NaN or overflowed to Infinity still draws from its children). Memoised per layout pass.
+ */
+export function nodeSize(node: PdSunburstNode, memo: Map<PdSunburstNode, number> = new Map()): number {
+  const known = memo.get(node);
+  if (known !== undefined) return known;
+  const own = sizeOf(node.value);
+  const size = own > 0 ? own : (node.children ?? []).reduce((s, k) => s + nodeSize(k, memo), 0);
+  const finite = Number.isFinite(size) ? size : Number.MAX_VALUE / 1e6;
+  memo.set(node, finite);
+  return finite;
 }
 
 /** Clamps `n` to `[lo, hi]`; NaN and non-numbers give `fallback`. */
@@ -141,7 +157,7 @@ const byValueThenId = (a: { v: number; node: PdSunburstNode }, b: { v: number; n
   b.v - a.v || (a.node.id < b.node.id ? -1 : a.node.id > b.node.id ? 1 : 0);
 
 function plural(n: number): string {
-  return `${n.toLocaleString('en-US')} smaller item${n === 1 ? '' : 's'}`;
+  return `${n.toLocaleString()} smaller item${n === 1 ? '' : 's'}`;
 }
 
 interface Pass {
@@ -152,33 +168,44 @@ interface Pass {
   readonly degPerUnit: number;
   readonly colourBy: PdSunburstColourBy;
   readonly order: readonly number[];
+  readonly foldedLabel: (n: number) => string;
+  readonly sizes: Map<PdSunburstNode, number>;
+  readonly seen: Set<string>;
 }
 
 /** Places the children of `node` (effective size `size`, starting at `a0`) and recurses while rings remain. */
 function expand(p: Pass, node: PdSunburstNode, parentArc: PdArc | null, size: number, a0: number, depth: number, slotOfParent: number): void {
-  const kids = node.children ?? [];
+  const kids = (node.children ?? []).filter((k) => {
+    if (p.seen.has(k.id)) return false;
+    p.seen.add(k.id);
+    return true;
+  });
   if (depth > p.rings || kids.length === 0 || size <= 0) return;
-  const sum = kids.reduce((s, k) => s + sizeOf(k.value), 0);
+  const sizes = kids.map((k) => nodeSize(k, p.sizes));
+  const sum = sizes.reduce((s, v) => s + v, 0);
   const factor = sum > size ? size / sum : 1;
   const items: { v: number; node: PdSunburstNode }[] = [];
   const rest: { v: number; node: PdSunburstNode }[] = [];
-  for (const k of kids) {
-    const entry = { v: sizeOf(k.value) * factor, node: k };
+  kids.forEach((k, i) => {
+    const entry = { v: (sizes[i] as number) * factor, node: k };
     (!k.kind || k.kind === 'item' ? items : rest).push(entry);
-  }
+  });
   items.sort(byValueThenId);
   rest.sort((a, b) => KIND_RANK[a.node.kind ?? 'item'] - KIND_RANK[b.node.kind ?? 'item'] || byValueThenId(a, b));
-  const keep = items.filter((e, i) => i < p.maxChildren && e.v * p.degPerUnit >= p.minAngle);
-  const tail = items.slice(keep.length);
+  const small = (e: { v: number }, i: number): boolean => i >= p.maxChildren || e.v * p.degPerUnit < p.minAngle;
+  const keep = items.filter((e, i) => !small(e, i));
+  const keepRest = rest.filter((e, i) => !small(e, i));
+  // Consumer kinds (hidden, pending, other) fold like items: a thousand slivers of hidden space explain nothing either.
+  const tail = [...items.filter((e, i) => small(e, i)), ...rest.filter((e, i) => small(e, i))];
   const foldedValue = tail.reduce((s, e) => s + e.v, 0);
 
   type Slice = { v: number; node: PdSunburstNode; folded: readonly string[] };
   const slices: Slice[] = keep.map((e) => ({ ...e, folded: [] }));
   if (tail.length > 0) {
     const id = `${node.id}\u0000folded`;
-    slices.push({ v: foldedValue, node: { id, label: plural(tail.length), value: foldedValue, kind: 'other' }, folded: tail.map((e) => e.node.id) });
+    slices.push({ v: foldedValue, node: { id, label: p.foldedLabel(tail.length), value: foldedValue, kind: 'other' }, folded: tail.map((e) => e.node.id) });
   }
-  for (const e of rest) slices.push({ ...e, folded: [] });
+  for (const e of keepRest) slices.push({ ...e, folded: [] });
   const drawn = slices.filter((s) => s.v > 0);
 
   let at = a0;
@@ -239,8 +266,10 @@ export function sunburstLayout(root: PdSunburstNode, centreId: string | null, op
   const requested = clampOr(opts.minAngle ?? 1.5, 1, 360, 1.5);
   const maxChildren = Math.round(clampOr(opts.maxChildren ?? 48, 1, 100000, 48));
   const maxSegments = Math.round(clampOr(opts.maxSegments ?? 1000, 1, SUNBURST_MAX_SEGMENTS, 1000));
-  const centreValue = sizeOf(centre.value);
-  const fixed = opts.scale === null || opts.scale === undefined ? 0 : sizeOf(opts.scale);
+  const sizes = new Map<PdSunburstNode, number>();
+  const centreValue = nodeSize(centre, sizes);
+  // A fixed scale is the root's denominator (a volume's used bytes); a drilled folder fills its own circle.
+  const fixed = trail.length > 1 || opts.scale === null || opts.scale === undefined ? 0 : sizeOf(opts.scale);
   const scale = Math.max(fixed, centreValue);
   if (scale <= 0) return { arcs: [], folded: null, scale: 0, centre, trail };
   const degPerUnit = 360 / scale;
@@ -248,10 +277,24 @@ export function sunburstLayout(root: PdSunburstNode, centreId: string | null, op
   let arcs: PdArc[] = [];
   for (let i = 0; i < 24; i += 1) {
     arcs = [];
-    expand({ arcs, rings, minAngle, maxChildren, degPerUnit, colourBy: opts.colourBy ?? 'branch', order: opts.order ?? [0, 1, 2, 3, 4] }, centre, null, centreValue, 0, 1, -1);
+    const pass: Pass = {
+      arcs,
+      rings,
+      minAngle,
+      maxChildren,
+      degPerUnit,
+      colourBy: opts.colourBy ?? 'branch',
+      order: opts.order ?? [0, 1, 2, 3, 4],
+      foldedLabel: opts.foldedLabel ?? plural,
+      sizes,
+      seen: new Set([centre.id]),
+    };
+    expand(pass, centre, null, centreValue, 0, 1, -1);
     if (arcs.length <= maxSegments || minAngle >= 360) break;
     minAngle = Math.min(360, minAngle * 1.5);
   }
+  // The cap is a contract: nothing past it is ever returned.
+  arcs = arcs.slice(0, SUNBURST_MAX_SEGMENTS);
   return { arcs, folded: minAngle > requested ? { segments: arcs.length, minAngle } : null, scale, centre, trail };
 }
 
@@ -304,14 +347,29 @@ export function arcPath(cx: number, cy: number, r0: number, r1: number, a0: numb
   return `M ${pt(cx, cy, ro, so)} A ${f2(ro)} ${f2(ro)} 0 ${large(so, eo)} 1 ${pt(cx, cy, ro, eo)} L ${pt(cx, cy, ri, ei)} A ${f2(ri)} ${f2(ri)} 0 ${large(si, ei)} 0 ${pt(cx, cy, ri, si)} Z`;
 }
 
-/** The estimated width of `text` in a 12 px system face. */
-export function textWidth(text: string): number {
-  return text.length * 6.6;
+/**
+ * A safe over-estimate of the width of `text` in a system sans face at `px` pixels: wide glyphs (capitals, digits, m, w) count 0.72 em,
+ * narrow ones (i, l, t, f, j, r, punctuation, space) 0.36 em, the rest 0.58 em, plus 8 %. Over-estimating keeps a curved label from
+ * being clipped; the cost is dropping one that would just have fitted.
+ */
+export function textWidth(text: string, px = 12): number {
+  let em = 0;
+  for (const ch of text) {
+    if (/[A-Z0-9mwMW@%]/.test(ch)) em += 0.72;
+    else if (/[iljtfr.,:;'| !()-]/.test(ch)) em += 0.36;
+    else em += 0.58;
+  }
+  return em * px * 1.08;
 }
 
-/** Whether a curved label fits: the arc length at the ring's middle must hold the text plus 18 px, and the ring must be 16 px thick. */
-export function labelFits(arcLength: number, thickness: number, text: string): boolean {
-  return thickness >= 16 && arcLength >= textWidth(text) + 18;
+/** Whether a curved label fits, all in screen pixels: the arc length at the ring's middle must hold the text plus 18 px, in a ring 16 px thick. */
+export function labelFits(arcLength: number, thickness: number, text: string, px = 12): boolean {
+  return thickness >= 16 && arcLength >= textWidth(text, px) + 18;
+}
+
+/** The palette colour of a slot as a CSS value (slot -1 and beyond the palette: the neutral slot 8). */
+export function slotColour(slot: number): string {
+  return `var(--pd-chart-${slot >= 0 ? Math.min(slot, 7) + 1 : 8})`;
 }
 
 /** The path a label follows, at radius `r`; reversed on the lower half so the text reads upright. */

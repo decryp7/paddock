@@ -7,6 +7,7 @@ import {
   DestroyRef,
   Directive,
   effect,
+  LOCALE_ID,
   ElementRef,
   inject,
   Injector,
@@ -30,7 +31,8 @@ import {
   luminance,
   nextFocus,
   ringRadii,
-  sizeOf,
+  nodeSize,
+  slotColour,
   sunburstLayout,
   type PdArc,
   type PdSunburstColourBy,
@@ -52,6 +54,8 @@ const INNER = 92;
 /** How long a burst of live updates is coalesced (4 per second). */
 const LIVE_MS = 250;
 const GAP = 1.8;
+/** The label height on screen, in pixels. */
+const LABEL_PX = 12;
 
 let nextId = 0;
 
@@ -90,7 +94,7 @@ interface LabelView {
     '[class.pd-reduce]': 'reduced()',
     '[attr.data-state]': 'shown()',
     '(keydown)': 'onKey($event)',
-    '(contextmenu)': 'onContext($event, hoveredId())',
+    '(contextmenu)': 'onContext($event)',
   },
   template: `
     @switch (shown()) {
@@ -123,6 +127,11 @@ interface LabelView {
                 <rect class="pd-pat-pending" width="9" height="9" />
                 <line class="pd-pat-line pd-pat-line--faint" x1="0" y1="0" x2="0" y2="9" />
               </pattern>
+              <pattern [attr.id]="uid + '-other'" patternUnits="userSpaceOnUse" width="8" height="8">
+                <rect class="pd-pat-other" width="8" height="8" />
+                <circle class="pd-pat-dot" cx="2" cy="2" r="1.1" />
+                <circle class="pd-pat-dot" cx="6" cy="6" r="1.1" />
+              </pattern>
               @for (l of labels(); track l.id) {
                 <path [attr.id]="l.pathId" [attr.d]="l.d" />
               }
@@ -144,13 +153,13 @@ interface LabelView {
                     [attr.aria-posinset]="s.arc.posinset"
                     [attr.aria-expanded]="s.arc.expandable ? s.arc.open : null"
                     [attr.tabindex]="s.arc.id === tabStop() ? 0 : -1"
+                    [attr.fill-rule]="'evenodd'"
                     [style.fill]="s.fill"
                     [style.opacity]="opacity(s.arc)"
                     (click)="activateArc(s.arc)"
                     (mouseenter)="hover(s.arc.id)"
                     (focus)="focusArc(s.arc.id)"
                     (blur)="blurArc()"
-                    (contextmenu)="onContext($event, s.arc.id)"
                   ></path>
                 }
               </g>
@@ -159,7 +168,7 @@ interface LabelView {
               <path class="pd-focus-ring" [attr.d]="f" aria-hidden="true" />
             }
             @for (l of labels(); track l.id) {
-              <text class="pd-label" aria-hidden="true" [style.fill]="l.ink" [style.opacity]="labelOpacity(l.id)">
+              <text class="pd-label" aria-hidden="true" [style.fill]="l.ink" [style.font-size.px]="fontUnits()" [style.opacity]="labelOpacity(l.id)">
                 <textPath [attr.href]="'#' + l.pathId" startOffset="50%" text-anchor="middle">{{ l.text }}</textPath>
               </text>
             }
@@ -177,8 +186,8 @@ interface LabelView {
               @if (centrePoint().node.detail) {
                 <span class="pd-centre-line">{{ centrePoint().node.detail }}</span>
               }
-              @if (canGoUp() && !activeId()) {
-                <button type="button" class="pd-up" (click)="goUp()">
+              @if (canGoUp()) {
+                <button type="button" class="pd-up" [class.pd-up--hidden]="hoveredId() !== null || highlight() !== null" (click)="goUp()">
                   <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
                   {{ upText() }}
                 </button>
@@ -192,25 +201,30 @@ interface LabelView {
   `,
   styles: `
     :host { display: block; position: relative; min-width: 0; width: 100%; }
-    .pd-wrap { position: relative; width: 100%; aspect-ratio: 1; }
+    .pd-wrap { position: relative; width: 100%; aspect-ratio: 1; container-type: inline-size; }
     .pd-svg { display: block; width: 100%; height: 100%; overflow: visible; }
     .pd-arc { stroke: none; cursor: pointer; outline: none; transition: opacity 100ms linear; }
     .pd-arc--hidden, .pd-arc--pending { cursor: default; }
-    .pd-arc--pending { stroke: var(--pd-border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+    .pd-arc--pending { stroke: var(--pd-text-subtle); stroke-width: 1; stroke-dasharray: 3 3; }
     .pd-arc--active { stroke: var(--pd-text); stroke-width: 2; }
     .pd-pat-hidden { fill: var(--pd-surface-2); }
+    .pd-pat-other { fill: var(--pd-chart-8); }
+    .pd-pat-dot { fill: var(--pd-surface-1); opacity: 0.7; }
     .pd-pat-pending { fill: var(--pd-surface-1); }
     .pd-pat-line { stroke: var(--pd-text-subtle); stroke-width: 1.5; }
     .pd-pat-line--faint { opacity: 0.5; stroke-width: 1; }
     .pd-focus-ring { fill: none; stroke: var(--pd-accent); stroke-width: 2; pointer-events: none; }
-    .pd-label { font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); pointer-events: none; font-family: var(--pd-font-sans); }
+    .pd-label { font-weight: var(--pd-weight-medium); pointer-events: none; font-family: var(--pd-font-sans); }
     .pd-centre-circle { fill: transparent; stroke: none; }
     .pd-centre-circle--up { cursor: pointer; }
     .pd-centre { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; pointer-events: none; color: var(--pd-text); }
-    .pd-centre-name { font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-centre-value { font-size: var(--pd-text-display); line-height: 1.15; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; }
+    .pd-centre-name { font-size: min(var(--pd-text-body), 4.2cqw); font-weight: var(--pd-weight-semibold); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-centre-value { font-size: min(var(--pd-text-display), 6cqw); line-height: 1.15; font-weight: var(--pd-weight-semibold); font-variant-numeric: tabular-nums; }
     .pd-centre-unit { font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular, 400); color: var(--pd-text-muted); }
     .pd-centre-line { font-size: var(--pd-text-label); color: var(--pd-text-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @container (max-width: 380px) { .pd-centre-line { display: none; } }
+    .pd-up--hidden { opacity: 0; }
+    .pd-up:focus-visible { opacity: 1; outline: 2px solid var(--pd-accent); }
     .pd-up { pointer-events: auto; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 var(--pd-space-2); border: 0; background: transparent; color: var(--pd-accent-text, var(--pd-accent)); font: inherit; font-size: var(--pd-text-label); cursor: pointer; border-radius: var(--pd-radius-control); }
     .pd-up:hover { background: var(--pd-hover); }
     .pd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
@@ -229,6 +243,7 @@ export class PdSunburst {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly injector = inject(Injector);
   private readonly clock = inject(PD_CLOCK_SOURCE);
+  private readonly locale = inject(LOCALE_ID);
 
   /** The hierarchy; null shows the empty state (or the skeleton while `state` is `loading`). */
   readonly root = input<PdSunburstNode | null>(null);
@@ -257,6 +272,8 @@ export class PdSunburst {
   /** While true: no animation, and updates of `root` are coalesced to four per second. */
   readonly live = input(false);
   readonly motion = input<'auto' | 'reduce'>('auto');
+  /** A node id to mark as if hovered (the centre, the fade and the outline follow it) without emitting `hoverChange`; a real hover or focus wins. */
+  readonly highlight = input<string | null>(null);
 
   /** The pointer or focus moved to a segment, or left them. */
   readonly hoverChange = output<PdSunburstPoint | null>();
@@ -277,7 +294,7 @@ export class PdSunburst {
   protected readonly size = SIZE;
   protected readonly mid = MID;
   protected readonly inner = INNER;
-  protected readonly centreWidth = ((INNER * 2) / SIZE) * 100 * 0.86;
+  protected readonly centreWidth = ((INNER * 2) / SIZE) * 100 * 0.92;
   protected readonly uid = `pd-sb-${nextId++}`;
   protected readonly loadingText = $localize`:@@pd.ui.loading:Loading`;
   protected readonly errorTitle = $localize`:@@pd.ui.sunburst.error:Could not draw the chart`;
@@ -301,8 +318,13 @@ export class PdSunburst {
   protected readonly shown = computed<'ready' | 'loading' | 'empty' | 'error'>(() => {
     const s = this.state();
     if (s !== 'ready') return s;
-    return this.shownRoot() ? 'ready' : 'empty';
+    // Nothing drawable (no root, or a root and children without any size) is the empty state, never a blank circle.
+    return this.layout() && (this.layout()?.scale ?? 0) > 0 ? 'ready' : 'empty';
   });
+
+  /** Rendered width over the drawing's design width (1 at 560 px): labels and the centre adapt to it. */
+  private readonly pxScale = signal(1);
+  protected readonly fontUnits = computed(() => LABEL_PX / this.pxScale());
 
   private readonly palette = computed(() => {
     this.appearance();
@@ -321,6 +343,7 @@ export class PdSunburst {
       scale: this.scale(),
       colourBy: this.colourBy(),
       order: branchSlots(this.palette().palette),
+      foldedLabel: (n) => this.foldedText(n),
     });
   });
 
@@ -341,7 +364,14 @@ export class PdSunburst {
   });
 
   protected readonly fadeKey = computed(() => this.layout()?.centre.id ?? '');
-  protected readonly activeId = computed(() => this.hoveredId() ?? (this.hasFocus() ? this.focusedId() : null));
+  /** What the user is on (pointer or focus): the only thing `hoverChange` reports. */
+  private readonly userId = computed(() => this.hoveredId() ?? (this.hasFocus() ? this.focusedId() : null));
+  /** What is drawn as active: the user's segment, else the consumer's `highlight` (when it is drawn). */
+  protected readonly activeId = computed(() => {
+    const own = this.userId();
+    const lit = this.highlight();
+    return own ?? (lit !== null && this.arcsById().has(lit) ? lit : null);
+  });
   protected readonly tabStop = computed(() => {
     const arcs = this.layout()?.arcs ?? [];
     const f = this.focusedId();
@@ -360,6 +390,15 @@ export class PdSunburst {
     const set = new Set<string>();
     const byId = this.arcsById();
     for (let at = byId.get(id); at; at = at.parent === null ? undefined : byId.get(at.parent)) set.add(at.id);
+    // The active segment's own descendants stay lit too: hovering a folder shows the folder, not a hole in it.
+    for (const arc of byId.values()) {
+      for (let at: PdArc | undefined = arc; at; at = at.parent === null ? undefined : byId.get(at.parent)) {
+        if (at.id === id) {
+          set.add(arc.id);
+          break;
+        }
+      }
+    }
     return set;
   });
 
@@ -378,14 +417,18 @@ export class PdSunburst {
     const tokens = this.palette();
     const surface = parseCssColor(tokens.surface1);
     const text = parseCssColor(tokens.text);
+    const k = this.pxScale();
     const out: LabelView[] = [];
     for (const arc of layout.arcs) {
       if (arc.depth > 2 || arc.kind !== 'item') continue;
       const r = radii[arc.depth - 1] as { r0: number; r1: number };
       const rMid = (r.r0 + r.r1) / 2;
-      const length = ((arc.a1 - arc.a0) * Math.PI * rMid) / 180;
-      const words = arc.depth === 1 ? `${arc.label}  ${fmt(arc.value)}` : arc.label;
-      if (!labelFits(length, r.r1 - r.r0, words)) continue;
+      const length = (((arc.a1 - arc.a0) * Math.PI * rMid) / 180) * k;
+      // Screen pixels throughout: the text is always LABEL_PX tall on screen, so it is the arc that must be big enough.
+      // Ring one tries "name  size", then the name, then nothing.
+      const candidates = arc.depth === 1 ? [`${arc.label}  ${fmt(arc.value)}`, arc.label] : [arc.label];
+      const words = candidates.find((c) => labelFits(length, (r.r1 - r.r0) * k, c, LABEL_PX));
+      if (words === undefined) continue;
       const ink = this.inkFor(arc, tokens, surface, text);
       if (!ink) continue;
       out.push({ id: arc.id, pathId: `${this.uid}-l${out.length}`, d: labelPath(MID, MID, rMid, arc.a0, arc.a1), text: words, ink });
@@ -406,7 +449,7 @@ export class PdSunburst {
   });
 
   protected readonly valueParts = computed(() => {
-    const text = this.format()(sizeOf(this.centrePoint().node.value));
+    const text = this.format()(nodeSize(this.centrePoint().node));
     const m = /^(.*\S)\s+(\S+)$/.exec(text);
     return m ? { number: m[1] as string, unit: m[2] as string } : { number: text, unit: '' };
   });
@@ -414,10 +457,10 @@ export class PdSunburst {
   protected readonly shareText = computed(() => {
     const active = this.activeId();
     const arc = active ? this.arcsById().get(active) : undefined;
-    if (arc) return `${percent(arc.value / (arc.parentValue || 1))} of ${arc.parentLabel}`;
+    if (arc) return this.shareOf(arc.value / (arc.parentValue || 1), arc.parentLabel);
     const trail = this.layout()?.trail ?? [];
     const parent = trail[trail.length - 2];
-    return parent ? `${percent(this.centrePoint().share)} of ${parent.label}` : '';
+    return parent ? this.shareOf(this.centrePoint().share, parent.label) : '';
   });
 
   constructor() {
@@ -427,9 +470,15 @@ export class PdSunburst {
       const live = this.live();
       untracked(() => this.applyRoot(next, live));
     });
+    let lastFolded = '';
+    // effect-state: emits `folded` once per change of the raised angle, not on every live update.
     effect(() => {
-      const f = this.layout()?.folded;
-      if (f) untracked(() => this.folded.emit(f));
+      const f = this.layout()?.folded ?? null;
+      untracked(() => {
+        const key = f ? `${f.segments}:${f.minAngle}` : '';
+        if (f && key !== lastFolded) this.folded.emit(f);
+        lastFolded = key;
+      });
     });
     let first = true;
     // effect-state: the live region's text is written once per change of the centre (not per live update), never on the first draw.
@@ -441,13 +490,20 @@ export class PdSunburst {
           first = false;
           return;
         }
-        if (centre) this.announcement.set([centre.label, this.format()(sizeOf(centre.value)), centre.detail].filter(Boolean).join(', '));
+        if (centre) this.announcement.set([centre.label, this.format()(nodeSize(centre)), centre.detail].filter(Boolean).join(', '));
       });
     });
     const observer = new MutationObserver(() => this.appearance.update((n) => n + 1));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-accent', 'data-contrast', 'data-motion'] });
+    const measure = (): void => {
+      const w = this.host.getBoundingClientRect().width;
+      this.pxScale.set(w > 0 ? w / SIZE : 1);
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(this.host);
     inject(DestroyRef).onDestroy(() => {
       observer.disconnect();
+      resize.disconnect();
       if (this.timer) clearTimeout(this.timer);
     });
   }
@@ -493,7 +549,8 @@ export class PdSunburst {
   private fillOf(arc: PdArc): string {
     if (arc.kind === 'hidden') return `url(#${this.uid}-hidden)`;
     if (arc.kind === 'pending') return `url(#${this.uid}-pending)`;
-    const base = `var(--pd-chart-${arc.slot >= 0 ? Math.min(arc.slot, 7) + 1 : 8})`;
+    if (arc.kind === 'folded' || arc.kind === 'other') return `url(#${this.uid}-other)`;
+    const base = slotColour(arc.slot);
     return arc.tone === 1 ? `color-mix(in srgb, ${base}, var(--pd-text) 12%)` : base;
   }
 
@@ -511,7 +568,7 @@ export class PdSunburst {
   }
 
   private ariaOf(arc: PdArc, fmt: (v: number) => string): string {
-    const parts = [arc.label, fmt(arc.value), `${percent(arc.value / (arc.parentValue || 1))} of ${arc.parentLabel}`];
+    const parts = [arc.label, fmt(arc.value), this.shareOf(arc.value / (arc.parentValue || 1), arc.parentLabel)];
     if (arc.node.detail) parts.push(arc.node.detail);
     return parts.join(', ');
   }
@@ -546,7 +603,7 @@ export class PdSunburst {
   }
 
   private emitActive(): void {
-    const id = this.activeId();
+    const id = this.userId();
     if (id === this.lastEmitted) return;
     this.lastEmitted = id;
     const arc = id ? this.arcsById().get(id) : undefined;
@@ -570,10 +627,24 @@ export class PdSunburst {
     }
   }
 
+  /** The segment a keyboard or mouse event came from (its `data-id`), if any. */
+  private arcOf(event: Event): PdArc | undefined {
+    const id = (event.target as Element | null)?.getAttribute?.('data-id');
+    return id ? this.arcsById().get(id) : undefined;
+  }
+
   protected onKey(event: KeyboardEvent): void {
-    const id = this.focusedId();
-    const arc = id ? this.arcsById().get(id) : undefined;
-    if (!arc || event.ctrlKey || event.metaKey || event.altKey) return;
+    const plain = !event.ctrlKey && !event.metaKey && !event.altKey;
+    // Up one level without the mouse: Alt+Up, Command+Up and Backspace (the events come from the chart, never from a text field).
+    if ((event.key === 'ArrowUp' && (event.altKey || event.metaKey) && !event.ctrlKey) || (event.key === 'Backspace' && plain)) {
+      if (this.canGoUp()) {
+        event.preventDefault();
+        this.upAndRefocus();
+      }
+      return;
+    }
+    const arc = this.arcOf(event);
+    if (!arc || !plain) return;
     if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
       event.preventDefault();
       // A segment in the model is always in the DOM (the same render), so the element exists.
@@ -596,16 +667,35 @@ export class PdSunburst {
     }
   }
 
+  /** Goes up one level and puts the keyboard focus on the segment that was the centre. */
+  private upAndRefocus(): void {
+    const from = (this.layout()?.centre as PdSunburstNode).id;
+    this.goUp();
+    this.focusedId.set(from);
+    afterNextRender(() => this.pathElement(from)?.focus(), { injector: this.injector });
+  }
+
   private focusFirst(): void {
     const first = this.layout()?.arcs[0];
     if (first) this.pathElement(first.id)?.focus();
   }
 
-  protected onContext(event: MouseEvent, id: string | null): void {
-    const arc = id ? this.arcsById().get(id) : undefined;
+  /** The one context-menu listener (on the host): the segment is found from the event's target, so it fires once. */
+  protected onContext(event: MouseEvent): void {
+    const arc = this.arcOf(event);
     if (!arc) return;
     event.preventDefault();
     this.contextMenu.emit({ point: this.pointOf(arc), x: event.clientX, y: event.clientY });
+  }
+
+  private foldedText(n: number): string {
+    return n === 1
+      ? $localize`:@@pd.ui.sunburst.smaller-one:1 smaller item`
+      : $localize`:@@pd.ui.sunburst.smaller-many:${n.toLocaleString(this.locale)}:count: smaller items`;
+  }
+
+  private shareOf(share: number, parent: string): string {
+    return $localize`:@@pd.ui.sunburst.share:${percent(share)}:percent: of ${parent}:parent:`;
   }
 
   private pathElement(id: string): SVGElement | undefined {

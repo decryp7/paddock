@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/core';
+import { readPaddockTokens } from '@decryp7/paddock-ui';
 import { form, FormField, maxLength, min, minLength, required, validate } from '@angular/forms/signals';
-import { PdChart, PdSunburst, type PdChartSpec, type PdSunburstNode } from '@decryp7/paddock-ui/chart';
+import { branchSlots, PdChart, PdSunburst, slotColour, sunburstLayout, type PdChartSpec, type PdSunburstNode } from '@decryp7/paddock-ui/chart';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdSort } from '@decryp7/paddock-ui/table';
 
@@ -110,22 +111,25 @@ const COLUMNS: PdColumn<Plugin>[] = [
         A drillable ring chart for hierarchies: click or press Enter on a folder to make it the centre, the centre goes up one level. Hidden space is hatched and not yet counted space is a dashed ghost,
         so status is never colour alone; the list beside the chart carries every value.
       </p>
-      <div class="gal-sunburst">
+      <div class="gal-sunburst-main">
         <div class="gal-box gal-pad" data-testid="sunburst-box">
           <pd-sunburst label="Disk usage of Macintosh HD" [root]="tree" [(centre)]="burstCentre" [format]="bytes" />
         </div>
         <div class="gal-box gal-pad">
-          <ul class="gal-key" aria-label="Largest folders">
-            @for (c of tree.children; track c.id; let i = $index) {
+          <ul class="gal-key" aria-label="Folders in the centre">
+            @for (a of legend(); track a.id) {
               <li>
-                <span class="gal-swatch" [attr.data-kind]="c.kind ?? 'item'" [style.background]="c.kind ? null : 'var(--pd-chart-' + (i < 5 ? i + 1 : 8) + ')'"></span>
-                <span>{{ c.label }}</span>
-                <span class="gal-key-value">{{ bytes(c.value) }}</span>
+                <span class="gal-swatch" [attr.data-kind]="a.kind" [style.background]="a.kind === 'item' ? slot(a.slot) : null"></span>
+                <span>{{ a.label }}</span>
+                <span class="gal-key-value">{{ bytes(a.value) }}</span>
               </li>
             }
           </ul>
           <p data-testid="sunburst-centre">Centre: {{ burstCentre() ?? 'root' }}</p>
         </div>
+      </div>
+      <div class="gal-sunburst">
+        <div class="gal-box gal-pad gal-narrow" data-testid="sunburst-narrow-box"><pd-sunburst label="Disk usage at a narrow width" [root]="tree" [format]="bytes" /></div>
         <div class="gal-box gal-pad" data-testid="sunburst-loading-box"><pd-sunburst label="Disk usage, loading" [root]="null" state="loading" [format]="bytes" /></div>
         <div class="gal-box gal-pad" data-testid="sunburst-empty-box"><pd-sunburst label="Disk usage, empty" [root]="null" [format]="bytes" emptyTitle="Nothing scanned yet" emptyText="Scan a volume to see where the space went."><button pdSunburstEmptyAction type="button" class="pd-btn pd-btn--primary">Scan this volume</button></pd-sunburst></div>
         <div class="gal-box gal-pad" data-testid="sunburst-error-box"><pd-sunburst label="Disk usage, error" [root]="null" state="error" errorText="The scan stopped: the volume stopped answering." [format]="bytes" /></div>
@@ -152,12 +156,15 @@ const COLUMNS: PdColumn<Plugin>[] = [
   `,
   styles: `
     .gal-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: var(--pd-space-3); }
+    .gal-sunburst-main { display: grid; grid-template-columns: minmax(0, 600px) minmax(16rem, 1fr); gap: var(--pd-space-3); align-items: start; margin-bottom: var(--pd-space-3); }
+    .gal-narrow { max-width: 300px; }
     .gal-sunburst { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--pd-space-3); align-items: start; }
     .gal-key { list-style: none; margin: 0 0 var(--pd-space-3); padding: 0; display: grid; gap: var(--pd-space-2); }
     .gal-key li { display: grid; grid-template-columns: 16px 1fr auto; gap: var(--pd-space-2); align-items: center; }
     .gal-key-value { font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
     .gal-swatch { width: 12px; height: 12px; border-radius: 2px; background: var(--pd-chart-8); }
     .gal-swatch[data-kind='hidden'] { background: repeating-linear-gradient(45deg, var(--pd-text-subtle) 0 1.5px, var(--pd-surface-2) 1.5px 5px); }
+    .gal-swatch[data-kind='folded'], .gal-swatch[data-kind='other'] { background: radial-gradient(var(--pd-surface-1) 1.1px, var(--pd-chart-8) 1.2px) 0 0 / 4px 4px; }
     .gal-swatch[data-kind='pending'] { background: var(--pd-surface-1); border: 1px dashed var(--pd-border-strong); }
     .gal-form { display: grid; gap: var(--pd-space-3); padding: var(--pd-space-4); max-width: 28rem; }
     .gal-pad { padding: var(--pd-space-3); }
@@ -203,6 +210,9 @@ export class GalData {
   protected readonly donut: PdChartSpec = { kind: 'donut', x: ['Logs', 'Models', 'Cache', 'Other'], unit: 'GB', series: [{ name: 'Disk', values: [42, 27, 14, 5] }] };
 
   protected readonly burstCentre = signal<string | null>(null);
+  protected readonly slot = slotColour;
+  /** The first ring around the centre, with the slots the chart itself uses: the swatches of the list match the segments. */
+  protected readonly legend = computed(() => sunburstLayout(this.tree, this.burstCentre(), { order: branchSlots(readPaddockTokens().palette) }).arcs.filter((a) => a.depth === 1));
   protected readonly bytes = (v: number): string => `${(v / 10).toFixed(1)} GB`;
   protected readonly tree: PdSunburstNode = {
     id: 'vol',

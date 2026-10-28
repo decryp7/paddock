@@ -37,7 +37,8 @@ export interface PdSunburstNode {
 ```
 
 Odd input never throws (family rule): `NaN`, negative or non-finite values count as 0; children whose values exceed
-the parent are scaled to fit and reported once through `ngDevMode` warnings; cycles are impossible (a tree of values);
+the parent are scaled to fit (no warning is logged); a root or folder whose own value is 0, NaN or overflowed draws from the sum of its
+children; duplicate ids are skipped; nothing drawable is the empty state; cycles are impossible (a tree of values);
 an unknown `centre` id falls back to the root.
 
 ## 3. Inputs and outputs
@@ -51,12 +52,13 @@ an unknown `centre` id falls back to the root.
 | `minAngle` | `number`, 1.5 (degrees; min 1) | smaller segments fold into "n smaller items" per parent (0.6° left 1 px slivers between the gaps) |
 | `maxChildren` | `number`, 48 | per parent, before folding |
 | `maxSegments` | `number`, 1000 (hard 2000) | when exceeded, `minAngle` rises until it fits; `folded` output reports it |
-| `scale` | `number \| null`, null | fixed denominator (a volume's used bytes) so arcs only grow during a live fill; `null` = the centre's value (folders, network shares) |
+| `scale` | `number \| null`, null | fixed denominator (a volume's used bytes) so arcs only grow during a live fill; applies only while the root is the centre (a drilled folder fills its own circle); `null` = the centre's value (folders, network shares) |
 | `colourBy` | `'branch' \| ((node) => number \| 'neutral')`, `'branch'` | branch: the 5 largest children of the centre take ring-ordered chart slots, the rest neutral; a function maps to palette slots by identity |
 | `format` | `(value: number) => string`, **required** | value text (centre, labels, aria); no default, because the component is not about bytes (Dyno passes `formatBytes`) |
 | `state` | `'ready' \| 'loading' \| 'empty' \| 'error'`, `'ready'` | loading: skeleton ring at final size; empty and error render `SuEmptyState` / `SuErrorState` with projected actions |
 | `emptyTitle`, `emptyText`, `errorText` | strings | state copy |
 | `live` | `boolean`, false | while true: no tweening, updates coalesced to 4 per second |
+| `highlight` | `string \| null`, null | marks a node as if hovered, without emitting `hoverChange` (the consumer's row hover) |
 | `motion` | `'auto' \| 'reduce'`, `'auto'` | `auto` follows `reducedMotion()` from `pd-chart` |
 
 | Output | Payload | When |
@@ -78,8 +80,6 @@ Content projection: `ng-template[pdSunburstCentre]` (context: the centre or hove
   `PdArc { id, depth, a0, a1, r0, r1, slot, tone, kind }`; sizes add up per parent; deterministic for equal values (ties
   by id).
 - `arcPath(arc, gapPx)`: annular sector with a constant pixel gap at every radius (1.8 px), full ring as two circles.
-- `tweenLayouts(from, to)`: per-id interpolation for the drill animation (new ids grow from their parent's angle,
-  removed ids collapse into theirs).
 - `branchSlots(children, palette)`: `ringOrder(palette, 5)` from `ring.ts`, neutral beyond; alternate sibling tone
   (12 % towards `--pd-text`).
 - `labelFits(arc, text)`: curved label only when the arc length at the ring's mid radius fits the text plus 18 px and
@@ -105,7 +105,7 @@ Content projection: `ng-template[pdSunburstCentre]` (context: the centre or hove
   still works on them (the minimum angle keeps them at least 3 px).
 - Never colour alone: direct labels, the centre text, and the consumer's list or table with matching swatches; the
   gallery story shows the pattern.
-- Reduced motion: no tween, ≤ 100 ms opacity cross-fade; skeleton static.
+- Drilling is a 180 ms opacity cross-fade (100 ms with reduced motion); there is no geometric tween in 1.0. Skeleton static under reduced motion.
 
 ## 6. Tests
 

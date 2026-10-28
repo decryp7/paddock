@@ -22,7 +22,10 @@ export {
 } from './src/options';
 export { PdSunburst, PdSunburstCentre } from './src/sunburst';
 export {
+  branchSlots,
+  slotColour,
   sunburstLayout,
+  type PdArc,
   type PdSunburstColourBy,
   type PdSunburstKind,
   type PdSunburstNode,
