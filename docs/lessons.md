@@ -529,3 +529,10 @@ Debrief's background "Learning human names" ran the local model over up to 2,000
 8 GB on the Mac and made a Windows PC sluggish for the whole run, for a result that rules, a names pack and the logs' own
 metadata match or beat. **Rule:** work over many items never calls an LLM automatically or once per item; it uses
 deterministic rules, TOML packs and static embeddings, and an LLM only answers bounded requests the user starts (rule 46).
+
+## A turn budget in a test wait is a timeout in disguise (2026-10-28, paddock-ui, Debrief)
+The boot-every-dialog harness gave a dialog window 200 macrotask turns to become stable, and Debrief's dialog spec 400
+render rounds to leave Loading. On a busy CI runner a first `import()` of the settings screen took longer, and both
+reported "never leaves Loading" for a dialog that was fine. **Rule:** a test waits on the condition itself (the promise the
+code awaits, `whenStable` over pending tasks), never on a count of turns, rounds or milliseconds; a wait that can hang is
+left to the runner's test timeout, which names the test (rule 5).
