@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, part 5: macOS attach at show and the configured deadline
+- macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
+  (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of
+  built with its parent and hidden again.
+- The shell plugin passes `paddock_startup::Config::dialog_show_deadline` to `Dialogs::with_show_deadline`.
+
 ### Shared dialog API, part 4: test kit and checks (ADR 0026 §6; package 1.2b, first part)
 - ESLint `paddock/dialog-frame-footer` (in the preset for the templates of `*dialog*` components): no `footer`, foot or
   actions row, and no Close, Cancel or OK button in a dialog content.
@@ -84,6 +90,12 @@ Conventional Commits; one semver tag for the whole repo.
   `check-index.mjs` and `ci-prune.sh` are deleted. Dyno's host clean-up ends only the test programs of its own build folder.
 - New `app-release.yml` input `bundle-check`: an app's own script run on Linux and macOS after the installers are built, with the bundle
   folder as its argument (Dyno's run-path check; on macOS the bundled `dyno-agent` measures once, which replaces the old Rust-leg step).
+
+### Dialog boot harness waits on the dialog's load, not on a turn budget
+- `bootDialog`/`assertDialogBoots` (`@decryp7/paddock-ui/shell/testing`) wait for `whenStable` (the shell's start is a
+  pending task), with no turn budget: a slow first `import()` on a busy runner no longer reads as "never leaves
+  Loading" (CI run 6563). `DialogHarnessOptions.maxTurns` is removed; a loader that never answers is now reported by the
+  runner's test timeout.
 
 ### Spotter on the shared CI kit (WP-C3)
 - Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin

@@ -26,9 +26,8 @@ pub struct Config {
     /// Longest boot error message logged, in characters (the rest is cut).
     pub max_error_len: usize,
     /// How long after its window is created a dialog may take to report `dialog_ready` before it is shown anyway at its
-    /// placed size (ADR 0026 §4.4). `paddock-startup` does not use it; the app hands it to
-    /// `paddock_dialogs::Dialogs::with_show_deadline` (its default, `paddock_dialogs::SHOW_DEADLINE`, is the same
-    /// second). A dialog window is created hidden, so the ping rules above never see it before it shows.
+    /// placed size (ADR 0026 §4.4). `paddock-startup` does not use it; the shell plugin hands it to
+    /// `paddock_dialogs::Dialogs::with_show_deadline`. A dialog window is created hidden, so the ping rules above never see it before it shows.
     pub dialog_show_deadline: Duration,
 }
 

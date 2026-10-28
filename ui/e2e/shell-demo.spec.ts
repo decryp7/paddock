@@ -533,6 +533,19 @@ test.describe('dialogs (plan S6)', () => {
     expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
   });
 
+  test.describe('a window that is not sized yet (ADR 0026 §4, method d)', () => {
+    // A hidden window may lay its page out at any width, even 0 (WebKitGTK under Xvfb): the frame measures at the contract's.
+    test.use({ viewport: { width: 1, height: 700 } });
+    test('sd.rename is measured at its contract width, not the 1 px viewport', async ({ app, page }) => {
+      await app.dialogs.openWindow('sd.rename', { current: 'Old name' });
+      await expect(page.locator('html')).toHaveAttribute('data-dialog-ready', 'true');
+      const html = page.locator('html');
+      await expect(html).toHaveAttribute('data-content-width', String(CONTRACTS['sd.rename']!.width));
+      expect(Number(await html.getAttribute('data-fitted-height'))).toBeLessThan(400);
+      await expect(page.locator('pd-dialog-frame')).not.toHaveClass(/pd-frame--pinned/);
+    });
+  });
+
   test.describe('the frame keeps its footer in view (ADR 0026 §2, package 1.2a)', () => {
     test.use({ deviceScaleFactor: 1.5, viewport: { width: 1366, height: 768 } });
     test('sd.rename at 1.5x: the footer is hit after the content grows by 400 px and shrinks back, with a gap of at most 24 px', async ({ app, page }) => {

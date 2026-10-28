@@ -231,6 +231,7 @@ export function workbenchRustRewrites({ id, name, identifier }, versions) {
     'tests/app.rs': [
       ['use paddock_workbench_demo::', `use ${lib}::`],
       ['app_dir().join("../../../ui/projects/workbench-demo")', 'app_dir().join("..")'],
+      ['"cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"', '"cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app"'],
       ['snapshot["app"], "Paddock Workbench Demo"', `snapshot["app"], ${JSON.stringify(name)}`],
     ],
     'tauri.conf.json': [
@@ -260,6 +261,7 @@ export function workbenchUiRewrites({ name, accent }) {
     ],
     'src/index.html': [['<title>Paddock Workbench Demo</title>', `<title>${name}</title>`], ['Starting workbench demo&hellip;', `Starting ${name}&hellip;`]],
     'src/main-window.ts': [["'Workbench demo'", JSON.stringify(name).replaceAll('"', "'")]],
+    'src/app/generated/dialog-contracts.ts': [['cd apps/workbench-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app']],
     'src/app/views/orientation-view.ts': [['<h1>Workbench demo</h1>', `<h1>${name}</h1>`]],
     'tsconfig.app.json': [
       ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],

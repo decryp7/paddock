@@ -3,13 +3,21 @@ import { DIALOG_BASE_COMMANDS, dialogBaseProviders } from '../../../../shell-dem
 import { APP_COMMANDS } from '../../../../shell-demo/src/app/generated/app-commands';
 import { DIALOG_BASE } from '../../../../shell-demo/src/app/generated/dialog-contracts';
 import { assertDialogBoots, dialogTableProblems } from './dialog-harness';
-import { SHELL_COMMANDS, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { dialogCommandsSeenJson, SHELL_COMMANDS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { CHANNELS_COMMANDS } from '@decryp7/paddock-ui/shell/channels';
 import { MCP_COMMANDS } from '@decryp7/paddock-ui/shell/mcp';
 
 // The shell demo's dialogs (one per kind) through the boot-every-dialog harness and its command table: what every app runs
 // over its own registry (ADR 0009 §4). The contracts are Rust's (ADR 0026 §3): the registry reads the generated ones.
 const DIALOGS = DEMO_DIALOGS as readonly DialogDef[];
+
+/** Node's `fs`, loaded at run time (the spec programme has no Node types). */
+interface NodeFs {
+  readFileSync(path: string, encoding: 'utf8'): string;
+  writeFileSync(path: string, data: string): void;
+}
+const nodeFs = (): Promise<NodeFs> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as Promise<NodeFs>;
+const env = (name: string): string | undefined => (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env[name];
 
 describe('shell-demo dialogs', () => {
   it('has one of each kind, a modal form and a required choice', () => {
@@ -38,6 +46,16 @@ describe('shell-demo dialogs', () => {
   it('declares only commands of its table that dialogs may call', () => {
     // The app's own table and the shell plugin's (every shell crate's commands, plan S17).
     expect(dialogTableProblems(DIALOGS, { ...APP_COMMANDS, ...SHELL_COMMANDS, ...CHANNELS_COMMANDS, ...MCP_COMMANDS }, DIALOG_BASE_COMMANDS)).toEqual([]);
+  });
+
+  // The commands every dialog sent while it booted, for the nightly "declared but never sent" check (ADR 0026 §3):
+  // PADDOCK_DIALOG_COMMANDS_SEEN=<file> npx ng test paddock-ui --watch=false --include=**/shell/testing/src/reference-dialogs.spec.ts
+  it('writes the commands it saw when asked to', async () => {
+    const file = env('PADDOCK_DIALOG_COMMANDS_SEEN');
+    if (!file) return;
+    const fs = await nodeFs();
+    fs.writeFileSync(file, dialogCommandsSeenJson());
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).version).toBe(1);
   });
 
   it('takes the base commands from the Rust table', () => {

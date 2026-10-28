@@ -573,16 +573,18 @@ impl<R: Runtime> Builder<R> {
             .copied()
             .chain(self.dialogs.iter().copied())
             .collect();
-        let dialogs =
-            Dialogs::from_tables(&tables).map_err(|e| named("the dialog contracts", e))?;
-        app.manage(dialogs);
-
         let startup = match self.startup {
             Some(s) => s,
             None => Startup::builder()
                 .build()
                 .map_err(|e| named("the start-up watchdog", e))?,
         };
+        // A dialog window that never sends its ready handshake is shown at the start-up config's deadline (ADR 0026 §4.3).
+        let deadline = startup.with(|dog| dog.config().dialog_show_deadline);
+        let dialogs = Dialogs::from_tables(&tables)
+            .map_err(|e| named("the dialog contracts", e))?
+            .with_show_deadline(deadline);
+        app.manage(dialogs);
         app.manage(startup);
 
         if let Some(f) = self.windows {

@@ -60,6 +60,7 @@ import { DialogPresenter, type DialogContent } from './types';
         [state]="state()"
         [failure]="failure()"
         [content]="content()"
+        [declaredWidth]="width()"
         (answered)="entry().ref.answer($event.value)"
         (dismissed)="dismissed()"
       >

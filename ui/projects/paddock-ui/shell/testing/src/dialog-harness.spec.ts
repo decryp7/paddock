@@ -113,12 +113,30 @@ describe('the boot-every-dialog harness', () => {
     expect(report.problems).toEqual(['logs an error: Error: something else broke', 'logs an error: {"circular":"object"}']);
   });
 
-  it('reports a dialog that is not in the list the window looks it up in, and one whose fixture never loads', async () => {
+  it('reports a dialog that is not in the list the window looks it up in, and one whose module fails to load', async () => {
     const report = await bootDialog(OK, { dialogs: [] });
     expect(report.problems.join('\n')).toMatch(/does not open: This dialog is not known/);
-    const stuck = dialog('t.stuck', 'viewer', () => new Promise(() => undefined));
-    const never = await bootDialog(stuck, { dialogs: [stuck], maxTurns: 2 });
-    expect(never.problems).toContain('never leaves Loading');
+    const broken = dialog('t.broken', 'viewer', () => Promise.reject(new Error('chunk missing')));
+    const failed = await bootDialog(broken, { dialogs: [broken] });
+    expect(failed.problems.join('\n')).toMatch(/does not open: .*chunk missing/);
+  });
+
+  it('waits for a dialog module that is still loading, however many turns that takes (no turn budget)', async () => {
+    // A first import() of a big screen on a busy runner: pending until the test resolves it by hand.
+    let finish!: () => void;
+    let asked!: () => void;
+    const askedFor = new Promise<void>((r) => (asked = r));
+    const module = new Promise<unknown>((resolve) => (finish = () => resolve(OkContent)));
+    const slow = dialog('t.slow', 'tool', () => (asked(), module));
+    let report: Awaited<ReturnType<typeof bootDialog>> | null = null;
+    const booted = bootDialog(slow, { dialogs: [slow] }).then((r) => (report = r));
+    await askedFor;
+    // Far more macrotask turns than any fixed budget the harness could have given the window: it must still be waiting.
+    for (let turn = 0; turn < 450; turn++) await new Promise<void>((r) => setTimeout(r, 0));
+    expect(report).toBeNull();
+    finish();
+    await booted;
+    expect(report!.problems).toEqual([]);
   });
 
   it('reports what it could not check as a problem instead of throwing', async () => {

@@ -905,3 +905,24 @@ fn storage_brings_its_commands_to_main_windows_and_dialogs_and_a_failing_setup_n
     let e = built.err().map(|e| e.to_string()).unwrap_or_default();
     assert!(e.contains("storage") && e.contains("no folders"), "{e}");
 }
+
+#[test]
+fn dialogs_are_shown_at_the_start_up_configs_deadline() {
+    let config = paddock_startup::Config {
+        dialog_show_deadline: std::time::Duration::from_millis(1500),
+        ..Default::default()
+    };
+    let startup = paddock_startup::tauri::Startup::builder()
+        .config(config)
+        .build()
+        .unwrap();
+    let app = app(Builder::new(identity())
+        .in_memory()
+        .native_menu(false)
+        .startup(startup));
+    let dialogs = app.state::<paddock_dialogs::Dialogs>();
+    assert_eq!(
+        dialogs.show_deadline(),
+        std::time::Duration::from_millis(1500)
+    );
+}

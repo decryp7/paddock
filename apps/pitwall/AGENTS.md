@@ -189,7 +189,7 @@ Pitwall runs native engines on untrusted model files and answers requests from o
 - UI: standalone components, signals, OnPush, CSS custom properties for theme tokens (dark and light), accessible
   markup (real buttons, labels, aria-labels on icon buttons), the `pw` selector prefix.
 - UI building blocks: use **Angular CDK** for behaviour and accessibility (menus, overlays, dialogs, listbox,
-  scrolling) instead of hand-rolling them, and **Angular Material** selectively for complex inputs, themed through
+  scrolling) instead of hand-rolling them, and **Angular Material first** (rule 47: a Material component wherever one fits), themed through
   Pitwall's CSS tokens. Icons use Material's `MatIconRegistry` with Pitwall's own SVGs registered as literals in the
   `pw` namespace (`<mat-icon svgIcon="pw:models">`); no icon fonts and no icon URLs fetched at run time (the CSP
   forbids it). Charts use Apache ECharts with the CVD-checked palette.
