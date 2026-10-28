@@ -263,8 +263,8 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Dialogs**: modal for decisions only; title 18, one sentence, primary on the right, cancel left of it; destructive
   dialog names the thing and the consequence ("Delete 3 runners and their folders"); Esc closes, focus returns to the
   trigger. Prefer inline panels or popovers over dialogs.
-- **Toasts**: bottom-right, kept clear of the status bar and of the page footer (`--pd-page-footer-safe`, 56 px: a wizard's
-  Next or a form's Save is never covered), 360 max, auto-dismiss 5 s (errors persist until dismissed), at most 3 stacked, with Undo
+- **Toasts**: bottom-right, kept clear of the status bar and of the page footer (`--pd-page-footer-safe`, 56 px: a footer up to 56 px
+  tall, such as a wizard's Next, is not covered), 360 max, auto-dismiss 5 s (errors persist until dismissed), at most 3 stacked, with Undo
   where the action is reversible; `role=status` (errors `role=alert`).
 - **Badges**: 20 px high, 12/500, pill, tint bg + status colour text + 12 px icon + word. Counts in nav: neutral
   surface-3 pill; use status tint only if the count means a problem. Never more than 2 badges in one table cell.

@@ -69,7 +69,7 @@ interface Timer {
     </div>
   `,
   styles: `
-    :host { position: fixed; right: var(--pd-space-4); bottom: calc(var(--pd-statusbar-height, 28px) + var(--pd-page-footer-safe, 56px) + var(--pd-space-2)); z-index: var(--pd-z-toast); pointer-events: none; }
+    :host { position: fixed; right: var(--pd-space-4); bottom: calc(var(--pd-statusbar-height, 24px) + var(--pd-page-footer-safe, 56px) + var(--pd-space-2)); z-index: var(--pd-z-toast); pointer-events: none; }
     .pd-stack { display: flex; flex-direction: column; gap: var(--pd-space-2); align-items: flex-end; }
     .pd-toast { pointer-events: auto; position: relative; width: 360px; max-width: calc(100vw - 2 * var(--pd-space-4)); box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-8) var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-info); border-radius: var(--pd-radius-popover); background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-2); display: flex; flex-direction: column; gap: var(--pd-space-1); font-size: var(--pd-text-body); }
     .pd-toast[data-severity='success'] { border-inline-start-color: var(--pd-success); }
