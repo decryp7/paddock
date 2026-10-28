@@ -97,7 +97,11 @@ fn golden_dir() -> PathBuf {
 
 /// A lockfile stored in the fixture as `package-lock.fixture.json`, so the repository's own "one lockfile" check ignores it.
 fn placed_name(name: &str) -> &str {
-    if name == "package-lock.fixture.json" { "package-lock.json" } else { name }
+    if name == "package-lock.fixture.json" {
+        "package-lock.json"
+    } else {
+        name
+    }
 }
 
 fn copy_tree(from: &Path, to: &Path) {
