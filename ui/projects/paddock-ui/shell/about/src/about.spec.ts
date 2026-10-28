@@ -16,7 +16,8 @@ import {
 } from './backend';
 import { ABOUT_DIALOG_COMMANDS, ABOUT_DIALOG_IDS, aboutContributions, defineAboutDialogs } from './about.contributions';
 import { PdAboutDialog } from './about-dialog';
-import { formatBytes } from './format';
+import { formatBytes, systemText } from './format';
+import { ABOUT_STYLES } from './styles';
 import { provideShellAbout } from './provide-about';
 import { PdUpdatesDialog } from './updates-dialog';
 import { UPDATES_CONFIG, UpdatesStore } from './updates.store';
@@ -377,6 +378,32 @@ describe('the dialogs', () => {
     expect(el.querySelector('[data-testid="about-legal"]')).toBeNull();
   });
 
+  it('About says the system in words, links the releases page and styles every class it uses', async () => {
+    bed('none');
+    const fixture = TestBed.createComponent(PdAboutDialog);
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    const facts = [...el.querySelectorAll('dl.pd-facts dt')].map((dt) => [text(dt as HTMLElement), text(dt.nextElementSibling as HTMLElement)]);
+    expect(facts).toContainEqual(['System', 'macOS (Apple silicon)']);
+    expect(text(el)).not.toContain('aarch64');
+    const link = el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!;
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe('https://updates.example/releases');
+    expect(link.rel).toContain('noopener');
+    // The stale-selector class of bug: a class the template uses but the stylesheet does not define.
+    const used = new Set([...el.querySelectorAll('[class]')].flatMap((n) => [...n.classList].filter((c) => c.startsWith('pd-'))));
+    for (const c of used) expect(ABOUT_STYLES, c).toContain(`.${c}`);
+  });
+
+  it('says the operating system and architecture in words', () => {
+    expect(systemText('macos', 'x86_64')).toBe('macOS (Intel)');
+    expect(systemText('windows', 'x86_64')).toBe('Windows (64-bit)');
+    expect(systemText('windows', 'aarch64')).toBe('Windows (ARM)');
+    expect(systemText('linux', 'x86_64')).toBe('Linux (64-bit)');
+    expect(systemText('browser', 'web')).toBe('Web browser');
+    expect(systemText('haiku', 'riscv')).toBe('haiku (riscv)');
+  });
+
   it('About in a build without updates and with a missing text says so', async () => {
     const about = new MemoryAboutBackend({ ...INFO, updatesAvailable: false, commit: null, built: null, releasesPage: null, legal: [{ id: 'gone', title: 'Gone' }] });
     TestBed.configureTestingModule({
@@ -420,6 +447,14 @@ describe('the dialogs', () => {
     const el: HTMLElement = fixture.nativeElement;
     expect(el.querySelector('[data-testid="updates-current"]')?.textContent).toBe(`You have version ${INFO.version}.`);
     expect(text(el)).toContain('Not checked yet.');
+    // Said once (the phase line), not again in the footer; the auto-check box and the channel are separate rows.
+    expect(text(el).match(/Not checked/g)).toHaveLength(1);
+    const prefs = el.querySelector('[data-testid="updates-prefs"]')!;
+    const auto = prefs.querySelector('[data-testid="updates-auto"]')!;
+    const channel = prefs.querySelector('[data-testid="updates-channel"]')!;
+    expect(auto.contains(channel) || channel.contains(auto)).toBe(false);
+    expect(text(auto as HTMLElement)).toBe('Check for updates automatically');
+    expect(text(channel as HTMLElement)).toContain('Channel');
     button(el, 'Check now').click();
     await settle();
     await fixture.whenStable();
@@ -509,7 +544,7 @@ describe('the contributions', () => {
     assertContributionsValid(TestBed.inject(Injector));
     expect(dialogs.map((d) => [d.id, d.kind, d.modality])).toEqual([
       ['pd.about', 'viewer', 'modeless'],
-      ['pd.updates', 'tool', 'modeless'],
+      ['pd.updates', 'form', 'modeless'],
       ['pd.whats-new', 'viewer', 'modeless'],
     ]);
   });

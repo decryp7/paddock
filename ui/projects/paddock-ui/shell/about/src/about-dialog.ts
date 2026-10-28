@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, resource, signal } from '@angular/core';
 import { AboutBackend } from './backend';
+import { systemText } from './format';
 import { ABOUT_STYLES } from './styles';
 
 /**
@@ -27,12 +28,12 @@ import { ABOUT_STYLES } from './styles';
               <dd>{{ a.built }}</dd>
             }
             <dt>{{ t.system }}</dt>
-            <dd>{{ a.os }} {{ a.arch }}</dd>
+            <dd>{{ system(a.os, a.arch) }}</dd>
             <dt>{{ t.updates }}</dt>
             <dd>{{ a.updatesAvailable ? t.updatesItself : t.updatesUnavailable }}</dd>
             @if (a.releasesPage) {
               <dt>{{ t.releases }}</dt>
-              <dd [title]="a.releasesPage">{{ a.releasesPage }}</dd>
+              <dd><a class="pd-link" [href]="a.releasesPage" target="_blank" rel="noopener noreferrer" data-testid="about-releases">{{ a.releasesPage }}</a></dd>
             }
           </dl>
           @if (a.legal.length) {
@@ -96,6 +97,10 @@ export class PdAboutDialog {
     params: () => this.selected() ?? undefined,
     loader: ({ params }) => this.backend.legal(params),
   });
+
+  protected system(os: string, arch: string): string {
+    return systemText(os, arch);
+  }
 
   protected versionText(version: string): string {
     return $localize`:@@pd.about.version:Version ${version}:version:`;

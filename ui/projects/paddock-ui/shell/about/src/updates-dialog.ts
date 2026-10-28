@@ -8,7 +8,7 @@ import { ABOUT_STYLES } from './styles';
 import { formatBytes } from './format';
 
 /**
- * Updates (a tool: modeless, kept open beside the work). Every step is the engine's: Check, Download (a job: the download
+ * Updates (a form: modeless, medium, fitted to its content, kept open beside the work). Every step is the engine's: Check, Download (a job: the download
  * and the signature check, its progress in the Jobs list and here when this window has jobs), Restart to update or
  * install when the app quits, and the preferences. A refused step shows the engine's message and next step. A build
  * without an update key says "Updates are not available in this build" and offers nothing to press.
@@ -72,26 +72,28 @@ import { formatBytes } from './format';
         <p class="pd-muted">{{ t.noKey }}</p>
       }
       @if (s.phase.kind !== 'unavailable') {
-        <div class="pd-row">
-          <label class="pd-check">
+        <div class="pd-prefs" data-testid="updates-prefs">
+          <label class="pd-check" data-testid="updates-auto">
             <input type="checkbox" [checked]="s.autoCheck" (change)="setAuto($any($event.target).checked)" />
             {{ t.autoCheck }}
           </label>
           @if (s.channels.length > 1) {
             <!-- eslint-disable-next-line @angular-eslint/template/label-has-associated-control -- the label wraps a pd-select, whose trigger button is the labelled control (ariaLabel is set) -->
-            <label class="pd-check">
-              {{ t.channel }}
+            <label class="pd-field" data-testid="updates-channel">
+              <span class="pd-label">{{ t.channel }}</span>
               <pd-select [options]="channelOptions()" [value]="s.channel" [ariaLabel]="t.channel" (valueChange)="setChannel($event)" />
             </label>
           }
+          @if (s.phase.kind === 'ready') {
+            <label class="pd-check">
+              <input type="checkbox" [checked]="installOnQuit()" (change)="store.installOnQuit($any($event.target).checked)" />
+              {{ t.installOnQuit }}
+            </label>
+          }
         </div>
-        @if (s.phase.kind === 'ready') {
-          <label class="pd-check">
-            <input type="checkbox" [checked]="installOnQuit()" (change)="store.installOnQuit($any($event.target).checked)" />
-            {{ t.installOnQuit }}
-          </label>
+        @if (checkedText(); as checked) {
+          <p class="pd-muted" data-testid="updates-checked">{{ checked }}</p>
         }
-        <p class="pd-muted">{{ checkedText() }}</p>
       }
     } @else if (store.requestError(); as error) {
       <p role="alert">{{ error }} <button type="button" class="pd-btn" (click)="store.load()">{{ t.retry }}</button></p>
@@ -183,8 +185,11 @@ export class PdUpdatesDialog implements DialogContent {
   protected readonly checkedText = computed(() => {
     const s = this.store.status();
     const when = s?.lastChecked ? new Date(s.lastChecked * 1000).toLocaleString() : null;
-    const checked = when ? $localize`:@@pd.updates.last-checked:Last checked ${when}:when:` : $localize`:@@pd.updates.never-checked:Not checked in this installation yet`;
-    return s?.endpointHost ? $localize`:@@pd.updates.asks:${checked}:checked: · asks ${s.endpointHost}:host:` : checked;
+    // "Not checked yet" is the phase line's own sentence; saying it twice was the duplicate.
+    const checked = when ? $localize`:@@pd.updates.last-checked:Last checked ${when}:when:` : null;
+    const host = s?.endpointHost;
+    if (!host) return checked;
+    return checked ? $localize`:@@pd.updates.asks:${checked}:checked: · asks ${host}:host:` : $localize`:@@pd.updates.asks-only:Asks ${host}:host:`;
   });
 
   /** The download job's phase, from the window's jobs (null without them or before the first event). */
