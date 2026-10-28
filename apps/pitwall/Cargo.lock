@@ -3390,6 +3390,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
+ "paddock-jobs",
  "paddock-service",
  "pitwall-core",
  "pitwall-loopback",

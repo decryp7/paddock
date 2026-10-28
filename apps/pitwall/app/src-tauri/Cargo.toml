@@ -22,6 +22,8 @@ tauri-build = { version = "2.7.3", features = [] }
 pitwall-core.workspace = true
 pitwall-loopback = { path = "../../crates/pitwall-loopback" }
 # The shared service crate (core only, no tauri feature): the launchctl parser and its stale rule.
+# The shared executor of long operations (ADR 0020, ADR 0024 rule 3): job registry, phases, progress, cancel tokens.
+paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 paddock-service = { path = "../../../../crates/paddock-service" }
 serde.workspace = true
 serde_json.workspace = true
