@@ -16,6 +16,7 @@ fn id(n: u32) -> SlotId {
 
 #[test]
 fn a_held_slot_is_busy_until_dropped() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (first, guard) = acquire_first(&locks, 2).unwrap().unwrap();
@@ -32,6 +33,7 @@ fn a_held_slot_is_busy_until_dropped() {
 
 #[test]
 fn owner_records_round_trip_and_bad_ones_are_ignored() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots")).unwrap();
@@ -68,6 +70,7 @@ fn owner_records_round_trip_and_bad_ones_are_ignored() {
 
 #[test]
 fn an_unusable_root_is_a_typed_error() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("plain");
     std::fs::write(&file, "x").unwrap();
@@ -99,6 +102,7 @@ fn an_unusable_root_is_a_typed_error() {
 
 #[test]
 fn hold_announces_and_ends_when_the_owner_folder_goes() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let owner = dir.path().join("job");
     std::fs::create_dir(&owner).unwrap();
@@ -146,6 +150,7 @@ impl std::io::Write for ChannelWriter {
 
 #[test]
 fn release_asks_the_holder_and_waits_for_it() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let owner = dir.path().join("job");
     std::fs::create_dir(&owner).unwrap();
@@ -166,6 +171,7 @@ fn release_asks_the_holder_and_waits_for_it() {
 
 #[test]
 fn release_of_a_holder_that_ignores_the_request_times_out() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();
@@ -202,6 +208,7 @@ fn start_holder(locks: &FsLocks, owner: &std::path::Path) -> (HolderThread, Slot
 
 #[test]
 fn a_late_release_never_frees_the_next_jobs_slot() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path().join("ci"));
     let (job_a, job_b) = (dir.path().join("a"), dir.path().join("b"));
@@ -229,6 +236,7 @@ fn a_late_release_never_frees_the_next_jobs_slot() {
 
 #[test]
 fn a_holder_ignores_a_release_request_with_another_token() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path().join("ci"));
     let job = dir.path().join("job");
@@ -244,6 +252,7 @@ fn a_holder_ignores_a_release_request_with_another_token() {
 
 #[test]
 fn a_probe_holding_a_lock_for_an_instant_does_not_make_acquire_refuse() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     // A status probe has slot s1 locked right now...
@@ -301,6 +310,7 @@ impl Drop for KillOnDrop {
 
 #[test]
 fn a_killed_holder_frees_its_slot() {
+    let _gate = crate::exclusive_gate();
     let dir = tempfile::tempdir().unwrap();
     let owner = dir.path().join("job");
     std::fs::create_dir(&owner).unwrap();
@@ -345,6 +355,7 @@ fn a_killed_holder_frees_its_slot() {
 
 #[test]
 fn a_release_whose_holder_ended_and_whose_slot_was_taken_again_meanwhile_withdraws_its_request() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();
@@ -379,6 +390,7 @@ fn a_release_whose_holder_ended_and_whose_slot_was_taken_again_meanwhile_withdra
 
 #[test]
 fn a_holder_that_cannot_record_itself_reports_it_and_frees_the_slot() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots/s1.owner")).unwrap();
@@ -394,6 +406,7 @@ fn a_holder_that_cannot_record_itself_reports_it_and_frees_the_slot() {
 
 #[test]
 fn owner_records_missing_a_field_are_ignored() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots")).unwrap();
@@ -409,6 +422,7 @@ fn owner_records_missing_a_field_are_ignored() {
 
 #[test]
 fn a_lock_file_that_cannot_be_opened_is_a_typed_error() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots/s1.lock")).unwrap();
@@ -422,6 +436,7 @@ fn a_lock_file_that_cannot_be_opened_is_a_typed_error() {
 
 #[test]
 fn a_release_request_that_cannot_be_written_is_a_typed_error() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();
@@ -441,6 +456,7 @@ fn a_release_request_that_cannot_be_written_is_a_typed_error() {
 #[cfg(unix)]
 #[test]
 fn a_lock_that_becomes_unusable_while_waiting_for_a_release_is_a_typed_error() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();

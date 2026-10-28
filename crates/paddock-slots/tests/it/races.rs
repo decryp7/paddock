@@ -8,6 +8,7 @@ const ROUNDS: usize = 40;
 
 #[test]
 fn many_racing_acquirers_never_hold_one_slot_twice() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let inside: Vec<AtomicU32> = (0..SLOTS).map(|_| AtomicU32::new(0)).collect();
