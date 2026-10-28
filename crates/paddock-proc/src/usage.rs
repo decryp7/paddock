@@ -129,9 +129,37 @@ pub trait ProcessSource {
     fn table(&self) -> Table;
 }
 
-/// The operating system as a [`ProcessSource`].
-#[derive(Debug, Clone, Copy, Default)]
-pub struct OsSource;
+/// The operating system as a [`ProcessSource`]. Make one per tree walk ([`tree_memory`] does): on a platform that cannot
+/// list the children of one pid it scans the machine's process list at most once, lazily, and shares that scan between
+/// the nodes of the walk.
+#[derive(Debug, Default)]
+pub struct OsSource {
+    scan: LazyScan,
+}
+
+/// The process list scanned on first use, for the platforms without a children-of-one-pid call.
+#[derive(Debug, Default)]
+struct LazyScan(std::cell::OnceCell<Table>);
+
+impl LazyScan {
+    /// The children of `pid` from the scan, which `scan` makes the first time only.
+    fn children(&self, pid: u32, scan: impl FnOnce() -> Table) -> Vec<u32> {
+        direct_children(self.0.get_or_init(scan), pid)
+    }
+}
+
+/// The parents of every process, for the fallback scan: on Windows a light id snapshot (no memory is read), elsewhere the
+/// ordinary table.
+fn scan_table() -> Table {
+    #[cfg(windows)]
+    if let Some(list) = crate::sys::process_parents() {
+        return list
+            .into_iter()
+            .map(|(pid, parent)| (pid, (Some(parent), 0)))
+            .collect();
+    }
+    snapshot()
+}
 
 impl ProcessSource for OsSource {
     fn memory(&self, pid: u32) -> Option<u64> {
@@ -139,7 +167,7 @@ impl ProcessSource for OsSource {
     }
 
     fn children(&self, pid: u32) -> Vec<u32> {
-        children_or_scan(children_of(pid), pid, || self.table())
+        children_or_scan(children_of(pid), || self.scan.children(pid, scan_table))
     }
 
     fn table(&self) -> Table {
@@ -147,9 +175,9 @@ impl ProcessSource for OsSource {
     }
 }
 
-/// `listed` when the platform can list the children of one pid; otherwise one scan of the table (the fallback only).
-fn children_or_scan(listed: Option<Vec<u32>>, pid: u32, table: impl FnOnce() -> Table) -> Vec<u32> {
-    listed.unwrap_or_else(|| direct_children(&table(), pid))
+/// `listed` when the platform can list the children of one pid; otherwise `scanned` (the fallback only).
+fn children_or_scan(listed: Option<Vec<u32>>, scanned: impl FnOnce() -> Vec<u32>) -> Vec<u32> {
+    listed.unwrap_or_else(scanned)
 }
 
 fn direct_children(table: &Table, pid: u32) -> Vec<u32> {
@@ -191,8 +219,11 @@ pub fn tree_memory_from(source: &impl ProcessSource, root: u32) -> u64 {
             if seen.len() >= MAX_TREE {
                 return total;
             }
-            if seen.insert(kid) {
-                total = total.saturating_add(source.memory(kid).unwrap_or(0));
+            // A child that is gone (or whose pid was reused after the listing) counts nothing and is not walked.
+            if seen.insert(kid)
+                && let Some(m) = source.memory(kid)
+            {
+                total = total.saturating_add(m);
                 frontier.push(kid);
             }
         }
@@ -203,14 +234,23 @@ pub fn tree_memory_from(source: &impl ProcessSource, root: u32) -> u64 {
 /// What `pid` really uses, in bytes: PSS on Linux, the physical footprint on macOS, the private working set on Windows (the
 /// resident size if that cannot be read). `None` when there is no such process (or it is a thread id). Reads that pid only.
 pub fn process_memory(pid: u32) -> Option<u64> {
-    OsSource.memory(pid)
+    OsSource::default().memory(pid)
 }
 
 /// The memory of the tree at `root` (see [`process_memory`]), 0 when it is gone. Reads the pids of the tree only; the
-/// children of each come from the OS per pid (`proc_listchildpids` on macOS, `/proc/<pid>/task/*/children` on Linux, one
-/// light process-id snapshot on Windows, which has no per-parent call).
+/// children of each come from the OS per pid (`proc_listchildpids` on macOS, `/proc/<pid>/task/*/children` on Linux). Windows
+/// has no per-parent call: one snapshot of the machine's process and thread list (ids and parents only) is taken for the
+/// whole walk. A supervised child on Windows is measured through its job object instead ([`tree_memory_of`]), with no scan.
 pub fn tree_memory(root: u32) -> u64 {
-    tree_memory_from(&OsSource, root)
+    tree_memory_from(&OsSource::default(), root)
+}
+
+/// Memory of the listed processes (a job object's members), 0 for those gone.
+pub fn tree_memory_of(source: &impl ProcessSource, pids: &[u32]) -> u64 {
+    pids.iter()
+        .take(MAX_TREE)
+        .filter_map(|p| source.memory(*p))
+        .fold(0, u64::saturating_add)
 }
 
 /// The direct children of `pid` read for that pid only, `None` when the platform has no such call.
@@ -225,8 +265,8 @@ fn children_of(pid: u32) -> Option<Vec<u32>> {
 }
 
 #[cfg(windows)]
-fn children_of(pid: u32) -> Option<Vec<u32>> {
-    crate::sys::child_pids(pid)
+fn children_of(_pid: u32) -> Option<Vec<u32>> {
+    None
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -439,9 +479,14 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             src.table().is_empty() && src.table_reads.get() == 1,
             "the counter counts"
         );
-        // 1 -> 2 -> 1 (a cycle) and a child that vanished between the listing and the read.
+        // 1 -> 2 -> 1 (a cycle) and a child that vanished between the listing and the read: its children are not walked.
         let src = Counting::new(&[(1, &[2, 8], 10), (2, &[1], 20)]);
         assert_eq!(tree_memory_from(&src, 1), 30);
+        assert_eq!(
+            src.children_reads.get(),
+            2,
+            "the gone child 8 is not asked for its children"
+        );
         // A very wide tree stops at the bound.
         let kids: Vec<u32> = (2..(MAX_TREE as u32 + 100)).collect();
         let mut rows: Vec<(u32, &[u32], u64)> = vec![(1, &kids, 1)];
@@ -474,6 +519,39 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         assert_eq!(read_children(proc.path(), 30), Some(vec![]));
     }
 
+    /// Without a children-of-one-pid call, a whole walk scans the machine once, however many nodes it has.
+    #[test]
+    fn a_walk_without_a_per_pid_call_scans_once() {
+        let table = table_from([
+            entry(1, None, 1, false),
+            entry(2, Some(1), 1, false),
+            entry(3, Some(2), 1, false),
+        ]);
+        let scans = std::cell::Cell::new(0);
+        let lazy = LazyScan::default();
+        let scan = || {
+            scans.set(scans.get() + 1);
+            table.clone()
+        };
+        assert_eq!(
+            scans.get(),
+            0,
+            "lazy: nothing is scanned before the first node"
+        );
+        for pid in [1, 2, 3, 1, 9] {
+            let _ = lazy.children(pid, scan);
+        }
+        assert_eq!(scans.get(), 1);
+        assert_eq!(lazy.children(1, scan), vec![2]);
+    }
+
+    #[test]
+    fn the_members_of_a_job_are_summed_and_the_gone_ones_count_nothing() {
+        let src = Counting::new(&[(1, &[], 10), (2, &[], 20)]);
+        assert_eq!(tree_memory_of(&src, &[1, 2, 3]), 30);
+        assert_eq!((src.table_reads.get(), src.children_reads.get()), (0, 0));
+    }
+
     #[test]
     fn direct_children_come_from_a_table() {
         let table = table_from([
@@ -488,17 +566,15 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         assert_eq!(k, vec![2, 3]);
         assert!(direct_children(&table, 5).is_empty());
         assert_eq!(
-            children_or_scan(Some(vec![7]), 1, || panic!(
-                "no scan when the platform lists"
-            )),
+            children_or_scan(Some(vec![7]), || panic!("no scan when the platform lists")),
             vec![7]
         );
-        assert_eq!(
-            children_or_scan(None, 5, || table.clone()),
-            Vec::<u32>::new()
+        assert_eq!(children_or_scan(None, || vec![8]), vec![8]);
+        assert!(
+            OsSource::default()
+                .table()
+                .contains_key(&std::process::id())
         );
-        assert_eq!(children_or_scan(None, 1, || table.clone()).len(), 2);
-        assert!(OsSource.table().contains_key(&std::process::id()));
     }
 
     #[test]
@@ -513,9 +589,9 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         let me = std::process::id();
         let c = crate::Supervised::spawn(child(Mode::Sleep)).unwrap();
         let pid = c.id().unwrap();
-        assert!(OsSource.children(me).contains(&pid));
-        assert!(OsSource.children(pid).is_empty());
-        assert!(OsSource.children(u32::MAX - 1).is_empty());
+        assert!(OsSource::default().children(me).contains(&pid));
+        assert!(OsSource::default().children(pid).is_empty());
+        assert!(OsSource::default().children(u32::MAX - 1).is_empty());
         assert!(tree_memory(me) >= process_memory(pid).unwrap());
     }
 

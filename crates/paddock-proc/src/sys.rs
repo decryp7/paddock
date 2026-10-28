@@ -183,10 +183,11 @@ pub fn private_working_set(pid: u32) -> Option<u64> {
     }
 }
 
-/// The direct children of `pid` from a snapshot of process ids and parents (`CreateToolhelp32Snapshot`: Windows has no
-/// per-parent call; the snapshot reads no memory, command lines or times, so it is far lighter than a full refresh).
+/// `(pid, parent)` of every process, from one snapshot (`CreateToolhelp32Snapshot`: Windows has no per-parent call). The
+/// snapshot is a full list of the machine's processes and threads, but reads no memory, command lines or times, so it is
+/// lighter than a full refresh; callers take it at most once per tree walk.
 #[cfg(windows)]
-pub fn child_pids(pid: u32) -> Option<Vec<u32>> {
+pub fn process_parents() -> Option<Vec<(u32, u32)>> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
@@ -201,16 +202,14 @@ pub fn child_pids(pid: u32) -> Option<Vec<u32>> {
         }
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        let mut kids = Vec::new();
+        let mut list = Vec::new();
         let mut ok = Process32FirstW(snap, &raw mut entry);
         while ok != 0 {
-            if entry.th32ParentProcessID == pid && entry.th32ProcessID != pid {
-                kids.push(entry.th32ProcessID);
-            }
+            list.push((entry.th32ProcessID, entry.th32ParentProcessID));
             ok = Process32NextW(snap, &raw mut entry);
         }
         CloseHandle(snap);
-        Some(kids)
+        Some(list)
     }
 }
 
