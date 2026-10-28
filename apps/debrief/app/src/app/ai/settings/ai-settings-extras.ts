@@ -120,7 +120,7 @@ export class AiSettingsExtras {
     const model = s.model ?? $localize`:@@ai.settings.status.modelNone:none`;
     const parts = [$localize`:@@ai.settings.status.model:Model: ${model}:model:`];
     if (s.backend) parts.push(s.backend);
-    if (s.rssBytes) parts.push($localize`:@@ai.settings.status.memory:${formatBytes(s.rssBytes)}:size: in memory`);
+    if (s.rssBytes) parts.push($localize`:@@ai.settings.status.memory:${formatBytes(s.rssBytes, 'memory')}:size: in memory`);
 
     if (s.reason) parts.push(s.reason);
     return parts.join(' · ');

@@ -1,25 +1,64 @@
 /** Formatting of what the server returns. Pure and locale-stable (en), so screenshots and tests are deterministic. */
 
-const KB = 1000;
-const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+/**
+ * Which convention a size follows (twin of `paddock_units::Kind`; one case table, `crates/paddock-units/cases.json`):
+ * `'storage'` for files, disks, downloads, caches, logs and network transfer (1 KB = 1000 bytes, as the Finder);
+ * `'memory'` for RAM, process memory, GPU memory and model memory fit (1 KB = 1024 bytes under the same labels, as
+ * Activity Monitor: 16 GiB is "16 GB"). A rate follows its quantity.
+ */
+export type ByteKind = 'storage' | 'memory';
 
-/** Bytes as `12.4 GB` (decimal multiples, 1 KB = 1000 bytes). */
-export function bytes(n: number | null | undefined, digits = 1): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
-  if (n < KB) return `${Math.max(0, Math.round(n))} B`;
-  let v = n;
-  let u = 0;
-  while (v >= KB && u < UNITS.length - 1) {
-    v /= KB;
-    u++;
+const STEP: Record<ByteKind, number> = { storage: 1000, memory: 1024 };
+const UNITS = ['KB', 'MB', 'GB', 'TB', 'PB'];
+
+/** Bytes in one KB of `kind`. */
+export const byteStep = (kind: ByteKind): number => STEP[kind];
+
+const grouped = (n: number): string => n.toLocaleString('en-US');
+
+function roundSize(value: number): number {
+  return value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
+}
+
+/** Bytes as `12 bytes`, `850 KB`, `1.2 GB`; 999.9 KB rolls over to `1 MB`. Storage is the default kind. */
+export function bytes(n: number | null | undefined, kind: ByteKind = 'storage'): string {
+  if (n === null || n === undefined || !Number.isFinite(n) || n < 0) return '—';
+  const step = STEP[kind];
+  if (n < step) {
+    const whole = Math.round(n);
+    return whole === 1 ? '1 byte' : `${grouped(whole)} bytes`;
   }
-  return `${v.toFixed(v >= 100 ? 0 : digits)} ${UNITS[u]}`;
+  let value = n / step;
+  let i = 0;
+  while (i < UNITS.length - 1 && roundSize(value) >= step) {
+    value /= step;
+    i++;
+  }
+  return `${grouped(roundSize(value))} ${UNITS[i]}`;
+}
+
+/** The largest unit `n` is a whole multiple of, for limits: `8 MB`, `1500 bytes`. */
+export function wholeBytes(n: number, kind: ByteKind = 'storage'): string {
+  for (let power = 3; power >= 1; power--) {
+    const size = STEP[kind] ** power;
+    if (n >= size && n % size === 0) return `${n / size} ${UNITS[power - 1]}`;
+  }
+  return `${n} bytes`;
+}
+
+/** A size typed by a person (`512`, `64k`, `10MB`, `2 GiB`) into bytes, or null. An explicit `KiB`/`MiB`/`GiB` is binary. */
+export function parseSize(text: string, kind: ByteKind = 'storage'): number | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(?:([kmgt])(i)?)?b?\s*$/i.exec(text);
+  if (!m) return null;
+  const power = m[2] ? 'kmgt'.indexOf(m[2].toLowerCase()) + 1 : 0;
+  const n = Number(m[1]) * (m[3] ? 1024 : STEP[kind]) ** power;
+  return Number.isSafeInteger(Math.floor(n)) ? Math.floor(n) : null;
 }
 
 /** Just the number of {@link bytes} in GB, for big tile figures (`12.4`). */
-export function gb(n: number | null | undefined, digits = 1): string {
+export function gb(n: number | null | undefined, kind: ByteKind, digits = 1): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return '—';
-  return (n / KB ** 3).toFixed(digits);
+  return (n / STEP[kind] ** 3).toFixed(digits);
 }
 
 /** Whole percentage of `part / total` (0 when total is 0). */

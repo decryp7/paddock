@@ -51,7 +51,7 @@ export class ProcessesPanel {
     return l.entries.map((entry) => ({
       entry,
       cpu: formatPermille(entry.cpuPermille),
-      mem: formatBytes(entry.memBytes),
+      mem: formatBytes(entry.memBytes, 'memory'),
       age: entry.startedAt === null ? '—' : formatDuration(now - entry.startedAt),
       job: entry.job ? [entry.job.repository, entry.job.job, entry.job.runNumber === null ? null : `#${entry.job.runNumber}`].filter((x) => x).join(' · ') || null : null,
       fate: entry.leftover ? fateText(entry.leftover, now, l.idle, l.keep) : null,

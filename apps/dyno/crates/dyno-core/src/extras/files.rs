@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Smallest size filter the user may ask for (below this, duplicates are noise: empty files, icons).
-pub const MIN_BYTES_FLOOR: u64 = 1024 * 1024;
+pub const MIN_BYTES_FLOOR: u64 = 1_000_000;
 /// Most files listed in each result list.
 pub const MAX_LISTED: usize = 200;
 /// Most duplicate groups listed.
@@ -208,7 +208,7 @@ mod tests {
         }
     }
 
-    const MB: u64 = 1024 * 1024;
+    const MB: u64 = 1_000_000;
 
     #[test]
     fn the_query_has_a_size_floor_and_a_folder() {

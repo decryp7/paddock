@@ -120,9 +120,9 @@ const cleanup = (over: Partial<CleanupPolicy> = {}): CleanupPolicy => ({
   automatic: true,
   every_hours: 24,
   work_max_age_hours: 72,
-  cache_cap_mb: 10240,
-  folder_cap_mb: 51200,
-  min_free_mb: 20480,
+  cache_cap_mb: 10000,
+  folder_cap_mb: 50000,
+  min_free_mb: 20000,
   keep_previous: true,
   ...over,
 });
@@ -157,7 +157,7 @@ describe('CleanupPolicyEditor', () => {
     (el.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
     f.detectChanges();
     byText<HTMLButtonElement>(el, 'button', 'Save')!.click();
-    expect(saved).toEqual([cleanup({ every_hours: 12, cache_cap_mb: 2560, keep_previous: false })]);
+    expect(saved).toEqual([cleanup({ every_hours: 12, cache_cap_mb: 2500, keep_previous: false })]);
   });
 
   it('toggles automatic cleanup and discards changes', () => {

@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 /// Largest PDB opened.
-const MAX_PDB_BYTES: u64 = 2 << 30;
+const MAX_PDB_BYTES: u64 = 2_000_000_000;
 /// Symbols kept per PDB.
 const MAX_SYMBOLS: usize = 4_000_000;
 /// PDBs kept open (parsed) at once.
@@ -90,7 +90,10 @@ pub fn read_table(path: &Path, expected: &PdbKey) -> Result<Table, Refused> {
     let unreadable = |e: &dyn std::fmt::Display| Refused::Unreadable(format!("{}: {e}", path.display()));
     let meta = std::fs::metadata(path).map_err(|e| unreadable(&e))?;
     if meta.len() > MAX_PDB_BYTES {
-        return Err(unreadable(&format!("larger than {} MB", MAX_PDB_BYTES >> 20)));
+        return Err(unreadable(&format!(
+            "larger than {}",
+            paddock_units::format_whole(MAX_PDB_BYTES, paddock_units::Kind::Storage)
+        )));
     }
     let file = std::fs::File::open(path).map_err(|e| unreadable(&e))?;
     let mut pdb = pdb::PDB::open(file).map_err(|e| unreadable(&e))?;

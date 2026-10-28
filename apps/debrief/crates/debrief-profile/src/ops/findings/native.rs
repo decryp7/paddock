@@ -247,7 +247,7 @@ pub(super) fn heap_growth(b: &mut Builder<'_>, s: &Side<'_>) {
     e.metric = MetricId::LiveBytes;
     e.frame = site.map(|f| frame_dto(p, f));
     e.path = path;
-    let mb = |v: u64| format!("{:.1} MB", v as f64 / 1e6);
+    let mb = |v: u64| paddock_units::format_bytes(v, paddock_units::Kind::Memory);
     let share = pct(under, unfreed);
     let kept = pct(unfreed, allocated.max(unfreed));
     let warn = unfreed >= GROWTH_WARN_BYTES && kept >= 25.0;

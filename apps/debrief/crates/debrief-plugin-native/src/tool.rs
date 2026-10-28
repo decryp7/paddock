@@ -27,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Largest `.etl` file converted.
-pub const MAX_ETL_BYTES: u64 = 8 << 30;
+pub const MAX_ETL_BYTES: u64 = 8_000_000_000;
 /// How long `stop` waits for the file (symbolisation included).
 const STOP_WAIT: Duration = Duration::from_secs(110);
 
@@ -159,9 +159,9 @@ impl NativeTool {
         let len = std::fs::metadata(&path)?.len();
         if len > MAX_ETL_BYTES {
             bail!(
-                "{} is larger than {} GB; record a shorter trace",
+                "{} is larger than {}; record a shorter trace",
                 path.display(),
-                MAX_ETL_BYTES >> 30
+                paddock_units::format_whole(MAX_ETL_BYTES, paddock_units::Kind::Storage)
             );
         }
         Ok(path)

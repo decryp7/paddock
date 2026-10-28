@@ -41,7 +41,7 @@ impl Default for ServersConfig {
             timeout: ms.timeout,
             max_bytes: ms.max_bytes,
             concurrent: 2,
-            cache_max_bytes: 4 << 30,
+            cache_max_bytes: 4_000_000_000,
         }
     }
 }

@@ -12,7 +12,7 @@ import { settle } from '../../../testing/render';
 
 import { StatTiles } from './stat-tiles';
 
-const GiB = 1000 ** 3;
+const GiB = 1024 ** 3;
 const gpu = (over: Partial<GpuSample> = {}): GpuSample => ({ name: 'NVIDIA GeForce RTX 4070', vramTotal: 12 * GiB, vramUsed: 6 * GiB, utilisation: 40, unified: false, ...over });
 const mem = (over: Partial<MemorySample> = {}): MemorySample => ({
   at: 0,
@@ -61,7 +61,7 @@ describe('StatTiles', () => {
     expect(t.querySelector('.stack')!.getAttribute('aria-label')).toBe('50 percent used, 13 percent by Pitwall');
     expect((t.querySelector('.seg.own') as HTMLElement).style.width).toBe('13%');
     expect((t.querySelector('.seg.other') as HTMLElement).style.width).toBe('37%');
-    expect(text(t.querySelector('.foot')!)).toBe('Pitwall4.0GB16.0GBfree');
+    expect(text(t.querySelector('.foot')!)).toBe('Pitwall4GB16GBfree');
   });
 
   it('caps the Pitwall share at the used share and shows critical pressure', async () => {
@@ -77,7 +77,7 @@ describe('StatTiles', () => {
     expect(text(t.querySelector('.value')!)).toBe('6.0GBof12GB');
     expect((t.querySelector('.meter span') as HTMLElement).style.width).toBe('50%');
     expect(t.querySelector('.meter')!.getAttribute('data-tone')).toBe('neutral');
-    expect(text(t.querySelector('.foot')!)).toBe('Models0B6.0GBfree');
+    expect(text(t.querySelector('.foot')!)).toBe('Models0bytes6GBfree');
   });
 
   it('stays neutral until VRAM is nearly full, then warns, then turns to danger', async () => {
@@ -120,7 +120,7 @@ describe('StatTiles', () => {
     expect(text(t.querySelector('.value')!)).toBe('40%GPU');
     expect(Array.from(t.querySelectorAll('.bar-row')).map(text)).toEqual(['CPU24%']);
     expect(t.querySelector('.bar-row .meter')!.getAttribute('data-tone')).toBe('neutral');
-    expect(text(t.querySelector('.foot')!)).toBe('Commit50%swap1.0GB');
+    expect(text(t.querySelector('.foot')!)).toBe('Commit50%swap1GB');
     expect(t.querySelector('.status')).toBeNull();
   });
 

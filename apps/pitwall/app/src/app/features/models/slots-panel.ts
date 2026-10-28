@@ -62,8 +62,8 @@ export const SLOT_PICKS: readonly number[] = [1, 2, 4, 8];
               @for (c of f.choices; track c.slots) {
                 <tr [class.sel]="c.slots === slots()">
                   <td class="num">{{ c.slots }}</td>
-                  <td class="right num">{{ size(c.needBytes) }}</td>
-                  <td class="right num">{{ c.extraBytes ? '+' + size(c.extraBytes) : '—' }}</td>
+                  <td class="right num">{{ size(c.needBytes, 'memory') }}</td>
+                  <td class="right num">{{ c.extraBytes ? '+' + size(c.extraBytes, 'memory') : '—' }}</td>
                   <td class="right num">{{ c.maxContext ? tokens(c.maxContext) : 'none' }}</td>
                   <td><span class="status" [attr.data-tone]="look(c.verdict).tone">{{ look(c.verdict).label }}</span></td>
                 </tr>
@@ -257,7 +257,7 @@ export class SlotsPanel implements OnInit, OnDestroy {
   protected adds(n: number): string {
     const c = this.choice(n);
     if (!c) return n === 1 ? 'baseline' : '…';
-    return c.extraBytes ? `adds ~${bytes(c.extraBytes)}` : 'baseline';
+    return c.extraBytes ? `adds ~${bytes(c.extraBytes, 'memory')}` : 'baseline';
   }
 
   protected tone(n: number): 'ok' | 'warn' | 'bad' {

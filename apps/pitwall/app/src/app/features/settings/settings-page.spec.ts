@@ -169,7 +169,7 @@ describe('SettingsPage', () => {
     expect(s.memory.idleUnloadSecs).toBe(300);
     expect(s.memory.deepIdleSecs).toBe(1200);
     expect(s.memory.pressureAvailablePercent).toBe(20);
-    expect(s.memory.minFreeBytes).toBe(2.5 * 1000 ** 3);
+    expect(s.memory.minFreeBytes).toBe(2.5 * 1024 ** 3);
     expect(s.memory.maxHotModels).toBe(2);
     expect(s.memory.preset).toBe('custom');
     expect(s.privacy.metricsRetentionDays).toBe(14);
@@ -187,7 +187,7 @@ describe('SettingsPage', () => {
     await settle(fixture);
     button(el, 'Save changes').click();
     await settle(fixture);
-    expect((await backend.settings()).memory.hotCapBytes).toBe(24 * 1000 ** 3);
+    expect((await backend.settings()).memory.hotCapBytes).toBe(24 * 1024 ** 3);
     button(el, 'What fits').click();
     await settle(fixture);
     expect(el.querySelector('[aria-label="Memory limit for hot models in GB"]')).toBeNull();

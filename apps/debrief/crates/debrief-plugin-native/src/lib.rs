@@ -58,7 +58,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            max_bytes: 1 << 30,
+            max_bytes: 1_000_000_000,
             max_duration: Duration::from_secs(60 * 60),
             max_samples: 4_000_000,
             max_addresses: 200_000,
@@ -130,6 +130,6 @@ mod tests {
             NativeError::Io(_)
         ));
         assert!(NativeError::NotFound { pid: 3 }.to_string().contains('3'));
-        assert_eq!(Limits::default().max_bytes, 1 << 30);
+        assert_eq!(Limits::default().max_bytes, 1_000_000_000);
     }
 }

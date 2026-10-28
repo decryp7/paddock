@@ -64,7 +64,7 @@ describe('AiModelManager', () => {
     expect(row.textContent).toContain('tool calling');
     await until(fixture, () => q('ai-engine-status')!.textContent!.includes('Vulkan'));
     expect(q('ai-engine-status')!.textContent).toContain('Running');
-    expect(q('ai-engine-status')!.textContent).toContain('3.4 GB in memory');
+    expect(q('ai-engine-status')!.textContent).toContain('3.2 GB in memory');
     expect(el.textContent).toContain('Qwen3.5 9B');
     expect(q('ai-engine-reset')).toBeNull();
   });

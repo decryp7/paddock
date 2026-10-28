@@ -762,11 +762,14 @@ fn allocations(b: &mut Builder<'_>, s: &Side<'_>) {
         }
     }
     let rate = if p.duration_ns > 0 {
-        format!(" ({:.1} MB/s)", total as f64 / 1e6 / (p.duration_ns as f64 / 1e9))
+        format!(
+            " ({}/s)",
+            paddock_units::format_bytes((total as f64 / (p.duration_ns as f64 / 1e9)) as u64, paddock_units::Kind::Memory)
+        )
     } else {
         String::new()
     };
-    let mb = |v: u64| format!("{:.1} MB", v as f64 / 1e6);
+    let mb = |v: u64| paddock_units::format_bytes(v, paddock_units::Kind::Memory);
     if let Some((&top, &top_bytes)) = by_type.iter().max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0))) {
         let mut e = b.evidence(EvidenceView::Hotspots);
         e.metric = MetricId::AllocBytes;
@@ -1099,7 +1102,7 @@ mod tests {
         let a: Vec<_> = f.iter().filter(|f| f.kind == FindingKind::Allocations).collect();
         assert_eq!(a.len(), 2, "{a:?}");
         let top = a.iter().find(|f| f.title.contains("System.String")).unwrap();
-        assert!(top.title.contains("10.0 MB allocated (5.0 MB/s)"), "{}", top.title);
+        assert!(top.title.contains("9.5 MB allocated (4.8 MB/s)"), "{}", top.title);
         assert!(top.detail.contains("Shop.ReadAll"), "{}", top.detail);
         assert_eq!(top.evidence.metric, MetricId::AllocBytes);
         assert!(a
@@ -1183,7 +1186,7 @@ mod tests {
         assert_eq!(wait.evidence.metric, MetricId::WaitNs);
         assert_eq!(wait.severity, FindingSeverity::Warning);
         let heap = f.iter().find(|f| f.kind == FindingKind::NativeHeapGrowth).unwrap();
-        assert!(heap.title.contains("3.1 MB of native heap not freed"), "{}", heap.title);
+        assert!(heap.title.contains("3 MB of native heap not freed"), "{}", heap.title);
         assert!(heap.title.contains("under busy::grow (busy.rs:50)"), "{}", heap.title);
         assert_eq!(heap.evidence.metric, MetricId::LiveBytes);
         assert_eq!(heap.evidence.frame.as_ref().unwrap().name, "busy::grow");

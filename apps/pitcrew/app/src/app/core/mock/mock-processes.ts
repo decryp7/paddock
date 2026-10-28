@@ -7,7 +7,8 @@ import type { KeepFor, ProcessEntry, ProcessList, ProcessPolicy, RunnerSnapshot,
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
-const MB = 1000 ** 2;
+/** Process memory is a memory size: binary steps under the KB/MB/GB labels, as Activity Monitor. */
+const MB = 1024 ** 2;
 
 export const DEFAULT_PROCESS_POLICY: ProcessPolicy = {
   cleanup: true,

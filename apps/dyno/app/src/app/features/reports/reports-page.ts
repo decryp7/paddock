@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
+import { formatBytes, formatMemory, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { SEVERITY_LABEL } from '../../shared/labels';
 import { Sparkline } from '../../shared/sparkline';
@@ -90,7 +90,7 @@ import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports
                   <thead><tr><th>App</th><th class="r">CPU (average)</th><th class="r">Memory (average)</th></tr></thead>
                   <tbody>
                     @for (a of r.topApps; track a.app) {
-                      <tr><td><span class="ell" [title]="a.app">{{ a.app }}</span></td><td class="r">{{ pct(a.cpuAvg) }}</td><td class="r">{{ bytes(a.memoryAvg) }}</td></tr>
+                      <tr><td><span class="ell" [title]="a.app">{{ a.app }}</span></td><td class="r">{{ pct(a.cpuAvg) }}</td><td class="r">{{ mem(a.memoryAvg) }}</td></tr>
                     }
                   </tbody>
                 </table>
@@ -201,6 +201,7 @@ export class ReportsPage implements OnInit {
   protected readonly canExport = computed(() => !!this.store.report() && !this.store.exporting());
   protected readonly trend = computed(() => this.store.report()?.scoreTrend.map((p) => p.score) ?? []);
   protected readonly bytes = formatBytes;
+  protected readonly mem = formatMemory;
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly plural = plural;
   protected readonly count = formatCount;

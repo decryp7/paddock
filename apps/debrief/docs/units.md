@@ -10,8 +10,11 @@ moment a person reads it.
    pane knows whether `done / total` are files or bytes. Do not build "12.4 MB" in Rust for the UI to display.
 2. **The UI formats with `app/src/app/shared/format/units.ts`** (`formatBytes`, `formatRate`, `formatEta`,
    `formatDuration`, `formatCount`, `formatPercent`, `formatRelativeTime`, `TransferMeter`). Numbers use `Intl` with
-   the active locale; words go through `$localize`. Bytes are binary (1024) with the labels KB / MB / GB, as Windows
-   shows them. Unknown or invalid input shows `—`.
+   the active locale; words go through `$localize`. Bytes have two kinds (family decision 2026-10-28, `crates/paddock-units`):
+   `'storage'` (the default: files, downloads, caches, logs, transfer) uses decimal steps (1 KB = 1000 bytes, as the
+   Finder), `'memory'` (RAM, process memory, heap, VRAM, model memory fit) uses binary steps (1 KB = 1024 bytes) under
+   the same labels, as Activity Monitor does. Every call site picks one; a rate follows its quantity. The case table
+   is `crates/paddock-units/cases.json`. Unknown or invalid input shows `—`.
 3. **Precision stays reachable.** A humanized size or count that hides digits gets the exact value in a tooltip
    (`formatExactBytes`, `formatExactDelta`).
 4. **Speed and time left come from samples**, not from a producer's guess: `TransferMeter` smooths bytes over time

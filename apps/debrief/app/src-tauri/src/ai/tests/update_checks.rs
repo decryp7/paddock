@@ -445,7 +445,7 @@ fn update_messages_name_the_versions_and_sizes() {
         to: "b.gguf".into(),
         download_bytes: bytes,
     };
-    let n = update_commands::update_notice(&u(UpdateKind::Model, 5_400_000_000));
+    let n = update_commands::update_notice(&u(UpdateKind::Model, 5_000_000_000));
     assert!(
         n.title.contains("model update") && n.body.contains("b.gguf replaces a.gguf (5 GB"),
         "{}",

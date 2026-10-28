@@ -15,6 +15,7 @@ path = "src/bin/fake_ffmpeg.rs"
 test = false
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-core = { path = "../debrief-core" }
 debrief-ai = { path = "../debrief-ai" }
 debrief-ipc = { path = "../debrief-ipc" }

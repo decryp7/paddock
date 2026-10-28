@@ -163,8 +163,14 @@ pub struct Fit {
     pub message: String,
 }
 
+/// A memory size in the app's one wording (`6.1 GB`, binary steps like Activity Monitor).
 pub(crate) fn gib(b: u64) -> String {
-    format!("{:.1} GB", b as f64 / GIB as f64)
+    paddock_units::format_bytes(b, paddock_units::Kind::Memory)
+}
+
+/// A file size on disk in the app's one wording (`4.2 GB`, decimal steps like the Finder).
+pub(crate) fn file_size(b: u64) -> String {
+    paddock_units::format_bytes(b, paddock_units::Kind::Storage)
 }
 
 /// Whether a model fits at a context length.

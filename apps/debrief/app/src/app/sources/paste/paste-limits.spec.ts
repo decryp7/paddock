@@ -1,8 +1,8 @@
 import { byteLength, nameToSend, overCap, PASTE_MAX_BYTES, safeLogName, uniqueName } from './paste-limits';
 
 describe('paste limits', () => {
-  it('caps at 8 MiB', () => {
-    expect(PASTE_MAX_BYTES).toBe(8 * 1024 * 1024);
+  it('caps at 8 MB', () => {
+    expect(PASTE_MAX_BYTES).toBe(8_000_000);
     expect(overCap(PASTE_MAX_BYTES)).toBe(false);
     expect(overCap(PASTE_MAX_BYTES + 1)).toBe(true);
     expect(overCap(0)).toBe(false);

@@ -4,8 +4,9 @@
  * `$localize`. Unknown, negative or non-finite input shows as "—" (`NONE`), except where the value is optional
  * decoration (a rate or an ETA), which returns '' so callers can drop the whole fragment.
  *
- * Byte sizes use binary steps (1024) with the short labels KB / MB / GB / TB, as Windows Explorer does, so a file
- * shown in Debrief matches what the file manager shows. Keep exact values in a tooltip (`formatExactBytes`).
+ * Byte sizes follow a `ByteKind`: decimal steps for storage (1 KB = 1000 bytes, as the macOS Finder), binary steps for
+ * memory (as Activity Monitor), both with the short labels KB / MB / GB / TB (family decision 2026-10-28). Keep exact
+ * values in a tooltip (`formatExactBytes`).
  */
 import { activeLocale, groupedNumber, plural } from '../../i18n/locale';
 
@@ -97,17 +98,52 @@ function roundSize(value: number): number {
   return value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
 }
 
-/** "12 bytes", "1 byte", "850 KB", "1.2 GB" (decimal steps). 999.9 KB rounds up to "1 MB", not "1,000 KB". */
-export function formatBytes(bytes: number | null | undefined): string {
+/**
+ * Which convention a size follows (the twin of `paddock_units::Kind`; one case table, `crates/paddock-units/cases.json`):
+ * `'storage'` is for files, disks, downloads, caches, imports, logs and network transfer (1 KB = 1000 bytes, as the Finder);
+ * `'memory'` is for RAM, process memory, working set, heap and GPU memory (1 KB = 1024 bytes under the same labels, as
+ * Activity Monitor: 16 GiB is "16 GB"). A rate follows its quantity.
+ */
+export type ByteKind = 'storage' | 'memory';
+
+const STEP: Record<ByteKind, number> = { storage: 1000, memory: 1024 };
+
+/** Bytes in one KB of `kind`. */
+export const byteStep = (kind: ByteKind): number => STEP[kind];
+
+/** "12 bytes", "1 byte", "850 KB", "1.2 GB", "16 GB" (memory). 999.9 KB rounds up to "1 MB", not "1,000 KB". */
+export function formatBytes(bytes: number | null | undefined, kind: ByteKind = 'storage'): string {
   if (!usable(bytes)) return NONE;
-  if (bytes < 1000) return plainBytes(Math.round(bytes));
-  let value = bytes / 1000;
+  const step = STEP[kind];
+  if (bytes < step) return plainBytes(Math.round(bytes));
+  let value = bytes / step;
   let i = 0;
-  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= 1000) {
-    value /= 1000;
+  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= step) {
+    value /= step;
     i++;
   }
   return `${nf(value < 10 ? 1 : 0).format(value)} ${BYTE_UNITS[i]}`;
+}
+
+/** The largest unit `bytes` is a whole multiple of, for limits: 8_000_000 is "8 MB" (storage), "1500 bytes". */
+export function formatWholeBytes(bytes: number, kind: ByteKind = 'storage'): string {
+  for (let power = 3; power >= 1; power--) {
+    const size = STEP[kind] ** power;
+    if (bytes >= size && bytes % size === 0) return `${bytes / size} ${BYTE_UNITS[power - 1]}`;
+  }
+  return `${bytes} bytes`;
+}
+
+/**
+ * A size typed by a person: `512`, `64k`, `10MB`, `1.5 g`, `2 GiB` into bytes, or null when it is not one. A bare number is
+ * bytes; the suffix takes the steps of `kind`, an explicit `KiB` / `MiB` / `GiB` / `TiB` is always binary.
+ */
+export function parseSize(text: string, kind: ByteKind = 'storage'): number | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(?:([kmgt])(i)?)?b?\s*$/i.exec(text);
+  if (!m) return null;
+  const power = m[2] ? 'kmgt'.indexOf(m[2].toLowerCase()) + 1 : 0;
+  const bytes = Number(m[1]) * (m[3] ? 1024 : STEP[kind]) ** power;
+  return Number.isSafeInteger(Math.floor(bytes)) ? Math.floor(bytes) : null;
 }
 
 /** The exact size for a tooltip: "1,234,567 bytes". */
@@ -116,9 +152,9 @@ export function formatExactBytes(bytes: number | null | undefined): string {
 }
 
 /** "12.4 MB/s"; '' while unknown or idle. */
-export function formatRate(bytesPerSec: number | null | undefined): string {
+export function formatRate(bytesPerSec: number | null | undefined, kind: ByteKind = 'storage'): string {
   if (!usable(bytesPerSec) || bytesPerSec <= 0) return '';
-  const size = formatBytes(bytesPerSec);
+  const size = formatBytes(bytesPerSec, kind);
   return $localize`:@@core.units.perSecond:${size}:size:/s`;
 }
 

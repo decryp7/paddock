@@ -1,5 +1,5 @@
 import type { Hint, MemoryArray, MemoryKind, MemoryModule } from '../../core/api.types';
-import { formatBytes } from '../../shared/format';
+import { formatMemory } from '../../shared/format';
 
 /** One memory slot as drawn: its name, the channel it belongs to, what is in it (or nothing) and the hint that points at it. */
 export interface SlotView {
@@ -181,8 +181,8 @@ export function slotModel(array: MemoryArray, hints: readonly Hint[]): SlotModel
 /** A sentence for screen readers (and the text alternative of the drawing). */
 export function describeSlots(model: SlotModel): string {
   if (model.slots.length === 0) return 'No memory slots were reported.';
-  const parts = model.slots.map((s) => (s.module ? `${s.name}: ${formatBytes(s.module.capacityBytes)} ${speedLabel(s.module)}` : `${s.name}: empty`));
-  return `${model.filled.toString()} of ${model.slots.length.toString()} memory slots filled, ${formatBytes(model.totalBytes)} in total. ${parts.join('. ')}.`;
+  const parts = model.slots.map((s) => (s.module ? `${s.name}: ${formatMemory(s.module.capacityBytes)} ${speedLabel(s.module)}` : `${s.name}: empty`));
+  return `${model.filled.toString()} of ${model.slots.length.toString()} memory slots filled, ${formatMemory(model.totalBytes)} in total. ${parts.join('. ')}.`;
 }
 
 const HINT_LABEL: Partial<Record<Hint['kind'], string>> = {

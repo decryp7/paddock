@@ -6,6 +6,7 @@ import { CleanupPolicyEditor } from '../../shared/policy/cleanup-policy-editor';
 import { DiskGuardEditor } from '../../shared/policy/disk-guard-editor';
 import { PauseEditor } from '../../shared/policy/pause-editor';
 import { ProcessPolicyEditor } from '../../shared/policy/process-policy-editor';
+import { byteStep } from '../../shared/format';
 import { LoadState } from '../../shared/ui/load-state';
 import { SettingsStore } from '../../state/settings.store';
 
@@ -61,7 +62,7 @@ export const GROUPS: DefaultsGroup[] = [
     title: 'Runner logs',
     hint: 'Each runner’s log file rotates at this size; older files are kept up to the count.',
     fields: [
-      { id: 'log-size', label: 'Rotate at', unit: 'MB', scale: 1024 * 1024, get: (d) => d.logs.max_bytes, set: (d, v) => (d.logs.max_bytes = v) },
+      { id: 'log-size', label: 'Rotate at', unit: 'MB', scale: byteStep('storage') ** 2, get: (d) => d.logs.max_bytes, set: (d, v) => (d.logs.max_bytes = v) },
       { id: 'log-keep', label: 'Keep', unit: 'files', scale: 1, get: (d) => d.logs.keep, set: (d, v) => (d.logs.keep = v) },
     ],
   },

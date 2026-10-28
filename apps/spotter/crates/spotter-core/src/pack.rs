@@ -19,10 +19,11 @@ use crate::notify::NotificationPolicy;
 use crate::source::SourceConfig;
 use crate::version::VersionScheme;
 use crate::watch::{Watch, WatchSpec};
+use paddock_units::{format_whole, Kind};
 use serde::Deserialize;
 
-/// Largest pack file read (512 KiB).
-pub const MAX_PACK_BYTES: usize = 512 << 10;
+/// Largest pack file read (500 KB).
+pub const MAX_PACK_BYTES: usize = 500_000;
 /// Most presets and schemes per pack.
 pub const MAX_ENTRIES: usize = 500;
 
@@ -136,7 +137,10 @@ impl Pack {
     /// Parses a pack. Entries that are not valid are skipped with a warning; `Err` only when nothing can be read.
     pub fn parse(text: &str) -> Result<(Pack, Vec<String>), String> {
         if text.len() > MAX_PACK_BYTES {
-            return Err("The pack is larger than 512 KiB.".into());
+            return Err(format!(
+                "The pack is larger than {}.",
+                format_whole(MAX_PACK_BYTES as u64, Kind::Storage)
+            ));
         }
         let table: toml::Table = toml::from_str(text).map_err(|e| format!("The pack is not valid TOML: {}", e.message()))?;
         let mut pack = Pack::default();
@@ -334,7 +338,7 @@ name = "No id at all"
     #[test]
     fn whole_packs_can_be_refused() {
         assert!(Pack::parse("= nope").unwrap_err().contains("TOML"));
-        assert!(Pack::parse(&" ".repeat(MAX_PACK_BYTES + 1)).unwrap_err().contains("512"));
+        assert!(Pack::parse(&" ".repeat(MAX_PACK_BYTES + 1)).unwrap_err().contains("500 KB"));
         let (empty, w) = Pack::parse("").unwrap();
         assert_eq!((empty, w.len()), (Pack::default(), 0));
         let (odd, _) = Pack::parse("scheme = 5\npreset = 'x'").unwrap();

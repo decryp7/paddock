@@ -1,10 +1,13 @@
 //! Human-readable quantities for text composed in Rust (AI summaries, exports, reports, log lines).
 //!
 //! These follow the same rules as the UI's `app/src/app/shared/format/units.ts`, in the source locale (en-US):
-//! binary steps with the labels KB / MB / GB / TB / PB, `12 bytes`, one decimal below 10 and none above (trailing
-//! zeros trimmed), `4.2 s` / `3 min 10 s` / `2 h 5 min` durations, grouped counts. Anything shown in the UI should
+//! byte sizes come from `paddock_units` (decimal steps for storage, binary for memory; labels KB / MB / GB / TB / PB),
+//! while `4.2 s` / `3 min 10 s` / `2 h 5 min` durations, grouped counts. Anything shown in the UI should
 //! travel as a typed value and be formatted there; use this only where the text itself is the product.
-//! `units-cases.json` is the table both implementations are tested against.
+//! `units-cases.json` is the table both implementations are tested against for durations, counts and percentages; byte
+//! sizes have their own table in `crates/paddock-units/cases.json`.
+
+pub use paddock_units::Kind;
 
 /// Shown for a value that is not a usable number.
 pub const NONE: &str = "—";
@@ -44,33 +47,20 @@ fn decimal(v: f64, decimals: i32) -> String {
     format!("{}.{}", group(whole), frac.trim_end_matches('0'))
 }
 
-/// `0` → `"0 bytes"`, `1` → `"1 byte"`, `1536` → `"1.5 KB"`, `1_288_490_189` → `"1.2 GB"`. 1023.9 KB rolls over to `"1 MB"`.
+/// A storage size (files, downloads, caches, logs): `0` → `"0 bytes"`, `1500` → `"1.5 KB"` (decimal steps). Memory sizes go through
+/// [`bytes_of`] with [`Kind::Memory`].
 pub fn bytes(n: u64) -> String {
-    const LABELS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
-    if n < 1024 {
-        return if n == 1 {
-            "1 byte".to_string()
-        } else {
-            format!("{} bytes", group(n))
-        };
-    }
-    let rounded = |v: f64| if v < 10.0 { round_to(v, 1) } else { v.round() };
-    let mut value = n as f64 / 1024.0;
-    let mut i = 0;
-    while i < LABELS.len() - 1 && rounded(value) >= 1024.0 {
-        value /= 1024.0;
-        i += 1;
-    }
-    format!("{} {}", decimal(value, if value < 10.0 { 1 } else { 0 }), LABELS[i])
+    bytes_of(n, Kind::Storage)
+}
+
+/// A size of the given kind, as `paddock_units::format_bytes` writes it.
+pub fn bytes_of(n: u64, kind: Kind) -> String {
+    paddock_units::format_bytes(n, kind)
 }
 
 /// The exact size, for a tooltip or a log: `1234567` → `"1,234,567 bytes"`.
 pub fn exact_bytes(n: u64) -> String {
-    if n == 1 {
-        "1 byte".to_string()
-    } else {
-        format!("{} bytes", group(n))
-    }
+    paddock_units::exact_bytes(n)
 }
 
 /// `350` → `"350 ms"`, `4200` → `"4.2 s"`, `190_000` → `"3 min 10 s"`, `7_500_000` → `"2 h 5 min"`, `97_200_000` → `"1 d 3 h"`.
@@ -131,7 +121,6 @@ mod tests {
                 assert_eq!(f(&c["in"]), c["out"].as_str().unwrap(), "{key}({})", c["in"]);
             }
         };
-        run("bytes", &|v| bytes(v.as_u64().unwrap()));
         run("durationMs", &|v| duration_ms(v.as_u64().unwrap()));
         run("count", &|v| count(v.as_u64().unwrap()));
         run("percent", &|v| percent(v[0].as_f64().unwrap(), v[1].as_u64().unwrap() as u8));
@@ -145,5 +134,7 @@ mod tests {
         assert_eq!(percent(f64::INFINITY, 1), NONE);
         assert_eq!(percent(-12.5, 1), "-12.5%");
         assert!(bytes(u64::MAX).ends_with(" PB"));
+        assert_eq!(bytes(1_500), "1.5 KB");
+        assert_eq!(bytes_of(16 << 30, Kind::Memory), "16 GB");
     }
 }

@@ -9,6 +9,7 @@ publish = false
 description = "Native symbols for Debrief (ADR 0022): PE/PDB identities, symbol paths and cache, optional symbol-server downloads, DbgHelp symbolisation and stack walking; shared by the native profiler and dump analysis"
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 thiserror.workspace = true
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"], optional = true }
 

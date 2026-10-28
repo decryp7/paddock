@@ -29,7 +29,7 @@ fn knowledge_files_are_managed_in_both_scopes() {
     );
     assert_eq!(
         (empty["maxFileBytes"].as_u64(), empty["maxFiles"].as_u64()),
-        (Some(65536), Some(32))
+        (Some(64_000), Some(32))
     );
     let g = create(&main, "global", "Glossary", "ACME-GW is the payment gateway.");
     let p = create(&main, "project", "Incident", "WEB01 was patched on Monday.");

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatPercent } from '../../shared/format';
+import { formatMemory, formatPercent } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
 import { EXTRAS_STYLES } from './extras-styles';
@@ -43,7 +43,7 @@ export class ExtrasGpu implements OnInit {
   protected readonly store = inject(ExtrasStore);
   protected readonly data = computed(() => this.store.gpu().data);
   protected readonly percent = formatPercent;
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatMemory;
 
   ngOnInit(): void {
     void this.store.ensure('gpu');

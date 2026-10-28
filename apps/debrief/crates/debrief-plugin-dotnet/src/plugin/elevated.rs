@@ -42,7 +42,7 @@ const POLL_EVERY: Duration = Duration::from_millis(200);
 /// Longest file name accepted.
 const MAX_NAME: usize = 200;
 /// Largest recording the elevated process streams.
-pub const MAX_BYTES: u64 = 8 << 30;
+pub const MAX_BYTES: u64 = 8_000_000_000;
 /// What the recorder may write after the size limit is reached (its closing blocks); the host's stream is cut at
 /// the size limit plus this.
 const CLOSING_ALLOWANCE: u64 = 64 << 20;

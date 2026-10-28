@@ -138,9 +138,9 @@ pub(crate) fn check_id(id: &str) -> Result<&str> {
 pub fn check_text(text: &str) -> Result<String> {
     if text.len() > MAX_TEXT_BYTES {
         return Err(NotesError::Limit(format!(
-            "the note is too long ({} KiB; at most {} KiB)",
-            text.len().div_ceil(1024),
-            MAX_TEXT_BYTES / 1024
+            "the note is too long ({}; at most {})",
+            paddock_units::format_bytes(text.len() as u64, paddock_units::Kind::Storage),
+            paddock_units::format_whole(MAX_TEXT_BYTES as u64, paddock_units::Kind::Storage)
         )));
     }
     if text.contains('\0') {

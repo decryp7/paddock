@@ -6,7 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import type { Priority } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
 import { Dialogs } from '../../shared/dialog';
-import { formatBytes, formatCount, formatPercent, formatRate, plural } from '../../shared/format';
+import { formatMemory, formatCount, formatPercent, formatRate, plural } from '../../shared/format';
 import { bar } from '../../shared/heat';
 import { Icon } from '../../shared/icon';
 import { PRIORITIES, PRIORITY_LABEL } from '../../shared/labels';
@@ -115,7 +115,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                   }
                 </span>
                 <span role="gridcell" class="r num heat" [style.background]="bar(r.cpu, 40, sortKey() === 'cpu')">{{ pct(r.cpu) }}</span>
-                <span role="gridcell" class="r num heat" [style.background]="bar(r.memory, 2147483648, sortKey() === 'memory')">{{ bytes(r.memory) }}</span>
+                <span role="gridcell" class="r num heat" [style.background]="bar(r.memory, 2147483648, sortKey() === 'memory')">{{ mem(r.memory) }}</span>
                 <span role="gridcell" class="r num heat" [style.background]="bar(r.disk, 52428800, sortKey() === 'disk')">{{ rate(r.disk) }}</span>
                 <span role="gridcell" class="truncate faint">{{ r.user ?? '' }}</span>
                 <span role="gridcell" class="r num faint">{{ pid(r) }}</span>
@@ -228,7 +228,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
     { id: 'flat', label: 'All', icon: 'processes' },
   ];
   protected readonly pct = formatPercent;
-  protected readonly bytes = formatBytes;
+  protected readonly mem = formatMemory;
   protected readonly rate = formatRate;
   protected readonly bar = bar;
   protected readonly sortKey = computed(() => this.store.sort().key);
@@ -240,7 +240,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
   protected readonly summary = computed(() => {
     const s = this.live.system();
     const n = this.store.total();
-    return n === 0 ? 'Reading processes…' : `${plural(n, 'process', 'processes')}${s ? ` · ${formatPercent(s.cpu.total)} CPU · ${formatBytes(s.memory.used)} memory in use` : ''}`;
+    return n === 0 ? 'Reading processes…' : `${plural(n, 'process', 'processes')}${s ? ` · ${formatPercent(s.cpu.total)} CPU · ${formatMemory(s.memory.used)} memory in use` : ''}`;
   });
   protected readonly trackRow = (_: number, r: Row) => r.key;
   protected readonly num = formatCount;

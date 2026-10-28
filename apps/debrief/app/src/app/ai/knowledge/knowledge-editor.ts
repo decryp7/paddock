@@ -84,7 +84,7 @@ export class KnowledgeEditor implements OnInit {
   /** The file to edit; null writes a new one in `scope`. */
   readonly file = input<KnowledgeInfo | null>(null);
   readonly scope = input<KnowledgeScope>('global');
-  readonly maxBytes = input(64 * 1024);
+  readonly maxBytes = input(64_000);
 
   protected readonly name = signal('');
   protected readonly text = signal('');

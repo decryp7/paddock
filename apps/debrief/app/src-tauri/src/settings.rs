@@ -36,7 +36,7 @@ pub use crate::builtin_sections::*;
 const FILE: &str = "settings.json";
 const VERSION: u32 = 1;
 /// Settings files (and imports) larger than this are rejected.
-const MAX_FILE_BYTES: u64 = 1 << 20;
+const MAX_FILE_BYTES: u64 = 1_000_000;
 const MAX_ID_LEN: usize = 128;
 /// Id of the AI assistant's section, registered by the AI module when installed.
 pub const AI_SECTION: &str = "ai";
@@ -161,7 +161,10 @@ pub fn load_file(dir: Option<&Path>) -> SettingsFile {
 fn read_settings_file(path: &Path) -> Result<Option<SettingsFile>, String> {
     use crate::config_store::{read_json, ReadError};
     if std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() > MAX_FILE_BYTES) {
-        return Err(format!("the file is larger than {} KB", MAX_FILE_BYTES / 1024));
+        return Err(format!(
+            "the file is larger than {}",
+            paddock_units::format_whole(MAX_FILE_BYTES, paddock_units::Kind::Storage)
+        ));
     }
     let value = match read_json(path) {
         Ok(v) => v,

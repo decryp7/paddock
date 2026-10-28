@@ -65,7 +65,7 @@ export class SearchEverythingNavigator {
     if (!this.knowledge.list()) await this.knowledge.load();
     const file = (scope === 'project' ? this.knowledge.project() : this.knowledge.global()).find((f) => f.id === id);
     if (file) {
-      const maxBytes = this.knowledge.list()?.maxFileBytes ?? 64 * 1024;
+      const maxBytes = this.knowledge.list()?.maxFileBytes ?? 64_000;
       void import('../ai/knowledge/knowledge-editor').then((m) => m.openKnowledgeEditor(this.dialogs, file, scope, maxBytes));
     } else this.context.notifyError($localize`:@@search.knowledge.gone:This knowledge file no longer exists.`);
   }

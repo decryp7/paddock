@@ -22,7 +22,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
         }
       </div>
       @if (live.memory(); as m) {
-        <div class="value num">{{ gbText(m.ramTotal - m.ramAvailable) }}<span class="unit">GB</span><span class="of">of {{ gbText(m.ramTotal, 0) }} GB</span></div>
+        <div class="value num">{{ gbText(m.ramTotal - m.ramAvailable, 'memory') }}<span class="unit">GB</span><span class="of">of {{ gbText(m.ramTotal, 'memory', 0) }} GB</span></div>
         <div class="stack" role="img" [attr.aria-label]="ramPct() + ' percent used, ' + ownPct() + ' percent by Pitwall'">
           <span class="seg own" [style.width.%]="ownPct()"></span>
           <span class="seg other" [style.width.%]="ramPct() - ownPct()"></span>
@@ -45,7 +45,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
       </div>
       @if (gpu(); as g) {
         @if (g.vramTotal !== null) {
-          <div class="value num">{{ gbText(g.vramUsed) }}<span class="unit">GB</span><span class="of">of {{ gbText(g.vramTotal, 0) }} GB</span></div>
+          <div class="value num">{{ gbText(g.vramUsed, 'memory') }}<span class="unit">GB</span><span class="of">of {{ gbText(g.vramTotal, 'memory', 0) }} GB</span></div>
           <div class="meter" [attr.data-tone]="tone(vramPct())"><span [style.width.%]="vramPct()"></span></div>
           <div class="foot">
             <span>Models <b class="num">{{ bytesText(modelVram()) }}</b></span>
@@ -281,7 +281,7 @@ import { Skeleton } from '../../shared/ui/skeleton';
 export class StatTiles {
   protected readonly live = inject(LiveStore);
   protected readonly gbText = gb;
-  protected readonly bytesText = bytes;
+  protected readonly bytesText = (n: number | null | undefined): string => bytes(n, 'memory');
   protected readonly rateText = rate;
   protected readonly intText = int;
   protected readonly round = Math.round;

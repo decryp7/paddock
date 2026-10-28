@@ -7,7 +7,7 @@
 //! again with the new PDBs when they arrive. Downloads are off until the user turns them on; nothing is requested
 //! while they are off.
 
-use debrief_core::settings::{Configurable, FieldKind, SectionOwner, SettingField, SettingsSection, ValidValues};
+use debrief_core::settings::{ByteKind, Configurable, FieldKind, SectionOwner, SettingField, SettingsSection, ValidValues};
 use debrief_dump::model::{Document, SymbolStatus};
 use debrief_dump::DumpDocs;
 use debrief_symbols::fetch::{FetchError, Fetcher};
@@ -356,8 +356,9 @@ impl Configurable for SymbolsSection {
                     "maxPdbSize",
                     "Largest PDB",
                     FieldKind::Size {
-                        min_bytes: 1 << 20,
-                        max_bytes: 8 << 30,
+                        kind: ByteKind::Storage,
+                        min_bytes: 1_000_000,
+                        max_bytes: 8_000_000_000,
                     },
                     d.max_bytes,
                 )
@@ -382,8 +383,9 @@ impl Configurable for SymbolsSection {
                     "cacheMaxSize",
                     "Cache size",
                     FieldKind::Size {
-                        min_bytes: 64 << 20,
-                        max_bytes: 64 << 30,
+                        kind: ByteKind::Storage,
+                        min_bytes: 64_000_000,
+                        max_bytes: 64_000_000_000,
                     },
                     d.cache_max_bytes,
                 )

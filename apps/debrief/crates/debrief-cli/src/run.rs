@@ -18,7 +18,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Largest knowledge file read (a Markdown note, never megabytes).
-const MAX_KNOWLEDGE_BYTES: u64 = 4 << 20;
+const MAX_KNOWLEDGE_BYTES: u64 = 4_000_000;
 /// Events fetched per call when a query returns events.
 const EVENT_CHUNK: usize = 500;
 
@@ -387,7 +387,11 @@ pub(crate) fn read_knowledge(files: &[PathBuf]) -> Result<Vec<(String, String)>,
         .map(|p| {
             let meta = std::fs::metadata(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
             if meta.len() > MAX_KNOWLEDGE_BYTES {
-                return Err(format!("{} is larger than {} MB", p.display(), MAX_KNOWLEDGE_BYTES >> 20));
+                return Err(format!(
+                    "{} is larger than {}",
+                    p.display(),
+                    paddock_units::format_whole(MAX_KNOWLEDGE_BYTES, paddock_units::Kind::Storage)
+                ));
             }
             let text = std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
             Ok((

@@ -110,7 +110,9 @@ pub enum Denied {
     TokensMonth(u64),
     /// The model needs more memory than the app's share.
     #[error(
-        "the model needs {need_mib} MiB but this app may use at most {percent}% of the machine's memory ({allowed_mib} MiB); use a smaller model or raise the share in Pitwall ▸ Apps & keys"
+        "the model needs {need} but this app may use at most {percent}% of the machine's memory ({allowed}); use a smaller model or raise the share in Pitwall ▸ Apps & keys",
+        need = paddock_units::format_bytes(*need_mib << 20, paddock_units::Kind::Memory),
+        allowed = paddock_units::format_bytes(*allowed_mib << 20, paddock_units::Kind::Memory)
     )]
     Memory {
         /// The share (percent).
@@ -481,7 +483,7 @@ mod tests {
         let e = check_memory(4 * gib + 1, 16 * gib, Some(25)).unwrap_err();
         assert!(!e.is_rate());
         let t = e.to_string();
-        assert!(t.contains("25%") && t.contains("4097 MiB") && t.contains("4096 MiB"), "{t}");
+        assert!(t.contains("25%") && t.contains("needs 4 GB") && t.contains("(4 GB)"), "{t}");
         assert!(check_memory(1, 0, Some(100)).is_err());
     }
 

@@ -28,7 +28,7 @@ pub const MAX_PRESETS: usize = 64;
 /// The longest alias.
 pub const MAX_ALIAS_LEN: usize = 48;
 /// The longest system prompt (bytes).
-pub const MAX_SYSTEM_PROMPT_BYTES: usize = 8 * 1024;
+pub const MAX_SYSTEM_PROMPT_BYTES: usize = 8_000;
 /// The longest target text (an `auto:` selection).
 pub const MAX_TARGET_LEN: usize = 160;
 /// The largest context a preset may ask for.
@@ -283,7 +283,10 @@ impl ModelPreset {
         if self.system_prompt.as_ref().is_some_and(|p| p.len() > MAX_SYSTEM_PROMPT_BYTES) {
             return Err(invalid(
                 "system prompt",
-                format!("use at most {} KB of text", MAX_SYSTEM_PROMPT_BYTES / 1024),
+                format!(
+                    "use at most {} of text",
+                    paddock_units::format_whole(MAX_SYSTEM_PROMPT_BYTES as u64, paddock_units::Kind::Storage)
+                ),
             ));
         }
         Ok(self)

@@ -11,9 +11,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Largest total size an archive may expand to.
-pub const MAX_EXPANDED: u64 = 3 << 30;
+pub const MAX_EXPANDED: u64 = 3_000_000_000;
 /// Largest download.
-pub const MAX_DOWNLOAD: u64 = 1 << 30;
+pub const MAX_DOWNLOAD: u64 = 1_000_000_000;
 
 fn err(m: impl Into<String>) -> Error {
     Error::Install(m.into())

@@ -4,7 +4,7 @@ use crate::forecast::Forecast;
 use crate::health::Severity;
 use crate::history::{Consumer, HistoryPoint};
 use crate::time::Timestamp;
-use crate::units::bytes;
+use crate::units::{bytes, Kind};
 use serde::{Deserialize, Serialize};
 
 /// The report.
@@ -175,7 +175,7 @@ pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
         ));
     }
     if i.cleaned_bytes > 0 {
-        highlights.push(format!("Cleanup freed {}.", bytes(i.cleaned_bytes)));
+        highlights.push(format!("Cleanup freed {}.", bytes(i.cleaned_bytes, Kind::Storage)));
     }
     if i.crashes > 0 {
         let one = i.crashes == 1;
@@ -360,7 +360,12 @@ pub fn to_markdown(r: &WeeklyReport) -> String {
     if !r.top_apps.is_empty() {
         o.push_str("\n## Busiest apps\n\n| App | CPU (average) | Memory (average) |\n| --- | ---: | ---: |\n");
         for a in &r.top_apps {
-            o.push_str(&format!("| {} | {:.1}% | {} |\n", md_cell(&a.app), a.cpu_avg, bytes(a.memory_avg)));
+            o.push_str(&format!(
+                "| {} | {:.1}% | {} |\n",
+                md_cell(&a.app),
+                a.cpu_avg,
+                bytes(a.memory_avg, Kind::Memory)
+            ));
         }
     }
     if !r.disks.is_empty() {
@@ -369,8 +374,8 @@ pub fn to_markdown(r: &WeeklyReport) -> String {
             o.push_str(&format!(
                 "- {}: {} free of {}, {}\n",
                 d.disk,
-                bytes(d.free),
-                bytes(d.total),
+                bytes(d.free, Kind::Storage),
+                bytes(d.total, Kind::Storage),
                 forecast_text(d.forecast)
             ));
         }
@@ -397,7 +402,7 @@ pub fn to_markdown(r: &WeeklyReport) -> String {
     o.push_str(&format!(
         "Rules stepped in {} time(s); cleanup freed {}.\n",
         r.rule_actions,
-        bytes(r.cleaned_bytes)
+        bytes(r.cleaned_bytes, Kind::Storage)
     ));
     for c in &r.changes {
         o.push_str(&format!("- {} {} ({})\n", utc_time(c.at), c.title, c.detail));
@@ -467,7 +472,7 @@ pub fn to_html(r: &WeeklyReport) -> String {
                 "<tr><td>{}</td><td class=\"n\">{:.1}%</td><td class=\"n\">{}</td></tr>\n",
                 e(&a.app),
                 a.cpu_avg,
-                bytes(a.memory_avg)
+                bytes(a.memory_avg, Kind::Memory)
             ));
         }
         o.push_str("</table>\n");
@@ -478,8 +483,8 @@ pub fn to_html(r: &WeeklyReport) -> String {
             o.push_str(&format!(
                 "<li>{}: {} free of {}, {}</li>\n",
                 e(&d.disk),
-                bytes(d.free),
-                bytes(d.total),
+                bytes(d.free, Kind::Storage),
+                bytes(d.total, Kind::Storage),
                 forecast_text(d.forecast)
             ));
         }
@@ -508,7 +513,7 @@ pub fn to_html(r: &WeeklyReport) -> String {
     o.push_str(&format!(
         "<h2>What changed</h2>\n<p>Rules stepped in {} time(s); cleanup freed {}.</p>\n<ul>\n",
         r.rule_actions,
-        bytes(r.cleaned_bytes)
+        bytes(r.cleaned_bytes, Kind::Storage)
     ));
     for c in &r.changes {
         o.push_str(&format!(
@@ -642,8 +647,8 @@ mod tests {
         i.disks = vec![
             ReportDisk {
                 disk: "C:".into(),
-                total: 500 << 30,
-                free: 20 << 30,
+                total: 500_000_000_000,
+                free: 20_000_000_000,
                 forecast: Forecast::FullInDays(12.0),
             },
             ReportDisk {
@@ -666,7 +671,7 @@ mod tests {
             detail: "You changed this".into(),
         }];
         i.rule_actions = 2;
-        i.cleaned_bytes = 1 << 30;
+        i.cleaned_bytes = 1_000_000_000;
         weekly(i)
     }
 
@@ -724,11 +729,11 @@ mod tests {
         assert!(md.starts_with("# Dyno weekly report\n\n2025-10-09 to 2025-10-16 (UTC)"));
         assert!(md.contains("Health score 80 (+10 against a week ago)."));
         assert!(md.contains("Recorded scores, oldest first: 70, 80."));
-        assert!(md.contains("| <b>Evil\\|App</b> | 12.5% | 2.0 GB |"));
-        assert!(md.contains("- C:: 20.0 GB free of 500.0 GB, full in about 12 days"));
+        assert!(md.contains("| <b>Evil\\|App</b> | 12.5% | 2 GB |"));
+        assert!(md.contains("- C:: 20 GB free of 500 GB, full in about 12 days"));
         assert!(md.contains("not filling up") && md.contains("not enough history for a forecast"));
         assert!(md.contains("1970-01-01 05:00 UTC Warning: Issue 5 (detail)"));
-        assert!(md.contains("Rules stepped in 2 time(s); cleanup freed 1.0 GB."));
+        assert!(md.contains("Rules stepped in 2 time(s); cleanup freed 1 GB."));
     }
 
     #[test]
@@ -807,7 +812,7 @@ mod tests {
         }];
         i.score_before = Some(70);
         i.rule_actions = 1;
-        i.cleaned_bytes = 3 << 30;
+        i.cleaned_bytes = 3_000_000_000;
         i.crashes = 2;
         let r = weekly(i);
         assert_eq!((r.avg_cpu, r.peak_cpu, r.avg_memory, r.score_change), (20.0, 90.0, 50.0, 10));

@@ -267,7 +267,7 @@ export function diskOption(series: TimeSeries[], cleanups: number[], t: ChartTok
       },
     },
     xAxis: timeAxis(t, hours),
-    yAxis: valueAxis(t, (v) => formatBytes(v, 0)),
+    yAxis: valueAxis(t, (v) => formatBytes(v)),
     dataZoom: [{ type: 'inside', throttle: 50 }],
     series: series.map((s, i) => ({
       name: s.name,

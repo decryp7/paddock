@@ -12,6 +12,7 @@ description = "Debrief's DuckDB store (ADR 0014): events as zstd Parquet segment
 #   eval "$(crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-core = { path = "../debrief-core" }
 # Gives freed memory back to the OS when an import or an index build ends (`debrief_alloc::release`).
 debrief-alloc = { path = "../debrief-alloc" }

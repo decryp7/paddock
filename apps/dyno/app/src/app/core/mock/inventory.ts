@@ -2,6 +2,8 @@ import type { Hint, MemoryModule, SystemInventory } from '../api.types';
 import type { MockOs } from './os';
 
 const GB = 1000 ** 3;
+/** Memory sizes are binary (16 GiB reads "16 GB", like Activity Monitor). */
+const GiB = 1024 ** 3;
 
 // Read when the module loads: the router drops the query string soon after.
 const OPENED_WITH = typeof location === 'undefined' ? '' : location.search;
@@ -25,7 +27,7 @@ export function inventoryVariantFromSearch(search: string): InventoryVariant | n
 const stick = (slot: string, gb: number, kind: MemoryModule['kind'], mts: number, configured: number, maker: string, part: string, form: MemoryModule['formFactor'] = 'dimm'): MemoryModule => ({
   slot,
   bank: null,
-  capacityBytes: gb * GB,
+  capacityBytes: gb * GiB,
   speedMts: mts,
   configuredSpeedMts: configured,
   kind,
@@ -41,7 +43,7 @@ function appleSilicon(): SystemInventory {
     os: 'macOS 15',
     hostName: 'MacBook-Pro',
     cpu: { name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 },
-    memory: { unified: { total: 48 * GB, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
+    memory: { unified: { total: 48 * GiB, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
     disks: [disk('Apple SSD AP1024', 994)],
     hints: [{ kind: 'notUpgradeable', message: 'The memory is part of the chip package and cannot be upgraded. Choose the size when buying.', slot: null }],
   };
@@ -52,7 +54,7 @@ function solderedLaptop(): SystemInventory {
     os: 'Windows 11',
     hostName: 'ULTRABOOK',
     cpu: { name: 'Intel Core Ultra 7 155H', physicalCores: 16, logicalCores: 22, frequencyMhz: 3800 },
-    memory: { unified: { total: 32 * GB, kind: 'lpddr5', manufacturer: 'Samsung', upgradeable: false } },
+    memory: { unified: { total: 32 * GiB, kind: 'lpddr5', manufacturer: 'Samsung', upgradeable: false } },
     disks: [disk('WD PC SN740 NVMe', 954)],
     hints: [{ kind: 'notUpgradeable', message: 'The memory is soldered to the mainboard and cannot be upgraded.', slot: null }],
   };
@@ -67,7 +69,7 @@ function ddr5Desktop(): SystemInventory {
     memory: {
       slots: {
         slots: 4,
-        maxCapacityBytes: 192 * GB,
+        maxCapacityBytes: 192 * GiB,
         modules: [stick('DIMM_A2', 32, 'ddr5', 6000, 6000, 'Kingston', part), stick('DIMM_B2', 32, 'ddr5', 6000, 6000, 'Kingston', part)],
       },
     },
@@ -96,7 +98,7 @@ function sodimmLaptop(dual: boolean): SystemInventory {
     os: 'Linux 6.8',
     hostName: 'dev-laptop',
     cpu: { name: 'AMD Ryzen 9 7940HS', physicalCores: 8, logicalCores: 16, frequencyMhz: 4000 },
-    memory: { slots: { slots: 2, maxCapacityBytes: 64 * GB, modules } },
+    memory: { slots: { slots: 2, maxCapacityBytes: 64 * GiB, modules } },
     disks: [disk('WD Blue SN570 NVMe', 954)],
     hints,
   };
@@ -104,7 +106,7 @@ function sodimmLaptop(dual: boolean): SystemInventory {
 
 /** A machine whose firmware says almost nothing: unknown type, no maker, no slot count. */
 function genericBoard(): SystemInventory {
-  const m: MemoryModule = { slot: 'Memory slot', bank: null, capacityBytes: 8 * GB, speedMts: null, configuredSpeedMts: null, kind: 'unknown', formFactor: 'unknown', manufacturer: null, partNumber: null };
+  const m: MemoryModule = { slot: 'Memory slot', bank: null, capacityBytes: 8 * GiB, speedMts: null, configuredSpeedMts: null, kind: 'unknown', formFactor: 'unknown', manufacturer: null, partNumber: null };
   return {
     os: 'Windows 10',
     hostName: null,
@@ -129,7 +131,7 @@ function ddr4Desktop(): SystemInventory {
     memory: {
       slots: {
         slots: 4,
-        maxCapacityBytes: 128 * GB,
+        maxCapacityBytes: 128 * GiB,
         modules: [stick('DIMM_A1', 16, 'ddr4', 3200, 2666, 'Corsair', 'CMK16GX4M1E3200C16'), stick('DIMM_A2', 8, 'ddr4', 2666, 2666, 'Kingston', 'KVR26N19S6/8')],
       },
     },

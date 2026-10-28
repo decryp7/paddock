@@ -70,9 +70,9 @@ pub fn decode(bytes: &[u8]) -> String {
 pub fn read_umdh(src: &dyn Source, limits: &Limits, file_time_ms: Option<i64>) -> Result<UmdhLog> {
     if src.len() > limits.max_read_bytes {
         return Err(DumpError::limit(format!(
-            "the UMDH log is {} MB; at most {} MB are read",
-            src.len() >> 20,
-            limits.max_read_bytes >> 20
+            "the UMDH log is {}; at most {} are read",
+            paddock_units::format_bytes(src.len(), paddock_units::Kind::Storage),
+            paddock_units::format_whole(limits.max_read_bytes, paddock_units::Kind::Storage)
         )));
     }
     let bytes = read_exact(src, 0, src.len(), "the log")?;

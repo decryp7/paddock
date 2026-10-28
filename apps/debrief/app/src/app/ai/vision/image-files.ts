@@ -11,7 +11,7 @@ export const IMAGE_EXTENSIONS: readonly string[] = ['png', 'jpg', 'jpeg', 'bmp',
 export const MAX_IMAGES_PER_QUESTION = 4;
 
 /** The engine's size limit of one image file. */
-export const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 32_000_000;
 
 const MIME = new Set(['image/png', 'image/jpeg', 'image/bmp', 'image/gif', 'image/webp']);
 

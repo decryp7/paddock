@@ -9,7 +9,7 @@ use std::path::Path;
 
 pub const VERSION: u32 = 1;
 /// The app file is never read past this size (it holds at most about a hundred short messages).
-const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_FILE_BYTES: u64 = 4_000_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

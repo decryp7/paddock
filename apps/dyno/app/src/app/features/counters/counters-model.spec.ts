@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CounterHistory, CounterReading, Widget } from '../../core/api.types';
 import { LIGHT } from '../../shared/tokens';
-import { counterChartOption, counterText, counterTitle, formatCounter, pathParts, readingNumber, readingReason, widgetCounterPaths, withPath, withoutPath } from './counters-model';
+import { counterByteKind, counterChartOption, counterText, counterTitle, formatCounter, pathParts, readingNumber, readingReason, widgetCounterPaths, withPath, withoutPath } from './counters-model';
 
 const W = (metric: Widget['metric']): Widget => ({ id: 'x', kind: 'graph', metric, size: 's', options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } });
 
@@ -22,13 +22,13 @@ describe('values', () => {
   it('formats each unit with the unit kept apart', () => {
     expect(formatCounter(34.2, 'percent')).toEqual(['34', '%']);
     expect(formatCounter(2000, 'bytes')).toEqual(['2', 'KB']);
-    expect(formatCounter(1572864, 'bytesPerSec')).toEqual(['1.57', 'MB/s']);
+    expect(formatCounter(1500000, 'bytesPerSec')).toEqual(['1.5', 'MB/s']);
     expect(formatCounter(412.4, 'perSec')).toEqual(['412', '/s']);
     expect(formatCounter(0.456, 'milliseconds')).toEqual(['0.46', 'ms']);
     expect(formatCounter(12.34, 'seconds')).toEqual(['12.3', 's']);
     expect(formatCounter(24000, 'number')).toEqual(['24,000', '']);
     expect(formatCounter(3, 'count')).toEqual(['3', '']);
-    expect(counterText(1572864, 'bytesPerSec')).toBe('1.57 MB/s');
+    expect(counterText(1500000, 'bytesPerSec')).toBe('1.5 MB/s');
     expect(counterText(3, 'count')).toBe('3');
   });
 
@@ -91,5 +91,15 @@ describe('the chart', () => {
     const html = tooltip.formatter([{ axisValue: 1000, marker: '*', seriesName: 'c0', seriesType: 'line', value: [1000, 2000], data: { unit: 'bytes' } }]);
     expect(html).toContain('2 KB');
     expect(tooltip.formatter([])).toBe('');
+  });
+});
+
+describe('byte counters follow their path', () => {
+  it('uses binary steps for memory counters and decimal steps for disk and network counters', () => {
+    expect(counterByteKind('\\Memory\\Available Bytes')).toBe('memory');
+    expect(counterByteKind('\\Process(app)\\Working Set')).toBe('memory');
+    expect(counterByteKind('\\Network Interface(en0)\\Bytes Sent/sec')).toBe('storage');
+    expect(formatCounter(16 * 1024 ** 3, 'bytes', '\\Memory\\Available Bytes')).toEqual(['16', 'GB']);
+    expect(formatCounter(16 * 1024 ** 3, 'bytes', '\\Physical Disk(0)\\Free Bytes')).toEqual(['17', 'GB']);
   });
 });

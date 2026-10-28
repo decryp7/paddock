@@ -109,7 +109,7 @@ impl Default for RotationPolicy {
     /// 10 MB and five old files, as the PowerShell supervisor did.
     fn default() -> Self {
         RotationPolicy {
-            max_bytes: 10 * 1024 * 1024,
+            max_bytes: 10_000_000,
             keep: 5,
         }
     }

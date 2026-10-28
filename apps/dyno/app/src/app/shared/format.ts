@@ -3,47 +3,79 @@
  * rules here (thresholds, scores and diagnoses come from the engine); only how numbers read.
  */
 
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const;
+const BYTE_UNITS = ['KB', 'MB', 'GB', 'TB', 'PB'] as const;
 
-/** Rounds to a precision that reads well: 3 significant digits below 100, none above (`1.23`, `12.3`, `123`). */
-function compact(value: number): string {
-  if (value >= 100) return Math.round(value).toString();
-  if (value >= 10) return trimZero(value.toFixed(1));
-  return trimZero(value.toFixed(2));
-}
+/**
+ * Which convention a size follows (the twin of `paddock_units::Kind`; one case table, `crates/paddock-units/cases.json`):
+ * `'storage'` for files, disks, free space, cleanup, downloads and network or disk throughput (1 KB = 1000 bytes, as the
+ * Finder); `'memory'` for RAM, process and app memory, swap, commit, GPU memory and DIMM sizes (1 KB = 1024 bytes under the
+ * same labels, as Activity Monitor: 16 GiB reads "16 GB"). A rate follows its quantity.
+ */
+export type ByteKind = 'storage' | 'memory';
 
+const STEP: Record<ByteKind, number> = { storage: 1000, memory: 1024 };
+
+/** Bytes in one KB of `kind`. */
+export const byteStep = (kind: ByteKind): number => STEP[kind];
+
+const grouped = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const oneDecimal = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
 function trimZero(s: string): string {
   return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
 }
 
-/** `1536` → `1.5 KB` (decimal multiples, 1 KB = 1000 bytes, as the Finder shows them). */
-export function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
-  const sign = bytes < 0 ? '−' : '';
-  let value = Math.abs(bytes);
-  let unit = 0;
-  while (value >= 1000 && unit < BYTE_UNITS.length - 1) {
-    value /= 1000;
-    unit++;
-  }
-  // 999.6 KB would print "1000 KB": promote it so it reads "1 MB".
-  if (Math.round(value) >= 1000 && unit < BYTE_UNITS.length - 1) {
-    value /= 1000;
-    unit++;
-  }
-  return `${sign}${unit === 0 ? Math.round(value) : compact(value)} ${BYTE_UNITS[unit]}`;
+const roundSize = (value: number): number => (value < 10 ? Math.round(value * 10) / 10 : Math.round(value));
+
+function plainBytes(n: number): string {
+  return n === 1 ? '1 byte' : `${grouped.format(n)} bytes`;
 }
 
-/** A byte delta with an explicit sign: `+12 MB`, `−3.4 GB`, `0 B`. */
-export function formatBytesDelta(bytes: number): string {
-  if (bytes > 0) return `+${formatBytes(bytes)}`;
-  return formatBytes(bytes);
+/** `1500` → `1.5 KB`; below the step `12 bytes`; 999.9 KB rolls over to `1 MB`. A negative value keeps a `−` sign. */
+export function formatBytes(bytes: number | null | undefined, kind: ByteKind = 'storage'): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
+  if (bytes < 0) return `−${formatBytes(-bytes, kind)}`;
+  const step = STEP[kind];
+  if (bytes < step) return plainBytes(Math.round(bytes));
+  let value = bytes / step;
+  let i = 0;
+  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= step) {
+    value /= step;
+    i++;
+  }
+  return `${value < 10 ? oneDecimal.format(value) : grouped.format(value)} ${BYTE_UNITS[i]}`;
+}
+
+/** The size of memory (RAM, process memory, swap, commit, GPU): `formatBytes(bytes, 'memory')`. */
+export const formatMemory = (bytes: number | null | undefined): string => formatBytes(bytes, 'memory');
+
+/** The largest unit `bytes` is a whole multiple of, for limits: 8_000_000 is `8 MB` (storage), 1500 is `1500 bytes`. */
+export function formatWholeBytes(bytes: number, kind: ByteKind = 'storage'): string {
+  for (let power = 3; power >= 1; power--) {
+    const size = STEP[kind] ** power;
+    if (bytes >= size && bytes % size === 0) return `${bytes / size} ${BYTE_UNITS[power - 1]}`;
+  }
+  return `${bytes} bytes`;
+}
+
+/** A size typed by a person (`64k`, `10MB`, `2 GiB`) into bytes, or null; an explicit `KiB`/`MiB`/`GiB` is always binary. */
+export function parseSize(text: string, kind: ByteKind = 'storage'): number | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(?:([kmgt])(i)?)?b?\s*$/i.exec(text);
+  if (!m) return null;
+  const power = m[2] ? 'kmgt'.indexOf(m[2].toLowerCase()) + 1 : 0;
+  const bytes = Number(m[1]) * (m[3] ? 1024 : STEP[kind]) ** power;
+  return Number.isSafeInteger(Math.floor(bytes)) ? Math.floor(bytes) : null;
+}
+
+/** A byte delta with an explicit sign: `+12 MB`, `−3.4 GB`, `0 bytes`. */
+export function formatBytesDelta(bytes: number, kind: ByteKind = 'storage'): string {
+  if (bytes > 0) return `+${formatBytes(bytes, kind)}`;
+  return formatBytes(bytes, kind);
 }
 
 /** Bytes per second: `2.4 MB/s`. */
-export function formatRate(bps: number | null | undefined): string {
+export function formatRate(bps: number | null | undefined, kind: ByteKind = 'storage'): string {
   if (bps === null || bps === undefined || !Number.isFinite(bps)) return '—';
-  return `${formatBytes(Math.max(0, bps))}/s`;
+  return `${formatBytes(Math.max(0, bps), kind)}/s`;
 }
 
 /** A 0–100 percentage: `0.4%`, `12%`, `100%`. `digits` forces a fixed number of decimals. */

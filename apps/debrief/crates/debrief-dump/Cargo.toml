@@ -9,6 +9,7 @@ publish = false
 description = "Debrief dump engine (ADR 0023): the model of crash/memory dumps and UMDH heap logs, its wire form from the dumps plugin's process, and every analysis over it (findings, UMDH diffs, the AI summary). Pure: no I/O."
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 # PDB identities (name, GUID, age) as symbol stores file them; pure (no DbgHelp, no downloads).
 debrief-symbols = { path = "../debrief-symbols", default-features = false }
 # The document on the wire from the dumps plugin's process (`wire`, ADR 0017).

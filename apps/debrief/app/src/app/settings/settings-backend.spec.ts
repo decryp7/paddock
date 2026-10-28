@@ -67,7 +67,7 @@ describe('MockSettingsBackend', () => {
     expect(mockValidate(dur, -1)).toContain('whole milliseconds');
     expect(mockValidate(dur, 10)).toBe('Must be between 1 s and 1 min.');
     expect(mockValidate(dur, 1000)).toBeNull();
-    const size = f({ type: 'size', minBytes: 1024, maxBytes: 2048 });
+    const size = f({ type: 'size', kind: 'memory', minBytes: 1024, maxBytes: 2048 });
     expect(mockValidate(size, 1.5)).toContain('whole bytes');
     expect(mockValidate(size, 10)).toBe('Must be between 1 KB and 2 KB.');
     expect(mockValidate(size, 1024)).toBeNull();

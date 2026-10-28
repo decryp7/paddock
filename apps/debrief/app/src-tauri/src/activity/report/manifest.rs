@@ -12,7 +12,7 @@ pub const MANIFEST_KIND: &str = "debrief-diagnostics";
 /// Format version this Debrief writes and reads.
 pub const SCHEMA_VERSION: u32 = 1;
 /// Largest manifest read.
-pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
+pub const MAX_MANIFEST_BYTES: u64 = 256_000;
 /// Most files a manifest may list.
 pub const MAX_MANIFEST_FILES: usize = 2000;
 /// Longest file name in a manifest.
@@ -113,7 +113,7 @@ impl std::fmt::Display for ManifestError {
                 f,
                 "it was made by a newer Debrief (report format {v}; this Debrief reads format {SCHEMA_VERSION}); update Debrief to open it as a report"
             ),
-            ManifestError::TooLarge => write!(f, "its manifest is larger than {} KB", MAX_MANIFEST_BYTES / 1024),
+            ManifestError::TooLarge => write!(f, "its manifest is larger than {}", paddock_units::format_whole(MAX_MANIFEST_BYTES, paddock_units::Kind::Storage)),
             ManifestError::TooManyFiles(n) => write!(f, "its manifest lists {n} files (at most {MAX_MANIFEST_FILES})"),
             ManifestError::UnsafeName(n) => write!(
                 f,

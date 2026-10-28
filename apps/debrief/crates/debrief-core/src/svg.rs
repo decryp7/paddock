@@ -61,7 +61,7 @@ const DRAWING_ATTRIBUTES: &[&str] = &[
 pub const ICON: Policy = Policy {
     what: "SVG icons",
     one: "an SVG icon",
-    max_bytes: 16 * 1024,
+    max_bytes: 16_000,
     elements: DRAWING,
     attributes: DRAWING_ATTRIBUTES,
     figures: false,
@@ -72,7 +72,7 @@ pub const ICON: Policy = Policy {
 pub const FIGURE: Policy = Policy {
     what: "SVG images",
     one: "an SVG image",
-    max_bytes: 4 << 20,
+    max_bytes: 4_000_000,
     elements: &[
         "svg",
         "g",
@@ -183,7 +183,11 @@ pub fn sanitize(svg: &str, policy: &Policy) -> Result<String> {
 /// (e.g. redaction).
 pub fn sanitize_text(svg: &str, policy: &Policy, text: &mut dyn FnMut(&str) -> String) -> Result<String> {
     if svg.len() > policy.max_bytes {
-        return Err(anyhow!("{} are limited to {} KB", policy.what, policy.max_bytes / 1024));
+        return Err(anyhow!(
+            "{} are limited to {}",
+            policy.what,
+            paddock_units::format_whole(policy.max_bytes as u64, paddock_units::Kind::Storage)
+        ));
     }
     let mut reader = Reader::from_str(svg);
     // Figures keep the spaces of their text; icons have none worth keeping.

@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 spotter-core.workspace = true
+paddock-units.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
 

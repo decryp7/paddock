@@ -1,5 +1,5 @@
 import type { CpuInfo, MemoryFormFactor, MemoryKind } from '../../core/api.types';
-import { formatBytes } from '../../shared/format';
+import { formatMemory } from '../../shared/format';
 import type { DimmSlotModel, MemoryTech, SlotTag, SocPackageModel } from './hardware-models';
 import { isAppleSilicon } from './package-geometry';
 import { type SlotModel, hintLabel, kindLabel } from './slot-model';
@@ -23,7 +23,7 @@ export function toDimmSlots(model: SlotModel): DimmSlotModel[] {
       module: m && {
         tech: memoryTech(m.kind),
         form: form(m.formFactor),
-        sizeLabel: formatBytes(m.capacityBytes),
+        sizeLabel: formatMemory(m.capacityBytes),
         capacityBytes: m.capacityBytes,
         ratedMts: m.speedMts,
         runningMts: m.configuredSpeedMts,
@@ -39,7 +39,7 @@ export function toDimmSlots(model: SlotModel): DimmSlotModel[] {
 /** Unified or soldered memory next to the processor. */
 export function toSocPackage(cpu: CpuInfo, memory: { total: number; kind: MemoryKind }): SocPackageModel {
   const apple = isAppleSilicon(cpu.name);
-  const what = `${formatBytes(memory.total)} ${kindLabel(memory.kind)}`;
+  const what = `${formatMemory(memory.total)} ${kindLabel(memory.kind)}`;
   return {
     style: apple ? 'apple' : 'soldered',
     name: cpu.name,

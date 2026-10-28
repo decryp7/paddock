@@ -254,7 +254,7 @@ export const ModelsStore = signalStore(
           async () => {
             for (const m of models) await backend.deleteModel(m.id);
           },
-          `Freed ${bytes(freed)}.`,
+          `Freed ${bytes(freed, 'memory')}.`,
         );
         // Reload either way: a failure part-way still deleted the models before it.
         await load();

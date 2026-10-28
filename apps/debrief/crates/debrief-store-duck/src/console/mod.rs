@@ -379,7 +379,10 @@ impl DuckStore {
     fn check_sql(conn: &Connection, sql: &str) -> StoreResult<guard::Checked> {
         if sql.len() > MAX_SQL_LEN {
             return Err(StoreError::Query(QlError::new(
-                format!("The SQL text is longer than {} KB.", MAX_SQL_LEN >> 10),
+                format!(
+                    "The SQL text is longer than {}.",
+                    paddock_units::format_whole(MAX_SQL_LEN as u64, paddock_units::Kind::Storage)
+                ),
                 MAX_SQL_LEN,
                 0,
             )));

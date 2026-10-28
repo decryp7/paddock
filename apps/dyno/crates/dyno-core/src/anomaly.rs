@@ -3,7 +3,7 @@
 use crate::history::{AppMinute, HistoryPoint};
 use crate::stats::{linear_fit, mean_sd};
 use crate::time::{Timestamp, HOUR, MINUTE};
-use crate::units::{bytes, duration};
+use crate::units::{bytes, duration, Kind};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -96,7 +96,7 @@ pub fn memory_growth(rows: &[AppMinute]) -> Vec<Anomaly> {
                 since: first.at,
                 title: format!(
                     "{app}'s memory grew {} in {}",
-                    bytes(growth as u64),
+                    bytes(growth as u64, Kind::Memory),
                     duration((hours * 3600.0) as u64)
                 ),
                 explanation: format!(
@@ -104,8 +104,8 @@ pub fn memory_growth(rows: &[AppMinute]) -> Vec<Anomaly> {
                      memory back; if it keeps happening, look for an update."
                 ),
                 evidence: vec![
-                    Evidence::new("Growth rate", format!("{}/h", bytes(fit.slope as u64))),
-                    Evidence::new("Now", bytes(last.memory)),
+                    Evidence::new("Growth rate", format!("{}/h", bytes(fit.slope as u64, Kind::Memory))),
+                    Evidence::new("Now", bytes(last.memory, Kind::Memory)),
                     Evidence::new("Steadiness (R²)", format!("{:.2}", fit.r2)),
                 ],
             });

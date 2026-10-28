@@ -280,7 +280,7 @@ mod tests {
     use super::*;
     use dyno_core::extras::files::FinderMode;
 
-    const MB: usize = 1024 * 1024;
+    const MB: usize = 1_000_000;
 
     fn write(dir: &Path, name: &str, byte: u8, len: usize) -> PathBuf {
         let p = dir.join(name);
@@ -315,7 +315,7 @@ mod tests {
         let (r, canon) = run(&query(&root, FinderMode::Both), "s1").unwrap();
         assert_eq!(canon, root);
         assert_eq!(r.large[0].path, root.join("big.bin").to_string_lossy());
-        assert_eq!(r.large.len(), 4, "the tiny file is below the 1 MiB floor");
+        assert_eq!(r.large.len(), 4, "the tiny file is below the 1 MB floor");
         assert_eq!(r.duplicates.len(), 1, "{:#?}", r.duplicates);
         assert_eq!(r.duplicates[0].files.len(), 2);
         assert_eq!(r.wasted_bytes, 2 * MB as u64);

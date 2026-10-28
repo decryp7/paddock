@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 /// The state format this Pitcrew writes.
 pub const STATE_VERSION: u32 = 1;
 /// Largest state file Pitcrew reads.
-pub const MAX_STATE_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_STATE_BYTES: usize = 16_000_000;
 
 /// What the service remembers about one runner.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,7 +158,10 @@ pub fn load(primary: Option<&str>, backup: Option<&str>) -> LoadedState {
 
 fn parse(text: &str) -> Result<(ServiceState, Vec<String>), String> {
     if text.len() > MAX_STATE_BYTES {
-        return Err(format!("it is larger than {} MB", MAX_STATE_BYTES / (1024 * 1024)));
+        return Err(format!(
+            "it is larger than {}",
+            paddock_units::format_whole(MAX_STATE_BYTES as u64, paddock_units::Kind::Storage)
+        ));
     }
     let v: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let version = v.get("version").and_then(serde_json::Value::as_u64).ok_or("it has no version")?;

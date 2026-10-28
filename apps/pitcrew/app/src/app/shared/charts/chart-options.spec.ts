@@ -165,10 +165,10 @@ describe('diskOption', () => {
   });
   it('formats tooltip and value axis', () => {
     const o = diskOption(series, [], t, 24) as Opt;
-    expect(o['tooltip'].formatter([{ seriesName: 'a', value: [0, 2048], color: 'red' }])).toContain('2.0 KB');
+    expect(o['tooltip'].formatter([{ seriesName: 'a', value: [0, 2048], color: 'red' }])).toContain('2 KB');
     expect(o['tooltip'].formatter([])).toContain('min-width');
     const long = diskOption(series, [], t, 24 * 7) as Opt;
-    expect(long['tooltip'].formatter([{ seriesName: 'a', value: [0, 1], color: 'red' }])).toContain('1 B');
+    expect(long['tooltip'].formatter([{ seriesName: 'a', value: [0, 1], color: 'red' }])).toContain('1 byte');
     expect(o['yAxis'].axisLabel.formatter(2048)).toBe('2 KB');
   });
 });

@@ -185,24 +185,7 @@ pub struct PruneResult {
 /// Parses `1.5GB`, `512MB`, `12kB`, `0B`, `1.2 GiB` (decimal for `kB/MB/GB/TB`, binary for `KiB..`); `None` when it
 /// is not a size. The engines print rounded decimal sizes, so this is approximate by nature.
 pub fn parse_size(text: &str) -> Option<u64> {
-    let t = text.trim();
-    let split = t.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(t.len());
-    let (num, unit) = t.split_at(split);
-    let value: f64 = num.parse().ok()?;
-    let mult: f64 = match unit.trim().to_ascii_lowercase().as_str() {
-        "" | "b" => 1.0,
-        "kb" => 1e3,
-        "mb" => 1e6,
-        "gb" => 1e9,
-        "tb" => 1e12,
-        "kib" => 1024.0,
-        "mib" => 1024.0 * 1024.0,
-        "gib" => 1024.0 * 1024.0 * 1024.0,
-        "tib" => 1024.0_f64.powi(4),
-        _ => return None,
-    };
-    let bytes = value * mult;
-    (bytes.is_finite() && (0.0..9e18).contains(&bytes)).then_some(bytes as u64)
+    paddock_units::parse_size(text, paddock_units::Kind::Storage).ok()
 }
 
 /// Parses `docker system df --format '{{.Type}}\t{{.TotalCount}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}'`. A
@@ -380,7 +363,7 @@ pub fn plan_cache(entries: &[CacheEntry], limits: &CacheLimits, now: Timestamp) 
             rest.push(e);
         }
     }
-    let cap = limits.max_mb.saturating_mul(1024 * 1024);
+    let cap = limits.max_mb.saturating_mul(1_000_000);
     if limits.max_mb > 0 {
         for e in rest {
             if total <= cap {
@@ -515,7 +498,7 @@ mod tests {
     fn entry(name: &str, mb: u64, age_days: u64) -> CacheEntry {
         CacheEntry {
             name: name.into(),
-            bytes: mb * 1024 * 1024,
+            bytes: mb * 1_000_000,
             modified: Timestamp(100 * 86_400_000 - age_days * 86_400_000),
         }
     }

@@ -197,7 +197,7 @@ fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
     let peer = h.client();
     let t = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(t.path()).unwrap().join("stuff");
-    const MB: usize = 1024 * 1024;
+    const MB: usize = 1_000_000;
     let a = write(&root, "a/movie.mkv", 5, 2 * MB);
     let b = write(&root, "b/movie copy.mkv", 5, 2 * MB);
     write(&root, "big.iso", 1, 4 * MB);

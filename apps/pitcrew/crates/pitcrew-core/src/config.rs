@@ -29,7 +29,7 @@ pub const MAX_LABELS: usize = 32;
 /// Longest label.
 pub const MAX_LABEL_LEN: usize = 128;
 /// Largest configuration file Pitcrew reads.
-pub const MAX_CONFIG_BYTES: usize = 1024 * 1024;
+pub const MAX_CONFIG_BYTES: usize = 1_000_000;
 
 /// The whole configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -329,7 +329,10 @@ pub fn to_toml(config: &Config) -> Result<String, String> {
 /// Parses one file. `Err` only when the file as a whole is unusable.
 fn parse(text: &str) -> Result<Loaded, String> {
     if text.len() > MAX_CONFIG_BYTES {
-        return Err(format!("it is larger than {} KB", MAX_CONFIG_BYTES / 1024));
+        return Err(format!(
+            "it is larger than {}",
+            paddock_units::format_whole(MAX_CONFIG_BYTES as u64, paddock_units::Kind::Storage)
+        ));
     }
     let mut table: toml::Table = toml::from_str(text).map_err(|e| first_line(&e.to_string()))?;
     let found = match table.get("schema_version") {

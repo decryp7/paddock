@@ -1,20 +1,18 @@
 //! Wording for numbers that the core puts into sentences (diagnoses, anomalies, reports). The UI formats its own
 //! numbers; these are only for text the engine writes.
 
-/// Bytes in binary units with one decimal: "512 B", "1.5 KB", "3.2 GB" (KB = 1024 bytes, as the OSes show).
-pub fn bytes(n: u64) -> String {
-    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
-    let mut v = n as f64;
-    let mut u = 0;
-    while v >= 1024.0 && u < UNITS.len() - 1 {
-        v /= 1024.0;
-        u += 1;
-    }
-    if u == 0 {
-        format!("{n} B")
-    } else {
-        format!("{v:.1} {}", UNITS[u])
-    }
+pub use paddock_units::Kind;
+
+/// A size as text, from the family's one definition ([`paddock_units`]): "512 bytes", "1.5 KB", "16 GB". Pick
+/// [`Kind::Storage`] (decimal) for files, disks and transfer rates, [`Kind::Memory`] (binary steps, same labels) for RAM,
+/// process memory, swap and commit.
+pub fn bytes(n: u64, kind: Kind) -> String {
+    paddock_units::format_bytes(n, kind)
+}
+
+/// A limit as text in the largest whole unit: "128 KB", "8 MB" (see [`paddock_units::format_whole`]).
+pub fn whole(n: u64, kind: Kind) -> String {
+    paddock_units::format_whole(n, kind)
 }
 
 /// A duration in the two largest units: "45s", "15m", "2h 5m", "3d 4h".
@@ -36,17 +34,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bytes_read_well() {
-        assert_eq!(bytes(0), "0 B");
-        assert_eq!(bytes(1023), "1023 B");
-        assert_eq!(bytes(1536), "1.5 KB");
-        assert_eq!(bytes(3 << 30), "3.0 GB");
-        assert_eq!(
-            bytes(u64::MAX),
-            "16.0 EB"
-                .replace("EB", "PB")
-                .replace("16.0", &format!("{:.1}", u64::MAX as f64 / 1024f64.powi(5)))
-        );
+    fn bytes_follow_their_kind() {
+        assert_eq!(bytes(0, Kind::Storage), "0 bytes");
+        assert_eq!(bytes(1_500, Kind::Storage), "1.5 KB");
+        assert_eq!(bytes(16 << 30, Kind::Memory), "16 GB");
+        assert_eq!(bytes(16 << 30, Kind::Storage), "17 GB");
+        assert_eq!(whole(128_000, Kind::Storage), "128 KB");
     }
 
     #[test]

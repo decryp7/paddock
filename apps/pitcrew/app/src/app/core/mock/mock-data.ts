@@ -29,8 +29,12 @@ import { DEFAULT_PROCESS_POLICY } from './mock-processes';
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
+/** Storage sizes: decimal steps, as the Finder (1 GB = 1000 MB). */
 export const GB = 1000 ** 3;
 export const MB = 1000 ** 2;
+/** Memory sizes: binary steps under the same labels, as Activity Monitor (16 GiB shows as "16 GB"). */
+export const MEM_GB = 1024 ** 3;
+export const MEM_MB = 1024 ** 2;
 
 /** A small deterministic PRNG (mulberry32), so the demo looks the same on every load. */
 export function rng(seed: number): () => number {
@@ -198,7 +202,7 @@ function jobInfo(p: RunnerProfile, r: () => number, n: number): JobInfo {
 /** What a generated job used at most, and what it left running (from a hash, so the main random stream is unchanged). */
 function jobUse(n: number): Pick<FinishedJob, 'peakCpuPermille' | 'peakMemBytes' | 'leftovers'> {
   const k = hashNoise(n + 7_001);
-  return { peakCpuPermille: Math.round(120 + k * 640), peakMemBytes: Math.round((0.4 + hashNoise(n + 9_007) * 5.5) * GB), leftovers: n % 7 === 3 ? 1 + (n % 3) : 0 };
+  return { peakCpuPermille: Math.round(120 + k * 640), peakMemBytes: Math.round((0.4 + hashNoise(n + 9_007) * 5.5) * MEM_GB), leftovers: n % 7 === 3 ? 1 + (n % 3) : 0 };
 }
 
 /** 30 days (or `days`) of plausible history ending at `now`. */
@@ -303,7 +307,7 @@ export function clipSpans(spans: Span[], from: number, to: number): Span[] {
 /** The demo machine's samples over the last `rangeHours`, with a daily rhythm. */
 export function machineSamples(now: number, rangeHours: number): MachineSample[] {
   const step = rangeHours <= 24 ? 5 * MINUTE : rangeHours <= 168 ? 30 * MINUTE : 2 * HOUR;
-  const memTotal = 32 * GB;
+  const memTotal = 32 * MEM_GB;
   const diskTotal = 953 * GB;
   const out: MachineSample[] = [];
   const end = Math.floor(now / step) * step;
@@ -319,15 +323,15 @@ export function machineSamples(now: number, rangeHours: number): MachineSample[]
       at: t,
       cpuPermille: cpu,
       cpuPeakPermille: Math.min(1000, cpu + Math.round(120 + noise * 380)),
-      memUsedBytes: Math.round((11.5 + (weekend ? 0.3 : 1) * work * 9 + noise * 1.6) * GB),
+      memUsedBytes: Math.round((11.5 + (weekend ? 0.3 : 1) * work * 9 + noise * 1.6) * MEM_GB),
       memTotalBytes: memTotal,
       diskFreeBytes: Math.round((214 - (sinceCleanup / DAY) * 38 + noise * 1.5) * GB),
       diskTotalBytes: diskTotal,
       runners: {
         cpuPermille: Math.round(cpu * 0.55),
         cpuPeakPermille: Math.min(1000, Math.round(cpu * 0.55) + Math.round(100 + noise * 300)),
-        memBytes: Math.round((3.2 + (weekend ? 0.3 : 1) * work * 5.5 + noise * 0.8) * GB),
-        memPeakBytes: Math.round((4.6 + (weekend ? 0.3 : 1) * work * 6.2 + noise * 0.8) * GB),
+        memBytes: Math.round((3.2 + (weekend ? 0.3 : 1) * work * 5.5 + noise * 0.8) * MEM_GB),
+        memPeakBytes: Math.round((4.6 + (weekend ? 0.3 : 1) * work * 6.2 + noise * 0.8) * MEM_GB),
         processes: Math.round(3 + work * 14 + noise * 4),
       },
     });
@@ -354,7 +358,7 @@ export function usageSeries(name: string, now: number, rangeHours: number, scale
 
 /** The use now of a demo runner. */
 export function demoUsage(cpuPermille: number, memGb: number, processes: number): Usage {
-  return { cpuPermille, cpuPeakPermille: Math.min(1000, cpuPermille + 90), memBytes: Math.round(memGb * GB), memPeakBytes: Math.round(memGb * 1.2 * GB), processes };
+  return { cpuPermille, cpuPeakPermille: Math.min(1000, cpuPermille + 90), memBytes: Math.round(memGb * MEM_GB), memPeakBytes: Math.round(memGb * 1.2 * MEM_GB), processes };
 }
 
 /** A runner folder's size over the range: it grows with jobs and drops at the nightly cleanup. */
@@ -385,9 +389,9 @@ export const DEFAULT_CLEANUP: CleanupPolicy = {
   automatic: true,
   every_hours: 24,
   work_max_age_hours: 72,
-  cache_cap_mb: 20_480,
-  folder_cap_mb: 102_400,
-  min_free_mb: 20_480,
+  cache_cap_mb: 20_000,
+  folder_cap_mb: 100_000,
+  min_free_mb: 20_000,
   keep_previous: true,
 };
 
@@ -410,7 +414,7 @@ export function defaultConfig(runners: RunnerConfig[]): Config {
       logs: { max_bytes: 10 * MB, keep: 5 },
       cleanup: structuredClone(DEFAULT_CLEANUP),
       processes: structuredClone(DEFAULT_PROCESS_POLICY),
-      disk_guard: { enabled: true, drain_below_mb: 4096, resume_above_mb: 6144, reserve_mb: 1024 },
+      disk_guard: { enabled: true, drain_below_mb: 4000, resume_above_mb: 6000, reserve_mb: 1000 },
       pause: { mode: 'off', windows: [{ days: [], start: '22:00', end: '06:00' }], busy_percent: 40, quiet_minutes: 5 },
     },
     runners,

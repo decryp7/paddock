@@ -17,6 +17,7 @@ name = "debrief"
 path = "src/bin/debrief.rs"
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-core = { path = "../debrief-core" }
 # The store worker's client (no database linked); the CLI starts the worker like the app does.
 debrief-store-client = { path = "../debrief-store-client" }

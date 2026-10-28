@@ -266,7 +266,7 @@ pub trait Configurable: Send + Sync {
 
 Field kinds: `Bool`, `Int { min, max, step, unit }`, `Float { min, max, step, unit }`,
 `Text { max_len, pattern }`, `Enum { options }`, `Path { dir }`, `Duration { min_ms, max_ms }`
-(values in milliseconds), `Size { min_bytes, max_bytes }` (bytes) and `StringList { max_items }`.
+(values in milliseconds), `Size { kind, min_bytes, max_bytes }` (bytes; `kind` is `storage`, decimal KB, or `memory`, binary KB) and `StringList { max_items }`.
 Mark a field `needs_restart()` when it only takes effect after a restart (the UI then offers
 one) and `as_advanced()` to hide it behind "Show advanced".
 

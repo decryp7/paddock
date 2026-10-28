@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// The pack format this version reads.
 pub const FORMAT: u32 = 1;
 /// Largest pack file accepted.
-pub const MAX_PACK_BYTES: usize = 256 * 1024;
+pub const MAX_PACK_BYTES: usize = 256_000;
 const MAX_MODELS: usize = 500;
 const MAX_VARIANTS: usize = 32;
 

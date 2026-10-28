@@ -62,7 +62,9 @@ import {
   demoReplyWords,
   wordsThatFit,
   GPU_NAME,
+  GB,
   GiB,
+  MB,
   MiB,
   RAM_TOTAL,
   VRAM_TOTAL,
@@ -199,7 +201,7 @@ export class MockBackend implements PitwallBackend {
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
     if (options.installing) {
-      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (b11669)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 388 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
+      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (b11669)', host: 'github.com', bytesDone: 212 * MB, bytesTotal: 388 * MB, speedBps: 24 * MB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
       this.engineSetup_ = { state: 'installing', error: null, download };
     }
     if (options.crashed) {
@@ -251,8 +253,8 @@ export class MockBackend implements PitwallBackend {
     if (empty) for (const r of ['1h', '24h', '7d', '30d'] as const) this.histories.set(r, { range: r, stepMs: 60_000, points: [], requestsByApp: [], requestsByModel: [], events: [] });
     if (!empty) {
       this.downloads_ = [
-        { id: 'dl-1', kind: 'model', name: 'gemma-4-E4B-it-Q8_0.gguf', host: 'huggingface.co', bytesDone: 3.1 * GiB, bytesTotal: 7.63 * GiB, speedBps: 38 * MiB, state: 'downloading', error: null, startedAt: now - 90_000 },
-        { id: 'dl-0', kind: 'model', name: 'gemma-4-26B-A4B-it-Q4_K_M.gguf', host: 'huggingface.co', bytesDone: 6.2 * GiB, bytesTotal: 15.4 * GiB, speedBps: 0, state: 'paused', error: 'Connection reset; resumes from 6.2 GB', startedAt: now - 3_600_000 },
+        { id: 'dl-1', kind: 'model', name: 'gemma-4-E4B-it-Q8_0.gguf', host: 'huggingface.co', bytesDone: 3.1 * GB, bytesTotal: 7.63 * GB, speedBps: 38 * MB, state: 'downloading', error: null, startedAt: now - 90_000 },
+        { id: 'dl-0', kind: 'model', name: 'gemma-4-26B-A4B-it-Q4_K_M.gguf', host: 'huggingface.co', bytesDone: 6.2 * GB, bytesTotal: 15.4 * GB, speedBps: 0, state: 'paused', error: 'Connection reset; resumes from 6.2 GB', startedAt: now - 3_600_000 },
       ];
     }
   }
@@ -346,7 +348,7 @@ export class MockBackend implements PitwallBackend {
         d.speedBps = 0;
         this.finishDownload(d);
       } else {
-        d.speedBps = Math.round((32 + this.rnd() * 14) * MiB * (d.kind === 'engine' ? 0.6 : 1));
+        d.speedBps = Math.round((32 + this.rnd() * 14) * MB * (d.kind === 'engine' ? 0.6 : 1));
         d.bytesDone = Math.min(d.bytesTotal, d.bytesDone + d.speedBps * 8);
         if (d.bytesDone >= d.bytesTotal) d.state = 'verifying';
       }
@@ -371,7 +373,7 @@ export class MockBackend implements PitwallBackend {
         engine.builds.push({ id: cat.id, tag: cat.tag, label: cat.label, sizeBytes: cat.downloadBytes * 1.05, selfTest: 'passed', selfTestMessage: 'Self-test passed', devices: [GPU_NAME], active: false, outdated: false });
       }
     }
-    this.pushEvent({ kind: 'download', severity: 'info', message: `Downloaded ${d.name} (${(d.bytesTotal / GiB).toFixed(1)} GB, verified)`, modelId: null, appId: null, reason: null });
+    this.pushEvent({ kind: 'download', severity: 'info', message: `Downloaded ${d.name} (${(d.bytesTotal / GB).toFixed(1)} GB, verified)`, modelId: null, appId: null, reason: null });
   }
 
   private pushEvent(e: Omit<PitwallEvent, 'id' | 'at'>): void {
@@ -569,7 +571,7 @@ export class MockBackend implements PitwallBackend {
   downloadModel(repo: string, file: string, projector: string | null): Promise<Download> {
     return this.reply('downloadModel', () => {
       const variant = demoRepo(repo, this.library).variants.find((v) => v.file === file);
-      const d: Download = { id: `dl-${10 + this.nextId++}`, kind: 'model', name: file, host: 'huggingface.co', bytesDone: 0, bytesTotal: (variant?.sizeBytes ?? 2 * GiB) + (projector ? 854 * MiB : 0), speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
+      const d: Download = { id: `dl-${10 + this.nextId++}`, kind: 'model', name: file, host: 'huggingface.co', bytesDone: 0, bytesTotal: (variant?.sizeBytes ?? 2 * GB) + (projector ? 854 * MB : 0), speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
       this.downloads_.unshift(d);
       // Like the engine: a notice that offered this file is done once its download starts being tracked.
       this.updateNotices_ = this.updateNotices_.filter((n) => !(n.repo === repo && n.file === file));
@@ -679,10 +681,10 @@ export class MockBackend implements PitwallBackend {
     return this.reply('diskUsage', () => {
       const now = this.now();
       return {
-        modelsBytes: this.library.reduce((s, m) => s + m.sizeBytes + (m.projector ? 854 * MiB : 0), 0),
+        modelsBytes: this.library.reduce((s, m) => s + m.sizeBytes + (m.projector ? 854 * MB : 0), 0),
         enginesBytes: this.engines_[0]!.builds.reduce((s, b) => s + b.sizeBytes, 0),
         partialBytes: this.downloads_.filter((d) => d.state !== 'done' && d.state !== 'cancelled').reduce((s, d) => s + d.bytesDone, 0),
-        freeBytes: 312 * GiB,
+        freeBytes: 312 * GB,
         unused: this.library.filter((m) => !m.loaded && (m.lastUsedAt === null || now - m.lastUsedAt > 30 * 86_400_000)).map((m) => m.id),
         unusedAfterDays: 30,
       };
@@ -895,7 +897,7 @@ export class MockBackend implements PitwallBackend {
     if (d.temperature !== null && (d.temperature < 0 || d.temperature > 2)) return 'temperature: use a value between 0 and 2';
     if (d.topP !== null && (d.topP < 0 || d.topP > 1)) return 'top-p: use a value between 0 and 1';
     if (d.maxTokens !== null && (d.maxTokens < 1 || d.maxTokens > 1_048_576)) return 'max tokens: use between 1 and 1048576';
-    if (d.systemPrompt !== null && d.systemPrompt.length > 8192) return 'system prompt: use at most 8 KB of text';
+    if (d.systemPrompt !== null && d.systemPrompt.length > 8000) return 'system prompt: use at most 8 KB of text';
     if (alias !== editing && this.presets_.some((p) => p.alias === alias)) return `a preset named "${alias}" already exists`;
     return null;
   }

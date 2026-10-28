@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 pitcrew-core.workspace = true
+paddock-units.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

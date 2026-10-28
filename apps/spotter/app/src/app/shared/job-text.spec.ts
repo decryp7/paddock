@@ -5,8 +5,8 @@ const p = (over: Partial<JobProgress>): JobProgress => ({ phase: 'downloading', 
 
 describe('job text', () => {
   it('says bytes on their own scale, with the total when it is known', () => {
-    expect(jobNumbers(p({ done: 5 * 1000 * 1000, total: 20 * 1000 * 1000 }))).toBe('5.0 MB of 20.0 MB');
-    expect(jobNumbers(p({ done: 2000, total: null }))).toBe('2.0 KB');
+    expect(jobNumbers(p({ done: 5 * 1000 * 1000, total: 20 * 1000 * 1000 }))).toBe('5 MB of 20 MB');
+    expect(jobNumbers(p({ done: 2000, total: null }))).toBe('2 KB');
   });
 
   it('says items as "n of m" or as a growing count when the total is not known', () => {

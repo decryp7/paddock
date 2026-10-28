@@ -23,9 +23,9 @@ pub fn read(path: &Path) -> Result<String, Error> {
         Some(t) if t.len() > MAX_CONFIG_TEXT => Err(Error::Os {
             what: "reading the runner configuration",
             reason: format!(
-                "{} is larger than {} KB; edit it with your own editor",
+                "{} is larger than {}; edit it with your own editor",
                 path.display(),
-                MAX_CONFIG_TEXT / 1024
+                paddock_units::format_whole(MAX_CONFIG_TEXT as u64, paddock_units::Kind::Storage)
             ),
         }),
         Some(t) => Ok(t),

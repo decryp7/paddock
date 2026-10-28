@@ -6,7 +6,7 @@ use crate::window_manager::clean_title;
 use serde::{Deserialize, Serialize};
 
 /// The largest snapshot accepted (a PNG data URL); the UI scales its snapshot down to stay below.
-pub const MAX_SNAPSHOT_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_SNAPSHOT_BYTES: usize = 2_000_000;
 /// The largest icon (an SVG path on Debrief's 24×24 icon grid).
 pub const MAX_ICON_BYTES: usize = 1024;
 const PNG_PREFIX: &str = "data:image/png;base64,";
@@ -86,8 +86,8 @@ impl GhostRequest {
         let snapshot = self.snapshot.filter(|s| !s.is_empty());
         if snapshot.as_deref().is_some_and(|s| !valid_snapshot(s)) {
             return Err(format!(
-                "the ghost's snapshot is not a PNG data URL of at most {} MiB",
-                MAX_SNAPSHOT_BYTES / (1024 * 1024)
+                "the ghost's snapshot is not a PNG data URL of at most {}",
+                paddock_units::format_whole(MAX_SNAPSHOT_BYTES as u64, paddock_units::Kind::Storage)
             ));
         }
         Ok(Ghost {

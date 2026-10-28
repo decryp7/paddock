@@ -235,9 +235,9 @@ pub(crate) async fn parser_import_check(
         return Err(CmdError::new(
             ErrorCode::Limit,
             format!(
-                "the file is {} KiB; a parser file has at most {} KiB",
-                len / 1024,
-                MAX_PARSER_BYTES / 1024
+                "the file is {}; a parser file has at most {}",
+                paddock_units::format_bytes(len as u64, paddock_units::Kind::Storage),
+                paddock_units::format_whole(MAX_PARSER_BYTES as u64, paddock_units::Kind::Storage)
             ),
         ));
     }

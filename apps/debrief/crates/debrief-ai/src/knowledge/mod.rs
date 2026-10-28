@@ -18,7 +18,7 @@ pub use provider::KnowledgeProvider;
 pub use record::{KnowledgeRecord, KNOWLEDGE_RECORD_VERSION};
 
 /// Largest knowledge file (bytes of UTF-8).
-pub const MAX_FILE_BYTES: usize = 64 * 1024;
+pub const MAX_FILE_BYTES: usize = 64_000;
 /// Most files in one scope.
 pub const MAX_FILES: usize = 32;
 /// Longest file name (characters).

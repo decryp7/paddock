@@ -48,8 +48,8 @@ impl NoteSet {
     fn check_total(&self, removed: usize, added: usize) -> Result<()> {
         if self.text_bytes() - removed + added > MAX_TOTAL_TEXT_BYTES {
             return Err(NotesError::Limit(format!(
-                "this project's notes are at their limit ({} MiB of text): shorten or remove some first",
-                MAX_TOTAL_TEXT_BYTES / (1024 * 1024)
+                "this project's notes are at their limit ({} of text): shorten or remove some first",
+                paddock_units::format_whole(MAX_TOTAL_TEXT_BYTES as u64, paddock_units::Kind::Storage)
             )));
         }
         Ok(())

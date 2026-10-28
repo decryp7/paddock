@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 
 /// A `latest.json` larger than this is not release information.
 #[cfg_attr(not(test), allow(dead_code))]
-pub const MAX_MANIFEST_BYTES: usize = 1 << 20;
+pub const MAX_MANIFEST_BYTES: usize = 1_000_000;
 /// Release notes beyond this many characters are cut (with an ellipsis).
 pub const MAX_NOTES_CHARS: usize = 20_000;
 const MAX_PLATFORMS: usize = 64;
@@ -50,7 +50,10 @@ impl Manifest {
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn parse(text: &str) -> Result<Manifest, String> {
     if text.len() > MAX_MANIFEST_BYTES {
-        return Err(format!("the release information is larger than {} KB", MAX_MANIFEST_BYTES / 1024));
+        return Err(format!(
+            "the release information is larger than {}",
+            paddock_units::format_whole(MAX_MANIFEST_BYTES as u64, paddock_units::Kind::Storage)
+        ));
     }
     let value: Value = serde_json::from_str(text).map_err(|e| format!("not JSON: {e}"))?;
     from_value(&value)

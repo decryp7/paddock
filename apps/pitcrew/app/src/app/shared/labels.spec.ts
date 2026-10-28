@@ -157,7 +157,7 @@ describe('labels', () => {
     expect(looks[11]!.title).toBe('Job finished');
     expect(looks[11]!.detail).toBe('a repository');
     expect(looks[12]!.title).toBe('Update updated');
-    expect(looks[13]!.title).toContain('freed 2.0 KB');
+    expect(looks[13]!.title).toContain('freed 2 KB');
     expect(looks[13]!.tone).toBe('neutral');
     expect(looks[14]!.tone).toBe('warning');
     expect(looks[14]!.detail).toContain('could not be deleted');

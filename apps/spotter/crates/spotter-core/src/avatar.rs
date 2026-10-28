@@ -10,12 +10,12 @@ use crate::source::SourceConfig;
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 
-/// Largest avatar image accepted (128 KiB).
-pub const MAX_AVATAR_BYTES: usize = 128 << 10;
+/// Largest avatar image accepted (128 KB).
+pub const MAX_AVATAR_BYTES: usize = 128_000;
 /// Largest width or height of a raster avatar, in pixels.
 pub const MAX_AVATAR_DIMENSION: u32 = 1024;
-/// Largest SVG avatar (32 KiB): an icon, not an illustration.
-pub const MAX_SVG_BYTES: usize = 32 << 10;
+/// Largest SVG avatar (32 KB): an icon, not an illustration.
+pub const MAX_SVG_BYTES: usize = 32_000;
 
 /// The image formats Spotter shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +53,10 @@ pub fn check_image(bytes: &[u8]) -> Result<ImageKind, String> {
         return Err("the image is empty".into());
     }
     if bytes.len() > MAX_AVATAR_BYTES {
-        return Err(format!("the image is larger than {} KiB", MAX_AVATAR_BYTES >> 10));
+        return Err(format!(
+            "the image is larger than {}",
+            paddock_units::format_whole(MAX_AVATAR_BYTES as u64, paddock_units::Kind::Storage)
+        ));
     }
     if bytes.starts_with(&PNG_SIGNATURE) {
         return png_dimensions(bytes).and_then(dimensions_ok).map(|()| ImageKind::Png);

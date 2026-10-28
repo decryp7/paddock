@@ -106,7 +106,7 @@ pub struct ServerInfo {
 
 /// Most images in one chat request, and most bytes of their (base64) data together.
 pub const MAX_IMAGES: usize = 4;
-pub const MAX_IMAGE_DATA: usize = 8 * 1024 * 1024;
+pub const MAX_IMAGE_DATA: usize = 8_000_000;
 
 /// An image of a chat request: Debrief's sanitised re-encoding (never the user's file), base64.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -134,8 +134,8 @@ impl WireImage {
             return Err(RpcError::new(
                 code::INVALID_PARAMS,
                 format!(
-                    "at most {MAX_IMAGES} PNG or JPEG images of {} MB together",
-                    MAX_IMAGE_DATA / (1024 * 1024)
+                    "at most {MAX_IMAGES} PNG or JPEG images of {} together",
+                    paddock_units::format_whole(MAX_IMAGE_DATA as u64, paddock_units::Kind::Storage)
                 ),
             ));
         }

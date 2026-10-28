@@ -74,13 +74,13 @@ export class RunnerDetailPage {
   });
   protected readonly usageNow = computed(() => {
     const u = this.runner()?.usage;
-    return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes), processes: u.processes, peakCpu: formatPermille(u.cpuPeakPermille) } : null;
+    return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes, 'memory'), processes: u.processes, peakCpu: formatPermille(u.cpuPeakPermille) } : null;
   });
   protected readonly usageCpu = computed(() => this.usage().map((p) => p.cpuPermille));
   protected readonly usageMem = computed(() => this.usage().map((p) => p.memBytes));
   protected readonly usagePeak = computed(() => {
     const u = this.usage();
-    return u.length ? { cpu: formatPermille(Math.max(...u.map((p) => p.cpuPeakPermille))), mem: formatBytes(Math.max(...u.map((p) => p.memPeakBytes))) } : null;
+    return u.length ? { cpu: formatPermille(Math.max(...u.map((p) => p.cpuPeakPermille))), mem: formatBytes(Math.max(...u.map((p) => p.memPeakBytes)), 'memory') } : null;
   });
 
   protected readonly cpuPeakLabel = computed(() => `peak ${this.usagePeak()?.cpu ?? '—'}`);

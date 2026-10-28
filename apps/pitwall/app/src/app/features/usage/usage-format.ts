@@ -3,7 +3,7 @@ import { bytes, compact, int } from '../../shared/format';
 
 /** A limit's used or limit value in its own unit: bytes for the memory share, otherwise a count. */
 export function limitValue(kind: LimitKind, n: number): string {
-  if (kind === 'memoryShare') return bytes(n);
+  if (kind === 'memoryShare') return bytes(n, 'memory');
   return kind === 'tokensPerDay' || kind === 'tokensPerMonth' ? compact(n) : int(n);
 }
 

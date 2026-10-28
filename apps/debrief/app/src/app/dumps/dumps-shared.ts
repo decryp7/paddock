@@ -6,16 +6,16 @@ import { ANALYSIS_STYLES } from '../analysis/analysis-styles';
 import { AsyncResource } from '../analysis/async-resource';
 import { SeverityBadge } from '../live/severity-badge';
 import { DumpsBackend } from './dumps-backend';
-import { formatBytes as unitBytes, formatCount } from '../shared/format/units';
+import { ByteKind, formatBytes as unitBytes, formatCount } from '../shared/format/units';
 
 export { formatCount };
 
 /** The AI chat view (provide-ai.ts `AI_CHAT_VIEW`). */
 const AI_CHAT_VIEW = 'ai-chat';
 
-/** A size, also negative (a shrinking stack): the app's humanized sizes (display only; the engine computes them). */
-export function formatBytes(n: number): string {
-  return n < 0 ? `-${unitBytes(-n)}` : unitBytes(n);
+/** A size, also negative (a shrinking stack): the app's humanized sizes (display only; the engine computes them). Defaults to memory: dump sizes are heap and allocation sizes; a dump file on disk is storage. */
+export function formatBytes(n: number, kind: ByteKind = 'memory'): string {
+  return n < 0 ? `-${unitBytes(-n, kind)}` : unitBytes(n, kind);
 }
 
 /** A signed change: `+1.2 MB`. */

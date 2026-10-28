@@ -7,7 +7,7 @@ use crate::metrics::{derive_pressure, percent, MemoryPressure, SystemSample};
 use crate::startup::{ImpactRating, StartupEntry};
 use crate::time::Timestamp;
 use crate::tuning::Plan;
-use crate::units::{bytes, duration};
+use crate::units::{bytes, duration, Kind};
 use serde::{Deserialize, Serialize};
 
 /// The score in a word.
@@ -200,7 +200,7 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             };
             add(
                 "lowDisk",
-                format!("{} has {} free ({free:.0}%)", d.name, bytes(d.free)),
+                format!("{} has {} free ({free:.0}%)", d.name, bytes(d.free, Kind::Storage)),
                 "Windows and apps need free space for updates, the page file and temporary files.".into(),
                 impact,
                 severity,
@@ -288,8 +288,8 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             "Memory is under pressure".into(),
             format!(
                 "{} of {} in use. Close apps you don't need, or add memory.",
-                bytes(i.sample.memory.used),
-                bytes(i.sample.memory.total)
+                bytes(i.sample.memory.used, Kind::Memory),
+                bytes(i.sample.memory.total, Kind::Memory)
             ),
             if pressure == MemoryPressure::Critical { 15 } else { 8 },
             Severity::Warning,

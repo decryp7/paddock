@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Largest runner binary Pitcrew downloads.
-pub const MAX_BINARY: u64 = 256 * 1024 * 1024;
+pub const MAX_BINARY: u64 = 250_000_000;
 
 /// An HTTP client. Only `https://` URLs are fetched, except loopback `http://` when built for tests.
 #[derive(Clone)]
@@ -95,7 +95,10 @@ impl Http {
         if n > max {
             drop(file);
             let _ = std::fs::remove_file(dest);
-            return Err(format!("the download is larger than {} MB", max / (1024 * 1024)));
+            return Err(format!(
+                "the download is larger than {}",
+                paddock_units::format_whole(max, paddock_units::Kind::Storage)
+            ));
         }
         Ok(digest)
     }

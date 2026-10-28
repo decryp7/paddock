@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
-import { formatBytes, formatCount, formatPercent } from '../../shared/format';
+import { formatMemory, formatCount, formatPercent } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { LiveStore } from '../../state/live.store';
 import type { AppGroup } from '../../core/api.types';
@@ -73,7 +73,7 @@ export class TopApps {
     return this.metric() === 'cpu' ? g.cpu : g.memory;
   }
   protected value(g: AppGroup): string {
-    return this.metric() === 'cpu' ? formatPercent(g.cpu) : formatBytes(g.memory);
+    return this.metric() === 'cpu' ? formatPercent(g.cpu) : formatMemory(g.memory);
   }
   protected share(g: AppGroup): number {
     return (this.raw(g) / this.max()) * 100;

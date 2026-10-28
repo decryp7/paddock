@@ -17,7 +17,7 @@ import { ModelsStore } from './models.store';
 
 /** Longest alias and system prompt the editor accepts (the engine enforces the same limits). */
 export const ALIAS_MAX = 48;
-export const PROMPT_MAX = 8192;
+export const PROMPT_MAX = 8000;
 
 /** Example capability selections offered next to the installed models. */
 export const AUTO_EXAMPLES: readonly string[] = ['auto:chat', 'auto:chat,fast', 'auto:chat,tools', 'auto:vision', 'auto:embeddings'];

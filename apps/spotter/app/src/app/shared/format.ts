@@ -42,18 +42,63 @@ export function formatInterval(secs: number): string {
   return `every ${spanText(secs * SECOND)}`;
 }
 
-/** Byte counts with decimal units (1 KB = 1000 bytes). */
-export function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return '—';
-  if (bytes < 1000) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = bytes / 1000;
+/**
+ * Which convention a size follows (the twin of `paddock_units::Kind`; one case table, `crates/paddock-units/cases.json`):
+ * `'storage'` is for files, disks, downloads, caches, imports, logs and network transfer (1 KB = 1000 bytes, as the Finder);
+ * `'memory'` is for RAM, process memory, working set, heap and GPU memory (1 KB = 1024 bytes under the same labels, as
+ * Activity Monitor: 16 GiB is "16 GB"). A rate follows its quantity.
+ */
+export type ByteKind = 'storage' | 'memory';
+
+const BYTE_UNITS = ['KB', 'MB', 'GB', 'TB', 'PB'] as const;
+const STEP: Record<ByteKind, number> = { storage: 1000, memory: 1024 };
+const grouped = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const oneDecimal = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+const none = '—';
+
+/** Bytes in one KB of `kind`. */
+export function byteStep(kind: ByteKind): number {
+  return STEP[kind];
+}
+
+function plainBytes(n: number): string {
+  return n === 1 ? '1 byte' : `${grouped.format(n)} bytes`;
+}
+
+function roundSize(value: number): number {
+  return value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
+}
+
+/** `12 bytes`, `1 byte`, `850 KB`, `1.2 GB`, `16 GB` (memory). 999.9 KB rounds up to `1 MB`, not `1,000 KB`. */
+export function formatBytes(bytes: number | null | undefined, kind: ByteKind = 'storage'): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return none;
+  const step = STEP[kind];
+  if (bytes < step) return plainBytes(Math.round(bytes));
+  let value = bytes / step;
   let i = 0;
-  while (v >= 1000 && i < units.length - 1) {
-    v /= 1000;
+  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= step) {
+    value /= step;
     i++;
   }
-  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+  return `${(value < 10 ? oneDecimal : grouped).format(value)} ${BYTE_UNITS[i]}`;
+}
+
+/** The largest unit `bytes` is a whole multiple of, for limits: 8_000_000 is `8 MB` (storage), `1500 bytes`. */
+export function formatWholeBytes(bytes: number, kind: ByteKind = 'storage'): string {
+  for (let power = 3; power >= 1; power--) {
+    const size = STEP[kind] ** power;
+    if (bytes >= size && bytes % size === 0) return `${bytes / size} ${BYTE_UNITS[power - 1]}`;
+  }
+  return `${bytes} bytes`;
+}
+
+/** A size typed by a person (`512`, `64k`, `10MB`, `1.5 g`, `2 GiB`) in bytes, or null. An explicit `KiB`/`MiB` is binary. */
+export function parseSize(text: string, kind: ByteKind = 'storage'): number | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(?:([kmgt])(i)?)?b?\s*$/i.exec(text);
+  if (!m) return null;
+  const power = m[2] ? 'kmgt'.indexOf(m[2].toLowerCase()) + 1 : 0;
+  const bytes = Number(m[1]) * (m[3] ? 1024 : STEP[kind]) ** power;
+  return Number.isSafeInteger(Math.floor(bytes)) ? Math.floor(bytes) : null;
 }
 
 /** A date and time in the user's locale; `—` when unknown. */

@@ -1601,6 +1601,7 @@ dependencies = [
  "debrief-monitor",
  "debrief-plugin-tools",
  "globset",
+ "paddock-units",
  "serde",
  "serde_json",
  "sysinfo",
@@ -1626,6 +1627,7 @@ dependencies = [
  "image",
  "libc",
  "log",
+ "paddock-units",
  "percent-encoding",
  "proptest",
  "regex",
@@ -1710,6 +1712,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-web-kit",
  "open",
+ "paddock-units",
  "semver",
  "serde",
  "serde_json",
@@ -1756,6 +1759,7 @@ dependencies = [
  "debrief-pdf",
  "debrief-store-client",
  "debrief-store-duck",
+ "paddock-units",
  "serde",
  "serde_json",
  "tempfile",
@@ -1799,6 +1803,7 @@ dependencies = [
  "insta",
  "libc",
  "log",
+ "paddock-units",
  "proptest",
  "quick-xml",
  "rayon",
@@ -1824,6 +1829,7 @@ name = "debrief-dump"
 version = "0.1.0"
 dependencies = [
  "debrief-symbols",
+ "paddock-units",
  "postcard",
  "proptest",
  "serde",
@@ -1838,6 +1844,7 @@ version = "0.1.0"
 dependencies = [
  "debrief-plugin-profiling",
  "debrief-profile",
+ "paddock-units",
  "proptest",
  "serde",
  "tempfile",
@@ -1902,6 +1909,7 @@ dependencies = [
  "landlock",
  "libc",
  "paddock-proc",
+ "paddock-units",
  "postcard",
  "proptest",
  "serde",
@@ -1931,6 +1939,7 @@ name = "debrief-notes"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "paddock-units",
  "proptest",
  "serde",
  "serde_json",
@@ -1962,6 +1971,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "debrief-ipc",
+ "paddock-units",
  "postcard",
  "regex",
  "serde",
@@ -1980,6 +1990,7 @@ dependencies = [
  "debrief-plugin-api",
  "debrief-plugin-profiling",
  "debrief-profile",
+ "paddock-units",
  "proptest",
  "serde",
  "serde_json",
@@ -1998,6 +2009,7 @@ dependencies = [
  "debrief-symbols",
  "minidump",
  "minidump-unwind",
+ "paddock-units",
  "pdb",
  "proptest",
  "serde",
@@ -2064,6 +2076,7 @@ dependencies = [
  "debrief-plugin-profiling",
  "debrief-profile",
  "debrief-symbols",
+ "paddock-units",
  "proptest",
  "serde",
  "serde_json",
@@ -2235,6 +2248,7 @@ dependencies = [
 name = "debrief-profile"
 version = "0.1.0"
 dependencies = [
+ "paddock-units",
  "postcard",
  "proptest",
  "regex",
@@ -2272,6 +2286,7 @@ dependencies = [
  "getrandom 0.4.3",
  "log",
  "memory-stats",
+ "paddock-units",
  "parquet",
  "rayon",
  "serde",
@@ -2307,6 +2322,7 @@ dependencies = [
 name = "debrief-symbols"
 version = "0.1.0"
 dependencies = [
+ "paddock-units",
  "proptest",
  "tempfile",
  "thiserror 2.0.21",
@@ -2324,6 +2340,7 @@ dependencies = [
  "debrief-ipc",
  "log",
  "lzma-rs",
+ "paddock-units",
  "proptest",
  "serde",
  "serde_json",
@@ -5335,6 +5352,13 @@ dependencies = [
  "paddock-workspace-hack",
  "sysinfo",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "paddock-units"
+version = "0.1.0"
+dependencies = [
+ "paddock-workspace-hack",
 ]
 
 [[package]]

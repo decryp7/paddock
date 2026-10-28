@@ -52,7 +52,7 @@ import { UpdatesStore } from '../updates/updates.store';
         <section class="mem" aria-label="Memory">
           <div class="row">
             <span class="k">RAM</span>
-            <span class="v num">{{ size(m.ramTotal - m.ramAvailable) }} <span class="faint">/ {{ size(m.ramTotal, 0) }}</span></span>
+            <span class="v num">{{ size(m.ramTotal - m.ramAvailable, 'memory') }} <span class="faint">/ {{ size(m.ramTotal, 'memory') }}</span></span>
             @if (pressure(); as p) {
               @if (p.tone !== 'ok') {
                 <span class="status" [attr.data-tone]="p.tone">{{ p.label }}</span>
@@ -63,7 +63,7 @@ import { UpdatesStore } from '../updates/updates.store';
           @if (vram(); as g) {
             <div class="row">
               <span class="k">VRAM</span>
-              <span class="v num">{{ size(g.used) }} <span class="faint">/ {{ size(g.total, 0) }}</span></span>
+              <span class="v num">{{ size(g.used, 'memory') }} <span class="faint">/ {{ size(g.total, 'memory') }}</span></span>
               <span class="faint small">{{ g.util === null ? '' : g.util + '% busy' }}</span>
             </div>
             <div class="meter" [attr.data-tone]="tone(g.pct)"><span [style.width.%]="g.pct"></span></div>

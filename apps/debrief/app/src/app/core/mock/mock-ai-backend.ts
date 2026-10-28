@@ -687,7 +687,7 @@ export class MockAiBackend extends AiBackend {
       this.check('image');
       if (!data) throw new AiError('invalid', 'the image is empty');
       // Base64 of 32 MB (the engine's file limit).
-      if (data.length > Math.ceil((32 * 1024 * 1024) / 3) * 4) throw new AiError('invalid', 'the image is larger than 32 MB');
+      if (data.length > Math.ceil(32_000_000 / 3) * 4) throw new AiError('invalid', 'the image is larger than 32 MB');
       const format = mockFormatOf(data);
       if (!format) throw new AiError('invalid', 'this is not a PNG, JPEG, BMP, GIF or WebP image');
       return this.addImage((name ?? '').trim() || 'Pasted image', null, format);

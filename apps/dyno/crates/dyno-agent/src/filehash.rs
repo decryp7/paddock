@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// The largest file hashed (a program bigger than this is not a file anyone sends to VirusTotal).
-pub const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+pub const MAX_BYTES: u64 = 2_000_000_000;
 /// Hashes remembered.
 const CACHE_ENTRIES: usize = 256;
 
@@ -63,7 +63,10 @@ impl FileHasher {
             return Err("That is not a file.".into());
         }
         if meta.len() > MAX_BYTES {
-            return Err("The file is too large to hash (over 2 GB).".into());
+            return Err(format!(
+                "The file is too large to hash (over {}).",
+                dyno_core::units::whole(MAX_BYTES, dyno_core::units::Kind::Storage)
+            ));
         }
         let shown = real.to_string_lossy().into_owned();
         let key: Key = (shown.clone(), meta.len(), meta.modified().map(millis).unwrap_or(0));

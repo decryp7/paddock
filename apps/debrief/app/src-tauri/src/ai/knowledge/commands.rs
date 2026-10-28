@@ -120,10 +120,10 @@ pub async fn ai_knowledge_import<R: Runtime>(
             return Err(AiCmdError::new(
                 AiErrorCode::Limit,
                 format!(
-                    "{} is too large for a knowledge file ({} KiB; at most {} KiB): split it or shorten it",
+                    "{} is too large for a knowledge file ({}; at most {}): split it or shorten it",
                     path.display(),
-                    len.div_ceil(1024),
-                    MAX_FILE_BYTES / 1024
+                    paddock_units::format_bytes(len as u64, paddock_units::Kind::Storage),
+                    paddock_units::format_whole(MAX_FILE_BYTES as u64, paddock_units::Kind::Storage)
                 ),
             ));
         }

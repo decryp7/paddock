@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Icon } from '../../shared/icon';
 import type { IconName } from '../../shared/icons';
-import { formatBytes, formatPercent } from '../../shared/format';
+import { formatMemory, formatPercent } from '../../shared/format';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { Ring } from '../../shared/ring';
 import { Sparkline } from '../../shared/sparkline';
@@ -218,6 +218,6 @@ export class WidgetView {
   protected readonly anomalyIcon = (k: keyof typeof ANOMALY_ICON) => ANOMALY_ICON[k];
   /** Slow-moving levels are drawn zoomed so a steady 50% still shows its line. */
   protected readonly zoomed = computed(() => ['memory', 'swap', 'gpuLoad', 'diskFree', 'battery'].includes(String(this.widget().metric)));
-  protected readonly topValue = (g: { cpu: number; memory: number }) => (this.widget().metric === 'memory' ? formatBytes(g.memory) : formatPercent(g.cpu));
+  protected readonly topValue = (g: { cpu: number; memory: number }) => (this.widget().metric === 'memory' ? formatMemory(g.memory) : formatPercent(g.cpu));
   protected readonly cellColor = (v: number) => `color-mix(in srgb, var(--accent) ${Math.round(Math.min(100, Math.max(0, v)) * 0.85)}%, var(--surface-active))`;
 }

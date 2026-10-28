@@ -155,7 +155,7 @@ export class KnowledgeSettings implements OnInit {
   }
 
   private openEditor(file: KnowledgeInfo | null, scope: KnowledgeScope): void {
-    const maxBytes = this.store.list()?.maxFileBytes ?? 64 * 1024;
+    const maxBytes = this.store.list()?.maxFileBytes ?? 64_000;
     void import('./knowledge-editor').then((m) => m.openKnowledgeEditor(this.dialogs, file, scope, maxBytes));
   }
 

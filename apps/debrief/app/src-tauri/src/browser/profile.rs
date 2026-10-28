@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 /// The profile's folder name under Debrief's data folder.
 pub const FOLDER: &str = "research-profile";
 /// The default size limit, and the limits of the setting.
-pub const DEFAULT_MAX_BYTES: u64 = 500 << 20;
-pub const MIN_MAX_BYTES: u64 = 50 << 20;
-pub const MAX_MAX_BYTES: u64 = 5 << 30;
+pub const DEFAULT_MAX_BYTES: u64 = 500_000_000;
+pub const MIN_MAX_BYTES: u64 = 50_000_000;
+pub const MAX_MAX_BYTES: u64 = 5_000_000_000;
 /// The browser's disk cache inside the kept profile (it would otherwise fill the size limit quickly).
 pub const DISK_CACHE_BYTES: u64 = 50 << 20;
 /// Files a size count looks at, at most (a profile is a few thousand files).
@@ -43,8 +43,8 @@ impl Check {
             Check::Usable => None,
             Check::TooLarge { bytes, max } => Some(format!(
                 "The research profile is {} (the limit is {}), so this research used a throwaway profile. Clear it in Settings ▸ Web browser, or raise the limit.",
-                mb(*bytes),
-                mb(*max)
+                size_text(*bytes),
+                size_text(*max)
             )),
             Check::Damaged(why) => Some(format!(
                 "The research profile is damaged ({why}), so this research used a throwaway profile. Clear it in Settings ▸ Web browser to start a fresh one."
@@ -53,8 +53,8 @@ impl Check {
     }
 }
 
-fn mb(bytes: u64) -> String {
-    format!("{} MB", bytes.div_ceil(1 << 20))
+fn size_text(bytes: u64) -> String {
+    paddock_units::format_bytes(bytes, paddock_units::Kind::Storage)
 }
 
 /// Checks the kept profile at `dir` against `max` bytes.

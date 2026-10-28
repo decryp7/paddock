@@ -102,9 +102,9 @@ pub const SNAPSHOTS: &str = "snapshots";
 pub const CACHES: [&str; 2] = ["index", "tmp"];
 
 /// Largest single file of an exported project (the database, a segment).
-pub const MAX_PROJECT_ENTRY: u64 = 256 << 30;
+pub const MAX_PROJECT_ENTRY: u64 = 256_000_000_000;
 /// Largest exported project, expanded.
-pub const MAX_PROJECT_BYTES: u64 = 1 << 40;
+pub const MAX_PROJECT_BYTES: u64 = 1_000_000_000_000;
 /// Most files in an exported project.
 pub const MAX_PROJECT_ENTRIES: usize = 100_000;
 /// Largest `project.toml`.
@@ -445,7 +445,10 @@ fn extract_project<R: Read + Seek>(path: &Path, zip: &mut zip::ZipArchive<R>, de
 
 fn cap(what: &str, n: u64, max: u64) -> Result<()> {
     if n > max {
-        bail!("{what} expands to more than {} GiB", max >> 30);
+        bail!(
+            "{what} expands to more than {}",
+            paddock_units::format_whole(max, paddock_units::Kind::Storage)
+        );
     }
     Ok(())
 }
@@ -700,11 +703,11 @@ mod tests {
         let e = cap("data.duckdb", MAX_PROJECT_ENTRY + 1, MAX_PROJECT_ENTRY)
             .unwrap_err()
             .to_string();
-        assert_eq!(e, "data.duckdb expands to more than 256 GiB");
+        assert_eq!(e, "data.duckdb expands to more than 256 GB");
         assert!(cap("the project", MAX_PROJECT_BYTES + 1, MAX_PROJECT_BYTES)
             .unwrap_err()
             .to_string()
-            .contains("1024 GiB"));
+            .contains("1000 GB"));
     }
 
     #[test]

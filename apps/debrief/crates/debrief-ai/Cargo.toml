@@ -16,6 +16,7 @@ path = "src/bin/fake_worker.rs"
 test = false
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-core = { path = "../debrief-core" }
 debrief-collect = { path = "../debrief-collect" }
 debrief-ipc = { path = "../debrief-ipc" }

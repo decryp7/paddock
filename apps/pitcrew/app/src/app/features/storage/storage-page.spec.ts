@@ -40,10 +40,10 @@ describe('StoragePage', () => {
       const { el } = await mount();
       expect(text(el.querySelector('[data-testid="engine-name"]'))).toBe('Docker');
       const images = el.querySelector('[data-testid="usage-Images"]')!;
-      expect(text(images)).toContain('18.4 GB');
+      expect(text(images)).toContain('18 GB');
       expect(text(images)).toContain('34 in total, 6 active');
-      expect(text(images)).toContain('12.1 GB');
-      expect(text(images)).toContain('12.1 GB reclaimable');
+      expect(text(images)).toContain('12 GB');
+      expect(text(images)).toContain('12 GB reclaimable');
       expect(images.querySelectorAll('.stack').length).toBe(1);
       expect(text(images.querySelector('.legend'))).toBe('In useReclaimable');
       expect(el.querySelectorAll('.usage-card').length).toBe(4);
@@ -243,7 +243,7 @@ describe('StoragePage', () => {
       await click(f, btn(el, 'cache-clean'));
       await click(f, dlgButton('Delete now'));
       await settle(f, 3);
-      expect(clean).toHaveBeenCalledWith('build-win', { maxMb: 4096, maxAgeDays: 30 });
+      expect(clean).toHaveBeenCalledWith('build-win', { maxMb: 4000, maxAgeDays: 30 });
       expect(text(el.querySelector('[data-testid="cache-result"]'))).toContain('Deleted');
     });
 

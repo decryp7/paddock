@@ -79,7 +79,7 @@ export function entryStateLabel(e: AiRuntimeEntry): string {
 
 /** "NVIDIA GeForce RTX 4060 (CUDA0, 7.4 GB of 8 GB free)". */
 export function deviceLine(d: AiRuntimeDevice): string {
-  const size = (mib: number) => formatBytes(mib * 1024 * 1024);
+  const size = (mib: number) => formatBytes(mib * 1024 * 1024, 'memory');
   return $localize`:@@ai.runtime.device:${d.description}:description: (${d.name}:name:, ${size(d.freeMib)}:free: of ${size(d.totalMib)}:total: free)`;
 }
 

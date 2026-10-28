@@ -3,6 +3,7 @@
 //! renaming it into place. A file that fails verification is deleted, never left looking finished.
 
 use crate::http::{read_bounded, transport, Http};
+use paddock_units::{format_whole, Kind};
 use reqwest::header::{CONTENT_RANGE, RANGE};
 use reqwest::StatusCode;
 use spotter_core::action::{file_name, resume_offset};
@@ -18,8 +19,8 @@ const IO_BUFFER: usize = 1 << 20;
 /// How often a stalled network wait looks at the cancel flag.
 const CANCEL_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
-/// Largest file Spotter downloads (64 GiB).
-pub const MAX_DOWNLOAD: u64 = 64 << 30;
+/// Largest file Spotter downloads (64 GB).
+pub const MAX_DOWNLOAD: u64 = 64_000_000_000;
 
 /// A finished download.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,7 +231,7 @@ async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher, max: u6
     }
     let total = response.content_length().map(|n| n + offset);
     if total.is_some_and(|t| t > max) {
-        return Err(format!("{url} is larger than {} GiB.", max >> 30));
+        return Err(format!("{url} is larger than {}.", format_whole(max, Kind::Storage)));
     }
     let offset = resume_offset(offset, total);
     let mut file = open_part(part, offset).await?;
@@ -242,7 +243,7 @@ async fn fetch(http: &Http, url: &str, part: &Path, hasher: &mut Hasher, max: u6
     {
         written += chunk.len() as u64;
         if written > max {
-            return Err(format!("{url} is larger than {} GiB.", max >> 30));
+            return Err(format!("{url} is larger than {}.", format_whole(max, Kind::Storage)));
         }
         stopped(job)?;
         hasher.update(&chunk);
@@ -265,7 +266,11 @@ async fn copy(source: &Path, part: &Path, hasher: &mut Hasher, job: &Job) -> Res
     }
     let total = meta.len();
     if total > MAX_DOWNLOAD {
-        return Err(format!("{} is larger than {} GiB.", source.display(), MAX_DOWNLOAD >> 30));
+        return Err(format!(
+            "{} is larger than {}.",
+            source.display(),
+            format_whole(MAX_DOWNLOAD, Kind::Storage)
+        ));
     }
     let existing = part_len(part).await;
     let mut have = hash_existing(part, existing, hasher, job).await?;
@@ -331,7 +336,7 @@ mod tests {
         let e = fetch(&http, &chunked_server(), &part, &mut Hasher::new(), 8, &Job::none())
             .await
             .unwrap_err();
-        assert!(e.contains("larger than 0 GiB"), "{e}");
+        assert!(e.contains("larger than 8 bytes"), "{e}");
         let ok = fetch(
             &http,
             &chunked_server(),

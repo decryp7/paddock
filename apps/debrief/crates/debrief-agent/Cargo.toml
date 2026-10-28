@@ -17,6 +17,7 @@ name = "debrief-agent"
 path = "src/bin/debrief-agent.rs"
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-core = { path = "../debrief-core" }
 debrief-collect = { path = "../debrief-collect" }
 debrief-monitor = { path = "../debrief-monitor" }

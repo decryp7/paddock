@@ -20,7 +20,7 @@ const STRING_PCT: f64 = 25.0;
 const FINALIZER_COUNT: usize = 1000;
 
 fn mb(v: u64) -> String {
-    format!("{:.1} MB", v as f64 / 1e6)
+    paddock_units::format_bytes(v, paddock_units::Kind::Memory)
 }
 
 /// A synthetic root group (`[Stack roots]`, `[Static variables]`, ...).

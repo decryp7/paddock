@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject
 import { MatTooltip } from '@angular/material/tooltip';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
-import { formatBytes, formatPercent, formatRate } from '../../shared/format';
+import { formatMemory, formatPercent, formatRate } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { Notifier, Toasts } from '../../shared/notifier';
@@ -63,7 +63,7 @@ import { SettingsStore } from '../../state/settings.store';
           <span class="eyebrow">Top apps by CPU</span>
           <ol>
             @for (g of top(); track g.id) {
-              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ pct(g.cpu) }}</span><span class="num faint">{{ bytes(g.memory) }}</span></li>
+              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ pct(g.cpu) }}</span><span class="num faint">{{ memBytes(g.memory) }}</span></li>
             } @empty {
               <li class="faint">Waiting for the first reading…</li>
             }
@@ -125,7 +125,7 @@ export class Tray implements OnInit, OnDestroy {
 
   protected readonly pct = formatPercent;
   protected readonly rate = formatRate;
-  protected readonly bytes = formatBytes;
+  protected readonly memBytes = formatMemory;
   protected readonly score = (v: number) => Math.round(v).toString();
   protected readonly cpu = computed(() => this.live.system()?.cpu.total ?? 0);
   protected readonly mem = computed(() => {

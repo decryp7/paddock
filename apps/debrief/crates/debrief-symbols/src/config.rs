@@ -40,7 +40,7 @@ impl ServerConfig {
         ServerConfig {
             url: "https://msdl.microsoft.com/download/symbols".into(),
             timeout: Duration::from_secs(120),
-            max_bytes: 512 << 20,
+            max_bytes: 512_000_000,
         }
     }
 

@@ -87,7 +87,7 @@ describe('historyOption', () => {
 });
 
 describe('consumersOption', () => {
-  const consumers = Array.from({ length: 8 }, (_, i) => ({ app: `app${i}`, cpuAvg: i + 1, memoryAvg: 1000 ** 3 }));
+  const consumers = Array.from({ length: 8 }, (_, i) => ({ app: `app${i}`, cpuAvg: i + 1, memoryAvg: 1024 ** 3 }));
   it('keeps the top six, largest at the top of the bar chart', () => {
     const o = consumersOption(consumers, LIGHT) as { yAxis: { data: string[] } };
     expect(o.yAxis.data).toEqual(['app2', 'app3', 'app4', 'app5', 'app6', 'app7']);

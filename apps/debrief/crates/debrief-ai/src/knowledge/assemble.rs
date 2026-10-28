@@ -87,8 +87,8 @@ pub fn assemble(project: &[KnowledgeFile], global: &[KnowledgeFile], budget: usi
         let mut note = String::new();
         if body.len() > MAX_FILE_BYTES {
             note = format!(
-                "\n[… the rest of this file was cut: it is longer than {} KiB]",
-                MAX_FILE_BYTES / 1024
+                "\n[… the rest of this file was cut: it is longer than {}]",
+                paddock_units::format_whole(MAX_FILE_BYTES as u64, paddock_units::Kind::Storage)
             );
             body = prefix(&body, MAX_FILE_BYTES).to_string();
         }

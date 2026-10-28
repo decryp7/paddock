@@ -281,8 +281,8 @@ fn control(
     let truncated = shared.has(FULL);
     if truncated {
         notes.push(format!(
-            "The recording reached the size limit of {} MB and was cut",
-            limits.max_bytes >> 20
+            "The recording reached the size limit of {} and was cut",
+            paddock_units::format_whole(limits.max_bytes, paddock_units::Kind::Storage)
         ));
     }
     if preset.samples() && stats.samples == 0 {

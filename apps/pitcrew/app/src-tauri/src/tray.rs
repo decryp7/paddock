@@ -105,8 +105,8 @@ pub fn load_text<'a>(usages: impl Iterator<Item = &'a pitcrew_core::usage::Usage
         return None;
     }
     let pct = f64::from(usage.cpu_permille) / 10.0;
-    let gb = usage.mem_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
-    Some(format!("CPU {pct:.0}% · {gb:.1} GB"))
+    let mem = paddock_units::format_bytes(usage.mem_bytes, paddock_units::Kind::Memory);
+    Some(format!("CPU {pct:.0}% · {mem}"))
 }
 
 /// The icon for a state (PNG bytes built into the app).

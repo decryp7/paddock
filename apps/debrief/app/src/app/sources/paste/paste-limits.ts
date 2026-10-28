@@ -1,5 +1,5 @@
-/** The most text "Paste as log" takes: 8 MiB of UTF-8 (the engine enforces the same cap). */
-export const PASTE_MAX_BYTES = 8 * 1024 * 1024;
+/** The most text "Paste as log" takes: 8 MB of UTF-8 (the engine enforces the same cap). */
+export const PASTE_MAX_BYTES = 8_000_000;
 
 /** The size of `text` once saved as UTF-8. */
 export function byteLength(text: string): number {

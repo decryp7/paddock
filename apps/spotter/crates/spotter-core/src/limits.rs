@@ -6,18 +6,18 @@ pub const MAX_HISTORY: usize = 200;
 pub const MAX_CANDIDATES: usize = 5000;
 /// Matches one folder scan keeps (a pattern that matches more is too broad; the watch says so).
 pub const MAX_FOLDER_MATCHES: usize = 50_000;
-/// Largest HTTP response body read (8 MiB).
-pub const MAX_BODY_BYTES: usize = 8 << 20;
-/// Largest checksum file read (64 KiB).
-pub const MAX_CHECKSUM_FILE: usize = 64 << 10;
+/// Largest HTTP response body read (8 MB).
+pub const MAX_BODY_BYTES: usize = 8_000_000;
+/// Largest checksum file read (64 KB).
+pub const MAX_CHECKSUM_FILE: usize = 64_000;
 /// Most watches in one configuration.
 pub const MAX_WATCHES: usize = 500;
 /// Longest watch name, in characters.
 pub const MAX_NAME_CHARS: usize = 120;
-/// Largest configuration file read (2 MiB).
-pub const MAX_CONFIG_BYTES: usize = 2 << 20;
-/// Largest state file read (32 MiB).
-pub const MAX_STATE_BYTES: usize = 32 << 20;
+/// Largest configuration file read (2 MB).
+pub const MAX_CONFIG_BYTES: usize = 2_000_000;
+/// Largest state file read (32 MB).
+pub const MAX_STATE_BYTES: usize = 32_000_000;
 /// Longest user pattern (regex or glob), in bytes.
 pub const MAX_PATTERN_LEN: usize = 1000;
 /// Most recent checks remembered per watch.

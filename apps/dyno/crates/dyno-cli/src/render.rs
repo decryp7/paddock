@@ -10,7 +10,7 @@ use dyno_core::grouping::AppGroup;
 use dyno_core::health::Severity;
 use dyno_core::metrics::{MemoryPressure, Reading};
 use dyno_core::protocol::LiveUpdate;
-use dyno_core::units::{bytes, duration};
+use dyno_core::units::{bytes, duration, Kind};
 use serde::Serialize;
 
 /// Pretty JSON for any serialisable value (the structures here cannot fail to serialise; a failure prints `null`).
@@ -120,7 +120,7 @@ pub fn status_data(u: &LiveUpdate, agent: &AgentInfo) -> StatusJson {
 }
 
 fn rate(bps: f64) -> String {
-    format!("{}/s", bytes(bps.max(0.0) as u64))
+    format!("{}/s", bytes(bps.max(0.0) as u64, Kind::Storage))
 }
 
 fn pct(part: u64, whole: u64) -> String {
@@ -144,16 +144,25 @@ pub fn status_text(u: &LiveUpdate, agent: &AgentInfo) -> String {
     };
     out += &format!(
         "Memory    {} of {} ({}){}\n",
-        bytes(s.memory.used),
-        bytes(s.memory.total),
+        bytes(s.memory.used, Kind::Memory),
+        bytes(s.memory.total, Kind::Memory),
         pct(s.memory.used, s.memory.total),
         pressure
     );
     if s.memory.swap_total > 0 {
-        out += &format!("Swap      {} of {}\n", bytes(s.memory.swap_used), bytes(s.memory.swap_total));
+        out += &format!(
+            "Swap      {} of {}\n",
+            bytes(s.memory.swap_used, Kind::Memory),
+            bytes(s.memory.swap_total, Kind::Memory)
+        );
     }
     for d in &s.disks {
-        out += &format!("Disk      {}: {} free of {}\n", d.name, bytes(d.free), bytes(d.total));
+        out += &format!(
+            "Disk      {}: {} free of {}\n",
+            d.name,
+            bytes(d.free, Kind::Storage),
+            bytes(d.total, Kind::Storage)
+        );
     }
     let (down, up) = (
         s.network.iter().map(|n| n.rx_bps).sum::<f64>(),
@@ -165,7 +174,11 @@ pub fn status_text(u: &LiveUpdate, agent: &AgentInfo) -> String {
     }
     out += &format!("Uptime    {}\n", duration(s.uptime_secs));
     out += &format!("Profile   {:?}{}\n", u.profile, if u.rules_paused { " (rules paused)" } else { "" });
-    out += &format!("Dyno      {:.1}% CPU, {}\n", u.overhead.agent_cpu, bytes(u.overhead.agent_memory));
+    out += &format!(
+        "Dyno      {:.1}% CPU, {}\n",
+        u.overhead.agent_cpu,
+        bytes(u.overhead.agent_memory, Kind::Memory)
+    );
     out
 }
 
@@ -199,7 +212,7 @@ pub fn top_text(rows: &[TopJson]) -> String {
         out += &format!(
             "{name:<w$}  {:>5.1}%  {:>10}  {:>4}\n",
             r.cpu_percent,
-            bytes(r.memory_bytes),
+            bytes(r.memory_bytes, Kind::Memory),
             r.processes
         );
     }
@@ -365,7 +378,7 @@ mod tests {
     fn status_in_words_and_as_stable_json() {
         let text = status_text(&live(), &info());
         assert!(text.contains("CPU       34%"));
-        assert!(text.contains("Memory    2.0 GB of 8.0 GB (25%)"));
+        assert!(text.contains("Memory    2 GB of 8 GB (25%)"));
         assert!(text.contains("rules paused"));
         let j: serde_json::Value = serde_json::from_str(&json(&status_data(&live(), &info()))).unwrap();
         assert_eq!(j["agent"]["pid"], 42);

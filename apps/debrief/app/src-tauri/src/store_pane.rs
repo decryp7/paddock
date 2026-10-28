@@ -156,7 +156,10 @@ pub(crate) async fn sql_export<R: Runtime>(
     overwrite: bool,
 ) -> CmdResult<u64> {
     if sql.len() > MAX_SQL_LEN {
-        return Err(CmdError::from(format!("The SQL text is longer than {} KB.", MAX_SQL_LEN >> 10)));
+        return Err(CmdError::from(format!(
+            "The SQL text is longer than {}.",
+            paddock_units::format_whole(MAX_SQL_LEN as u64, paddock_units::Kind::Storage)
+        )));
     }
     let target = crate::paths::WindowGrants::of(&app, state.label())
         .write(&path, &[])?
@@ -269,7 +272,14 @@ pub(crate) async fn sql_run<R: Runtime>(
     // The store checks the text again; this keeps an oversized request from going further.
     if sql.len() > MAX_SQL_LEN {
         return Ok(SqlOutcome {
-            error: Some(QlError::new(format!("The SQL text is longer than {} KB.", MAX_SQL_LEN >> 10), 0, 0)),
+            error: Some(QlError::new(
+                format!(
+                    "The SQL text is longer than {}.",
+                    paddock_units::format_whole(MAX_SQL_LEN as u64, paddock_units::Kind::Storage)
+                ),
+                0,
+                0,
+            )),
             result: None,
             cancelled: false,
         });

@@ -57,7 +57,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            max_bytes: 1 << 30,
+            max_bytes: 1_000_000_000,
             max_duration: Duration::from_secs(30 * 60),
             connect_timeout: Duration::from_secs(5),
         }
@@ -183,7 +183,7 @@ mod tests {
             DotnetError::Io(_)
         ));
         assert!(DotnetError::NotFound { pid: 3 }.to_string().contains('3'));
-        assert_eq!(Limits::default().max_bytes, 1 << 30);
+        assert_eq!(Limits::default().max_bytes, 1_000_000_000);
         assert!(SystemCollector
             .start(u32::MAX - 7, Preset::Cpu, Path::new("x"), Limits::default())
             .is_err());

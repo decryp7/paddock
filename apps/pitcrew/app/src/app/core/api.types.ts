@@ -436,6 +436,7 @@ export interface CleanupPolicy {
   automatic: boolean;
   every_hours: number;
   work_max_age_hours: number;
+  /** Sizes in MB of 1,000,000 bytes (storage steps, like the Finder). */
   cache_cap_mb: number;
   folder_cap_mb: number;
   min_free_mb: number;

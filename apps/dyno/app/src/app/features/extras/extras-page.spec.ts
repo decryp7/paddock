@@ -338,7 +338,7 @@ describe('dy-extras-page', () => {
     await settle(f);
     btn(el, '1 GB').click();
     await settle(f);
-    expect(store.minMib()).toBe(1024);
+    expect(store.minMb()).toBe(1000);
     expect(el.querySelector('.none strong')).toBeNull();
     vi.spyOn(mock, 'findFiles').mockResolvedValue({ scanId: 's', folder: '/x', large: [], duplicates: [], scanned: 10, truncated: true, wastedBytes: 0 });
     await store.search();

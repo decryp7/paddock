@@ -2,7 +2,7 @@ import { AiError } from '../ai-backend';
 import { KnowledgeChange, KnowledgeInfo, KnowledgeList, KnowledgeRecord, KnowledgeRestore, KnowledgeScope, KnowledgeText } from '../ai.types';
 import type { KnowledgeBackend } from './knowledge-backend';
 
-const MAX_FILE_BYTES = 64 * 1024;
+const MAX_FILE_BYTES = 64_000;
 const MAX_FILES = 32;
 
 interface File {

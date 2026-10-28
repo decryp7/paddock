@@ -1,7 +1,7 @@
 //! A parser for the server-sent events of a streamed OpenAI chat completion. Pure and bounded: bytes in, events out.
 
 /// The longest event kept while waiting for its end (a hostile or broken stream cannot grow memory without limit).
-pub const MAX_EVENT_BYTES: usize = 1024 * 1024;
+pub const MAX_EVENT_BYTES: usize = 1_000_000;
 
 /// What one event means to the CLI.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +31,10 @@ impl Parser {
         }
         if self.buf.len() > MAX_EVENT_BYTES {
             self.buf.clear();
-            out.push(Event::Error("the server sent an event larger than 1 MB".into()));
+            out.push(Event::Error(format!(
+                "the server sent an event larger than {}",
+                paddock_units::format_whole(MAX_EVENT_BYTES as u64, paddock_units::Kind::Storage)
+            )));
         }
         out
     }

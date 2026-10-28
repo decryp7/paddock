@@ -18,6 +18,7 @@ tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
 spotter-core.workspace = true
+paddock-units.workspace = true
 spotter-engine.workspace = true
 spotter-render.workspace = true
 spotter-sources.workspace = true

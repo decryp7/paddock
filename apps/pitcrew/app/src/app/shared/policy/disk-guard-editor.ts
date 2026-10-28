@@ -10,7 +10,8 @@ interface GuardField {
   hint: string;
 }
 
-const MB_PER_GB = 1024;
+/** Storage steps: 1 GB = 1000 MB of 1,000,000 bytes, as the Finder shows disk sizes. */
+const MB_PER_GB = 1000;
 
 const FIELDS: GuardField[] = [
   { key: 'drain_below_mb', label: 'Pause runners below', hint: 'Free space under this stops runners from taking new jobs.' },

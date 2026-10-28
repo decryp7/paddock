@@ -24,7 +24,7 @@ pub const MAX_STEPS: usize = 100;
 /// Most tags on a playbook.
 pub const MAX_TAGS: usize = 10;
 /// Largest playbook file (bytes).
-pub const MAX_FILE_BYTES: usize = 256 * 1024;
+pub const MAX_FILE_BYTES: usize = 256_000;
 const MAX_TITLE: usize = 120;
 const MAX_TEXT: usize = 4_000;
 const MAX_QL: usize = 2_000;
@@ -126,7 +126,10 @@ impl Playbook {
     /// Reads a playbook file's text.
     pub fn parse_str(s: &str) -> Result<Playbook> {
         if s.len() > MAX_FILE_BYTES {
-            bail!("a playbook file is at most {} KB", MAX_FILE_BYTES / 1024);
+            bail!(
+                "a playbook file is at most {}",
+                paddock_units::format_whole(MAX_FILE_BYTES as u64, paddock_units::Kind::Storage)
+            );
         }
         Playbook::parse(serde_json::from_str(s).context("the file is not JSON")?)
     }

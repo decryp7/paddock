@@ -82,8 +82,11 @@ impl Device {
     /// For the UI: `CUDA0: NVIDIA GeForce RTX 4070 (11034 of 12281 MiB free)`.
     pub fn label(&self) -> String {
         format!(
-            "{}: {} ({} of {} MiB free)",
-            self.name, self.description, self.free_mib, self.total_mib
+            "{}: {} ({} of {} free)",
+            self.name,
+            self.description,
+            paddock_units::format_bytes(self.free_mib << 20, paddock_units::Kind::Memory),
+            paddock_units::format_bytes(self.total_mib << 20, paddock_units::Kind::Memory)
         )
     }
 }
@@ -173,7 +176,7 @@ mod tests {
         assert!(!d[1].is_gpu());
         assert_eq!(d[2].backend(), "CUDA");
         assert_eq!(d[3].backend(), "Metal");
-        assert_eq!(d[2].label(), "CUDA0: NVIDIA GeForce RTX 4070 (11034 of 12281 MiB free)");
+        assert_eq!(d[2].label(), "CUDA0: NVIDIA GeForce RTX 4070 (11 GB of 12 GB free)");
         assert_eq!(best_gpu(&d).map(|g| g.name.as_str()), Some("MTL0"));
         assert!(parse_list_devices("Available devices:\n  (none)\n").is_empty());
         assert!(best_gpu(&[]).is_none());

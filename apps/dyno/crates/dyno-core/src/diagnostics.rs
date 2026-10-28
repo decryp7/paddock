@@ -12,7 +12,7 @@ pub const MAX_FILES: usize = 32;
 /// Largest single file, bytes (longer ones are cut with a note).
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 /// Largest bundle in total, bytes.
-pub const MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_TOTAL_BYTES: usize = 8_000_000;
 /// Longest path inside the zip, characters.
 pub const MAX_PATH_CHARS: usize = 100;
 /// The marker appended to a cut file.
@@ -34,7 +34,7 @@ pub enum BundleError {
     #[error("A bundle holds at most {MAX_FILES} files.")]
     TooManyFiles,
     /// Too many bytes.
-    #[error("The bundle would be larger than {} MB.", MAX_TOTAL_BYTES / (1024 * 1024))]
+    #[error("The bundle would be larger than {}.", crate::units::whole(MAX_TOTAL_BYTES as u64, crate::units::Kind::Storage))]
     TooLarge,
 }
 

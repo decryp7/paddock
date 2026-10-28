@@ -31,9 +31,9 @@ pub const REPORTS_DIR: &str = "diagnostics-reports";
 /// Copied-out reports kept (the oldest are removed).
 pub const KEEP_EXTRACTED: usize = 8;
 /// Largest JSON file of a report read for the panel.
-pub const MAX_JSON: u64 = 4 << 20;
+pub const MAX_JSON: u64 = 4_000_000;
 /// Largest text file (steps, description) read.
-pub const MAX_TEXT: u64 = 1 << 20;
+pub const MAX_TEXT: u64 = 1_000_000;
 /// Most snapshots, processes, steps and breadcrumbs shown.
 pub const MAX_SNAPSHOTS: usize = 50;
 pub const MAX_PROCESSES: usize = 512;
@@ -126,7 +126,10 @@ fn fallback_notice(path: &Path, why: &str) -> String {
 fn read_entry<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>, name: &str, cap: u64) -> Result<Vec<u8>, String> {
     let entry = zip.by_name(name).map_err(|_| format!("{name} is missing"))?;
     if entry.size() > cap {
-        return Err(format!("{name} is larger than {} KB", cap / 1024));
+        return Err(format!(
+            "{name} is larger than {}",
+            paddock_units::format_whole(cap, paddock_units::Kind::Storage)
+        ));
     }
     let mut out = Vec::new();
     entry
@@ -134,7 +137,10 @@ fn read_entry<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>, name: &str,
         .read_to_end(&mut out)
         .map_err(|e| format!("{name} cannot be read ({e})"))?;
     if out.len() as u64 > cap {
-        return Err(format!("{name} is larger than {} KB", cap / 1024));
+        return Err(format!(
+            "{name} is larger than {}",
+            paddock_units::format_whole(cap, paddock_units::Kind::Storage)
+        ));
     }
     Ok(out)
 }
@@ -210,8 +216,8 @@ pub fn extract_logs(zip_path: &Path, m: &Manifest, reports_dir: &Path) -> Result
         total += data.len() as u64;
         if total > debrief_core::archive::MAX_ARCHIVE_BYTES {
             return Err(format!(
-                "its logs expand to more than {} MiB",
-                debrief_core::archive::MAX_ARCHIVE_BYTES >> 20
+                "its logs expand to more than {}",
+                paddock_units::format_whole(debrief_core::archive::MAX_ARCHIVE_BYTES, paddock_units::Kind::Storage)
             ));
         }
         if data.is_empty() {

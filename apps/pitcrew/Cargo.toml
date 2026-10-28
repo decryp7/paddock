@@ -13,6 +13,7 @@ version = "1.0.2"
 # Versions of the dependencies that two or more members use, so they stay on one version.
 [workspace.dependencies]
 pitcrew-core = { path = "crates/pitcrew-core" }
+paddock-units = { path = "../../crates/paddock-units" }
 regex = "1.12"
 semver = { version = "1", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }

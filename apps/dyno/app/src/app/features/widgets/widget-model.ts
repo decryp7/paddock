@@ -10,7 +10,7 @@ import type {
   WidgetSize,
   WidgetThresholds,
 } from '../../core/api.types';
-import { formatBytes, formatPercent, formatRate, splitValue } from '../../shared/format';
+import { formatPercent, formatRate, splitValue } from '../../shared/format';
 import { counterTitle, formatCounter, readingNumber, readingReason } from '../counters/counters-model';
 import type { Series } from '../../state/live.store';
 
@@ -225,7 +225,7 @@ export function readCounter(r: CounterReading | undefined): Reading {
   if (!r) return na('Waiting for the first reading.');
   const n = readingNumber(r);
   if (n === null) return na(readingReason(r) ?? 'The counter is not available.');
-  return { value: n, text: formatCounter(n, r.unit), percent: r.unit === 'percent' ? Math.min(100, Math.max(0, n)) : null, reason: null };
+  return { value: n, text: formatCounter(n, r.unit, r.path), percent: r.unit === 'percent' ? Math.min(100, Math.max(0, n)) : null, reason: null };
 }
 
 /** The live history of a metric for a graph (`values2` is the second line, e.g. disk write), or `null` when none is kept. */
@@ -279,5 +279,3 @@ export function newTrayItem(metric: WidgetMetric, style: TrayStyleId, existing: 
   while (existing.some((i) => i.id === `${typeof metric === 'string' ? metric : 'item'}-${n.toString()}`)) n++;
   return { id: `${typeof metric === 'string' ? metric : 'item'}-${n.toString()}`, metric, style: styleFromId(style), opens: 'ownPopover' };
 }
-
-export const bytesText = formatBytes;

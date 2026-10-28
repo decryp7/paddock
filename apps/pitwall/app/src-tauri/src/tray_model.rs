@@ -99,16 +99,9 @@ pub struct TrayModel {
     pairings: usize,
 }
 
-/// `4.2 GB` / `512 MB` / `0 MB`.
+/// Model memory (RAM plus video memory) in binary steps: `4.2 GB`, `512 MB`, `0 bytes`.
 pub fn bytes_text(bytes: u64) -> String {
-    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
-    const MB: f64 = 1024.0 * 1024.0;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.1} GB", b / GB)
-    } else {
-        format!("{:.0} MB", b / MB)
-    }
+    paddock_units::format_bytes(bytes, paddock_units::Kind::Memory)
 }
 
 impl TrayModel {
@@ -322,7 +315,7 @@ mod tests {
             models: vec![model("Qwen 7B", 4 * GB, 2 * GB), model("Gemma 2B", GB, 0)],
         });
         assert_eq!(m.state(), TrayState::Idle);
-        assert_eq!(m.summary(), "2 models · 7.0 GB");
+        assert_eq!(m.summary(), "2 models · 7 GB");
         m.apply(&LiveUpdate::Queue {
             queue: QueueSnapshot {
                 running: vec![],
@@ -340,9 +333,9 @@ mod tests {
                 ..Throughput::default()
             },
         });
-        assert_eq!(m.summary(), "2 models · 7.0 GB · 38 tok/s");
+        assert_eq!(m.summary(), "2 models · 7 GB · 38 tok/s");
         assert!(m.view().tooltip.starts_with("Pitwall: 2 models"));
-        assert!(m.view().entries.contains(&Entry::Status("  Qwen 7B  6.0 GB".into())));
+        assert!(m.view().entries.contains(&Entry::Status("  Qwen 7B  6 GB".into())));
         // Memory samples and events do not change what the tray shows.
         let before = m.view();
         m.apply(&LiveUpdate::Memory { sample: sample() });
@@ -420,7 +413,7 @@ mod tests {
 
     #[test]
     fn byte_sizes_read_naturally_and_long_model_lists_are_cut() {
-        assert_eq!(bytes_text(0), "0 MB");
+        assert_eq!(bytes_text(0), "0 bytes");
         assert_eq!(bytes_text(512 * 1024 * 1024), "512 MB");
         assert_eq!(bytes_text(GB + GB / 2), "1.5 GB");
         let mut m = TrayModel::new();
@@ -431,7 +424,7 @@ mod tests {
         m.apply(&LiveUpdate::Models {
             models: vec![model("one", GB, 0)],
         });
-        assert_eq!(m.summary(), "1 model · 1.0 GB");
+        assert_eq!(m.summary(), "1 model · 1 GB");
         m.apply(&LiveUpdate::Models { models: vec![] });
         assert_eq!(m.summary(), "No model loaded");
     }
@@ -447,7 +440,7 @@ mod tests {
         let o: Overview = serde_json::from_value(overview).unwrap();
         let mut m = TrayModel::new();
         m.seed(&o);
-        assert_eq!(m.summary(), "1 model · 1.0 GB · 12 tok/s");
+        assert_eq!(m.summary(), "1 model · 1 GB · 12 tok/s");
         assert_eq!(m.state(), TrayState::Paused);
     }
 }

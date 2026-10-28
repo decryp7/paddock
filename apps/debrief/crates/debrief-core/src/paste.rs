@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// Largest pasted text (bytes). Bigger logs are opened as files.
-pub const MAX_PASTE_BYTES: usize = 8 << 20;
+pub const MAX_PASTE_BYTES: usize = 8_000_000;
 /// Longest file name kept, in characters (extension included).
 pub const MAX_NAME_CHARS: usize = 80;
 /// The name used when none is given.

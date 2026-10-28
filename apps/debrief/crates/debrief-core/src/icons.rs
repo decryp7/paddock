@@ -9,7 +9,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 /// Largest accepted icon source (SVG text or decoded PNG), in bytes.
-pub const MAX_ICON_BYTES: usize = 16 * 1024;
+pub const MAX_ICON_BYTES: usize = 16_000;
 
 /// An `[[icon]]` entry as written in a profile.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -68,7 +68,10 @@ pub fn validate_png(b64: &str) -> Result<String> {
         .decode(&cleaned)
         .map_err(|_| anyhow!("PNG icon is not valid base64"))?;
     if bytes.len() > MAX_ICON_BYTES {
-        return Err(anyhow!("PNG icons are limited to {} KB", MAX_ICON_BYTES / 1024));
+        return Err(anyhow!(
+            "PNG icons are limited to {}",
+            paddock_units::format_whole(MAX_ICON_BYTES as u64, paddock_units::Kind::Storage)
+        ));
     }
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err(anyhow!("icon is not a PNG image"));

@@ -72,7 +72,7 @@ describe('MockKnowledgeBackend', () => {
     const a = await m.createKnowledge('project', ' Notes ', 'a\r\nb');
     expect(a).toMatchObject({ id: 'k1', name: 'Notes', bytes: 3 });
     await expect(m.createKnowledge('project', ' ')).rejects.toBeInstanceOf(AiError);
-    await expect(m.updateKnowledge('project', 'k1', { text: 'x'.repeat(64 * 1024 + 1) })).rejects.toMatchObject({ code: 'invalid' });
+    await expect(m.updateKnowledge('project', 'k1', { text: 'x'.repeat(64_000 + 1) })).rejects.toMatchObject({ code: 'invalid' });
     await expect(m.getKnowledge('project', 'k9')).rejects.toMatchObject({ code: 'notFound' });
     expect((await m.importKnowledge('global', 'C:\\docs\\Runbook.md')).name).toBe('Runbook');
     expect(await m.exportKnowledge('project', 'k1', '/x.md')).toBe('/x.md');
@@ -195,7 +195,7 @@ describe('KnowledgeSettings', () => {
     await vi.waitFor(() => expect(dialogs.stack().length).toBeGreaterThan(0));
     dlg = dialogs.stack().at(-1);
     expect(dlg?.options.title).toBe('New knowledge file');
-    expect(dlg?.options.inputs).toMatchObject({ file: null, scope: 'project', maxBytes: 65536 });
+    expect(dlg?.options.inputs).toMatchObject({ file: null, scope: 'project', maxBytes: 64_000 });
     dlg?.ref.close();
     await backend.createKnowledge('project', 'Incident');
     TestBed.inject(KnowledgePersistence).restored.set(5);
@@ -247,7 +247,7 @@ describe('KnowledgeEditor', () => {
     type(f, '[data-testid=knowledge-name]', 'Glossary');
     type(f, '[data-testid=knowledge-text]', '# Names\n\n**ACME-GW** <img src=x onerror=alert(1)>');
     await settle(f);
-    expect(el(f, '[data-testid=knowledge-size]').textContent).toContain('of 66 KB');
+    expect(el(f, '[data-testid=knowledge-size]').textContent).toContain('of 64 KB');
     el<HTMLButtonElement>(f, '[data-testid=knowledge-preview-tab]').click();
     await settle(f);
     const preview = el(f, '[data-testid=knowledge-preview]');

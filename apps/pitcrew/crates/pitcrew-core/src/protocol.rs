@@ -539,7 +539,7 @@ pub struct CacheInfo {
     pub entries: u32,
     /// The biggest entries, biggest first (at most 50).
     pub top: Vec<CacheEntry>,
-    /// The runner's own `cache.size_limit`, in MB (`None`: not set).
+    /// The runner's own `cache.size_limit`, in MB of 1,000,000 bytes (`None`: not set).
     pub size_limit_mb: Option<u64>,
     /// The cache is bigger than its limit.
     pub over_limit: bool,

@@ -243,9 +243,10 @@ pub fn judge_series(mut s: GrowthSeries, cfg: &TrendConfig) -> Option<Anomaly> {
     })
 }
 
-/// "1.8 GB", "512 MB", "40 KB", "12 bytes" (the shared rules of `debrief_plugin_api::units`).
+/// "1.8 GB", "512 MB", "40 KB", "12 bytes" (the shared rules of `debrief_plugin_api::units`). The series are memory-like
+/// (growth fields, PerfMon memory counters), so they are written with memory steps.
 fn fmt_bytes(v: f64) -> String {
-    let text = debrief_plugin_api::units::bytes(v.abs().round() as u64);
+    let text = debrief_plugin_api::units::bytes_of(v.abs().round() as u64, debrief_plugin_api::units::Kind::Memory);
     if v < 0.0 {
         format!("-{text}")
     } else {

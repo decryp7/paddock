@@ -3,7 +3,7 @@ import { RouterLink } from '@angular/router';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { ListOrReason, ProcessDetails } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { formatAffinity, formatBytes, formatRate, formatCount, formatPercent, formatRelative } from '../../shared/format';
+import { formatAffinity, formatMemory, formatRate, formatCount, formatPercent, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { PRIORITY_LABEL, signatureText } from '../../shared/labels';
 import { LiveStore } from '../../state/live.store';
@@ -73,7 +73,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                   <dt>Threads</dt><dd class="num">{{ x.threads === null ? '—' : count(x.threads) }}</dd>
                   <dt>Handles</dt><dd class="num">{{ x.handles === null ? '—' : count(x.handles) }}</dd>
                   <dt>Starts with</dt><dd>{{ x.startupSource ?? 'Not a startup item' }}</dd>
-                  <dt>Now</dt><dd class="num">{{ pct(x.process.cpu) }} CPU · {{ bytes(x.process.memory) }}</dd>
+                  <dt>Now</dt><dd class="num">{{ pct(x.process.cpu) }} CPU · {{ mem(x.process.memory) }}</dd>
                 </dl>
               }
               @case ('parents') {
@@ -207,7 +207,7 @@ export class ProcessDetailsPanel {
   protected readonly sig = computed(() => signatureText(this.d()?.signature ?? { unknown: 'Unknown' }));
   protected readonly pidText = (n: number) => String(n);
   protected readonly pct = formatPercent;
-  protected readonly bytes = formatBytes;
+  protected readonly mem = formatMemory;
   protected readonly count = formatCount;
   protected readonly priorityLabel = (p: keyof typeof PRIORITY_LABEL) => PRIORITY_LABEL[p];
   protected readonly affinity = (mask: number) => formatAffinity(mask, this.live.system()?.cpu.perCore.length ?? 1);

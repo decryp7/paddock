@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 pub const ERROR_EVENT: &str = "debrief://error";
 const NOTICE_MARKER: &str = "notice-shown";
 /// Largest image accepted from the UI.
-pub const MAX_IMAGE_BYTES: usize = 3 * 1024 * 1024;
+pub const MAX_IMAGE_BYTES: usize = 3_000_000;
 const MAX_REASON: usize = 100;
 const MAX_MESSAGE: usize = 1_000;
 const MAX_STACK: usize = 8_000;
@@ -55,7 +55,11 @@ impl fmt::Display for SnapshotError {
             Self::BadMime(m) => write!(f, "unsupported image type \"{m}\" (use image/png or image/jpeg)"),
             Self::BadEncoding => write!(f, "the image is not valid base64"),
             Self::BadMagic => write!(f, "the data is not a PNG or JPEG image"),
-            Self::TooLarge(n) => write!(f, "the image is too large ({n} bytes; the limit is {MAX_IMAGE_BYTES})"),
+            Self::TooLarge(n) => write!(
+                f,
+                "the image is too large ({n} bytes; the limit is {})",
+                paddock_units::format_whole(MAX_IMAGE_BYTES as u64, paddock_units::Kind::Storage)
+            ),
             Self::BadId(id) => write!(f, "\"{id}\" is not a snapshot id"),
             Self::NotFound(id) => write!(f, "no snapshot \"{id}\""),
             Self::Disabled => write!(f, "error snapshots are turned off in the settings"),

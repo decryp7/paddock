@@ -49,7 +49,7 @@ export class RunnerTile {
   /** What the runner and its processes use now (ADR 0007). */
   protected readonly load = computed(() => {
     const u = this.runner().usage;
-    return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes), processes: `${u.processes} ${u.processes === 1 ? 'process' : 'processes'}` } : null;
+    return u ? { cpu: formatPermille(u.cpuPermille), mem: formatBytes(u.memBytes, 'memory'), processes: `${u.processes} ${u.processes === 1 ? 'process' : 'processes'}` } : null;
   });
   protected readonly nextStart = computed(() => formatRelative(this.runner().nextStartAt, this.now()));
   protected readonly lastJobAgo = computed(() => {

@@ -12,7 +12,7 @@ use crate::process::{Priority, ProcessAction, ProcessRef, ProcessSample};
 use crate::protect::Protection;
 use crate::throttle::{self, ThrottleInput};
 use crate::time::Timestamp;
-use crate::units::bytes;
+use crate::units::{bytes, Kind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -393,17 +393,24 @@ fn memory_cause(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &
     };
     let mut evidence = vec![Evidence::new(
         "Memory in use",
-        format!("{} of {}", bytes(last.memory.used), bytes(last.memory.total)),
+        format!(
+            "{} of {}",
+            bytes(last.memory.used, Kind::Memory),
+            bytes(last.memory.total, Kind::Memory)
+        ),
     )];
     if let Some(c) = last.memory.commit.value() {
-        evidence.push(Evidence::new("Committed", format!("{} of {}", bytes(c.used), bytes(c.limit))));
+        evidence.push(Evidence::new(
+            "Committed",
+            format!("{} of {}", bytes(c.used, Kind::Memory), bytes(c.limit, Kind::Memory)),
+        ));
     }
     if last.memory.swap_used > 0 {
-        evidence.push(Evidence::new("Swap / page file in use", bytes(last.memory.swap_used)));
+        evidence.push(Evidence::new("Swap / page file in use", bytes(last.memory.swap_used, Kind::Memory)));
     }
     let mut suggestions = vec![];
     if let Some(top) = input.groups.iter().max_by_key(|g| g.memory) {
-        evidence.push(Evidence::new(format!("Biggest: {}", top.name), bytes(top.memory)));
+        evidence.push(Evidence::new(format!("Biggest: {}", top.name), bytes(top.memory, Kind::Memory)));
         if let Some(root) = root_of(top, by_pid).filter(|r| input.protection.allows(r)) {
             suggestions.push(Suggestion {
                 label: format!("Close {}", top.name),
@@ -432,7 +439,7 @@ fn memory_cause(input: &Input<'_>, by_pid: &HashMap<u32, &ProcessSample>, out: &
         confidence,
         evidence,
         suggestions,
-        involved: involved(input.groups, |g| g.memory as f32, |v| bytes(v as u64)),
+        involved: involved(input.groups, |g| g.memory as f32, |v| bytes(v as u64, Kind::Memory)),
     });
 }
 
@@ -448,7 +455,10 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
     let mut evidence = vec![
         Evidence::new("Disk queue", format!("{queue:.1}")),
         Evidence::new("Disk busy", pct(busy)),
-        Evidence::new("Reading / writing", format!("{}/s / {}/s", bytes(read as u64), bytes(write as u64))),
+        Evidence::new(
+            "Reading / writing",
+            format!("{}/s / {}/s", bytes(read as u64, Kind::Storage), bytes(write as u64, Kind::Storage)),
+        ),
     ];
     if let Some(top) = input
         .groups
@@ -458,7 +468,7 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
     {
         evidence.push(Evidence::new(
             format!("Busiest: {}", top.name),
-            format!("{}/s", bytes(top.disk_bps as u64)),
+            format!("{}/s", bytes(top.disk_bps as u64, Kind::Storage)),
         ));
     }
     out.push(Cause {
@@ -473,7 +483,11 @@ fn disk_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
             label: "Open the task manager".into(),
             action: SuggestedAction::OpenTaskManager,
         }],
-        involved: involved(input.groups, |g| g.disk_bps as f32, |v| format!("{}/s", bytes(v as u64))),
+        involved: involved(
+            input.groups,
+            |g| g.disk_bps as f32,
+            |v| format!("{}/s", bytes(v as u64, Kind::Storage)),
+        ),
     });
 }
 
@@ -521,7 +535,10 @@ fn space_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
                       save. Cleanup shows what can go safely."
             .into(),
         confidence: if d.free < 1 << 30 { 0.8 } else { 0.5 },
-        evidence: vec![Evidence::new("Free", format!("{} ({})", bytes(d.free), pct(free_pct)))],
+        evidence: vec![Evidence::new(
+            "Free",
+            format!("{} ({})", bytes(d.free, Kind::Storage), pct(free_pct)),
+        )],
         suggestions: vec![Suggestion {
             label: "Free up space".into(),
             action: SuggestedAction::OpenCleanup,

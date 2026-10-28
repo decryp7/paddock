@@ -1,6 +1,7 @@
 //! HTTP for sources: bounded bodies, deadlines, the OCI anonymous/credentialed token dance, and failures mapped to
 //! statuses ([`spotter_core::source::http::status_error`]).
 
+use paddock_units::{format_whole, Kind};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, WWW_AUTHENTICATE};
 use spotter_core::limits::MAX_BODY_BYTES;
 use spotter_core::source::http::{parse_token, status_error, BearerChallenge};
@@ -113,8 +114,8 @@ pub async fn read_bounded(mut response: reqwest::Response, max: usize, url: &str
 
 fn too_large(url: &str, max: usize) -> SourceError {
     SourceError::InvalidResponse(format!(
-        "{url} answered with more than {} MiB; Spotter reads at most that.",
-        max >> 20
+        "{url} answered with more than {}; Spotter reads at most that.",
+        format_whole(max as u64, Kind::Storage)
     ))
 }
 

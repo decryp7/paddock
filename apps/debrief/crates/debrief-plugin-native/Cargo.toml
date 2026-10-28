@@ -9,6 +9,7 @@ publish = false
 description = "Debrief plugin: native (C/C++) profiling by ETW (elevated) or suspend-and-sample (no rights), written as NetTrace with symbols; .etl import (ADR 0022). Nothing is loaded into the target."
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 debrief-etw = { path = "../debrief-etw" }
 debrief-symbols = { path = "../debrief-symbols", default-features = false, features = ["dbghelp"] }

@@ -1,6 +1,9 @@
 import {
   formatAxisDuration,
+  byteStep,
   formatBytes,
+  formatWholeBytes,
+  parseSize,
   formatCount,
   formatDateTime,
   formatDay,
@@ -16,22 +19,39 @@ import {
   formatSpan,
 } from './format';
 
-describe('formatBytes', () => {
-  it('uses decimal units (1 KB = 1000 bytes) and drops decimals for big values', () => {
-    expect(formatBytes(0)).toBe('0 B');
-    expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(1536)).toBe('1.5 KB');
-    expect(formatBytes(10 * 1000 * 1000)).toBe('10.0 MB');
-    expect(formatBytes(150 * 1000 ** 3)).toBe('150 GB');
-    expect(formatBytes(3 * 1000 ** 5)).toBe('3000 TB');
-    expect(formatBytes(1536, 0)).toBe('2 KB');
+describe('byte sizes: the case table shared with Rust (crates/paddock-units/cases.json)', () => {
+  type Table = Record<string, { in: unknown; out: unknown }[] | string[]>;
+  async function table(): Promise<Table> {
+    // node:fs is loaded dynamically so the browser-typed app tsconfig needs no node types.
+    const fs = (await import(/* @vite-ignore */ ['node', 'fs'].join(':'))) as { readFileSync(path: string, encoding: 'utf8'): string };
+    return JSON.parse(fs.readFileSync('../../../crates/paddock-units/cases.json', 'utf8')) as Table;
+  }
+  const run = async (key: string, f: (input: never) => unknown): Promise<void> => {
+    const cases = (await table())[key] as { in: never; out: unknown }[];
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) expect(f(c.in), `${key}(${String(c.in)})`).toBe(c.out);
+  };
+
+  it('formats storage sizes', () => run('storage', (n: number) => formatBytes(n, 'storage')));
+  it('formats memory sizes', () => run('memory', (n: number) => formatBytes(n, 'memory')));
+  it('defaults to storage', () => {
+    expect(formatBytes(1500)).toBe('1.5 KB');
   });
-  it('handles negatives and missing values', () => {
-    expect(formatBytes(-2048)).toBe('-2.0 KB');
-    expect(formatBytes(null)).toBe('—');
-    expect(formatBytes(undefined)).toBe('—');
-    expect(formatBytes(Number.NaN)).toBe('—');
-    expect(formatBytes(Infinity)).toBe('—');
+  it('formats limits in the largest whole unit', async () => {
+    await run('wholeStorage', (n: number) => formatWholeBytes(n, 'storage'));
+    await run('wholeMemory', (n: number) => formatWholeBytes(n, 'memory'));
+  });
+  it('parses typed sizes', async () => {
+    await run('parseStorage', (s: string) => parseSize(s, 'storage'));
+    await run('parseMemory', (s: string) => parseSize(s, 'memory'));
+  });
+  it('rejects text that is not a size', async () => {
+    for (const s of (await table())['parseBad'] as string[]) expect(parseSize(s), s).toBeNull();
+  });
+  it('shows unusable input as a dash and exposes the steps', () => {
+    for (const v of [null, undefined, Number.NaN, Infinity, -1]) expect(formatBytes(v)).toBe('—');
+    expect(byteStep('storage')).toBe(1000);
+    expect(byteStep('memory')).toBe(1024);
   });
 });
 

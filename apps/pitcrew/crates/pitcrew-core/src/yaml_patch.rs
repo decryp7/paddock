@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 /// Largest document the patcher accepts.
-pub const MAX_PATCH_BYTES: usize = 256 * 1024;
+pub const MAX_PATCH_BYTES: usize = 250_000;
 /// Deepest key path.
 pub const MAX_PATH_DEPTH: usize = 6;
 /// Indentation of new nested lines.
@@ -129,7 +129,13 @@ fn refuse<T>(path: &[String], reason: impl Into<String>) -> Result<T, PatchError
 /// Applies `edits` in order and returns the new text. The input is returned unchanged when nothing needs to change.
 pub fn apply(text: &str, edits: &[Edit]) -> Result<String, PatchError> {
     if text.len() > MAX_PATCH_BYTES {
-        return refuse(&[], format!("it is larger than {} KB", MAX_PATCH_BYTES / 1024));
+        return refuse(
+            &[],
+            format!(
+                "it is larger than {}",
+                paddock_units::format_whole(MAX_PATCH_BYTES as u64, paddock_units::Kind::Storage)
+            ),
+        );
     }
     let mut doc = Doc::parse(text)?;
     for e in edits {

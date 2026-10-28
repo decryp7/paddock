@@ -19,7 +19,7 @@ pub const SQL_MEMORY_LIMIT: &str = "128MB";
 /// The console's DuckDB threads.
 pub const SQL_THREADS: usize = 2;
 /// Longest SQL text.
-pub const MAX_SQL_LEN: usize = 64 << 10;
+pub const MAX_SQL_LEN: usize = 64_000;
 /// Longest cell text; longer values are cut and end with `…`.
 pub const MAX_CELL_CHARS: usize = 4_096;
 /// Most bytes of cell text a run keeps (a result of long values stops earlier than [`SQL_MAX_ROWS`]).

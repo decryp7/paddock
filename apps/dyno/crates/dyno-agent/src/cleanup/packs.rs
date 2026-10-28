@@ -32,7 +32,10 @@ pub fn load(dir: &Path) -> (Vec<CategorySpec>, Vec<String>) {
             continue;
         }
         if meta.len() > MAX_PACK_BYTES as u64 {
-            notes.push(ignored(format!("it is larger than {} KiB.", MAX_PACK_BYTES / 1024)));
+            notes.push(ignored(format!(
+                "it is larger than {}.",
+                dyno_core::units::whole(MAX_PACK_BYTES as u64, dyno_core::units::Kind::Storage)
+            )));
             continue;
         }
         let text = match std::fs::read_to_string(e.path()) {

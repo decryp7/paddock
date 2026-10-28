@@ -46,7 +46,7 @@ const ENGINE_STATE: Record<string, string> = {
             · {{ s.backend }}
           }
           @if (s.rssBytes) {
-            <ng-container i18n="@@ai.models.inMemory">· {{ size(s.rssBytes) }} in memory</ng-container>
+            <ng-container i18n="@@ai.models.inMemory">· {{ mem(s.rssBytes) }} in memory</ng-container>
           }
         </p>
         @if (s.reason) {
@@ -350,7 +350,8 @@ export class AiModelManager implements OnInit {
   protected readonly engineState = computed(
     () => ENGINE_STATE[this.status.status()?.state ?? ''] ?? '',
   );
-  protected readonly size = formatBytes;
+  protected readonly size = (n: number): string => formatBytes(n);
+  protected readonly mem = (n: number): string => formatBytes(n, 'memory');
   protected readonly fit = fitLabel;
   protected readonly numbers = (r: Recommendation) => fitNumbers(r.assessment);
   protected readonly facts = (r: Recommendation) => {

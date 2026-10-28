@@ -60,6 +60,26 @@ impl EnumOption {
     }
 }
 
+/// Which convention a size follows: files, disks and caches are `storage` (1 KB = 1000 bytes), RAM and process memory are
+/// `memory` (1 KB = 1024 bytes). The wire twin of [`paddock_units::Kind`] (and of `paddock_settings::ByteKind`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ByteKind {
+    /// Files, disks, downloads, caches, logs: decimal steps.
+    Storage,
+    /// RAM, process memory, heap, GPU memory: binary steps under the same labels.
+    Memory,
+}
+
+impl From<ByteKind> for paddock_units::Kind {
+    fn from(kind: ByteKind) -> Self {
+        match kind {
+            ByteKind::Storage => paddock_units::Kind::Storage,
+            ByteKind::Memory => paddock_units::Kind::Memory,
+        }
+    }
+}
+
 /// The type of a field and its limits. Durations are stored as milliseconds and sizes as bytes, so values
 /// are plain JSON integers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,8 +133,10 @@ pub enum FieldKind {
         /// Longest accepted span, in milliseconds.
         max_ms: u64,
     },
-    /// A size, stored as bytes.
+    /// A size, stored as bytes; `kind` says whether KB / MB / GB are decimal (storage) or binary (memory).
     Size {
+        /// The convention of the unit labels.
+        kind: ByteKind,
         /// Smallest accepted size, in bytes.
         min_bytes: u64,
         /// Largest accepted size, in bytes.
@@ -284,7 +306,7 @@ fn check_kind(kind: &FieldKind) -> Result<(), String> {
             }
         }
         FieldKind::Duration { min_ms, max_ms } if min_ms > max_ms => Err("needs min_ms <= max_ms".into()),
-        FieldKind::Size { min_bytes, max_bytes } if min_bytes > max_bytes => Err("needs min_bytes <= max_bytes".into()),
+        FieldKind::Size { min_bytes, max_bytes, .. } if min_bytes > max_bytes => Err("needs min_bytes <= max_bytes".into()),
         FieldKind::StringList { max_items } if *max_items == 0 || *max_items > MAX_LIST_ITEMS => {
             Err(format!("max_items must be 1-{MAX_LIST_ITEMS}"))
         }
@@ -474,7 +496,11 @@ pub fn validate_field(field: &SettingField, value: &Value) -> Result<Value, Stri
             }
             Ok(Value::from(n))
         }
-        FieldKind::Size { min_bytes, max_bytes } => {
+        FieldKind::Size {
+            kind,
+            min_bytes,
+            max_bytes,
+        } => {
             let n = whole(value)
                 .filter(|n| *n >= 0)
                 .ok_or("Must be a size in whole bytes.")?
@@ -482,8 +508,8 @@ pub fn validate_field(field: &SettingField, value: &Value) -> Result<Value, Stri
             if n < *min_bytes || n > *max_bytes {
                 return Err(format!(
                     "Must be between {} and {}.",
-                    format_bytes(*min_bytes),
-                    format_bytes(*max_bytes)
+                    format_bytes(*min_bytes, *kind),
+                    format_bytes(*max_bytes, *kind)
                 ));
             }
             Ok(Value::from(n))
@@ -529,13 +555,9 @@ pub fn format_ms(ms: u64) -> String {
         .map_or_else(|| format!("{ms} ms"), |(size, name)| format!("{} {name}", ms / size))
 }
 
-/// `10485760` → `"10 MB"` (binary units, as the rest of Debrief).
-pub fn format_bytes(bytes: u64) -> String {
-    const UNITS: [(u64, &str); 3] = [(1 << 30, "GB"), (1 << 20, "MB"), (1 << 10, "KB")];
-    UNITS
-        .iter()
-        .find(|(size, _)| bytes >= *size && bytes.checked_rem(*size) == Some(0))
-        .map_or_else(|| format!("{bytes} bytes"), |(size, name)| format!("{} {name}", bytes / size))
+/// `10_000_000` → `"10 MB"` (storage), `10485760` → `"10 MB"` (memory): the largest whole unit, as `paddock_units::format_whole`.
+pub fn format_bytes(bytes: u64, kind: ByteKind) -> String {
+    paddock_units::format_whole(bytes, kind.into())
 }
 
 /// Something with user-facing settings: a plugin or an app module.
@@ -573,11 +595,14 @@ mod tests {
         assert_eq!(format_ms(90_000), "90 s");
         assert_eq!(format_ms(120_000), "2 min");
         assert_eq!(format_ms(7_200_000), "2 h");
-        assert_eq!(format_bytes(0), "0 bytes");
-        assert_eq!(format_bytes(1000), "1000 bytes");
-        assert_eq!(format_bytes(2048), "2 KB");
-        assert_eq!(format_bytes(10 << 20), "10 MB");
-        assert_eq!(format_bytes(3 << 30), "3 GB");
+        assert_eq!(format_bytes(0, ByteKind::Storage), "0 bytes");
+        assert_eq!(format_bytes(1500, ByteKind::Storage), "1500 bytes");
+        assert_eq!(format_bytes(2000, ByteKind::Storage), "2 KB");
+        assert_eq!(format_bytes(10_000_000, ByteKind::Storage), "10 MB");
+        assert_eq!(format_bytes(1000, ByteKind::Memory), "1000 bytes");
+        assert_eq!(format_bytes(2048, ByteKind::Memory), "2 KB");
+        assert_eq!(format_bytes(10 << 20, ByteKind::Memory), "10 MB");
+        assert_eq!(format_bytes(3 << 30, ByteKind::Memory), "3 GB");
         assert_eq!(with_unit(3, &Some(String::new())), "3");
     }
 

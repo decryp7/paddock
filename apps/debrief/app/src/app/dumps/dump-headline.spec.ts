@@ -13,9 +13,9 @@ describe('headlineText', () => {
   });
 
   it('formats UMDH sizes with the shared units rules', () => {
-    expect(headlineText({ type: 'umdhSnapshot', stacks: 412, bytes: 40_055_603 })).toBe('412 allocation stacks, 40 MB');
+    expect(headlineText({ type: 'umdhSnapshot', stacks: 412, bytes: 40_055_603 })).toBe('412 allocation stacks, 38 MB');
     expect(headlineText({ type: 'umdhSnapshot', stacks: 1, bytes: 1536 })).toBe('1 allocation stack, 1.5 KB');
-    expect(headlineText({ type: 'umdhDiff', stacks: 3, deltaBytes: 2 << 20 })).toBe('+2.1 MB across 3 allocation stacks');
-    expect(headlineText({ type: 'umdhDiff', stacks: 1, deltaBytes: -(5 << 20) })).toBe('-5.2 MB across 1 allocation stack');
+    expect(headlineText({ type: 'umdhDiff', stacks: 3, deltaBytes: 2 << 20 })).toBe('+2 MB across 3 allocation stacks');
+    expect(headlineText({ type: 'umdhDiff', stacks: 1, deltaBytes: -(5 << 20) })).toBe('-5 MB across 1 allocation stack');
   });
 });

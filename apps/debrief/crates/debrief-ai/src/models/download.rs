@@ -135,9 +135,9 @@ impl Downloader<'_> {
         }
         if remote.size == 0 || remote.size > self.opts.max_bytes {
             return Err(AiError::Refused(format!(
-                "the file is {:.1} GB, above the {:.1} GB download limit",
-                remote.size as f64 / 1e9,
-                self.opts.max_bytes as f64 / 1e9
+                "the file is {}, above the {} download limit",
+                paddock_units::format_bytes(remote.size, paddock_units::Kind::Storage),
+                paddock_units::format_bytes(self.opts.max_bytes, paddock_units::Kind::Storage)
             )));
         }
         if remote.sha256.len() != 64 {
@@ -175,9 +175,9 @@ impl Downloader<'_> {
             let need = (remote.size - covered).saturating_add(self.opts.margin_bytes);
             if free < need {
                 return Err(AiError::Disk(format!(
-                    "{:.1} GB are needed but only {:.1} GB are free on that drive",
-                    need as f64 / 1e9,
-                    free as f64 / 1e9
+                    "{} are needed but only {} are free on that drive",
+                    paddock_units::format_bytes(need, paddock_units::Kind::Storage),
+                    paddock_units::format_bytes(free, paddock_units::Kind::Storage)
                 )));
             }
         }

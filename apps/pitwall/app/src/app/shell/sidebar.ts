@@ -311,15 +311,15 @@ export class Sidebar {
   });
   protected readonly ramUsed = computed(() => {
     const m = this.live.memory();
-    return m ? bytes(m.ramTotal - m.ramAvailable) : '';
+    return m ? bytes(m.ramTotal - m.ramAvailable, 'memory') : '';
   });
-  protected readonly ramTotal = computed(() => bytes(this.live.memory()?.ramTotal ?? 0, 0));
+  protected readonly ramTotal = computed(() => bytes(this.live.memory()?.ramTotal ?? 0, 'memory'));
   protected readonly vramPct = computed(() => {
     const g = this.live.memory()?.gpus[0];
     return g && g.vramTotal && g.vramUsed !== null ? percent(g.vramUsed, g.vramTotal) : null;
   });
   protected readonly vramText = computed(() => {
     const g = this.live.memory()?.gpus[0];
-    return g ? `${bytes(g.vramUsed)} / ${bytes(g.vramTotal, 0)}` : '';
+    return g ? `${bytes(g.vramUsed, 'memory')} / ${bytes(g.vramTotal, 'memory')}` : '';
   });
 }

@@ -181,9 +181,9 @@ pub async fn ai_image_open<R: Runtime>(
         let limit = ImageLimits::default().max_file_bytes as u64;
         if meta.len() > limit {
             return Err(AiCmdError::invalid(format!(
-                "the image is {:.1} MB; images up to {} MB can be opened",
-                meta.len() as f64 / 1e6,
-                limit / (1024 * 1024)
+                "the image is {}; images up to {} can be opened",
+                paddock_units::format_bytes(meta.len(), paddock_units::Kind::Storage),
+                paddock_units::format_whole(limit, paddock_units::Kind::Storage)
             )));
         }
         let bytes = std::fs::read(&file).map_err(|e| AiCmdError::not_found(format!("cannot read {}: {e}", file.display())))?;
@@ -211,8 +211,8 @@ pub async fn ai_image_paste<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, d
     let max = ImageLimits::default().max_file_bytes;
     if data.len() > max / 3 * 4 + 4 {
         return Err(AiCmdError::invalid(format!(
-            "images up to {} MB can be pasted",
-            max / (1024 * 1024)
+            "images up to {} can be pasted",
+            paddock_units::format_whole(max as u64, paddock_units::Kind::Storage)
         )));
     }
     let w = win.arc().clone();

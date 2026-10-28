@@ -42,8 +42,12 @@ import type {
   UpdateNotice,
 } from './api.types';
 
-export const GiB = 1000 ** 3;
-export const MiB = 1000 ** 2;
+/** Memory (RAM, VRAM, process memory, model fit): binary steps, shown under KB/MB/GB. */
+export const GiB = 1024 ** 3;
+export const MiB = 1024 ** 2;
+/** Storage (model files, downloads, caches, disk): decimal steps. */
+export const GB = 1000 ** 3;
+export const MB = 1000 ** 2;
 export const RAM_TOTAL = 32 * GiB;
 export const VRAM_TOTAL = 12 * GiB;
 export const GPU_NAME = 'NVIDIA GeForce RTX 4070';
@@ -143,14 +147,14 @@ function demoKvPerToken(paramsB: number): number {
 /** How many parallel slots a downloaded-size model would fit at 8,192 tokens each on the demo box (mock only). */
 export function demoMaxSlots(size: number): number {
   const base = size * 1.05 + 512 * MiB;
-  const per = 8192 * demoKvPerToken((size / GiB) * 1.7);
+  const per = 8192 * demoKvPerToken((size / GB) * 1.7);
   if (base + per > DEMO_BUDGET) return 0;
   return Math.min(16, Math.floor((DEMO_BUDGET * 0.8 - base) / per) || 1);
 }
 
 /** The slots fit table of a demo model (mock only: the real numbers come from the engine). */
 export function demoSlotFit(m: Pick<LocalModel, 'sizeBytes' | 'paramsB' | 'contextMax'>, context: number, slots: number): SlotFit {
-  const paramsB = m.paramsB ?? (m.sizeBytes / GiB) * 1.7;
+  const paramsB = m.paramsB ?? (m.sizeBytes / GB) * 1.7;
   const kv = demoKvPerToken(paramsB);
   const base = m.sizeBytes * 1.05 + 512 * MiB;
   const per = kv * context;
@@ -206,14 +210,14 @@ export function demoLocalModels(now: number): LocalModel[] {
     ...p,
   });
   return [
-    m({ id: 'qwen3.5-9b-q4_k_m', repo: 'unsloth/Qwen3.5-9B-GGUF', file: 'Qwen3.5-9B-Q4_K_M.gguf', name: 'Qwen3.5 9B', quant: 'Q4_K_M', sizeBytes: 5.29 * GiB, paramsB: 8.2, contextMax: 32768, architecture: 'qwen3', capabilities: ['chat', 'tools', 'json'], loaded: true, loadedSlots: 2, lastUsedAt: now - 48_000, addedAt: now - 34 * DAY }),
-    m({ id: 'qwen3.5-4b-q4_k_m', repo: 'unsloth/Qwen3.5-4B-GGUF', file: 'Qwen3.5-4B-Q4_K_M.gguf', name: 'Qwen3.5 4B', quant: 'Q4_K_M', sizeBytes: 2.55 * GiB, paramsB: 4.2, contextMax: 262144, architecture: 'qwen35', capabilities: ['chat', 'tools'], loaded: true, slots: 4, slotsCustom: true, loadedSlots: 4, lastUsedAt: now - 2_000, idleSecs: 300 }),
-    m({ id: 'qwen3-embedding-0.6b-q8_0', repo: 'Qwen/Qwen3-Embedding-0.6B-GGUF', file: 'Qwen3-Embedding-0.6B-Q8_0.gguf', name: 'Qwen3 Embedding 0.6B', quant: 'Q8_0', sizeBytes: 610 * MiB, paramsB: 0.6, contextMax: 32768, architecture: 'qwen3', capabilities: ['embeddings'], loaded: true, pinned: true, lastUsedAt: now - 9_000 }),
-    m({ id: 'gemma-4-12b-it-q4_k_m', repo: 'unsloth/gemma-4-12b-it-GGUF', file: 'gemma-4-12b-it-Q4_K_M.gguf', name: 'Gemma 4 12B', quant: 'Q4_K_M', sizeBytes: 6.63 * GiB, paramsB: 12.2, contextMax: 131072, architecture: 'gemma4', capabilities: ['chat', 'vision', 'json'], projector: 'mmproj-F16.gguf', lastUsedAt: now - 2 * DAY, idleSecs: 120 }),
-    m({ id: 'gemma-4-e4b-it-q4_k_m', repo: 'unsloth/gemma-4-E4B-it-GGUF', file: 'gemma-4-E4B-it-Q4_K_M.gguf', name: 'Gemma 4 E4B', quant: 'Q4_K_M', sizeBytes: 4.64 * GiB, paramsB: 7.5, contextMax: 131072, architecture: 'gemma4', capabilities: ['chat', 'vision', 'json'], lastUsedAt: now - 3 * DAY, addedAt: now - 19 * DAY }),
-    m({ id: 'qwen3.6-35b-a3b-q2_k_xl', repo: 'unsloth/Qwen3.6-35B-A3B-GGUF', file: 'Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf', name: 'Qwen3.6 35B-A3B', quant: 'Q2_K_XL', sizeBytes: 11.45 * GiB, paramsB: 35, contextMax: 262144, architecture: 'qwen35moe', capabilities: ['chat', 'tools', 'json'], lastUsedAt: now - 6 * DAY, addedAt: now - 11 * DAY }),
-    m({ id: 'bge-reranker-v2-m3-q8_0', repo: 'gpustack/bge-reranker-v2-m3-GGUF', file: 'bge-reranker-v2-m3-Q8_0.gguf', name: 'BGE reranker v2 m3', quant: 'Q8_0', sizeBytes: 606 * MiB, paramsB: 0.57, contextMax: 8192, architecture: 'xlm-roberta', capabilities: ['rerank'], lastUsedAt: now - 5 * HOUR }),
-    m({ id: 'qwen3.5-2b-q8_0', repo: 'unsloth/Qwen3.5-2B-GGUF', file: 'Qwen3.5-2B-Q8_0.gguf', name: 'Qwen3.5 2B', quant: 'Q8_0', sizeBytes: 1.87 * GiB, paramsB: 2, contextMax: 262144, architecture: 'qwen35', capabilities: ['chat'], lastUsedAt: now - 41 * DAY, addedAt: now - 80 * DAY }),
+    m({ id: 'qwen3.5-9b-q4_k_m', repo: 'unsloth/Qwen3.5-9B-GGUF', file: 'Qwen3.5-9B-Q4_K_M.gguf', name: 'Qwen3.5 9B', quant: 'Q4_K_M', sizeBytes: 5.29 * GB, paramsB: 8.2, contextMax: 32768, architecture: 'qwen3', capabilities: ['chat', 'tools', 'json'], loaded: true, loadedSlots: 2, lastUsedAt: now - 48_000, addedAt: now - 34 * DAY }),
+    m({ id: 'qwen3.5-4b-q4_k_m', repo: 'unsloth/Qwen3.5-4B-GGUF', file: 'Qwen3.5-4B-Q4_K_M.gguf', name: 'Qwen3.5 4B', quant: 'Q4_K_M', sizeBytes: 2.55 * GB, paramsB: 4.2, contextMax: 262144, architecture: 'qwen35', capabilities: ['chat', 'tools'], loaded: true, slots: 4, slotsCustom: true, loadedSlots: 4, lastUsedAt: now - 2_000, idleSecs: 300 }),
+    m({ id: 'qwen3-embedding-0.6b-q8_0', repo: 'Qwen/Qwen3-Embedding-0.6B-GGUF', file: 'Qwen3-Embedding-0.6B-Q8_0.gguf', name: 'Qwen3 Embedding 0.6B', quant: 'Q8_0', sizeBytes: 610 * MB, paramsB: 0.6, contextMax: 32768, architecture: 'qwen3', capabilities: ['embeddings'], loaded: true, pinned: true, lastUsedAt: now - 9_000 }),
+    m({ id: 'gemma-4-12b-it-q4_k_m', repo: 'unsloth/gemma-4-12b-it-GGUF', file: 'gemma-4-12b-it-Q4_K_M.gguf', name: 'Gemma 4 12B', quant: 'Q4_K_M', sizeBytes: 6.63 * GB, paramsB: 12.2, contextMax: 131072, architecture: 'gemma4', capabilities: ['chat', 'vision', 'json'], projector: 'mmproj-F16.gguf', lastUsedAt: now - 2 * DAY, idleSecs: 120 }),
+    m({ id: 'gemma-4-e4b-it-q4_k_m', repo: 'unsloth/gemma-4-E4B-it-GGUF', file: 'gemma-4-E4B-it-Q4_K_M.gguf', name: 'Gemma 4 E4B', quant: 'Q4_K_M', sizeBytes: 4.64 * GB, paramsB: 7.5, contextMax: 131072, architecture: 'gemma4', capabilities: ['chat', 'vision', 'json'], lastUsedAt: now - 3 * DAY, addedAt: now - 19 * DAY }),
+    m({ id: 'qwen3.6-35b-a3b-q2_k_xl', repo: 'unsloth/Qwen3.6-35B-A3B-GGUF', file: 'Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf', name: 'Qwen3.6 35B-A3B', quant: 'Q2_K_XL', sizeBytes: 11.45 * GB, paramsB: 35, contextMax: 262144, architecture: 'qwen35moe', capabilities: ['chat', 'tools', 'json'], lastUsedAt: now - 6 * DAY, addedAt: now - 11 * DAY }),
+    m({ id: 'bge-reranker-v2-m3-q8_0', repo: 'gpustack/bge-reranker-v2-m3-GGUF', file: 'bge-reranker-v2-m3-Q8_0.gguf', name: 'BGE reranker v2 m3', quant: 'Q8_0', sizeBytes: 606 * MB, paramsB: 0.57, contextMax: 8192, architecture: 'xlm-roberta', capabilities: ['rerank'], lastUsedAt: now - 5 * HOUR }),
+    m({ id: 'qwen3.5-2b-q8_0', repo: 'unsloth/Qwen3.5-2B-GGUF', file: 'Qwen3.5-2B-Q8_0.gguf', name: 'Qwen3.5 2B', quant: 'Q8_0', sizeBytes: 1.87 * GB, paramsB: 2, contextMax: 262144, architecture: 'qwen35', capabilities: ['chat'], lastUsedAt: now - 41 * DAY, addedAt: now - 80 * DAY }),
   ];
 }
 
@@ -227,7 +231,7 @@ export function demoUpdateNotices(now: number): UpdateNotice[] {
       kind: 'newerRevision',
       file: 'Qwen3.5-9B-Q4_K_M.gguf',
       quant: 'Q4_K_M',
-      sizeBytes: 5.29 * GiB,
+      sizeBytes: 5.29 * GB,
       installedFile: 'Qwen3.5-9B-Q4_K_M.gguf',
       installedQuant: 'Q4_K_M',
       summary: 'Qwen3.5-9B-Q4_K_M.gguf changed on Hugging Face since you downloaded it (repository revision 3f9a1c2, now b72e04d).',
@@ -241,7 +245,7 @@ export function demoUpdateNotices(now: number): UpdateNotice[] {
       kind: 'betterQuant',
       file: 'Qwen3.5-4B-Q8_0.gguf',
       quant: 'Q8_0',
-      sizeBytes: 4.17 * GiB,
+      sizeBytes: 4.17 * GB,
       installedFile: 'Qwen3.5-4B-Q4_K_M.gguf',
       installedQuant: 'Q4_K_M',
       summary: 'Q8_0 (4.2 GB) is available and fits this machine; you have Q4_K_M.',
@@ -288,15 +292,15 @@ export function demoEngines(now: number): Engine[] {
       availability: { state: 'available' },
       buildChoice: 'auto',
       builds: [
-        { id: 'cuda-13', tag: 'b11669', label: 'CUDA 13 (NVIDIA)', sizeBytes: 412 * MiB, selfTest: 'passed', selfTestMessage: 'CUDA0: NVIDIA GeForce RTX 4070 (12282 MiB)', devices: ['CUDA0: NVIDIA GeForce RTX 4070'], active: true, outdated: true },
-        { id: 'vulkan', tag: 'b11669', label: 'Vulkan', sizeBytes: 38 * MiB, selfTest: 'passed', selfTestMessage: 'Vulkan0: NVIDIA GeForce RTX 4070', devices: ['Vulkan0: NVIDIA GeForce RTX 4070'], active: false, outdated: true },
-        { id: 'cpu', tag: 'b4300', label: 'CPU (AVX2)', sizeBytes: 24 * MiB, selfTest: 'notRun', selfTestMessage: null, devices: ['CPU'], active: false, outdated: true },
+        { id: 'cuda-13', tag: 'b11669', label: 'CUDA 13 (NVIDIA)', sizeBytes: 412 * MB, selfTest: 'passed', selfTestMessage: 'CUDA0: NVIDIA GeForce RTX 4070 (12282 MB)', devices: ['CUDA0: NVIDIA GeForce RTX 4070'], active: true, outdated: true },
+        { id: 'vulkan', tag: 'b11669', label: 'Vulkan', sizeBytes: 38 * MB, selfTest: 'passed', selfTestMessage: 'Vulkan0: NVIDIA GeForce RTX 4070', devices: ['Vulkan0: NVIDIA GeForce RTX 4070'], active: false, outdated: true },
+        { id: 'cpu', tag: 'b4300', label: 'CPU (AVX2)', sizeBytes: 24 * MB, selfTest: 'notRun', selfTestMessage: null, devices: ['CPU'], active: false, outdated: true },
       ],
       catalog: [
-        { id: 'cuda-13', label: 'CUDA 13 (NVIDIA)', tag: 'b11702', downloadBytes: 398 * MiB, suggested: true, installed: false },
-        { id: 'cuda-12', label: 'CUDA 12 (NVIDIA, older drivers)', tag: 'b11702', downloadBytes: 381 * MiB, suggested: false, installed: false },
-        { id: 'vulkan', label: 'Vulkan (any GPU)', tag: 'b11702', downloadBytes: 37 * MiB, suggested: false, installed: false },
-        { id: 'cpu', label: 'CPU (AVX2)', tag: 'b11702', downloadBytes: 23 * MiB, suggested: false, installed: false },
+        { id: 'cuda-13', label: 'CUDA 13 (NVIDIA)', tag: 'b11702', downloadBytes: 398 * MB, suggested: true, installed: false },
+        { id: 'cuda-12', label: 'CUDA 12 (NVIDIA, older drivers)', tag: 'b11702', downloadBytes: 381 * MB, suggested: false, installed: false },
+        { id: 'vulkan', label: 'Vulkan (any GPU)', tag: 'b11702', downloadBytes: 37 * MB, suggested: false, installed: false },
+        { id: 'cpu', label: 'CPU (AVX2)', tag: 'b11702', downloadBytes: 23 * MB, suggested: false, installed: false },
       ],
       processes: [
         { pid: 18244, modelId: 'qwen3.5-9b-q4_k_m', health: 'healthy', restarts: 0, rssBytes: 1.1 * GiB, startedAt: now - 52 * MIN },
@@ -304,7 +308,7 @@ export function demoEngines(now: number): Engine[] {
         { pid: 9960, modelId: 'qwen3-embedding-0.6b-q8_0', health: 'healthy', restarts: 0, rssBytes: 0.21 * GiB, startedAt: now - 5 * HOUR },
       ],
       rollbackTo: 'vulkan',
-      leftovers: [{ id: 'pack-llamafile', label: 'llamafile', sizeBytes: 351 * MiB }],
+      leftovers: [{ id: 'pack-llamafile', label: 'llamafile', sizeBytes: 351 * MB }],
     },
   ];
 }
@@ -312,7 +316,7 @@ export function demoEngines(now: number): Engine[] {
 export function demoSettings(): Settings {
   return {
     general: { theme: 'system', onQuit: 'keepServing' },
-    server: { port: 11500, maxRequestBytes: 32 * MiB, requestTimeoutSecs: 600, maxConcurrent: 4, allowKeylessLocal: false },
+    server: { port: 11500, maxRequestBytes: 32 * MB, requestTimeoutSecs: 600, maxConcurrent: 4, allowKeylessLocal: false },
     memory: {
       preset: 'balanced',
       idleUnloadSecs: 600,
@@ -405,7 +409,7 @@ export function demoRepo(repo: string, local: LocalModel[]): HfRepo {
   const base = repo.split('/')[1]!.replace(/-GGUF$/i, '');
   const variants: QuantVariant[] = QUANTS.map(([quant, bpp]) => {
     const size = params * 1e9 * bpp;
-    const parts = size > 40 * GiB ? 2 : 1;
+    const parts = size > 40 * GB ? 2 : 1;
     const file = parts > 1 ? `${base}-${quant}-00001-of-0000${parts}.gguf` : `${base}-${quant}.gguf`;
     return { file, quant, sizeBytes: size, parts, sha256: null, fit: demoFit(size), maxSlots: demoMaxSlots(size), downloaded: local.some((l) => l.repo === repo && l.quant === quant) };
   });
@@ -413,7 +417,7 @@ export function demoRepo(repo: string, local: LocalModel[]): HfRepo {
   return {
     repo,
     variants,
-    projectors: vision ? [{ file: 'mmproj-F16.gguf', quant: 'F16', sizeBytes: 854 * MiB, parts: 1, sha256: null, fit: demoFit(854 * MiB), maxSlots: 0, downloaded: false }] : [],
+    projectors: vision ? [{ file: 'mmproj-F16.gguf', quant: 'F16', sizeBytes: 854 * MB, parts: 1, sha256: null, fit: demoFit(854 * MB), maxSlots: 0, downloaded: false }] : [],
     license: /gemma/i.test(repo) ? 'gemma' : 'apache-2.0',
     gated: /^google\//i.test(repo),
   };
@@ -668,18 +672,18 @@ interface DemoCatalogModel {
   repo: string;
   base: string;
   quant: string;
-  sizeGiB: number;
+  sizeGB: number;
   tags: string[];
 }
 
 const DEMO_CATALOG: DemoCatalogModel[] = [
-  { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next', repo: 'unsloth/Qwen3-Coder-Next-GGUF', base: 'Qwen3-Coder-Next-UD', quant: 'Q2_K_XL', sizeGiB: 24.9, tags: ['code'] },
-  { id: 'qwen3.5-2b', name: 'Qwen3.5 2B', repo: 'unsloth/Qwen3.5-2B-GGUF', base: 'Qwen3.5-2B', quant: 'Q8_0', sizeGiB: 1.9, tags: ['small', 'chat'] },
-  { id: 'qwen3.5-4b', name: 'Qwen3.5 4B', repo: 'unsloth/Qwen3.5-4B-GGUF', base: 'Qwen3.5-4B', quant: 'Q4_K_M', sizeGiB: 2.6, tags: ['small', 'chat'] },
-  { id: 'gemma-4-12b', name: 'Gemma 4 12B', repo: 'unsloth/gemma-4-12b-it-GGUF', base: 'gemma-4-12b-it', quant: 'Q4_K_M', sizeGiB: 6.6, tags: ['chat', 'vision'] },
-  { id: 'qwen3.8-27b', name: 'Qwen3.8 27B', repo: 'unsloth/Qwen3.8-27B-GGUF', base: 'Qwen3.8-27B-UD', quant: 'Q4_K_M', sizeGiB: 15.3, tags: ['chat', 'reasoning'] },
-  { id: 'qwen3.6-35b-a3b', name: 'Qwen3.6 35B-A3B', repo: 'unsloth/Qwen3.6-35B-A3B-GGUF', base: 'Qwen3.6-35B-A3B-UD', quant: 'Q3_K_XL', sizeGiB: 15.7, tags: ['code', 'chat'] },
-  { id: 'qwen3-embedding', name: 'Qwen3 Embedding 0.6B', repo: 'Qwen/Qwen3-Embedding-0.6B-GGUF', base: 'Qwen3-Embedding-0.6B', quant: 'Q8_0', sizeGiB: 0.6, tags: ['small', 'embedding'] },
+  { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next', repo: 'unsloth/Qwen3-Coder-Next-GGUF', base: 'Qwen3-Coder-Next-UD', quant: 'Q2_K_XL', sizeGB: 24.9, tags: ['code'] },
+  { id: 'qwen3.5-2b', name: 'Qwen3.5 2B', repo: 'unsloth/Qwen3.5-2B-GGUF', base: 'Qwen3.5-2B', quant: 'Q8_0', sizeGB: 1.9, tags: ['small', 'chat'] },
+  { id: 'qwen3.5-4b', name: 'Qwen3.5 4B', repo: 'unsloth/Qwen3.5-4B-GGUF', base: 'Qwen3.5-4B', quant: 'Q4_K_M', sizeGB: 2.6, tags: ['small', 'chat'] },
+  { id: 'gemma-4-12b', name: 'Gemma 4 12B', repo: 'unsloth/gemma-4-12b-it-GGUF', base: 'gemma-4-12b-it', quant: 'Q4_K_M', sizeGB: 6.6, tags: ['chat', 'vision'] },
+  { id: 'qwen3.8-27b', name: 'Qwen3.8 27B', repo: 'unsloth/Qwen3.8-27B-GGUF', base: 'Qwen3.8-27B-UD', quant: 'Q4_K_M', sizeGB: 15.3, tags: ['chat', 'reasoning'] },
+  { id: 'qwen3.6-35b-a3b', name: 'Qwen3.6 35B-A3B', repo: 'unsloth/Qwen3.6-35B-A3B-GGUF', base: 'Qwen3.6-35B-A3B-UD', quant: 'Q3_K_XL', sizeGB: 15.7, tags: ['code', 'chat'] },
+  { id: 'qwen3-embedding', name: 'Qwen3 Embedding 0.6B', repo: 'Qwen/Qwen3-Embedding-0.6B-GGUF', base: 'Qwen3-Embedding-0.6B', quant: 'Q8_0', sizeGB: 0.6, tags: ['small', 'embedding'] },
 ];
 
 /** The demo packs (mock only): recommendations sorted fits first, optionally for one tag; one pack with a problem. */
@@ -687,7 +691,7 @@ export function demoPacks(tag: string | null): PacksInfo {
   const rank = { fits: 0, tight: 1, unknown: 2, wontFit: 3 } as const;
   const recommendations = DEMO_CATALOG.filter((m) => !tag || m.tags.includes(tag))
     .map((m): Recommendation => {
-      const sizeBytes = Math.round(m.sizeGiB * GiB);
+      const sizeBytes = Math.round(m.sizeGB * GB);
       return { id: m.id, name: m.name, repo: m.repo, file: `${m.base}-${m.quant}.gguf`, quant: m.quant, sizeBytes, tags: m.tags, fit: demoFit(sizeBytes), contextTokens: 8192 };
     })
     .sort((a, b) => rank[a.fit.verdict] - rank[b.fit.verdict] || a.sizeBytes - b.sizeBytes);

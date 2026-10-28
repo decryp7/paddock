@@ -358,7 +358,7 @@ fn better_quant(have: &Installed, all: &[Installed], snap: &RepoSnapshot, basis:
     let label = v.quant.as_deref().unwrap_or("a higher quantisation");
     let summary = format!(
         "{label} ({}) is available and fits this machine; you have {}.",
-        fit::gib(v.size),
+        fit::file_size(v.size),
         have.quant.as_deref().unwrap_or("a lower quantisation")
     );
     Some(notice(have, UpdateKind::BetterQuant, v, summary, basis.now))
@@ -377,7 +377,7 @@ fn imatrix_build(have: &Installed, snap: &RepoSnapshot, basis: &Basis<'_>) -> Op
     })?;
     let summary = format!(
         "An importance-matrix build of {label} ({}) is available; it usually keeps more quality at the same size.",
-        fit::gib(v.size)
+        fit::file_size(v.size)
     );
     Some(notice(have, UpdateKind::Imatrix, v, summary, basis.now))
 }

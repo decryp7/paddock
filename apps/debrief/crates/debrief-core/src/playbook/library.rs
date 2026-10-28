@@ -26,7 +26,10 @@ fn file_of(dir: &Path, id: &str) -> Result<PathBuf> {
 fn read_file(path: &Path) -> Result<Playbook> {
     let meta = std::fs::metadata(path).context("the file cannot be read")?;
     if meta.len() > MAX_FILE_BYTES as u64 {
-        bail!("the file is larger than {} KB", MAX_FILE_BYTES / 1024);
+        bail!(
+            "the file is larger than {}",
+            paddock_units::format_whole(MAX_FILE_BYTES as u64, paddock_units::Kind::Storage)
+        );
     }
     Playbook::parse_str(&std::fs::read_to_string(path).context("the file cannot be read as text")?)
 }

@@ -182,14 +182,17 @@ const KEYS: &[(&str, Kind)] = &[
 ];
 
 /// Largest configuration file the editor works with.
-pub const MAX_CONFIG_TEXT: usize = 256 * 1024;
+pub const MAX_CONFIG_TEXT: usize = 250_000;
 
 /// Parses `text` as YAML. A syntax error is returned as an issue with its line.
 pub fn parse(text: &str) -> Result<Value, ConfigIssue> {
     if text.len() > MAX_CONFIG_TEXT {
         return Err(ConfigIssue::error(
             "",
-            format!("the file is larger than {} KB, which Pitcrew does not edit", MAX_CONFIG_TEXT / 1024),
+            format!(
+                "the file is larger than {}, which Pitcrew does not edit",
+                paddock_units::format_whole(MAX_CONFIG_TEXT as u64, paddock_units::Kind::Storage)
+            ),
         ));
     }
     if text.trim().is_empty() {

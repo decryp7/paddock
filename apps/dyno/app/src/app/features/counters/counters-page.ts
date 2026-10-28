@@ -377,7 +377,7 @@ export class CountersPage implements OnInit {
   protected value(path: string): [string, string] | null {
     const r = this.store.readings()[path];
     const n = readingNumber(r);
-    return r && n !== null ? formatCounter(n, r.unit) : null;
+    return r && n !== null ? formatCounter(n, r.unit, path) : null;
   }
 
   protected reason(path: string): string | null {

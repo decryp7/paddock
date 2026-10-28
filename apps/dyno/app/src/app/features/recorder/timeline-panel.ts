@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, linkedSign
 import type { RecorderSnapshot } from '../../core/api.types';
 import { ThemeService } from '../../core/theme';
 import { Chart } from '../../shared/chart';
-import { formatBytes } from '../../shared/format';
+import { formatMemory } from '../../shared/format';
 import { clockSeconds, momentInRange, overviewPoints, panelHeadings, rangeFromDrag, timelineOption, timelineSummary, TIMELINE_HEIGHT, type SampleRange } from './recorder-options';
 
 /** One snapshot's timeline (stacked charts on one time axis) and the busiest processes at the picked moment. */
@@ -90,7 +90,7 @@ export class TimelinePanel {
 
   private readonly theme = inject(ThemeService);
   protected readonly height = TIMELINE_HEIGHT;
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatMemory;
   protected readonly option = computed(() => timelineOption(this.snapshot().samples, this.moment(), this.theme.tokens(), this.range()));
   protected readonly summary = computed(() => timelineSummary(this.snapshot().samples));
   protected readonly colorA = computed(() => this.theme.tokens().chart[2]!);

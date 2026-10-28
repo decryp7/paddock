@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import type { AppGroup } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { PlatformService } from '../core/platform';
-import { formatBytes, formatPercent } from '../shared/format';
+import { formatMemory, formatPercent } from '../shared/format';
 import { Icon } from '../shared/icon';
 import type { IconName } from '../shared/icons';
 import { PROFILE_ICON } from '../shared/labels';
@@ -182,7 +182,7 @@ export class CommandPalette {
         id: `app-${g.id}`,
         section: 'Apps',
         label: g.pids.length > 1 ? `${g.name} · ${g.pids.length}` : g.name,
-        hint: `${formatPercent(g.cpu)} · ${formatBytes(g.memory)}`,
+        hint: `${formatPercent(g.cpu)} · ${formatMemory(g.memory)}`,
         icon: 'processes',
         keywords: g.exe?.split('\\').pop() ?? '',
         run: () => void this.router.navigate(['/processes'], { queryParams: { q: g.name } }),

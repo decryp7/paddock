@@ -83,7 +83,7 @@ const VISIBLE_ROWS = 6;
                 <div class="chip"><dt i18n="@@home.view.storeSize">Store</dt><dd>{{ bytes(o.sizeBytes) }}</dd></div>
               }
               @if (home.memory.data(); as m) {
-                <div class="chip"><dt i18n="@@home.view.memory">Memory</dt><dd>{{ bytes(m.worker?.rssBytes ?? m.duckUsedBytes) }}</dd></div>
+                <div class="chip"><dt i18n="@@home.view.memory">Memory</dt><dd>{{ mem(m.worker?.rssBytes ?? m.duckUsedBytes) }}</dd></div>
               }
             </dl>
             <debrief-coverage-note [coverage]="s.coverage" />
@@ -265,7 +265,8 @@ export class HomeView {
   private readonly recent = inject(RECENT_PROJECTS);
 
   protected readonly count = formatCount;
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = (n: number): string => formatBytes(n, 'storage');
+  protected readonly mem = (n: number): string => formatBytes(n, 'memory');
   private readonly healthWidth = viewChild(MeasuredWidthOf);
   /** The Health column (not the pane: it shares the row with Needs attention) is too narrow for the actions beside the text. */
   protected readonly narrow = computed(() => (this.healthWidth()?.width() ?? NARROW_PANE_PX) < NARROW_PANE_PX);

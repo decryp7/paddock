@@ -1,11 +1,12 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { RecorderSample } from '../../core/api.types';
-import { formatBytes } from '../../shared/format';
+import { formatMemory } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-const GIB = 1000 ** 3;
-const MIB = 1000 ** 2;
+/** Memory is binary (16 GiB reads "16 GB"); disk and network rates are decimal (storage). */
+const GIB = 1024 ** 3;
+const MB = 1000 ** 2;
 
 /** The index of the sample with the highest CPU (the first one on a tie; 0 when there are none). */
 export function peakIndex(samples: readonly RecorderSample[]): number {
@@ -21,7 +22,7 @@ export function clockSeconds(at: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(at);
 }
 
-const mb = (bps: number) => bps / MIB;
+const mb = (bps: number) => bps / MB;
 const num = (v: number) => (v >= 100 ? v.toFixed(0) : v.toFixed(1));
 
 /** One line the tooltip and the panel titles show for a sample: every metric with its unit. */
@@ -41,7 +42,7 @@ export function timelineSummary(samples: readonly RecorderSample[]): string {
   const maxMem = Math.max(...samples.map((s) => s.memoryUsed));
   return (
     `Timeline of ${samples.length} one-second samples from ${clockSeconds(samples[0]!.at)} to ${clockSeconds(samples[samples.length - 1]!.at)}: ` +
-    `CPU peaked at ${num(peak.cpuTotal)}% at ${clockSeconds(peak.at)}; memory used reached ${formatBytes(maxMem)} of ${formatBytes(peak.memoryTotal)}; ` +
+    `CPU peaked at ${num(peak.cpuTotal)}% at ${clockSeconds(peak.at)}; memory used reached ${formatMemory(maxMem)} of ${formatMemory(peak.memoryTotal)}; ` +
     `disk and network rates are charted below. Use the left and right arrow keys to move the picked moment.`
   );
 }

@@ -224,7 +224,7 @@ fn scan_now(req: &ScanRequest, halt: &Halt, max_matches: usize) -> Result<Scan, 
         )?;
     }
     stats.settling = settling;
-    if src.limits.hash_below_mib > 0 {
+    if src.limits.hash_below_mb > 0 {
         hash_small(src, &mut entries, known, halt)?;
     }
     let mut snapshot_entries: Vec<SnapEntry> = entries
@@ -598,7 +598,7 @@ fn settle(root: &Path, entries: &mut Matched, previous: Option<&Snapshot>, settl
 /// Hashes small files that changed. A file whose size and hash are as before but whose time moved was only touched:
 /// it keeps its old time so it is not taken for a new release.
 fn hash_small(src: &FolderSource, entries: &mut Matched, previous: Option<&Snapshot>, halt: &Halt) -> Result<(), Stop> {
-    let limit = u64::from(src.limits.hash_below_mib) << 20;
+    let limit = u64::from(src.limits.hash_below_mb) * 1_000_000;
     for (e, hash) in entries.iter_mut() {
         if halt.stopped() {
             return Err(Stop::Cancelled);
@@ -961,7 +961,7 @@ mod tests {
     async fn a_touched_small_file_keeps_its_time_when_hashing_is_on() {
         let d = tempfile::tempdir().unwrap();
         touch(d.path(), "setup.exe", "same bytes");
-        let src = source(d.path(), &[("hashBelowMib", "1")]);
+        let src = source(d.path(), &[("hashBelowMb", "1")]);
         let first = scan(request(src.clone())).await.unwrap();
         assert!(first.snapshot.entries[0].hash.is_some());
         std::thread::sleep(Duration::from_millis(1100));
@@ -1145,7 +1145,7 @@ mod tests {
         touch(d.path(), "a/small.bin", "abc");
         touch(d.path(), "a/big.bin", &"x".repeat(1_100_000));
         touch(d.path(), "top.bin", "top");
-        let extra = [("depth", "1"), ("hashBelowMib", "1"), ("settleSeconds", "1")];
+        let extra = [("depth", "1"), ("hashBelowMb", "1"), ("settleSeconds", "1")];
         let first = scan(request(source(d.path(), &extra))).await.unwrap();
         let hashed = first.snapshot.entries.iter().filter(|e| e.hash.is_some()).count();
         assert_eq!(hashed, 2, "the file above the limit is not hashed");

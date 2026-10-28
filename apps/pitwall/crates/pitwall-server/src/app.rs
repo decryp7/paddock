@@ -1065,7 +1065,10 @@ pub fn load_packs(dirs: &Dirs) -> pitwall_core::packs::Packs {
     let mut p = pitwall_core::packs::Packs::load(all);
     p.problems.extend(unreadable.into_iter().map(|file| pitwall_core::packs::Problem {
         file,
-        message: "the file is unreadable or larger than 256 KB".into(),
+        message: format!(
+            "the file is unreadable or larger than {}",
+            paddock_units::format_whole(pitwall_core::packs::MAX_PACK_BYTES as u64, paddock_units::Kind::Storage)
+        ),
     }));
     p
 }

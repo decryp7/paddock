@@ -37,7 +37,7 @@ export const NotesStore = signalStore(
       tags: computed(() => allTags(items())),
       byEvent: computed(() => byEvent(items())),
       bySource: computed(() => bySource(items())),
-      maxTextBytes: computed(() => store.list()?.maxTextBytes ?? 16 * 1024),
+      maxTextBytes: computed(() => store.list()?.maxTextBytes ?? 16_000),
       maxRegions: computed(() => store.list()?.maxRegions ?? 16),
     };
   }),

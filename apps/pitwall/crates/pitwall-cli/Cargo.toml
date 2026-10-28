@@ -18,6 +18,7 @@ name = "pitwall"
 path = "src/main.rs"
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 pitwall-core.workspace = true
 # The only way the CLI reaches the server: a client that cannot hold an address other than 127.0.0.1 (ADR 0001).
 pitwall-loopback = { path = "../pitwall-loopback" }

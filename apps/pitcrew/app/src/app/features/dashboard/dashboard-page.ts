@@ -115,7 +115,7 @@ export class DashboardPage {
   protected readonly memOpt = computed(() =>
     loadOption(
       this.samples().map((x) => ({ at: x.at, runners: x.runners.memBytes, machine: x.memUsedBytes })),
-      (v) => formatBytes(v, 0),
+      (v) => formatBytes(v, 'memory'),
       this.samples().at(-1)?.memTotalBytes,
       this.theme.chartTokens(),
       this.hours(),

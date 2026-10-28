@@ -19,6 +19,7 @@ tauri-build = { version = "2.7.3", features = [] }
 # The shell depends on the management contract (pitwall-core) and the loopback-only HTTP client; never on
 # pitwall-server (the server is a separate process) and never on an HTTP client of its own (ADR 0001).
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 pitwall-core.workspace = true
 pitwall-loopback = { path = "../../crates/pitwall-loopback" }
 serde.workspace = true

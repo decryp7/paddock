@@ -13,7 +13,7 @@ import { settle } from '../../../testing/render';
 import { WINDOW_CONTROL, type WindowControl } from '../../core/window-control';
 import { TrayPopover } from './tray-popover';
 
-const GiB = 1000 ** 3;
+const GiB = 1024 ** 3;
 
 function fakeWindows() {
   const openMain = vi.fn().mockResolvedValue(undefined);
@@ -44,7 +44,7 @@ describe('TrayPopover', () => {
     const port = live.server()!.port;
     expect(text(el.querySelector('.state')!)).toBe('Servingon:' + port);
     expect(el.querySelector('.state')!.getAttribute('data-state')).toBe('serving');
-    expect(text(el.querySelector('.mem .row')!)).toMatch(/^RAM\d+\.\dGB\/32GB(Elevated|Critical)?$/);
+    expect(text(el.querySelector('.mem .row')!)).toMatch(/^RAM\d+(\.\d)?GB\/32GB(Elevated|Critical)?$/);
     expect(text(el.querySelectorAll('.mem .row')[1]!)).toMatch(/^VRAM[\d.]+GB\/12GB\d+%busy$/);
     const stats = Array.from(el.querySelectorAll('.stats div')).map(text);
     expect(stats).toEqual(['58.4tok/s', '2running', '3waiting']);

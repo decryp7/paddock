@@ -163,7 +163,7 @@ const TAB_LABELS: Record<StoreTab, string> = {
                 <dt i18n="@@store.index.size">Size</dt><dd>{{ bytes(i.sizeBytes) }}</dd>
                 <dt i18n="@@store.index.segments">Index segments</dt><dd>{{ i.indexSegments }}</dd>
                 <dt i18n="@@store.index.commit">Last commit</dt><dd>{{ i.lastCommitMs === null ? '—' : ago(i.lastCommitMs) }}</dd>
-                <dt i18n="@@store.index.writer">Writer</dt><dd i18n="@@store.index.writerValue">{{ bytes(i.writerHeapBytes) }} heap, {{ i.writerThreads }} threads</dd>
+                <dt i18n="@@store.index.writer">Writer</dt><dd i18n="@@store.index.writerValue">{{ mem(i.writerHeapBytes) }} heap, {{ i.writerThreads }} threads</dd>
               </dl>
               @if (i.error) {
                 <p class="error" role="alert">{{ i.error }}</p>
@@ -180,15 +180,15 @@ const TAB_LABELS: Record<StoreTab, string> = {
               <div class="gauges" data-testid="store-memory">
                 @for (g of gauges(); track g.label) {
                   <div class="gauge">
-                    <div class="gauge-label"><span>{{ g.label }}</span><span>{{ bytes(g.value) }} / {{ bytes(g.max) }}</span></div>
+                    <div class="gauge-label"><span>{{ g.label }}</span><span>{{ mem(g.value) }} / {{ mem(g.max) }}</span></div>
                     <div class="track" role="meter" [attr.aria-label]="g.label" aria-valuemin="0" [attr.aria-valuemax]="g.max" [attr.aria-valuenow]="g.value"><div class="fill" [class.near]="g.near" [style.width.%]="g.percent"></div></div>
                   </div>
                 }
               </div>
               <dl class="facts">
-                <dt i18n="@@store.memory.budgets">Budgets</dt><dd i18n="@@store.memory.budgetsValue">{{ bytes(m.importBudgetBytes) }} importing, {{ bytes(m.queryBudgetBytes) }} querying</dd>
+                <dt i18n="@@store.memory.budgets">Budgets</dt><dd i18n="@@store.memory.budgetsValue">{{ mem(m.importBudgetBytes) }} importing, {{ mem(m.queryBudgetBytes) }} querying</dd>
                 <dt i18n="@@store.memory.duckLimit">DuckDB limit</dt><dd>{{ m.duckLimit }} · <ng-container i18n="@@store.memory.threads">{{ m.duckThreads }} threads</ng-container>@if (m.duckSpilledBytes) {<ng-container i18n="@@store.memory.spilled"> · {{ bytes(m.duckSpilledBytes) }} spilled</ng-container>}</dd>
-                <dt i18n="@@store.memory.console">SQL console limit</dt><dd>{{ bytes(m.consoleLimitBytes) }}</dd>
+                <dt i18n="@@store.memory.console">SQL console limit</dt><dd>{{ mem(m.consoleLimitBytes) }}</dd>
                 <dt i18n="@@store.memory.lowMemory">Low memory mode</dt><dd>{{ m.worker?.lowMemory ? on : off }}</dd>
                 @if (m.worker; as w) {
                   <dt i18n="@@store.memory.pid">Worker process</dt><dd>{{ w.pid }}</dd>
@@ -312,7 +312,10 @@ export class StorePane implements OnInit {
     await this.pane.maintain(action);
   }
 
-  protected bytes = (n: number) => formatBytes(n);
+  /** Files on disk (the store, its tmp folder, cached analyses): storage. */
+  protected bytes = (n: number) => formatBytes(n, 'storage');
+  /** Worker heap, DuckDB and query budgets: memory. */
+  protected mem = (n: number) => formatBytes(n, 'memory');
   protected count = (n: number) => formatCount(n);
   protected duration = (ms: number) => formatDuration(ms);
   protected rate = (n: number) => formatEventRate(n);

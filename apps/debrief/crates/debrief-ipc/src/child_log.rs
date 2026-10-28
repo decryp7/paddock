@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Largest log file of one child per session; the oldest half is dropped when it is reached.
-pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
+pub const MAX_FILE_BYTES: u64 = 1_000_000;
 /// Sessions kept per child: this one and the two before.
 pub const KEEP_RUNS: usize = 3;
 /// Longest line kept (bytes); longer ones are cut at a character boundary.
@@ -745,8 +745,8 @@ impl ChildLog {
                 None,
                 0,
                 &ChildEvent::Note(format!(
-                    "Earlier output was cut to keep this log under {} KB",
-                    MAX_FILE_BYTES / 1024
+                    "Earlier output was cut to keep this log under {}",
+                    paddock_units::format_whole(MAX_FILE_BYTES, paddock_units::Kind::Storage)
                 )),
             )
         });

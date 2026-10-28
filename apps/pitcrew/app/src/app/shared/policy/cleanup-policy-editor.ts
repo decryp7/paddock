@@ -9,7 +9,7 @@ interface NumberField {
   key: NumberKey;
   label: string;
   unit: string;
-  /** Shown value per stored unit (MB fields are edited in GB). */
+  /** Shown value per stored unit (MB fields hold 1,000,000 bytes and are edited in GB of 1,000 MB). */
   scale: number;
   hint: string;
 }
@@ -17,9 +17,9 @@ interface NumberField {
 const FIELDS: NumberField[] = [
   { key: 'every_hours', label: 'Clean every', unit: 'hours', scale: 1, hint: 'How often the scheduled cleanup runs.' },
   { key: 'work_max_age_hours', label: 'Delete work folders after', unit: 'hours', scale: 1, hint: 'Unused for this long.' },
-  { key: 'cache_cap_mb', label: 'Cache cap', unit: 'GB', scale: 1024, hint: 'Caches above this are trimmed, oldest first.' },
-  { key: 'folder_cap_mb', label: 'Folder cap', unit: 'GB', scale: 1024, hint: 'Clean when the runner folder grows past this.' },
-  { key: 'min_free_mb', label: 'Keep free on the disk', unit: 'GB', scale: 1024, hint: 'Clean when free space drops below this.' },
+  { key: 'cache_cap_mb', label: 'Cache cap', unit: 'GB', scale: 1000, hint: 'Caches above this are trimmed, oldest first.' },
+  { key: 'folder_cap_mb', label: 'Folder cap', unit: 'GB', scale: 1000, hint: 'Clean when the runner folder grows past this.' },
+  { key: 'min_free_mb', label: 'Keep free on the disk', unit: 'GB', scale: 1000, hint: 'Clean when free space drops below this.' },
 ];
 
 /** Edits a cleanup policy. Emits the edited policy on Save; the service validates it again. */

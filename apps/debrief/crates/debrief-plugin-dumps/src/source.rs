@@ -45,7 +45,7 @@ const MAX_STREAMS: u32 = 4096;
 /// Memory ranges of a full dump's `Memory64List`.
 const MAX_RANGES: u64 = 4 << 20;
 /// Largest prefix (everything before the bulk memory) read from a full dump.
-const MAX_PREFIX: u64 = 512 << 20;
+const MAX_PREFIX: u64 = 512_000_000;
 /// Stack bytes kept per thread of a full dump.
 const STACK_KEPT: u64 = 1 << 20;
 /// Memory kept from a full dump in all.
@@ -143,9 +143,9 @@ pub fn load(src: &dyn Source, limits: &Limits) -> Result<Loaded> {
         None => {
             if src.len() > limits.max_read_bytes {
                 return Err(DumpError::limit(format!(
-                    "the dump is {} MB; dumps without a full-memory list are read whole, up to {} MB",
-                    src.len() >> 20,
-                    limits.max_read_bytes >> 20
+                    "the dump is {}; dumps without a full-memory list are read whole, up to {}",
+                    paddock_units::format_bytes(src.len(), paddock_units::Kind::Storage),
+                    paddock_units::format_whole(limits.max_read_bytes, paddock_units::Kind::Storage)
                 )));
             }
             Ok(Loaded {
@@ -241,9 +241,9 @@ fn compact(src: &dyn Source, entries: &[Entry], m64: usize, dir_rva: u32) -> Res
     let prefix_end = base_rva.min(src.len());
     if prefix_end > MAX_PREFIX {
         return Err(DumpError::limit(format!(
-            "the dump's streams before its memory take {} MB; at most {} MB are read",
-            prefix_end >> 20,
-            MAX_PREFIX >> 20
+            "the dump's streams before its memory take {}; at most {} are read",
+            paddock_units::format_bytes(prefix_end, paddock_units::Kind::Storage),
+            paddock_units::format_whole(MAX_PREFIX, paddock_units::Kind::Storage)
         )));
     }
     let mut notes = Vec::new();

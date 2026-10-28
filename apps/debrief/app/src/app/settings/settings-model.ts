@@ -1,4 +1,5 @@
 import { unitLabels } from '../core/format';
+import { byteStep, ByteKind } from '../shared/format/units';
 import { VIDEO_SETTINGS_ID } from '../video/video-settings.types';
 import { KEYBOARD_ID } from './keyboard/keyboard.types';
 import { PARSERS_ID } from './parsers/parsers.types';
@@ -82,11 +83,15 @@ const UNITS_MS: [number, string][] = [
   [60_000, unitLabels().min],
   [1000, unitLabels().s],
 ];
-const UNITS_BYTES: [number, string][] = [
-  [1 << 30, $localize`:Gigabytes (binary)@@settings.unit.gb:GB`],
-  [1 << 20, $localize`:Megabytes (binary)@@settings.unit.mb:MB`],
-  [1 << 10, $localize`:Kilobytes (binary)@@settings.unit.kb:KB`],
-];
+/** The edit units of a size, largest first, in the steps of its kind (decimal for storage, binary for memory). */
+function unitsBytes(kind: ByteKind): [number, string][] {
+  const step = byteStep(kind);
+  return [
+    [step ** 3, $localize`:Gigabytes (binary)@@settings.unit.gb:GB`],
+    [step ** 2, $localize`:Megabytes (binary)@@settings.unit.mb:MB`],
+    [step, $localize`:Kilobytes (binary)@@settings.unit.kb:KB`],
+  ];
+}
 const BYTES = $localize`:Unit after a byte count@@settings.unit.bytes:bytes`;
 
 function largest(n: number, units: [number, string][], fallback: string): string {
@@ -99,9 +104,9 @@ export function formatMs(ms: number): string {
   return largest(ms, UNITS_MS, unitLabels().ms);
 }
 
-/** `10485760` → `"10 MB"` (binary units). */
-export function formatBytes(bytes: number): string {
-  return largest(bytes, UNITS_BYTES, BYTES);
+/** `10_000_000` → `"10 MB"` (storage), `10485760` → `"10 MB"` (memory): the same text as `paddock_units::format_whole`. */
+export function formatBytes(bytes: number, kind: ByteKind): string {
+  return largest(bytes, unitsBytes(kind), BYTES);
 }
 
 /** The unit a duration or size is edited in: the largest one both limits are whole multiples of. */
@@ -116,7 +121,7 @@ export function editUnit(kind: FieldKind): EditUnit | null {
     return u ? { factor: u[0], label: u[1] } : { factor: 1, label: base };
   };
   if (kind.type === 'duration') return pick(kind.minMs, kind.maxMs, UNITS_MS.slice(2), unitLabels().ms);
-  if (kind.type === 'size') return pick(kind.minBytes, kind.maxBytes, UNITS_BYTES, BYTES);
+  if (kind.type === 'size') return pick(kind.minBytes, kind.maxBytes, unitsBytes(kind.kind), BYTES);
   return null;
 }
 
@@ -130,7 +135,7 @@ export function rangeHint(kind: FieldKind): string {
     case 'duration':
       return `${formatMs(kind.minMs)} – ${formatMs(kind.maxMs)}`;
     case 'size':
-      return `${formatBytes(kind.minBytes)} – ${formatBytes(kind.maxBytes)}`;
+      return `${formatBytes(kind.minBytes, kind.kind)} – ${formatBytes(kind.maxBytes, kind.kind)}`;
     case 'text':
       return $localize`:@@settings.hint.maxLen:up to ${kind.maxLen}:max: characters`;
     case 'stringList':
@@ -147,7 +152,7 @@ export function displayValue(field: SettingField, value: SettingValue): string {
   const k = field.kind;
   if (k.type === 'bool') return value ? $localize`:Value of a switched-on setting@@settings.value.on:on` : $localize`:Value of a switched-off setting@@settings.value.off:off`;
   if (k.type === 'duration' && typeof value === 'number') return formatMs(value);
-  if (k.type === 'size' && typeof value === 'number') return formatBytes(value);
+  if (k.type === 'size' && typeof value === 'number') return formatBytes(value, k.kind);
   if (k.type === 'enum') return k.options.find((o) => o.value === value)?.label ?? String(value);
   if (Array.isArray(value)) return value.length ? value.join(', ') : $localize`:Value of an empty list setting@@settings.value.none:none`;
   if ((k.type === 'int' || k.type === 'float') && k.unit) return `${value} ${k.unit}`;

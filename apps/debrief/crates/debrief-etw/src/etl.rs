@@ -140,8 +140,8 @@ pub fn convert(
     let mut notes = Vec::new();
     if truncated {
         notes.push(format!(
-            "The conversion reached the size limit of {} MB and was cut",
-            max_bytes >> 20
+            "The conversion reached the size limit of {} and was cut",
+            paddock_units::format_whole(max_bytes, paddock_units::Kind::Storage)
         ));
     }
     if panicked {

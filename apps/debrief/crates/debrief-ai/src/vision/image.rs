@@ -27,7 +27,7 @@ pub struct ImageLimits {
 impl Default for ImageLimits {
     fn default() -> Self {
         ImageLimits {
-            max_file_bytes: 32 * 1024 * 1024,
+            max_file_bytes: 32_000_000,
             max_pixels: 64 * 1024 * 1024,
             max_side: 16_384,
             max_alloc: 512 * 1024 * 1024,

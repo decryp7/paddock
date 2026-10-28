@@ -197,7 +197,7 @@ export class DotnetDialog implements OnInit {
   }
 
   protected size(c: DotnetCaptureStatus): string {
-    return formatBytes(c.bytes);
+    return formatBytes(c.bytes, 'storage'); // the NetTrace file written so far
   }
 
   protected stopLabel(c: DotnetCaptureStatus): string {

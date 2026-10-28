@@ -3,12 +3,13 @@
 use crate::limits::{MAX_NAME_CHARS, MAX_WATCHES};
 use crate::source::SourceConfig;
 use crate::watch::{Watch, WatchSpec};
+use paddock_units::{format_whole, Kind};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use quick_xml::XmlVersion;
 
-/// Largest list read (2 MiB).
-pub const MAX_IMPORT_BYTES: usize = 2 << 20;
+/// Largest list read (2 MB).
+pub const MAX_IMPORT_BYTES: usize = 2_000_000;
 
 /// A list format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +46,10 @@ pub struct Imported {
 /// Reads a list. `Err` only when the text cannot be read at all (not JSON, not XML, too large).
 pub fn import(format: ImportFormat, text: &str) -> Result<Imported, String> {
     if text.len() > MAX_IMPORT_BYTES {
-        return Err("The list is larger than 2 MiB.".into());
+        return Err(format!(
+            "The list is larger than {}.",
+            format_whole(MAX_IMPORT_BYTES as u64, Kind::Storage)
+        ));
     }
     let text = text.trim_start_matches('\u{feff}');
     let mut out = match format {
@@ -299,7 +303,7 @@ mod tests {
     fn imports_are_bounded_and_formats_parse() {
         assert!(import(ImportFormat::Brewfile, &" ".repeat(MAX_IMPORT_BYTES + 1))
             .unwrap_err()
-            .contains("2 MiB"));
+            .contains("2 MB"));
         let many: String = (0..MAX_WATCHES + 5).map(|i| format!("brew \"pkg{i}\"\n")).collect();
         let out = import(ImportFormat::Brewfile, &many).unwrap();
         assert_eq!((out.drafts.len(), out.skipped.len()), (MAX_WATCHES, 1));

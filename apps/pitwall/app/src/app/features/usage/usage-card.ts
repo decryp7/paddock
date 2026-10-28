@@ -48,7 +48,7 @@ import { UsageStore } from './usage.store';
                 <a routerLink="/apps" [queryParams]="a.appId === 'other' ? null : { app: a.appId }" class="nm">{{ name(a.appId) }}</a>
                 <span class="num">{{ count(tokens(a.totals)) }} tokens</span>
                 <span class="num faint">{{ intText(a.totals.requests) }} requests</span>
-                <span class="num faint">{{ a.totals.peakMemoryBytes ? size(a.totals.peakMemoryBytes) + ' peak' : '' }}</span>
+                <span class="num faint">{{ a.totals.peakMemoryBytes ? size(a.totals.peakMemoryBytes, 'memory') + ' peak' : '' }}</span>
                 <span class="num faint" [title]="'Cache hits: ' + intText(a.totals.cacheHits)">{{ hasRate(a.totals) ? rateText(a.totals) + ' cached' : '' }}</span>
               </li>
             }

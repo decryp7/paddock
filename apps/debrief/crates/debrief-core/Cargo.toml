@@ -9,6 +9,7 @@ publish = false
 description = "Log and file analysis engine for Debrief: importers, parsing profiles, query, timeline and chart aggregation"
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true

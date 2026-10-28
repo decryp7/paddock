@@ -31,7 +31,7 @@ pub const MAX_EVENT_IDS: usize = 1000;
 /// Most rows in a table block.
 pub const MAX_TABLE_ROWS: usize = 1000;
 /// Most bytes of a text field (markdown, captions...).
-pub const MAX_TEXT: usize = 256 * 1024;
+pub const MAX_TEXT: usize = 256_000;
 
 fn version_1() -> u32 {
     REPORT_VERSION
@@ -173,7 +173,10 @@ impl Block {
 
 fn check_text(what: &str, text: &str) -> Result<()> {
     if text.len() > MAX_TEXT {
-        bail!("{what} is longer than {} KB", MAX_TEXT / 1024);
+        bail!(
+            "{what} is longer than {}",
+            paddock_units::format_whole(MAX_TEXT as u64, paddock_units::Kind::Storage)
+        );
     }
     Ok(())
 }

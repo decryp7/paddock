@@ -263,20 +263,14 @@ pub fn tree(rows: &[Growth], path: &[String], limit: u32) -> Vec<UmdhTreeNode> {
     out
 }
 
-/// `12.3 MB`.
+/// `12 MB`, `1.5 GB` (memory steps).
 pub fn fmt_bytes(b: i64) -> String {
     let sign = if b < 0 { "-" } else { "" };
-    let v = b.unsigned_abs() as f64;
-    let (n, unit) = if v >= 1024.0 * 1024.0 * 1024.0 {
-        (v / (1024.0 * 1024.0 * 1024.0), "GB")
-    } else if v >= 1024.0 * 1024.0 {
-        (v / (1024.0 * 1024.0), "MB")
-    } else if v >= 1024.0 {
-        (v / 1024.0, "KB")
-    } else {
-        return format!("{sign}{} bytes", b.unsigned_abs());
-    };
-    format!("{sign}{n:.1} {unit}")
+    // Heap and allocation sizes of a dump: memory steps.
+    format!(
+        "{sign}{}",
+        paddock_units::format_bytes(b.unsigned_abs(), paddock_units::Kind::Memory)
+    )
 }
 
 /// Growth at least this large (or this share of the total) is a leak suspect.
@@ -504,16 +498,16 @@ mod tests {
         let leak = f.iter().find(|f| f.kind == FindingKind::LeakGrowth).unwrap();
         assert_eq!(leak.severity, Severity::Critical);
         assert!(
-            leak.title.starts_with("Shop.Orders!Cache::Add+0x34 grew by 20.0 MB"),
+            leak.title.starts_with("Shop.Orders!Cache::Add+0x34 grew by 20 MB"),
             "{}",
             leak.title
         );
         assert_eq!(leak.evidence.doc_id, 3);
         let steady: Vec<&DumpFinding> = f.iter().filter(|f| f.kind == FindingKind::SteadyGrowth).collect();
         assert_eq!(steady.len(), 1, "stack 2 shrank once");
-        assert!(steady[0].detail.contains("10.0 MB → 20.0 MB → 30.0 MB"));
+        assert!(steady[0].detail.contains("10 MB → 20 MB → 30 MB"));
         let large = f.iter().find(|f| f.kind == FindingKind::LargeAllocation).unwrap();
-        assert!(large.title.contains("64.0 MB"));
+        assert!(large.title.contains("64 MB"));
 
         let one = findings(&[(1, &s1)]).unwrap();
         assert!(one.iter().all(|f| f.kind != FindingKind::LeakGrowth));
@@ -530,9 +524,9 @@ mod tests {
     #[test]
     fn bytes_are_formatted() {
         assert_eq!(fmt_bytes(512), "512 bytes");
-        assert_eq!(fmt_bytes(-2048), "-2.0 KB");
-        assert_eq!(fmt_bytes(3 << 20), "3.0 MB");
-        assert_eq!(fmt_bytes(5 << 30), "5.0 GB");
+        assert_eq!(fmt_bytes(-2048), "-2 KB");
+        assert_eq!(fmt_bytes(3 << 20), "3 MB");
+        assert_eq!(fmt_bytes(5 << 30), "5 GB");
         assert_eq!(culprit(&[]), None);
     }
 }

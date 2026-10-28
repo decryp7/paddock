@@ -149,7 +149,7 @@ export function mockSections(): SettingsSection[] {
         f('researchProfile', 'Keep a research profile (cookies and consent between researches)', { type: 'bool' }, false, {
           description: "Off: every research browser starts with a throwaway profile. On: research uses a profile of its own in Debrief's data folder (never your browser's).",
         }),
-        f('researchProfileMax', 'Research profile size limit', { type: 'size', minBytes: 50 << 20, maxBytes: 5 * 1024 ** 3 }, 500 << 20, {
+        f('researchProfileMax', 'Research profile size limit', { type: 'size', kind: 'storage', minBytes: 50_000_000, maxBytes: 5_000_000_000 }, 500_000_000, {
           description: 'A larger research profile is not used until you clear it.',
           advanced: true,
         }),
@@ -196,7 +196,7 @@ export function mockSections(): SettingsSection[] {
         f('ratio', 'Sample ratio', { type: 'float', min: 0, max: 1, step: 0.05, unit: null }, 0.5),
         f('prefix', 'Prefix', { type: 'text', maxLen: 16, pattern: '[A-Z]+' }, 'Debrief'),
         f('outDir', 'Output folder', { type: 'path', dir: true }, ''),
-        f('cache', 'Cache size', { type: 'size', minBytes: 1 << 20, maxBytes: 1 << 30 }, 64 << 20),
+        f('cache', 'Cache size', { type: 'size', kind: 'storage', minBytes: 1_000_000, maxBytes: 1_000_000_000 }, 64_000_000),
         f('hosts', 'Hosts', { type: 'stringList', maxItems: 10 }, []),
       ],
     }),
@@ -244,7 +244,7 @@ export function mockValidate(field: SettingField, value: unknown): string | null
       return whole < k.minMs || whole > k.maxMs ? `Must be between ${formatMs(k.minMs)} and ${formatMs(k.maxMs)}.` : null;
     case 'size':
       if (whole === null || whole < 0) return 'Must be a size in whole bytes.';
-      return whole < k.minBytes || whole > k.maxBytes ? `Must be between ${formatBytes(k.minBytes)} and ${formatBytes(k.maxBytes)}.` : null;
+      return whole < k.minBytes || whole > k.maxBytes ? `Must be between ${formatBytes(k.minBytes, k.kind)} and ${formatBytes(k.maxBytes, k.kind)}.` : null;
     case 'stringList':
       if (!Array.isArray(value)) return 'Must be a list of text.';
       if (value.length > k.maxItems) return `Must have at most ${k.maxItems} items.`;

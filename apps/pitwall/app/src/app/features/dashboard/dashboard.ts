@@ -7,7 +7,7 @@ import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
 import { latencyChart, memoryChart, stackedRequestsChart, throughputChart } from '../../shared/charts/chart-options';
 import { EChart } from '../../shared/charts/echart';
-import { duration } from '../../shared/format';
+import { duration, gb } from '../../shared/format';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
 import { ContextMenuService } from '../../shared/ui/context-menu';
@@ -379,7 +379,7 @@ export class Dashboard implements OnInit {
     if (!ms.length) return '';
     const vram = ms.reduce((s, m) => s + m.vramBytes, 0);
     const ram = ms.reduce((s, m) => s + m.ramBytes, 0);
-    return `${ms.length} hot · ${(vram / 1000 ** 3).toFixed(1)} GB VRAM · ${(ram / 1000 ** 3).toFixed(1)} GB RAM`;
+    return `${ms.length} hot · ${gb(vram, 'memory')} GB VRAM · ${gb(ram, 'memory')} GB RAM`;
   });
   protected readonly queueSummary = computed(() => {
     const q = this.live.queue();

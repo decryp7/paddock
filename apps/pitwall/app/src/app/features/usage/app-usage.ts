@@ -44,7 +44,7 @@ const METRICS: { id: UsageMetric; label: string }[] = [
           <div><dt>Prompt tokens</dt><dd class="num">{{ count(s.totals.promptTokens) }}</dd></div>
           <div><dt>Completion tokens</dt><dd class="num">{{ count(s.totals.completionTokens) }}</dd></div>
           <div><dt>Errors</dt><dd class="num" [class.bad]="s.totals.errors > 0">{{ intText(s.totals.errors) }}</dd></div>
-          <div><dt>Peak memory</dt><dd class="num">{{ s.totals.peakMemoryBytes ? size(s.totals.peakMemoryBytes) : '—' }}</dd></div>
+          <div><dt>Peak memory</dt><dd class="num">{{ s.totals.peakMemoryBytes ? size(s.totals.peakMemoryBytes, 'memory') : '—' }}</dd></div>
         </dl>
         <pw-cache-tiles class="cache" [totals]="s.totals" />
         <pw-echart [option]="option()" [themeKey]="chartKey()" height="240px" [label]="chartLabel()" />

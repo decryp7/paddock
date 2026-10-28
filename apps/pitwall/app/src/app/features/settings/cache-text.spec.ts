@@ -1,12 +1,12 @@
 import type { CacheKindInfo } from '../../core/api.types';
 import { expiryText, oldestText, sizeText, ttlOptions, TTL_CHOICES } from './cache-text';
 
-const MiB = 1000 ** 2;
+const MB = 1000 ** 2;
 const kind = (over: Partial<CacheKindInfo> = {}): CacheKindInfo => ({
   storage: 'disk',
   entries: 3,
-  bytes: 12 * MiB,
-  maxBytes: 512 * MiB,
+  bytes: 12 * MB,
+  maxBytes: 512 * MB,
   hits: 5,
   oldestAt: 1_000_000,
   expiresAfterSecs: 7 * 86_400,
@@ -35,7 +35,7 @@ describe('cache text', () => {
     expect(expiryText(kind({ expiresAfterSecs: 90 * 86_400, sliding: true }))).toBe('90 days since last use');
     expect(expiryText(kind({ expiresAfterSecs: null }))).toBe('Never (size cap only)');
     expect(expiryText(kind({ expiresAfterSecs: 5000 }))).toContain('seconds');
-    expect(sizeText(kind())).toBe('12.0 MB of 512 MB');
+    expect(sizeText(kind())).toBe('12 MB of 512 MB');
     expect(oldestText(kind({ oldestAt: null }), 2_000_000)).toBe('none');
     expect(oldestText(kind(), 2_000_000)).toContain('ago');
   });

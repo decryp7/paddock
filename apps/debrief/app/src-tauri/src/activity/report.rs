@@ -40,7 +40,7 @@ const REPORT_BREADCRUMBS: usize = 200;
 /// Most error snapshots included (the newest).
 const MAX_SNAPSHOTS: usize = 10;
 /// Largest settings file read for the system information.
-const MAX_CONFIG_FILE: u64 = 1 << 20;
+const MAX_CONFIG_FILE: u64 = 1_000_000;
 
 /// One file of the report as previewed.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -252,7 +252,10 @@ fn read_config(path: &Path) -> Result<Option<Value>, String> {
         Err(e) => return Err(format!("cannot be read ({})", e.kind())),
     };
     if meta.len() > MAX_CONFIG_FILE {
-        return Err(format!("is larger than {} KB", MAX_CONFIG_FILE / 1024));
+        return Err(format!(
+            "is larger than {}",
+            paddock_units::format_whole(MAX_CONFIG_FILE, paddock_units::Kind::Storage)
+        ));
     }
     let text = std::fs::read_to_string(path).map_err(|e| format!("cannot be read ({})", e.kind()))?;
     serde_json::from_str(&text)

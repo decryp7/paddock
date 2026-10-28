@@ -45,9 +45,9 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
             </div>
             <div class="meta num">
               @if (m.vramBytes) {
-                <span>{{ size(m.vramBytes) }} VRAM</span>
+                <span>{{ size(m.vramBytes, 'memory') }} VRAM</span>
               }
-              <span>{{ size(m.ramBytes) }} RAM</span>
+              <span>{{ size(m.ramBytes, 'memory') }} RAM</span>
             </div>
           </div>
           <div class="side">
@@ -82,10 +82,10 @@ export function idleProgress(m: LoadedModel, now: number): number | null {
     }
     @if (!compact() && split(); as s) {
       <div class="split">
-        <div class="split-head"><span>GPU memory by model</span><span class="num faint">{{ size(s.used) }} of {{ size(s.total) }}</span></div>
+        <div class="split-head"><span>GPU memory by model</span><span class="num faint">{{ size(s.used, 'memory') }} of {{ size(s.total, 'memory') }}</span></div>
         <div class="split-bar" role="img" [attr.aria-label]="s.label">
           @for (seg of s.segments; track seg.name) {
-            <span [style.width.%]="seg.pct" [style.background]="seg.color" [matTooltip]="seg.name + ' · ' + size(seg.bytes)"></span>
+            <span [style.width.%]="seg.pct" [style.background]="seg.color" [matTooltip]="seg.name + ' · ' + size(seg.bytes, 'memory')"></span>
           }
         </div>
         <ul class="split-legend" aria-hidden="true">

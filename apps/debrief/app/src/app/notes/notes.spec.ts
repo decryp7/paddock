@@ -153,7 +153,7 @@ describe('MockNotesBackend', () => {
     const m = new MockNotesBackend();
     await expect(m.addNote({ anchor: anchors.project(), text: ' ' })).rejects.toMatchObject({ code: 'invalid' });
     await expect(m.addNote({ anchor: { kind: 'range', from: 2, to: 1 }, text: 'x' })).rejects.toMatchObject({ code: 'invalid' });
-    await expect(m.addNote({ anchor: anchors.project(), text: 'x'.repeat(16 * 1024 + 1) })).rejects.toMatchObject({ code: 'limit' });
+    await expect(m.addNote({ anchor: anchors.project(), text: 'x'.repeat(16_000 + 1) })).rejects.toMatchObject({ code: 'limit' });
     const n = await m.addNote({ anchor: anchors.project(), text: 'a\r\nb ', tags: ['#Disk', 'disk'] });
     expect(n).toMatchObject({ id: 'n1', text: 'a\nb', tags: ['disk'], severity: 'info' });
     const img = await m.openNoteImage('C:\\shots\\screen.png');
@@ -324,7 +324,7 @@ describe('NoteEditor', () => {
     await settle(f);
     expect(el<HTMLTextAreaElement>(f, '[data-testid=note-text]').value).toBe('old');
     expect(el<HTMLInputElement>(f, '[data-testid=note-tags]').value).toBe('a');
-    typeInto(el<HTMLTextAreaElement>(f, '[data-testid=note-text]'), 'x'.repeat(16 * 1024 + 1));
+    typeInto(el<HTMLTextAreaElement>(f, '[data-testid=note-text]'), 'x'.repeat(16_000 + 1));
     await settle(f);
     expect(el<HTMLButtonElement>(f, '[data-testid=note-save]').disabled).toBe(true);
     typeInto(el<HTMLInputElement>(f, '[data-testid=note-tags]'), 'two words');

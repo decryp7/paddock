@@ -1,6 +1,6 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { CounterHistory, CounterReading, CounterUnit, Widget } from '../../core/api.types';
-import { formatBytes, formatClock, formatPercent, formatRate } from '../../shared/format';
+import { formatBytes, formatClock, formatPercent, formatRate, type ByteKind } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
 import { EVENT_STYLE } from '../dashboard/history-options';
 
@@ -50,17 +50,27 @@ function plain(v: number): string {
   return a >= 10 ? v.toFixed(1) : v.toFixed(2);
 }
 
+/**
+ * Which byte convention a counter follows, by its path: memory counters (memory, working set, private or virtual bytes,
+ * page file, commit, heap) use binary steps like Activity Monitor; every other byte counter (disk, network, system) is
+ * storage or transfer with decimal steps. Counters without a path are storage.
+ */
+export function counterByteKind(path: string): ByteKind {
+  return /memory|working set|private bytes|virtual bytes|paging file|page file|commit|heap/i.test(path) ? 'memory' : 'storage';
+}
+
 /** A value and its unit, split so the number can be right-aligned and the unit sit in the column header or beside it. */
-export function formatCounter(value: number, unit: CounterUnit): [string, string] {
+export function formatCounter(value: number, unit: CounterUnit, path = ''): [string, string] {
+  const kind = counterByteKind(path);
   switch (unit) {
     case 'percent':
       return [formatPercent(value).replace('%', ''), '%'];
     case 'bytes': {
-      const [n, u] = formatBytes(value).split(' ');
+      const [n, u] = formatBytes(value, kind).split(' ');
       return [n ?? '—', u ?? ''];
     }
     case 'bytesPerSec': {
-      const [n, u] = formatRate(value).split(' ');
+      const [n, u] = formatRate(value, kind).split(' ');
       return [n ?? '—', u ?? ''];
     }
     case 'perSec':
@@ -76,8 +86,8 @@ export function formatCounter(value: number, unit: CounterUnit): [string, string
 }
 
 /** One line for a tooltip or a screen reader: `1.2 MB/s`. */
-export function counterText(value: number, unit: CounterUnit): string {
-  return formatCounter(value, unit).filter(Boolean).join(' ');
+export function counterText(value: number, unit: CounterUnit, path = ''): string {
+  return formatCounter(value, unit, path).filter(Boolean).join(' ');
 }
 
 /** The number a reading shows, or why not. */
@@ -119,7 +129,7 @@ export interface CounterChart {
   units: CounterUnit[];
 }
 
-const axisLabel = (unit: CounterUnit) => (v: number) => (unit === 'percent' ? `${v}%` : counterText(v, unit));
+const axisLabel = (unit: CounterUnit, path: string) => (v: number) => (unit === 'percent' ? `${v}%` : counterText(v, unit, path));
 
 /**
  * The counters over time as lines (colour from the CVD-checked palette, never colour alone: the legend names each line),
@@ -160,9 +170,9 @@ export function counterChartOption(history: CounterHistory, t: ThemeTokens, hidd
       textStyle: { color: t.text1, fontFamily: FONT, fontSize: 12 },
       axisPointer: { type: 'line', lineStyle: { color: t.borderStrong } },
       formatter: (raw: unknown) => {
-        const list = (raw as { axisValue: number; marker: string; seriesName: string; seriesType: string; value: [number, number]; data: { unit: CounterUnit } }[]).filter((p) => p.seriesType === 'line');
+        const list = (raw as { axisValue: number; marker: string; seriesName: string; seriesType: string; value: [number, number]; data: { unit: CounterUnit; path: string } }[]).filter((p) => p.seriesType === 'line');
         if (!list.length) return '';
-        const rows = list.map((p) => `${p.marker} ${p.seriesName}&nbsp;<b>${counterText(p.value[1], p.data.unit)}</b>`);
+        const rows = list.map((p) => `${p.marker} ${p.seriesName}&nbsp;<b>${counterText(p.value[1], p.data.unit, p.data.path)}</b>`);
         return `${formatClock(list[0]!.axisValue)}<br/>${rows.join('<br/>')}`;
       },
     },
@@ -177,7 +187,7 @@ export function counterChartOption(history: CounterHistory, t: ThemeTokens, hidd
         position: i === 0 ? 'left' : 'right',
         min: 0,
         ...(unit === 'percent' ? { max: 100 } : {}),
-        axisLabel: { ...text, formatter: axisLabel(unit) },
+        axisLabel: { ...text, formatter: axisLabel(unit, drawn.find((s) => s.unit === unit && counterByteKind(s.path) === 'memory')?.path ?? '') },
         splitLine: i === 0 ? { lineStyle: { color: t.chartGrid, type: 'dashed' } } : { show: false },
       })),
       { type: 'value', gridIndex: 1, min: 0, max: 1, show: false },
@@ -194,7 +204,7 @@ export function counterChartOption(history: CounterHistory, t: ThemeTokens, hidd
           showSymbol: false,
           smooth: 0.15,
           sampling: 'lttb',
-          data: hidden.has(s.path) ? [] : s.points.map((p) => ({ value: [p.at, p.value], unit: s.unit })),
+          data: hidden.has(s.path) ? [] : s.points.map((p) => ({ value: [p.at, p.value], unit: s.unit, path: s.path })),
           lineStyle: { width: 1.5, color },
           itemStyle: { color },
           z: 3,

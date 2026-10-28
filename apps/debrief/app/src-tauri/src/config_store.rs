@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 /// Largest configuration file read (a bigger one is not a configuration file).
-pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+pub const MAX_FILE_BYTES: u64 = 4_000_000;
 
 /// Serialises every write (one writer).
 static WRITER: Mutex<()> = Mutex::new(());
@@ -140,7 +140,10 @@ pub fn read_json(path: &Path) -> Result<serde_json::Value, ReadError> {
         return Err(ReadError::Damaged("not a file".into()));
     }
     if meta.len() > MAX_FILE_BYTES {
-        return Err(ReadError::Damaged(format!("larger than {} KB", MAX_FILE_BYTES / 1024)));
+        return Err(ReadError::Damaged(format!(
+            "larger than {}",
+            paddock_units::format_whole(MAX_FILE_BYTES, paddock_units::Kind::Storage)
+        )));
     }
     let text = std::fs::read_to_string(path).map_err(|e| ReadError::Damaged(e.to_string()))?;
     serde_json::from_str(&text).map_err(|e| ReadError::Damaged(e.to_string()))

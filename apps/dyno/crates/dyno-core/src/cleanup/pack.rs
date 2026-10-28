@@ -13,7 +13,7 @@ use serde::Deserialize;
 /// The pack format this build reads.
 pub const FORMAT: u32 = 1;
 /// The largest pack file read.
-pub const MAX_PACK_BYTES: usize = 128 * 1024;
+pub const MAX_PACK_BYTES: usize = 128_000;
 /// The most categories in one user pack.
 pub const MAX_USER_CATEGORIES: usize = 64;
 /// The most roots and paths in one category.
@@ -179,7 +179,10 @@ fn convert(raw: RawCategory, trust: Trust) -> Result<CategorySpec, String> {
 /// Parses and validates a pack. Any problem refuses the whole pack.
 pub fn parse(text: &str, trust: Trust) -> Result<Vec<CategorySpec>, String> {
     if text.len() > MAX_PACK_BYTES {
-        return Err(format!("the pack is larger than {} KiB", MAX_PACK_BYTES / 1024));
+        return Err(format!(
+            "the pack is larger than {}",
+            crate::units::whole(MAX_PACK_BYTES as u64, crate::units::Kind::Storage)
+        ));
     }
     let raw: RawPack = toml::from_str(text).map_err(|e| e.to_string())?;
     if raw.format != FORMAT {

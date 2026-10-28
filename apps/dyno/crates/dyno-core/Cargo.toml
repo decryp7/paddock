@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+paddock-units = { path = "../../../../crates/paddock-units" }
 thiserror.workspace = true
 toml.workspace = true
 

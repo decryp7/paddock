@@ -1,7 +1,7 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { Consumer, DiskTrend, History, HistoryPoint, TimelineEvent, TimelineEventKind } from '../../core/api.types';
 import { forecastText } from '../../shared/labels';
-import { formatBytes, formatClock, formatDate, formatPercent } from '../../shared/format';
+import { formatBytes, formatMemory, formatClock, formatDate, formatPercent } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
 
 /** How each kind of timeline event is drawn: a colour and a distinct shape (never colour alone). */
@@ -168,7 +168,7 @@ export function consumersOption(consumers: readonly Consumer[], t: ThemeTokens):
       formatter: (raw: unknown) => {
         const p = (raw as { dataIndex: number }[])[0];
         const c = p ? top[p.dataIndex] : undefined;
-        return c ? `${c.app}<br/>CPU <b>${formatPercent(c.cpuAvg)}</b> · memory <b>${formatBytes(c.memoryAvg)}</b>` : '';
+        return c ? `${c.app}<br/>CPU <b>${formatPercent(c.cpuAvg)}</b> · memory <b>${formatMemory(c.memoryAvg)}</b>` : '';
       },
     },
     xAxis: { type: 'value', show: false, max: (v: { max: number }) => v.max * 1.15 },

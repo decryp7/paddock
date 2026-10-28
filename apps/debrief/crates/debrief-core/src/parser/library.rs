@@ -334,8 +334,8 @@ fn user_files(dir: &Path) -> Vec<(String, Result<String, ParserError>)> {
             let too_large = std::fs::metadata(&p).is_ok_and(|m| m.len() > super::MAX_PARSER_BYTES as u64);
             let text = if too_large {
                 Err(ParserError::new(format!(
-                    "the parser file is larger than {} KiB",
-                    super::MAX_PARSER_BYTES / 1024
+                    "the parser file is larger than {}",
+                    paddock_units::format_whole(super::MAX_PARSER_BYTES as u64, paddock_units::Kind::Storage)
                 )))
             } else {
                 std::fs::read_to_string(&p).map_err(|e| ParserError::new(format!("cannot read the file: {e}")))
@@ -531,7 +531,7 @@ mod tests {
             .broken()
             .iter()
             .any(|b| b.file == "named.toml" && b.error.message.contains("holds the parser")));
-        assert!(lib.broken().iter().any(|b| b.file == "big.toml" && b.error.message.contains("KiB")));
+        assert!(lib.broken().iter().any(|b| b.file == "big.toml" && b.error.message.contains("KB")));
         // A newer index is ignored too.
         std::fs::write(d.0.join(INDEX_FILE), "{\"version\": 9, \"disabled\": [\"generic\"]}").unwrap();
         assert!(Library::load(&d.0).get("generic").unwrap().enabled);

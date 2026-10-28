@@ -132,8 +132,8 @@ export class MachineTiles {
         key: 'mem',
         icon: 'memory',
         label: 'Runners memory',
-        value: last ? formatBytes(last.runners.memBytes) : '—',
-        sub: last ? `${formatPermille(memShare)} of ${formatBytes(last.memTotalBytes, 0)} · peak ${formatBytes(memPeak)}` : 'No samples yet',
+        value: last ? formatBytes(last.runners.memBytes, 'memory') : '—',
+        sub: last ? `${formatPermille(memShare)} of ${formatBytes(last.memTotalBytes, 'memory')} · peak ${formatBytes(memPeak, 'memory')}` : 'No samples yet',
         values: run.map((x) => x.memBytes),
         max: last?.memTotalBytes,
         tone: 'chart-3',
@@ -143,7 +143,7 @@ export class MachineTiles {
         icon: 'disk',
         label: 'Free disk',
         value: last ? formatBytes(last.diskFreeBytes) : '—',
-        sub: last ? `of ${formatBytes(last.diskTotalBytes, 0)} · ${formatPermille(freeShare)} free` : 'No samples yet',
+        sub: last ? `of ${formatBytes(last.diskTotalBytes)} · ${formatPermille(freeShare)} free` : 'No samples yet',
         values: s.map((x) => x.diskFreeBytes),
         max: undefined,
         tone: freeShare !== null && freeShare < 100 ? 'warning' : 'chart-4',
@@ -155,14 +155,14 @@ export class MachineTiles {
   protected readonly context = computed(() => {
     const last = this.samples().at(-1) ?? this.service()?.machine ?? null;
     if (!last) return 'The machine’s own totals appear once samples arrive.';
-    return `This machine: ${formatPermille(last.cpuPermille)} CPU · ${formatBytes(last.memUsedBytes)} of ${formatBytes(last.memTotalBytes, 0)} memory in use, runners included`;
+    return `This machine: ${formatPermille(last.cpuPermille)} CPU · ${formatBytes(last.memUsedBytes, 'memory')} of ${formatBytes(last.memTotalBytes, 'memory')} memory in use, runners included`;
   });
 
   protected readonly own = computed(() => {
     const svc = this.service();
     return {
       cpu: svc ? formatPermille(svc.ownCpuPermille) : '—',
-      mem: svc ? formatBytes(svc.ownMemBytes) : '—',
+      mem: svc ? formatBytes(svc.ownMemBytes, 'memory') : '—',
       up: svc ? formatDuration(this.now() - svc.startedAt) : '—',
     };
   });

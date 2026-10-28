@@ -74,7 +74,7 @@ describe('leftover processes in the UI', () => {
     expect(rows[0]!.querySelectorAll("td")[6]!.textContent).toMatch(/%/);
     const page = f.componentInstance as unknown as { cpu(p: number): string; bytes(n: number): string };
     expect(page.cpu(420)).toBe('42%');
-    expect(page.bytes(1000 ** 3)).toBe('1.0 GB');
+    expect(page.bytes(1000 ** 3)).toBe('1 GB');
   });
 
   it('Settings > Defaults edits and saves the leftover process policy', async () => {

@@ -328,9 +328,9 @@ impl RuntimeStore {
             let need = build.download_bytes().saturating_mul(3).saturating_add(opts.margin_bytes);
             if free < need {
                 return Err(AiError::Disk(format!(
-                    "{:.1} GB are needed but only {:.1} GB are free on that drive",
-                    need as f64 / 1e9,
-                    free as f64 / 1e9
+                    "{} are needed but only {} are free on that drive",
+                    paddock_units::format_bytes(need, paddock_units::Kind::Storage),
+                    paddock_units::format_bytes(free, paddock_units::Kind::Storage)
                 )));
             }
         }

@@ -39,7 +39,7 @@ export const CacheStore = signalStore(
       const gb = s.maxGb();
       const days = s.maxAgeDays();
       if (!positive(gb) && !positive(days)) return null;
-      return { maxMb: positive(gb) ? Math.max(1, Math.round(gb * 1024)) : 0, maxAgeDays: positive(days) ? Math.max(1, Math.floor(days)) : 0 };
+      return { maxMb: positive(gb) ? Math.max(1, Math.round(gb * 1000)) : 0, maxAgeDays: positive(days) ? Math.max(1, Math.floor(days)) : 0 };
     });
     const currentPreview = computed(() => {
       const p = s.preview();

@@ -111,9 +111,9 @@ pub fn check_name(name: &str) -> Result<String> {
 pub fn check_text(text: &str) -> Result<String> {
     if text.len() > MAX_FILE_BYTES {
         return Err(AiError::Invalid(format!(
-            "the knowledge file is too large ({} KiB; at most {} KiB): split it or shorten it",
-            text.len().div_ceil(1024),
-            MAX_FILE_BYTES / 1024
+            "the knowledge file is too large ({}; at most {}): split it or shorten it",
+            paddock_units::format_bytes(text.len() as u64, paddock_units::Kind::Storage),
+            paddock_units::format_whole(MAX_FILE_BYTES as u64, paddock_units::Kind::Storage)
         )));
     }
     if text.contains('\0') {
@@ -225,7 +225,7 @@ mod tests {
         assert!(check_name(&"n".repeat(MAX_NAME_CHARS)).is_ok());
         assert!(check_text(&"x".repeat(MAX_FILE_BYTES)).is_ok());
         let e = check_text(&"x".repeat(MAX_FILE_BYTES + 1)).unwrap_err().to_string();
-        assert!(e.contains("too large") && e.contains("64 KiB"), "{e}");
+        assert!(e.contains("too large") && e.contains("64 KB"), "{e}");
         assert!(check_text("a\0b").is_err());
         assert_eq!(KnowledgeScope::Global.label(), "global");
         assert_eq!(KnowledgeScope::Project.label(), "project");

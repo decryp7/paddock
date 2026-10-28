@@ -18,7 +18,7 @@ const model = (over: Partial<LoadedModel> = {}): LoadedModel => ({
   engine: 'llama.cpp',
   build: 'cpu',
   state: 'ready',
-  ramBytes: 1000 ** 3,
+  ramBytes: 1024 ** 3,
   vramBytes: 0,
   contextTokens: 4096,
   slots: 2,
@@ -65,12 +65,12 @@ async function mountWith(models: LoadedModel[], inputs: { now?: number; compact?
 
 describe('HotModels', () => {
   it('lists the hot models with state, memory, context and countdown', async () => {
-    const { el } = await mountWith([model({ modelId: 'a', name: 'Alpha', vramBytes: 2 * 1000 ** 3, contextTokens: 16384, lastUsedAt: NOW - 10_000, idleReleaseAt: NOW + 10_000 })]);
+    const { el } = await mountWith([model({ modelId: 'a', name: 'Alpha', vramBytes: 2 * 1024 ** 3, contextTokens: 16384, lastUsedAt: NOW - 10_000, idleReleaseAt: NOW + 10_000 })]);
     const row = el.querySelector('li.row')!;
     expect(row.querySelector('.name')!.textContent).toBe('Alpha');
     expect(row.querySelector('.state')!.getAttribute('aria-label')).toBe('Ready');
-    expect(row.querySelector('.meta')!.textContent).toContain('2.0 GB VRAM');
-    expect(row.querySelector('.meta')!.textContent).toContain('1.0 GB RAM');
+    expect(row.querySelector('.meta')!.textContent).toContain('2 GB VRAM');
+    expect(row.querySelector('.meta')!.textContent).toContain('1 GB RAM');
     // Context and slots are secondary: they are in the row's tooltip, not on its line.
     expect(row.querySelector('.meta')!.textContent).not.toContain('ctx');
     expect(row.querySelector('.when')!.getAttribute('aria-label')).toBe('Released in 0:10');
@@ -139,7 +139,7 @@ describe('HotModels', () => {
   });
 
   it('is read-only in compact mode: no actions, no context, no GPU split', async () => {
-    const { el } = await mountWith([model({ vramBytes: 1000 ** 3 })], { compact: true });
+    const { el } = await mountWith([model({ vramBytes: 1024 ** 3 })], { compact: true });
     expect(el.querySelector('.actions')).toBeNull();
     expect(el.querySelector('ul.list')!.classList.contains('compact')).toBe(true);
     expect(el.querySelector('.meta')!.textContent).not.toContain('ctx');
@@ -147,7 +147,7 @@ describe('HotModels', () => {
   });
 
   it('splits GPU memory by model plus other apps', async () => {
-    const { el } = await mountWith([model({ modelId: 'a', name: 'Alpha', vramBytes: 2 * 1000 ** 3 }), model({ modelId: 'b', name: 'Beta', vramBytes: 0 })]);
+    const { el } = await mountWith([model({ modelId: 'a', name: 'Alpha', vramBytes: 2 * 1024 ** 3 }), model({ modelId: 'b', name: 'Beta', vramBytes: 0 })]);
     const bar = el.querySelector('.split-bar')!;
     expect(bar.getAttribute('aria-label')).toMatch(/^GPU memory: Alpha \d+%, Other apps \d+%$/);
     expect(bar.querySelectorAll('span').length).toBe(2);
@@ -172,7 +172,7 @@ describe('HotModels', () => {
   it('does not show an Other apps segment when models use all the used VRAM', async () => {
     const { el, live, fixture } = await mountWith([model()]);
     const o = live.overview()!;
-    const used = 3 * 1000 ** 3;
+    const used = 3 * 1024 ** 3;
     patchState(live as unknown as WritableStateSource<object>, { overview: { ...o, models: [model({ vramBytes: used })], memory: { ...o.memory, gpus: [{ ...o.memory.gpus[0]!, vramUsed: used }] } } });
     await settle(fixture);
     expect(el.querySelectorAll('.split-bar span').length).toBe(1);

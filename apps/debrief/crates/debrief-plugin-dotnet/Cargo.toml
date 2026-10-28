@@ -9,6 +9,7 @@ publish = false
 description = "Debrief plugin: event-based .NET profiling (ETW and EventPipe captures written as NetTrace, .etl import); nothing is loaded into the target"
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-plugin-api = { path = "../debrief-plugin-api", optional = true }
 debrief-profile = { path = "../debrief-profile" }
 debrief-plugin-profiling = { path = "../debrief-plugin-profiling", default-features = false }

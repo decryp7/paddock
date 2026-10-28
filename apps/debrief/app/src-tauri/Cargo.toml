@@ -19,6 +19,7 @@ tauri-build = { version = "2.7.3", features = [] }
 [dependencies]
 debrief-alloc = { path = "../../crates/debrief-alloc" }
 debrief-core = { path = "../../crates/debrief-core" }
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-pdf = { path = "../../crates/debrief-pdf" }
 debrief-profile = { path = "../../crates/debrief-profile" }
 # Dumps and UMDH logs (ADR 0023): the engine; the readers run in the dumps plugin's process.

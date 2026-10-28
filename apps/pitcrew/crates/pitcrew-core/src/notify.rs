@@ -10,6 +10,7 @@ use crate::names::RunnerName;
 use crate::time::Timestamp;
 use crate::update::{UpdateOutcome, UpdatePlan};
 use crate::version::RunnerVersion;
+use paddock_units::{format_bytes, Kind};
 use serde::{Deserialize, Serialize};
 
 /// What a notification is about.
@@ -180,7 +181,7 @@ pub fn disk_low(runner: &RunnerName, free_bytes: u64, at: Timestamp) -> Notifica
         "Disk space is low".to_string(),
         format!(
             "{} free on {runner}'s disk. Pitcrew cleans up between jobs; check the Disk page.",
-            human_bytes(free_bytes)
+            format_bytes(free_bytes, Kind::Storage)
         ),
         at,
     )
@@ -189,7 +190,7 @@ pub fn disk_low(runner: &RunnerName, free_bytes: u64, at: Timestamp) -> Notifica
 /// Pitcrew drained a runner for `reason`.
 pub fn held(runner: &RunnerName, reason: HoldReason, free_bytes: Option<u64>, at: Timestamp) -> Notification {
     let extra = match (reason, free_bytes) {
-        (HoldReason::LowDisk, Some(f)) => format!(" ({} free)", human_bytes(f)),
+        (HoldReason::LowDisk, Some(f)) => format!(" ({} free)", format_bytes(f, Kind::Storage)),
         _ => String::new(),
     };
     n(
@@ -258,7 +259,7 @@ pub fn cleanup(runner: &RunnerName, report: &CleanupReport) -> Option<Notificati
             format!("{runner}: some files could not be cleaned up"),
             format!(
                 "Freed {}; {} item(s) could not be deleted and are tried again next time.",
-                human_bytes(report.freed_bytes),
+                format_bytes(report.freed_bytes, Kind::Storage),
                 report.failures.len()
             ),
             report.at,
@@ -269,27 +270,11 @@ pub fn cleanup(runner: &RunnerName, report: &CleanupReport) -> Option<Notificati
             NotificationKind::CleanedUp,
             Severity::Info,
             runner,
-            format!("{runner}: cleaned up {}", human_bytes(report.freed_bytes)),
+            format!("{runner}: cleaned up {}", format_bytes(report.freed_bytes, Kind::Storage)),
             format!("{} item(s) deleted between jobs.", report.deleted),
             report.at,
         )
     })
-}
-
-/// `1.5 GB`, `320 MB`, `12 KB`, `0 B`.
-pub fn human_bytes(b: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut v = b as f64;
-    let mut i = 0;
-    while v >= 1024.0 && i < UNITS.len() - 1 {
-        v /= 1024.0;
-        i += 1;
-    }
-    if i == 0 || v >= 100.0 {
-        format!("{v:.0} {}", UNITS[i])
-    } else {
-        format!("{v:.1} {}", UNITS[i])
-    }
 }
 
 #[cfg(test)]
@@ -359,7 +344,7 @@ mod tests {
     #[test]
     fn disk_and_cleanup() {
         let at = Timestamp(3);
-        assert!(disk_low(&r(), 3 * 1024 * 1024 * 1024, at).body.starts_with("3.0 GB free"));
+        assert!(disk_low(&r(), 3_000_000_000, at).body.starts_with("3 GB free"));
         let mut report = CleanupReport {
             trigger: CleanupTrigger::Schedule,
             at,
@@ -376,9 +361,5 @@ mod tests {
             reason: "in use".into(),
         });
         assert_eq!(cleanup(&r(), &report).unwrap().kind, NotificationKind::CleanupProblems);
-        assert_eq!(human_bytes(0), "0 B");
-        assert_eq!(human_bytes(1536), "1.5 KB");
-        assert_eq!(human_bytes(300 * 1024 * 1024), "300 MB");
-        assert_eq!(human_bytes(u64::MAX), "16777216 TB");
     }
 }

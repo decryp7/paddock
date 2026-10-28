@@ -11,7 +11,7 @@ use debrief_ai::browser::pace::{
 use debrief_ai::browser::research::{DEFAULT_RESULTS, RESULT_CHOICES};
 use debrief_ai::browser::Pacing;
 use debrief_ai::browser::{clamp_results, AgentLimits, ResearchSettings, SearchEngine, SearchSettings, SearchTemplate};
-use debrief_core::settings::{Configurable, EnumOption, FieldKind, SectionOwner, SettingField, SettingsSection, ValidValues};
+use debrief_core::settings::{ByteKind, Configurable, EnumOption, FieldKind, SectionOwner, SettingField, SettingsSection, ValidValues};
 use std::sync::Arc;
 
 pub struct BrowserSection {
@@ -171,6 +171,7 @@ impl Configurable for BrowserSection {
                     "researchProfileMax",
                     "Research profile size limit",
                     FieldKind::Size {
+                        kind: ByteKind::Storage,
                         min_bytes: MIN_MAX_BYTES,
                         max_bytes: MAX_MAX_BYTES,
                     },

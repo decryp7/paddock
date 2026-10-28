@@ -27,7 +27,7 @@ pub use set::{ParserSet, ParserSetup, SetupParser};
 /// The parser schema this Debrief reads (`schema = 1`).
 pub const SCHEMA_VERSION: u32 = 1;
 /// Largest parser file.
-pub const MAX_PARSER_BYTES: usize = 256 * 1024;
+pub const MAX_PARSER_BYTES: usize = 256_000;
 /// Most output templates plus regexes of one parser.
 pub const MAX_TEXT_FORMATS: usize = 64;
 /// Most `[[extract]]` and `[[pipeline]]` entries of one parser (each).
@@ -237,9 +237,9 @@ impl Parser {
     pub(crate) fn parse_unchecked(text: &str) -> Result<Parser, ParserError> {
         if text.len() > MAX_PARSER_BYTES {
             return Err(ParserError::new(format!(
-                "the parser file is {} KiB; at most {} KiB are read",
-                text.len() / 1024,
-                MAX_PARSER_BYTES / 1024
+                "the parser file is {}; at most {} are read",
+                paddock_units::format_bytes(text.len() as u64, paddock_units::Kind::Storage),
+                paddock_units::format_whole(MAX_PARSER_BYTES as u64, paddock_units::Kind::Storage)
             )));
         }
         let table: toml::Table = toml::from_str(text).map_err(|e| toml_error(&e, text))?;
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn limits_and_compile_errors_are_refused() {
         let huge = format!("{MINIMAL}description = \"{}\"\n", "x".repeat(MAX_PARSER_BYTES));
-        assert!(Parser::from_toml(&huge).unwrap_err().message.contains("KiB"));
+        assert!(Parser::from_toml(&huge).unwrap_err().message.contains("KB"));
         let many: Vec<String> = (0..=MAX_TEXT_FORMATS).map(|i| format!("'^(?P<message>{i}.*)$'")).collect();
         let too_many = Parser::from_toml(&format!("{MINIMAL}[format]\nregexes = [{}]\n", many.join(", "))).unwrap_err();
         assert!(too_many.message.contains("at most 64"));

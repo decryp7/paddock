@@ -139,7 +139,10 @@ fn read_text(dir: &Path, id: &str) -> std::result::Result<String, String> {
     let path = dir.join(format!("{id}.md"));
     let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
     if meta.len() > MAX_FILE_BYTES as u64 {
-        return Err(format!("larger than {} KiB", MAX_FILE_BYTES / 1024));
+        return Err(format!(
+            "larger than {}",
+            paddock_units::format_whole(MAX_FILE_BYTES as u64, paddock_units::Kind::Storage)
+        ));
     }
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
     String::from_utf8(bytes).map_err(|_| "not UTF-8 text".to_string())
@@ -289,7 +292,7 @@ mod tests {
         let w = g.warnings().join("\n");
         for part in [
             "\"Missing\" could not be read",
-            "\"Huge\" could not be read (larger than 64 KiB)",
+            "\"Huge\" could not be read (larger than 64 KB)",
             "not UTF-8",
             "was skipped",
         ] {

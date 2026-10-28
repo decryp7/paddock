@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 croner.workspace = true
+paddock-units.workspace = true
 jiff.workspace = true
 quick-xml.workspace = true
 regex.workspace = true

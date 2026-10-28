@@ -127,9 +127,9 @@ pub fn open_file(file: &Path) -> CmdResult<OpenNoteImage> {
         return Err(CmdError::new(
             ErrorCode::Limit,
             format!(
-                "the image is {:.1} MB; images up to {} MB can be opened",
-                len as f64 / 1e6,
-                limit / (1024 * 1024)
+                "the image is {}; images up to {} can be opened",
+                paddock_units::format_bytes(len, paddock_units::Kind::Storage),
+                paddock_units::format_whole(limit, paddock_units::Kind::Storage)
             ),
         ));
     }

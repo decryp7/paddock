@@ -104,6 +104,6 @@ export class HeapGrowth {
   }
 
   protected seriesText(values: number[]): string {
-    return values.map(formatBytes).join(' → ');
+    return values.map((v) => formatBytes(v)).join(' → ');
   }
 }

@@ -15,6 +15,7 @@ version = "1.0.0"
 spotter-core = { path = "crates/spotter-core" }
 spotter-sources = { path = "crates/spotter-sources" }
 spotter-engine = { path = "crates/spotter-engine" }
+paddock-units = { path = "../../crates/paddock-units" }
 spotter-render = { path = "crates/spotter-render" }
 croner = { version = "4", default-features = false, features = ["jiff"] }
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }

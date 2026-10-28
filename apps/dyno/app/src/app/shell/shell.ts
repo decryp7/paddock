@@ -4,7 +4,7 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { BACKEND } from '../core/backend';
 import { PlatformService } from '../core/platform';
 import { Dialogs } from '../shared/dialog';
-import { formatBytes, formatDuration, formatPercent } from '../shared/format';
+import { formatMemory, formatDuration, formatPercent } from '../shared/format';
 import { Icon } from '../shared/icon';
 import { SEVERITY_TONE } from '../shared/labels';
 import { Notifier, Toasts } from '../shared/notifier';
@@ -157,7 +157,7 @@ export class Shell implements OnInit {
   protected readonly agentTip = computed(() => {
     const o = this.live.overhead();
     const own = o
-      ? `Dyno uses ${formatPercent(o.agentCpu)} CPU (a share of one core) and ${formatBytes(o.agentMemory)}. Sampling every ${formatDuration(o.samplingIntervalMs / 1000)}, processes every ${formatDuration(o.processIntervalMs / 1000)}.`
+      ? `Dyno uses ${formatPercent(o.agentCpu)} CPU (a share of one core) and ${formatMemory(o.agentMemory)}. Sampling every ${formatDuration(o.samplingIntervalMs / 1000)}, processes every ${formatDuration(o.processIntervalMs / 1000)}.`
       : 'Dyno is measuring its own use.';
     const msg = this.live.agent().message;
     return msg ? `${msg} ${own}` : own;

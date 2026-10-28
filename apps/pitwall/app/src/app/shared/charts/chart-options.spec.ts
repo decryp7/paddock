@@ -61,8 +61,8 @@ describe('chart options', () => {
     expect((o['dataZoom'] as unknown[]).length).toBe(2);
     const tooltip = o['tooltip'] as { formatter: (p: unknown) => string };
     const at = h.events[0]!.at;
-    const html = tooltip.formatter([{ marker: '•', seriesName: 'RAM used', value: [at + h.stepMs / 2, 8 * 1000 ** 3] }, { marker: '•', seriesName: 'VRAM used', value: [at, null] }]);
-    expect(html).toContain('8.0 GB');
+    const html = tooltip.formatter([{ marker: '•', seriesName: 'RAM used', value: [at + h.stepMs / 2, 8 * 1024 ** 3] }, { marker: '•', seriesName: 'VRAM used', value: [at, null] }]);
+    expect(html).toContain('8 GB');
     expect(html).not.toContain('VRAM used');
     const withEvent = memoryChart({ points: h.points, events: [ev('modelLoaded', null, at)], range: '7d', stepMs: h.stepMs }, t) as unknown as Opt;
     expect((withEvent['tooltip'] as { formatter: (p: unknown) => string }).formatter({ marker: '', seriesName: 'RAM used', value: [at, 1] })).toContain('m &lt;b&gt;');
@@ -76,7 +76,7 @@ describe('chart options', () => {
     const o = memoryChart({ points: h.points, events: [], range: '1h', stepMs: h.stepMs, zoom: true }, t) as unknown as Opt;
     const slider = (o['dataZoom'] as { labelFormatter?: (v: number) => string }[])[1]!;
     expect(slider.labelFormatter!(new Date(2026, 0, 1, 7, 3).getTime())).toBe('07:03');
-    const yLabel = (o['yAxis'] as { axisLabel: { formatter: (v: number) => string } }[])[0]!.axisLabel.formatter(16 * 1000 ** 3);
+    const yLabel = (o['yAxis'] as { axisLabel: { formatter: (v: number) => string } }[])[0]!.axisLabel.formatter(16 * 1024 ** 3);
     expect(yLabel).toBe('16 GB');
   });
 
@@ -177,9 +177,9 @@ describe('chart options', () => {
       const multi = usageChart(series, 'memory', 'app', t) as unknown as Opt;
       expect(multi.series.every((x) => x['type'] === 'line' && !('areaStyle' in x))).toBe(true);
       const tip = (multi['tooltip'] as { formatter: (p: unknown) => string }).formatter;
-      expect(tip([{ marker: '', seriesName: 'A', value: [0, 3 * 1000 ** 3] }])).toContain('3.0 GB');
+      expect(tip([{ marker: '', seriesName: 'A', value: [0, 3 * 1024 ** 3] }])).toContain('3 GB');
       const axis = o['yAxis'] as { axisLabel: { formatter: (v: number) => string } };
-      expect(axis.axisLabel.formatter(2 * 1000 ** 3)).toBe('2 GB');
+      expect(axis.axisLabel.formatter(2 * 1024 ** 3)).toBe('2 GB');
     });
 
     it('labels daily buckets by date and gives a legend row of room for many apps', () => {

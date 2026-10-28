@@ -130,7 +130,7 @@ pub fn builtin_kinds() -> Vec<SourceKindSpec> {
                     .advanced(),
             )
             .with_field(
-                FieldSpec::new("hashBelowMib", "Hash files up to (MiB)", FieldKind::Integer { min: 0, max: 256 })
+                FieldSpec::new("hashBelowMb", "Hash files up to (MB)", FieldKind::Integer { min: 0, max: 256 })
                     .help("0 never hashes. A changed small file is hashed to tell real changes from a touched timestamp.")
                     .default_value("0")
                     .advanced(),

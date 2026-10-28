@@ -21,6 +21,8 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const MB = 1000 ** 2;
 const GB = 1000 ** 3;
+/** Memory sizes are binary (16 GiB reads "16 GB", like Activity Monitor). */
+const MiB = 1024 ** 2;
 
 /** The default window of "What changed" when the query says 0 (the engine's default). */
 const DEFAULT_HOURS = 72;
@@ -112,11 +114,11 @@ export function mockUsage(): UsageReport {
 export function mockGpu(): GpuReport {
   return {
     processes: [
-      { pid: 311, name: 'WindowServer', gpuPercent: 14.2, memoryBytes: Math.round(612 * MB) },
-      { pid: 5120, name: 'Google Chrome Helper (GPU)', gpuPercent: 9.8, memoryBytes: Math.round(388 * MB) },
-      { pid: 4821, name: 'zoom.us', gpuPercent: 6.1, memoryBytes: Math.round(204 * MB) },
-      { pid: 7788, name: 'Figma', gpuPercent: 3.4, memoryBytes: Math.round(176 * MB) },
-      { pid: 622, name: 'Dock', gpuPercent: 0.7, memoryBytes: Math.round(42 * MB) },
+      { pid: 311, name: 'WindowServer', gpuPercent: 14.2, memoryBytes: Math.round(612 * MiB) },
+      { pid: 5120, name: 'Google Chrome Helper (GPU)', gpuPercent: 9.8, memoryBytes: Math.round(388 * MiB) },
+      { pid: 4821, name: 'zoom.us', gpuPercent: 6.1, memoryBytes: Math.round(204 * MiB) },
+      { pid: 7788, name: 'Figma', gpuPercent: 3.4, memoryBytes: Math.round(176 * MiB) },
+      { pid: 622, name: 'Dock', gpuPercent: 0.7, memoryBytes: Math.round(42 * MiB) },
     ],
     source: 'Apple GPU accelerator counters',
     unavailable: null,

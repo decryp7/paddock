@@ -1,17 +1,17 @@
 import type { DeleteMode, DuplicateGroup, FinderMode, FinderResult, FoundFile } from '../../core/api.types';
 import { formatBytes, plural } from '../../shared/format';
 
-const MIB = 1024 * 1024;
+const MB = 1_000_000;
 
-/** The size filters offered, in MiB (the engine refuses anything under 1 MiB). */
-export const MIN_SIZES: readonly { mib: number; label: string }[] = [
-  { mib: 50, label: '50 MB' },
-  { mib: 100, label: '100 MB' },
-  { mib: 500, label: '500 MB' },
-  { mib: 1024, label: '1 GB' },
+/** The size filters offered, in MB (decimal, as file sizes read; the engine refuses anything under 1 MB). */
+export const MIN_SIZES: readonly { mb: number; label: string }[] = [
+  { mb: 50, label: '50 MB' },
+  { mb: 100, label: '100 MB' },
+  { mb: 500, label: '500 MB' },
+  { mb: 1000, label: '1 GB' },
 ];
 
-export const DEFAULT_MIN_MIB = 100;
+export const DEFAULT_MIN_MB = 100;
 
 export const MODES: readonly { mode: FinderMode; label: string }[] = [
   { mode: 'both', label: 'Both' },
@@ -19,7 +19,7 @@ export const MODES: readonly { mode: FinderMode; label: string }[] = [
   { mode: 'duplicates', label: 'Duplicates' },
 ];
 
-export const mibToBytes = (mib: number): number => Math.round(mib * MIB);
+export const mbToBytes = (mb: number): number => Math.round(mb * MB);
 
 /**
  * The files to remove by default: every copy of a duplicate group except the oldest (the engine lists copies oldest first and

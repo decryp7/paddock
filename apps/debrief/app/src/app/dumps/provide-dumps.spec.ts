@@ -76,10 +76,12 @@ describe('dumps views and commands', () => {
 describe('dumps shared', () => {
   it('formats bytes and changes', () => {
     
-    expect(formatBytes(-2000)).toBe('-2 KB');
-    expect(formatBytes(3_000_000)).toBe('3 MB');
-    expect(formatBytes(2e9)).toBe('2 GB');
-    expect(formatDelta(1000)).toBe('+1 KB');
+    // Dump sizes are heap and allocation sizes: memory steps by default; a file on disk asks for 'storage'.
+    expect(formatBytes(-2048)).toBe('-2 KB');
+    expect(formatBytes(3 * 1024 ** 2)).toBe('3 MB');
+    expect(formatBytes(2 * 1024 ** 3)).toBe('2 GB');
+    expect(formatBytes(3_000_000, 'storage')).toBe('3 MB');
+    expect(formatDelta(1024)).toBe('+1 KB');
     expect(formatDelta(-1024)).toBe('-1 KB');
   });
 

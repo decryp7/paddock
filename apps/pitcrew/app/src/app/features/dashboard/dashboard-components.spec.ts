@@ -85,7 +85,7 @@ describe('RunnerTile', () => {
     const meta = el.querySelector('p.meta')!;
     expect(el.querySelector('dl')).toBeNull();
     expect(meta.textContent).not.toMatch(/Version|Up for|Disk/);
-    expect(text(meta)).toBe('5.2.0·up 3d 4h·38.4 GB');
+    expect(text(meta)).toBe('5.2.0·up 3d 4h·38 GB');
     expect(el.querySelector('.disk.tone-danger')).toBeNull();
     expect(el.querySelector('.meter')).toBeNull();
     expect(text(meta)).not.toContain('available');
@@ -195,11 +195,11 @@ describe('MachineTiles', () => {
     at: i,
     cpuPermille: 100 * i,
     cpuPeakPermille: 150 * i,
-    memUsedBytes: 8 * 1000 ** 3,
-    memTotalBytes: 16 * 1000 ** 3,
+    memUsedBytes: 8 * 1024 ** 3,
+    memTotalBytes: 16 * 1024 ** 3,
     diskFreeBytes: 50 * 1000 ** 3,
     diskTotalBytes: 500 * 1000 ** 3,
-    runners: { cpuPermille: 50 * i, cpuPeakPermille: 80 * i, memBytes: 2 * 1000 ** 3, memPeakBytes: 3 * 1000 ** 3, processes: 4 },
+    runners: { cpuPermille: 50 * i, cpuPeakPermille: 80 * i, memBytes: 2 * 1024 ** 3, memPeakBytes: 3 * 1024 ** 3, processes: 4 },
   });
   const service = (machine: MachineSample | null): ServiceInfo => ({
     version: '0.1.0',
@@ -209,7 +209,7 @@ describe('MachineTiles', () => {
     readOnly: false,
     machine,
     ownCpuPermille: 25,
-    ownMemBytes: 24 * 1000 ** 2,
+    ownMemBytes: 24 * 1024 ** 2,
   });
 
   beforeEach(() => TestBed.configureTestingModule({ providers: appProviders(makeMock()) }));
@@ -227,16 +227,16 @@ describe('MachineTiles', () => {
     const el = mount([sample(1), sample(2), sample(3)], service(null));
     const tiles = Array.from(el.querySelectorAll('section')).map((s) => s.getAttribute('aria-label'));
     expect(tiles[0]).toBe('Runners CPU: 15%, avg 10% · peak 24%');
-    expect(tiles[1]).toBe('Runners memory: 2.0 GB, 13% of 16 GB · peak 3.0 GB');
-    expect(tiles[2]).toBe('Free disk: 50.0 GB, of 500 GB · 10% free');
+    expect(tiles[1]).toBe('Runners memory: 2 GB, 13% of 16 GB · peak 3 GB');
+    expect(tiles[2]).toBe('Free disk: 50 GB, of 500 GB · 10% free');
     expect(text(el.querySelector('.own'))).toContain('2.5% CPU');
-    expect(text(el.querySelector('.own'))).toContain('24.0 MB memory · up 1h 00m');
+    expect(text(el.querySelector('.own'))).toContain('24 MB memory · up 1h 00m');
     expect(el.querySelectorAll('pc-sparkline')).toHaveLength(3);
   });
 
   it('adds the whole machine as a muted context line, runners included', () => {
     const el = mount([sample(1), sample(2), sample(3)], service(null));
-    expect(text(el.querySelector('[data-testid="machine-context"]'))).toBe('This machine: 30% CPU · 8.0 GB of 16 GB memory in use, runners included');
+    expect(text(el.querySelector('[data-testid="machine-context"]'))).toBe('This machine: 30% CPU · 8 GB of 16 GB memory in use, runners included');
     expect(text(mount([], null).querySelector('[data-testid="machine-context"]'))).toContain('appear once samples arrive');
   });
 

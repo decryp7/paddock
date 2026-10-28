@@ -18,14 +18,7 @@ pub const INTERRUPTED: &str = "interrupted: the import was cancelled, the files 
 
 /// One short line for a snapshot: the phase and its counts ("Importing 12 of 40 files, 3.2 GB of 9.1 GB").
 pub fn progress_line(p: &ProgressSnapshot) -> String {
-    let size = |b: u64| {
-        let (mut v, mut u) = (b as f64, 0);
-        while v >= 1024.0 && u < 4 {
-            v /= 1024.0;
-            u += 1;
-        }
-        format!("{v:.1} {}", ["B", "KB", "MB", "GB", "TB"][u])
-    };
+    let size = |b: u64| paddock_units::format_bytes(b, paddock_units::Kind::Storage);
     match p.phase {
         ImportPhase::Idle => String::new(),
         ImportPhase::Finding => format!("Finding files: {} found ({})", p.done, size(p.bytes_total)),

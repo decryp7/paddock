@@ -2,7 +2,7 @@ import { Note, NoteAnchor, NoteChange, NoteDraft, NoteImage, NoteRecord, NoteReg
 import { CmdError } from '../../core/cmd-error';
 import type { NotesBackend } from '../notes-backend';
 
-const MAX_TEXT_BYTES = 16 * 1024;
+const MAX_TEXT_BYTES = 16_000;
 const MAX_REGIONS = 16;
 
 const invalid = (message: string) => new CmdError({ code: 'invalid', message, retryable: false });

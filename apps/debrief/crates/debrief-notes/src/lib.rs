@@ -20,11 +20,11 @@ pub use record::{NoteRecord, NOTE_RECORD_VERSION};
 pub use set::NoteSet;
 
 /// Largest note text (bytes of UTF-8 Markdown).
-pub const MAX_TEXT_BYTES: usize = 16 * 1024;
+pub const MAX_TEXT_BYTES: usize = 16_000;
 /// Most notes in one project.
 pub const MAX_NOTES: usize = 5_000;
 /// Most text of all notes of a project together (bytes), so a project's record stays small.
-pub const MAX_TOTAL_TEXT_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_TOTAL_TEXT_BYTES: usize = 4_000_000;
 /// Most tags on one note.
 pub const MAX_TAGS: usize = 8;
 /// Longest tag (characters).

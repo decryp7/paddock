@@ -10,6 +10,7 @@ authors = ["decryp7"]
 publish = false
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 base64.workspace = true
 serde.workspace = true
 serde_json.workspace = true

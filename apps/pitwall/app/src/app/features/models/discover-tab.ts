@@ -13,8 +13,8 @@ import { ModelsStore } from './models.store';
 /** What a fit needs, in one line: `6.1 GB VRAM + 0.9 GB RAM · all layers on the GPU`. */
 export function fitDetail(f: Fit): string {
   const parts: string[] = [];
-  if (f.needVram > 0) parts.push(`${bytes(f.needVram)} VRAM`);
-  if (f.needRam > 0) parts.push(`${bytes(f.needRam)} RAM`);
+  if (f.needVram > 0) parts.push(`${bytes(f.needVram, 'memory')} VRAM`);
+  if (f.needRam > 0) parts.push(`${bytes(f.needRam, 'memory')} RAM`);
   const offload = { all: 'all layers on the GPU', partial: 'part of the layers on the GPU', none: 'CPU only' }[f.offload];
   return `${parts.join(' + ') || 'Nothing'} · ${offload}`;
 }

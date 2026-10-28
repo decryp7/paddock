@@ -128,6 +128,9 @@ import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } 
 
 const GB = 1000 ** 3;
 const MB = 1000 ** 2;
+/** Memory sizes are binary (16 GiB reads "16 GB", like Activity Monitor). */
+const GiB = 1024 ** 3;
+const MiB = 1024 ** 2;
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 
@@ -356,7 +359,7 @@ export class MockBackend implements DynoBackend {
       topMemory: byMemory,
       overhead: {
         agentCpu: round(0.4 + 0.08 * wobble(t, 900, 5), 2),
-        agentMemory: Math.round((38 + 0.6 * wobble(t, 901, 30)) * MB),
+        agentMemory: Math.round((38 + 0.6 * wobble(t, 901, 30)) * MiB),
         samplingIntervalMs: this.settingsValue.sampling.intervalMs,
         processIntervalMs: this.settingsValue.sampling.processIntervalMs,
       },
@@ -389,8 +392,8 @@ export class MockBackend implements DynoBackend {
     });
     const memTotal = this.profile.memoryTotal;
     // A slow swell on top of the processes' own memory (caches, compression) so the live line moves like a real machine's.
-    const swell = (0.8 + 0.7 * wobble(t, 810, 22)) * GB + 0.18 * GB * wobble(t, 811, 3);
-    const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + s.memory, 0) + 2.9 * GB + swell);
+    const swell = (0.8 + 0.7 * wobble(t, 810, 22)) * GiB + 0.18 * GiB * wobble(t, 811, 3);
+    const memUsed = Math.min(memTotal - 1.2 * GiB, samples.reduce((a, s) => a + s.memory, 0) + 2.9 * GiB + swell);
     const diskRead = samples.reduce((a, s) => a + s.diskReadBps, 0);
     const diskWrite = samples.reduce((a, s) => a + s.diskWriteBps, 0);
     const building = samples.some((s) => s.name === this.profile.names.rustc && s.cpu > 1);
@@ -402,9 +405,9 @@ export class MockBackend implements DynoBackend {
         total: memTotal,
         used: Math.round(memUsed),
         available: Math.round(memTotal - memUsed),
-        commit: { available: { used: Math.round(memUsed + 6.4 * GB), limit: Math.round(memTotal + 24 * GB) } },
-        swapUsed: Math.round(2.1 * GB),
-        swapTotal: 24 * GB,
+        commit: { available: { used: Math.round(memUsed + 6.4 * GiB), limit: Math.round(memTotal + 24 * GiB) } },
+        swapUsed: Math.round(2.1 * GiB),
+        swapTotal: 24 * GiB,
         pressure: { available: memUsed / memTotal > 0.85 ? 'critical' : memUsed / memTotal > 0.7 ? 'elevated' : 'normal' },
       },
       disks: this.profile.disks((this.now() - this.start) / DAY),
@@ -419,8 +422,8 @@ export class MockBackend implements DynoBackend {
         available: {
           name: this.profile.gpuName,
           utilization: round(clamp(9 + 6 * wobble(t, 820, 4), 0, 100), 1),
-          memoryUsed: Math.round((2.3 + 0.1 * wobble(t, 821, 20)) * GB),
-          memoryTotal: this.profile.os === 'macos' ? this.profile.memoryTotal : 8 * GB,
+          memoryUsed: Math.round((2.3 + 0.1 * wobble(t, 821, 20)) * GiB),
+          memoryTotal: this.profile.os === 'macos' ? this.profile.memoryTotal : 8 * GiB,
         },
       },
       battery: laptop
@@ -479,8 +482,8 @@ export class MockBackend implements DynoBackend {
         priority: this.priorities.get(p.pid) ?? 'normal',
         affinity: pr.os === 'macos' ? null : (this.affinities.get(p.pid) ?? 2 ** pr.cores - 1),
         efficiencyMode: this.efficiency.has(p.pid),
-        threads: Math.round(8 + (p.memory / MB) * 0.08),
-        handles: Math.round(180 + (p.memory / MB) * 1.4),
+        threads: Math.round(8 + (p.memory / MiB) * 0.08),
+        handles: Math.round(180 + (p.memory / MiB) * 1.4),
         parents,
         signature: system
           ? { signed: pr.signer }
@@ -639,7 +642,7 @@ export class MockBackend implements DynoBackend {
       const changed = y
         .filter((s) => xs.has(s.pid))
         .map((s) => ({ pid: s.pid, name: s.name, cpuBefore: xs.get(s.pid)!.cpu, cpuAfter: s.cpu, memoryBefore: xs.get(s.pid)!.memory, memoryAfter: s.memory }))
-        .filter((c) => Math.abs(c.memoryAfter - c.memoryBefore) >= 10 * MB || Math.abs(c.cpuAfter - c.cpuBefore) >= 5)
+        .filter((c) => Math.abs(c.memoryAfter - c.memoryBefore) >= 10 * MiB || Math.abs(c.cpuAfter - c.cpuBefore) >= 5)
         .sort((p, q) => Math.abs(q.memoryAfter - q.memoryBefore) - Math.abs(p.memoryAfter - p.memoryBefore));
       const sum = (l: ProcessSample[], f: (s: ProcessSample) => number) => l.reduce((acc, s) => acc + f(s), 0);
       return {

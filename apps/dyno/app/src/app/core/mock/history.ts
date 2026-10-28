@@ -7,6 +7,9 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const GB = 1000 ** 3;
 const MB = 1000 ** 2;
+/** Memory sizes are binary (16 GiB reads "16 GB", like Activity Monitor). */
+const GiB = 1024 ** 3;
+const MiB = 1024 ** 2;
 
 export const RANGES: Record<HistoryRange, { span: number; step: number }> = {
   hour: { span: HOUR, step: 30_000 },
@@ -179,12 +182,12 @@ export function mockHistory(range: HistoryRange, end: number | null, now: number
     events: events(from, to, now, step),
     topConsumers: [
       { app: 'Rust build (cargo)', cpuAvg: round(range === 'hour' ? 31 : 14.2, 1), memoryAvg: Math.round((range === 'hour' ? 2.4 : 1.1) * GB) },
-      { app: 'Google Chrome', cpuAvg: round(6.1 * (range === 'hour' ? 1 : 0.8), 1), memoryAvg: Math.round(4.1 * GB) },
-      { app: 'WSL / Docker VM', cpuAvg: round(3.2, 1), memoryAvg: Math.round(4 * GB) },
-      { app: 'Visual Studio Code', cpuAvg: round(3.0 * consumersScale + 1, 1), memoryAvg: Math.round(2.1 * GB) },
-      { app: 'Microsoft Defender', cpuAvg: round(2.6, 1), memoryAvg: Math.round(370 * MB) },
-      { app: 'Microsoft Teams', cpuAvg: round(1.8, 1), memoryAvg: Math.round(1.1 * GB) },
-      { app: 'Windows services', cpuAvg: round(1.9, 1), memoryAvg: Math.round(1.3 * GB) },
+      { app: 'Google Chrome', cpuAvg: round(6.1 * (range === 'hour' ? 1 : 0.8), 1), memoryAvg: Math.round(4.1 * GiB) },
+      { app: 'WSL / Docker VM', cpuAvg: round(3.2, 1), memoryAvg: Math.round(4 * GiB) },
+      { app: 'Visual Studio Code', cpuAvg: round(3.0 * consumersScale + 1, 1), memoryAvg: Math.round(2.1 * GiB) },
+      { app: 'Microsoft Defender', cpuAvg: round(2.6, 1), memoryAvg: Math.round(370 * MiB) },
+      { app: 'Microsoft Teams', cpuAvg: round(1.8, 1), memoryAvg: Math.round(1.1 * GiB) },
+      { app: 'Windows services', cpuAvg: round(1.9, 1), memoryAvg: Math.round(1.3 * GiB) },
     ],
     diskTrends: diskTrends(now),
     boots: boots(now),

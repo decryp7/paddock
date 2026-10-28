@@ -32,8 +32,8 @@ import { EXTRAS_STYLES } from './extras-styles';
         }
       </div>
       <div class="seg" role="group" aria-label="At least this big">
-        @for (s of sizes; track s.mib) {
-          <button type="button" [attr.aria-pressed]="store.minMib() === s.mib" (click)="store.setMinMib(s.mib)">{{ s.label }}</button>
+        @for (s of sizes; track s.mb) {
+          <button type="button" [attr.aria-pressed]="store.minMb() === s.mb" (click)="store.setMinMb(s.mb)">{{ s.label }}</button>
         }
       </div>
     </div>
@@ -137,7 +137,7 @@ export class ExtrasFiles {
     return r ? groupsEmptied(r, this.selectedSet()) : [];
   });
   protected readonly canRemove = computed(() => this.sel().count > 0 && this.emptied().length === 0 && !this.store.removing());
-  protected readonly minLabel = computed(() => MIN_SIZES.find((s) => s.mib === this.store.minMib())?.label ?? formatBytes(this.store.minMib() * 1024 * 1024));
+  protected readonly minLabel = computed(() => MIN_SIZES.find((s) => s.mb === this.store.minMb())?.label ?? formatBytes(this.store.minMb() * 1_000_000));
   protected readonly scanned = computed(() => {
     const r = this.result();
     return r ? scanSentence(r) : '';

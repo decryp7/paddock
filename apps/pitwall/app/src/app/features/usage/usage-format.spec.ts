@@ -3,7 +3,7 @@ import { barWidth, limitValue, tokensOf } from './usage-format';
 
 describe('usage format', () => {
   it('formats limit values in their own unit', () => {
-    expect(limitValue('memoryShare', 4 * GiB)).toBe('4.0 GB');
+    expect(limitValue('memoryShare', 4 * GiB)).toBe('4 GB');
     expect(limitValue('tokensPerDay', 5_000_000)).toBe('5.0M');
     expect(limitValue('tokensPerMonth', 1500)).toBe('1.5k');
     expect(limitValue('requestsPerDay', 12_345)).toBe('12,345');

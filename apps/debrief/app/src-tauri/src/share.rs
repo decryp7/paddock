@@ -22,9 +22,9 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Runtime};
 
 /// Largest image a visual export writes (decoded PNG or SVG text).
-const MAX_VISUAL_BYTES: usize = 32 << 20;
+const MAX_VISUAL_BYTES: usize = 32_000_000;
 /// Largest report accepted from the UI (JSON).
-const MAX_REPORT_JSON: usize = 64 << 20;
+const MAX_REPORT_JSON: usize = 64_000_000;
 
 /// Folder under the system temp folder where bundles are extracted to be opened.
 #[cfg(not(test))]
@@ -58,7 +58,7 @@ fn parse_report(value: Value) -> CmdResult<Report> {
     if value.to_string().len() > MAX_REPORT_JSON {
         return Err(crate::CmdError::from(format!(
             "a report is limited to {}",
-            debrief_plugin_api::units::bytes(MAX_REPORT_JSON as u64)
+            paddock_units::format_whole(MAX_REPORT_JSON as u64, paddock_units::Kind::Storage)
         )));
     }
     crate::error::lift(Report::parse(value).map_err(err))
@@ -235,7 +235,7 @@ fn visual_bytes(kind: &str, data: &str) -> anyhow::Result<Vec<u8>> {
             if b64.len() > MAX_VISUAL_BYTES / 3 * 4 + 4 {
                 anyhow::bail!(
                     "images are limited to {}",
-                    debrief_plugin_api::units::bytes(MAX_VISUAL_BYTES as u64)
+                    paddock_units::format_whole(MAX_VISUAL_BYTES as u64, paddock_units::Kind::Storage)
                 );
             }
             let bytes = base64::engine::general_purpose::STANDARD
@@ -250,7 +250,7 @@ fn visual_bytes(kind: &str, data: &str) -> anyhow::Result<Vec<u8>> {
             if data.len() > MAX_VISUAL_BYTES {
                 anyhow::bail!(
                     "images are limited to {}",
-                    debrief_plugin_api::units::bytes(MAX_VISUAL_BYTES as u64)
+                    paddock_units::format_whole(MAX_VISUAL_BYTES as u64, paddock_units::Kind::Storage)
                 );
             }
             let clean = debrief_core::svg::sanitize(data, &debrief_core::svg::FIGURE)?;

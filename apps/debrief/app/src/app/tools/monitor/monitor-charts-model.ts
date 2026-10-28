@@ -1,4 +1,4 @@
-import { formatBytes, formatNumber, formatPercent, formatRate } from '../../shared/format/units';
+import { byteStep, formatBytes, formatNumber, formatPercent, formatRate } from '../../shared/format/units';
 import type { EChartsCoreOption } from 'echarts/core';
 import { ChartData, ChartDef, Query, WorkspaceSummary } from '../../core/api.types';
 import { EMPTY_QUERY } from '../../core/workspace.store';
@@ -122,10 +122,13 @@ export function humanValue(v: unknown, unit: string): string {
   if (typeof v !== 'number' || !Number.isFinite(v)) return '—';
   switch (unit) {
     case 'MB':
-      return formatBytes(v * 1000 * 1000);
+      // WorkingSetMb / PrivateMb are memory counters in binary megabytes (Windows performance counters).
+      return formatBytes(v * byteStep('memory') ** 2, 'memory');
     case 'B':
-      return formatBytes(v);
+      // The only plain-bytes counter is the GC heap: memory.
+      return formatBytes(v, 'memory');
     case 'B/s':
+      // IO read / write per second is disk throughput: storage.
       return v > 0 ? formatRate(v) : $localize`:@@tools.monitor.noRate:0 bytes/s`;
     case '%':
       return formatPercent(v, 1);

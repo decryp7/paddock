@@ -10,7 +10,7 @@ import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { Confirm } from '../../shared/ui/confirm';
 import { Panel } from '../../shared/ui/panel';
 import { PwSelect, type SelectOption } from '../../shared/ui/select';
-import { bytes, date, int } from '../../shared/format';
+import { byteStep, bytes, date, int } from '../../shared/format';
 import { expiryText, oldestText, sizeText, ttlOptions } from './cache-text';
 import { ServicePanel } from '../service/service-panel';
 import { ServiceStore } from '../service/service.store';
@@ -19,8 +19,9 @@ import { UpdatesStore } from '../updates/updates.store';
 import { injectNow } from '../../shared/now';
 import { SettingsStore } from './settings.store';
 
-const GB = 1000 ** 3;
-const MB = 1000 ** 2;
+// Memory limits (free memory, hot-model cap) are binary under the GB label; the request limit is storage-like (decimal MB).
+const GB = byteStep('memory') ** 3;
+const MB = byteStep('storage') ** 2;
 const PRESETS: Exclude<Preset, 'custom'>[] = ['lowMemory', 'balanced', 'performance'];
 
 const SECTIONS = [

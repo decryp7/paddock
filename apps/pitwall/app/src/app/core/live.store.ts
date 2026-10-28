@@ -94,7 +94,7 @@ export const LiveStore = signalStore(
       },
 
       releaseMemory() {
-        return act('release', () => backend.releaseMemory(), (freed) => (freed > 0 ? `Released ${bytes(freed)}.` : 'Nothing to release: every hot model is pinned or busy.'));
+        return act('release', () => backend.releaseMemory(), (freed) => (freed > 0 ? `Released ${bytes(freed, 'memory')}.` : 'Nothing to release: every hot model is pinned or busy.'));
       },
 
       async applyPreset(preset: Preset) {

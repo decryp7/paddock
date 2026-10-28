@@ -123,7 +123,7 @@ fn overview() -> Value {
     json!({
         "server": {"version": "0.1.0", "apiVersion": 1, "pid": 4242, "port": 11435, "startedAt": 1, "serving": "serving", "offline": true,
                    "lan": {"enabled": false, "url": null, "certFingerprint": null}},
-        "memory": {"at": 1, "ramTotal": 32_000_000_000u64, "ramAvailable": 12_500_000_000u64, "commitUsed": null, "commitLimit": null,
+        "memory": {"at": 1, "ramTotal": 34_359_738_368u64, "ramAvailable": 13_421_772_800u64, "commitUsed": null, "commitLimit": null,
                    "swapUsed": 0, "pressure": "normal", "cpuPercent": 3.0, "gpus": [{"name": "Test GPU", "vramTotal": 8_000_000_000u64,
                    "vramUsed": 2_000_000_000u64, "utilisation": 10.0, "unified": false}], "pitwallRss": 1, "foregroundBusy": false},
         "models": [loaded()],
@@ -176,7 +176,7 @@ fn status_text_and_json_authenticate_with_the_admin_key() {
     let s = text(&out.stdout);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert!(
-        s.contains("127.0.0.1:11435") && s.contains("(offline mode)") && s.contains("12.5 GB free of 32.0 GB"),
+        s.contains("127.0.0.1:11435") && s.contains("(offline mode)") && s.contains("13 GB free of 32 GB"),
         "{s}"
     );
     assert!(s.contains("acme--tiny--q4") && s.contains("Test GPU"), "{s}");

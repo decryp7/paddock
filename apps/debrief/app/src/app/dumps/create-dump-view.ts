@@ -218,6 +218,7 @@ export class CreateDumpView implements OnInit {
     }
   }
 
-  protected readonly bytes = formatBytes;
+  /** The dump file on disk: storage. */
+  protected readonly bytes = (n: number): string => formatBytes(n, 'storage');
   protected readonly count = formatCount;
 }

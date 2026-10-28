@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { setActiveLocale, SOURCE_LOCALE } from '../../i18n/locale';
 import {
+  byteStep,
   formatBytes,
+  formatWholeBytes,
+  parseSize,
   formatCompact,
   formatCount,
   formatDecimal,
@@ -241,11 +244,35 @@ describe('the table shared with Rust (debrief-plugin-api units)', () => {
   };
 
   it('formats every case exactly as the Rust side does', () => {
-    // `bytes` is left out until the Rust side (debrief-plugin-api `units`) moves to decimal steps too (family decision
-    // 2026-10-28); units-cases.json still holds the binary cases. The TS decimal cases are in the formatBytes tests above.
-    // each('bytes', (v: number) => formatBytes(v));
     each('durationMs', (v: number) => formatDuration(v));
     each('count', (v: number) => formatCount(v));
     each('percent', (v: [number, number]) => formatPercent(v[0], v[1]));
+  });
+});
+
+describe('the byte-size case table shared with Rust (crates/paddock-units/cases.json)', () => {
+  type Table = Record<string, { in: never; out: unknown }[] | string[]>;
+  const table = JSON.parse(readFileSync('../../../crates/paddock-units/cases.json', 'utf8')) as Table;
+  const run = (key: string, f: (v: never) => unknown) => {
+    const cases = table[key] as { in: never; out: unknown }[];
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) expect(f(c.in), `${key}(${String(c.in)})`).toBe(c.out);
+  };
+
+  it('formats, reads and rounds every case exactly as paddock_units does', () => {
+    run('storage', (v: number) => formatBytes(v, 'storage'));
+    run('memory', (v: number) => formatBytes(v, 'memory'));
+    run('wholeStorage', (v: number) => formatWholeBytes(v, 'storage'));
+    run('wholeMemory', (v: number) => formatWholeBytes(v, 'memory'));
+    run('parseStorage', (v: string) => parseSize(v, 'storage'));
+    run('parseMemory', (v: string) => parseSize(v, 'memory'));
+    for (const bad of table['parseBad'] as string[]) expect(parseSize(bad), `parseBad(${bad})`).toBeNull();
+  });
+
+  it('keeps the steps of each kind', () => {
+    expect(byteStep('storage')).toBe(1000);
+    expect(byteStep('memory')).toBe(1024);
+    expect(formatBytes(16 * 1024 ** 3, 'memory')).toBe('16 GB');
+    expect(formatRate(2 * 1024 ** 2, 'memory')).toBe('2 MB/s');
   });
 });

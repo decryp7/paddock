@@ -5,7 +5,7 @@
 use super::{clean, clip};
 use crate::inventory::SystemInventory;
 use crate::time::Timestamp;
-use crate::units::bytes;
+use crate::units::{bytes, Kind};
 use serde::{Deserialize, Serialize};
 
 /// Most items kept (a developer machine has thousands of packages; more than this is cut and says so).
@@ -225,12 +225,12 @@ fn markdown(at: Timestamp, hw: &SystemInventory, sw: &SoftwareInventory) -> Stri
             String::new()
         }
     ));
-    s.push_str(&format!("- Memory: {}\n", bytes(hw.memory.total())));
+    s.push_str(&format!("- Memory: {}\n", bytes(hw.memory.total(), Kind::Memory)));
     for d in &hw.disks {
         s.push_str(&format!(
             "- Disk: {}, {}{}\n",
             cell(&d.name),
-            bytes(d.total_bytes),
+            bytes(d.total_bytes, Kind::Storage),
             if d.removable { " (removable)" } else { "" }
         ));
     }

@@ -27,7 +27,7 @@ pub enum FetchError {
     NotFound(String),
     #[error("{0}")]
     Refused(String),
-    #[error("the PDB is larger than {} MB", .0 >> 20)]
+    #[error("the PDB is larger than {}", paddock_units::format_whole(*.0, paddock_units::Kind::Storage))]
     TooLarge(u64),
     #[error("the symbol server's {0}")]
     Mismatch(String),
@@ -418,7 +418,7 @@ mod tests {
             ..ServerConfig::microsoft()
         })
         .is_err());
-        assert_eq!(FetchError::TooLarge(2 << 20).to_string(), "the PDB is larger than 2 MB");
+        assert_eq!(FetchError::TooLarge(2_000_000).to_string(), "the PDB is larger than 2 MB");
         assert_eq!(FetchError::from(std::io::Error::other("x")), FetchError::Io("x".into()));
     }
 

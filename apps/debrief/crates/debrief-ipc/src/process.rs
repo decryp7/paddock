@@ -205,7 +205,7 @@ pub const MEMORY_LOOK: Duration = Duration::from_millis(200);
 
 /// "512 MB": a memory cap for messages.
 fn megabytes(bytes: u64) -> String {
-    format!("{} MB", bytes.div_ceil(1 << 20))
+    paddock_units::format_bytes(bytes, paddock_units::Kind::Memory)
 }
 
 /// What the memory watcher of one child shares with its [`ChildProcess`].

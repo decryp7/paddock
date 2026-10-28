@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 // The schema, its validation and `Configurable` are part of the plugin contract (ADR 0017).
 pub use debrief_plugin_api::settings::{
-    format_bytes, format_ms, sanitize, validate, validate_field, Configurable, EnumOption, FieldError, FieldKind, SectionOwner,
+    format_bytes, format_ms, sanitize, validate, validate_field, ByteKind, Configurable, EnumOption, FieldError, FieldKind, SectionOwner,
     SettingField, SettingsSection, ValidValues, MAX_FIELDS, MAX_ITEM_LEN, MAX_LIST_ITEMS, MAX_PATH_LEN, MAX_TEXT_LEN,
 };
 

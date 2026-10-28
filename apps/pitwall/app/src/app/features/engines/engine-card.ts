@@ -219,7 +219,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
                   </td>
                   <td class="mono faint">{{ p.pid }}</td>
                   <td class="right num" [class.warn]="p.restarts > 0">{{ p.restarts }}</td>
-                  <td class="right num">{{ size(p.rssBytes) }}</td>
+                  <td class="right num">{{ size(p.rssBytes, 'memory') }}</td>
                   <td class="faint">{{ when(p.startedAt, now()) }}</td>
                 </tr>
               }

@@ -6,7 +6,7 @@ use crate::grouping::AppGroup;
 use crate::health::Severity;
 use crate::metrics::{derive_pressure, percent, MemoryPressure, SystemSample};
 use crate::time::{Timestamp, HOUR, MINUTE, SECOND};
-use crate::units::bytes;
+use crate::units::{bytes, Kind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -124,7 +124,7 @@ impl Alerts {
                     AlertKind::LowDisk,
                     sev,
                     format!("{} is almost full", d.name),
-                    format!("{} free ({free:.0}%). Cleanup can free space safely.", bytes(d.free)),
+                    format!("{} free ({free:.0}%). Cleanup can free space safely.", bytes(d.free, Kind::Storage)),
                 );
             }
         }
@@ -156,8 +156,8 @@ impl Alerts {
                 "Your PC is out of memory".into(),
                 format!(
                     "{} of {} in use. Close apps you don't need.",
-                    bytes(s.memory.used),
-                    bytes(s.memory.total)
+                    bytes(s.memory.used, Kind::Memory),
+                    bytes(s.memory.total, Kind::Memory)
                 ),
             );
         }

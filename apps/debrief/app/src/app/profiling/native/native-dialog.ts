@@ -217,7 +217,7 @@ export class NativeDialog implements OnInit {
   protected progress(c: NativeCaptureStatus): string {
     const parts = [formatNs(c.elapsedMs * 1_000_000)];
     if (c.mode === 'sampling') parts.push($localize`:@@profiling.native.samples:${formatValue(c.samples, 'count')}:count: samples`);
-    else parts.push(formatBytes(c.bytes));
+    else parts.push(formatBytes(c.bytes, 'storage')); // the NetTrace file written so far
     return parts.join(' · ');
   }
 

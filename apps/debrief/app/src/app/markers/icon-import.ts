@@ -4,7 +4,7 @@ import { iconNameFromFile } from './marker-rules';
 import { PendingIcon } from './markers.types';
 
 /** The engine's limit for icon sources (crates/debrief-core/src/icons.rs MAX_ICON_BYTES). */
-export const MAX_ICON_BYTES = 16 * 1024;
+export const MAX_ICON_BYTES = 16_000;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 
 export type IconImport = { ok: true; icon: PendingIcon } | { ok: false; error: string };

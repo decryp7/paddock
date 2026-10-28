@@ -105,11 +105,11 @@ describe('ExtrasStore: file finder', () => {
     await store.chooseFolder();
     const spy = vi.spyOn(mock, 'findFiles');
     await store.setMode('both');
-    await store.setMinMib(100);
+    await store.setMinMb(100);
     expect(spy).not.toHaveBeenCalled();
     await store.setMode('duplicates');
     expect(store.finder().data?.large).toEqual([]);
-    await store.setMinMib(1024);
+    await store.setMinMb(1024);
     expect(spy).toHaveBeenCalledTimes(2);
     expect(store.finder().data?.duplicates.map((g) => g.bytesEach)).toEqual([expect.any(Number)]);
   });

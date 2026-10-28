@@ -2,6 +2,10 @@ import {
   formatAffinity,
   formatBytes,
   formatBytesDelta,
+  formatMemory,
+  formatWholeBytes,
+  parseSize,
+  byteStep,
   formatClock,
   formatCount,
   formatDate,
@@ -22,39 +26,63 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const NOW = 1_700_000_000_000;
 
+describe('byte sizes (the case table shared with Rust, crates/paddock-units/cases.json)', () => {
+  type Table = Record<string, { in: never; out: unknown }[] | string[]>;
+  // Read from disk (the spec runs in `apps/dyno/app`); the dynamic import keeps the Node types out of the browser build.
+  const load = async (): Promise<Table> => {
+    const fs = (await import(/* @vite-ignore */ ['node', 'fs'].join(':'))) as { readFileSync(path: string, encoding: 'utf8'): string };
+    return JSON.parse(fs.readFileSync('../../../crates/paddock-units/cases.json', 'utf8')) as Table;
+  };
+  let table: Table;
+  beforeAll(async () => {
+    table = await load();
+  });
+  const each = (key: string, f: (v: never) => unknown) => {
+    const cases = table[key] as { in: never; out: unknown }[];
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) expect(f(c.in), `${key}(${String(c.in)})`).toBe(c.out);
+  };
+
+  it('formats, writes limits and reads sizes exactly as the Rust side does', () => {
+    each('storage', (v: number) => formatBytes(v, 'storage'));
+    each('memory', (v: number) => formatBytes(v, 'memory'));
+    each('wholeStorage', (v: number) => formatWholeBytes(v, 'storage'));
+    each('wholeMemory', (v: number) => formatWholeBytes(v, 'memory'));
+    each('parseStorage', (v: string) => parseSize(v, 'storage'));
+    each('parseMemory', (v: string) => parseSize(v, 'memory'));
+    for (const bad of table['parseBad'] as string[]) expect(parseSize(bad, 'storage'), bad).toBeNull();
+  });
+
+  it('shows memory like the OS and storage like the Finder', () => {
+    expect(formatBytes(16 * 1024 ** 3, 'memory')).toBe('16 GB');
+    expect(formatMemory(16 * 1024 ** 3)).toBe('16 GB');
+    expect(formatBytes(16 * 1024 ** 3)).toBe('17 GB');
+    expect(byteStep('memory')).toBe(1024);
+    expect(byteStep('storage')).toBe(1000);
+  });
+});
+
 describe('formatBytes', () => {
-  it('uses decimal multiples (1 KB = 1000 bytes)', () => {
-    expect(formatBytes(0)).toBe('0 B');
-    expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(1500)).toBe('1.5 KB');
-    expect(formatBytes(1000 ** 2)).toBe('1 MB');
-    expect(formatBytes(12.34 * 1000 ** 2)).toBe('12.3 MB');
-    expect(formatBytes(123.4 * 1000 ** 3)).toBe('123 GB');
-  });
-  it('promotes values that would print as 1000 of a unit', () => {
-    expect(formatBytes(1000 * 1000)).toBe('1 MB');
-    expect(formatBytes(1_048_576)).toBe('1.05 MB');
-    expect(formatBytes(999_600)).toBe('1 MB');
-    expect(formatBytes(1000)).toBe('1 KB');
-  });
-  it('caps at PB and handles negatives', () => {
-    expect(formatBytes(2 * 1000 ** 6)).toBe('2000 PB');
+  it('keeps a sign and shows missing values as a dash', () => {
     expect(formatBytes(-2000)).toBe('−2 KB');
-  });
-  it('shows a dash for missing or non-finite values', () => {
     for (const v of [null, undefined, NaN, Infinity]) expect(formatBytes(v)).toBe('—');
   });
-  it('formats deltas with an explicit sign', () => {
+  it('caps at petabytes', () => {
+    expect(formatBytes(2 * 1000 ** 6)).toBe('2,000 PB');
+  });
+  it('writes a signed delta', () => {
     expect(formatBytesDelta(1000)).toBe('+1 KB');
     expect(formatBytesDelta(-1000)).toBe('−1 KB');
-    expect(formatBytesDelta(0)).toBe('0 B');
+    expect(formatBytesDelta(0)).toBe('0 bytes');
+    expect(formatBytesDelta(1024, 'memory')).toBe('+1 KB');
   });
 });
 
 describe('formatRate', () => {
-  it('appends /s and clamps negatives', () => {
+  it('follows its quantity', () => {
     expect(formatRate(2.4 * 1000 ** 2)).toBe('2.4 MB/s');
-    expect(formatRate(-5)).toBe('0 B/s');
+    expect(formatRate(2 * 1024 ** 2, 'memory')).toBe('2 MB/s');
+    expect(formatRate(-5)).toBe('0 bytes/s');
     expect(formatRate(null)).toBe('—');
     expect(formatRate(NaN)).toBe('—');
     expect(formatRate(undefined)).toBe('—');

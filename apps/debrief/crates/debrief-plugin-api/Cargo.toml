@@ -9,6 +9,7 @@ publish = false
 description = "The contract of Debrief plugins (ADR 0017): plugin traits, the values plugins build (records, timestamps, configuration trees, settings, tools, marker kinds, annotations), the manifest, the plugin protocol over debrief-ipc frames, and serve(). No dependency on debrief-core."
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 debrief-ipc = { path = "../debrief-ipc" }
 anyhow.workspace = true
 chrono.workspace = true

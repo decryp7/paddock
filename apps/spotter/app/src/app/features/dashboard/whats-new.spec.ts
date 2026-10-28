@@ -57,7 +57,7 @@ describe('WhatsNew', () => {
     ]);
     expect(Array.from((f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('h3')).map((h) => text(h)).slice(0, 2)).toEqual(['Today', 'Yesterday']);
     const [a, b] = rows(f);
-    expect(text(a!.querySelector('.meta'))).toBe('Server · 5.0 MB · 2 files');
+    expect(text(a!.querySelector('.meta'))).toBe('Server · 5 MB · 2 files');
     expect(a!.querySelector('.unseen-dot')!.classList.contains('off')).toBe(false);
     expect(a!.querySelector('.pre')).toBeNull();
     expect(text(b!.querySelector('.meta'))).toBe('Plain name');

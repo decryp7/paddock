@@ -9,6 +9,7 @@ publish = false
 description = "Debrief notes (ADR 0021): the user's observations anchored to events, times, sources, markers, chart points, the project or regions of images; their checks and limits, the versioned project record and the AI context block. Pure: no I/O."
 
 [dependencies]
+paddock-units = { path = "../../../../crates/paddock-units" }
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true

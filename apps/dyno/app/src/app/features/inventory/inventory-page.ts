@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import type { Hint, HintKind, MemoryArray } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatCount, formatGhz } from '../../shared/format';
+import { formatBytes, formatMemory, formatCount, formatGhz } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import type { IconName } from '../../shared/icons';
 import { InventoryStore } from '../../state/inventory.store';
@@ -133,7 +133,7 @@ const HINT_TONE: Record<HintKind, string> = {
                   <div class="meta">
                     <span class="k">Drive</span>
                     <strong>{{ d.name }}</strong>
-                    <span class="sub"><span class="num">{{ bytes(d.totalBytes) }}</span>{{ d.removable ? ' · removable' : '' }}</span>
+                    <span class="sub"><span class="num">{{ disk(d.totalBytes) }}</span>{{ d.removable ? ' · removable' : '' }}</span>
                   </div>
                 </article>
               }
@@ -184,7 +184,8 @@ export class InventoryPage implements OnInit {
   protected readonly ghz = formatGhz;
   protected readonly isApple = isAppleSilicon;
   protected readonly art = (d: { name: string; removable: boolean }): DeviceArtKind => driveKind(d.name, d.removable);
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatMemory;
+  protected readonly disk = formatBytes;
   protected readonly n = formatCount;
   protected readonly kind = kindLabel;
   protected readonly speed = speedLabel;

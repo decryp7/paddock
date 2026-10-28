@@ -589,9 +589,9 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
         return Err(err(
             mgmt::ErrorCode::Conflict,
             format!(
-                "not enough disk space: {:.1} GB needed, {:.1} GB free",
-                q.size_bytes as f64 / 1e9,
-                free as f64 / 1e9
+                "not enough disk space: {} needed, {} free",
+                paddock_units::format_bytes(q.size_bytes, paddock_units::Kind::Storage),
+                paddock_units::format_bytes(free, paddock_units::Kind::Storage)
             ),
         ));
     }

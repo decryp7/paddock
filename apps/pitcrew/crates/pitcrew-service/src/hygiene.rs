@@ -337,7 +337,7 @@ pub fn cache_dir_of(settings: &RunnerSettings, runner_dir: &Path, home: Option<&
 
 /// `10GB`, `512MB`, `1TiB` as MB (0: no limit).
 pub fn size_limit_mb(text: &str) -> Option<u64> {
-    hygiene::parse_size(text).map(|b| b / (1024 * 1024))
+    hygiene::parse_size(text).map(|b| b / 1_000_000)
 }
 
 /// The cache report of a runner.
@@ -366,7 +366,7 @@ pub fn cache_report(
         entries: count,
         top: entries,
         size_limit_mb: limit,
-        over_limit: limit.is_some_and(|l| bytes > l * 1024 * 1024),
+        over_limit: limit.is_some_and(|l| bytes > l * 1_000_000),
         free_bytes,
         truncated,
         problem,
@@ -597,6 +597,6 @@ mod tests {
         let (p, def) = cache_dir_of(&RunnerSettings::default(), Path::new("/r"), Some(Path::new("/h"))).unwrap();
         assert_eq!((p, def), (Path::new("/h").join(".cache").join("actcache"), true));
         assert!(cache_dir_of(&RunnerSettings::default(), Path::new("/r"), None).is_none());
-        assert_eq!(size_limit_mb("10GB"), Some(9536));
+        assert_eq!(size_limit_mb("10GB"), Some(10_000));
     }
 }

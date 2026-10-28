@@ -1,6 +1,7 @@
 //! Output formatting: pure functions from the engine's DTOs to text. Nothing here prints or reads a clock; the
-//! caller passes "now". Sizes are decimal (GB), as the Pitwall window shows them.
+//! caller passes "now". Sizes follow `paddock_units`: decimal for storage, binary for memory, as the Pitwall window shows them.
 
+use paddock_units::{format_bytes, Kind};
 use pitwall_core::mgmt::{
     ApiKeyInfo, AppInfo, BenchmarkResult, CreatedKey, Download, DownloadState, LoadedModel, LocalModel, Overview, PresetEntry, PresetStatus,
 };
@@ -19,20 +20,14 @@ pub fn label<T: Serialize>(v: &T) -> String {
     }
 }
 
-/// `1.5 GB`, `340 MB`, `12 KB`, `7 B`.
-pub fn human_bytes(n: u64) -> String {
-    const UNITS: [(&str, f64); 4] = [("TB", 1e12), ("GB", 1e9), ("MB", 1e6), ("KB", 1e3)];
-    for (name, size) in UNITS {
-        if n as f64 >= size {
-            let v = n as f64 / size;
-            return if v >= 100.0 {
-                format!("{v:.0} {name}")
-            } else {
-                format!("{v:.1} {name}")
-            };
-        }
-    }
-    format!("{n} B")
+/// A file or transfer size, decimal steps as the Finder: `1.5 GB`, `340 MB`, `12 KB`, `7 bytes`.
+pub fn storage_bytes(n: u64) -> String {
+    format_bytes(n, Kind::Storage)
+}
+
+/// A memory size (RAM, video memory), binary steps under the same labels as Activity Monitor: 16 GiB is `16 GB`.
+pub fn memory_bytes(n: u64) -> String {
+    format_bytes(n, Kind::Memory)
 }
 
 /// `2h 5m`, `3m 04s`, `12s`.
@@ -100,8 +95,8 @@ pub fn status(o: &Overview, now: Millis) -> String {
         human_duration(now.saturating_sub(s.started_at)),
         label(&s.serving),
         if s.offline { " (offline mode)" } else { "" },
-        human_bytes(m.ram_available),
-        human_bytes(m.ram_total),
+        memory_bytes(m.ram_available),
+        memory_bytes(m.ram_total),
         label(&m.pressure),
         if o.models.is_empty() {
             "no models".to_string()
@@ -116,7 +111,7 @@ pub fn status(o: &Overview, now: Millis) -> String {
     );
     for g in &m.gpus {
         let vram = match (g.vram_used, g.vram_total) {
-            (Some(u), Some(t)) => format!(", {} of {} video memory used", human_bytes(u), human_bytes(t)),
+            (Some(u), Some(t)) => format!(", {} of {} video memory used", memory_bytes(u), memory_bytes(t)),
             _ => String::new(),
         };
         out.push_str(&format!("\nGPU:       {}{vram}", g.name));
@@ -145,8 +140,8 @@ pub fn ps(models: &[LoadedModel]) -> String {
                 m.model_id.clone(),
                 label(&m.state),
                 label(&m.engine),
-                human_bytes(m.ram_bytes),
-                human_bytes(m.vram_bytes),
+                memory_bytes(m.ram_bytes),
+                memory_bytes(m.vram_bytes),
                 m.context_tokens.to_string(),
                 m.slots.to_string(),
                 if m.pinned { "pinned".into() } else { String::new() },
@@ -167,7 +162,7 @@ pub fn models(models: &[LocalModel]) -> String {
             vec![
                 m.id.clone(),
                 m.quant.clone().unwrap_or_default(),
-                human_bytes(m.size_bytes),
+                storage_bytes(m.size_bytes),
                 if m.loaded { "loaded".into() } else { String::new() },
                 label(&m.fit.verdict),
             ]
@@ -287,9 +282,9 @@ pub fn progress_line(d: &Download) -> String {
             "{} {:>3}%  {} / {}  {}/s",
             d.name,
             percent(d.bytes_done, d.bytes_total),
-            human_bytes(d.bytes_done),
-            human_bytes(d.bytes_total),
-            human_bytes(d.speed_bps)
+            storage_bytes(d.bytes_done),
+            storage_bytes(d.bytes_total),
+            storage_bytes(d.speed_bps)
         ),
         DownloadState::Failed => format!("{} failed: {}", d.name, d.error.as_deref().unwrap_or("unknown error")),
         _ => format!("{} {state}", d.name),
@@ -319,12 +314,14 @@ mod tests {
 
     #[test]
     fn sizes_and_durations() {
-        assert_eq!(human_bytes(0), "0 B");
-        assert_eq!(human_bytes(999), "999 B");
-        assert_eq!(human_bytes(12_000), "12.0 KB");
-        assert_eq!(human_bytes(340_000_000), "340 MB");
-        assert_eq!(human_bytes(1_500_000_000), "1.5 GB");
-        assert_eq!(human_bytes(2_000_000_000_000), "2.0 TB");
+        assert_eq!(storage_bytes(0), "0 bytes");
+        assert_eq!(storage_bytes(999), "999 bytes");
+        assert_eq!(storage_bytes(12_000), "12 KB");
+        assert_eq!(storage_bytes(340_000_000), "340 MB");
+        assert_eq!(storage_bytes(1_500_000_000), "1.5 GB");
+        assert_eq!(storage_bytes(2_000_000_000_000), "2 TB");
+        assert_eq!(memory_bytes(16 << 30), "16 GB");
+        assert_eq!(memory_bytes(1000), "1,000 bytes");
         assert_eq!(human_duration(12_000), "12s");
         assert_eq!(human_duration(184_000), "3m 04s");
         assert_eq!(human_duration(7_500_000), "2h 5m");
@@ -363,7 +360,7 @@ mod tests {
     #[test]
     fn download_progress() {
         let l = progress_line(&download(DownloadState::Downloading, 250_000_000));
-        assert!(l.contains(" 25%") && l.contains("250 MB / 1.0 GB") && l.contains("5.0 MB/s"), "{l}");
+        assert!(l.contains(" 25%") && l.contains("250 MB / 1 GB") && l.contains("5 MB/s"), "{l}");
         let mut f = download(DownloadState::Failed, 0);
         assert!(progress_line(&f).contains("unknown error"));
         f.error = Some("disk full".into());
@@ -400,7 +397,7 @@ mod tests {
     fn loaded_model() -> LoadedModel {
         from_json(
             serde_json::json!({"modelId": "acme--tiny--q4", "name": "Tiny", "engine": "llama.cpp", "build": "vulkan", "state": "ready",
-            "ramBytes": 1_500_000_000u64, "vramBytes": 0, "contextTokens": 4096, "slots": 2, "pinned": true, "activeRequests": 0,
+            "ramBytes": 1_610_612_736u64, "vramBytes": 0, "contextTokens": 4096, "slots": 2, "pinned": true, "activeRequests": 0,
             "loadedAt": 1, "lastUsedAt": 1, "idleReleaseAt": null, "coldStartMs": 900, "capabilities": ["chat"]}),
         )
     }
@@ -479,9 +476,9 @@ mod tests {
         let o: Overview = from_json(serde_json::json!({
             "server": {"version": "0.1.0", "apiVersion": 1, "pid": 7, "port": 11435, "startedAt": 0, "serving": "paused", "offline": true,
                        "lan": {"enabled": false, "url": null, "certFingerprint": null}},
-            "memory": {"at": 1, "ramTotal": 32_000_000_000u64, "ramAvailable": 8_000_000_000u64, "commitUsed": null, "commitLimit": null,
+            "memory": {"at": 1, "ramTotal": 34_359_738_368u64, "ramAvailable": 8_589_934_592u64, "commitUsed": null, "commitLimit": null,
                        "swapUsed": 0, "pressure": "elevated", "cpuPercent": 3.0,
-                       "gpus": [{"name": "G1", "vramTotal": 8_000_000_000u64, "vramUsed": 2_000_000_000u64, "utilisation": null, "unified": false},
+                       "gpus": [{"name": "G1", "vramTotal": 8_589_934_592u64, "vramUsed": 2_147_483_648u64, "utilisation": null, "unified": false},
                                 {"name": "G2", "vramTotal": null, "vramUsed": null, "utilisation": null, "unified": true}],
                        "pitwallRss": 1, "foregroundBusy": false},
             "models": [], "engines": [],
@@ -495,10 +492,10 @@ mod tests {
         for want in [
             "up 1h 1m",
             "paused (offline mode)",
-            "8.0 GB free of 32.0 GB (elevated pressure)",
+            "8 GB free of 32 GB (elevated pressure)",
             "no models",
             "42 tokens/s",
-            "2.0 GB of 8.0 GB video memory",
+            "2 GB of 8 GB video memory",
             "GPU:       G2",
             "Issue:     m (failed)",
             "1 app(s) waiting",

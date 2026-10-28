@@ -19,7 +19,7 @@ import type {
 } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { DEFAULT_MIN_MIB, defaultSelection, mibToBytes } from '../features/extras/files-model';
+import { DEFAULT_MIN_MB, defaultSelection, mbToBytes } from '../features/extras/files-model';
 import type { ExtrasTab } from '../features/extras/extras-model';
 import { formatBytes, plural } from '../shared/format';
 import { Notifier } from '../shared/notifier';
@@ -54,7 +54,7 @@ interface ExtrasState {
   // The file finder.
   folder: string | null;
   mode: FinderMode;
-  minMib: number;
+  minMb: number;
   finder: Resource<FinderResult>;
   /** File ids chosen for removal. */
   selected: string[];
@@ -97,7 +97,7 @@ export const ExtrasStore = signalStore(
     saveError: null,
     folder: null,
     mode: 'both',
-    minMib: DEFAULT_MIN_MIB,
+    minMb: DEFAULT_MIN_MB,
     finder: idle<FinderResult>(),
     selected: [],
     removing: false,
@@ -121,7 +121,7 @@ export const ExtrasStore = signalStore(
     const search = (): Promise<void> => {
       const folder = store.folder();
       if (!folder) return Promise.resolve();
-      return read('finder', () => backend.findFiles({ folder, mode: store.mode(), minBytes: mibToBytes(store.minMib()) }), (r) => ({
+      return read('finder', () => backend.findFiles({ folder, mode: store.mode(), minBytes: mbToBytes(store.minMb()) }), (r) => ({
         selected: [...defaultSelection(r)],
         removeError: null,
       }));
@@ -189,9 +189,9 @@ export const ExtrasStore = signalStore(
         patchState(store, { mode });
         await search();
       },
-      async setMinMib(minMib: number): Promise<void> {
-        if (minMib === store.minMib()) return;
-        patchState(store, { minMib });
+      async setMinMb(minMb: number): Promise<void> {
+        if (minMb === store.minMb()) return;
+        patchState(store, { minMb });
         await search();
       },
       toggleFile(id: string): void {

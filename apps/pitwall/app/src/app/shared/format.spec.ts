@@ -1,25 +1,45 @@
-import { ago, bytes, clock, compact, concurrencyText, countdown, date, duration, gb, int, percent, rate, seconds, slotsText, tokensText } from './format';
+import { ago, byteStep, bytes, clock, compact, concurrencyText, countdown, date, duration, gb, int, parseSize, percent, rate, seconds, slotsText, tokensText, wholeBytes } from './format';
 
-const GB = 1000 ** 3;
+interface Table {
+  [key: string]: { in: never; out: unknown }[] | string[];
+}
+
+async function cases(): Promise<Table> {
+  const fs = (await import(/* @vite-ignore */ ['node', 'fs'].join(':'))) as { readFileSync(path: string, encoding: 'utf8'): string };
+  return JSON.parse(fs.readFileSync('../../../crates/paddock-units/cases.json', 'utf8')) as Table;
+}
 
 describe('format', () => {
-  it('formats bytes in decimal units (1 KB = 1000 bytes)', () => {
-    expect(bytes(0)).toBe('0 B');
-    expect(bytes(512)).toBe('512 B');
-    expect(bytes(1536)).toBe('1.5 KB');
-    expect(bytes(5.03 * GB)).toBe('5.0 GB');
-    expect(bytes(262 * 1000 ** 2)).toBe('262 MB');
-    expect(bytes(3 * 1000 ** 5)).toBe('3000 TB');
+  it('follows the case table shared with Rust (crates/paddock-units/cases.json)', async () => {
+    const table = await cases();
+    const run = (key: string, f: (v: never) => unknown): void => {
+      const list = table[key] as { in: never; out: unknown }[];
+      expect(list.length).toBeGreaterThan(0);
+      for (const c of list) expect(f(c.in), `${key}(${String(c.in)})`).toBe(c.out);
+    };
+    run('storage', (n: number) => bytes(n, 'storage'));
+    run('memory', (n: number) => bytes(n, 'memory'));
+    run('wholeStorage', (n: number) => wholeBytes(n, 'storage'));
+    run('wholeMemory', (n: number) => wholeBytes(n, 'memory'));
+    run('parseStorage', (t: string) => parseSize(t, 'storage'));
+    run('parseMemory', (t: string) => parseSize(t, 'memory'));
+    for (const bad of table['parseBad'] as string[]) expect(parseSize(bad), bad).toBeNull();
+  });
+
+  it('shows missing and negative sizes as a dash and picks the step by kind', () => {
     expect(bytes(null)).toBe('—');
     expect(bytes(undefined)).toBe('—');
     expect(bytes(NaN)).toBe('—');
-    expect(bytes(-5)).toBe('0 B');
+    expect(bytes(-5)).toBe('—');
+    expect(byteStep('storage')).toBe(1000);
+    expect(byteStep('memory')).toBe(1024);
+    expect(bytes(16 * 1024 ** 3, 'memory')).toBe('16 GB');
   });
 
   it('gives GB figures and percentages', () => {
-    expect(gb(17.4 * GB)).toBe('17.4');
-    expect(gb(32 * GB, 0)).toBe('32');
-    expect(gb(null)).toBe('—');
+    expect(gb(17.4 * 1000 ** 3, 'storage')).toBe('17.4');
+    expect(gb(32 * 1024 ** 3, 'memory', 0)).toBe('32');
+    expect(gb(null, 'memory')).toBe('—');
     expect(percent(1, 4)).toBe(25);
     expect(percent(5, 0)).toBe(0);
     expect(percent(9, 4)).toBe(100);

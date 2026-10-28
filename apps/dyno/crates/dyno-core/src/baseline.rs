@@ -9,7 +9,7 @@
 use crate::hardware::Confidence;
 use crate::stats::{median, quantile};
 use crate::time::{Timestamp, DAY, HOUR, MINUTE};
-use crate::units::bytes;
+use crate::units::{bytes, Kind};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -135,9 +135,9 @@ impl BaselineMetric {
     pub fn format(self, v: f64) -> String {
         match self {
             BaselineMetric::Cpu | BaselineMetric::Memory | BaselineMetric::Gpu | BaselineMetric::AppCpu => format!("{v:.0}%"),
-            BaselineMetric::AppMemory => bytes(v.max(0.0) as u64),
+            BaselineMetric::AppMemory => bytes(v.max(0.0) as u64, Kind::Memory),
             BaselineMetric::Temperature => format!("{v:.0} °C"),
-            BaselineMetric::DiskWrite | BaselineMetric::Network => format!("{}/s", bytes(v.max(0.0) as u64)),
+            BaselineMetric::DiskWrite | BaselineMetric::Network => format!("{}/s", bytes(v.max(0.0) as u64, Kind::Storage)),
         }
     }
 }
@@ -629,10 +629,13 @@ mod tests {
         assert_eq!(BaselineMetric::Temperature.format(71.6), "72 °C");
         assert_eq!(
             BaselineMetric::Network.format(3.0 * 1024.0 * 1024.0),
-            format!("{}/s", bytes(3 * 1024 * 1024))
+            format!("{}/s", bytes(3 * 1024 * 1024, Kind::Storage))
         );
         assert_eq!(BaselineMetric::SYSTEM.len(), 6);
-        assert_eq!(BaselineMetric::AppMemory.format(2.0 * 1024.0 * 1024.0 * 1024.0), bytes(2 << 30));
+        assert_eq!(
+            BaselineMetric::AppMemory.format(2.0 * 1024.0 * 1024.0 * 1024.0),
+            bytes(2 << 30, Kind::Memory)
+        );
         assert_eq!(BaselineMetric::AppCpu.label(), "CPU");
         assert!(BaselineMetric::APP.iter().all(|m| m.min_deviation() > 0.0));
         assert_eq!(BaselineMetric::DiskWrite.label(), "Disk writes");

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import type { Reading } from '../../core/api.types';
-import { formatBytes, formatDuration, formatFraction, formatGhz, formatPercent, formatRate, formatCount, splitValue } from '../../shared/format';
+import { formatBytes, formatMemory, formatDuration, formatFraction, formatGhz, formatPercent, formatRate, formatCount, splitValue } from '../../shared/format';
 import { PRESSURE_LABEL, PRESSURE_TONE, readingReason, readingValue } from '../../shared/labels';
 import { Sparkline } from '../../shared/sparkline';
 import { LiveStore } from '../../state/live.store';
@@ -140,7 +140,7 @@ export class CpuTile {
 export class MemoryTile {
   protected readonly live = inject(LiveStore);
   protected readonly mem = computed(() => this.live.system()?.memory ?? null);
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatMemory;
   protected readonly pct = formatPercent;
   protected readonly used = (v: number) => parts(formatBytes(v));
   protected readonly usedPercent = computed(() => {
@@ -152,7 +152,7 @@ export class MemoryTile {
   protected readonly pressureText = computed(() => `Pressure: ${PRESSURE_LABEL[this.live.update()?.pressure ?? 'normal']}`);
   protected readonly commitText = computed(() => {
     const c = combine(this.mem()?.commit);
-    return c.value ? `${formatBytes(c.value.used)} of ${formatBytes(c.value.limit)}` : (c.reason ?? '—');
+    return c.value ? `${formatMemory(c.value.used)} of ${formatMemory(c.value.limit)}` : (c.reason ?? '—');
   });
 }
 
@@ -275,7 +275,7 @@ export class GpuTile {
   protected readonly live = inject(LiveStore);
   protected readonly gpu = computed(() => combine(this.live.system()?.gpu));
   protected readonly pct = (v: number) => parts(formatPercent(v));
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatMemory;
   protected readonly frac = formatFraction;
 }
 

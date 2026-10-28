@@ -4,7 +4,7 @@ import { appProviders, byText, makeMock, text, type as typeInto } from '../../..
 import { DiskGuardEditor, diskGuardProblem, mbToGb } from './disk-guard-editor';
 import { PauseEditor, pauseProblem } from './pause-editor';
 
-const guard = (over: Partial<DiskGuardPolicy> = {}): DiskGuardPolicy => ({ enabled: true, drain_below_mb: 4096, resume_above_mb: 6144, reserve_mb: 1024, ...over });
+const guard = (over: Partial<DiskGuardPolicy> = {}): DiskGuardPolicy => ({ enabled: true, drain_below_mb: 4000, resume_above_mb: 6000, reserve_mb: 1000, ...over });
 const pause = (over: Partial<PausePolicy> = {}): PausePolicy => ({
   mode: 'off',
   windows: [{ days: ['mon'], start: '22:00', end: '06:00' }],
@@ -16,8 +16,8 @@ const pause = (over: Partial<PausePolicy> = {}): PausePolicy => ({
 describe('diskGuardProblem', () => {
   it('requires resume above drain and reserve below drain', () => {
     expect(diskGuardProblem(guard())).toBeNull();
-    expect(diskGuardProblem(guard({ resume_above_mb: 4096 }))).toContain('Resume above');
-    expect(diskGuardProblem(guard({ reserve_mb: 4096 }))).toContain('reserve');
+    expect(diskGuardProblem(guard({ resume_above_mb: 4000 }))).toContain('Resume above');
+    expect(diskGuardProblem(guard({ reserve_mb: 4000 }))).toContain('reserve');
     expect(diskGuardProblem(guard({ drain_below_mb: 0 }))).toContain('more than 0');
     expect(diskGuardProblem(guard({ enabled: false, resume_above_mb: 1 }))).toBeNull();
     expect(mbToGb(1536)).toBe(1.5);
@@ -44,7 +44,7 @@ describe('DiskGuardEditor', () => {
     typeInto(el.querySelector('#guard-resume_above_mb')!, '8', 'change');
     f.detectChanges();
     save(el).click();
-    expect(saved).toEqual([guard({ resume_above_mb: 8192 })]);
+    expect(saved).toEqual([guard({ resume_above_mb: 8000 })]);
   });
 
   it('blocks saving an inconsistent policy and shows why', () => {

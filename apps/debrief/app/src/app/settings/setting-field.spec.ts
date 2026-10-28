@@ -77,11 +77,11 @@ describe('SettingFieldControl', () => {
     typeInto(input, '300');
     expect(d.changed).toEqual([300_000]);
     TestBed.resetTestingModule();
-    const s = await render(field({ type: 'size', minBytes: 1 << 20, maxBytes: 1 << 30 }, 64 << 20), 64 << 20);
+    const s = await render(field({ type: 'size', kind: 'storage', minBytes: 1_000_000, maxBytes: 1_000_000_000 }, 64_000_000), 64_000_000);
     const si = el<HTMLInputElement>(s.fixture, 'input');
     expect(si.value).toBe('64');
     typeInto(si, '128');
-    expect(s.changed).toEqual([128 << 20]);
+    expect(s.changed).toEqual([128_000_000]);
     expect(text(s.fixture)).toContain('MB');
   });
 

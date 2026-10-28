@@ -38,9 +38,9 @@ pub fn encode_result(result: &Result<Document>) -> Vec<u8> {
 pub fn decode_result(bytes: &[u8], limits: &Limits) -> Result<Document> {
     if bytes.len() as u64 > limits.max_encoded_bytes {
         return Err(DumpError::limit(format!(
-            "the document is {} MB; at most {} MB are accepted",
-            bytes.len() >> 20,
-            limits.max_encoded_bytes >> 20
+            "the document is {}; at most {} are accepted",
+            paddock_units::format_bytes(bytes.len() as u64, paddock_units::Kind::Storage),
+            paddock_units::format_whole(limits.max_encoded_bytes, paddock_units::Kind::Storage)
         )));
     }
     let (w, rest): (WResult, &[u8]) =

@@ -405,7 +405,10 @@ fn start_symbols_job<R: tauri::Runtime>(
             &|done, total| ctx.progress(JobProgress::counts(done as u64, total as u64)),
             &|n| {
                 let so_far = received.fetch_add(n, std::sync::atomic::Ordering::Relaxed) + n;
-                ctx.message(&format!("Downloaded {} MB", so_far >> 20));
+                ctx.message(&format!(
+                    "Downloaded {}",
+                    paddock_units::format_bytes(so_far, paddock_units::Kind::Storage)
+                ));
             },
             reimport,
         );

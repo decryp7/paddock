@@ -197,9 +197,9 @@ export class CacheSection {
     return {
       size: formatBytes(c.bytes),
       entries: formatCount(c.entries),
-      limit: c.sizeLimitMb === null ? 'none' : formatBytes(c.sizeLimitMb * 1024 * 1024),
+      limit: c.sizeLimitMb === null ? 'none' : formatBytes(c.sizeLimitMb * 1_000_000),
       free: c.freeBytes === null ? 'unknown' : formatBytes(c.freeBytes),
-      percent: c.sizeLimitMb === null ? null : Math.round(share(c.bytes, c.sizeLimitMb * 1024 * 1024) * 100),
+      percent: c.sizeLimitMb === null ? null : Math.round(share(c.bytes, c.sizeLimitMb * 1_000_000) * 100),
     };
   });
   protected readonly top = computed(() => {

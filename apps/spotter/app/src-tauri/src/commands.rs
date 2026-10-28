@@ -23,7 +23,7 @@ const MAX_TEXT: usize = 2048;
 /// Most secret fields in one request.
 const MAX_SECRETS: usize = 16;
 /// Largest list text accepted for an import (the engine re-checks).
-const MAX_IMPORT_TEXT: usize = 3 << 20;
+const MAX_IMPORT_TEXT: usize = 3_000_000;
 /// Most events one request may ask for.
 const MAX_EVENTS: usize = 500;
 
@@ -524,7 +524,10 @@ pub async fn install_renderer<R: Runtime>(app: AppHandle<R>, state: State<'_, Sh
 pub async fn import_list(state: State<'_, Shared>, format: String, text: String) -> Out<ImportResultDto> {
     text_ok("format", &format)?;
     if text.len() > MAX_IMPORT_TEXT {
-        return Err(CommandError::bad("The list is larger than 2 MiB."));
+        return Err(CommandError::bad(format!(
+            "The list is larger than {}.",
+            paddock_units::format_whole(MAX_IMPORT_TEXT as u64, paddock_units::Kind::Storage)
+        )));
     }
     let imported = state.engine.import_list(&format, &text)?;
     Ok(ImportResultDto {

@@ -33,7 +33,7 @@ export function expiryText(k: CacheKindInfo): string {
 
 /** `12.4 MB of 512 MB`. */
 export function sizeText(k: CacheKindInfo): string {
-  return `${bytes(k.bytes)} of ${bytes(k.maxBytes, 0)}`;
+  return `${bytes(k.bytes)} of ${bytes(k.maxBytes)}`;
 }
 
 /** Age of the oldest entry as a relative date, or `none` when the cache is empty. */

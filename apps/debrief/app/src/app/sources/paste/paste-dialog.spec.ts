@@ -30,7 +30,7 @@ describe('Paste as log dialog', () => {
     await settle(fixture);
     expect(el<HTMLInputElement>(fixture, '[data-testid=paste-name]').value).toBe('Pasted log');
     expect(area(fixture).value).toBe('héllo');
-    expect(el(fixture, '[data-testid=paste-count]').textContent).toContain('6 bytes of 8.4 MB');
+    expect(el(fixture, '[data-testid=paste-count]').textContent).toContain('6 bytes of 8 MB');
     expect(addButton(fixture).disabled).toBe(false);
   });
 
@@ -50,12 +50,12 @@ describe('Paste as log dialog', () => {
     expect(area(fixture).value).toBe('dropped');
   });
 
-  it('refuses text over 8 MiB early', async () => {
+  it('refuses text over 8 MB early', async () => {
     const { backend } = await setup('');
     const add = vi.spyOn(backend, 'pasteLog');
     const fixture = TestBed.createComponent(PasteDialog);
     await settle(fixture);
-    typeInto(area(fixture), 'x'.repeat(8 * 1024 * 1024 + 1));
+    typeInto(area(fixture), 'x'.repeat(8_000_000 + 1));
     await settle(fixture);
     expect(addButton(fixture).disabled).toBe(true);
     expect(text(fixture)).toContain('Save it as a file and open that instead');

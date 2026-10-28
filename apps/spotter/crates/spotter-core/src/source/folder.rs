@@ -60,8 +60,8 @@ pub struct ScanLimits {
     pub settle_secs: u32,
     /// A full re-listing at least every this many checks, even when the folders look unchanged.
     pub relist_every: u32,
-    /// Files up to this many MiB are hashed when they change, to tell a real change from a touch (0: never).
-    pub hash_below_mib: u32,
+    /// Files up to this many MB (decimal) are hashed when they change, to tell a real change from a touch (0: never).
+    pub hash_below_mb: u32,
 }
 
 impl Default for ScanLimits {
@@ -71,7 +71,7 @@ impl Default for ScanLimits {
             timeout_secs: DEFAULT_SCAN_SECS,
             settle_secs: DEFAULT_SETTLE_SECS,
             relist_every: DEFAULT_RELIST_EVERY,
-            hash_below_mib: 0,
+            hash_below_mb: 0,
         }
     }
 }
@@ -193,7 +193,7 @@ impl FolderSource {
                 timeout_secs: ranged(c, "scanSeconds", DEFAULT_SCAN_SECS, 5, 1800, "The scan time limit")?,
                 settle_secs: ranged(c, "settleSeconds", DEFAULT_SETTLE_SECS, 0, 300, "The settle time")?,
                 relist_every: ranged(c, "relistEvery", DEFAULT_RELIST_EVERY, 1, 1000, "The re-listing interval")?,
-                hash_below_mib: ranged(c, "hashBelowMib", 0, 0, 256, "The hash size limit")?,
+                hash_below_mb: ranged(c, "hashBelowMb", 0, 0, 256, "The hash size limit")?,
             },
         })
     }
@@ -457,7 +457,7 @@ mod tests {
             ("scanSeconds", "1", "time limit"),
             ("settleSeconds", "301", "settle time"),
             ("relistEvery", "0", "re-listing"),
-            ("hashBelowMib", "999", "hash size"),
+            ("hashBelowMb", "999", "hash size"),
             ("matchAgainst", "x", "match against"),
             ("extensions", "a/b", "not a file extension"),
         ] {

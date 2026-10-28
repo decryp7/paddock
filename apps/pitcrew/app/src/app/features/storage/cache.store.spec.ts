@@ -35,7 +35,7 @@ describe('CacheStore', () => {
   it('maps the form to limits: GB to MB, days floored, either one is enough', () => {
     expect(store.limits()).toBeNull();
     store.setMaxGb(2.5);
-    expect(store.limits()).toEqual({ maxMb: 2560, maxAgeDays: 0 });
+    expect(store.limits()).toEqual({ maxMb: 2500, maxAgeDays: 0 });
     store.setMaxGb(null);
     store.setMaxAgeDays(14.7);
     expect(store.limits()).toEqual({ maxMb: 0, maxAgeDays: 14 });
@@ -78,7 +78,7 @@ describe('CacheStore', () => {
     await store.runPreview();
     const before = store.report().value!.bytes;
     expect(await store.clean()).toBe(true);
-    expect(clean).toHaveBeenCalledWith('docker-lab', { maxMb: 2048, maxAgeDays: 30 });
+    expect(clean).toHaveBeenCalledWith('docker-lab', { maxMb: 2000, maxAgeDays: 30 });
     expect(store.result()?.failures).toEqual([]);
     expect(store.preview()).toBeNull();
     expect(store.report().value!.bytes).toBeLessThan(before);

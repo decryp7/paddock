@@ -103,7 +103,10 @@ impl Workspace {
             if let Some(limit) = redact_limit.filter(|&l| meta.is_ok_and(|m| m.len() > l)) {
                 skipped.push(SkippedSource {
                     path: s.path.clone(),
-                    reason: format!("larger than {} MiB, too large to redact", limit >> 20),
+                    reason: format!(
+                        "larger than {}, too large to redact",
+                        paddock_units::format_whole(limit, paddock_units::Kind::Storage)
+                    ),
                 });
                 continue;
             }

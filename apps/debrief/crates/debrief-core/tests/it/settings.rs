@@ -73,6 +73,7 @@ fn kinds_section() -> SettingsSection {
             "size",
             "Size",
             FieldKind::Size {
+                kind: ByteKind::Memory,
                 min_bytes: 1024,
                 max_bytes: 1 << 20,
             },
@@ -317,6 +318,7 @@ fn schema_checks_catch_inconsistent_declarations() {
     assert!(bad(with_field(FieldKind::Duration { min_ms: 2, max_ms: 1 }, json!(1))).contains("min_ms"));
     assert!(bad(with_field(
         FieldKind::Size {
+            kind: ByteKind::Storage,
             min_bytes: 2,
             max_bytes: 1
         },

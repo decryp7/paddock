@@ -220,9 +220,9 @@ pub fn run(tools: &Tools, mut run: Run) -> Result<Ran> {
         if stopped.load(Ordering::SeqCst) {
             child.kill();
             return Err(VideoError::OverMemory(format!(
-                "{} used more than its memory cap of {} MB and was stopped: the video may be too large for this PC",
+                "{} used more than its memory cap of {} and was stopped: the video may be too large for this PC",
                 run.label,
-                run.caps.memory_bytes >> 20
+                paddock_units::format_bytes(run.caps.memory_bytes, paddock_units::Kind::Memory)
             )));
         }
         if run.cancel.load(Ordering::SeqCst) {
@@ -245,9 +245,9 @@ pub fn run(tools: &Tools, mut run: Run) -> Result<Ran> {
     // The watcher may see the cap a moment before the kill lands.
     if stopped.load(Ordering::SeqCst) {
         return Err(VideoError::OverMemory(format!(
-            "{} used more than its memory cap of {} MB and was stopped",
+            "{} used more than its memory cap of {} and was stopped",
             run.label,
-            run.caps.memory_bytes >> 20
+            paddock_units::format_bytes(run.caps.memory_bytes, paddock_units::Kind::Memory)
         )));
     }
     let report = read_capped(&run.work.join(REPORT_FILE));

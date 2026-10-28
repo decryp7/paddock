@@ -15,7 +15,7 @@ describe('slotModel', () => {
     expect(m.slots[2]!.hint?.kind).toBe('freeSlots');
     expect(m.slots[0]!.hint?.kind).toBe('mismatchedSpeed');
     expect(m.pairs).toEqual([]);
-    expect(m.totalBytes).toBe(24 * 1000 ** 3);
+    expect(m.totalBytes).toBe(24 * 1024 ** 3);
   });
 
   it('pairs matching sticks across channels when the engine reports multi-channel', () => {

@@ -41,8 +41,8 @@ impl Default for Limits {
             max_umdh_frames: 64,
             max_text: 1024,
             max_notes: 64,
-            max_read_bytes: 1 << 30,
-            max_encoded_bytes: 512 << 20,
+            max_read_bytes: 1_000_000_000,
+            max_encoded_bytes: 512_000_000,
         }
     }
 }

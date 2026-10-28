@@ -7,9 +7,9 @@ use anyhow::{anyhow, Context, Result};
 use std::io::{Cursor, Read};
 
 /// Largest decompressed size of one entry (1 GiB).
-pub const MAX_ENTRY_BYTES: u64 = 1 << 30;
+pub const MAX_ENTRY_BYTES: u64 = 1_000_000_000;
 /// Largest total decompressed size of one archive (4 GiB).
-pub const MAX_ARCHIVE_BYTES: u64 = 4 << 30;
+pub const MAX_ARCHIVE_BYTES: u64 = 4_000_000_000;
 /// Separator between an archive's path and an entry inside it.
 pub const ENTRY_SEPARATOR: &str = "!/";
 
@@ -60,7 +60,10 @@ fn expand_capped(file_name: &str, bytes: Vec<u8>, max_entry: u64, max_archive: u
             let data = read_capped(entry, max_entry).with_context(|| format!("zip entry {name}"))?;
             total += data.len() as u64;
             if total > max_archive {
-                return Err(anyhow!("archive expands to more than {} MiB", max_archive >> 20));
+                return Err(anyhow!(
+                    "archive expands to more than {}",
+                    paddock_units::format_whole(max_archive, paddock_units::Kind::Storage)
+                ));
             }
             out.push(Entry {
                 name: Some(name),
@@ -85,7 +88,10 @@ fn read_capped(reader: impl Read, cap: u64) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     reader.take(cap + 1).read_to_end(&mut data)?;
     if data.len() as u64 > cap {
-        return Err(anyhow!("expands to more than {} MiB", cap >> 20));
+        return Err(anyhow!(
+            "expands to more than {}",
+            paddock_units::format_whole(cap, paddock_units::Kind::Storage)
+        ));
     }
     Ok(data)
 }
@@ -144,10 +150,10 @@ mod tests {
         assert_eq!(read_capped(Cursor::new(vec![0u8; 10]), 10).unwrap().len(), 10);
         assert!(is_gzip(&gzip(b"")) && is_zip(&zip_of(&[])) && !is_zip(b"PK"));
         // Entries each within their limit can still add up past the archive's.
-        let mib = vec![b'x'; 1 << 20];
-        let z = zip_of(&[("a.log", &mib), ("b.log", &mib), ("c.log", &mib)]);
-        assert_eq!(expand_capped("ok.zip", z.clone(), 1 << 20, 3 << 20).unwrap().len(), 3);
-        let e = expand_capped("bomb.zip", z, 1 << 20, 2 << 20).err().unwrap().to_string();
-        assert_eq!(e, "archive expands to more than 2 MiB");
+        let mb = vec![b'x'; 1_000_000];
+        let z = zip_of(&[("a.log", &mb), ("b.log", &mb), ("c.log", &mb)]);
+        assert_eq!(expand_capped("ok.zip", z.clone(), 1_000_000, 3_000_000).unwrap().len(), 3);
+        let e = expand_capped("bomb.zip", z, 1_000_000, 2_000_000).err().unwrap().to_string();
+        assert_eq!(e, "archive expands to more than 2 MB");
     }
 }

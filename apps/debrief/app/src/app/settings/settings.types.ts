@@ -12,6 +12,9 @@ export interface EnumOption {
   label: string;
 }
 
+/** Whether KB / MB / GB of a size are decimal (storage) or binary (memory); the engine's `ByteKind`. */
+export type ByteKind = 'storage' | 'memory';
+
 /** The type of a field and its limits. */
 export type FieldKind =
   | { type: 'bool' }
@@ -21,7 +24,7 @@ export type FieldKind =
   | { type: 'enum'; options: EnumOption[] }
   | { type: 'path'; dir: boolean }
   | { type: 'duration'; minMs: number; maxMs: number }
-  | { type: 'size'; minBytes: number; maxBytes: number }
+  | { type: 'size'; kind: ByteKind; minBytes: number; maxBytes: number }
   | { type: 'stringList'; maxItems: number };
 
 export interface SettingField {

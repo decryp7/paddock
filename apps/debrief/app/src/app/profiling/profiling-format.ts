@@ -1,9 +1,12 @@
 import { CaptureSummary, HeapSummary, Measurement, MetricDto, MetricId, MetricUnit, ProfileSummary } from '../core/api.types';
 import { formatCount } from '../core/format';
 import { localizeDecimal } from '../i18n/locale';
-import { formatBytes, formatExactBytes } from '../shared/format/units';
+import { ByteKind, formatBytes as unitBytes, formatExactBytes } from '../shared/format/units';
 
-export { formatBytes };
+/** Profiling sizes are heap and allocation sizes (memory) unless a call says otherwise (a capture file on disk is storage). */
+export function formatBytes(bytes: number | null | undefined, kind: ByteKind = 'memory'): string {
+  return unitBytes(bytes, kind);
+}
 
 /** Pure presentation helpers of the profiling views (units, labels, measurement tags). */
 

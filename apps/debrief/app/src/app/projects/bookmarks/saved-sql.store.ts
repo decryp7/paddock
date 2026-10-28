@@ -12,7 +12,7 @@ export interface SavedSql {
 }
 
 /** Longest saved SQL text (the engine runs at most 64 KB). */
-const MAX_SQL = 64 * 1024;
+const MAX_SQL = 64_000;
 
 export function parseSavedSql(value: unknown): SavedSql[] {
   if (!Array.isArray(value)) return [];

@@ -13,7 +13,8 @@ use std::time::Duration;
 
 /// Most entries one scan reports (bigger folders are cut; the biggest work entries come first in the scan).
 pub const MAX_ENTRIES: usize = 4096;
-const MB: u64 = 1024 * 1024;
+/// One MB (storage steps: 1000 bytes per KB, as the Finder).
+const MB: u64 = 1_000_000;
 /// Work and cache entries changed this recently are never planned for deletion (a job may have just started).
 pub const RECENT_GRACE: Duration = Duration::from_secs(600);
 
@@ -43,9 +44,9 @@ impl Default for CleanupPolicy {
             automatic: true,
             every_hours: 24,
             work_max_age_hours: 72,
-            cache_cap_mb: 10 * 1024,
-            folder_cap_mb: 50 * 1024,
-            min_free_mb: 10 * 1024,
+            cache_cap_mb: 10_000,
+            folder_cap_mb: 50_000,
+            min_free_mb: 10_000,
             keep_previous: true,
         }
     }
@@ -373,7 +374,7 @@ mod tests {
                 e("cache/b", EntryKind::Cache, 6000, 5, now),
             ],
             folder_bytes: 13_100 * MB,
-            free_bytes: Some(100 * 1024 * MB),
+            free_bytes: Some(100_000 * MB),
             truncated: false,
         }
     }
@@ -482,7 +483,7 @@ mod tests {
         assert_eq!(due(&p, &s, Some(Timestamp(now.0 - HOUR)), now, gap), Some(CleanupTrigger::LowDisk));
         assert_eq!(due(&p, &s, Some(Timestamp(now.0 - 60_000)), now, gap), None, "not again right away");
         s.free_bytes = None;
-        s.folder_bytes = 60 * 1024 * MB;
+        s.folder_bytes = 60_000 * MB;
         assert_eq!(
             due(&p, &s, Some(Timestamp(now.0 - HOUR)), now, gap),
             Some(CleanupTrigger::FolderCap)

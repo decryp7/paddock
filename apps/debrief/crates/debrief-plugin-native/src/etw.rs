@@ -286,8 +286,8 @@ mod windows_impl {
         let truncated = shared.has(FULL);
         if truncated {
             notes.push(format!(
-                "The capture reached the size limit of {} MB and was cut",
-                spec.max_bytes >> 20
+                "The capture reached the size limit of {} and was cut",
+                paddock_units::format_whole(spec.max_bytes, paddock_units::Kind::Storage)
             ));
         }
         if stats.samples == 0 {

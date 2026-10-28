@@ -4,7 +4,7 @@
 use serde::Serialize;
 
 /// Downloads larger than this are refused (a Debrief installer is well under 200 MB).
-pub const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_DOWNLOAD_BYTES: u64 = 512_000_000;
 
 /// Why checking, downloading or installing an update failed.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -12,8 +12,8 @@ use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// One MiB.
-const MB: u64 = 1024 * 1024;
+/// One MB (storage steps: 1000 bytes per KB, as the Finder).
+const MB: u64 = 1_000_000;
 /// The shortest time between two reads of one disk's free space.
 pub const MIN_POLL_GAP_MS: u64 = 60_000;
 /// Most disks remembered.
@@ -37,9 +37,9 @@ impl Default for DiskGuardPolicy {
     fn default() -> Self {
         DiskGuardPolicy {
             enabled: true,
-            drain_below_mb: 4 * 1024,
-            resume_above_mb: 6 * 1024,
-            reserve_mb: 1024,
+            drain_below_mb: 4_000,
+            resume_above_mb: 6_000,
+            reserve_mb: 1_000,
         }
     }
 }
@@ -123,7 +123,7 @@ impl SpaceCache {
 mod tests {
     use super::*;
 
-    const GB: u64 = 1024 * MB;
+    const GB: u64 = 1000 * MB;
 
     #[test]
     fn levels_follow_the_thresholds() {

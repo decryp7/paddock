@@ -1,6 +1,6 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { HistoryPoint, HistoryRange, KeyedSeries, PitwallEvent, ReleaseReason, UsageSeries } from '../../core/api.types';
-import { bytes, clock, compact, date, rate } from '../format';
+import { byteStep, bytes, clock, compact, date, rate } from '../format';
 import { REASON_LABEL } from '../labels';
 import { seriesColor, type ThemeTokens } from '../theme-tokens';
 
@@ -10,7 +10,9 @@ import { seriesColor, type ThemeTokens } from '../theme-tokens';
  * colour; one y-axis per plot (two measures of different scale get two plots).
  */
 
-const GB = 1000 ** 3;
+// The charts here show RAM and GPU memory: binary steps under the GB label.
+const STEP = byteStep('memory');
+const GB = STEP ** 3;
 const FONT = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif";
 
 /** The x-axis tick text for a range. */
@@ -150,7 +152,7 @@ export interface MemoryChartInput {
   zoom?: boolean;
 }
 
-const gbText = (v: number) => `${(v / GB).toFixed(1)} GB`;
+const gbText = (v: number) => bytes(v, 'memory');
 
 /** Height of the event lane under the plot (px), and the room the time axis labels need between them. */
 const LANE = 16;
@@ -357,7 +359,7 @@ export type UsageSplit = 'app' | 'kind';
 export function usageChart(series: UsageSeries, metric: UsageMetric, split: UsageSplit, t: ThemeTokens, nameOf: (appId: string) => string = (k) => k): EChartsCoreOption {
   const at = series.starts;
   const pts = (values: number[]) => values.map((v, i) => [at[i] ?? 0, v] as [number, number]);
-  const unit = metric === 'memory' ? (v: number) => bytes(v) : (v: number) => (metric === 'tokens' ? `${compact(v)} tokens` : `${Math.round(v)} requests`);
+  const unit = metric === 'memory' ? (v: number) => bytes(v, 'memory') : (v: number) => (metric === 'tokens' ? `${compact(v)} tokens` : `${Math.round(v)} requests`);
   type Entry = { name: string; color: string; values: number[] };
   let entries: Entry[];
   if (split === 'kind') {
@@ -390,7 +392,7 @@ export function usageChart(series: UsageSeries, metric: UsageMetric, split: Usag
     legend: { ...legend(t, entries.map((e) => e.name)), top: 'auto', bottom: 0, left: 0, right: 0 },
     grid: { left: 8, right: 12, top: 10, bottom: entries.length > 3 ? 64 : 44 },
     xAxis: { ...timeAxis(t, series.range), boundaryGap: false },
-    yAxis: valueAxis(t, 0, (v) => (metric === 'memory' ? bytes(v, 0) : compact(v)), { min: 0 }),
+    yAxis: valueAxis(t, 0, (v) => (metric === 'memory' ? bytes(v, 'memory') : compact(v)), { min: 0 }),
     series: entries.map((e, i) =>
       bars
         ? {

@@ -4,6 +4,8 @@ import { clamp, wobble } from './noise';
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const GB = 1000 ** 3;
+/** Memory sizes are binary (16 GiB reads "16 GB", like Activity Monitor). */
+const GiB = 1024 ** 3;
 
 /** A few plausible alarms in different states, so the Alarms page has every kind of row to show. */
 export function demoAlarms(now: number): Alarm[] {
@@ -74,7 +76,7 @@ export function demoHistory(alarms: readonly Alarm[]): AlarmChange[] {
 /** Ten minutes of one-second samples ending at `at`, with a CPU burst in the middle (a build) so a capture has a story. */
 export function recorderSamples(at: number, seconds = 600): RecorderSample[] {
   const out: RecorderSample[] = [];
-  const total = 24 * GB;
+  const total = 24 * GiB;
   for (let i = 0; i < seconds; i++) {
     const t = (at / 1000) - (seconds - i);
     const burst = i > seconds * 0.45 && i < seconds * 0.8 ? 1 : 0;
@@ -83,7 +85,7 @@ export function recorderSamples(at: number, seconds = 600): RecorderSample[] {
       at: at - (seconds - i) * 1000,
       cpuTotal: Math.round(cpu * 10) / 10,
       cpuCores: Array.from({ length: 14 }, (_, c) => Math.round(clamp(cpu + 18 * wobble(t, 40 + c, 5), 0, 100))),
-      memoryUsed: Math.round((11.5 + 2.2 * burst + 0.4 * wobble(t, 32, 40)) * GB),
+      memoryUsed: Math.round((11.5 + 2.2 * burst + 0.4 * wobble(t, 32, 40)) * GiB),
       memoryTotal: total,
       diskReadBps: Math.round((6 + 80 * burst) * 1000 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 33, 4)))),
       diskWriteBps: Math.round((3 + 140 * burst) * 1000 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 34, 4)))),
@@ -91,8 +93,8 @@ export function recorderSamples(at: number, seconds = 600): RecorderSample[] {
       netTxBps: Math.round((0.05 + 0.4 * Math.abs(wobble(t, 36, 9))) * 1000 ** 2),
       top: [
         { name: burst ? 'rustc' : 'Google Chrome', cpu: Math.round((burst ? 38 : 6) * 10) / 10, memory: Math.round((burst ? 2.4 : 4.1) * GB) },
-        { name: 'Visual Studio Code', cpu: 3.1, memory: Math.round(2.1 * GB) },
-        { name: 'WindowServer', cpu: 2.4, memory: Math.round(0.3 * GB) },
+        { name: 'Visual Studio Code', cpu: 3.1, memory: Math.round(2.1 * GiB) },
+        { name: 'WindowServer', cpu: 2.4, memory: Math.round(0.3 * GiB) },
       ],
     });
   }

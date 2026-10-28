@@ -385,7 +385,7 @@ mod tests {
         assert_eq!(by(4).need_bytes - by(2).need_bytes, 2 * f.per_slot_bytes);
         assert_eq!(f.choices.iter().map(|c| c.slots).collect::<Vec<_>>(), vec![1, 2, 4, 8]);
         assert_eq!(f.verdict, Verdict::Fits);
-        assert!(f.message.contains("Each slot adds about 1.0 GB"), "{}", f.message);
+        assert!(f.message.contains("Each slot adds about 1 GB"), "{}", f.message);
     }
 
     #[test]

@@ -288,7 +288,7 @@ pub enum LoadPlan {
 
 /// Why a load is refused (becomes the typed `insufficientMemory` error).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{model} needs about {need_gib:.1} GiB of memory but only {have_gib:.1} GiB can be made free. Close other apps, choose a smaller quantisation or a shorter context.", need_gib = *need as f64 / GIB as f64, have_gib = *have as f64 / GIB as f64)]
+#[error("{model} needs about {need} of memory but only {have} can be made free. Close other apps, choose a smaller quantisation or a shorter context.", need = paddock_units::format_bytes(*need, paddock_units::Kind::Memory), have = paddock_units::format_bytes(*have, paddock_units::Kind::Memory))]
 pub struct Refusal {
     /// The model.
     pub model: ModelId,
@@ -622,7 +622,7 @@ mod tests {
         };
         assert_eq!(r.model, m);
         let msg = r.to_string();
-        assert!(msg.contains("needs about 41.5 GiB") && msg.contains("24.0 GiB"), "{msg}");
+        assert!(msg.contains("needs about 42 GB") && msg.contains("24 GB"), "{msg}");
         // Reloading a model that is already in the list ignores its own entry.
         assert_eq!(
             plan_load(&id("a"), need, &[hot("a", 4, 0)], &sys(32, 20), &p),

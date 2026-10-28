@@ -1269,7 +1269,7 @@ impl Supervisor {
                     &format!(
                         "cleanup ({:?}): freed {}, deleted {}, {} could not be deleted",
                         report.trigger,
-                        notify::human_bytes(report.freed_bytes),
+                        paddock_units::format_bytes(report.freed_bytes, paddock_units::Kind::Storage),
                         report.deleted,
                         failed
                     ),

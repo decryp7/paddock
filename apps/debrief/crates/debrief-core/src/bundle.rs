@@ -24,7 +24,7 @@ pub const PROJECT_NAME: &str = "project.debriefproj";
 /// Most files in a bundle.
 pub const MAX_ENTRIES: usize = 10_000;
 /// Largest text file redacted when raw files are bundled with redaction.
-pub const MAX_REDACTED_FILE: u64 = 256 << 20;
+pub const MAX_REDACTED_FILE: u64 = 256_000_000;
 
 /// What the bundle carries of the logs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -250,7 +250,10 @@ struct Limits {
 /// Fails when `n` bytes exceed `max` (`what` names the file, or the whole bundle).
 fn cap(what: &str, n: u64, max: u64) -> Result<()> {
     if n > max {
-        bail!("{what} expands to more than {} MiB", max >> 20);
+        bail!(
+            "{what} expands to more than {}",
+            paddock_units::format_whole(max, paddock_units::Kind::Storage)
+        );
     }
     Ok(())
 }
@@ -359,7 +362,7 @@ pub fn read_capped(r: impl Read, cap: u64) -> Result<Vec<u8>> {
     let mut data = Vec::new();
     r.take(cap + 1).read_to_end(&mut data)?;
     if data.len() as u64 > cap {
-        bail!("more than {} MiB", cap >> 20);
+        bail!("more than {}", paddock_units::format_whole(cap, paddock_units::Kind::Storage));
     }
     Ok(data)
 }

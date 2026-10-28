@@ -47,6 +47,7 @@ import {
   DAY,
   FORGEJO_SERVER,
   GB,
+  MEM_MB,
   HOUR,
   MINUTE,
   PROFILES,
@@ -583,7 +584,7 @@ export class MockBackend implements PitcrewBackend {
     const r = this.find(runner);
     const info = demoCache(this.now(), `${r.dir}${r.dir.includes('\\') ? '\\' : '/'}cache`);
     const trimmed = this.cacheTrimmedBytes.get(runner) ?? 0;
-    return { ...info, bytes: Math.max(0, info.bytes - trimmed), overLimit: info.bytes - trimmed > (info.sizeLimitMb ?? Infinity) * 1000 * 1000 };
+    return { ...info, bytes: Math.max(0, info.bytes - trimmed), overLimit: info.bytes - trimmed > (info.sizeLimitMb ?? Infinity) * 1_000_000 };
   }
 
   async previewCacheClean(runner: string, limits: CacheLimits): Promise<CachePlan> {
@@ -885,7 +886,7 @@ export class MockBackend implements PitcrewBackend {
       readOnly: false,
       machine,
       ownCpuPermille: 3 + (this.ticks % 3),
-      ownMemBytes: Math.round(23.4 * 1000 * 1000),
+      ownMemBytes: Math.round(23.4 * MEM_MB),
     };
   }
 
