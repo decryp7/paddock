@@ -5,7 +5,8 @@
 // (a generous limit that only stops a hung test) is allowed with `// conformance: hang-guard` on the assertion's line
 // or the line above and a limit of at least 10 s. Also flagged: a `thread::sleep` in a Rust test that also starts or joins
 // threads, uses channels, atomics or locks (a sleep waiting for another thread's effect: wait on the event, a channel or the
-// FakeClock instead; the waiver comment alone allows a deliberate sleep), and, in TypeScript specs, `Date.now()` /
+// FakeClock instead; the waiver comment alone allows a deliberate sleep), an `assert!` over `.close()` / `.close_gracefully(..)`
+// (it asserts that a product grace period was long enough for this machine; waive with the hang-guard comment), and, in TypeScript specs, `Date.now()` /
 // `performance.now()` differences asserted with `expect` (unless the spec uses fake timers: `useFakeTimers`, `setSystemTime`,
 // `page.clock`). Warning level: existing code is listed, never blocks a build.
 import { warn } from '../finding.mjs';
@@ -96,6 +97,32 @@ export function wallClockAsserts(source) {
   return out;
 }
 
+/** Calls that wait out a product's grace period and answer whether it was enough: asserting on them asserts on the machine's load. */
+const GRACE_CALL = /\.(?:close|close_gracefully)\s*\(/;
+
+/** `assert!` over a call that waits out a grace period, in `#[test]` fns of a Rust file: [{ line, text, guarded }] (`guarded`: a hang-guard comment on the line or the one above). */
+export function graceAsserts(source) {
+  const masked = mask(source);
+  const raw = source.split('\n');
+  const out = [];
+  for (const t of masked.matchAll(/#\[(?:[\w]+::)*test(?:\([^)]*\))?\]/g)) {
+    const fn = /\bfn\s+\w+[^{;]*\{/.exec(masked.slice(t.index));
+    if (!fn) continue;
+    const open = t.index + fn.index + fn[0].length - 1;
+    const end = closing(masked, open);
+    if (end < 0) continue;
+    const body = masked.slice(open, end);
+    for (const a of body.matchAll(/\b(?:debug_)?assert(?:_eq|_ne)?!\s*\(/g)) {
+      const start = open + a.index + a[0].length - 1;
+      const stop = closing(masked, start);
+      if (stop < 0 || !GRACE_CALL.test(masked.slice(start, stop))) continue;
+      const line = masked.slice(0, start).split('\n').length;
+      out.push({ line, text: (raw[line - 1] ?? '').trim().slice(0, 100), guarded: HANG_GUARD.test(raw[line - 1] ?? '') || HANG_GUARD.test(raw[line - 2] ?? '') });
+    }
+  }
+  return out;
+}
+
 /** Signals in a test body that a sleep is waiting for another thread. */
 const THREADED = /\bthread::(?:spawn|scope)\b|\.spawn\s*\(|\.join\s*\(\)|\bmpsc\b|\bchannel\s*\(|\.recv(?:_timeout)?\s*\(|\bAtomic\w+|\bArc::|\bMutex\b|\bCondvar\b/;
 
@@ -171,6 +198,9 @@ export default {
         for (const a of wallClockAsserts(text)) {
           if (a.guard === null) out.push(warn('C30', 40, f, a.line, `asserts on the wall clock: ${a.text}`, fix));
           else if (a.guard < MIN_GUARD_MS) out.push(warn('C30', 40, f, a.line, `a hang guard of ${a.guard} ms is too tight to be one: ${a.text}`, 'Raise the limit to at least 10 s, or replace it with a FakeClock.'));
+        }
+        for (const a of graceAsserts(text)) {
+          if (!a.guarded) out.push(warn('C30', 40, f, a.line, `asserts that a call outlasted by load finished within its grace: ${a.text}`, 'Wait for the exit on the condition with a generous hang guard (`close_gracefully(Duration::from_secs(120))`, `// conformance: hang-guard`) and assert the mechanism, not the budget (lesson "Chromium tests compared a loaded machine with a product timeout").'));
         }
         for (const s of threadSleeps(text)) {
           if (s.waived === 'no-reason') out.push(warn('C30', 40, f, s.line, `the sleep's waiver gives no reason: ${s.text}`, 'Write `// conformance: hang-guard — <why this sleep is needed>`.'));

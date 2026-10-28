@@ -577,12 +577,16 @@ impl Chromium {
         self.stop.cancel();
         let mut exited = !self.proc().is_running();
         if !exited && !self.conn.is_closed() {
-            let _ = self.conn.call(
+            if let Err(e) = self.conn.call(
                 None,
                 "Browser.close",
                 json!({}),
                 grace.min(Duration::from_secs(2)),
-            );
+            ) {
+                // Not an error to the caller (a closing browser may drop the connection before it answers), but the
+                // reason a close was slow or forced.
+                log::debug!("Browser.close was not answered: {e}");
+            }
             let end = Instant::now() + grace;
             while !exited && Instant::now() < end {
                 std::thread::sleep(Duration::from_millis(25));

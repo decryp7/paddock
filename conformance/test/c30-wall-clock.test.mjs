@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mask, threadSleeps, tsWallClockAsserts, wallClockAsserts } from '../src/checks/C30-wall-clock.mjs';
+import { graceAsserts, mask, threadSleeps, tsWallClockAsserts, wallClockAsserts } from '../src/checks/C30-wall-clock.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const wrap = (body) => `use std::time::*;\n#[test]\nfn it() {\n${body}\n}\n`;
@@ -93,4 +93,19 @@ test('C30 through the runner: a sleep waiver needs a reason', async () => {
   assert.deepEqual(await findingsOf('C30', makeApp({ 'crates/a/tests/a.rs': body('// conformance: hang-guard — the kernel gives no event for a mtime tick') })), []);
   const f = await findingsOf('C30', makeApp({ 'crates/a/tests/a.rs': body('// conformance: hang-guard') }));
   assert.match(f[0].message, /gives no reason/);
+});
+
+test('C30 grace: assert! over close() or close_gracefully() is flagged, a hang guard or a plain call is not', () => {
+  assert.equal(graceAsserts(wrap('    assert!(b.close(), "ends by itself");')).length, 1);
+  assert.equal(graceAsserts(wrap('    assert!(b.close_gracefully(Duration::from_secs(5)));'))[0].guarded, false);
+  assert.equal(graceAsserts(wrap('    // conformance: hang-guard — only stops a browser that never exits\n    assert!(b.close_gracefully(Duration::from_secs(120)));'))[0].guarded, true);
+  assert.deepEqual(graceAsserts(wrap('    b.close();\n    assert!(!dir.exists());')), []);
+  assert.deepEqual(graceAsserts('fn helper(b: &mut B) { assert!(b.close()); }\n'), []);
+  assert.deepEqual(graceAsserts(wrap('    // assert!(b.close());\n    let s = "assert!(b.close())";')), []);
+});
+
+test('C30 grace through the runner: a warning for an unguarded assert over close()', async () => {
+  const f = await findingsOf('C30', makeApp({ 'crates/a/tests/b.rs': wrap('    assert!(b.close());'), 'crates/a/tests/ok.rs': wrap('    b.close();') }));
+  assert.equal(f.length, 1);
+  assert.equal(f[0].file, 'crates/a/tests/b.rs');
 });

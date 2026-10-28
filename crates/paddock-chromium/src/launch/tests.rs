@@ -1,6 +1,6 @@
 use super::*;
 use crate::fake::{FakeBrowser, Mode, UserAction};
-use crate::page::Outcome;
+use crate::page::{MAX_HTML, Outcome};
 use crate::ready::{Readiness, Rule};
 use paddock_jobs::time::FakeClock;
 
@@ -709,4 +709,11 @@ fn going_back_ends_at_once_when_the_window_is_closed_meanwhile() {
             Err(Error::Closed)
         ));
     });
+}
+
+/// `capture` applies [`MAX_HTML`] (`capture_within` takes it as a parameter so tests need not move that much); the cap is
+/// part of the contract with the apps, so a change to it is a deliberate one.
+#[test]
+fn the_page_size_cap_is_sixteen_mebibytes() {
+    assert_eq!(MAX_HTML, 16 << 20);
 }
