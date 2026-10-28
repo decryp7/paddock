@@ -16,7 +16,7 @@ import { DIALOG_EVENTS, loadPart, type DialogDef, type DialogModality } from '@d
 import { DeniedCommands } from './denied';
 import { DIALOG_IO } from './io';
 import { dialogKeyAction, findDefaultAction, hasCloseAction } from './keys';
-import { fitsContent } from './kind';
+import { DIALOG_MIN, fitsContent } from './kind';
 import { contentInjector, errorText, isRecord, mountContent } from './mount';
 import { DIALOG_ROUTE } from './route';
 import { DIALOG_LOOKUP, type DialogContent, type DialogRef } from './types';
@@ -244,8 +244,10 @@ export class DialogShell {
     const fit = () => {
       const needed = this.neededHeight();
       if (needed <= 0 || needed <= last) return;
+      const first = last === 0;
       last = needed;
-      void this.io.fitHeight(needed).catch(() => undefined);
+      const measure = { content: { width: window.innerWidth, height: needed }, minContent: { width: DIALOG_MIN.width, height: DIALOG_MIN.height } };
+      void (first ? this.io.ready(measure) : this.io.fit(measure)).catch(() => undefined);
     };
     const refit = debounced(fit, REFIT_DEBOUNCE_MS, () => this.pending.add());
     const schedule = refit.ask;

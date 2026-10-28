@@ -20,7 +20,7 @@ export {
   type ResolvedSize,
 } from './src/kind';
 export { commandCovered, allowedCommands } from './src/contracts';
-export { DIALOG_IO, BROWSER_DIALOG_RESULT_KEY, browserDialogIo, tauriDialogIo, type DialogIo, type TauriBridge, type Unlisten } from './src/io';
+export { DIALOG_IO, BROWSER_DIALOG_RESULT_KEY, browserDialogIo, tauriDialogIo, type DialogIo, type DialogMeasure, type TauriBridge, type Unlisten } from './src/io';
 export { DIALOG_ROUTE, DIALOG_ROUTE_PATH, parseDialogRoute, dialogHash, type DialogRoute } from './src/route';
 export { dialogKeyAction, findDefaultAction, hasCloseAction, type DialogKeyAction, type DialogKeyEvent } from './src/keys';
 export {
