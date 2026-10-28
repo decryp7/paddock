@@ -50,9 +50,12 @@ Conventional Commits; one semver tag for the whole repo.
 - Tooltips are `matTooltip`, not `title`: the rail's page names, the activity bar and its More menu, the status bar's More button, the part Retry button, the path text's Copy button. `pd-path-text` shows the full value only when the text on screen is shorter than it; the title bar no longer repeats the app name as a native title.
 - The Copy menu (`PdCopyMenuHost`) is a CDK context menu (`cdkContextMenuTrigger` and `cdkMenu`), opened at the pointer by `PdCopyMenu` as before. The `.pd-badge`/`.pd-act-badge` classes and `[data-testid="page-badge"]` are gone: the e2e page object `badges` finds `.mat-badge-content`.
 
+
 ### Shell toasts keep a page-footer safe area
 - New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
   longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
+
+
 
 ### One shared Material theme (WP-0 of the Material migration, rule 47)
 - `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
@@ -100,6 +103,16 @@ Conventional Commits; one semver tag for the whole repo.
   picker cannot read keeps the last good time and shows "Enter a time such as 09:00." once the field is left; any change of the schedule
   from outside the field clears it. Buttons are `matButton`/`matIconButton`, tooltips `matTooltip`.
 - Escape closes an open `pd-select` or time list and stops there, so a dialog around it stays open.
+
+### Shell pages' controls are Angular Material (WP-2 of the Material migration, rule 47)
+- Settings window and fields, AI access (MCP), Notification channels, Set-up, Storage, Knowledge packs, Background service, Report a
+  problem and Language: the hand-made switches are `mat-slide-toggle`, checkboxes `mat-checkbox`, the language radio group
+  `mat-radio-group`, native `<progress>` `mat-progress-bar`, the "Needs restart" and "Advanced" badges static `mat-chip`s, native
+  buttons `matButton` (filled = primary, outlined = secondary, text for quiet actions) and `matIconButton`, and `title` tooltips
+  `matTooltip`. Public APIs and `data-testid`s are unchanged, but a toggle's test id is now on the Material host: tests reach the control
+  with `getByRole('switch' | 'checkbox')` inside it. A button at a limit uses `disabledInteractive` (focusable, `aria-disabled`).
+- `.pd-switch` stays in `_controls.scss` until its last users (the view form and the gallery) have moved.
+
 
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec

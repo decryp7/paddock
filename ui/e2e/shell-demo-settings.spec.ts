@@ -37,7 +37,8 @@ test.describe('settings (plan S10)', () => {
     await expect(app.settings.field('repeat').getByRole('spinbutton', { name: 'Repeat' })).toHaveValue('1');
     await expect(app.settings.field('volume')).toContainText('Needs restart');
 
-    await app.settings.field('notify').getByRole('switch').uncheck();
+    await app.settings.field('notify').getByRole('switch').click();
+    await expect(app.settings.field('notify').getByRole('switch')).not.toBeChecked();
     await expect(app.settings.saved('Show a notification saved.')).toBeVisible();
     await app.settings.field('volume').getByRole('spinbutton').fill('0.8');
     await app.settings.field('volume').getByRole('spinbutton').press('Enter');

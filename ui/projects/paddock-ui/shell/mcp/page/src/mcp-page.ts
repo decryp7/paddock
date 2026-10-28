@@ -1,4 +1,8 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatCheckbox, type MatCheckboxChange } from '@angular/material/checkbox';
+import { MatSlideToggle, type MatSlideToggleChange } from '@angular/material/slide-toggle';
+import { MatTooltip } from '@angular/material/tooltip';
 import { SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill } from '@decryp7/paddock-ui';
 import { MCP_KEY_DIALOG_ID, MCP_REVOKE_DIALOG_ID, McpStore, type KeyInfo, type ToolInfo } from '@decryp7/paddock-ui/shell/mcp';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
@@ -15,7 +19,7 @@ import { MCP_STYLES } from './styles';
 @Component({
   selector: 'pd-mcp-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdMcpAudit, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill],
+  imports: [MatButton, MatCheckbox, MatSlideToggle, MatTooltip, PdMcpAudit, SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill],
   template: `
     <section aria-labelledby="pd-mc-title" data-testid="mcp-page">
       <h2 id="pd-mc-title">{{ t.title }}</h2>
@@ -25,18 +29,19 @@ import { MCP_STYLES } from './styles';
     @if (store.saveError(); as problem) {
       <div class="pd-mc__notice" role="alert" data-testid="mcp-save-error">
         <span>{{ problem }}</span>
-        <button type="button" class="pd-mc__btn" data-testid="mcp-save-error-dismiss" (click)="store.dismissSaveError()">{{ t.dismiss }}</button>
+        <button matButton="outlined" type="button" data-testid="mcp-save-error-dismiss" (click)="store.dismissSaveError()">{{ t.dismiss }}</button>
       </div>
     }
 
     @if (store.isLoaded() && store.settings(); as s) {
-      <label class="pd-mc__master">
-        <input type="checkbox" role="switch" [checked]="s.enabled" [disabled]="store.saving()" (change)="apply($event, store.setEnabled)" data-testid="mcp-enabled" />
-        <span>
-          <strong>{{ s.enabled ? t.on : t.off }}</strong>
-          <span class="pd-mc__muted">{{ t.masterHint }}</span>
-        </span>
-      </label>
+      <div class="pd-mc__master">
+        <mat-slide-toggle [checked]="s.enabled" [disabled]="store.saving()" (change)="apply($event, store.setEnabled)" data-testid="mcp-enabled">
+          <span class="pd-mc__label">
+            <strong>{{ s.enabled ? t.on : t.off }}</strong>
+            <span class="pd-mc__muted">{{ t.masterHint }}</span>
+          </span>
+        </mat-slide-toggle>
+      </div>
 
       <section aria-labelledby="pd-mc-tools" data-testid="mcp-tools">
         <h3 id="pd-mc-tools">{{ t.toolsTitle }}</h3>
@@ -44,23 +49,21 @@ import { MCP_STYLES } from './styles';
         <ul class="pd-mc__tools">
           @for (tool of store.readOnlyTools(); track tool.name) {
             <li>
-              <label class="pd-mc__check">
-                <input type="checkbox" [checked]="!s.disabledTools.includes(tool.name)" [disabled]="store.saving()" (change)="apply($event, store.setToolOn, tool.name)" [attr.data-testid]="'mcp-tool-' + tool.name" />
-                <span>
+              <mat-checkbox class="pd-mc__check" [checked]="!s.disabledTools.includes(tool.name)" [disabled]="store.saving()" (change)="apply($event, store.setToolOn, tool.name)" [attr.data-testid]="'mcp-tool-' + tool.name">
+                <span class="pd-mc__label">
                   <strong>{{ label(tool) }}</strong>
                   <span class="pd-mc__muted">{{ tool.description }}</span>
                 </span>
-              </label>
+              </mat-checkbox>
             </li>
           }
         </ul>
-        <label class="pd-mc__check">
-          <input type="checkbox" [checked]="s.resources" [disabled]="store.saving()" (change)="apply($event, store.setResources)" data-testid="mcp-resources" />
-          <span>
+        <mat-checkbox class="pd-mc__check" [checked]="s.resources" [disabled]="store.saving()" (change)="apply($event, store.setResources)" data-testid="mcp-resources">
+          <span class="pd-mc__label">
             <strong>{{ t.resources }}</strong>
             <span class="pd-mc__muted">{{ t.resourcesHint }}</span>
           </span>
-        </label>
+        </mat-checkbox>
       </section>
 
       @if (store.actionTools().length > 0) {
@@ -70,13 +73,12 @@ import { MCP_STYLES } from './styles';
           <ul class="pd-mc__tools">
             @for (tool of store.actionTools(); track tool.name) {
               <li>
-                <label class="pd-mc__check">
-                  <input type="checkbox" [checked]="s.allowedActions.includes(tool.name)" [disabled]="store.saving()" (change)="apply($event, store.setActionAllowed, tool.name)" [attr.data-testid]="'mcp-action-' + tool.name" />
-                  <span>
+                <mat-checkbox class="pd-mc__check" [checked]="s.allowedActions.includes(tool.name)" [disabled]="store.saving()" (change)="apply($event, store.setActionAllowed, tool.name)" [attr.data-testid]="'mcp-action-' + tool.name">
+                  <span class="pd-mc__label">
                     <strong>{{ allowLabel(tool) }}</strong>
                     <span class="pd-mc__muted">{{ tool.description }}</span>
                   </span>
-                </label>
+                </mat-checkbox>
               </li>
             }
           </ul>
@@ -86,7 +88,7 @@ import { MCP_STYLES } from './styles';
       <section aria-labelledby="pd-mc-clients" data-testid="mcp-clients">
         <div class="pd-mc__head">
           <h3 id="pd-mc-clients">{{ t.clientsTitle }}</h3>
-          <button type="button" class="pd-mc__btn pd-mc__btn--primary" data-testid="mcp-add-client" [attr.aria-disabled]="store.atKeyLimit() || null" [attr.aria-describedby]="store.atKeyLimit() ? 'pd-mc-limit' : null" (click)="addClient()">{{ t.add }}</button>
+          <button matButton="filled" type="button" data-testid="mcp-add-client" [disabled]="store.atKeyLimit()" disabledInteractive [attr.aria-describedby]="store.atKeyLimit() ? 'pd-mc-limit' : null" (click)="addClient()">{{ t.add }}</button>
         </div>
         <p class="pd-mc__muted">{{ t.clientsLede }}</p>
         @if (store.atKeyLimit()) {
@@ -108,12 +110,12 @@ import { MCP_STYLES } from './styles';
             <tbody>
               @for (k of store.keys(); track k.id) {
                 <tr [attr.data-testid]="'mcp-key-row-' + k.id">
-                  <th scope="row"><strong [title]="k.client">{{ k.client }}</strong></th>
+                  <th scope="row"><strong [matTooltip]="k.client">{{ k.client }}</strong></th>
                   <td class="pd-mc__created">{{ created(k) }}</td>
                   <td><pd-status-pill [status]="k.revoked ? 'neutral' : 'success'" [label]="k.revoked ? t.revoked : t.active" /></td>
                   <td>
                     @if (!k.revoked) {
-                      <button type="button" class="pd-mc__btn" data-testid="mcp-revoke" [attr.aria-label]="revokeAria(k.client)" (click)="revoke(k)">{{ t.revoke }}</button>
+                      <button matButton="outlined" type="button" data-testid="mcp-revoke" [attr.aria-label]="revokeAria(k.client)" (click)="revoke(k)">{{ t.revoke }}</button>
                     }
                   </td>
                 </tr>
@@ -184,8 +186,8 @@ export class PdMcpPage {
    * Runs a change that a switch asked for. The browser has already flipped the box; when the engine refuses, the box goes back to
    * what the engine has, so the screen never shows a setting that is not in force.
    */
-  protected async apply(event: Event, change: (...args: never[]) => Promise<boolean>, name?: string): Promise<void> {
-    const box = event.target as HTMLInputElement;
+  protected async apply(event: MatSlideToggleChange | MatCheckboxChange, change: (...args: never[]) => Promise<boolean>, name?: string): Promise<void> {
+    const box = event.source;
     const wanted = box.checked;
     const args = (name === undefined ? [wanted] : [name, wanted]) as never[];
     if (!(await change(...args))) box.checked = !wanted;

@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 import { SuStatusPill } from '@decryp7/paddock-ui';
 import { SetupStore, statusView, type ItemView } from '@decryp7/paddock-ui/shell/setup';
 import { SETUP_STYLES } from './styles';
@@ -13,7 +15,7 @@ import { SETUP_STYLES } from './styles';
 @Component({
   selector: 'pd-setup-checklist',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuStatusPill],
+  imports: [MatButton, MatProgressBar, SuStatusPill],
   template: `
     @if (store.setup(); as s) {
       <p class="pd-setup__muted" data-testid="setup-lede">{{ store.allSettled() ? t.settled : t.lede }}</p>
@@ -22,7 +24,7 @@ import { SETUP_STYLES } from './styles';
           <span class="pd-setup__title">{{ t.failed }}</span>
           <span>{{ f.error.message }}</span>
           @if (f.error.retryable) {
-            <span class="pd-setup__row"><button type="button" class="pd-setup__btn" data-testid="setup-retry" (click)="store.retry()">{{ t.retry }}</button></span>
+            <span class="pd-setup__row"><button matButton="outlined" type="button" data-testid="setup-retry" (click)="store.retry()">{{ t.retry }}</button></span>
           }
         </div>
       }
@@ -50,18 +52,18 @@ import { SETUP_STYLES } from './styles';
                 <p class="pd-setup__title" [attr.data-testid]="'setup-hint-' + item.id">{{ item.hint }}</p>
               }
               @if (working) {
-                <progress [attr.aria-label]="t.working" [attr.data-testid]="'setup-working-' + item.id"></progress>
+                <mat-progress-bar mode="indeterminate" [attr.aria-label]="t.working" [attr.data-testid]="'setup-working-' + item.id" />
                 <span class="pd-setup__muted" data-testid="setup-still-working">{{ t.stillWorking }}</span>
               }
             </div>
             <div class="pd-setup__actions" role="group" [attr.aria-label]="item.title">
               @if (item.status === 'problem') {
-                <button type="button" class="pd-setup__btn" [class.pd-setup__btn--primary]="item.id === lead()" [attr.data-testid]="'setup-repair-' + item.id" [disabled]="working" (click)="store.repair(item.id)">{{ t.repair }}</button>
+                <button [matButton]="item.id === lead() ? 'filled' : 'outlined'" type="button" [attr.data-testid]="'setup-repair-' + item.id" [disabled]="working" (click)="store.repair(item.id)">{{ t.repair }}</button>
               } @else if (item.status === 'todo') {
-                <button type="button" class="pd-setup__btn" [class.pd-setup__btn--primary]="item.id === lead()" [attr.data-testid]="'setup-act-' + item.id" [disabled]="working" (click)="store.act(item.id)">{{ actionLabel(item) }}</button>
+                <button [matButton]="item.id === lead() ? 'filled' : 'outlined'" type="button" [attr.data-testid]="'setup-act-' + item.id" [disabled]="working" (click)="store.act(item.id)">{{ actionLabel(item) }}</button>
               }
               @if (item.status !== 'done') {
-                <button type="button" class="pd-setup__btn pd-setup__btn--quiet" [attr.data-testid]="'setup-skip-' + item.id" [disabled]="working" (click)="store.skip(item.id, !item.skipped)">{{ item.skipped ? t.unskip : t.skip }}</button>
+                <button matButton="text" type="button" [attr.data-testid]="'setup-skip-' + item.id" [disabled]="working" (click)="store.skip(item.id, !item.skipped)">{{ item.skipped ? t.unskip : t.skip }}</button>
               }
             </div>
           </li>
@@ -73,7 +75,7 @@ import { SETUP_STYLES } from './styles';
       <div class="pd-setup__notice pd-setup__notice--danger" role="alert" data-testid="setup-error">
         <span class="pd-setup__title">{{ t.noState }}</span>
         <span>{{ problem }}</span>
-        <span class="pd-setup__row"><button type="button" class="pd-setup__btn" data-testid="setup-load-retry" (click)="store.load()">{{ t.retry }}</button></span>
+        <span class="pd-setup__row"><button matButton="outlined" type="button" data-testid="setup-load-retry" (click)="store.load()">{{ t.retry }}</button></span>
       </div>
     } @else {
       <p class="pd-setup__muted" role="status" data-testid="setup-loading">{{ t.loading }}</p>
