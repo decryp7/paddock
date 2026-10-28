@@ -89,6 +89,17 @@ impl GitHistory {
     }
 }
 
+/// A revision that starts with `-` would be read by git as an option; it is refused instead.
+#[cfg(feature = "git-history")]
+fn check_rev(rev: &str) -> Result<(), GraphError> {
+    if rev.starts_with('-') {
+        return Err(GraphError::History(format!(
+            "{rev:?} is not a revision (it starts with '-'). Pass a branch, tag or commit id."
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(feature = "git-history")]
 impl History for GitHistory {
     fn tracked_files(&self) -> Result<Vec<String>, GraphError> {
@@ -96,15 +107,19 @@ impl History for GitHistory {
     }
 
     fn changed_files(&self, base: &str, head: &str) -> Result<Vec<String>, GraphError> {
+        check_rev(base)?;
+        check_rev(head)?;
         self.lines(&["diff", "--name-only", "--no-renames", base, head])
     }
 
     fn file_at(&self, rev: &str, path: &str) -> Result<Option<String>, GraphError> {
+        check_rev(rev)?;
         let out = self.git(&["show", &format!("{rev}:{path}")])?;
         Ok(out.success().then(|| out.stdout_text()))
     }
 
     fn log(&self, range: &str, limit: usize) -> Result<Vec<Commit>, GraphError> {
+        check_rev(range)?;
         let n = format!("-n{limit}");
         let out = self.git(&["log", &n, &format!("--format=%H{FIELD}%s"), range])?;
         if !out.success() {
@@ -120,6 +135,22 @@ impl History for GitHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "git-history")]
+    #[test]
+    fn a_revision_that_looks_like_an_option_is_refused_before_git_runs() {
+        let h = GitHistory::new(".", std::time::Duration::from_secs(5))
+            .with_program("paddock-no-such-git");
+        for result in [
+            h.changed_files("--output=x", "HEAD").err(),
+            h.changed_files("HEAD", "-x").err(),
+            h.file_at("--help", "a").err(),
+            h.log("--all", 1).err(),
+        ] {
+            let msg = result.unwrap().to_string();
+            assert!(msg.contains("starts with '-'"), "{msg}");
+        }
+    }
 
     #[test]
     fn log_lines_split_on_the_separator() {

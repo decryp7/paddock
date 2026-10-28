@@ -111,7 +111,7 @@ fn hold_announces_and_ends_when_the_owner_folder_goes() {
         let (locks, owner) = (locks.clone(), owner.clone());
         let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
         let mut writer = ChannelWriter(tx);
-        let t = std::thread::spawn(move || hold(&locks, 1, &owner, POLL, &mut writer));
+        let t = std::thread::spawn(move || hold(&locks, 1, &owner, POLL, None, &mut writer));
         (t, rx)
     };
     // Wait on the announcement, not on time.
@@ -127,7 +127,11 @@ fn hold_announces_and_ends_when_the_owner_folder_goes() {
     assert!(acquire_first(&locks, 1).unwrap().is_none());
     // A second holder with every slot busy reports `none`.
     let mut out = Vec::new();
-    assert!(hold(&locks, 1, &owner, POLL, &mut out).unwrap().is_none());
+    assert!(
+        hold(&locks, 1, &owner, POLL, None, &mut out)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(out, b"none\n");
     std::fs::remove_dir(&owner).unwrap();
     let end = holder.0.join().unwrap().unwrap();
@@ -158,7 +162,7 @@ fn release_asks_the_holder_and_waits_for_it() {
     let (tx, rx) = std::sync::mpsc::channel();
     let t = {
         let (locks, owner) = (locks.clone(), owner.clone());
-        std::thread::spawn(move || hold(&locks, 1, &owner, POLL, &mut ChannelWriter(tx)))
+        std::thread::spawn(move || hold(&locks, 1, &owner, POLL, None, &mut ChannelWriter(tx)))
     };
     rx.recv_timeout(LONG).unwrap();
     let token = locks.read_owner(id(1)).unwrap().token;
@@ -198,7 +202,7 @@ type HolderThread = std::thread::JoinHandle<Result<Option<(SlotId, HoldEnd)>, Sl
 fn start_holder(locks: &FsLocks, owner: &std::path::Path) -> (HolderThread, SlotId, String) {
     let (tx, rx) = std::sync::mpsc::channel();
     let (locks, owner) = (locks.clone(), owner.to_path_buf());
-    let t = std::thread::spawn(move || hold(&locks, 1, &owner, POLL, &mut ChannelWriter(tx)));
+    let t = std::thread::spawn(move || hold(&locks, 1, &owner, POLL, None, &mut ChannelWriter(tx)));
     let said = String::from_utf8(rx.recv_timeout(LONG).unwrap()).unwrap();
     let Ok(Announcement::Slot(slot, token)) = Announcement::parse(&said) else {
         panic!("{said:?}")
@@ -294,6 +298,8 @@ fn killed_holder_child() {
         1,
         &PathBuf::from(owner),
         Duration::from_millis(50),
+        // A child left behind by a failed test ends by itself (tests leave no process on the machine).
+        Some(Duration::from_secs(60)),
         &mut std::io::stdout(),
     );
 }
@@ -395,7 +401,7 @@ fn a_holder_that_cannot_record_itself_reports_it_and_frees_the_slot() {
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots/s1.owner")).unwrap();
     let mut said = Vec::new();
-    let err = hold(&locks, 1, dir.path(), POLL, &mut said).unwrap_err();
+    let err = hold(&locks, 1, dir.path(), POLL, None, &mut said).unwrap_err();
     assert!(matches!(err, SlotError::Io { .. }));
     assert!(said.is_empty(), "nothing was announced");
     assert!(
@@ -430,7 +436,7 @@ fn a_lock_file_that_cannot_be_opened_is_a_typed_error() {
     assert!(wait_free(&locks, id(1), Duration::ZERO, POLL).is_err());
     assert!(release(&locks, id(1), "t", Duration::ZERO, POLL).is_err());
     let mut said = Vec::new();
-    assert!(hold(&locks, 1, dir.path(), POLL, &mut said).is_err());
+    assert!(hold(&locks, 1, dir.path(), POLL, None, &mut said).is_err());
     assert!(said.is_empty());
 }
 
@@ -497,4 +503,28 @@ fn a_lock_that_becomes_unusable_while_waiting_for_a_release_is_a_typed_error() {
         release(&locks, id(1), "mine", LONG, POLL),
         Err(SlotError::Io { .. })
     ));
+}
+
+#[test]
+fn a_holder_with_a_lifetime_cap_lets_go_when_it_is_reached() {
+    let _gate = crate::share_gate();
+    let dir = tempfile::tempdir().unwrap();
+    let owner = dir.path().join("job");
+    std::fs::create_dir(&owner).unwrap();
+    let locks = FsLocks::new(dir.path().join("ci"));
+    let mut said = Vec::new();
+    let end = hold(
+        &locks,
+        1,
+        &owner,
+        POLL,
+        Some(Duration::from_millis(30)),
+        &mut said,
+    )
+    .unwrap();
+    assert_eq!(end, Some((id(1), HoldEnd::Expired)));
+    assert!(
+        acquire_first(&locks, 1).unwrap().is_some(),
+        "the slot is free again"
+    );
 }

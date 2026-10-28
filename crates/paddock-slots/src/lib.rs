@@ -14,6 +14,15 @@
 //!   announces it, and keeps it until its owner folder disappears or a release is requested ([`request_release`]).
 //!
 //! Reading a slot's state tries its lock, so a status call can make a concurrent acquirer skip that slot for a moment.
+//!
+//! # Processes that start children
+//!
+//! A lock belongs to an open file description. A program that holds a slot ([`FsGuard`]) or has a status probe running and
+//! starts a child process by fork-then-exec (what `std::process::Command` does) hands the child a copy of the open lock file
+//! for the moment between the fork and the exec, because another thread's file is not yet closed-on-exec at that point.
+//! If the child is slow to exec, the slot looks held after its guard was dropped. Library consumers that spawn children on
+//! one thread while another thread takes slots should serialise the two (a read-write lock around slot work and spawning;
+//! this crate's own tests do exactly that), or spawn from a process that holds no slots, as the holder protocol does.
 
 mod error;
 mod fs;
