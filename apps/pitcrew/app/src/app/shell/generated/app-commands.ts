@@ -28,6 +28,7 @@ export const APP_COMMANDS = {
   notification_channels_get: { kind: 'query', windows: ['main', 'dialog'], limit: 262144 },
   notification_channels_save: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   open_in_debrief: { kind: 'mutation', windows: ['main'], limit: 262144 },
+  open_page: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   open_url: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   pin_version: { kind: 'mutation', windows: ['main'], limit: 262144 },
   pitcrew_open_login_items: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },

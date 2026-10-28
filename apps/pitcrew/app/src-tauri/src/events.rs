@@ -59,6 +59,21 @@ pub fn page_route(action: &str, runner: &str) -> Option<String> {
     }
 }
 
+/// The main-window page a window may ask to be opened (`open_page`): a known screen and nothing else, so an argument from a
+/// webview can never name a path of its own. The UI's `core/deep-link.ts` has the same list for what the shell sends in.
+pub fn open_page_route(raw: &str) -> Option<&'static str> {
+    match raw {
+        "/" => Some("/"),
+        "/runners" => Some("/runners"),
+        "/activity" => Some("/activity"),
+        "/insights" => Some("/insights"),
+        "/storage" => Some("/storage"),
+        "/logs" => Some("/logs"),
+        "/updates" => Some("/updates"),
+        _ => None,
+    }
+}
+
 /// The last page the shell asked the window to open, until a window takes it (one created by that same action only
 /// starts listening after it was asked).
 #[derive(Default)]
@@ -248,6 +263,15 @@ mod tests {
 #[cfg(test)]
 mod nav_tests {
     use super::*;
+
+    #[test]
+    fn a_window_can_ask_for_a_known_screen_and_nothing_else() {
+        assert_eq!(open_page_route("/updates"), Some("/updates"));
+        assert_eq!(open_page_route("/"), Some("/"));
+        for bad in ["", "updates", "//evil.example", "https://evil.example", "/settings", "/runners/../x", "/updates?x=1", "/logs/a b"] {
+            assert_eq!(open_page_route(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn tray_pages_have_routes_and_a_pending_route_is_taken_once() {

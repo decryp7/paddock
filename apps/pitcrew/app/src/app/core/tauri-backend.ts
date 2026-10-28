@@ -128,6 +128,9 @@ export class TauriBackend implements PitcrewBackend {
     };
   }
 
+  openPage(route: string): Promise<void> {
+    return this.run('open_page', { route });
+  }
   takePendingNavigation(): Promise<string | null> {
     return this.run('take_pending_navigation');
   }

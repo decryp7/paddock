@@ -279,6 +279,25 @@ test.describe('native feel (ADR 0008)', () => {
     expect(await page.locator('main.pd-body').evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
   });
 
+  test('every Settings page renders its content in the real Settings window (a window without the main window\'s router)', async ({ page, app }) => {
+    const pages: [string, string][] = [
+      ['pc.general', 'Start-up'],
+      ['pc.service', 'Pitcrew service'],
+      ['pc.defaults', 'Leftover processes'],
+      ['pc.channels', 'Notification channels'],
+      ['pc.tokens', 'Gitea read tokens'],
+      ['pc.diagnostics', 'Diagnostics'],
+    ];
+    await page.setViewportSize({ width: 920, height: 1500 });
+    for (const [id, heading] of pages) {
+      // A new document each time: a window opens its page once.
+      await page.goto('about:blank');
+      await app.dialogs.openWindow('pd.settings', { page: id });
+      await app.dialogs.loaded();
+      await expect(page.getByRole('heading', { name: heading, exact: true }), id).toBeVisible();
+    }
+  });
+
   test('edits the runner configuration, reviews the diff and saves', async ({ page }) => {
     await page.goto(`${APP}/runners/build-win?tab=config`);
     await expect(page.getByRole('heading', { name: 'Runner configuration' })).toBeVisible();

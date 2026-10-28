@@ -52,6 +52,7 @@ paddock_commands::command_table! {
     pub static COMMANDS, macro handler;
     Query [MAIN | DIALOG] => commands::platform_name,
     Query [MAIN] => commands::take_pending_navigation,
+    Mutation [MAIN | DIALOG] => commands::open_page,
     Query [MAIN | DIALOG] => commands::runner_status,
     Query [MAIN | DIALOG] => commands::connection_state,
     Mutation [MAIN] => commands::runner_action,

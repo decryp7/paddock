@@ -20,7 +20,7 @@ use pitcrew_core::time::Timestamp;
 use pitcrew_core::version::RunnerVersion;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -186,6 +186,18 @@ pub async fn runner_status(client: State<'_, SharedClient>) -> Result<StatusRepl
 #[tauri::command]
 pub async fn take_pending_navigation(pending: State<'_, crate::events::PendingNav>) -> Result<Option<String>, CommandError> {
     Ok(pending.take())
+}
+
+/// `open_page`: shows the main window at a screen. A dialog window (Settings) has no pages of its own, so it asks for one here; the
+/// route is checked against the known screens, and the main window opens it as it does the tray's (it may not listen yet, so the
+/// route is kept until it asks).
+#[tauri::command]
+pub async fn open_page<R: Runtime>(app: AppHandle<R>, pending: State<'_, crate::events::PendingNav>, route: String) -> Result<(), CommandError> {
+    let route = crate::events::open_page_route(&route).ok_or_else(|| CommandError::bad("That is not a screen Pitcrew can open."))?;
+    pending.set(route.to_string());
+    let _ = app.emit(crate::events::NAVIGATE, route);
+    let _ = paddock_window::tauri::reveal(&app, "main");
+    Ok(())
 }
 
 /// `connection_state`.

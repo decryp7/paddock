@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
-import { appProviders, makeMock, settle, text } from '../../../testing/test-helpers';
+import { NoticeLog, appProviders, makeMock, settle, text } from '../../../testing/test-helpers';
 import { InsightsPage } from './insights-page';
 
 describe('InsightsPage', () => {
@@ -114,9 +114,12 @@ describe('InsightsPage', () => {
       const real = m.insights.bind(m);
       m.insights = async (d) => ({ ...(await real(d)), hasApiToken: false });
     });
-    const link = el.querySelector('.callout a');
-    expect(text(link)).toContain('API tokens');
+    const button = el.querySelector<HTMLButtonElement>('.callout button');
+    expect(text(button)).toContain('Gitea tokens');
     expect(text(el)).toContain('need a Gitea read token');
+    // Settings is a window of the shell, not a route: the button opens it at the tokens page.
+    button!.click();
+    expect(TestBed.inject(NoticeLog).dialogs).toEqual([{ id: 'pd.settings', inputs: { page: 'pc.tokens' } }]);
   });
 
   it('mentions jobs without an outcome yet', async () => {

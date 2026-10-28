@@ -53,6 +53,8 @@ export interface PitcrewBackend {
 
   /** Subscribes to requests from the shell to show a page (tray actions, `pitcrew://navigate`); returns the unsubscribe. */
   navigations(listener: (route: string) => void): () => void;
+  /** Asks the main window to show a screen (`/updates`): a window with no pages of its own, like Settings, has no router. */
+  openPage(route: string): Promise<void>;
   /** The page the shell asked for before this window listened, once (`null` when there is none). */
   takePendingNavigation(): Promise<string | null>;
 

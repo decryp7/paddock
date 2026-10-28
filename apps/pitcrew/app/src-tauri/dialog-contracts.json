@@ -75,6 +75,7 @@
         "install_service",
         "notification_channels_get",
         "notification_channels_save",
+        "open_page",
         "open_url",
         "pitcrew_open_login_items",
         "platform_name",

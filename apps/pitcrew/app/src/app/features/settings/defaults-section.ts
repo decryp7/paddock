@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal } from '@angular/core';
+import { BACKEND } from '../../core/backend';
 import { SavedNote } from '../../shared/ui/saved-note';
 import { MatIcon } from '@angular/material/icon';
-import { RouterLink } from '@angular/router';
 import type { CleanupPolicy, Config, DiskGuardPolicy, PausePolicy, ProcessPolicy } from '../../core/api.types';
 import { CleanupPolicyEditor } from '../../shared/policy/cleanup-policy-editor';
 import { DiskGuardEditor } from '../../shared/policy/disk-guard-editor';
@@ -71,7 +71,7 @@ export const GROUPS: DefaultsGroup[] = [
 /** The defaults every runner uses unless it overrides them: watchdog, restarts, update timeouts, logs, cleanup. */
 @Component({
   selector: 'pc-defaults-section',
-  imports: [MatIcon, RouterLink, LoadState, SavedNote, CleanupPolicyEditor, ProcessPolicyEditor, DiskGuardEditor, PauseEditor],
+  imports: [MatIcon, LoadState, SavedNote, CleanupPolicyEditor, ProcessPolicyEditor, DiskGuardEditor, PauseEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pc-load-state what="The settings" [hasValue]="!!settings.config()" [error]="settings.settings().error" [skeleton]="[80, 160, 160]" (retry)="settings.load()">
@@ -163,7 +163,7 @@ export const GROUPS: DefaultsGroup[] = [
             <pc-pause-editor id="defaults-pause" [policy]="d.pause" [readOnly]="settings.readOnly()" [saving]="settings.saving()" (save)="savePause($event)" />
           </div>
         </section>
-        <p class="faint small">The update schedule is on the <a routerLink="/updates">Updates</a> page.</p>
+        <p class="faint small">The update schedule is on the Updates page. <button type="button" class="btn sm ghost" (click)="openUpdates()">Open Updates</button></p>
       }
     </pc-load-state>
   `,
@@ -201,6 +201,12 @@ export const GROUPS: DefaultsGroup[] = [
 })
 export class DefaultsSection {
   protected readonly settings = inject(SettingsStore);
+  private readonly backend = inject(BACKEND);
+
+  /** Settings is a window of its own with no router: the main window is asked to show the page. */
+  protected openUpdates(): void {
+    void this.backend.openPage('/updates').catch(() => undefined);
+  }
   protected readonly groups = GROUPS;
   protected readonly draft = linkedSignal(() => {
     const c = this.settings.config();

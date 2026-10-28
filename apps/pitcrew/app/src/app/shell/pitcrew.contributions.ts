@@ -107,6 +107,7 @@ export const SETTINGS_COMMANDS = [
   'clear_api_token',
   'export_diagnostics',
   'open_url',
+  'open_page',
 ] as const;
 
 // TODO(ADR 0026 §7): settings, About and Updates become the shared dialogs; the pages above stay Pitcrew's sections.

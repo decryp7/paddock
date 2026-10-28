@@ -190,6 +190,11 @@ export class MockBackend implements PitcrewBackend {
     return p;
   }
 
+  /** How the browser build answers a window asking the main window for a screen: the navigation listeners hear it. */
+  async openPage(route: string): Promise<void> {
+    this.requestNavigation(route);
+  }
+
   /** Simulates the tray opening the window for a page before it listens (tests). */
   setPendingNavigation(route: string): void {
     this.pendingNavigation = route;
