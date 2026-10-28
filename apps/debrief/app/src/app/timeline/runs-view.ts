@@ -129,7 +129,7 @@ interface Column {
     .scroll { position: relative; flex: 1; overflow: auto; padding: 0 14px 14px; }
     .grid { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
     .grid th, .grid td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-    .grid thead th { position: sticky; top: 0; background: var(--bg-1); color: var(--muted); font-weight: 500; }
+    .grid thead th { position: sticky; top: 0; z-index: 3; background: var(--bg-1); color: var(--muted); font-weight: 500; }
     .sort { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; padding: 2px 0; min-height: 24px; }
     .sort:focus-visible, .link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
     .arrow { display: inline-block; width: 1em; }

@@ -26,7 +26,7 @@ export function reasonText(r: CaptureReason): string {
   styles: `
     :host { display: block; min-width: 0; }
     .head, .row { display: grid; grid-template-columns: 112px minmax(0, 1fr) 64px; gap: var(--sp-3); align-items: center; padding: 0 var(--sp-3); }
-    .head { height: 30px; border-bottom: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; background: var(--surface-1); z-index: 1; }
+    .head { height: 30px; border-bottom: 1px solid var(--border); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; background: var(--surface-1); z-index: 3; }
     .r, .size { text-align: right; }
     .row { width: 100%; height: 40px; border: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; color: var(--text-1); font: inherit; font-size: var(--fs-base); text-align: left; cursor: default; position: relative; }
     .row:hover { background: var(--surface-hover); }

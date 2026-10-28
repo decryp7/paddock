@@ -10,7 +10,6 @@ use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, IssuesQuer
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
 use dyno_core::time::{Timestamp, HOUR, MINUTE};
-use dyno_core::unusual::baseline::UnusualAction;
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
 use std::sync::{Arc, Mutex};
@@ -323,8 +322,8 @@ fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
     panic!("timed out waiting for {what}");
 }
 
-fn unusual(peer: &Peer<Message>, include_ignored: bool) -> dyno_core::unusual::UnusualOverview {
-    let Reply::Unusual(o) = ask(peer, Request::Unusual { include_ignored }).unwrap() else {
+fn unusual(peer: &Peer<Message>) -> dyno_core::unusual::UnusualOverview {
+    let Reply::Unusual(o) = ask(peer, Request::Unusual).unwrap() else {
         panic!("unusual")
     };
     *o
@@ -373,7 +372,7 @@ fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_igno
     wait_until("the first process table", || shared_has_process(&h, "calm"));
     let shared = h.shared();
     shared.unusual.look(&shared);
-    let o = unusual(&peer, false);
+    let o = unusual(&peer);
     assert!(o.items.is_empty(), "the first look is silent");
     assert_eq!(o.known, 1);
     // A program that starts later, from a temporary folder, is listed and explained, and writes one activity line.
@@ -382,7 +381,7 @@ fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_igno
     h.fake.add_process(odd);
     wait_until("the new process", || shared_has_process(&h, "helper"));
     shared.unusual.look(&shared);
-    let o = unusual(&peer, false);
+    let o = unusual(&peer);
     assert_eq!(o.items.len(), 1);
     let item = &o.items[0];
     assert_eq!(item.name, "helper");
@@ -399,51 +398,6 @@ fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_igno
         panic!("activity")
     };
     assert_eq!(log.iter().filter(|e| e.title == "Unusual program: helper").count(), 1, "said once");
-    // Protect: the rules' protected list gets it and it leaves the list; nothing is acted on.
-    let Reply::Unusual(after) = ask(
-        &peer,
-        Request::UnusualAct {
-            key: item.key.clone(),
-            action: UnusualAction::Protect,
-        },
-    )
-    .unwrap() else {
-        panic!("unusual")
-    };
-    assert!(after.items.is_empty());
-    let Reply::Rules(rules) = ask(&peer, Request::Rules).unwrap() else {
-        panic!("rules")
-    };
-    assert!(rules.protected.iter().any(|p| *p == temp_exe("helper")), "{:?}", rules.protected);
-    assert!(h.fake.actions().is_empty());
-    // Restore brings it back, Ignore hides it, and the ignored one shows when asked.
-    ask(
-        &peer,
-        Request::UnusualAct {
-            key: item.key.clone(),
-            action: UnusualAction::Restore,
-        },
-    )
-    .unwrap();
-    assert_eq!(unusual(&peer, false).items.len(), 1);
-    ask(
-        &peer,
-        Request::UnusualAct {
-            key: item.key.clone(),
-            action: UnusualAction::Ignore,
-        },
-    )
-    .unwrap();
-    assert!(unusual(&peer, false).items.is_empty());
-    assert_eq!(unusual(&peer, true).items.len(), 1);
-    assert!(ask(
-        &peer,
-        Request::UnusualAct {
-            key: "nothing".into(),
-            action: UnusualAction::Ignore
-        }
-    )
-    .is_err());
     // The baseline survives; forgetting it starts learning again.
     let Reply::Unusual(f) = ask(&peer, Request::ForgetBaseline).unwrap() else {
         panic!("unusual")
@@ -466,7 +420,7 @@ fn a_fresh_install_learns_silently_for_the_configured_period() {
     h.fake.add_process(odd);
     wait_until("the new process", || shared_has_process(&h, "tmp-thing"));
     shared.unusual.look(&shared);
-    let o = unusual(&peer, false);
+    let o = unusual(&peer);
     assert!(o.learning.active, "seven days by default");
     assert!(o.items.is_empty(), "nothing is flagged while learning");
     assert_eq!(o.known, 2);
@@ -481,8 +435,8 @@ fn a_fresh_install_learns_silently_for_the_configured_period() {
     h.fake.add_process(more);
     wait_until("the other process", || shared_has_process(&h, "another"));
     shared.unusual.look(&shared);
-    assert_eq!(unusual(&peer, false).known, 2);
-    assert!(!unusual(&peer, false).enabled);
+    assert_eq!(unusual(&peer).known, 2);
+    assert!(!unusual(&peer).enabled);
 }
 
 #[test]
@@ -505,11 +459,11 @@ fn the_baseline_survives_an_agent_restart() {
         std::thread::sleep(Duration::from_millis(50));
     }
     r.shared.unusual.look(&r.shared);
-    let known = r.shared.unusual.overview(&r.shared, false).known;
+    let known = r.shared.unusual.overview(&r.shared).known;
     assert_eq!(known, 1);
     r.stop();
     let r = start();
-    let o = r.shared.unusual.overview(&r.shared, false);
+    let o = r.shared.unusual.overview(&r.shared);
     assert_eq!(o.known, 1);
     assert!(o.learning.until.is_some());
     r.stop();

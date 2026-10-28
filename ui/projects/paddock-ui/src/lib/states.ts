@@ -27,7 +27,7 @@ import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
     :host { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-8) var(--pd-space-4); text-align: center; }
     .pd-icon { display: inline-flex; color: var(--pd-text-muted); }
     .pd-title { margin: 0; font-size: var(--pd-text-subtitle); line-height: var(--pd-lh-subtitle); font-weight: var(--pd-weight-semibold); }
-    .pd-description { margin: 0; max-width: 48ch; color: var(--pd-text-muted); font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
+    .pd-description { margin: 0; max-width: 48ch; color: var(--pd-text-muted); font-size: var(--pd-text-body); line-height: var(--pd-lh-body); text-wrap: pretty; }
     .pd-action { margin-top: var(--pd-space-2); }
     .pd-action:empty { display: none; }
   `,

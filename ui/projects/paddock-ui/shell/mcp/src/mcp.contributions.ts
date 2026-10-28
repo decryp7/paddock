@@ -1,5 +1,6 @@
 import { defineDialog, defineSettingsPage, msg, type, type ContributionBatch, type DialogDef, type ProvidersLoader, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import type { McpCommand } from '../generated/mcp-commands';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
 // The AI access part's contributions: static data and loaders only (lazy by construction, plan §9). The page's component, the
 // dialogs' components and the providers each need are chunks of their own, loaded when their window opens.
@@ -21,7 +22,7 @@ export const MCP_REVOKE_DIALOG_ID = 'pd.mcp.revoke';
 export const MCP_SETTINGS_COMMANDS = ['mcp_get', 'mcp_save', 'mcp_revoke_key', 'mcp_audit', 'mcp_audit_clear'] as const satisfies readonly McpCommand[];
 
 /** What the key dialog's window may call (its contract; Rust's guard allows exactly this). */
-export const MCP_KEY_DIALOG_COMMANDS = ['mcp_issue_key'] as const satisfies readonly McpCommand[];
+export const MCP_KEY_DIALOG_COMMANDS = DIALOG_CONTRACTS[MCP_KEY_DIALOG_ID].commands satisfies readonly McpCommand[];
 
 export interface McpSettingsPageOptions {
   /** The providers the page boots with: `provideShellMcp` with the app's backend, from a module of its own so they stay lazy. */
@@ -55,15 +56,9 @@ export interface McpKeyDialogOptions {
  * with `DialogService.open(MCP_KEY_DIALOG_ID)` from the page.
  */
 export function defineMcpKeyDialog(options: McpKeyDialogOptions): DialogDef<typeof MCP_KEY_DIALOG_ID, boolean, McpCommand> {
-  return defineDialog({
-    id: MCP_KEY_DIALOG_ID,
-    kind: 'form',
-    modality: 'modal',
-    requiredChoice: false,
+  return defineDialog(DIALOG_CONTRACTS[MCP_KEY_DIALOG_ID], {
     title: msg('pd.mcp.key.title', 'Add a client'),
-    width: 480,
     result: type<boolean>(),
-    commands: MCP_KEY_DIALOG_COMMANDS,
     providers: options.providers,
     load: options.load,
   });
@@ -79,14 +74,9 @@ export interface McpRevokeDialogOptions {
  * per key. It calls nothing; it resolves `true` when the user chose Revoke, `false` or nothing when they kept the key.
  */
 export function defineMcpRevokeDialog(options: McpRevokeDialogOptions): DialogDef<typeof MCP_REVOKE_DIALOG_ID, boolean, McpCommand> {
-  return defineDialog({
-    id: MCP_REVOKE_DIALOG_ID,
-    kind: 'decision',
+  return defineDialog(DIALOG_CONTRACTS[MCP_REVOKE_DIALOG_ID], {
     title: msg('pd.mcp.revoke.title', 'Revoke key'),
-    width: 420,
-    instanced: true,
     result: type<boolean>(),
-    commands: [],
     load: options.load,
   });
 }

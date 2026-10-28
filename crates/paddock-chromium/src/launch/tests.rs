@@ -1,6 +1,6 @@
 use super::*;
 use crate::fake::{FakeBrowser, Mode, UserAction};
-use crate::page::{MAX_HTML, Outcome};
+use crate::page::Outcome;
 use crate::ready::{Readiness, Rule};
 use paddock_jobs::time::FakeClock;
 
@@ -553,10 +553,16 @@ fn a_page_is_read_snapshot_by_snapshot() {
         .page_shows(&json!({"exception": "ReferenceError: x"}))
         .unwrap();
     assert!(matches!(p.evaluate("x"), Err(Error::Protocol(m)) if m.contains("ReferenceError")));
-    f.fake
-        .page_shows(&json!({"html": "x".repeat(MAX_HTML + 1)}))
-        .unwrap();
-    assert!(p.capture().unwrap_err().to_string().contains("larger"));
+    // The cap is proved with a few bytes: `MAX_HTML` itself is 16 MiB, whose transfer through the fake browser in a debug
+    // build outlasted the call timeout on a loaded CI runner (macOS run 6726).
+    f.fake.page_shows(&json!({"html": "x".repeat(9)})).unwrap();
+    assert!(
+        p.capture_within(8)
+            .unwrap_err()
+            .to_string()
+            .contains("larger")
+    );
+    assert_eq!(p.capture_within(9).unwrap().0, "x".repeat(9));
 }
 
 #[test]

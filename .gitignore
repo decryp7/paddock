@@ -8,6 +8,7 @@ node_modules/
 /ui/out-tsc/
 /ui/coverage/
 /ui/test-results/
+/ui/dialog-check/
 # Generated from scss/ by `npm run build:css`.
 /ui/projects/paddock-ui/css/
 /crates/target/

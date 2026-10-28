@@ -70,12 +70,19 @@ export function demoChannelsBackend(): ChannelsBackend {
   const ipc = tauriIpc();
   if (ipc) return new TauriChannelsBackend(ipc);
   const start = fakeChannels();
-  memory ??= new MemoryChannelsBackend({
-    channels: start.channels,
-    secrets: start.secrets,
-    getFailures: start.getFailures,
-    outcome: fakeTestOutcome(),
-    schedule: manualSteps() ? queueStep : (step) => void setTimeout(step, 400),
-  });
+  if (!memory) {
+    const engine = new MemoryChannelsBackend({
+      channels: start.channels,
+      secrets: start.secrets,
+      getFailures: start.getFailures,
+      outcome: fakeTestOutcome(),
+      schedule: manualSteps() ? queueStep : (step) => void setTimeout(step, 400),
+    });
+    // The secret dialog's busy and rejected states (`?channels-secret=slow|refuse`): storing never answers, or is refused.
+    const secret = new URLSearchParams(globalThis.location?.search ?? '').get('channels-secret');
+    if (secret === 'slow') engine.setSecret = () => new Promise(() => undefined);
+    if (secret === 'refuse') engine.setSecret = () => Promise.reject({ code: 'storeUnavailable', message: 'The keychain is locked. Unlock it and try again.', retryable: true });
+    memory = engine;
+  }
   return memory;
 }

@@ -42,3 +42,14 @@ html().run('template-no-inner-html', rules['template-no-inner-html'], {
     { code: '<p [outerHTML]="text()"></p>', errors: [{ messageId: 'bound' }] },
   ],
 });
+
+html().run('dialog-frame-footer (ADR 0026)', rules['dialog-frame-footer'], {
+  valid: ['<p>Remove the channel?</p>', '<form><input data-autofocus /></form>', '<button type="button">Copy</button>', '<div class="pd-key__field"></div>'],
+  invalid: [
+    { code: '<div class="pd-rm__actions"><span></span></div>', errors: [{ messageId: 'footer' }] },
+    { code: '<div class="row foot"></div>', errors: [{ messageId: 'footer' }] },
+    { code: '<footer></footer>', errors: [{ messageId: 'footer' }] },
+    { code: '<button type="button" (click)="cancel()"> Cancel </button>', errors: [{ messageId: 'wayOut' }] },
+    { code: '<button type="button">OK</button><button>Close</button>', errors: [{ messageId: 'wayOut' }, { messageId: 'wayOut' }] },
+  ],
+});

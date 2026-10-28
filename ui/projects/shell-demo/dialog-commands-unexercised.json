@@ -1,0 +1,48 @@
+{
+  "pd.about": {
+    "about_legal": "sent when the user opens a licence document in About; the boot shows the version only"
+  },
+  "pd.channels.secret": {
+    "channels_set_secret": "sent by Save once a secret is typed; the boot does not type one (channel-secret-dialog.spec drives Save against the memory backend)"
+  },
+  "pd.mcp.key": {
+    "mcp_issue_key": "sent by Create key once a client is named; the boot names none (mcp-dialogs.spec drives it)"
+  },
+  "pd.report-problem": {
+    "diagnostics_save": "sent by Save report…, which asks the OS where to save; the boot never saves",
+    "diagnostics_cancel": "sent by Stop saving during a save; the boot never saves",
+    "log_from_webview": "sent only when the window logs a warning or error; a clean boot logs none"
+  },
+  "pd.settings": {
+    "app_relaunch": "sent from the Settings window's Language page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend) (Relaunch)",
+    "channels_clear_secret": "sent from the Settings window's Notification channels page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "channels_get": "sent from the Settings window's Notification channels page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "channels_save": "sent from the Settings window's Notification channels page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "channels_test": "sent from the Settings window's Notification channels page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "dialog_open": "the Notification channels and AI access pages open their dialogs from the Settings window; the boot opens none",
+    "mcp_audit": "sent from the Settings window's AI access page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "mcp_audit_clear": "sent from the Settings window's AI access page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "mcp_get": "sent from the Settings window's AI access page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "mcp_revoke_key": "sent from the Settings window's AI access page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "mcp_save": "sent from the Settings window's AI access page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "open_login_items": "sent from the Settings window's Background service page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend) (Open Login Items, macOS)",
+    "packs_*": "sent from the Settings window's Knowledge packs page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "service_*": "sent from the Settings window's Background service page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "setup_*": "sent from the Settings window's Set-up page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)",
+    "storage_*": "sent from the Settings window's Storage page when the user acts on it; the boot only opens the window on Appearance (the page's own specs drive it against the memory backend)"
+  },
+  "pd.setup": {
+    "setup_act": "sent when the user acts on a step of the checklist; the boot only reads it (setup-page.spec drives the steps)",
+    "setup_finish": "sent when the user acts on a step of the checklist; the boot only reads it (setup-page.spec drives the steps)",
+    "setup_repair": "sent when the user acts on a step of the checklist; the boot only reads it (setup-page.spec drives the steps)",
+    "setup_skip": "sent when the user acts on a step of the checklist; the boot only reads it (setup-page.spec drives the steps)"
+  },
+  "pd.updates": {
+    "updates_cancel": "sent by the Updates window's buttons and preferences; the boot only reads the status (about.spec drives each phase)",
+    "updates_check": "sent by the Updates window's buttons and preferences; the boot only reads the status (about.spec drives each phase)",
+    "updates_download": "sent by the Updates window's buttons and preferences; the boot only reads the status (about.spec drives each phase)",
+    "updates_install_on_quit": "sent by the Updates window's buttons and preferences; the boot only reads the status (about.spec drives each phase)",
+    "updates_restart": "sent by the Updates window's buttons and preferences; the boot only reads the status (about.spec drives each phase)",
+    "updates_set_preferences": "sent by the Updates window's buttons and preferences; the boot only reads the status (about.spec drives each phase)"
+  }
+}

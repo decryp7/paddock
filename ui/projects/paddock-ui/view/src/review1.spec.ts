@@ -286,7 +286,7 @@ describe('pd-view review 1 fixes', () => {
       buttonByText(form, 'Choose a secret…').click();
       await settle(f);
       const chosen = all(form, '[data-testid=view-chosen]');
-      expect(one(chosen[0]!, '[data-testid=path-text]').getAttribute('title')).toBe('/a/b');
+      expect(one(chosen[0]!, '[data-testid=path-text]').getAttribute('data-full')).toBe('/a/b');
       expect(text(chosen[1]!)).toContain('token');
     });
     it('says "Chosen" for a value the plugin sent without a name', async () => {

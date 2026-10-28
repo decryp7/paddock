@@ -1,3 +1,4 @@
+import { showMeasured } from '../../core/measured';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ThemeService } from '../../core/theme';
@@ -57,7 +58,7 @@ import { coreHeatmapOption } from './cpu-options';
           <div class="card-head"><h2><dy-icon name="processes" /> Hottest apps</h2></div>
           <ol>
             @for (g of hot(); track g.id) {
-              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ pct(g.cpu) }}</span></li>
+              <li><span class="truncate">{{ g.name }}</span><span class="num">{{ show(g.cpu, pct) }}</span></li>
             } @empty {
               <li class="faint">Waiting for the first reading…</li>
             }
@@ -115,6 +116,7 @@ export class CpuDetail implements OnInit {
   private readonly theme = inject(ThemeService);
   protected readonly ranges = RANGES;
   protected readonly pct = formatPercent;
+  protected readonly show = showMeasured;
   protected readonly cpu = computed(() => this.live.system()?.cpu ?? null);
   protected readonly groups = computed(() => {
     const c = this.cpu();

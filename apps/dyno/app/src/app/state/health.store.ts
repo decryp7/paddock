@@ -1,10 +1,8 @@
 import { inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
-import type { CommandError, HealthReport, StartupEntry, StartupFilter, StartupState, WeeklyReport } from '../core/api.types';
+import type { CommandError, HealthReport, StartupEntry, StartupFilter, WeeklyReport } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { Notifier } from '../shared/notifier';
-import { ActivityStore } from './activity.store';
 
 interface HealthState {
   report: HealthReport | null;
@@ -16,8 +14,6 @@ interface HealthState {
   startupCounts: { total: number; os: number; signed: number };
   startupLoaded: boolean;
   startupError: CommandError | null;
-  /** Ids of startup entries with a change in flight. */
-  busy: string[];
 }
 
 const initial: HealthState = {
@@ -28,15 +24,13 @@ const initial: HealthState = {
   startupCounts: { total: 0, os: 0, signed: 0 },
   startupLoaded: false,
   startupError: null,
-  busy: [],
 };
 
 /** The health score with its reasons, and the startup manager. */
 export const HealthStore = signalStore(
   { providedIn: 'root' },
   withState(initial),
-  withMethods((store, backend = inject(BACKEND), notifier = inject(Notifier), activity = inject(ActivityStore)) => {
-    const busy = (id: string, on: boolean) => patchState(store, (s) => ({ busy: on ? [...s.busy, id] : s.busy.filter((x) => x !== id) }));
+  withMethods((store, backend = inject(BACKEND)) => {
     return {
       async loadReport(): Promise<void> {
         patchState(store, { reportError: null });
@@ -55,21 +49,6 @@ export const HealthStore = signalStore(
           patchState(store, { startup: o.entries, startupCounts: { total: o.total, os: o.osCount, signed: o.signedCount }, startupLoaded: true });
         } catch (e) {
           patchState(store, { startupError: toCommandError(e) });
-        }
-      },
-      async setStartup(id: string, state: StartupState): Promise<boolean> {
-        busy(id, true);
-        try {
-          const entry = await backend.setStartupState(id, state);
-          activity.receive(entry);
-          patchState(store, (s) => ({ startup: s.startup.map((e) => (e.id === id ? { ...e, state } : e)) }));
-          notifier.show(entry.title);
-          return true;
-        } catch (e) {
-          notifier.error(toCommandError(e));
-          return false;
-        } finally {
-          busy(id, false);
         }
       },
     };

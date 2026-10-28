@@ -147,6 +147,84 @@ for (const theme of THEMES) {
     }
   });
 
+  test(`Material controls: a hovered or focused icon button draws a translucent state layer (${theme})`, async ({ page }) => {
+    await open(page, theme);
+    const buttons = section(page).locator('.mat-mdc-icon-button:visible:not(.mat-mdc-button-disabled):not(.mat-mdc-button-disabled-interactive)'); // a disabled button has no state layer
+    const count = await buttons.count();
+    expect(count).toBeGreaterThan(0);
+    const alpha = (colour: string) => {
+      const slash = /\/\s*([\d.]+%?)\s*\)/.exec(colour);
+      const comma = /^rgba\(([^)]*)\)$/.exec(colour);
+      const raw = slash?.[1] ?? comma?.[1]?.split(',')[3]?.trim();
+      return raw === undefined ? 1 : raw.endsWith('%') ? parseFloat(raw) / 100 : parseFloat(raw);
+    };
+    const hoverAlpha = alpha(await token(page, '--pd-hover'));
+    const pressedAlpha = alpha(await token(page, '--pd-pressed'));
+    expect(hoverAlpha).toBeLessThan(0.2);
+
+    for (let n = 0; n < count; n++) {
+      const button = buttons.nth(n);
+      await button.scrollIntoViewIfNeeded();
+      // The state layer is the ripple host's ::before: its fill is the token colour, shown at Material's state-layer opacity.
+      const effective = () =>
+        button.evaluate((e) => {
+          const cs = getComputedStyle(e.querySelector('.mat-mdc-button-persistent-ripple') ?? e, '::before');
+          return { colour: cs.backgroundColor, opacity: parseFloat(cs.opacity) };
+        });
+      const effectiveAlpha = async () => {
+        const l = await effective();
+        return alpha(l.colour) * l.opacity;
+      };
+      const shot = async (name: string) => {
+        if (SHOTS) {
+          mkdirSync(SHOTS, { recursive: true });
+          await button.screenshot({ path: join(SHOTS, `icon-button-${n}-${name}-${theme}.png`) });
+        }
+      };
+      // Rendered pixels: the corner of the button's box (inside the state layer, clear of the glyph) against the page just outside it
+      // must differ by under 10 % per channel; a solid disc differs by far more.
+      const pixelsDiffer = async () => {
+        const box = (await button.boundingBox())!;
+        const png = await page.screenshot({ clip: { x: box.x - 4, y: box.y - 4, width: box.width + 8, height: box.height + 8 } });
+        return page.evaluate(async (b64) => {
+          const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(bitmap, 0, 0);
+          const at = (x: number, y: number) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+          const outside = at(1, 1);
+          // The state layer is round: sample on the circle's inner ring (just inside its edge), clear of the glyph.
+          const cx = bitmap.width / 2;
+          const r = Math.min(bitmap.width, bitmap.height) / 2 - 6;
+          const ring = at(Math.round(cx + r), Math.round(bitmap.height / 2));
+          return Math.max(...[0, 1, 2].map((c) => Math.abs((ring[c] ?? 0) - (outside[c] ?? 0)) / 255));
+        }, png.toString('base64'));
+      };
+
+      await button.hover();
+      await settled(page);
+      await shot('hover');
+      expect(await effectiveAlpha(), `icon button ${n} hover`).toBeCloseTo(hoverAlpha, 2);
+      expect(await pixelsDiffer(), `icon button ${n} hover pixels`).toBeLessThan(0.1);
+
+      await page.mouse.move(0, 0);
+      await page.keyboard.press('Shift');
+      await button.focus();
+      await expect(button).toBeFocused();
+      await settled(page);
+      await shot('focus');
+      expect(await effectiveAlpha(), `icon button ${n} focus`).toBeCloseTo(hoverAlpha, 2);
+
+      await button.hover();
+      await page.mouse.down();
+      await settled(page);
+      expect(await effectiveAlpha(), `icon button ${n} pressed`).toBeCloseTo(pressedAlpha, 2);
+      // Release away from the button: no click, so no popup opens or tree node toggles, and the next button stays reachable.
+      await page.mouse.move(0, 0);
+      await page.mouse.up();
+    }
+  });
+
   test(`Material controls: a glyph in a matButton is centred on the label with a gap (${theme})`, async ({ page }) => {
     await open(page, theme);
     for (const id of ['filled', 'outlined', 'text']) {
@@ -188,7 +266,7 @@ for (const theme of THEMES) {
     expect(sel.radius).toBe(popover);
     expect(sel.top).toBe(popover);
     expect(sel.pad).toBe('4px');
-    expect(await select.locator('.mat-mdc-option').first().evaluate((e) => e.offsetHeight)).toBe(rowH);
+    expect(await select.locator('.mat-mdc-option').first().evaluate((e) => (e as HTMLElement).offsetHeight)).toBe(rowH);
     await closeOverlays(page);
 
     await page.getByTestId('material-menu').click();
@@ -197,7 +275,7 @@ for (const theme of THEMES) {
     await settled(page);
     expect(await menu.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(await token(page, '--pd-surface-3'));
     expect(await menu.locator('.mat-mdc-menu-content').evaluate((e) => getComputedStyle(e).paddingTop)).toBe('4px');
-    expect(await menu.locator('.mat-mdc-menu-item').first().evaluate((e) => e.offsetHeight)).toBe(rowH);
+    expect(await menu.locator('.mat-mdc-menu-item').first().evaluate((e) => (e as HTMLElement).offsetHeight)).toBe(rowH);
     await closeOverlays(page);
 
     await page.getByTestId('material-tooltip').hover();

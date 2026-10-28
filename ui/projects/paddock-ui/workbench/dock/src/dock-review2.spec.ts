@@ -263,6 +263,15 @@ describe('save and manage layouts as dialogs (gap 2)', () => {
     expect(dock.openPanels()).toEqual(['a.one']);
   });
 
+  it('runs the Save layout flow when the manage window answers a save', async () => {
+    const { dock, ports, commands } = await setup();
+    ports.dialogAnswers.set(LAYOUT_MANAGE_DIALOG_ID, { save: true });
+    ports.dialogAnswers.set(LAYOUT_SAVE_DIALOG_ID, 'From manage');
+    expect(await commands.run(DOCK_COMMANDS.layoutManage)).toBe(true);
+    expect(ports.dialogs.map((d) => d.id)).toEqual([LAYOUT_MANAGE_DIALOG_ID, LAYOUT_SAVE_DIALOG_ID]);
+    expect(dock.namedLayouts().map((l) => l.name)).toEqual(['From manage']);
+  });
+
   it('forgets what was remembered for layouts the manage window deleted, and falls back to the first perspective', async () => {
     const { dock, rendered, ports, store, commands } = await setup();
     const perspectives = TestBed.inject(Perspectives);

@@ -361,10 +361,10 @@ describe('the store', () => {
 describe('the contributions', () => {
   const setup = () => defineSetup({ providers: () => Promise.resolve([]), loadPage: () => Promise.resolve(class {}), loadDialog: () => Promise.resolve(class {}) });
 
-  it('declare a modeless tool window, a settings page and the five commands of the table', () => {
+  it('declare a modeless form window that fits its steps, a settings page and the five commands of the table', () => {
     const { dialog, page } = setup();
     expect(dialog.id).toBe(SETUP_DIALOG_ID);
-    expect(dialog.kind).toBe('tool');
+    expect(dialog.kind).toBe('form');
     expect([...dialog.commands].sort()).toEqual(Object.keys(SETUP_COMMANDS).sort());
     expect([...SETUP_DIALOG_COMMANDS].sort()).toEqual(Object.keys(SETUP_COMMANDS).sort());
     expect(page.id).toBe(SETUP_SETTINGS_PAGE);

@@ -117,6 +117,13 @@
   --mat-form-field-outlined-focus-outline-color: var(--pd-focus-ring);
   --mat-form-field-outlined-focus-outline-width: calc(var(--pd-focus-width) + 1px);
   --mat-icon-button-state-layer-size: var(--pd-control-height);
+  // State layers: Material draws an opaque ink at these opacities, and without them (the bridge alone, no `mat.theme`) the opacity
+  // is undefined and computes to 1: a solid disc. They are the alpha of --pd-hover (hover and keyboard focus) and --pd-pressed, so a
+  // hovered or pressed Material control looks like the family's own; Material's defaults (0.08 / 0.12 / 0.12) are heavier.
+  --mat-sys-hover-state-layer-opacity: var(--pd-hover-alpha);
+  --mat-sys-focus-state-layer-opacity: var(--pd-hover-alpha);
+  --mat-sys-pressed-state-layer-opacity: var(--pd-pressed-alpha);
+  --mat-icon-button-state-layer-color: var(--pd-text);
   --mat-icon-button-icon-size: var(--pd-space-4);
   --mat-focus-indicator-border-color: var(--pd-focus-ring);
   --mat-focus-indicator-display: block;
@@ -273,9 +280,10 @@
   --mat-chip-elevated-container-color: var(--pd-surface-2);
   --mat-chip-label-text-color: var(--pd-text-muted);
   --mat-chip-outline-color: var(--pd-hairline);
-  --mat-snack-bar-container-color: var(--pd-text);
-  --mat-snack-bar-supporting-text-color: var(--pd-surface-1);
-  --mat-snack-bar-button-color: var(--pd-surface-1);
+  // The snack bar is a toast like the notification host's (surface-3, hairline, shadow), not the inverse block.
+  --mat-snack-bar-container-color: var(--pd-surface-3);
+  --mat-snack-bar-supporting-text-color: var(--pd-text);
+  --mat-snack-bar-button-color: var(--pd-accent);
   --mat-dialog-container-color: var(--pd-surface-3);
   --mat-dialog-container-shape: var(--pd-radius-dialog);
   --mat-dialog-subhead-color: var(--pd-text);
@@ -694,6 +702,72 @@ html .mat-button-toggle-checked .mat-button-toggle-label-content {
 // The snack bar action is a 600 label.
 html .mat-mdc-snack-bar-action {
   font-weight: var(--pd-weight-semibold);
+}
+
+// The snack bar looks like a notification toast: hairline, the toast shadow.
+html .mat-mdc-snack-bar-container .mat-mdc-snackbar-surface {
+  border: 1px solid var(--pd-hairline);
+  box-shadow: var(--pd-shadow-2);
+}
+
+// The undo toast is one toast area with the notification host (guide section 8): bottom right, 360 px, on the host's baseline (clear of
+// the status bar and of the page footer, so a wizard's Next or a form's Save is never covered). While it is open the host lifts itself by its
+// height (`ToastArea`), so the two stack and never overlap, at any width.
+html .mat-mdc-snack-bar-container.pd-undo-snack {
+  box-sizing: border-box;
+  width: auto;
+  max-width: calc(100vw - 2 * var(--pd-space-4));
+  // Material's handset layout (under 600 px) centres the container: keep it at the right, as the host is.
+  justify-content: flex-end;
+  margin: 0 var(--pd-space-4) calc(var(--pd-statusbar-height, 24px) + var(--pd-page-footer-safe, 56px) + var(--pd-space-2));
+}
+
+// The host's compact layout (up to 480 px) has an 8 px gutter.
+@media (max-width: 480px) {
+  html .mat-mdc-snack-bar-container.pd-undo-snack {
+    max-width: calc(100vw - 2 * var(--pd-space-2));
+    margin-inline: var(--pd-space-2);
+  }
+}
+
+html .mat-mdc-snack-bar-container.pd-undo-snack .mat-mdc-snackbar-surface {
+  width: 360px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+// A checkbox's touch-target padding puts its box about half the target's overhang to the right of the form column. Pull the box back, so
+// a column of checkboxes, inputs and labels lines up on one left edge (and the label keeps its 8 px gap). One rule for every inline form.
+// Not in a table cell: a selection column keeps Material's centring.
+html .mat-mdc-checkbox:not(:is(.mat-mdc-cell, .mat-mdc-header-cell, .mat-mdc-footer-cell) .mat-mdc-checkbox) .mdc-checkbox {
+  margin-inline-start: calc((var(--mat-checkbox-state-layer-size, 40px) - 18px) / -2);
+}
+
+// An indeterminate progress bar with reduced motion: the global rule runs its animation once, which leaves a static partial bar that reads as
+// a determinate value. Draw it as a full, softer bar instead (work in progress, no value), and drop the second sweeping bar.
+@mixin progress-bar-still {
+  .mat-mdc-progress-bar.mdc-linear-progress--indeterminate {
+    .mdc-linear-progress__primary-bar {
+      animation: none;
+      inset: 0;
+      transform: none;
+      opacity: 0.45;
+    }
+
+    .mdc-linear-progress__secondary-bar {
+      display: none;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) {
+    @include progress-bar-still;
+  }
+}
+
+:root[data-motion='reduce'] {
+  @include progress-bar-still;
 }
 
 // ---- Keyboard focus (SC 2.4.7, 2.4.13). Material's strong focus indicator (mat.strong-focus-indicators in entry-material.scss)

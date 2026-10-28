@@ -2,7 +2,8 @@ import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, sig
 import { TestBed } from '@angular/core/testing';
 import { form, FormField, maxLength, min, minLength, required, validate } from '@angular/forms/signals';
 import { describe, expect, it } from 'vitest';
-import { PdField, PdFieldControl } from './field';
+import { By } from '@angular/platform-browser';
+import { PdField, PdFieldControl, PdFieldProxy } from './field';
 import { defaultErrorText, errorText, fieldMessage, showErrors, type PdFieldStateLike } from './messages';
 import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
 
@@ -61,10 +62,10 @@ interface Model {
   imports: [PdField, PdFieldControl, FormField],
   template: `
     <pd-field label="Name" hint="Shown in the list" [state]="f.name()" [submitted]="submitted()" [messages]="messages">
-      <input class="pd-input" type="text" pdFieldControl [formField]="f.name" />
+      <input type="text" pdFieldControl [formField]="f.name" />
     </pd-field>
     <pd-field label="Port" [state]="f.port()">
-      <input class="pd-input" type="number" pdFieldControl [formField]="f.port" />
+      <input type="number" pdFieldControl [formField]="f.port" />
     </pd-field>
     <pd-field label="Plain"><input pdFieldControl /></pd-field>
   `,
@@ -80,6 +81,33 @@ class Host {
     min(p.port, 1);
     validate(p.port, ({ value }) => (value() === 13 ? { kind: 'unlucky', message: 'Pick another port.' } : undefined));
   });
+}
+
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdField, PdFieldControl],
+  template: `
+    <pd-field label="Notes" hint="Optional"><textarea pdFieldControl rows="2" placeholder="Nothing yet"></textarea></pd-field>
+    <pd-field label="Kind"><select pdFieldControl class="pd-select"><option>A</option></select></pd-field>
+    <pd-field label="Folder" hint="Where it goes"><div class="picker"><button type="button">Choose folder</button></div></pd-field>
+    <pd-field label="Late">
+      @if (show()) {
+        <input pdFieldControl />
+      }
+    </pd-field>
+  `,
+})
+class Late {
+  readonly show = signal(false);
+}
+
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdField, PdFieldControl],
+  template: `<pd-field label="Time" [error]="error()"><input pdFieldControl /></pd-field>`,
+})
+class WithError {
+  readonly error = signal<string | null>(null);
 }
 
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
@@ -100,13 +128,16 @@ describe('pd-field', () => {
 
   it('labels the control, marks required fields and says nothing about an untouched field', async () => {
     const f = await setup();
-    const [name] = fields(f);
+    const [name, port] = fields(f);
     const input = name!.querySelector('input')!;
     expect(name!.querySelector('label')!.getAttribute('for')).toBe(input.id);
     expect(name!.querySelector('label')!.textContent).toContain('Name');
-    expect(name!.querySelector('.pd-required')).not.toBeNull();
+    expect(name!.querySelector('.mat-mdc-form-field-required-marker')).not.toBeNull();
+    expect(port!.querySelector('.mat-mdc-form-field-required-marker')).toBeNull();
     expect(name!.querySelector('[data-testid=field-error]')).toBeNull();
     expect(input.getAttribute('aria-invalid')).toBeNull();
+    expect(name!.querySelector('.mat-form-field-appearance-outline')).not.toBeNull();
+    expect(name!.querySelector('.mat-form-field-invalid')).toBeNull();
     expect(input.getAttribute('aria-describedby')).toBe(name!.querySelector('.pd-field__hint')!.id);
   });
 
@@ -144,6 +175,102 @@ describe('pd-field', () => {
     port.dispatchEvent(new Event('blur'));
     await settle(f);
     expect(fields(f)[1]!.querySelector('[data-testid=field-error]')?.textContent).toContain('Pick another port.');
+  });
+
+  it('tells Material about focus, the error and a disabled control, and updates when the value is set from outside', async () => {
+    const f = await setup();
+    const name = fields(f)[0]!;
+    const input = name.querySelector('input')!;
+    input.dispatchEvent(new Event('focus'));
+    await settle(f);
+    expect(name.querySelector('.mat-focused')).not.toBeNull();
+    input.dispatchEvent(new Event('blur'));
+    await settle(f);
+    expect(name.querySelector('.mat-focused')).toBeNull();
+    expect(name.querySelector('.mat-form-field-invalid')).not.toBeNull();
+    expect(name.querySelector('.mat-form-field-disabled')).toBeNull();
+    input.disabled = true;
+    f.componentInstance.submitted.set(true); // (the host binds `disabled` in real use: any change of the host checks the field)
+    await settle(f);
+    expect(name.querySelector('.mat-form-field-disabled')).not.toBeNull();
+    input.disabled = false;
+    input.value = 'Valid';
+    input.dispatchEvent(new Event('input'));
+    await settle(f);
+    expect(name.querySelector('.mat-form-field-invalid')).toBeNull();
+    expect(name.querySelector('.mat-form-field-should-float, .mdc-text-field--no-label')).toBeDefined();
+  });
+
+  it('wraps a textarea, a select and a control that appears later, and forgets one that goes', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Late);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('textarea')!.id).toMatch(/^pd-field-/);
+    expect(el.querySelectorAll('.mat-mdc-input-element')).toHaveLength(2);
+    expect(el.querySelectorAll('.mat-mdc-form-field-hint').length).toBe(1);
+    // a native select gets Material's arrow (the form field's control type), a textarea its own class
+    const select = el.querySelector('select')!;
+    expect(select.closest('mat-form-field')!.classList).toContain('mat-mdc-form-field-type-mat-native-select');
+    expect(select.classList).toContain('mat-mdc-native-select-inline');
+    expect(el.querySelector('textarea')!.classList).toContain('mat-mdc-form-field-textarea-control');
+    expect(el.querySelector('textarea')!.closest('mat-form-field')!.classList).toContain('mat-mdc-form-field-type-mat-input');
+    // a field with no control to outline keeps the classic layout: label above, a named group, the hint below
+    const plain = [...el.querySelectorAll<HTMLElement>('pd-field')].find((x) => x.textContent!.includes('Choose folder'))!;
+    expect(plain.classList).toContain('pd-field--plain');
+    expect(plain.querySelector('mat-form-field')).toBeNull();
+    expect(plain.querySelector('.pd-field__label')!.textContent).toBe('Folder');
+    expect(plain.querySelector('[role=group]')!.getAttribute('aria-labelledby')).toBe(plain.querySelector('.pd-field__label')!.id);
+    expect(plain.querySelector('.pd-field__hint')!.textContent).toBe('Where it goes');
+    expect(plain.querySelector('[role=group]')!.getAttribute('aria-describedby')).toBe(plain.querySelector('.pd-field__hint')!.id);
+    expect(plain.querySelector('button')).not.toBeNull();
+    f.componentInstance.show.set(true);
+    await settle(f);
+    const late = el.querySelector<HTMLInputElement>('input')!;
+    expect(late.id).toMatch(/^pd-field-/);
+    [...el.querySelectorAll<HTMLElement>('.mat-mdc-form-field-flex')].at(-1)!.click();
+    await settle(f);
+    expect(document.activeElement).toBe(late);
+    f.componentInstance.show.set(false);
+    await settle(f);
+    expect(el.querySelector('input')).toBeNull();
+  });
+
+  it('answers Material from the marked control, and sensibly once it is gone', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Late);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    f.componentInstance.show.set(true);
+    await settle(f);
+    const proxies = f.debugElement.queryAllNodes(By.directive(PdFieldProxy)).map((d) => d.injector.get(PdFieldProxy));
+    const [notes, , late] = proxies;
+    expect(notes!.placeholder).toBe('Nothing yet');
+    expect([late!.focused, late!.empty, late!.disabled]).toEqual([false, true, false]);
+    const field = f.debugElement.queryAll(By.directive(PdField))[3]!.injector.get(PdField);
+    late!.setDescribedByIds(['a', 'b']);
+    expect(field.describedBy()).toBe('a b');
+    late!.setDescribedByIds([]);
+    expect(field.describedBy()).toBeNull();
+    f.componentInstance.show.set(false);
+    await settle(f);
+    expect([late!.placeholder, late!.value, late!.focused, late!.empty, late!.disabled, late!.controlType]).toEqual(['', '', false, true, false, 'mat-input']);
+    late!.onContainerClick();
+  });
+
+  it('shows an error the host gives it, and a field marked disabled is filled', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(WithError);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid=field-error]')).toBeNull();
+    f.componentInstance.error.set('Enter a time.');
+    await settle(f);
+    expect(el.querySelector('[data-testid=field-error]')!.textContent).toContain('Enter a time.');
+    expect(el.querySelector('input')!.getAttribute('aria-invalid')).toBe('true');
+    expect(el.querySelector('.pd-field--invalid')).not.toBeNull();
   });
 
   it('works for a control without a form state', async () => {

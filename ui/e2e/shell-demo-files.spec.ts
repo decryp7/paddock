@@ -16,7 +16,7 @@ test.describe('user files (plan X31)', () => {
     const entries = page.getByTestId('recent-entry');
     await expect(entries).toHaveCount(2);
     const long = entries.nth(1).locator('.pd-dir').getByTestId('path-text');
-    await expect(long).toHaveAttribute('title', /a-very-long-project-folder-name.*service-2026-10-24-11-30\.log$/);
+    await expect(long).toHaveAttribute('data-full', /a-very-long-project-folder-name.*service-2026-10-24-11-30\.log$/);
     expect(await axeViolations(page)).toEqual([]);
     await expectNoHorizontalScroll(page);
 

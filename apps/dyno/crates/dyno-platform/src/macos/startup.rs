@@ -1,7 +1,6 @@
-//! The startup manager on macOS: launch agents in `~/Library/LaunchAgents` (changeable) and `/Library/LaunchAgents`
-//! (listed; changing them needs the helper). Enabled/disabled is launchd's own override database
-//! (`launchctl print-disabled`), so disabling survives updates of the plist. `launchctl` sits behind [`Launchctl`] so
-//! tests never touch the real user's launchd.
+//! The startup manager on macOS: launch agents in `~/Library/LaunchAgents` and `/Library/LaunchAgents`, listed only.
+//! Enabled/disabled is launchd's own override database (`launchctl print-disabled`). `launchctl` sits behind
+//! [`Launchctl`] so tests never touch the real user's launchd.
 
 use crate::parse::launchd::{parse_launch_agent, parse_print_disabled, LaunchAgent};
 use dyno_core::ports::{PlatformError, StartupItems};
@@ -16,10 +15,6 @@ const MAX_AGENTS: usize = 2_000;
 pub trait Launchctl: Send {
     /// `launchctl print-disabled gui/<uid>` output.
     fn print_disabled(&mut self) -> Result<String, PlatformError>;
-    /// Stops the agent if it runs and marks it disabled.
-    fn disable(&mut self, label: &str) -> Result<(), PlatformError>;
-    /// Marks the agent enabled again (it starts at the next login).
-    fn enable(&mut self, label: &str) -> Result<(), PlatformError>;
 }
 
 /// The real `launchctl` for the current user's GUI domain.
@@ -63,15 +58,6 @@ impl Launchctl for RealLaunchctl {
     fn print_disabled(&mut self) -> Result<String, PlatformError> {
         self.run(&["print-disabled", &self.domain])
     }
-    fn disable(&mut self, label: &str) -> Result<(), PlatformError> {
-        let target = format!("{}/{label}", self.domain);
-        // Not running is fine.
-        let _ = self.run(&["bootout", &target]);
-        self.run(&["disable", &target]).map(|_| ())
-    }
-    fn enable(&mut self, label: &str) -> Result<(), PlatformError> {
-        self.run(&["enable", &format!("{}/{label}", self.domain)]).map(|_| ())
-    }
 }
 
 /// Launch agents as startup entries.
@@ -105,12 +91,7 @@ impl LaunchAgents {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         for e in rd.flatten().take(MAX_AGENTS) {
             let path = e.path();
-            // An all-users agent the helper turned off is renamed (ADR 0016); it is still listed, as disabled.
-            let off_by_dyno = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with(&format!(".plist{}", crate::tuning_admin::DISABLED_SUFFIX)));
-            if path.extension().and_then(|x| x.to_str()) != Some("plist") && !off_by_dyno {
+            if path.extension().and_then(|x| x.to_str()) != Some("plist") {
                 continue;
             }
             let Ok(bytes) = std::fs::read(&path) else { continue };
@@ -118,11 +99,7 @@ impl LaunchAgents {
             if !agent.starts_at_login() {
                 continue;
             }
-            let mut entry = entry_of(&agent, location.clone(), disabled);
-            if off_by_dyno {
-                entry.state = StartupState::Disabled;
-            }
-            out.push(entry);
+            out.push(entry_of(&agent, location.clone(), disabled));
         }
     }
 }
@@ -174,47 +151,19 @@ impl StartupItems for LaunchAgents {
         out.sort_by_key(|e| e.name.to_lowercase());
         Ok(out)
     }
-
-    fn set_state(&mut self, entry: &StartupEntry, state: StartupState) -> Result<(), PlatformError> {
-        if entry.location.needs_admin() {
-            return Err(PlatformError::AccessDenied(
-                "This launch agent is installed for all users; changing it needs administrator rights (the helper).".into(),
-            ));
-        }
-        let Some(label) = entry.id.strip_prefix("agent:user:") else {
-            return Err(PlatformError::NotFound("That is not one of your launch agents.".into()));
-        };
-        match state {
-            StartupState::Enabled => self.launchctl.enable(label),
-            StartupState::Disabled => self.launchctl.disable(label),
-            StartupState::Delayed(_) => Err(PlatformError::Unsupported(
-                "macOS launch agents can't be delayed; turn it off or keep it on.".into(),
-            )),
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
     struct Fake {
-        calls: Arc<Mutex<Vec<String>>>,
         disabled_text: String,
     }
     impl Launchctl for Fake {
         fn print_disabled(&mut self) -> Result<String, PlatformError> {
             Ok(self.disabled_text.clone())
-        }
-        fn disable(&mut self, label: &str) -> Result<(), PlatformError> {
-            self.calls.lock().unwrap().push(format!("disable {label}"));
-            Ok(())
-        }
-        fn enable(&mut self, label: &str) -> Result<(), PlatformError> {
-            self.calls.lock().unwrap().push(format!("enable {label}"));
-            Ok(())
         }
     }
 
@@ -240,25 +189,9 @@ mod tests {
         std::fs::write(system.join("s.plist"), plist("com.vendor.s", true)).unwrap();
         let fake = Fake {
             disabled_text: "disabled services = {\n\t\"com.example.b\" => disabled\n\t\"com.example.a\" => enabled\n}".into(),
-            ..Fake::default()
         };
         let la = LaunchAgents::with(Some(user), Some(system), Box::new(fake.clone()));
         (dir, fake, la)
-    }
-
-    #[test]
-    fn an_all_users_agent_the_helper_turned_off_is_still_listed_as_disabled() {
-        let (d, _f, mut la) = setup();
-        let system = d.path().join("system");
-        std::fs::rename(system.join("s.plist"), system.join("s.plist.dyno-disabled")).unwrap();
-        std::fs::write(system.join("other.plist.bak"), plist("com.vendor.other", true)).unwrap();
-        let list = la.list().unwrap();
-        let s = list.iter().find(|e| e.name == "com.vendor.s").unwrap();
-        assert_eq!(
-            (s.state, s.location.clone()),
-            (StartupState::Disabled, StartupLocation::SystemLaunchAgent)
-        );
-        assert!(!list.iter().any(|e| e.name == "com.vendor.other"));
     }
 
     #[test]
@@ -271,29 +204,6 @@ mod tests {
         assert_eq!(list[1].state, StartupState::Disabled);
         assert_eq!(list[2].location, StartupLocation::SystemLaunchAgent);
         assert_eq!(list[0].exe.as_deref(), Some("/Applications/X.app/x"));
-    }
-
-    #[test]
-    fn changes_only_the_users_own_agents() {
-        let (_d, fake, mut la) = setup();
-        let list = la.list().unwrap();
-        la.set_state(&list[0], StartupState::Disabled).unwrap();
-        la.set_state(&list[1], StartupState::Enabled).unwrap();
-        assert_eq!(*fake.calls.lock().unwrap(), vec!["disable com.example.a", "enable com.example.b"]);
-        assert!(matches!(
-            la.set_state(&list[2], StartupState::Disabled),
-            Err(PlatformError::AccessDenied(_))
-        ));
-        assert!(matches!(
-            la.set_state(&list[0], StartupState::Delayed(30)),
-            Err(PlatformError::Unsupported(_))
-        ));
-        let mut other = list[0].clone();
-        other.id = "elsewhere".into();
-        assert!(matches!(
-            la.set_state(&other, StartupState::Enabled),
-            Err(PlatformError::NotFound(_))
-        ));
     }
 
     #[test]

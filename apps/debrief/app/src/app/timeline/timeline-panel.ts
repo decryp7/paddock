@@ -157,11 +157,11 @@ function timelineSource(): TimelineSource {
   `,
   styles: `
     :host { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg-1); overflow: hidden; position: relative; }
-    .err-card { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 14px 18px; border: 1px solid var(--border-3); border-radius: 8px; background: var(--bg-3); color: var(--text); text-align: center; }
+    .err-card { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 80%; padding: 14px 18px; border: 1px solid var(--border-3); border-radius: 8px; background: var(--bg-3); color: var(--text); text-align: center; }
     .wrap { position: relative; flex: 1; min-height: 0; user-select: none; }
     .wrap.panning { cursor: grabbing; }
     .scroller { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; padding-bottom: 8px; }
-    .sticky { position: sticky; top: 0; z-index: 2; background: var(--bg-1); }
+    .sticky { position: sticky; top: 0; z-index: 3; background: var(--bg-1); }
     .row { display: flex; align-items: stretch; }
     .label { width: var(--tl-label-w); flex: none; }
     .plot { flex: 1; min-width: 0; position: relative; margin-right: var(--s-5); }
