@@ -1,4 +1,4 @@
-import { expectHeaderOnTop, headerCovers, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, expectHeaderOnTop, headerCovers, headerTrack, test, type Page } from '@decryp7/paddock-e2e';
 
 // ER-21: scrolled rows and cells never paint over a grid's header (the user's report of 2026-10-28: "the cell will cover the
 // header when scrolling"). Every gallery grid is scrolled, hovered and probed with elementFromPoint across its header row.
@@ -20,6 +20,16 @@ for (const theme of ['dark', 'light'] as const) {
   test(`pd-table: deep in 5,000 virtual rows the header stays on top while scrolled and hovered (${theme})`, async ({ page }) => {
     await open(page, theme);
     await expectHeaderOnTop(page.locator('[data-testid="table-virtual"] .pd-grid'), { from: 2500 * 32, steps: 8 });
+  });
+
+  // Frame by frame: 300 px a frame for 60 frames, a jump of 2.5 viewports, then the end. The header must not move and must be
+  // on top in every frame (review P1-1: a header inside the virtual list's moving window left the top on fast scrolls).
+  test(`pd-table: the header stays put and on top in every frame of a fast scroll, a jump and End (${theme})`, async ({ page }) => {
+    await open(page, theme);
+    const frames = await headerTrack(page.locator('[data-testid="table-virtual"] .pd-grid'), { perFrame: 300, frames: 60 });
+    expect(frames.length).toBe(62);
+    expect(frames.at(-1)!.scrollTop).toBeGreaterThan(100_000);
+    expect(frames.filter((f) => f.moved !== 0 || !f.onTop)).toEqual([]);
   });
 }
 

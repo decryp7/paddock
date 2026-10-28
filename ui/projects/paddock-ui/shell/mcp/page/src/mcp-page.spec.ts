@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MAX_KEYS, MCP_KEY_DIALOG_ID, MCP_REVOKE_DIALOG_ID, MemoryMcpBackend, provideShellMcp, type MemoryMcpOptions } from '@decryp7/paddock-ui/shell/mcp';
@@ -8,8 +9,14 @@ async function settle(rounds = 12): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
 }
 
-/** The frame in which pd-table (Material's table in the CDK viewport) draws the rows of its range. */
-const nextFrame = (): Promise<void> => new Promise((done) => requestAnimationFrame(() => done()));
+/** Waits until every pd-table on the page has drawn what it shows: its rows, or its empty, error or loading state (Material's table in the CDK viewport draws its rows in the next frame). */
+async function tablesDrawn(el: HTMLElement): Promise<void> {
+  await vi.waitFor(() => {
+    for (const t of el.querySelectorAll('pd-table')) {
+      if (!t.querySelector('.pd-body [role="row"], .pd-empty')) throw new Error('pd-table has not drawn its rows yet');
+    }
+  });
+}
 
 const text = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
 
@@ -42,7 +49,7 @@ describe('the AI access page', () => {
       await fixture.whenStable();
       await settle();
       await fixture.whenStable();
-      await nextFrame();
+      await tablesDrawn(el);
       await fixture.whenStable();
     };
     await flush();

@@ -5,19 +5,19 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### `pd-table` on Angular Material's table (ADR 0027, decision 5)
-- `pd-table` is built on `mat-table` with Material's sticky header row inside the CDK virtual scroll viewport, `matSort` and
-  `mat-sort-header` for sorting (`aria-sort`; the arrow is Material's, hidden at rest, a hint on hover, solid when sorted),
-  `mat-menu` for the column and row menus (the "..." button, right-click and Shift+F10), `matTooltip` for a cell's full text
-  and the icon buttons, and `matIconButton` for the row actions. Group rows, middle truncation, `hideBelow`, the row heights
-  and the grid keyboard stay the family's own. The public API is unchanged.
-- Every table is drawn in the viewport: above 100 lines only the rows in view; below, or with `virtual="false"`, every row.
-  Moving with the keyboard scrolls only when the row is out of view.
+- `pd-table` is built on `mat-table`: a header-only table above the CDK virtual scroll viewport and the body table inside it,
+  one `role="grid"`, so the header never moves with the rows (also on fast scrolls, jumps and End). `matSort` and
+  `mat-sort-header` sort (`aria-sort`; Material's arrow, hidden at rest), `mat-menu` gives the column and row menus (the
+  "..." button, right-click and Shift+F10), `matTooltip` the full text of a cut cell and the buttons' names, `matIconButton`
+  the row actions (24 px, the family's hover fill in a 6 px shape). Group rows, middle truncation, `hideBelow`, the row
+  heights and the grid keyboard stay the family's own. The public API is unchanged.
+- One tab stop for the grid (the active row); Up from the first row reaches the sort headers, the arrows move along them.
+  The keyboard focus follows End and Home in a virtual table once the row is drawn. A row stays marked while its menu is open.
+- Every body is drawn in the viewport: above 100 lines only the rows in view; below, or with `virtual="false"`, every row,
+  a frame after a change.
 - A sortable header's accessible name is its label (the button inside the column header); "Sort by …" is its description.
-  Tests that looked for a "Sort by …" button look for the column header's button instead.
-- `@angular/material` is an optional peer dependency of `@decryp7/paddock-ui` (for `/table`); the gallery and the demos load
-  the Material bridge (`css/material.css`) like the apps. Popup menus built with `mat-menu` keep the family's item size and
-  2 px keyboard ring (`_controls.scss`).
-- The gallery's sizes are decimal (KB), as the family's byte formatter writes them.
+- `@decryp7/paddock-e2e`: `headerTrack` samples a grid's header frame by frame through a fast scroll, a jump and End.
+- Popup menus built with `mat-menu` keep the family's item size and keyboard ring (`_controls.scss`).
 
 ### Sticky table headers stay above their rows (ADR 0027)
 - New tokens `--pd-z-table-corner` (4), `--pd-z-table-header` (3), `--pd-z-table-sticky-column` (2) and

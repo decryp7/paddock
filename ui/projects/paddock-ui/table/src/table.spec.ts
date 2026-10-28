@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './table';
 import { PD_FOLD_EXTRA, type PdColumn, type PdRowAction, type PdSort } from './model';
 import { assertStatusGlyphs } from '@decryp7/paddock-ui/testing';
+import { MatTooltip } from '@angular/material/tooltip';
+import { CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 
 interface Plugin {
   id: string;
@@ -19,7 +21,7 @@ const DATA: Plugin[] = [
 ];
 const COLUMNS: PdColumn<Plugin>[] = [
   { key: 'name', header: 'Name', value: (r) => r.name, required: true },
-  { key: 'size', header: 'Size (KB)', value: (r) => r.size, align: 'end' },
+  { key: 'size', header: 'Size (KiB)', value: (r) => r.size, align: 'end' },
   { key: 'kind', header: 'Kind', value: (r) => r.kind, hidden: true },
   { key: 'path', header: 'Path', value: (r) => r.path, truncate: 'middle', hideBelow: 500 },
 ];
@@ -56,7 +58,7 @@ const ACTIONS: PdRowAction[] = [
       (rowActivate)="opened.push($event.id)"
       (action)="chosen.push($event)"
     >
-      <ng-template pdCell="size" let-row><b class="custom">{{ row.size }} KB</b></ng-template>
+      <ng-template pdCell="size" let-row><b class="custom">{{ row.size }} KiB</b></ng-template>
       <div pdTableEmpty class="next-step"><button type="button">Install a plugin</button></div>
     </pd-table>
   `,
@@ -143,11 +145,11 @@ describe('pd-table', () => {
     const grid = el(f).querySelector('[role=grid]')!;
     expect(grid.getAttribute('aria-label')).toBe('Plugins');
     expect(grid.getAttribute('aria-rowcount')).toBe('4');
-    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KB)', 'Path', 'Actions']);
+    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Path', 'Actions']);
     expect(names(f)).toEqual(['Zeta', 'alpha', 'Mid']);
     expect(rowEls(f)[1]?.getAttribute('aria-rowindex')).toBe('3');
     expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe('3 rows');
-    expect(el(f).querySelector('.custom')?.textContent).toBe('30 KB');
+    expect(el(f).querySelector('.custom')?.textContent).toBe('30 KiB');
     // Paths are shortened in the middle with the full value as the tooltip.
     expect(el(f).querySelector('pd-middle-text')?.getAttribute('title')).toBe('/opt/plugins/zeta/plugin.so');
   });
@@ -159,7 +161,7 @@ describe('pd-table', () => {
     document.body.appendChild(f.nativeElement);
     await settle(f);
     const hidden = [...el(f).querySelectorAll('[role=columnheader] .pd-th-text.pd-sr')].map((h) => h.textContent?.trim());
-    expect(hidden).toEqual(['Name', 'Size (KB)']);
+    expect(hidden).toEqual(['Name', 'Size (KiB)']);
     expect(el(f).querySelector('[role=columnheader]')?.textContent?.trim()).toBe('Name');
   });
 
@@ -203,7 +205,7 @@ describe('pd-table', () => {
     el(f).querySelector<HTMLButtonElement>('[data-testid=table-columns]')!.click();
     await settle(f);
     const items = [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=menuitemcheckbox]')];
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Size (KB)', 'Kind', 'Path']);
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Size (KiB)', 'Kind', 'Path']);
     expect(items.map((i) => i.getAttribute('aria-checked'))).toEqual(['true', 'false', 'true']);
     items[1]!.click();
     await settle(f);
@@ -231,7 +233,7 @@ describe('pd-table', () => {
       },
     );
     const f = await setup();
-    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KB)', 'Actions']);
+    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Actions']);
     // No column folds: rows keep one line.
     expect(rowEls(f).some((r) => r.classList.contains('pd-folded'))).toBe(false);
     expect(getComputedStyle(el(f).querySelector('.pd-grid')!).overflow).not.toBe('scroll');
@@ -519,7 +521,7 @@ describe('pd-table', () => {
     const f = await setup();
     f.componentInstance.rows.set([DATA[2]!]);
     await settle(f);
-    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KB)', 'Path']);
+    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Path']);
     expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols')).not.toContain('px 28px');
   });
   it('says the default empty text without a next step, draws no action column without actions, and ignores clicks on placeholders', async () => {
@@ -562,6 +564,96 @@ describe('pd-table', () => {
     expect(off.disabled || off.getAttribute('aria-disabled') === 'true').toBe(true);
     (f.debugElement.query((d) => d.name === 'pd-table').componentInstance as unknown as { emit(a: PdRowAction, row: unknown): void }).emit({ id: 'off', label: 'Off', disabled: true }, { id: 'a' });
     expect(f.componentInstance.chosen).toEqual([]);
+  });
+  it('is one grid: a header-only table above the scrolling body, the header row first (aria-rowindex 1), the body\'s cells grid cells', async () => {
+    const f = await setup();
+    const grid = el(f).querySelector('[role=grid]')!;
+    expect(grid.classList.contains('pd-grid')).toBe(true);
+    const header = grid.querySelector('.pd-head-table [role=row]')!;
+    expect(header.getAttribute('aria-rowindex')).toBe('1');
+    // The header is not inside the scrolling viewport: it never moves with the rows.
+    expect(header.closest('cdk-virtual-scroll-viewport')).toBeNull();
+    expect(grid.querySelectorAll('[role=rowgroup]')).toHaveLength(2);
+    expect([...rowEls(f)[0]!.children].every((c) => c.getAttribute('role') === 'gridcell')).toBe(true);
+  });
+
+  it('has one tab stop, the active row: the sort headers are reached with Up from the first row, moved through with the arrows and left with Down', async () => {
+    const f = await setup();
+    const headers = () => [...el(f).querySelectorAll<HTMLElement>('.mat-sort-header-container')];
+    expect(headers().map((h) => h.getAttribute('tabindex'))).toEqual(['-1', '-1', '-1']);
+    rowEls(f)[0]!.focus();
+    press(rowEls(f)[0]!, 'ArrowUp');
+    await settle(f);
+    expect(document.activeElement).toBe(headers()[0]);
+    press(headers()[0]!, 'ArrowRight');
+    expect(document.activeElement).toBe(headers()[1]);
+    press(headers()[1]!, 'End');
+    expect(document.activeElement).toBe(headers()[2]);
+    press(headers()[2]!, 'ArrowRight');
+    expect(document.activeElement).toBe(headers()[2]);
+    press(headers()[2]!, 'Home');
+    expect(document.activeElement).toBe(headers()[0]);
+    press(headers()[0]!, 'ArrowLeft');
+    expect(document.activeElement).toBe(headers()[0]);
+    press(headers()[0]!, 'x');
+    press(headers()[0]!, 'ArrowDown');
+    await settle(f);
+    expect(document.activeElement).toBe(rowEls(f)[0]);
+    // Up from the first row goes to the sorted column's header when there is one.
+    f.componentInstance.sort.set({ key: 'size', direction: 'asc' });
+    await settle(f);
+    press(rowEls(f)[0]!, 'ArrowUp');
+    await settle(f);
+    expect(document.activeElement).toBe(headers()[1]);
+    // Without rows the first sort header keeps the grid's tab stop.
+    f.componentInstance.rows.set([]);
+    await settle(f);
+    expect(headers()[0]?.getAttribute('tabindex')).toBe('0');
+    headers()[0]!.focus();
+    press(headers()[0]!, 'ArrowDown');
+    expect(document.activeElement).toBe(headers()[0]);
+  });
+
+  it('focuses a row the keyboard moves to once the virtual table has drawn it, not before', async () => {
+    const f = await setup();
+    const many = Array.from({ length: PD_TABLE_VIRTUAL_FROM * 5 }, (_, i): Plugin => ({ id: `r${i}`, name: `Row ${i}`, size: i, kind: 'k', path: `/p/${i}` }));
+    f.componentInstance.rows.set(many);
+    await settle(f);
+    rowEls(f)[0]!.focus();
+    press(rowEls(f)[0]!, 'End');
+    await settle(f);
+    // jsdom does not scroll, so the last row is not drawn yet: the focus waits (the browser case is the e2e's End and Home).
+    expect(el(f).querySelector('[data-index="499"]')).toBeNull();
+    expect((document.activeElement as HTMLElement).dataset['index']).toBe('0');
+    // The viewport draws it: the focus lands on it.
+    f.debugElement.query((d) => d.name === 'cdk-virtual-scroll-viewport').injector.get(CdkVirtualScrollViewport).setRenderedRange({ start: 480, end: 500 });
+    await vi.waitFor(async () => {
+      await settle(f);
+      expect((document.activeElement as HTMLElement | null)?.dataset['index']).toBe('499');
+    });
+  });
+
+  it('shows a cell\'s tooltip only when its text is cut', async () => {
+    const f = await setup();
+    const text = rowEls(f)[0]!.querySelector<HTMLElement>('.pd-text')!;
+    Object.defineProperty(text, 'scrollWidth', { configurable: true, value: 10 });
+    Object.defineProperty(text, 'clientWidth', { configurable: true, value: 10 });
+    text.dispatchEvent(new MouseEvent('mouseenter'));
+    const tip = f.debugElement.query((d) => d.nativeElement === text).injector.get(MatTooltip);
+    expect(tip.disabled).toBe(true);
+    Object.defineProperty(text, 'scrollWidth', { configurable: true, value: 50 });
+    text.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(tip.disabled).toBe(false);
+  });
+
+  it('keeps the header as wide as the body above its scrollbar', async () => {
+    const f = await setup();
+    const body = el(f).querySelector<HTMLElement>('.pd-body')!;
+    Object.defineProperty(body, 'offsetWidth', { configurable: true, value: 415 });
+    Object.defineProperty(body, 'clientWidth', { configurable: true, value: 400 });
+    f.componentInstance.query.set('a');
+    await settle(f);
+    expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-gutter')).toBe('15px');
   });
 });
 

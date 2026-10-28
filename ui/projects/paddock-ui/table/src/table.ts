@@ -1,6 +1,7 @@
 import { CdkFixedSizeVirtualScroll, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { NgTemplateOutlet } from '@angular/common';
 import {
+  afterEveryRender,
   afterNextRender,
   ChangeDetectionStrategy,
   Component,
@@ -168,34 +169,47 @@ const VIRTUAL_BUFFER_ROWS = 8;
         </button>
       }
     </div>
-    <div class="pd-grid" [style.--pd-cols]="gridTemplate()">
-      <cdk-virtual-scroll-viewport class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="viewportHeight()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
-        <mat-table
-          role="grid"
-          class="pd-mat-table"
-          [dataSource]="lines()"
-          [trackBy]="trackLine"
-          matSort
-          [matSortActive]="sort()?.key ?? ''"
-          [matSortDirection]="sort()?.direction ?? ''"
-          (matSortChange)="onSort($event)"
-          [attr.aria-label]="label()"
-          [attr.aria-busy]="state() === 'loading'"
-          [attr.aria-rowcount]="items().length + 1"
-          (keydown)="onKeydown($event)"
-        >
+    <!-- One grid: a header-only table above the scrolling body, so the header never moves with the rows (ADR 0027). There is no
+         horizontal scroll (columns drop out instead), so the two tables share their tracks (--pd-cols) and need no syncing
+         sideways; the header keeps the width of the body's scrollbar (--pd-gutter). -->
+    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the grid only receives keydown bubbling from its rows and sort headers, which are the focus stops (roving tabindex) -->
+    <div
+      class="pd-grid"
+      role="grid"
+      [style.--pd-cols]="gridTemplate()"
+      [style.--pd-gutter.px]="gutter()"
+      [attr.aria-label]="label()"
+      [attr.aria-busy]="state() === 'loading'"
+      [attr.aria-rowcount]="items().length + 1"
+      (keydown)="onKeydown($event)"
+    >
+      <mat-table role="rowgroup" class="pd-head-table" [dataSource]="noLines" matSort [matSortActive]="sort()?.key ?? ''" [matSortDirection]="sort()?.direction ?? ''" (matSortChange)="onSort($event)">
+        @for (c of columns2(); track c.key) {
+          <ng-container [matColumnDef]="c.key">
+            @if (c.sortable !== false) {
+              <mat-header-cell *matHeaderCellDef mat-sort-header class="pd-th pd-sort" [class.pd-end]="c.align === 'end'" [class.pd-sorted]="sort()?.key === c.key" [arrowPosition]="c.align === 'end' ? 'before' : 'after'" [sortActionDescription]="sortLabel(c)">
+                <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
+              </mat-header-cell>
+            } @else {
+              <mat-header-cell *matHeaderCellDef class="pd-th" [class.pd-end]="c.align === 'end'">
+                <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
+              </mat-header-cell>
+            }
+          </ng-container>
+        }
+        @if (actionWidth()) {
+          <ng-container [matColumnDef]="actionsColumn">
+            <mat-header-cell *matHeaderCellDef class="pd-th pd-actions-th"><span class="pd-sr">{{ t.actions }}</span></mat-header-cell>
+          </ng-container>
+        }
+        <mat-header-row *matHeaderRowDef="displayed()" class="pd-header" aria-rowindex="1" />
+      </mat-table>
+      <cdk-virtual-scroll-viewport class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
+        <!-- A row group only while it has rows: an empty one would be a group without rows (the state is said below). -->
+        <mat-table class="pd-body-table" [attr.role]="lines().length ? 'rowgroup' : null" [dataSource]="lines()" [trackBy]="trackLine" (contentChanged)="focusPending()">
           @for (c of columns2(); track c.key; let k = $index) {
             <ng-container [matColumnDef]="c.key">
-              @if (c.sortable !== false) {
-                <mat-header-cell *matHeaderCellDef mat-sort-header class="pd-th pd-sort" [class.pd-end]="c.align === 'end'" [class.pd-sorted]="sort()?.key === c.key" [arrowPosition]="c.align === 'end' ? 'before' : 'after'" [sortActionDescription]="sortLabel(c)">
-                  <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
-                </mat-header-cell>
-              } @else {
-                <mat-header-cell *matHeaderCellDef class="pd-th" [class.pd-end]="c.align === 'end'">
-                  <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
-                </mat-header-cell>
-              }
-              <mat-cell *matCellDef="let line" class="pd-cell" [class.pd-end]="c.align === 'end'" [class.pd-first]="k === 0" [class.pd-group-cell]="line.kind === 'group' && k === 0" [class.pd-group-summary]="line.kind === 'group' && k > 0">
+              <mat-cell *matCellDef="let line" class="pd-cell" [attr.role]="cellRole" [class.pd-end]="c.align === 'end'" [class.pd-first]="k === 0" [class.pd-group-cell]="line.kind === 'group' && k === 0" [class.pd-group-summary]="line.kind === 'group' && k > 0">
                 @switch (line.kind) {
                   @case ('skeleton') {
                     <span class="pd-skel" [class.pd-skel-end]="c.align === 'end'" [style.width.%]="40 + ((line.n * 17 + c.key.length * 11) % 50)"></span>
@@ -218,7 +232,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
                     } @else if (c.truncate === 'middle') {
                       <pd-middle-text [value]="text(c, line.row)" />
                     } @else {
-                      <span class="pd-text" [matTooltip]="text(c, line.row)" matTooltipShowDelay="500">{{ text(c, line.row) }}</span>
+                      <span class="pd-text" [matTooltip]="text(c, line.row)" matTooltipShowDelay="500" #tip="matTooltip" (mouseenter)="tip.disabled = !isTruncated($event)">{{ text(c, line.row) }}</span>
                     }
                   }
                 }
@@ -227,8 +241,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
           }
           @if (actionWidth()) {
             <ng-container [matColumnDef]="actionsColumn">
-              <mat-header-cell *matHeaderCellDef class="pd-th pd-actions-th"><span class="pd-sr">{{ t.actions }}</span></mat-header-cell>
-              <mat-cell *matCellDef="let line" class="pd-cell pd-actions">
+              <mat-cell *matCellDef="let line" class="pd-cell pd-actions" [attr.role]="cellRole">
                 @if (line.kind === 'row') {
                   @let actions = actionsOf(line.row);
                   @if (actions.length) {
@@ -247,7 +260,6 @@ const VIRTUAL_BUFFER_ROWS = 8;
               </mat-cell>
             </ng-container>
           }
-          <mat-header-row *matHeaderRowDef="displayed(); sticky: true" class="pd-header" />
           <mat-row
             *matRowDef="let line; columns: displayed()"
             class="pd-row"
@@ -268,13 +280,14 @@ const VIRTUAL_BUFFER_ROWS = 8;
           />
         </mat-table>
       </cdk-virtual-scroll-viewport>
+      <!-- The error and empty states are a row of the grid, across its columns. -->
       @if (state() === 'error') {
-        <div class="pd-empty pd-error" data-testid="table-error">
+        <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty pd-error" data-testid="table-error">
           <pd-status-glyph status="error" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
           <button type="button" class="pd-retry" (click)="retry.emit()">{{ t.retry }}</button>
-        </div>
+        </div></div>
       } @else if (state() === 'ready' && !items().length) {
-        <div class="pd-empty">
+        <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty">
           @if (rows().length) {
             <p role="status">{{ t.noMatch }}</p>
           } @else if (emptySlot()) {
@@ -282,7 +295,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
           } @else {
             <p role="status">{{ emptyText() }}</p>
           }
-        </div>
+        </div></div>
       }
     </div>
 
@@ -314,41 +327,43 @@ const VIRTUAL_BUFFER_ROWS = 8;
     </mat-menu>
   `,
   styles: `
-    /* Material's table, sort header and icon button take the family's sizes and colours here (their component tokens); the menus
-       and tooltips are themed by the Material bridge (css/material.css) and the shared popup-menu classes. */
+    /* Material's parts take the family's theme (css/material.css: colours, the sort arrow, type); the table sets only what is its
+       own: its row and header heights, 24 px row action buttons whose state layer is the family's hover fill in a 6 px shape
+       (not Material's solid disc), and no 48 px touch target reaching out of a 24 to 36 px row (the row is the target). */
     :host {
       display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; container-type: inline-size;
       --mat-table-background-color: transparent;
       --mat-table-header-container-height: var(--pd-table-head);
       --mat-table-row-item-container-height: var(--pd-table-row);
-      --mat-table-row-item-outline-color: var(--pd-hairline);
-      --mat-sort-arrow-color: var(--pd-text-subtle);
       --mat-icon-button-state-layer-size: 24px;
-      --mat-icon-button-icon-size: 16px;
-      --mat-icon-button-icon-color: var(--pd-text-muted);
-      --mat-icon-button-state-layer-color: var(--pd-text);
-      /* The row is the touch target: the 48 px invisible target of an icon button would reach out of a 24 to 36 px row. */
+      --mat-icon-button-container-shape: var(--pd-radius-control);
+      --mat-icon-button-state-layer-color: var(--pd-hover);
+      --mat-icon-button-ripple-color: var(--pd-hover);
+      --mat-icon-button-hover-state-layer-opacity: 1;
+      --mat-icon-button-focus-state-layer-opacity: 1;
+      --mat-icon-button-pressed-state-layer-opacity: 1;
       --mat-icon-button-touch-target-display: none;
     }
     .pd-toolbar { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 44px; min-width: 0; }
     .pd-filter { display: flex; align-items: center; gap: var(--pd-space-2); flex: 1 1 8rem; max-width: 24rem; min-width: 8rem; height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-input); background: var(--pd-surface-1); color: var(--pd-text-muted); }
-    .pd-filter:focus-within { border-color: var(--pd-focus-ring); outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-filter:focus-within { border-color: var(--pd-focus-ring); outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-filter-input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-body); }
     .pd-count { color: var(--pd-text-muted); font-size: var(--pd-text-label); white-space: nowrap; font-variant-numeric: tabular-nums; }
     .pd-spacer { flex: 1; }
     .pd-tool { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
     .pd-tool:hover, .pd-tool[aria-expanded='true'] { background: var(--pd-hover); color: var(--pd-text); }
-    .pd-tool:focus-visible, .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-tool:focus-visible, .pd-retry:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: 2px; }
     /* A narrow table keeps the filter and an icon-only Columns button; the count goes (the grid says how many rows it has). */
     @container (max-width: 400px) { .pd-tool-text, .pd-count { display: none; } .pd-tool { padding: 0 var(--pd-space-2); } }
-    /* Its own stacking context: the table's layers (the sticky header above the rows) stay local and never compete with the page's. */
+    /* Its own stacking context: the table's layers stay local and never compete with the page's. */
     .pd-grid { position: relative; isolation: isolate; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
     .pd-body { display: block; min-width: 0; overflow-x: hidden; overflow-y: auto; }
-    .pd-grid .pd-mat-table { display: block; min-width: 0; }
+    .pd-grid .pd-head-table, .pd-grid .pd-body-table { display: block; min-width: 0; }
     /* Every line is a CSS grid over the same tracks (--pd-cols), so the header and the rows share their columns. */
     .pd-grid .pd-header, .pd-grid .pd-row { display: grid; grid-template-columns: var(--pd-cols); align-items: center; column-gap: var(--pd-space-3); box-sizing: border-box; padding: 0 var(--pd-space-3); min-width: 0; border: 0; }
-    /* The sticky header (the CDK table sets its position and layer): an opaque surface, so nothing shows through it. */
-    .pd-grid .pd-header { height: var(--pd-table-head); min-height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); font-family: inherit; letter-spacing: normal; }
+    /* The header is outside the scrolling body, on an opaque surface; it keeps the width of the body's scrollbar so a column's
+       header and values share one right edge. */
+    .pd-grid .pd-header { padding-inline-end: calc(var(--pd-space-3) + var(--pd-gutter, 0px)); height: var(--pd-table-head); min-height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); font-family: inherit; letter-spacing: normal; }
     .pd-grid .pd-th, .pd-grid .pd-cell { display: flex; align-items: center; flex: none; min-width: 0; min-height: 0; padding: 0; border: 0; overflow: hidden; white-space: nowrap; background: none; color: inherit; font: inherit; letter-spacing: normal; align-self: stretch; }
     .pd-grid .pd-th.pd-end, .pd-grid .pd-cell.pd-end { justify-content: flex-end; text-align: end; }
     .pd-grid .pd-sort { cursor: pointer; }
@@ -356,14 +371,15 @@ const VIRTUAL_BUFFER_ROWS = 8;
     .pd-grid .pd-th .mat-sort-header-container { min-width: 0; max-width: 100%; gap: var(--pd-space-1); border-radius: var(--pd-radius-tag); }
     .pd-grid .pd-th.pd-end .mat-sort-header-container { margin-inline-start: auto; }
     .pd-grid .pd-th .mat-sort-header-content { min-width: 0; }
-    .pd-grid .pd-th .mat-sort-header-container:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-grid .pd-th .mat-sort-header-container:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: 2px; }
     .pd-grid .pd-th .mat-sort-header-arrow { margin: 0; }
     .pd-grid .pd-sorted .mat-sort-header-arrow { color: var(--pd-text); }
     .pd-th-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-grid .pd-row { height: var(--pd-table-row); min-height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); cursor: default; }
     .pd-grid .pd-row.pd-folded { align-items: start; padding-block: 6px; }
-    .pd-grid .pd-row:hover { background: var(--pd-hover); }
-    .pd-grid .pd-row:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
+    /* Hovered, and while its menu is open (the "..." button's or the right-click one), so the menu's row stays marked. */
+    .pd-grid .pd-row:hover, .pd-grid .pd-row[aria-expanded='true'], .pd-grid .pd-row:has(.pd-more[aria-expanded='true']) { background: var(--pd-hover); }
+    .pd-grid .pd-row:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: -2px; }
     /* Selected: the accent tint with a 2 px accent bar on the left (the guide). */
     .pd-grid .pd-row.pd-selected { background: var(--pd-accent-tint, var(--pd-hover)); box-shadow: inset 2px 0 0 var(--pd-accent); }
     .pd-grid .pd-cell.pd-end { font-variant-numeric: tabular-nums; }
@@ -381,8 +397,8 @@ const VIRTUAL_BUFFER_ROWS = 8;
     .pd-group-count { color: var(--pd-text-subtle); font-variant-numeric: tabular-nums; }
     .pd-grid .pd-actions { justify-content: flex-end; gap: 4px; overflow: visible; }
     .pd-grid .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); }
-    .pd-grid .pd-icon-btn:hover:not(:disabled) { color: var(--pd-text); }
-    .pd-grid .pd-icon-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); }
+    .pd-grid .pd-icon-btn:hover:not(:disabled), .pd-grid .pd-icon-btn:focus-visible { color: var(--pd-text); }
+    .pd-grid .pd-icon-btn:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); }
     .pd-grid .pd-inline { opacity: 0; }
     /* Always visible in its own resting colour (3:1, SC 1.4.11), so touch and keyboard users can find it (UI patterns, rule 2). */
     .pd-grid .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
@@ -471,6 +487,10 @@ export class PdTable<T> {
     retry: $localize`:@@pd.table.retry:Retry`,
   };
   protected readonly actionsColumn = ACTIONS_COLUMN;
+  /** The header-only table draws no lines. */
+  protected readonly noLines: readonly PdLine<T>[] = [];
+  /** The body's cells are cells of the one grid (the CDK table would call them `cell`: its own role is `rowgroup`). */
+  protected readonly cellRole = 'gridcell';
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly injector = inject(Injector);
@@ -480,6 +500,10 @@ export class PdTable<T> {
   protected readonly customCells = computed(() => new Map(this.cells().map((c) => [c.key(), c.template] as const)));
 
   private readonly width = signal(1024);
+  /** The width of the body's scrollbar in pixels (0 when it does not scroll or the bar overlays). */
+  protected readonly gutter = signal(0);
+  /** The row to focus once the table has drawn it (a virtual table draws a row a frame after it scrolls there). */
+  private pendingFocus: number | null = null;
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
   protected readonly active = signal(0);
 
@@ -525,10 +549,8 @@ export class PdTable<T> {
   protected readonly lines = computed<readonly PdLine<T>[]>(() => (this.state() === 'loading' ? SKELETON : this.state() === 'error' ? [] : this.items()));
   private readonly positions = computed(() => new Map<PdLine<T>, number>(this.lines().map((l, i) => [l, i])));
   protected readonly isVirtual = computed(() => (this.virtual() === 'auto' ? this.items().length > PD_TABLE_VIRTUAL_FROM : this.virtual()));
-  /** The rows' part of the viewport: as tall as the lines, up to `maxHeight`. */
-  private readonly bodyHeight = computed(() => Math.min(this.lines().length * this.rowPx(), this.maxHeight()));
-  /** The viewport holds the sticky header row and the rows. */
-  protected readonly viewportHeight = computed(() => this.headerPx + this.bodyHeight());
+  /** The scrolling body: as tall as the lines, up to `maxHeight`. */
+  protected readonly bodyHeight = computed(() => Math.min(this.lines().length * this.rowPx(), this.maxHeight()));
   /** Virtual: a few rows beyond the visible ones; otherwise a buffer that covers every row, so all are drawn. */
   protected readonly bufferPx = computed(() => (this.isVirtual() ? VIRTUAL_BUFFER_ROWS * this.rowPx() : (this.lines().length + 1) * this.rowPx()));
   /** "N rows" (thousands separated by the locale), "M of N rows" when filtered; empty while loading or when there are no rows (nothing to count). */
@@ -550,6 +572,16 @@ export class PdTable<T> {
     observer?.observe(this.host);
     const mutation = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => this.density.set(readDensity()));
     mutation?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
+    afterEveryRender(() => {
+      const body = this.host.querySelector<HTMLElement>('.pd-body');
+      const bar = body ? Math.max(0, body.offsetWidth - body.clientWidth) : 0;
+      if (bar !== this.gutter()) this.gutter.set(bar);
+      // One tab stop for the grid: the active row. The sort headers are reached with the arrow keys from the rows (Up from the
+      // first row); they keep the stop only while there are no rows to stop on.
+      const hasRows = !!this.host.querySelector('.pd-body [role="row"][data-index]');
+      this.host.querySelectorAll<HTMLElement>('.pd-head-table .mat-sort-header-container').forEach((h, i) => h.setAttribute('tabindex', !hasRows && i === 0 ? '0' : '-1'));
+      this.focusPending();
+    });
     inject(DestroyRef).onDestroy(() => {
       observer?.disconnect();
       mutation?.disconnect();
@@ -627,7 +659,10 @@ export class PdTable<T> {
   }
 
   protected onKeydown(e: KeyboardEvent): void {
-    const target = e.target instanceof Element ? e.target.closest<HTMLElement>('[role="row"][data-index]') : null;
+    if (!(e.target instanceof Element)) return;
+    const head = e.target.closest<HTMLElement>('.pd-head-table [role="columnheader"]');
+    if (head) return this.onHeaderKeydown(e, head);
+    const target = e.target.closest<HTMLElement>('[role="row"][data-index]');
     if (!target || e.target !== target) return;
     const index = Number(target.dataset['index']);
     if (isMenuKey(e)) {
@@ -644,6 +679,10 @@ export class PdTable<T> {
       else if (item) this.open(item.row);
       return;
     }
+    if (e.key === 'ArrowUp' && index === 0 && this.focusHeader(this.sortHeaders().findIndex((h) => h.closest('.pd-sorted')))) {
+      e.preventDefault();
+      return;
+    }
     const page = Math.max(1, Math.floor(this.bodyHeight() / this.rowPx()) - 1);
     const to = nextIndex(this.items().length, index, e.key, page);
     if (to === null) return;
@@ -651,9 +690,42 @@ export class PdTable<T> {
     this.moveTo(to);
   }
 
+  /** The sortable column headers' buttons (Material's sort header containers), in order. */
+  private sortHeaders(): HTMLElement[] {
+    return [...this.host.querySelectorAll<HTMLElement>('.pd-head-table .mat-sort-header-container')];
+  }
+  /** Focuses sort header `i` (the first when `i` is -1); false when the table has none. */
+  private focusHeader(i: number): boolean {
+    const headers = this.sortHeaders();
+    const h = headers[Math.max(0, i)];
+    h?.focus();
+    return !!h;
+  }
+  /** In the header row: Left, Right, Home and End move between the sort headers, Down goes back to the rows (Material sorts on Enter and Space). */
+  private onHeaderKeydown(e: KeyboardEvent, head: HTMLElement): void {
+    const headers = this.sortHeaders();
+    const at = headers.findIndex((h) => head.contains(h));
+    const to = e.key === 'ArrowLeft' ? at - 1 : e.key === 'ArrowRight' ? at + 1 : e.key === 'Home' ? 0 : e.key === 'End' ? headers.length - 1 : null;
+    if (e.key === 'ArrowDown' && this.items().length) {
+      e.preventDefault();
+      this.moveTo(Math.min(this.active(), this.items().length - 1));
+      return;
+    }
+    if (to === null || to < 0 || to >= headers.length) return;
+    e.preventDefault();
+    this.focusHeader(to);
+  }
+
+  /** Whether a cell's text is cut (its tooltip shows the full text only then). */
+  protected isTruncated(e: Event): boolean {
+    const el = e.target as HTMLElement;
+    return el.scrollWidth > el.clientWidth;
+  }
+
   /**
-   * Makes row `index` the tab stop and focuses it, first scrolling it into view below the sticky header when it is not in view
-   * (or not drawn: a virtual table draws only the rows in view).
+   * Makes row `index` the tab stop and focuses it, first scrolling it into view below the header when it is not in view. A
+   * virtual table draws a row a frame after it scrolls there, so the focus waits until the row is drawn (each render and each
+   * time the table's rows change).
    */
   moveTo(index: number): void {
     this.active.set(index);
@@ -663,6 +735,16 @@ export class PdTable<T> {
     const visible = this.bodyHeight();
     if (top < offset) viewport.scrollToOffset(top);
     else if (top + this.rowPx() > offset + visible) viewport.scrollToOffset(top + this.rowPx() - visible);
-    afterNextRender(() => this.host.querySelector<HTMLElement>(`[role="row"][data-index="${index}"]`)?.focus({ preventScroll: true }), { injector: this.injector });
+    this.pendingFocus = index;
+    afterNextRender(() => this.focusPending(), { injector: this.injector });
+  }
+
+  /** Focuses the row `moveTo` asked for once it is drawn; a no-op when there is none or it is not drawn yet. */
+  protected focusPending(): void {
+    if (this.pendingFocus === null) return;
+    const row = this.host.querySelector<HTMLElement>(`.pd-body [role="row"][data-index="${this.pendingFocus}"]`);
+    if (!row) return;
+    this.pendingFocus = null;
+    row.focus({ preventScroll: true });
   }
 }

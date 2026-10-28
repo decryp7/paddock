@@ -190,6 +190,53 @@ export async function headerCovers(grid: Locator, parts: GridParts = {}): Promis
   return { covers, background, opaque: isOpaqueColor(background), scrolled };
 }
 
+/** One frame of {@link headerTrack}: where the header was and whether it was on top, after a scroll. */
+export interface HeaderFrame {
+  readonly scrollTop: number;
+  /** How far the header's top moved from where it was before the scrolling, in pixels. */
+  readonly moved: number;
+  /** Whether the header itself was on top at its middle (`elementFromPoint`). */
+  readonly onTop: boolean;
+}
+
+/**
+ * Samples the header frame by frame while the grid's body scrolls fast (`perFrame` pixels a frame for `frames` frames), then
+ * jumps more than two viewports, then goes to the end: every frame says how far the header moved and whether it was on top.
+ * A header that rides in a virtual list's moving window shows up here (it moves, or something else is on top for a frame).
+ */
+export async function headerTrack(grid: Locator, parts: GridParts & { perFrame?: number; frames?: number } = {}): Promise<readonly HeaderFrame[]> {
+  await grid.scrollIntoViewIfNeeded();
+  return grid.evaluate(
+    async (root, { headerSel, scrollerSel, perFrame, frames }) => {
+      const canScroll = (e: Element) => e.scrollHeight > e.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(e).overflowY);
+      const scroller = scrollerSel ? root.querySelector(scrollerSel) : canScroll(root) ? root : [...root.querySelectorAll('*')].find(canScroll);
+      const header = root.querySelector(headerSel);
+      if (!scroller || !header) return [];
+      const top0 = header.getBoundingClientRect().top;
+      const out: { scrollTop: number; moved: number; onTop: boolean }[] = [];
+      const sample = () => {
+        const r = header.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        out.push({ scrollTop: scroller.scrollTop, moved: Math.round(r.top - top0), onTop: !!hit && header.contains(hit) });
+      };
+      const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()));
+      for (let i = 0; i < frames; i++) {
+        scroller.scrollTop += perFrame;
+        await frame();
+        sample();
+      }
+      scroller.scrollTop += scroller.clientHeight * 2.5;
+      await frame();
+      sample();
+      scroller.scrollTop = scroller.scrollHeight;
+      await frame();
+      sample();
+      return out;
+    },
+    { headerSel: parts.header ?? '[role="row"]:first-child, thead', scrollerSel: parts.scroller ?? null, perFrame: parts.perFrame ?? 300, frames: parts.frames ?? 60 },
+  );
+}
+
 /**
  * Fails when rows or cells paint over the grid's header while it scrolls and a row is hovered, when the header's
  * background lets them show through, or when the body did not scroll at all (the check would prove nothing).

@@ -3,7 +3,8 @@
 - Status: Accepted (2026-10-28). Decisions 1-4 shipped with the fix (`fix/grid-header-on-top`). Decision 5, `pd-table` on
   Angular Material's table, was accepted by the user the same day after reading the findings below ("full mat-table
   rebuild", knowing that Material's sticky header sits inside the virtual-scroll content) and built as its own change
-  (`feat/pd-table-mat-table`)
+  (`feat/pd-table-mat-table`); the independent review measured that header leaving the top on fast scrolls, so the header
+  is Material's table too, but a header-only one above the viewport (decision 5)
 - Date: 2026-10-28
 - Related: rule 40 (recurring bugs mean a missing design rule), rules 39, 42, 43; ADR 0012 (app shell); plan X21 (`pd-table`)
 
@@ -77,13 +78,18 @@ above are fixed wherever they occur.
      and the icon buttons' names; `matIconButton` for the row actions. The menus keep the family's popup-menu classes
      (`pd-popmenu`, `pd-popmenu__item`); Material's component tokens are set to `--pd-*` tokens on the table's host, and
      the menus and tooltips use the Material bridge (`css/material.css`, now in the gallery and the demos as in the apps).
-   - **Sticky header under virtual scroll (Material's documented way):** the table sits inside the CDK
-     `cdk-virtual-scroll-viewport`; CDK 22's table attaches to the viewport (`CdkTable._setupVirtualScrolling`) and keeps
-     its sticky header row at the top of the viewport while the rows' wrapper is translated, by setting the header's `top`
-     from the viewport's rendered offset. The header is an opaque surface, the grid is its own stacking context, and CDK
-     puts the header at z-index 100 above the rows. `expectHeaderOnTop` checks it on the gallery's 5,000-row grouped table,
-     scrolled in steps and hovered, in both themes, in Chromium and WebKit.
-   - **Always in the viewport:** every table is drawn in the viewport, so there is one template and one header. Above 100
+   - **The header is a header-only `mat-table` above the viewport** (review P1-1, 2026-10-28). Material's documented way, a
+     sticky header row inside the virtual-scroll viewport, was built first: CDK 22's table keeps that header at the top by
+     rewriting its `top` from the viewport's rendered offset one frame later. The independent review measured it leaving the
+     top on fast and deep scrolls (31 of 60 frames at 300 px a frame, and 77,056 px off on a jump), because the header rides
+     in the viewport's moving content window. So the grid is two Material tables in one `role="grid"`: a header-only table
+     (`role="rowgroup"`, its row `aria-rowindex="1"`) above the scrolling body table (`role="rowgroup"` while it has rows,
+     its cells `gridcell`). The header is not sticky and never moves; there is no horizontal scroll (columns drop out
+     instead), so both tables share the column tracks (`--pd-cols`) and need no sideways syncing, and the header keeps the
+     width of the body's scrollbar (`--pd-gutter`). The grid stays its own stacking context. `headerTrack` samples every
+     frame of a 300 px-a-frame scroll, a 2.5-viewport jump and End, and `expectHeaderOnTop` probes the first frame and the
+     settled one after each scroll, in both themes, Chromium and WebKit.
+   - **Always in the viewport:** every body is drawn in the viewport, so there is one template. Above 100
      lines (`virtual="auto"`) the viewport draws the rows in view plus 8; below that, or with `virtual="false"`, its buffer
      covers every line and all rows are drawn. The viewport is as tall as the header plus the rows, up to `maxHeight` for
      the rows.
@@ -91,9 +97,17 @@ above are fixed wherever they occur.
      throw under virtual scrolling, so a group heading is drawn by the one row definition: one cell across the row, or the
      group's own cells under the columns); text shortened in the middle (`pd-middle-text`); columns dropped by the table's
      own width (`hideBelow`, `fitColumns`, a CSS grid over shared tracks instead of Material's flex cells); the family's
-     uniform row heights (24, 32 or 36 px and a 28 px header, also the virtual scroll's item size); the roving one-tab-stop
-     grid keyboard (Up, Down, Page Up, Page Down, Home, End, Enter; `mat-table` has no keyboard model), which now scrolls
-     a row into view below the header only when it is out of view; the loading placeholders, empty and error states.
+     uniform row heights (24, 32 or 36 px and a 28 px header, also the virtual scroll's item size); the grid keyboard
+     (`mat-table` has no keyboard model): one tab stop for the whole grid, the active row; Up, Down, Page Up, Page Down,
+     Home, End and Enter on the rows; Up from the first row into the sort headers (not tab stops of their own), Left,
+     Right, Home and End along them, Down back. A row the keyboard moves to is scrolled into view only when it is out of
+     view, and focused once the virtual table has drawn it (End and Home in 5,000 rows); the loading placeholders, empty
+     and error states (a row of the grid).
+   - **Smaller choices:** a cell's tooltip shows only when its text is cut; the row stays marked while its menu is open; the
+     row action buttons are 24 px with the family's hover fill as their state layer in a 6 px shape (Material's state layer
+     needs opacity tokens the theme does not set, which drew a solid disc) and no 48 px touch target; the sort arrow is
+     Material's (hidden at rest, a hint on hover and focus, solid when sorted), which replaces the family's two-way hint
+     glyph and its "never the descending arrow" guard (a decision, not a regression: Material's arrow is hidden at rest).
    - `@angular/material` is an optional peer dependency of `@decryp7/paddock-ui` (needed by `@decryp7/paddock-ui/table`;
      every app already has it) and a dev dependency of the `ui` workspace.
 

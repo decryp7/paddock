@@ -192,7 +192,7 @@ test('table: loading and empty say no count, and the columns do not move when ro
   await open(page);
   await expect(page.locator('[data-testid="box-loading"] [data-testid="table-count"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="box-empty"] [data-testid="table-count"]')).toHaveCount(0);
-  const left = (id: string) => page.locator(`[data-testid="${id}"]`).getByRole('columnheader', { name: 'Size (KB)' }).evaluate((e) => Math.round(e.getBoundingClientRect().left - (e.closest('.pd-grid') as HTMLElement).getBoundingClientRect().left));
+  const left = (id: string) => page.locator(`[data-testid="${id}"]`).getByRole('columnheader', { name: 'Size (KiB)' }).evaluate((e) => Math.round(e.getBoundingClientRect().left - (e.closest('.pd-grid') as HTMLElement).getBoundingClientRect().left));
   const loaded = await left('box-selected');
   for (const id of ['box-loading', 'box-empty', 'box-error']) expect(await left(id), id).toBe(loaded);
 });
@@ -200,7 +200,7 @@ test('table: loading and empty say no count, and the columns do not move when ro
 test('table: an unsorted header hides its arrow, the sorted one shows it solid', async ({ page }) => {
   await open(page);
   const grid = page.locator('[data-testid="box-selected"]');
-  await expect(grid.getByRole('columnheader', { name: 'Size (KB)' }).locator('.mat-sort-header-arrow')).toHaveCSS('opacity', '1');
+  await expect(grid.getByRole('columnheader', { name: 'Size (KiB)' }).locator('.mat-sort-header-arrow')).toHaveCSS('opacity', '1');
   await expect(grid.getByRole('columnheader', { name: 'Kind' }).locator('.mat-sort-header-arrow')).toHaveCSS('opacity', '0');
 });
 
@@ -217,7 +217,7 @@ test('table: selected row, descending sort, empty, loading and error states are 
   await open(page);
   const selected = page.locator('[data-testid="box-selected"]');
   await expect(selected.locator('[role=row][aria-selected=true]')).toHaveCount(1);
-  await expect(selected.getByRole('columnheader', { name: 'Size (KB)' })).toHaveAttribute('aria-sort', 'descending');
+  await expect(selected.getByRole('columnheader', { name: 'Size (KiB)' })).toHaveAttribute('aria-sort', 'descending');
   await expect(page.locator('[data-testid="box-empty"]').getByRole('button', { name: 'Install a plugin' })).toBeVisible();
   await expect(page.locator('[data-testid="box-loading"] .pd-skel').first()).toBeVisible();
   await expect(page.locator('[data-testid="box-error"]').getByRole('alert')).toContainText('could not be read');
@@ -314,3 +314,15 @@ test('forms: the error shows after the field was left, with the 14 px alert icon
   await forms.getByRole('button', { name: 'Save' }).click();
   await expect(forms.getByTestId('forms-status')).toHaveText('Saved Alpha');
 });
+
+test('table: End and Home in the 5,000-row virtual table move the focus to the last and the first row once they are drawn', async ({ page }) => {
+  await open(page);
+  const grid = page.locator('[data-testid="table-virtual"]');
+  await grid.locator('[role=row][data-index]').first().focus();
+  await page.keyboard.press('End');
+  const last = await grid.locator('[role=grid]').getAttribute('aria-rowcount');
+  await expect(page.locator(':focus')).toHaveAttribute('aria-rowindex', String(last));
+  await page.keyboard.press('Home');
+  await expect(page.locator(':focus')).toHaveAttribute('data-index', '0');
+});
+
