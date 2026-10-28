@@ -1,0 +1,22 @@
+name: prune-build-folder
+description: "Keeps this job's kept build folder (the build-folder action's $PADDOCK_BUILD_FOLDER on a host runner) within a size cap, so nothing piles up on the owner's machines (tools/prune-build-folders.sh: incremental caches first, then the folder). It touches only that one folder, after the job's builds and uploads are done: run it last, with if: always(), on host runners only. Never fails the job."
+inputs:
+  max-gb:
+    description: The cap in whole gigabytes.
+    default: "20"
+  drop-bundles:
+    description: "'true' first removes <folder>/dist/bundle (installers already uploaded as artifacts)."
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MAX_GB: ${{ inputs.max-gb }}
+        DROP_BUNDLES: ${{ inputs.drop-bundles }}
+      run: |
+        dir="${PADDOCK_BUILD_FOLDER:-}"
+        [ -n "$dir" ] || { echo "no build folder was set in this job; nothing to prune"; exit 0; }
+        if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
+        if [ "$DROP_BUNDLES" = true ]; then rm -rf "$dir/dist/bundle" || true; fi
+        bash "${{ github.action_path }}/../../../tools/prune-build-folders.sh" "$dir" "$MAX_GB" || true

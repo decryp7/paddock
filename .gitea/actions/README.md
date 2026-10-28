@@ -32,6 +32,7 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `conformance` | `paddock-conformance` with the Paddock checkout, summary in the job | new |
 | `publish-release` | release notes with the First launch block (and an app's `notes-extra`), `latest.json`, the Gitea release for `v*` or `<app>-v*` tags, `latest.json` also on the moving `<app>-latest` release | the release job's steps |
 | `host-cleanup` | stray processes, temp folders and build outputs on a host runner | Pitwall `macos-cleanup.sh` |
+| `prune-build-folder` | caps the job's kept build folder on a host runner (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
 
 Reusable workflows: `app-release.yml` (bundles on three platforms, verify, publish; in the monorepo called from `<app>-release.yml`, see below), `app-fuzz.yml` (cargo-fuzz shards from a JSON list), `app-mutants.yml` (cargo-mutants, weekly and on the changed lines) and `app-never-panics.yml` (the never-panics tests with many cases; plan X41), `app-e2e.yml` (Chrome for Testing,
 Playwright), `app-licences.yml`. They need the Gitea on dev.decryptology.net to resolve cross-repository `uses:` (plan

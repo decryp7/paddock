@@ -250,6 +250,12 @@ jobs:
         with:
           app-id: ${{ inputs.app-id }}
 
+      # The kept build folder stays within its cap; the installers are already in the artifact.
+      - uses: ./.paddock/.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux'
+        with:
+          drop-bundles: "true"
+
   release:
     name: release
     if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix))

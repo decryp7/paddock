@@ -1103,3 +1103,16 @@ test("app-release runs an app's own bundle check on Linux and macOS, after the i
   const script = /bundle-check: (\S+)/.exec(dyno)?.[1];
   assert.ok(script && existsSync(join(PADDOCK, script)), "Dyno's check script exists");
 });
+
+test('every host job that keeps a build folder caps it at the end, with the shared prune action, in its own folder only', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const rel = read(join(WORKFLOWS, 'app-release.yml'));
+  assert.match(ci, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\n/, "ci.yml's app job prunes on the hosts, even after a failure");
+  assert.ok(ci.indexOf('actions/prune-build-folder') > ci.indexOf('actions/host-cleanup'), 'after the clean-up of the job');
+  assert.match(rel, /- uses: \.\/\.paddock\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\s+with:\n\s+drop-bundles: "true"/, "app-release's bundle job prunes on the hosts after the upload");
+  assert.ok(rel.indexOf('actions/prune-build-folder') > rel.indexOf('actions/upload-artifact'), 'only after the installers are uploaded');
+  const action = read(join(ACTIONS, 'prune-build-folder', 'action.yml'));
+  assert.match(action, /dir="\$\{PADDOCK_BUILD_FOLDER:-\}"/, 'only the job\'s own build folder');
+  assert.match(action, /prune-build-folders\.sh" "\$dir" "\$MAX_GB"/);
+  assert.match(action, /default: "20"/, 'the cap the old Dyno workflow had');
+});
