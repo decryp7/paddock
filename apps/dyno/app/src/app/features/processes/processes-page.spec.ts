@@ -51,6 +51,24 @@ describe('ProcessesPage', () => {
     expect(el.querySelector('[data-key="other-users"] .act button')).toBeNull();
     f.destroy();
   });
+  it('offers Run as administrator when values are unavailable, and not while elevated', async () => {
+    const { f, el, store } = await make((m) => {
+      const live = m.liveUpdate.bind(m);
+      m.liveUpdate = (d) => {
+        const u = live(d);
+        return { ...u, processes: u.processes?.map((p, i) => (i === 0 ? { ...p, cpu: { unavailable: { reason: 'needsAdmin' as const } } } : p)) ?? null };
+      };
+    });
+    store.setMode('flat');
+    f.detectChanges();
+    const note = el.querySelector('[data-testid="partial-note"]');
+    expect(note?.textContent).toContain('Run as administrator');
+    f.destroy();
+    TestBed.resetTestingModule();
+    const fine = await make();
+    expect(fine.el.querySelector('[data-testid="partial-note"]')).toBeNull();
+    fine.f.destroy();
+  });
   it('the view buttons switch the store mode', async () => {
     const { f, store, el } = await make();
     const buttons = [...el.querySelectorAll<HTMLButtonElement>('[aria-label="View"] button')];

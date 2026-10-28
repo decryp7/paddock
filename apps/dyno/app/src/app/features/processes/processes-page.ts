@@ -1,3 +1,4 @@
+import { ElevationStore } from '../../state/elevation.store';
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, input } from '@angular/core';
@@ -55,6 +56,12 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
         </div>
       }
 
+      @if (partialNote()) {
+        <p class="note" data-testid="partial-note">
+          <dy-icon name="info" /> Some values are unavailable or partial because Dyno runs with your normal rights.
+          <button type="button" class="btn sm" [disabled]="elevation.busy()" (click)="elevation.runAsAdministrator()"><dy-icon name="shield" /> Run as administrator</button>
+        </p>
+      }
       @if (store.otherUsers(); as o) {
         <p class="note" data-testid="other-users-note">
           <dy-icon name="info" /> “Other users” is one row for the {{ num(o.count) }} processes of other accounts on this PC. It adds up only the values Dyno can read.
@@ -240,6 +247,11 @@ export class ProcessesPage implements OnInit, OnDestroy {
     const n = this.store.total();
     return n === 0 ? 'Reading processes…' : `${plural(n, 'process', 'processes')}${s ? ` · ${formatPercent(s.cpu.total)} CPU · ${formatBytes(s.memory.used)} memory in use` : ''}`;
   });
+  protected readonly elevation = inject(ElevationStore);
+  /** Some value could not be read (or a sum is partial) and Dyno does not already run as administrator. */
+  protected readonly partialNote = computed(
+    () => !this.elevation.elevated() && this.store.rows().some((r) => r.partial || r.cpu === null || r.memory === null),
+  );
   protected readonly trackRow = (_: number, r: Row) => r.key;
   protected readonly num = formatCount;
   protected readonly pid = (r: Row) => (r.pid === null ? '' : String(r.pid));

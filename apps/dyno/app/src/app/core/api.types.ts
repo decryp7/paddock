@@ -268,6 +268,15 @@ export interface LiveUpdate {
   groups: AppGroup[] | null;
   /** Other users' processes, folded into one row (`processes` and `groups` leave them out); null when there are none. */
   otherUsers: OtherUsers | null;
+  /** The agent runs with administrator rights for this session: every process is listed in full. */
+  elevated: boolean;
+}
+
+/** The answer to "Run as administrator" and "Go back to normal rights". */
+export interface ElevationStatus {
+  elevated: boolean;
+  /** A calm sentence when nothing changed (the prompt was cancelled). */
+  message: string | null;
 }
 
 export type LiveDetail = 'summary' | 'processes';

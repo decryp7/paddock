@@ -16,6 +16,7 @@ import type {
   Anomaly,
   AppInfo,
   Diagnosis,
+  ElevationStatus,
   HealthReport,
   History,
   HistoryRange,
@@ -214,6 +215,10 @@ export interface DynoBackend {
   softwareInventory(): Promise<SoftwareInventory>;
   /** Asks where to save (the OS save dialog) and writes the hardware and software report there; `null` when they cancel. */
   saveInventoryReport(format: InventoryFormat): Promise<SavedInventory | null>;
+  /** Restarts the agent with administrator rights for this session, after the OS prompt. A cancelled prompt answers `elevated: false` with a message. */
+  runAsAdministrator(): Promise<ElevationStatus>;
+  /** Restarts the agent with normal rights. */
+  runUnelevated(): Promise<ElevationStatus>;
   /** Asks for a folder (the OS folder dialog; the webview never invents a path); `null` when they cancel. */
   pickFolder(): Promise<string | null>;
   /** Looks for large and duplicate files in a folder the person chose. Deletes nothing. */

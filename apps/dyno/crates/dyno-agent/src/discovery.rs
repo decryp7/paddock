@@ -22,6 +22,10 @@ pub struct Discovery {
     pub version: String,
     /// The app ↔ agent protocol version.
     pub protocol: u32,
+    /// For an agent started as administrator for this session: the user it belongs to (see
+    /// `dyno_core::session::user_key`). Another user never reuses it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elevated_for: Option<String>,
 }
 
 impl Discovery {
@@ -89,6 +93,7 @@ mod tests {
             started: 5,
             version: "0.1.0".into(),
             protocol: 1,
+            elevated_for: None,
         }
     }
 

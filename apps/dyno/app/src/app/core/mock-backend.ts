@@ -18,6 +18,7 @@ import type {
   AppInfo,
   CommandError,
   Diagnosis,
+  ElevationStatus,
   HealthReport,
   History,
   HistoryRange,
@@ -308,6 +309,7 @@ export class MockBackend implements DynoBackend {
       processes: detail === 'processes' ? samples : null,
       groups: detail === 'processes' ? groups : null,
       otherUsers: null,
+      elevated: this.elevated,
     };
   }
 
@@ -1094,6 +1096,28 @@ export class MockBackend implements DynoBackend {
     return this.reply('saveInventoryReport', () => {
       this.savedInventories.push(format);
       return { path: `/Users/sam/Documents/dyno-inventory.${format === 'markdown' ? 'md' : 'json'}`, bytes: 18_204 };
+    });
+  }
+
+  /** The mock's session: `elevationDeclined` makes the next request answer like a cancelled prompt. */
+  elevated = false;
+  elevationDeclined = false;
+
+  runAsAdministrator(): Promise<ElevationStatus> {
+    return this.reply('runAsAdministrator', () => {
+      if (this.elevationDeclined) {
+        this.elevationDeclined = false;
+        return { elevated: false, message: 'Dyno kept running with your normal rights. Nothing was changed.' };
+      }
+      this.elevated = true;
+      return { elevated: true, message: null };
+    });
+  }
+
+  runUnelevated(): Promise<ElevationStatus> {
+    return this.reply('runUnelevated', () => {
+      this.elevated = false;
+      return { elevated: false, message: null };
     });
   }
 

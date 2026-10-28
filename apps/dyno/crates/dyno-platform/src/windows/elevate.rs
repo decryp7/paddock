@@ -66,3 +66,35 @@ pub fn run_elevated(program: &Path, parameters: &str, timeout: Duration) -> Resu
         (false, _) => Err(ElevationError::Failed(None, "Could not read the installer's result.".into())),
     }
 }
+
+/// Starts `program` with the already quoted `parameters` as administrator (UAC) and returns without waiting for it.
+#[allow(unsafe_code)]
+pub fn start_elevated(program: &Path, parameters: &str) -> Result<(), ElevationError> {
+    let file: Vec<u16> = program.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let params: Vec<u16> = parameters.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_NOCLOSEPROCESS,
+        lpVerb: w!("runas"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpParameters: PCWSTR(params.as_ptr()),
+        nShow: SW_HIDE.0,
+        ..Default::default()
+    };
+    // SAFETY: `info` is fully initialised for the fields the flags read; `file` and `params` are NUL-terminated and
+    // outlive the call.
+    if let Err(e) = unsafe { ShellExecuteExW(&mut info) } {
+        return Err(if e.code() == HRESULT::from_win32(ERROR_CANCELLED) {
+            ElevationError::Declined
+        } else {
+            ElevationError::Failed(None, format!("Windows could not start Dyno as administrator: {e}"))
+        });
+    }
+    if !info.hProcess.is_invalid() {
+        // SAFETY: the handle is ours and not used after this; the process keeps running.
+        unsafe {
+            let _ = CloseHandle(info.hProcess);
+        }
+    }
+    Ok(())
+}

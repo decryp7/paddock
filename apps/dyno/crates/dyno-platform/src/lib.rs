@@ -25,6 +25,7 @@ pub mod processes;
 pub mod readability;
 pub mod runner;
 pub mod sensors;
+pub mod session_elevate;
 pub mod toolpath;
 #[cfg(unix)]
 #[allow(unsafe_code)]

@@ -193,6 +193,8 @@ pub struct Shared {
     pub hardware: crate::hardware::HardwareCentre,
     /// "Is this normal?" baselines learned from history.
     pub baselines: crate::baselines::BaselineCentre,
+    /// What the agent runs as: normal rights, or administrator rights for this session only.
+    pub session: dyno_core::session::Session,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -205,6 +207,18 @@ impl Shared {
     /// defaults with a note in the activity log). Returns the sampler's two ports separately. `details` is a second
     /// process source used only for on-demand details, so a slow `lsof` never delays a sampling tick.
     pub fn build(dirs: Dirs, platform: Platform, details: Box<dyn ProcessSource>, reveal: Reveal) -> Result<Built, String> {
+        let session = dyno_core::session::Session::normal(crate::identity::this_uid());
+        Shared::build_session(dirs, platform, details, reveal, session)
+    }
+
+    /// [`Shared::build`] for a given session.
+    pub fn build_session(
+        dirs: Dirs,
+        platform: Platform,
+        details: Box<dyn ProcessSource>,
+        reveal: Reveal,
+        session: dyno_core::session::Session,
+    ) -> Result<Built, String> {
         let t = now();
         let mut notes: Vec<String> = Vec::new();
         if let Err(e) = std::fs::create_dir_all(dirs.root()) {
@@ -294,6 +308,7 @@ impl Shared {
             ),
             hardware: crate::hardware::HardwareCentre::os(),
             baselines: crate::baselines::BaselineCentre::new(),
+            session,
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),

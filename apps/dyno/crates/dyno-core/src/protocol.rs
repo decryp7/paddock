@@ -407,6 +407,8 @@ pub struct LiveUpdate {
     /// Other users' processes folded into one row; `processes` and `groups` leave them out. `None` when there are none
     /// or the grouping is off.
     pub other_users: Option<OtherUsers>,
+    /// The agent runs with administrator rights ("Run as administrator"): every process is listed in full.
+    pub elevated: bool,
 }
 
 /// A marker on the history timeline.
@@ -859,6 +861,7 @@ mod tests {
             processes: None,
             groups: Some(vec![]),
             other_users: None,
+            elevated: false,
         };
         for m in [
             Message::Request(Box::new(Request::SaveSettings { settings: Box::default() })),

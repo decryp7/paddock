@@ -106,6 +106,60 @@ fn other_users_processes_are_folded_into_one_row_in_the_live_update() {
     assert_eq!(listed.len(), 3);
 }
 
+#[cfg(unix)]
+#[test]
+fn an_elevated_agent_answers_only_the_user_it_was_started_for_and_lists_every_process() {
+    use dyno_core::session::Session;
+    let me = dyno_agent::identity::this_uid().unwrap();
+    let start = |allowed: u32| {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = Dirs::at(tmp.path().join("elevated"));
+        let fake = Fake::new();
+        fake.add_process(process(100, "busy", 60.0));
+        let mut theirs = process(200, "theirs", 3.0);
+        theirs.owner = dyno_core::process::Owner::Other;
+        fake.add_process(theirs);
+        let session = Session::elevated("uid:test".into(), Some(allowed));
+        let running = Running::start_session(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(())), session).unwrap();
+        (running, dirs, tmp)
+    };
+    // The right user: connects, sees the other user's process in the list, and the update says elevated.
+    let (running, dirs, _tmp) = start(me);
+    let d = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
+    assert_eq!(d.elevated_for.as_deref(), Some("uid:test"));
+    let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+    let (tx, rx) = channel();
+    let peer = Peer::start(
+        conn,
+        PeerOptions::new().on_push(move |m| {
+            if let Message::Live(l) = m {
+                let _ = tx.send(*l);
+            }
+        }),
+    )
+    .unwrap();
+    ask(
+        &peer,
+        Request::Subscribe {
+            detail: LiveDetail::Processes,
+        },
+    )
+    .unwrap();
+    let live = rx.recv_timeout(Duration::from_secs(10)).expect("a live update");
+    assert!(live.elevated && live.other_users.is_none());
+    assert_eq!(live.processes.unwrap().len(), 2, "every process is listed in full");
+    running.stop();
+    // Another user: the connection is dropped before any request is answered.
+    let (running, dirs, _tmp) = start(me + 1);
+    let d = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
+    let refused = Client::connect(&d.endpoint, &d.token().unwrap())
+        .map_err(|e| e.to_string())
+        .and_then(|c| Peer::start(c, PeerOptions::new()).map_err(|e| e.to_string()))
+        .and_then(|p| ask(&p, Request::Settings).map_err(|e| e.to_string()));
+    assert!(refused.is_err(), "a caller that is not the session's user gets no answer");
+    running.stop();
+}
+
 #[test]
 fn settings_round_trip_and_survive_a_restart() {
     let h = Harness::start();

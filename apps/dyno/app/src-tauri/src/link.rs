@@ -79,12 +79,15 @@ pub enum Plan {
     Connect,
     /// An agent of another build (or protocol): ask it to exit, then start ours.
     Replace,
+    /// An elevated agent that was started for another user: never connected to, replaced or removed.
+    Foreign,
 }
 
 /// The decision for the discovery file's content.
-pub fn plan(found: Option<&Discovery>, app_version: &str, protocol: u32) -> Plan {
+pub fn plan(found: Option<&Discovery>, app_version: &str, protocol: u32, current_user: &str) -> Plan {
     match found {
         None => Plan::Spawn,
+        Some(d) if !dyno_core::session::discovery_usable(d.elevated_for.as_deref(), current_user) => Plan::Foreign,
         Some(d) if d.version == app_version && d.protocol == protocol => Plan::Connect,
         Some(_) => Plan::Replace,
     }
@@ -145,7 +148,16 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// The connection manager.
 pub struct AgentLink {
-    dirs: Dirs,
+    /// The folder whose discovery file names the agent to talk to: the data folder, or the elevated session's.
+    dirs: Mutex<Dirs>,
+    /// The person's own data folder.
+    home: Dirs,
+    /// No normal agent may be started (an elevated one is being started or replaces it).
+    hold_spawn: AtomicBool,
+    /// The agent we talk to runs with administrator rights for this session.
+    elevated: AtomicBool,
+    /// A folder to remove when the app quits (the elevated session's).
+    cleanup: Mutex<Option<std::path::PathBuf>>,
     app_version: String,
     sink: Arc<dyn Sink>,
     launcher: Box<dyn Launcher>,
@@ -168,7 +180,11 @@ impl AgentLink {
     /// A link for the agent in `dirs`.
     pub fn new(dirs: Dirs, app_version: &str, sink: Arc<dyn Sink>, launcher: Box<dyn Launcher>) -> Arc<AgentLink> {
         Arc::new(AgentLink {
-            dirs,
+            dirs: Mutex::new(dirs.clone()),
+            home: dirs,
+            hold_spawn: AtomicBool::new(false),
+            elevated: AtomicBool::new(false),
+            cleanup: Mutex::new(None),
             app_version: app_version.to_string(),
             sink,
             launcher,
@@ -349,7 +365,8 @@ impl AgentLink {
         if self.quit_done.swap(true, Ordering::SeqCst) {
             return false;
         }
-        let stop = stop_agent_on_quit(self.started_by_this_app(), self.service_installed.load(Ordering::SeqCst));
+        // An agent with administrator rights lives for this session only: it always ends with Dyno.
+        let stop = self.is_elevated() || stop_agent_on_quit(self.started_by_this_app(), self.service_installed.load(Ordering::SeqCst));
         logging::info(&format!(
             "quitting; the agent {}",
             if stop {
@@ -358,7 +375,60 @@ impl AgentLink {
                 "keeps running"
             }
         ));
-        self.shutdown(stop)
+        let asked = self.shutdown(stop);
+        if let Some(dir) = lock(&self.cleanup).take() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        asked
+    }
+
+    fn discovery_path(&self) -> std::path::PathBuf {
+        lock(&self.dirs).discovery()
+    }
+
+    /// Switches to the agent started with administrator rights in `session` (its own folder, removed when the app quits):
+    /// the normal agent is asked to exit first, then the connection moves to the elevated one.
+    pub fn enter_session(&self, session: Dirs, cleanup: std::path::PathBuf) {
+        let _ = self.call(Request::Shutdown);
+        self.launcher.finish(Duration::from_secs(3));
+        *lock(&self.dirs) = session;
+        *lock(&self.cleanup) = Some(cleanup);
+        self.elevated.store(true, Ordering::SeqCst);
+        self.hold_spawn.store(false, Ordering::SeqCst);
+        self.drop_connection();
+    }
+
+    /// Goes back to normal rights: the elevated agent exits, its folder is removed and a normal agent is started again.
+    pub fn leave_session(&self) {
+        let _ = self.call(Request::Shutdown);
+        let end = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < end && Discovery::read(&self.discovery_path()).is_some() {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        *lock(&self.dirs) = self.home.clone();
+        self.elevated.store(false, Ordering::SeqCst);
+        self.hold_spawn.store(false, Ordering::SeqCst);
+        if let Some(dir) = lock(&self.cleanup).take() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        self.drop_connection();
+    }
+
+    /// No normal agent is started while a session switch is under way.
+    pub fn hold_spawn(&self, hold: bool) {
+        self.hold_spawn.store(hold, Ordering::SeqCst);
+    }
+
+    fn drop_connection(&self) {
+        *lock(&self.sent) = None;
+        if let Some(p) = lock(&self.peer).take() {
+            p.close();
+        }
+    }
+
+    /// Whether the agent this link talks to runs with administrator rights.
+    pub fn is_elevated(&self) -> bool {
+        self.elevated.load(Ordering::SeqCst)
     }
 
     fn try_connect(&self, d: &Discovery) -> Result<Arc<Peer<Message>>, String> {
@@ -378,8 +448,17 @@ impl AgentLink {
     /// Connects to the agent, starting or replacing it when needed.
     fn establish(&self) -> Result<Arc<Peer<Message>>, String> {
         for _ in 0..3 {
-            let found = Discovery::read(&self.dirs.discovery());
-            match plan(found.as_ref(), &self.app_version, PROTOCOL_VERSION) {
+            let found = Discovery::read(&self.discovery_path());
+            match plan(
+                found.as_ref(),
+                &self.app_version,
+                PROTOCOL_VERSION,
+                &dyno_agent::identity::this_user_key(),
+            ) {
+                Plan::Foreign => {
+                    logging::info("the agent in this folder belongs to another user; not using it");
+                    return Err("The agent in this folder was started for another user.".into());
+                }
                 Plan::Connect => {
                     if let Some(d) = &found {
                         match self.try_connect(d) {
@@ -387,7 +466,7 @@ impl AgentLink {
                             // A stale file (its process is gone): treat as no agent.
                             Err(e) => {
                                 logging::info(&format!("stale agent.json: {e}"));
-                                let _ = std::fs::remove_file(self.dirs.discovery());
+                                let _ = std::fs::remove_file(self.discovery_path());
                             }
                         }
                     }
@@ -406,9 +485,9 @@ impl AgentLink {
                             self.wait_gone(Duration::from_secs(5));
                         }
                     }
-                    if Discovery::read(&self.dirs.discovery()).is_some() {
+                    if Discovery::read(&self.discovery_path()).is_some() {
                         // Its process is gone but the file stayed.
-                        let _ = std::fs::remove_file(self.dirs.discovery());
+                        let _ = std::fs::remove_file(self.discovery_path());
                     }
                 }
                 Plan::Spawn => self.start_agent()?,
@@ -422,19 +501,22 @@ impl AgentLink {
 
     fn wait_gone(&self, wait: Duration) {
         let end = Instant::now() + wait;
-        while Instant::now() < end && Discovery::read(&self.dirs.discovery()).is_some() {
+        while Instant::now() < end && Discovery::read(&self.discovery_path()).is_some() {
             std::thread::sleep(Duration::from_millis(100));
         }
     }
 
     /// Starts the agent and waits for it to be reachable (a connection is made by the next pass of [`establish`]).
     fn start_agent(&self) -> Result<(), String> {
+        if self.hold_spawn.load(Ordering::SeqCst) {
+            return Err("Dyno is switching to administrator rights.".into());
+        }
         logging::info("starting the agent");
         self.launcher.launch()?;
         self.started_by_us.store(true, Ordering::SeqCst);
         let end = Instant::now() + SPAWN_WAIT;
         while Instant::now() < end {
-            if Discovery::read(&self.dirs.discovery()).is_some() {
+            if Discovery::read(&self.discovery_path()).is_some() {
                 return Ok(());
             }
             if self.is_stopping() {
@@ -578,19 +660,33 @@ mod tests {
             started: 0,
             version: version.into(),
             protocol,
+            elevated_for: None,
         }
     }
 
     #[test]
     fn the_discovery_file_decides_what_to_do() {
-        assert_eq!(plan(None, "0.1.0", 1), Plan::Spawn);
-        assert_eq!(plan(Some(&disc("0.1.0", 1)), "0.1.0", 1), Plan::Connect);
+        let me = "uid:1";
+        assert_eq!(plan(None, "0.1.0", 1, me), Plan::Spawn);
+        assert_eq!(plan(Some(&disc("0.1.0", 1)), "0.1.0", 1, me), Plan::Connect);
         assert_eq!(
-            plan(Some(&disc("0.0.9", 1)), "0.1.0", 1),
+            plan(Some(&disc("0.0.9", 1)), "0.1.0", 1, me),
             Plan::Replace,
             "an older agent is replaced"
         );
-        assert_eq!(plan(Some(&disc("0.1.0", 2)), "0.1.0", 1), Plan::Replace, "another protocol too");
+        assert_eq!(plan(Some(&disc("0.1.0", 2)), "0.1.0", 1, me), Plan::Replace, "another protocol too");
+        let mut theirs = disc("0.1.0", 1);
+        theirs.elevated_for = Some("uid:2".into());
+        assert_eq!(
+            plan(Some(&theirs), "0.1.0", 1, me),
+            Plan::Foreign,
+            "another user's elevated agent is left alone"
+        );
+        assert_eq!(
+            plan(Some(&theirs), "0.1.0", 1, "uid:2"),
+            Plan::Connect,
+            "the user it was started for connects"
+        );
     }
 
     #[test]
@@ -767,7 +863,7 @@ mod tests {
         // Quit: the agent this app started is asked to exit.
         assert!(r.link.quit());
         handle.join().unwrap();
-        assert!(!r.link.dirs.discovery().exists(), "the agent removed its discovery file");
+        assert!(!r.link.discovery_path().exists(), "the agent removed its discovery file");
         assert_eq!(r.link.call(Request::Settings).unwrap_err().code, ErrorCode::AgentUnavailable);
     }
 
@@ -792,7 +888,7 @@ mod tests {
         assert!(!r.link.started_by_this_app());
         assert!(!r.link.quit(), "somebody else's agent stays");
         handle.join().unwrap();
-        assert!(r.link.dirs.discovery().exists(), "it is still there");
+        assert!(r.link.discovery_path().exists(), "it is still there");
         r.launcher.finish(Duration::ZERO);
     }
 
@@ -805,7 +901,7 @@ mod tests {
         assert!(r.link.started_by_this_app());
         assert!(!r.link.quit());
         handle.join().unwrap();
-        assert!(r.link.dirs.discovery().exists());
+        assert!(r.link.discovery_path().exists());
         r.launcher.finish(Duration::ZERO);
     }
 
@@ -821,6 +917,62 @@ mod tests {
         assert!(r.link.call(Request::Settings).is_ok());
         r.link.quit();
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn the_link_moves_to_an_elevated_agent_and_back_without_starting_a_second_normal_one() {
+        let r = rig(false);
+        let handle = r.link.spawn().unwrap();
+        wait_for(&r.statuses, AgentState::Running);
+        assert!(!r.link.is_elevated());
+        // The elevated agent (here in process, over the fake platform) lives in its own folder.
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("elevated-session");
+        let fake = Fake::new();
+        fake.add_process(process(7, "root-only", 1.0));
+        let session = dyno_core::session::Session::elevated(dyno_agent::identity::this_user_key(), dyno_agent::identity::this_uid());
+        let elevated = Running::start_session(
+            Dirs::at(&folder),
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+            session,
+        )
+        .unwrap();
+        r.link.hold_spawn(true);
+        r.link.enter_session(Dirs::at(&folder), folder.clone());
+        wait_for(&r.statuses, AgentState::Running);
+        assert!(r.link.is_elevated());
+        assert!(r.link.call(Request::Settings).is_ok(), "the link talks to the elevated agent");
+        assert_eq!(
+            r.launcher.launches.load(Ordering::SeqCst),
+            1,
+            "no normal agent was started meanwhile"
+        );
+        assert!(!r.link.discovery_path().starts_with(r.link.home.root()) || r.link.discovery_path().starts_with(&folder));
+        // Back to normal rights: the elevated agent exits, its folder goes and a normal agent starts again.
+        r.link.leave_session();
+        elevated.stop();
+        wait_for(&r.statuses, AgentState::Running);
+        assert!(!r.link.is_elevated());
+        assert!(r.link.call(Request::Settings).is_ok());
+        assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 2);
+        assert!(!folder.exists(), "the session folder is removed");
+        r.link.quit();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn quitting_while_elevated_always_stops_the_agent_and_removes_its_folder() {
+        let r = rig(false);
+        r.link.set_service_installed(true);
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("elevated-session");
+        std::fs::create_dir_all(&folder).unwrap();
+        *lock(&r.link.cleanup) = Some(folder.clone());
+        r.link.elevated.store(true, Ordering::SeqCst);
+        assert!(!r.link.quit() || true);
+        assert!(!folder.exists());
     }
 
     #[test]

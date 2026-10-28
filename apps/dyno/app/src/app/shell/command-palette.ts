@@ -1,3 +1,4 @@
+import { ElevationStore } from '../state/elevation.store';
 import { DialogRef } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
@@ -125,6 +126,7 @@ export function rankItems<T extends { label: string; keywords: string }>(items: 
 })
 export class CommandPalette {
   private readonly ref = inject(DialogRef);
+  private readonly elevation = inject(ElevationStore);
   private readonly router = inject(Router);
   private readonly diagnosis = inject(DiagnosisStore);
   protected readonly platform = inject(PlatformService);
@@ -141,7 +143,17 @@ export class CommandPalette {
     const go = (path: string) => () => void this.router.navigateByUrl(path);
     const screens: PaletteItem[] = NAV.map((n) => ({ id: `go${n.path.replace('/', '-')}`, section: 'Go to', label: n.label, hint: '', icon: n.icon, keywords: n.keywords, run: go(n.path) }));
     screens.push({ id: 'go-cpu', section: 'Go to', label: 'CPU details', hint: 'Per core', icon: 'cpu', keywords: 'cores per core heatmap frequency performance efficiency', run: go('/cpu') });
+    const elevated = this.elevation.elevated();
     const actions: PaletteItem[] = [
+      {
+        id: 'run-as-administrator',
+        section: 'Actions',
+        label: elevated ? 'Go back to normal rights' : 'Run as administrator',
+        hint: elevated ? 'Restart Dyno without administrator rights' : 'Read every process, for this session',
+        icon: 'shield',
+        keywords: 'administrator admin elevate permission rights uac sudo',
+        run: () => void (elevated ? this.elevation.goBackToNormal() : this.elevation.runAsAdministrator()),
+      },
       {
         id: 'why-slow',
         section: 'Actions',

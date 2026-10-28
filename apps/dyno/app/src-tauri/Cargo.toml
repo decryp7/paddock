@@ -22,6 +22,7 @@ dyno-ipc.workspace = true
 # Only for `Dirs`, `Discovery` and `service::Service` (the agent's per-user service registration); the app never links to
 # the sensors by calling them (ADR 0002: the agent measures, the app is a client).
 dyno-agent.workspace = true
+dyno-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -51,7 +52,6 @@ objc2-service-management = { version = "0.3", default-features = false, features
 
 [dev-dependencies]
 # Tests start an in-process agent over the fake platform (never the real sensors).
-dyno-platform.workspace = true
 tempfile.workspace = true
 
 [lints]
