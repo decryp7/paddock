@@ -63,7 +63,12 @@ fn a_real_browser_reads_a_page_and_closes_cleanly() {
     assert!(!page.screenshot_png().unwrap().is_empty());
     assert_eq!(b.page_count().unwrap(), 1, "the start page is the only tab");
     let dir = b.profile_dir().to_path_buf();
-    assert!(b.close(), "Browser.close ends it by itself");
+    let exited = close_by_itself(&mut b);
+    assert!(
+        exited.0,
+        "Browser.close ends it by itself (waited {:?})",
+        exited.1
+    );
     assert!(!dir.exists());
     assert!(!paddock_proc::is_alive(pid), "nothing is left behind");
     // Helpers end a moment after the browser; a bounded wait, not an immediate check (rule 40).
@@ -127,9 +132,14 @@ fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
                 Duration::from_secs(30),
             )
         });
-        first_request
-            .recv_timeout(Duration::from_secs(30))
-            .expect("the first load reached the server");
+        if first_request.recv_timeout(Duration::from_secs(30)).is_err() {
+            // Windows runs 6696 and 6697 never saw the request. Say what the load itself reported (its own wait ends after
+            // 30 s), so the next failure names the cause instead of only the symptom.
+            panic!(
+                "the first load did not reach the server in 30 s; the load itself ended with {:?}",
+                first.join()
+            );
+        }
         page.navigate(
             &format!("http://127.0.0.1:{port}/other"),
             Duration::from_secs(30),
@@ -141,5 +151,21 @@ fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
         e.contains("replaced") && e.contains(&format!("http://127.0.0.1:{port}/other")),
         "{e}"
     );
-    assert!(b.close(), "Browser.close ends it by itself");
+    let exited = close_by_itself(&mut b);
+    assert!(
+        exited.0,
+        "Browser.close ends it by itself (waited {:?})",
+        exited.1
+    );
+}
+
+/// How long a loaded CI runner may take to let Chrome exit after `Browser.close` is a property of the machine, not of the
+/// driver (macOS 6662 and 6726 and Windows 6726 took more than `CLOSE_GRACE`, 5 s, with the test otherwise fine). The test
+/// asserts the mechanism, that the browser exits by itself and is not killed, and waits for that exit on the condition; the
+/// bound only keeps a browser that never exits from hanging the test (rule 40). Returns whether it exited and the wait.
+fn close_by_itself(b: &mut Chromium) -> (bool, Duration) {
+    const HANG_GUARD: Duration = Duration::from_secs(120);
+    let started = std::time::Instant::now();
+    let exited = b.close_gracefully(HANG_GUARD);
+    (exited, started.elapsed())
 }
