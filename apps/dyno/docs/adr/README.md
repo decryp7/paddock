@@ -25,7 +25,7 @@ so the numbering is fixed.
 | [0018](0018-throttling-lifespan-and-baselines.md) | Throttling episodes, hardware life forecasts as ranges and learned baselines: pure judging, read-only readers, evidence before alarms |
 | [0019](0019-watched-folders-and-browser-lookups.md) | Watched folders sweep into the quarantine only, previewed first; web and hash searches are browser hand-offs |
 | [0020](0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver; taming rules that expire and prove their effect |
-| [0022](0022-helper-installed-with-the-app.md) | Proposed: the helper is installed with the app on all three OS (per-machine NSIS, an unsigned .pkg, .deb scripts), runs nothing from a user-writable place, installs Dyno's signed updates itself, and reads all processes in bounded, scoped shapes |
+| [0022](0022-helper-installed-with-the-app.md) | Proposed for Dyno 1.1 (1.0 ships without the helper): the helper is installed with the app on all three OS (per-machine NSIS, an unsigned .pkg, .deb scripts), runs nothing from a user-writable place, installs Dyno's signed updates itself, and reads all processes in bounded, scoped shapes |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.
