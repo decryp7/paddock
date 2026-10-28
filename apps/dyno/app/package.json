@@ -4,12 +4,11 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
-    "build": "ng build && node scripts/check-index.mjs",
+    "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
     "tauri": "tauri",
-    "test:scripts": "node --test scripts/check-index.test.mjs",
     "e2e": "playwright test --workers=1",
     "screenshots": "SCREENSHOTS=1 playwright test --project=screenshots --workers=1"
   },

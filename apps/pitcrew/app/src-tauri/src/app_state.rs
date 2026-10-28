@@ -62,7 +62,7 @@ mod tests {
     use super::*;
 
     fn temp(name: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-appstate-{name}-{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("pitcrew-it-appstate-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p

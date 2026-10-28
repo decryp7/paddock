@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn scans_and_cleans_a_runner_folder_including_read_only_and_deep_files() {
-        let d = std::env::temp_dir().join(format!("pitcrew-clean-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("pitcrew-it-clean-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let deep = d
             .join("work/abc")
@@ -366,7 +366,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_file_in_use_is_reported_with_a_reason() {
-        let d = std::env::temp_dir().join(format!("pitcrew-inuse-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("pitcrew-it-inuse-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("work/job")).unwrap();
         let f = d.join("work/job/open.bin");
