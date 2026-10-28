@@ -19,6 +19,7 @@ mod history;
 mod lock;
 mod npm;
 mod paths;
+mod real;
 mod source;
 
 #[cfg(feature = "cargo-metadata")]
@@ -32,4 +33,5 @@ pub use history::{Commit, History, parse_log};
 pub use lock::lock_diff;
 pub use npm::npm_graph;
 pub use paths::{dirname, join_normalized, relative};
+pub use real::{real_path, strip_verbatim};
 pub use source::{FileSource, MemoryFiles};

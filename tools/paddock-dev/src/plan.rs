@@ -6,7 +6,7 @@
 //! in `paddock-repo-graph`: they are this repository's, the graph crate is generic (ADR 0022 §6, "CI-only").
 
 use paddock_cli::{CliError, Report};
-use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph};
+use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph, real_path};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -398,6 +398,9 @@ pub fn apps_of(files: &[String]) -> BTreeSet<String> {
 /// Reads the graphs of the repository at `root` (tracked files only, as `git ls-files` lists them).
 pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, GraphError> {
     let files = history.tracked_files()?;
+    // The root in the spelling cargo prints its paths in (a temp folder's short name or a symlinked workspace is not).
+    let root = real_path(root);
+    let root = root.as_path();
     let disk = DiskFiles(root.to_path_buf());
     let root_text = root.to_string_lossy().replace('\\', "/");
     let cargo = cargo_graph(&files, &disk, &CargoCli::new(root, TIMEOUT), &root_text)?;
