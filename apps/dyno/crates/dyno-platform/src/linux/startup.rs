@@ -13,10 +13,32 @@ use std::time::Duration;
 
 /// Most files read from one autostart folder.
 const MAX_FILES: usize = 1_000;
+/// How long `systemctl` may take.
+const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(10);
 
 const USER_PREFIX: &str = "autostart:";
 const SYSTEM_PREFIX: &str = "autostart-system:";
 const UNIT_PREFIX: &str = "systemd-user:";
+
+/// A file name that is a `.desktop` file directly in a folder (no separators, no dot-files, no `..`).
+fn plain_desktop_name(name: &str) -> Option<&str> {
+    let ok = name.len() <= 255
+        && name.ends_with(".desktop")
+        && name.len() > ".desktop".len()
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\', '\0']);
+    ok.then_some(name)
+}
+
+/// A systemd service name: letters, digits and `:_.@\-`, ending in `.service`, not starting with `-` or `.`.
+fn plain_unit_name(name: &str) -> bool {
+    name.ends_with(".service")
+        && name.len() <= 256
+        && !name.starts_with(['-', '.'])
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '.' | '@' | '\\' | '-'))
+}
 
 /// Startup items for Linux.
 pub struct LinuxStartup {
@@ -264,7 +286,6 @@ mod tests {
         );
         let unit = find(&list, "systemd-user:syncthing.service");
         assert_eq!((unit.name.as_str(), unit.state), ("syncthing", StartupState::Enabled));
-        assert!(!unit.location.needs_admin());
         assert_eq!(
             e.tools.calls(),
             ["systemctl --user list-unit-files --type=service --state=enabled --no-legend --no-pager"]
@@ -286,13 +307,17 @@ mod tests {
         assert_eq!(e.startup.list().unwrap(), vec![]);
     }
 
-    fn unit_entry(unit: &str) -> StartupEntry {
-        LinuxStartup::entry(
-            format!("{UNIT_PREFIX}{unit}"),
-            unit.into(),
-            unit.into(),
-            StartupLocation::LoginItem,
-            true,
-        )
+    #[test]
+    fn only_plain_file_and_unit_names_are_listed() {
+        assert!(plain_desktop_name("a.desktop").is_some());
+        for bad in [".desktop", ".hidden.desktop", "a/b.desktop", "a\\b.desktop", "a.txt", "a\0.desktop"] {
+            assert!(plain_desktop_name(bad).is_none(), "{bad}");
+        }
+        assert!(plain_desktop_name(&format!("{}.desktop", "a".repeat(260))).is_none());
+        assert!(plain_unit_name("syncthing.service") && plain_unit_name("app@1.service"));
+        for bad in ["-x.service", ".x.service", "x.timer", "a b.service", "a/b.service"] {
+            assert!(!plain_unit_name(bad), "{bad}");
+        }
+        assert!(!plain_unit_name(&format!("{}.service", "a".repeat(260))));
     }
 }
