@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { BackupSettings, BackupTool, BaselineSettings, HardwareAlarms, IpLookupSettings, Settings, Theme, TrayItem, UnusualSettings } from '../../core/api.types';
+import type { BackupSettings, BackupTool, BaselineSettings, HardwareAlarms, IpLookupSettings, Settings, TrayItem, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -12,7 +12,7 @@ import { LOOKUP_PRESETS, presetIdFor, templateProblem } from './ip-lookup-preset
 import { TrayItemsEditor } from './tray-items-editor';
 import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 
-/** Settings: appearance, start-up, sampling and retention, the tray, alert thresholds, the observe-only posture, plugins and About. */
+/** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
   selector: 'dy-settings-page',
   imports: [FormsModule, Switch, AsyncState, Icon, TrayItemsEditor],
@@ -20,10 +20,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
   template: `
     <div class="page narrow">
       <header class="page-head">
-        <div class="titles">
-          <h1>Settings</h1>
-          <p>Dyno only looks. It changes nothing on your PC.</p>
-        </div>
+        <div class="titles"><h1 class="visually-hidden">Dyno settings</h1></div>
         @if (store.saveError(); as failed) {
           <span class="save-error" role="alert">{{ failed.message }}</span>
         }
@@ -38,16 +35,8 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
           <div class="stack">
             <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads and changes nothing on your computer.</p>
 
-            <section class="card" aria-label="Appearance">
-              <h2>Appearance</h2>
-              <div class="row">
-                <div class="lbl"><strong>Theme</strong><small>Follow the system, or always dark or light.</small></div>
-                <div class="seg" role="radiogroup" aria-label="Theme">
-                  @for (t of themes; track t.id) {
-                    <button type="button" role="radio" [attr.aria-checked]="d.theme === t.id" (click)="set({ theme: t.id })"><dy-icon [name]="t.icon" /> {{ t.label }}</button>
-                  }
-                </div>
-              </div>
+            <section class="card" aria-label="Start-up">
+              <h2>Start-up</h2>
               <div class="row">
                 <div class="lbl"><strong>Start Dyno at login</strong><small>The background agent keeps measuring either way once it is running.</small></div>
                 <dy-switch [checked]="d.launchAtLogin" (changed)="set({ launchAtLogin: $event })" label="Start Dyno at login" />
@@ -228,20 +217,6 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
           </ul>
         </dy-async>
       </section>
-
-      <section class="card about" aria-label="About">
-        <h2>About</h2>
-        @if (store.appInfo(); as a) {
-          <dl>
-            <dt>Version</dt><dd class="num">{{ a.version }}</dd>
-            <dt>Platform</dt><dd>{{ osName(a.os) }}</dd>
-            <dt>Updates</dt>
-            <dd>{{ a.updatesAvailable ? 'An update is available.' : (a.updatesReason ?? 'Dyno is up to date.') }}</dd>
-          </dl>
-        } @else {
-          <div class="skeleton" style="width: 40%"></div>
-        }
-      </section>
     </div>
   `,
   styles: `
@@ -273,9 +248,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
     .plugins { list-style: none; margin: 0; padding: 0; display: grid; }
     .plugins li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); }
     .plugins .txt { flex: 1; display: grid; }
-    .about dl { margin: 0; display: grid; grid-template-columns: 110px 1fr; gap: var(--sp-2); }
-    .about dt { color: var(--text-3); } .about dd { margin: 0; }
-    @media (max-width: 760px) { .row { flex-direction: column; align-items: flex-start; gap: var(--sp-2); } }
+        @media (max-width: 760px) { .row { flex-direction: column; align-items: flex-start; gap: var(--sp-2); } }
   `,
 })
 export class SettingsPage implements OnInit {
@@ -283,11 +256,6 @@ export class SettingsPage implements OnInit {
   private readonly backend = inject(BACKEND);
   private readonly notifier = inject(Notifier);
   protected readonly draft = signal<Settings | null>(null);
-  protected readonly themes: { id: Theme; label: string; icon: 'monitor' | 'moon' | 'sun' }[] = [
-    { id: 'system', label: 'System', icon: 'monitor' },
-    { id: 'dark', label: 'Dark', icon: 'moon' },
-    { id: 'light', label: 'Light', icon: 'sun' },
-  ];
   protected readonly presets = LOOKUP_PRESETS;
   protected readonly ipLookup = computed(() => this.draft()?.ipLookup ?? { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' });
   protected readonly presetId = computed(() => presetIdFor(this.ipLookup().ipTemplate));
@@ -325,8 +293,6 @@ export class SettingsPage implements OnInit {
 
   protected set(patch: Partial<Settings>): void {
     this.draft.update((d) => (d ? { ...d, ...patch } : d));
-    // The theme applies at once so the choice is visible; it is stored with Save.
-    if (patch.theme) this.store.applyTheme(patch.theme);
   }
   protected setLookup(p: Partial<IpLookupSettings>): void {
     this.draft.update((d) => (d ? { ...d, ipLookup: { ...this.ipLookup(), ...p } } : d));
@@ -396,13 +362,11 @@ export class SettingsPage implements OnInit {
     const s = this.store.settings();
     this.draft.set(s ? structuredClone(s) : null);
     this.rawOverrides.set({});
-    if (s) this.store.applyTheme(s.theme);
   }
 
   protected every(ms: number): string {
     return ms < 1000 ? 'Every half second' : ms === 1000 ? 'Every second' : `Every ${ms / 1000} seconds`;
   }
-  protected readonly osName = (os: string) => (os === 'macos' ? 'macOS' : os === 'windows' ? 'Windows' : 'Linux');
   protected readonly pluginState = (s: string) => (s === 'running' ? 'Running' : s === 'stopped' ? 'Stopped' : s === 'failed' ? 'Failed' : 'Paused after failures');
   protected readonly pluginTone = (s: string) => (s === 'running' ? 'ok' : s === 'stopped' ? 'muted' : 'bad');
 }

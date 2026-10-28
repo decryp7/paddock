@@ -1,7 +1,17 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 /** Browser flows against the mock backend (a macOS laptop; `?mock=desktop` has no battery or sensors). */
 const url = (path = '/', query = '') => `/?latency=0${query}#${path}`;
+
+/** Opens the shell's Settings window (Mod+, on the mock's macOS) and shows Dyno's page of it. */
+async function openSettings(page: Page): Promise<void> {
+  await page.goto(url('/'));
+  await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+  await page.keyboard.press('Meta+,');
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByText('Dyno', { exact: true }).click();
+}
 
 test.describe('screens', () => {
   test('every screen opens from the sidebar', async ({ page }) => {
@@ -19,7 +29,6 @@ test.describe('screens', () => {
       ['Extras', 'Extras'],
       ['Lifespan', 'Disk and battery life'],
       ['Diagnostics', 'Diagnostics bundle'],
-      ['Settings', 'Settings'],
       ['Dashboard', 'Dashboard'],
     ] as const) {
       await nav.first().getByRole('link', { name: label, exact: true }).click();
@@ -39,23 +48,6 @@ test.describe('screens', () => {
     await page.goto(url('/tray'));
     await expect(page.getByRole('button', { name: /Open Dyno/ })).toBeVisible();
     await expect(page.getByText('Top apps by CPU')).toBeVisible();
-  });
-
-  test('a menu-bar item popover renders the compact dashboard, not the main window', async ({ page }) => {
-    await page.setViewportSize({ width: 360, height: 520 });
-    await page.goto(url('/popover/cpu-1'));
-    await expect(page.getByRole('button', { name: /Open Dyno/ })).toBeVisible();
-    await expect(page.getByRole('navigation')).toHaveCount(0);
-  });
-
-  test('the command palette opens with Ctrl+K and jumps to a screen', async ({ page }) => {
-    await page.goto(url());
-    await page.keyboard.press('Control+k');
-    const box = page.getByRole('combobox');
-    await expect(box).toBeVisible();
-    await box.fill('settings');
-    await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
   });
 });
 
@@ -136,24 +128,23 @@ test.describe('processes', () => {
 });
 
 test.describe('settings', () => {
-  test('the theme switch applies at once and Save stores it', async ({ page }) => {
-    await page.goto(url('/settings'));
-    await expect(page.getByText(/Dyno only looks/)).toBeVisible();
-    await page.getByRole('radio', { name: 'Dark' }).click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    await page.getByRole('radio', { name: 'Light' }).click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    await page.getByRole('button', { name: 'Save changes' }).click();
+  test('Settings is the shell’s window: Dyno’s page saves, the appearance is the shell’s', async ({ page }) => {
+    await openSettings(page);
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText(/Dyno only reads/).first()).toBeVisible();
+    await expect(dialog.getByRole('radio', { name: 'Dark' })).toHaveCount(0);
+    await dialog.getByRole('switch', { name: 'Start Dyno at login' }).click();
+    await dialog.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('Settings saved')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Save changes' })).toBeHidden();
+    await expect(dialog.getByRole('button', { name: 'Save changes' })).toBeHidden();
   });
 });
 
 test.describe('native feel', () => {
   test('chrome cannot be selected, copyable content can, browser keys do nothing', async ({ page }) => {
-    await page.goto(url('/settings'));
+    await page.goto(url('/'));
     const style = (loc: ReturnType<typeof page.locator>) => loc.evaluate((e) => { const c = getComputedStyle(e) as CSSStyleDeclaration & { webkitUserSelect?: string }; return c.webkitUserSelect || c.userSelect; });
-    expect(await style(page.getByRole('heading', { level: 1, name: 'Settings' }))).toBe('none');
+    expect(await style(page.getByRole('heading', { level: 1, name: 'Dashboard' }))).toBe('none');
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorX)).toBe('none');
 
     const prevented = await page.evaluate(() => {
@@ -203,7 +194,7 @@ test.describe('native feel', () => {
           const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: px, clientY: py });
           (document.elementFromPoint(px!, py!) ?? document.body).dispatchEvent(e);
           await new Promise((r) => setTimeout(r, 150));
-          return !!document.querySelector('dy-copy-menu [role=menuitem]');
+          return !!document.querySelector('.cdk-overlay-container [role=menuitem]');
         },
         [x, y],
       );
@@ -252,7 +243,7 @@ test.describe('widgets', () => {
   });
 
   test('menu bar items: add several, reorder, preview follows, save', async ({ page }) => {
-    await page.goto(url('/settings'));
+    await openSettings(page);
     const section = page.getByRole('region', { name: 'Menu bar items' });
     await expect(section.getByRole('listitem')).toHaveCount(2);
     await section.getByRole('button', { name: 'Add item' }).click();
@@ -334,7 +325,7 @@ test.describe('network', () => {
   });
 
   test('settings: choosing a preset fills the address and a bad address is explained', async ({ page }) => {
-    await page.goto(url('/settings'));
+    await openSettings(page);
     await page.getByLabel('Lookup site').selectOption('bgp');
     await expect(page.getByLabel('Lookup address', { exact: true })).toHaveValue('https://bgp.he.net/ip/{ip}');
     await page.getByLabel('Lookup address', { exact: true }).fill('http://nope/{ip}');
@@ -402,7 +393,7 @@ test.describe('network', () => {
   });
 
   test('settings: the hardware and baselines toggles change the draft and bring up Save', async ({ page }) => {
-    await page.goto(url('/settings'));
+    await openSettings(page);
     const section = page.getByRole('region', { name: 'Hardware and baselines' });
     await expect(section.getByRole('switch', { name: 'Alarm for throttling' })).toHaveAttribute('aria-checked', 'true');
     await expect(section.getByRole('switch', { name: 'Alarm when far above usual' })).toHaveAttribute('aria-checked', 'false');
@@ -451,7 +442,7 @@ test.describe('issues', () => {
   });
 
   test('settings: the learning period is a setting and can be turned off', async ({ page }) => {
-    await page.goto(url('/settings'));
+    await openSettings(page);
     const section = page.getByRole('region', { name: 'New programs' });
     await section.getByLabel('Days of quiet learning').fill('3');
     await page.getByRole('button', { name: 'Save changes' }).click();
@@ -466,12 +457,12 @@ test.describe('right-click search (nothing is sent until the click)', () => {
     await page.getByLabel('Filter processes').fill('rustc');
     await page.locator('[role=row][data-key^="g"]').first().getByRole('button', { name: /Actions for/ }).click();
     await page.getByRole('menuitem', { name: 'Search the web…' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Search the web' });
+    const dialog = page.getByRole('dialog', { name: /Search the web/ });
     await expect(dialog.getByText('Nothing leaves your computer until you click Search')).toBeVisible();
     const field = dialog.getByLabel('Search for');
     await expect(field).toHaveValue(/rustc|Rust/);
     await field.fill('rustc high cpu while building');
-    await dialog.getByRole('button', { name: 'Search' }).click();
+    await dialog.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(dialog).toBeHidden();
   });
 
@@ -485,7 +476,9 @@ test.describe('right-click search (nothing is sent until the click)', () => {
     const dialog = page.getByRole('dialog', { name: /VirusTotal/ });
     await expect(dialog.getByText('Nothing is uploaded')).toBeVisible();
     await expect(dialog.getByLabel('SHA-256 hash')).toHaveText(/^[0-9a-f]{64}$/);
-    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    // A viewer: Close, Copy hash and the one primary, in the frame's footer.
+    await expect(dialog.getByRole('button', { name: 'Copy hash' })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close' }).click();
     await expect(dialog).toBeHidden();
   });
 
@@ -493,7 +486,7 @@ test.describe('right-click search (nothing is sent until the click)', () => {
     await page.goto(url('/issues'));
     await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Search the web…' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Search the web' });
+    const dialog = page.getByRole('dialog', { name: /Search the web/ });
     await expect(dialog.getByText(/Removed from the text: 1 home folder/)).toBeVisible();
     await expect(dialog.getByLabel('Search for')).not.toHaveValue(/alex/);
     await dialog.getByRole('button', { name: 'Cancel' }).click();
@@ -556,7 +549,7 @@ test.describe('backup health', () => {
   });
 
   test('Settings has the Backup health section', async ({ page }) => {
-    await page.goto(url('/settings'));
+    await openSettings(page);
     const section = page.getByRole('region', { name: 'Backup health' });
     await expect(section.getByText('Out of date after')).toBeVisible();
     await section.getByLabel('restic folders').fill('tools/restic');

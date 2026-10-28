@@ -90,11 +90,11 @@ describe('dy-why-slow-page', () => {
     btn(el, 'Copy as text').click();
     await settle(f);
     expect(writeText.mock.calls[0]![0]).toContain('Rust build');
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toBe('Copied the diagnosis');
+    expect(TestBed.inject(Notifier).recent().at(-1)?.text).toBe('Copied the diagnosis');
     writeText.mockRejectedValue(new Error('denied'));
     btn(el, 'Copy as text').click();
     await settle(f);
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toContain('clipboard');
+    expect(TestBed.inject(Notifier).recent().at(-1)?.text).toContain('clipboard');
   });
 
   it('links the hints that open a screen and shows the others as words', async () => {

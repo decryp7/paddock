@@ -1,64 +1,74 @@
-import { LiveAnnouncer } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, Injectable, inject, signal } from '@angular/core';
+import { Injectable, inject, signal, makeEnvironmentProviders, type EnvironmentProviders } from '@angular/core';
+import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
+import { NOTICE_ACTION_HANDLERS, type NoticeActionHandler } from '@decryp7/paddock-ui/shell/notify';
 import type { CommandError } from '../core/api.types';
-import { Icon } from './icon';
 import type { Tone } from './labels';
 
-export interface Toast {
-  id: number;
-  text: string;
-  tone: Tone;
-  action: { label: string; run: () => void } | null;
+/** What a notice's button does. */
+export interface NoticeAction {
+  label: string;
+  run: () => void;
 }
 
-/** Results of user actions: announced to screen readers (CDK LiveAnnouncer) and shown as a short-lived toast. */
+const LEVEL: Record<Tone, ShellNotice['level']> = { ok: 'success', warn: 'warning', bad: 'error', info: 'info', accent: 'info', muted: 'info' };
+
+/** The type of the notice button that undoes something (`{ type: 'dy.undo', id }`). */
+export const UNDO_ACTION = 'dy.undo';
+
+/**
+ * Results of user actions, through the shell's notification host (one display rule, one message per cause, a centre to read
+ * them again, announced to screen readers). An action (Undo) becomes a button of the notice that runs in this window.
+ */
 @Injectable({ providedIn: 'root' })
 export class Notifier {
-  private readonly announcer = inject(LiveAnnouncer);
+  private readonly ports = inject(SHELL_PORTS);
   private nextId = 1;
-  readonly toasts = signal<Toast[]>([]);
+  private readonly actions = new Map<number, NoticeAction>();
+  /** The latest notices this window raised (newest last, at most 20): what a test or a debugging session reads back. */
+  readonly recent = signal<readonly { text: string; tone: Tone; action: NoticeAction | null }[]>([]);
 
-  show(text: string, tone: Tone = 'ok', action: Toast['action'] = null, ms = 5000): void {
-    const toast: Toast = { id: this.nextId++, text, tone, action };
-    this.toasts.update((t) => [...t.slice(-3), toast]);
-    void this.announcer.announce(text, tone === 'bad' ? 'assertive' : 'polite');
-    if (ms > 0) setTimeout(() => this.dismiss(toast.id), ms);
+  show(text: string, tone: Tone = 'ok', action: NoticeAction | null = null, _ms = 5000): void {
+    this.recent.update((r) => [...r.slice(-19), { text, tone, action }]);
+    const notice: ShellNotice = { level: LEVEL[tone], message: text };
+    if (action) {
+      const id = this.nextId++;
+      this.actions.set(id, action);
+      // Only the latest few undo closures are kept.
+      if (this.actions.size > 8) this.actions.delete(this.actions.keys().next().value as number);
+      this.ports.notify({ ...notice, action: { type: UNDO_ACTION, id, label: action.label } });
+    } else {
+      this.ports.notify(notice);
+    }
   }
 
   error(e: CommandError): void {
-    this.show(e.message, 'bad', null, 8000);
+    this.show(e.message, 'bad');
   }
 
-  dismiss(id: number): void {
-    this.toasts.update((t) => t.filter((x) => x.id !== id));
+  /** Runs and forgets the action of notice button `id` (the handler of `UNDO_ACTION`). */
+  runAction(id: number): void {
+    const action = this.actions.get(id);
+    this.actions.delete(id);
+    action?.run();
   }
 }
 
-/** The toast stack (bottom right). */
-@Component({
-  selector: 'dy-toasts',
-  imports: [Icon],
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    @for (t of notifier.toasts(); track t.id) {
-      <div class="toast" [attr.data-tone]="t.tone">
-        <dy-icon [name]="t.tone === 'bad' ? 'alert' : 'check'" />
-        <span>{{ t.text }}</span>
-        @if (t.action; as a) {
-          <button type="button" class="btn sm ghost" (click)="a.run(); notifier.dismiss(t.id)">{{ a.label }}</button>
-        }
-        <button type="button" class="btn sm ghost icon" aria-label="Dismiss" (click)="notifier.dismiss(t.id)"><dy-icon name="close" /></button>
-      </div>
-    }
-  `,
-  styles: `
-    :host { position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: 1100; display: grid; gap: var(--sp-2); justify-items: end; pointer-events: none; }
-    .toast { pointer-events: auto; display: flex; align-items: center; gap: var(--sp-2); max-width: 420px; padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--overlay-bg); box-shadow: var(--shadow-3); animation: dy-fade-in var(--dur-base) var(--ease-out); font-size: var(--fs-base); }
-    .toast > dy-icon { --icon-size: 16px; color: var(--ok); }
-    .toast[data-tone='bad'] > dy-icon { color: var(--bad); }
-    .toast span { flex: 1; min-width: 0; padding: var(--sp-1) 0; }
-  `,
-})
-export class Toasts {
-  protected readonly notifier = inject(Notifier);
+/** Registers the Undo button of notices in this window. */
+export function provideNotifierActions(): EnvironmentProviders {
+  return makeEnvironmentProviders([
+    {
+      provide: NOTICE_ACTION_HANDLERS,
+      multi: true,
+      useFactory: (): NoticeActionHandler => {
+        const notifier = inject(Notifier);
+        return {
+          type: UNDO_ACTION,
+          label: (a) => (typeof a['label'] === 'string' ? a['label'] : 'Undo'),
+          run: (a) => {
+            if (typeof a['id'] === 'number') notifier.runAction(a['id']);
+          },
+        };
+      },
+    },
+  ]);
 }

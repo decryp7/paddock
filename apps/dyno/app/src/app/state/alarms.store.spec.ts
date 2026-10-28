@@ -71,7 +71,7 @@ describe('AlarmsStore', () => {
     const { store, notifier } = setup();
     await store.load();
     expect(await store.note(7, '   ')).toBe(false);
-    expect(notifier.toasts().at(-1)?.text).toBe('Write a note of 1 to 200 characters.');
+    expect(notifier.recent().at(-1)?.text).toBe('Write a note of 1 to 200 characters.');
     expect(store.alarms()).toHaveLength(5);
   });
 

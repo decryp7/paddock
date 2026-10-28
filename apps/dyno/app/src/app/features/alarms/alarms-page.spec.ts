@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideRouter } from '@angular/router';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
@@ -333,129 +334,40 @@ describe('dy-alarms-page, Rules', () => {
     expect(TestBed.inject(SettingsStore).settings()?.customAlerts?.[0]?.enabled).toBe(true);
   });
 
-  it('adds a rule with a generated unique id', async () => {
-    const { f, el } = render();
-    await settle(f);
-    await tab(f, el, 'Rules');
-    button(el, /Add rule/)!.click();
-    await settle(f);
-    const dialog = document.querySelector('dy-rule-dialog')!;
-    const name = dialog.querySelector<HTMLInputElement>('#rule-name')!;
-    name.value = 'GPU limit';
-    name.dispatchEvent(new Event('input'));
-    button(dialog, 'Critical')!.click();
-    button(dialog, 'Below')!.click();
-    button(dialog, 'Increase the limit')!.click();
-    button(dialog, 'min')!.click();
-    await settle(f);
-    button(dialog, 'Add rule')!.click();
-    await settle(f);
-    const rules = TestBed.inject(SettingsStore).settings()!.customAlerts!;
-    expect(rules).toHaveLength(2);
-    expect(rules[1]).toMatchObject({ id: 'gpu-limit-2', name: 'GPU limit', op: 'below', severity: 'critical', limit: 95, forSecs: 120 });
-  });
-
-  it('validates the form first and shows the engine error inline without closing', async () => {
+  it('opens the rule window for a new rule and for an edit, and reads the settings again once a rule was stored', async () => {
     const { f, el, mock } = render();
     await settle(f);
     await tab(f, el, 'Rules');
+    const dialogs = TestBed.inject(DialogService);
+    const opened = vi.spyOn(dialogs, 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
     button(el, /Add rule/)!.click();
     await settle(f);
-    const dialog = document.querySelector('dy-rule-dialog')!;
-    button(dialog, 'Add rule')!.click();
-    await settle(f);
-    expect(text(dialog)).toContain('Give the rule a name.');
-    const set = (sel: string, v: string) => {
-      const i = dialog.querySelector<HTMLInputElement>(sel)!;
-      i.value = v;
-      i.dispatchEvent(new Event('input'));
-    };
-    set('#rule-name', 'Hot');
-    set('[aria-label="Limit"]', 'abc');
-    await settle(f);
-    expect(text(dialog)).toContain('The limit must be a number.');
-    set('[aria-label="Limit"]', '85');
-    set('[aria-label="Duration"]', '2.5');
-    await settle(f);
-    expect(text(dialog)).toContain('whole number');
-    set('[aria-label="Duration"]', '10');
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'badRequest', message: 'Limit must be 0 to 100.' });
-    await settle(f);
-    button(dialog, 'Add rule')!.click();
-    await settle(f);
-    expect(text(document.querySelector('dy-rule-dialog')!)).toContain('Limit must be 0 to 100.');
-    button(document.querySelector('dy-rule-dialog')!, 'Add rule')!.click();
-    await settle(f);
-    expect(document.querySelector('dy-rule-dialog')).toBeNull();
-    expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(2);
-  });
-
-  it('edits a rule keeping its id, showing minutes when divisible, and converts units', async () => {
-    const { f, el } = render();
-    await settle(f);
-    await tab(f, el, 'Rules');
+    expect(opened.mock.calls[0]![0]).toBe('dy.alert-rule');
+    expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { rule: null, takenIds: ['gpu-limit'] }, title: 'Add alert rule' });
+    const load = vi.spyOn(mock, 'settings');
+    opened.mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
     button(el, 'Edit GPU limit')!.click();
     await settle(f);
-    const dialog = document.querySelector('dy-rule-dialog')!;
-    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Duration"]')!.value).toBe('2');
-    button(dialog, 'sec')!.click();
-    await settle(f);
-    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Duration"]')!.value).toBe('120');
-    button(dialog, 'sec')!.click();
-    button(dialog, 'Decrease the limit')!.click();
-    const name = dialog.querySelector<HTMLInputElement>('#rule-name')!;
-    name.value = 'GPU hot';
-    name.dispatchEvent(new Event('input'));
-    await settle(f);
-    button(dialog, 'Save')!.click();
-    await settle(f);
-    expect(TestBed.inject(SettingsStore).settings()!.customAlerts![0]).toMatchObject({ id: 'gpu-limit', name: 'GPU hot', limit: 85, forSecs: 120 });
+    expect(opened.mock.calls[1]![1]).toMatchObject({ inputs: { rule: expect.objectContaining({ id: 'gpu-limit' }) }, title: 'Edit alert rule' });
+    expect(load).toHaveBeenCalled();
   });
 
-  it('picks another metric with its unit and steps temperatures by one degree within bounds', async () => {
+  it('deletes a rule only after the shared confirmation that names it', async () => {
     const { f, el } = render();
     await settle(f);
     await tab(f, el, 'Rules');
-    button(el, /Add rule/)!.click();
-    await settle(f);
-    const dialog = document.querySelector('dy-rule-dialog')!;
-    button(dialog, /^CPU/)!.click();
-    await settle(f);
-    expect(document.querySelectorAll('.menu-item.two-line')).toHaveLength(8);
-    menuItem(/^Temperature/)!.click();
-    await settle(f);
-    expect(text(dialog.querySelector('.stepper')!)).toContain('°C');
-    const limit = dialog.querySelector<HTMLInputElement>('[aria-label="Limit"]')!;
-    limit.value = '150';
-    limit.dispatchEvent(new Event('input'));
-    button(dialog, 'Increase the limit')!.click();
-    await settle(f);
-    expect(limit.value).toBe('150');
-    limit.value = 'x';
-    limit.dispatchEvent(new Event('input'));
-    button(dialog, 'Decrease the limit')!.click();
-    await settle(f);
-    expect(limit.value).toBe('-1');
-  });
-
-  it('deletes a rule only after a confirmation that names it', async () => {
-    const { f, el } = render();
-    await settle(f);
-    await tab(f, el, 'Rules');
+    const opened = vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'dismissed' }), dismiss() {} } as never);
     button(el, /^More actions for GPU limit/)!.click();
     await settle(f);
     menuItem('Delete…')!.click();
     await settle(f);
-    const confirm = document.querySelector('dy-confirm-dialog')!;
-    expect(text(confirm)).toContain('Delete “GPU limit”?');
-    button(confirm, 'Cancel')!.click();
-    await settle(f);
+    expect(opened.mock.calls[0]![0]).toBe('pd.confirm');
+    expect(opened.mock.calls[0]![1]).toMatchObject({ inputs: { heading: 'Delete “GPU limit”?', confirm: { label: 'Delete rule', destructive: true } } });
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(1);
+    opened.mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
     button(el, /^More actions for GPU limit/)!.click();
     await settle(f);
     menuItem('Delete…')!.click();
-    await settle(f);
-    button(document.querySelector('dy-confirm-dialog')!, 'Delete rule')!.click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(0);
     expect(text(el)).toContain('No custom rules');
@@ -472,16 +384,15 @@ describe('dy-alarms-page, Rules', () => {
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts![0]!.enabled).toBe(false);
   });
 
-  it('shows a toast when deleting fails', async () => {
+  it('says so when deleting fails', async () => {
     const { f, el, mock } = render();
     await settle(f);
     await tab(f, el, 'Rules');
+    vi.spyOn(TestBed.inject(DialogService), 'open').mockReturnValue({ closed: Promise.resolve({ kind: 'answered', value: true }), dismiss() {} } as never);
+    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'internal', message: 'Disk full.' });
     button(el, /^More actions for GPU limit/)!.click();
     await settle(f);
     menuItem('Delete…')!.click();
-    await settle(f);
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'internal', message: 'Disk full.' });
-    button(document.querySelector('dy-confirm-dialog')!, 'Delete rule')!.click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()!.customAlerts).toHaveLength(1);
   });

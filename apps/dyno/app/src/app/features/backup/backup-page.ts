@@ -1,6 +1,6 @@
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import type { BackupStatus } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatClock, formatDate } from '../../shared/format';
@@ -17,7 +17,7 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
  */
 @Component({
   selector: 'dy-backup-page',
-  imports: [AsyncState, Icon, RouterLink, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
+  imports: [AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -95,7 +95,7 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
                   }
                   <div class="dacts">
                     <button type="button" class="btn sm" (click)="copy(s)"><dy-icon name="copy" /> Copy</button>
-                    <a class="btn sm ghost" routerLink="/settings">Backup settings</a>
+                    <button type="button" class="btn sm ghost" (click)="openSettings()">Backup settings</button>
                   </div>
                 </aside>
               }
@@ -171,6 +171,7 @@ import { BACKUP_STATE_LABEL, type DotTone, checkedText, heroTone, hue, initial, 
 export class BackupPage implements OnInit {
   protected readonly store = inject(BackupStore);
   private readonly notifier = inject(Notifier);
+  private readonly ports = inject(SHELL_PORTS);
   private readonly now = injectNow();
   protected readonly selectedTool = signal<string | null>(null);
   protected readonly initial = initial;
@@ -226,5 +227,10 @@ export class BackupPage implements OnInit {
     } catch {
       this.notifier.show('Copying is not allowed here.', 'bad');
     }
+  }
+
+  /** Opens the shell's Settings window (Dyno's page is in it). */
+  protected openSettings(): void {
+    void this.ports.openDialog('pd.settings');
   }
 }

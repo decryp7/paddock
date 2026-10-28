@@ -97,7 +97,7 @@ describe('dy-backup-page', () => {
     write.mockRejectedValueOnce(new Error('no'));
     btn(el, 'Copy').click();
     await settle(f);
-    expect(notifier.toasts().at(-1)?.tone).toBe('bad');
+    expect(notifier.recent().at(-1)?.tone).toBe('bad');
   });
 
   it('checks now: disabled while it runs, then shows the new time', async () => {

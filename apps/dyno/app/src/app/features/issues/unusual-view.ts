@@ -1,9 +1,10 @@
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import type { UnusualItem } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { Dialogs } from '../../shared/dialog';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { formatDate, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
@@ -18,7 +19,7 @@ import { hue, initial, learningText, whyText } from './issues-model';
  */
 @Component({
   selector: 'dy-unusual-view',
-  imports: [AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger, RouterLink],
+  imports: [AsyncState, Icon, CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(keydown)': 'key($event)' },
   template: `
@@ -31,7 +32,7 @@ import { hue, initial, learningText, whyText } from './issues-model';
         </div>
 
         @if (!o.enabled) {
-          <div class="none"><dy-icon name="eye" /><strong>Watching for new programs is off</strong><span>Turn it on in Settings and Dyno starts learning which programs are normal here.</span><a class="btn" routerLink="/settings">Open settings</a></div>
+          <div class="none"><dy-icon name="eye" /><strong>Watching for new programs is off</strong><span>Turn it on in Settings and Dyno starts learning which programs are normal here.</span><button type="button" class="btn" (click)="openSettings()">Open settings</button></div>
         } @else if (o.items.length === 0) {
           <div class="none">
             <dy-icon [name]="o.learning.active ? 'clock' : 'check'" />
@@ -154,7 +155,8 @@ import { hue, initial, learningText, whyText } from './issues-model';
 export class UnusualView {
   protected readonly store = inject(UnusualStore);
   private readonly notifier = inject(Notifier);
-  private readonly dialogs = inject(Dialogs);
+  private readonly ports = inject(SHELL_PORTS);
+  private readonly dialogs = inject(DialogService);
   private readonly lookups = inject(Lookups);
   protected readonly selectedKey = signal<string | null>(null);
   protected readonly ini = initial;
@@ -208,11 +210,10 @@ export class UnusualView {
 
   protected async forget(): Promise<void> {
     const known = this.store.overview()?.known ?? 0;
-    const ok = await this.dialogs.confirm({
-      title: 'Forget the programs Dyno knows?',
+    const ok = await confirm(this.dialogs, {
+      heading: 'Forget the programs Dyno knows?',
       message: `Dyno forgets the ${known} programs it learned, then learns again for ${this.store.overview()?.learningDays ?? 7} days before it lists anything new.`,
-      confirmLabel: 'Forget',
-      danger: true,
+      confirm: { label: 'Forget', destructive: true },
     });
     if (ok) {
       this.selectedKey.set(null);
@@ -227,5 +228,10 @@ export class UnusualView {
     } catch {
       this.notifier.show('Copying is not allowed here.', 'bad');
     }
+  }
+
+  /** Opens the shell's Settings window (Dyno's page is in it). */
+  protected openSettings(): void {
+    void this.ports.openDialog('pd.settings');
   }
 }

@@ -14,7 +14,6 @@ import type {
   SavedDiagnostics,
   ShelveFor,
   Anomaly,
-  AppInfo,
   Diagnosis,
   HealthReport,
   History,
@@ -88,8 +87,6 @@ export interface DynoBackend {
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe;
   /** Alarm changes pushed by the agent (new, repeated, returned, acknowledged, shelved, muted, noted). */
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe;
-
-  appInfo(): Promise<AppInfo>;
 
   // Processes.
   processDetails(target: ProcessRef): Promise<ProcessDetails>;
@@ -225,13 +222,15 @@ export interface DynoBackend {
   /** Checks the backup tools now and answers the report. */
   refreshBackup(): Promise<BackupReport>;
 
-  // The tray dropdown window.
-  /** Shows and focuses the main window (and hides the tray dropdown). */
-  trayOpenMain(): Promise<void>;
-  /** Tells the shell how tall the tray popover's content is (CSS pixels) so it can size the window to fit; no-op in the browser. */
-  popoverResize(height: number): Promise<void>;
+  // The tray popover window (the shell places and fits it).
+  /** Shows and focuses the main window (and hides the tray popover). */
+  showMainWindow(): Promise<void>;
+  /** Tells the shell how tall the popover's content is (CSS pixels) so it can size the window to fit; no-op in the browser. */
+  fitTray(height: number): Promise<void>;
+  /** Closes the tray popover. */
+  hideTray(): Promise<void>;
   /** Quits the Dyno app (the background agent keeps its own lifecycle). */
-  trayQuit(): Promise<void>;
+  quitApp(): Promise<void>;
 }
 
 export const BACKEND = new InjectionToken<DynoBackend>('DynoBackend');

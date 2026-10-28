@@ -1,19 +1,17 @@
-import { DialogRef } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { CommandError, Locker } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { Dialogs, DialogFrame } from '../../shared/dialog';
 import { Icon } from '../../shared/icon';
 import { ProcessesStore } from '../../state/processes.store';
 
 /** "What is locking this file?": the processes that hold a path open, with what they are. */
 @Component({
   selector: 'dy-lockers-dialog',
-  imports: [DialogFrame, FormsModule, Icon],
+  imports: [FormsModule, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <dy-dialog title="What is locking this file?" subtitle="Find the programs that hold a file or folder open" icon="search">
+      <p class="lead">Find the programs that hold a file or folder open.</p>
       <form class="find" (ngSubmit)="find()">
         <input class="input grow" name="path" [ngModel]="path()" (ngModelChange)="path.set($event)" placeholder="Path of the file or folder" aria-label="Path" autocomplete="off" spellcheck="false" />
         <button type="submit" class="btn primary" [disabled]="busy() || !path().trim()">Find</button>
@@ -33,11 +31,10 @@ import { ProcessesStore } from '../../state/processes.store';
           }
         </ul>
       }
-      <ng-container footer><button type="button" class="btn" (click)="ref.close()">Close</button></ng-container>
-    </dy-dialog>
   `,
   styles: `
-    :host { --dialog-w: 520px; }
+    :host { display: grid; gap: var(--sp-3); min-width: 0; }
+    .lead { color: var(--text-2); }
     .find { display: flex; gap: var(--sp-2); }
     .grow { flex: 1; }
     .err { display: flex; gap: var(--sp-2); color: var(--bad); }
@@ -50,9 +47,7 @@ import { ProcessesStore } from '../../state/processes.store';
   `,
 })
 export class LockersDialog {
-  protected readonly ref = inject<DialogRef<void>>(DialogRef);
   private readonly store = inject(ProcessesStore);
-  private readonly dialogs = inject(Dialogs);
   protected readonly path = signal('');
   protected readonly busy = signal(false);
   protected readonly results = signal<Locker[] | null>(null);

@@ -51,10 +51,6 @@ describe('applyMockPlatform', () => {
 });
 
 describe('OS differences', () => {
-  it('appInfo reports the OS', async () => {
-    for (const os of ['windows', 'macos', 'linux'] as const) expect((await make({ os }).appInfo()).os).toBe(os);
-    expect((await make().appInfo()).updatesAvailable).toBe(false);
-  });
   it('disks follow the OS', async () => {
     const mounts = async (os: 'windows' | 'macos' | 'linux') => make({ os }).liveUpdate('summary').system.disks.map((d) => d.mount);
     expect(await mounts('windows')).toEqual(['C:\\', 'D:\\']);
@@ -393,8 +389,10 @@ describe('reports, settings, plugins, tray', () => {
   it('lists plugins and handles the tray commands', async () => {
     const b = make();
     expect((await b.plugins()).length).toBeGreaterThan(0);
-    await expect(b.trayOpenMain()).resolves.toBeUndefined();
-    await expect(b.trayQuit()).resolves.toBeUndefined();
+    await expect(b.showMainWindow()).resolves.toBeUndefined();
+    await expect(b.hideTray()).resolves.toBeUndefined();
+    await expect(b.fitTray(300)).resolves.toBeUndefined();
+    await expect(b.quitApp()).resolves.toBeUndefined();
   });
 });
 

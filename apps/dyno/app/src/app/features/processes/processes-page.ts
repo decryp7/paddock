@@ -3,14 +3,13 @@ import { CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf } 
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { errorHint } from '../../core/command-error';
-import { Dialogs } from '../../shared/dialog';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { formatBytes, formatCount, formatPercent, formatRate, plural } from '../../shared/format';
 import { bar } from '../../shared/heat';
 import { Icon } from '../../shared/icon';
 import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
-import { LockersDialog } from './process-dialogs';
 import { ProcessDetailsPanel } from './process-details';
 import { type Row, type SortKey, type ViewMode } from './process-rows';
 
@@ -213,7 +212,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
 })
 export class ProcessesPage implements OnInit, OnDestroy {
   protected readonly store = inject(ProcessesStore);
-  private readonly dialogs = inject(Dialogs);
+  private readonly dialogs = inject(DialogService);
   private readonly live = inject(LiveStore);
   private readonly lookups = inject(Lookups);
   /** `?q=` filters on open (from the dashboard's top apps and the command palette). */
@@ -282,7 +281,7 @@ export class ProcessesPage implements OnInit, OnDestroy {
   }
 
   protected lockers(): void {
-    this.dialogs.open(LockersDialog);
+    void this.dialogs.open('dy.lockers').closed;
   }
 
   /** Arrow keys move between rows, Right/Left open and close, Enter shows details. */

@@ -87,7 +87,7 @@ describe('ReportsStore', () => {
     await store.export('html');
     expect(mock.savedReports).toEqual([{ format: 'html', weeksAgo: 2 }]);
     expect(store.saved()?.path).toMatch(/\.html$/);
-    expect(notifier.toasts().at(-1)?.text).toBe('Saved dyno-weekly-report.html');
+    expect(notifier.recent().at(-1)?.text).toBe('Saved dyno-weekly-report.html');
     expect(store.exporting()).toBeNull();
   });
 
@@ -96,7 +96,7 @@ describe('ReportsStore', () => {
     vi.spyOn(mock, 'saveReport').mockResolvedValueOnce(null);
     await store.export('markdown');
     expect(store.saved()).toBeNull();
-    expect(notifier.toasts()).toHaveLength(0);
+    expect(notifier.recent()).toHaveLength(0);
     vi.spyOn(mock, 'saveReport').mockRejectedValueOnce({ code: 'accessDenied', message: 'no' });
     await store.export('markdown');
     expect(store.saveError()).toEqual({ code: 'accessDenied', message: 'no' });

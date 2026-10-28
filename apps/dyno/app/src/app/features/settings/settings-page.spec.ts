@@ -32,16 +32,17 @@ const toggle = (el: HTMLElement, label: string) => el.querySelector<HTMLButtonEl
 describe('SettingsPage', () => {
   it('renders the sections once loaded and shows no save bar while clean', async () => {
     const { el, saveButton, store } = await make();
-    expect(el.querySelector('h1')?.textContent).toBe('Settings');
-    for (const name of ['Appearance', 'Measuring', 'Menu bar items', 'Alerts', 'Plugins', 'About']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
+    expect(el.querySelector('h1')?.textContent).toBe('Dyno settings');
+    // Appearance, Updates and About are the shell's pages of the Settings window, not Dyno's.
+    for (const name of ['Start-up', 'Measuring', 'Menu bar items', 'Alerts', 'Plugins']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
     expect(saveButton()).toBeUndefined();
     expect(store.settings()).not.toBeNull();
   });
-  it('shows plugins and About details from the engine', async () => {
+  it('shows the plugins from the engine and no appearance or About of its own', async () => {
     const { el } = await make();
     expect(el.querySelectorAll('.plugins li').length).toBeGreaterThan(0);
-    expect(el.querySelector('.about')!.textContent).toContain('0.1.0');
-    expect(el.querySelector('.about')!.textContent).toContain('macOS');
+    expect(el.querySelector('section[aria-label="Appearance"]')).toBeNull();
+    expect(el.querySelector('section[aria-label="About"]')).toBeNull();
   });
   it('a change brings up the save bar; Save sends the whole draft and the bar goes away', async () => {
     const { f, mock, el, saveButton, store } = await make();
@@ -56,7 +57,7 @@ describe('SettingsPage', () => {
     expect(spy.mock.calls[0]![0]).toEqual({ ...before, launchAtLogin: !before.launchAtLogin });
     expect(store.settings()!.launchAtLogin).toBe(!before.launchAtLogin);
     expect(saveButton()).toBeUndefined();
-    expect(TestBed.inject(Notifier).toasts().at(-1)?.text).toBe('Settings saved');
+    expect(TestBed.inject(Notifier).recent().at(-1)?.text).toBe('Settings saved');
   });
   it('Discard restores the saved values', async () => {
     const { f, mock, el, saveButton, discardButton, store } = await make();
@@ -69,17 +70,6 @@ describe('SettingsPage', () => {
     expect(saveButton()).toBeUndefined();
     expect(spy).not.toHaveBeenCalled();
     expect(toggle(el, 'Alerts').getAttribute('aria-checked')).toBe(String(store.settings()!.alerts.enabled));
-  });
-  it('choosing a theme previews it immediately and counts as a change', async () => {
-    const { f, el, saveButton, store } = await make();
-    const target = store.settings()!.theme === 'dark' ? 'Light' : 'Dark';
-    const radio = [...el.querySelectorAll<HTMLButtonElement>('[aria-label="Theme"] button')].find((b) => b.textContent?.includes(target))!;
-    radio.click();
-    f.detectChanges();
-    expect(radio.getAttribute('aria-checked')).toBe('true');
-    expect(document.documentElement.dataset['theme']).toBe(target.toLowerCase());
-    expect(saveButton()).toBeDefined();
-    document.documentElement.removeAttribute('data-theme');
   });
   it('menu bar items: adding one makes the page dirty and Save stores trayItems', async () => {
     const { f, el, saveButton, mock } = await make();
@@ -100,7 +90,7 @@ describe('SettingsPage', () => {
     saveButton()!.click();
     await settle(f);
     expect(saveButton()).toBeDefined();
-    expect(TestBed.inject(Notifier).toasts().at(-1)).toMatchObject({ tone: 'bad', text: 'Nope.' });
+    expect(TestBed.inject(Notifier).recent().at(-1)).toMatchObject({ tone: 'bad', text: 'Nope.' });
   });
   it('shows an inline error with Retry when settings cannot load', async () => {
     const mock = new MockBackend({ latencyMs: 0, now: () => NOW, fail: new Set(['settings']) });
