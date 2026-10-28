@@ -18,8 +18,9 @@ describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
-    // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too.
-    assert.deepEqual(r.apps, ['debrief', 'shell-demo', 'workbench-demo']);
+    // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
+    // so the shared crates reach Debrief and Spotter too.
+    assert.deepEqual(r.apps, ['debrief', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
