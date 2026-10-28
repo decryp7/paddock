@@ -1,6 +1,6 @@
 //! The `./dev` wrapper and `dev self hash` compute one value, in shell and in Rust, from the same inputs.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
-use paddock_dev::input_hash::{Real, compute};
+use paddock_dev::input_hash::{Real, compute, is_hashed_var};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -31,13 +31,16 @@ fn git(dir: &Path, args: &[&str]) {
 /// A repository with the real wrapper and input list, and a placeholder for every listed path.
 struct Fixture {
     dir: tempfile::TempDir,
+    repo: PathBuf,
     cargo_home: tempfile::TempDir,
 }
 
 impl Fixture {
     fn new() -> Fixture {
+        // The repository sits one folder below the scratch folder, so a test can put a config "above the repository".
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
+        let repo = dir.path().join("repo");
+        let root = repo.as_path();
         std::fs::create_dir_all(root.join("tools/paddock-dev/src")).unwrap();
         std::fs::copy(repo_root().join("dev"), root.join("dev")).unwrap();
         let inputs = std::fs::read_to_string(repo_root().join("tools/paddock-dev/inputs.txt")).unwrap();
@@ -59,12 +62,13 @@ impl Fixture {
         git(root, &["commit", "-q", "-m", "chore: fixture"]);
         Fixture {
             dir,
+            repo: repo.clone(),
             cargo_home: tempfile::tempdir().unwrap(),
         }
     }
 
     fn root(&self) -> &Path {
-        self.dir.path()
+        &self.repo
     }
 
     /// The environment both implementations see (no user config: an empty CARGO_HOME).
@@ -81,6 +85,10 @@ impl Fixture {
             .current_dir(self.root().join("tools/paddock-dev/src"))
             .env_remove("RUSTC")
             .env_remove("CARGO_BUILD_RUSTC");
+        // The hash reads the environment: start from none of the variables it uses, as `rust` does.
+        std::env::vars().filter(|(k, _)| is_hashed_var(k)).for_each(|(k, _)| {
+            cmd.env_remove(k);
+        });
         cmd.envs(env.iter().cloned());
         // Tests never touch the user's cache: the wrapper's home is a scratch folder too.
         cmd.env("PADDOCK_DEV_HOME", self.cargo_home.path().join("dev-home"));
@@ -97,7 +105,7 @@ impl Fixture {
 
     fn rust(&self, env: &[(String, String)]) -> (String, bool) {
         let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
-        let h = compute(&Real, &get, self.root()).unwrap();
+        let h = compute(&Real, &get, env, self.root()).unwrap();
         (h.hash, h.dirty)
     }
 
@@ -243,13 +251,45 @@ fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     .unwrap();
     let with_home = f.both(&[]).0;
     assert_ne!(with_home, committed);
-    // Lines that merely look similar do not count.
+    // Any change to a config counts, whatever the table: a profile or a linker in $CARGO_HOME's config.
     std::fs::write(
         f.cargo_home.path().join("config.toml"),
-        "[build]\n# rustflags = []\nrustflags-x = 1\njobs = 2\n",
+        "[profile.release]\nlto = true\n[target.x86_64-unknown-linux-gnu]\nlinker = \"clang\"\n",
     )
     .unwrap();
-    assert_eq!(f.both(&[]).0, committed);
+    let profile = f.both(&[]).0;
+    assert_ne!(profile, committed);
+    assert_ne!(profile, with_home);
+    // The dotted key, a profile or target variable, and the git-ignored include next to the tool all count too.
+    std::fs::remove_file(f.cargo_home.path().join("config.toml")).unwrap();
+    for (k, v) in [
+        ("CARGO_BUILD_RUSTFLAGS", "-Ca"),
+        ("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1"),
+        ("CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", "-Cb"),
+        ("CARGO_BUILD_TARGET", "wasm32-unknown-unknown"),
+    ] {
+        assert_ne!(f.both(&[(k, v.to_string())]).0, committed, "{k}");
+    }
+    assert_eq!(
+        f.both(&[("CARGO_BUILD_JOBS", "3".to_string())]).0,
+        committed,
+        "the job count does not change the binary"
+    );
+    std::fs::create_dir_all(f.root().join("tools/paddock-dev/.cargo")).unwrap();
+    std::fs::write(
+        f.root().join("tools/paddock-dev/.cargo/ci.toml"),
+        "[build]\nrustflags = [\"-Dx\"]\n",
+    )
+    .unwrap();
+    let included = f.both(&[]).0;
+    assert_ne!(included, committed);
+    // A config above the repository counts as well (cargo reads every ancestor's `.cargo`).
+    let above = f.dir.path().join(".cargo");
+    std::fs::create_dir_all(&above).unwrap();
+    std::fs::write(above.join("config.toml"), "[build]\nrustflags = [\"-Dy\"]\n").unwrap();
+    let with_above = f.both(&[]).0;
+    std::fs::remove_dir_all(&above).unwrap();
+    assert_ne!(with_above, included);
 }
 
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
@@ -332,4 +372,61 @@ fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
     // A cached file that does not run is not used either.
     write_script(&home.join("bin/some-hash/paddock-dev-test-host"), "exit 1");
     assert_eq!(run_wrapper(&f, &home, &missing).0, 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_sparse_checkout_without_the_tool_is_told_how_to_add_it() {
+    let f = Fixture::new();
+    std::fs::remove_file(f.root().join("tools/paddock-dev/inputs.txt")).unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &[]);
+    assert_eq!(code, 2);
+    assert!(
+        err.contains("tools/paddock-dev is not in this checkout") && err.contains("git sparse-checkout add tools"),
+        "{err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_compiler_without_a_release_line_and_a_build_target_are_refused_aloud() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let odd = scratch.path().join("odd-rustc");
+    write_script(&odd, "echo 'not rustc'");
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", odd.display().to_string())]);
+    assert_eq!(code, 2);
+    assert!(err.contains("printed no release line"), "{err}");
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (code, _, err) = run_wrapper(
+        &f,
+        &home,
+        &[("RUSTC", rustc), ("CARGO_BUILD_TARGET", "wasm32-unknown-unknown".to_string())],
+    );
+    assert_eq!(code, 2);
+    assert!(err.contains("CARGO_BUILD_TARGET is set"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn only_the_five_newest_cached_tools_are_kept() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    for i in 0..7 {
+        write_script(&home.join(format!("bin/old-{i}/paddock-dev-test-host")), "exit 0");
+        // Older directories get older times so the order is certain.
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(1000 - i * 100);
+        std::fs::File::open(home.join(format!("bin/old-{i}")))
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    }
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!(code, 0, "{err}");
+    let kept = std::fs::read_dir(home.join("bin")).unwrap().count();
+    assert_eq!(kept, 5);
 }

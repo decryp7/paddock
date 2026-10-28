@@ -1,8 +1,8 @@
 //! `dev self hash`: the content address of the tool's binary (ADR 0022 §3.3).
 //!
 //! The hash is `git hash-object --stdin` over `git ls-tree HEAD -- <inputs>` followed by the `commit-hash:` and `release:`
-//! lines of `<rustc> -vV` (in rustc's order) and [`flag_lines`] (`RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS` and the `rustflags`
-//! lines of cargo's configs), where `<inputs>` are the paths in `tools/paddock-dev/inputs.txt` and `<rustc>`
+//! lines of `<rustc> -vV` (in rustc's order) and [`flag_lines`] (the hashed environment variables and the text of cargo's config
+//! files), where `<inputs>` are the paths in `tools/paddock-dev/inputs.txt` and `<rustc>`
 //! is the compiler cargo will use. The `./dev` wrapper computes the same value in shell (`./dev --wrapper-hash`); a test
 //! runs both on one repository. When an input has uncommitted changes (`git status --porcelain --untracked-files=all`), the
 //! hash cannot describe the files and the wrapper builds.
@@ -48,29 +48,42 @@ pub fn compiler_lines(vv: &str) -> String {
         })
 }
 
-/// What else changes the compiled code, as lines: `RUSTFLAGS=` and `CARGO_ENCODED_RUSTFLAGS=` (empty when unset), then every
-/// `rustflags =` line (any table: `[build]` or `[target.*]`) of the configs, closest first, as the wrapper's `grep` finds them.
-pub fn flag_lines(env: &dyn Fn(&str) -> Option<String>, configs: &[String]) -> String {
-    let mut out = format!(
-        "RUSTFLAGS={}\nCARGO_ENCODED_RUSTFLAGS={}\n",
-        env("RUSTFLAGS").unwrap_or_default(),
-        env("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default()
-    );
-    for line in configs.iter().flat_map(|c| c.lines()).map(|l| l.trim_end_matches('\r')) {
-        let rest = line.trim_start_matches(char::is_whitespace);
-        if rest
-            .strip_prefix("rustflags")
-            .is_some_and(|r| r.trim_start_matches(char::is_whitespace).starts_with('='))
-        {
-            out.push_str(line);
-            out.push('\n');
-        }
+/// Whether an environment variable changes the compiled code and so is hashed: `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
+/// `CARGO_BUILD_*`, `CARGO_PROFILE_*` and `CARGO_TARGET_*`, except the build folder, the job count and the compiler (the `-vV` lines name that).
+pub fn is_hashed_var(name: &str) -> bool {
+    let listed = name == "RUSTFLAGS"
+        || name == "CARGO_ENCODED_RUSTFLAGS"
+        || name.starts_with("CARGO_BUILD_")
+        || name.starts_with("CARGO_PROFILE_")
+        || name.starts_with("CARGO_TARGET_");
+    listed
+        && !matches!(
+            name,
+            "CARGO_TARGET_DIR" | "CARGO_BUILD_JOBS" | "CARGO_BUILD_TARGET_DIR" | "CARGO_BUILD_RUSTC"
+        )
+}
+
+/// What else changes the compiled code, as text: the hashed environment variables that are not empty as `NAME=value` lines
+/// in byte order, then the whole text of every config (carriage returns dropped), each after a `config-file` line. The
+/// wrapper builds the same text with `env | grep | sort` and `tr -d '\r'`; trailing newlines are the caller's to trim.
+pub fn flag_lines(vars: &[(String, String)], configs: &[String]) -> String {
+    let mut lines: Vec<String> = vars
+        .iter()
+        .filter(|(k, v)| is_hashed_var(k) && !v.is_empty())
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    lines.sort();
+    let mut out: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    for c in configs {
+        out.push_str("config-file\n");
+        out.push_str(&c.replace('\r', ""));
+        out.push('\n');
     }
     out
 }
 
-/// The `rustc = "..."` of a `[build]` table in a cargo config, read line by line exactly as the wrapper's awk does (so a
-/// dotted `build.rustc = ` key or an inline table is not seen; the wrapper has the same limit).
+/// The `rustc = "..."` of a `[build]` table (or a top-level dotted `build.rustc = `) in a cargo config, read line by line
+/// exactly as the wrapper's awk does (so an inline table is not seen; the wrapper has the same limit).
 pub fn build_rustc(config: &str) -> Option<String> {
     let mut section = String::new();
     for line in config.lines() {
@@ -79,11 +92,16 @@ pub fn build_rustc(config: &str) -> Option<String> {
             section = line.chars().filter(|c| !matches!(c, ' ' | '\t')).collect();
             continue;
         }
-        let Some(rest) = trimmed.strip_prefix("rustc") else { continue };
+        let (key, wanted_section) = if section.is_empty() {
+            ("build.rustc", "")
+        } else {
+            ("rustc", "[build]")
+        };
+        let Some(rest) = trimmed.strip_prefix(key) else { continue };
         let Some(value) = rest.trim_start_matches([' ', '\t']).strip_prefix('=') else {
             continue;
         };
-        if section != "[build]" {
+        if section != wanted_section {
             continue;
         }
         let value = value.trim_start_matches([' ', '\t']);
@@ -112,20 +130,41 @@ pub fn resolve_rustc(env: &dyn Fn(&str) -> Option<String>, configs: &[String]) -
         .unwrap_or_else(|| "rustc".to_string())
 }
 
-/// The configs on the tool's path, closest first: the tool's own folder, `tools/`, the root and `$CARGO_HOME`.
-pub fn config_paths(root: &Path, env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+/// The config files cargo reads for the tool, closest first, as the wrapper lists them: `config.toml` and `config` in every
+/// `.cargo` folder from the tool's own up to the filesystem root, the other `*.toml` files of the tool's `.cargo` (what
+/// `include` pulls in), then `$CARGO_HOME`'s; only files that exist, without duplicates.
+pub fn config_files(root: &Path, env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    let tool = root.join("tools/paddock-dev");
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut add = |p: PathBuf| {
+        if p.is_file() && !out.contains(&p) {
+            out.push(p);
+        }
+    };
+    for dir in tool.ancestors() {
+        let cargo = dir.join(".cargo");
+        add(cargo.join("config.toml"));
+        add(cargo.join("config"));
+        if dir == tool {
+            let mut others: Vec<_> = std::fs::read_dir(&cargo)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.file_name())
+                .filter(|n| n.to_string_lossy().ends_with(".toml") && n != "config.toml")
+                .collect();
+            others.sort();
+            others.into_iter().for_each(|n| add(cargo.join(n)));
+        }
+    }
     let cargo_home = env("CARGO_HOME")
         .map(PathBuf::from)
         .or_else(|| env("HOME").or_else(|| env("USERPROFILE")).map(|h| PathBuf::from(h).join(".cargo")));
-    [
-        root.join("tools/paddock-dev/.cargo"),
-        root.join("tools/.cargo"),
-        root.join(".cargo"),
-    ]
-    .into_iter()
-    .chain(cargo_home)
-    .map(|d| d.join("config.toml"))
-    .collect()
+    if let Some(home) = cargo_home {
+        add(home.join("config.toml"));
+        add(home.join("config"));
+    }
+    out
 }
 
 /// Runs programs for the hash: a port, so the computation is testable without a repository.
@@ -134,13 +173,33 @@ pub trait Exec {
     fn run(&self, program: &str, args: &[&str], cwd: &Path, stdin: Option<&[u8]>) -> Result<String, CliError>;
 }
 
-/// Writes `bytes` to the child's standard input, closes it and waits for the child.
-fn pipe_in(mut child: std::process::Child, bytes: &[u8]) -> std::io::Result<std::process::Output> {
-    child
-        .stdin
-        .take()
-        .map_or(Ok(()), |mut pipe| pipe.write_all(bytes))
-        .and_then(|()| child.wait_with_output())
+/// Feeds `bytes` to the child's standard input (on its own thread, so a large input cannot stall the wait) and waits for the
+/// child for at most `limit`; a child still running then is killed and reported as an error.
+fn pipe_in(mut child: std::process::Child, bytes: &[u8], limit: Duration) -> std::io::Result<std::process::Output> {
+    let stdin = child.stdin.take();
+    let deadline = std::time::Instant::now() + limit;
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            if let Some(mut pipe) = stdin {
+                // The child may end before reading everything; its exit status says what went wrong.
+                let _ = pipe.write_all(bytes);
+            }
+        });
+        loop {
+            if child.try_wait()?.is_some() {
+                return child.wait_with_output();
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("it did not finish within {} seconds", limit.as_secs()),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    })
 }
 
 /// The real thing, through `paddock-proc` (stdin only for `git hash-object`, which reads it and ends).
@@ -166,7 +225,7 @@ impl Exec for Real {
                 cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
                 let out = cmd
                     .spawn()
-                    .and_then(|child| pipe_in(child, bytes))
+                    .and_then(|child| pipe_in(child, bytes, TIMEOUT))
                     .map_err(|e| fail(e.to_string()))?;
                 if !out.status.success() {
                     return Err(fail(String::from_utf8_lossy(&out.stderr).trim().to_string()));
@@ -192,14 +251,19 @@ pub struct InputHash {
 }
 
 /// Computes the hash for the repository at `root`.
-pub fn compute(exec: &dyn Exec, env: &dyn Fn(&str) -> Option<String>, root: &Path) -> Result<InputHash, CliError> {
+pub fn compute(
+    exec: &dyn Exec,
+    env: &dyn Fn(&str) -> Option<String>,
+    vars: &[(String, String)],
+    root: &Path,
+) -> Result<InputHash, CliError> {
     let tool = root.join("tools/paddock-dev");
     let list = std::fs::read_to_string(tool.join("inputs.txt")).map_err(|e| {
         CliError::failure(format!("tools/paddock-dev/inputs.txt could not be read: {e}."))
             .with_hint("Run ./dev inside the Paddock repository.")
     })?;
     let inputs = parse_inputs(&list)?;
-    let configs: Vec<String> = config_paths(root, env)
+    let configs: Vec<String> = config_files(root, env)
         .iter()
         .filter_map(|p| std::fs::read_to_string(p).ok())
         .collect();
@@ -208,13 +272,13 @@ pub fn compute(exec: &dyn Exec, env: &dyn Fn(&str) -> Option<String>, root: &Pat
     let mut git_args: Vec<&str> = vec!["ls-tree", "HEAD", "--"];
     git_args.extend(inputs.iter().map(String::as_str));
     let tree = exec.run("git", &git_args, root, None)?;
-    let flags = flag_lines(env, &configs);
+    let flags = flag_lines(vars, &configs);
     let hash = exec
         .run(
             "git",
             &["hash-object", "--stdin"],
             root,
-            Some(format!("{tree}{compiler}{flags}").as_bytes()),
+            Some(format!("{tree}{compiler}{}\n", flags.trim_end_matches('\n')).as_bytes()),
         )?
         .trim()
         .to_string();
@@ -237,7 +301,8 @@ pub fn command() -> Result<Report, CliError> {
     let root = Real
         .run("git", &["rev-parse", "--show-toplevel"], &cwd, None)
         .map_err(|e| e.with_hint("Run ./dev inside the Paddock repository."))?;
-    let h = compute(&Real, &env, Path::new(root.trim()))?;
+    let vars: Vec<(String, String)> = std::env::vars().collect();
+    let h = compute(&Real, &env, &vars, Path::new(root.trim()))?;
     let wrapper = env("PADDOCK_DEV_WRAPPER_HASH");
     let text = format!(
         "hash     {}\nwrapper  {}\nembedded {}\ndirty    {}",
@@ -286,24 +351,36 @@ mod tests {
         assert_eq!(build_rustc("[build]\nrustc = \"/z\" \n").as_deref(), Some("/z"));
         assert_eq!(build_rustc("[build]\nrustc-wrapper = \"w\"\njobs = 2\n"), None);
         assert_eq!(build_rustc("rustc = \"top\"\n"), None);
+        assert_eq!(build_rustc("build.rustc = \"/dotted\"\n[x]\n").as_deref(), Some("/dotted"));
+        assert_eq!(build_rustc("[x]\nbuild.rustc = \"no\"\n"), None);
         assert_eq!(build_rustc("[build]\nrustc = bare\n").as_deref(), Some("bare"));
     }
 
     #[test]
-    fn flags_in_the_environment_and_in_any_config_table_change_the_hashed_text() {
-        let none = |_: &str| None;
-        assert_eq!(flag_lines(&none, &[]), "RUSTFLAGS=\nCARGO_ENCODED_RUSTFLAGS=\n");
-        let env = |k: &str| (k == "RUSTFLAGS").then(|| "-C target-cpu=native".to_string());
-        assert_eq!(flag_lines(&env, &[]), "RUSTFLAGS=-C target-cpu=native\nCARGO_ENCODED_RUSTFLAGS=\n");
-        let encoded = |k: &str| (k == "CARGO_ENCODED_RUSTFLAGS").then(|| "-Ca\x1f-Cb".to_string());
-        assert!(flag_lines(&encoded, &[]).contains("CARGO_ENCODED_RUSTFLAGS=-Ca\x1f-Cb\n"));
-        let configs = vec![
-            "[build]\nrustflags = [\"-D\", \"warnings\"]\njobs = 2\n".to_string(),
-            "[target.x86_64-pc-windows-msvc]\r\n  rustflags=[\"-C\", \"x\"]\r\nrustflags-not = 1\n# rustflags = []\n".to_string(),
+    fn hashed_variables_and_whole_configs_change_the_hashed_text() {
+        let var = |k: &str, v: &str| (k.to_string(), v.to_string());
+        assert_eq!(flag_lines(&[], &[]), "");
+        let vars = [
+            var("RUSTFLAGS", "-C target-cpu=native"),
+            var("CARGO_PROFILE_RELEASE_LTO", "fat"),
+            var("CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", "-Cx"),
+            var("CARGO_BUILD_TARGET", "wasm32-unknown-unknown"),
+            var("CARGO_ENCODED_RUSTFLAGS", ""),
+            var("CARGO_TARGET_DIR", "/ignored"),
+            var("CARGO_BUILD_JOBS", "2"),
+            var("PATH", "/bin"),
         ];
         assert_eq!(
-            flag_lines(&none, &configs),
-            "RUSTFLAGS=\nCARGO_ENCODED_RUSTFLAGS=\nrustflags = [\"-D\", \"warnings\"]\n  rustflags=[\"-C\", \"x\"]\n"
+            flag_lines(&vars, &[]),
+            "CARGO_BUILD_TARGET=wasm32-unknown-unknown\nCARGO_PROFILE_RELEASE_LTO=fat\nCARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-Cx\nRUSTFLAGS=-C target-cpu=native\n"
+        );
+        let configs = vec![
+            "[profile.release]\r\nlto = true\n".to_string(),
+            "build.rustflags = [\"-D\"]\n".to_string(),
+        ];
+        assert_eq!(
+            flag_lines(&[], &configs),
+            "config-file\n[profile.release]\nlto = true\n\nconfig-file\nbuild.rustflags = [\"-D\"]\n\n"
         );
     }
 
@@ -326,14 +403,45 @@ mod tests {
     }
 
     #[test]
-    fn config_paths_go_closest_first_and_cargo_home_wins_over_home() {
-        let env = |k: &str| (k == "CARGO_HOME").then(|| "/ch".to_string());
-        let p = config_paths(Path::new("/r"), &env);
-        assert!(p[0].ends_with("tools/paddock-dev/.cargo/config.toml") && p[2].ends_with(".cargo/config.toml"));
-        assert_eq!(p[3], Path::new("/ch/config.toml"));
-        let home_only = |k: &str| (k == "HOME").then(|| "/h".to_string());
-        assert_eq!(config_paths(Path::new("/r"), &home_only)[3], Path::new("/h/.cargo/config.toml"));
-        assert_eq!(config_paths(Path::new("/r"), &|_: &str| None).len(), 3);
+    fn config_files_go_closest_first_include_the_tools_toml_files_and_end_with_cargo_home() {
+        let d = tempfile::tempdir().unwrap();
+        let (root, home) = (d.path().join("repo"), d.path().join("ch"));
+        let w = |p: &Path, text: &str| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        w(&root.join("tools/paddock-dev/.cargo/config.toml"), "a");
+        w(&root.join("tools/paddock-dev/.cargo/ci.toml"), "b");
+        w(&root.join("tools/paddock-dev/.cargo/note.txt"), "c");
+        w(&root.join(".cargo/config"), "d");
+        w(&d.path().join(".cargo/config.toml"), "above the repository");
+        w(&home.join("config.toml"), "e");
+        let env = |k: &str| (k == "CARGO_HOME").then(|| home.display().to_string());
+        let names: Vec<String> = config_files(&root, &env)
+            .iter()
+            .map(|p| p.strip_prefix(d.path()).unwrap().display().to_string().replace('\\', "/"))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "repo/tools/paddock-dev/.cargo/config.toml",
+                "repo/tools/paddock-dev/.cargo/ci.toml",
+                "repo/.cargo/config",
+                ".cargo/config.toml",
+                "ch/config.toml"
+            ]
+        );
+        // CARGO_HOME that is also an ancestor's `.cargo` is listed once; HOME is the fallback.
+        let same = |k: &str| (k == "CARGO_HOME").then(|| d.path().join(".cargo").display().to_string());
+        assert_eq!(
+            config_files(&root, &same)
+                .iter()
+                .filter(|p| p.ends_with(".cargo/config.toml"))
+                .count(),
+            2
+        );
+        let via_home = |k: &str| (k == "HOME").then(|| d.path().display().to_string());
+        assert_eq!(config_files(&root, &via_home).len(), 4);
     }
 
     /// Scripted programs: answers by program and first argument, and records the stdin of `hash-object`.
@@ -376,17 +484,14 @@ mod tests {
             status: " M tools/paddock-dev/src/x.rs\n".into(),
             stdin_seen: RefCell::default(),
         };
-        let h = compute(&fake, &|_: &str| None, d.path()).unwrap();
-        assert_eq!(
-            fake.stdin_seen.borrow()[0],
-            "T\ncommit-hash: c1\nrelease: 1.0\nRUSTFLAGS=\nCARGO_ENCODED_RUSTFLAGS=\n"
-        );
+        let h = compute(&fake, &|_: &str| None, &[], d.path()).unwrap();
+        assert_eq!(fake.stdin_seen.borrow()[0], "T\ncommit-hash: c1\nrelease: 1.0\n\n");
         assert!(h.dirty && h.inputs == ["tools/paddock-dev", "crates/a"] && h.hash.starts_with("hash-of-"));
         let clean = Fake {
             status: "\n".into(),
             ..fake
         };
-        assert!(!compute(&clean, &|_: &str| None, d.path()).unwrap().dirty);
+        assert!(!compute(&clean, &|_: &str| None, &[], d.path()).unwrap().dirty);
     }
 
     #[test]
@@ -399,8 +504,8 @@ mod tests {
             stdin_seen: RefCell::default(),
         };
         let env = |k: &str| (k == "RUSTC").then(|| "my-rustc".to_string());
-        assert!(compute(&fake, &env, d.path()).is_ok());
-        assert!(compute(&fake, &|_: &str| None, d.path()).is_err());
+        assert!(compute(&fake, &env, &[], d.path()).is_ok());
+        assert!(compute(&fake, &|_: &str| None, &[], d.path()).is_err());
     }
 
     #[test]
@@ -423,6 +528,19 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_program_that_reads_its_input_but_never_ends_is_killed_at_the_limit() {
+        let mut cmd = proc_command("sh");
+        cmd.args(["-c", "cat >/dev/null; sleep 30"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let child = cmd.spawn().unwrap();
+        let err = pipe_in(child, b"x", Duration::from_millis(200)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
     #[test]
     fn every_step_that_fails_stops_the_hash_with_that_error() {
         let d = repo();
@@ -432,7 +550,7 @@ mod tests {
             status: String::new(),
             stdin_seen: RefCell::default(),
         };
-        assert!(compute(&ok, &|_: &str| None, d.path()).is_ok());
+        assert!(compute(&ok, &|_: &str| None, &[], d.path()).is_ok());
         // Each program fails in turn.
         struct FailOn(&'static str);
         impl Exec for FailOn {
@@ -450,12 +568,12 @@ mod tests {
             }
         }
         for step in ["rustc", "ls-tree", "hash-object", "status"] {
-            let err = compute(&FailOn(step), &|_: &str| None, d.path()).unwrap_err();
+            let err = compute(&FailOn(step), &|_: &str| None, &[], d.path()).unwrap_err();
             assert_eq!(err.message, format!("{step} failed"));
         }
         std::fs::write(d.path().join("tools/paddock-dev/inputs.txt"), "has space\n").unwrap();
         assert!(
-            compute(&ok, &|_: &str| None, d.path())
+            compute(&ok, &|_: &str| None, &[], d.path())
                 .unwrap_err()
                 .text()
                 .contains("not a plain repository-relative path")
@@ -471,7 +589,7 @@ mod tests {
             status: String::new(),
             stdin_seen: RefCell::default(),
         };
-        let err = compute(&fake, &|_: &str| None, d.path()).unwrap_err();
+        let err = compute(&fake, &|_: &str| None, &[], d.path()).unwrap_err();
         assert!(err.text().contains("inputs.txt") && err.text().contains("Paddock repository"));
     }
 }

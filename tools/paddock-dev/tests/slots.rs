@@ -36,6 +36,9 @@ fn acquire(root: &Path, owner: &Path, max: &str) -> (i32, Value, String) {
         root.to_str().unwrap(),
         "--poll-ms",
         POLL,
+        // Whatever a failing test leaves behind ends by itself (tests leave no process on the machine).
+        "--max-hold-secs",
+        "120",
     ])
 }
 
@@ -192,7 +195,7 @@ fn the_holder_does_not_keep_an_inherited_pipe_open() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
-    let script = r#"exec 7>&1 1>/dev/null; exec "$0" ci slot acquire --max 1 --owner "$1" --root "$2" --poll-ms 20"#;
+    let script = r#"exec 7>&1 1>/dev/null; exec "$0" ci slot acquire --max 1 --owner "$1" --root "$2" --poll-ms 20 --max-hold-secs 120"#;
     let (tx, rx) = std::sync::mpsc::channel();
     let (bin, job_arg, root_arg) = (
         env!("CARGO_BIN_EXE_paddock-dev"),
@@ -209,17 +212,10 @@ fn the_holder_does_not_keep_an_inherited_pipe_open() {
         .expect("the pipe stayed open: the holder kept an inherited descriptor");
     assert_eq!(code, Some(0));
     assert!(!is_free(&root, 1), "the holder is still running");
-    dev(&[
-        "ci",
-        "slot",
-        "release",
-        "--slot",
-        "s1",
-        "--token",
-        "x",
-        "--root",
-        root.to_str().unwrap(),
-    ]);
+    // The step's output went to /dev/null, so the holder's own record gives the token to release with.
+    let token = FsLocks::new(&root).read_owner(SlotId::new(1).unwrap()).unwrap().token;
+    assert_eq!(release(&root, "s1", &token).0, 0);
+    assert!(is_free(&root, 1));
 }
 
 /// Windows hands a child every inheritable handle of its parent, and Unix runs the same shape of check through the descriptor
@@ -250,6 +246,8 @@ fn the_step_output_pipe_closes_when_acquire_ends_even_though_the_holder_lives_on
                 &root_arg,
                 "--poll-ms",
                 POLL,
+                "--max-hold-secs",
+                "120",
             ])
             .output()
             .unwrap();
@@ -353,4 +351,30 @@ fn failures_of_the_slot_files_are_reported_with_exit_1_by_every_command() {
     let (code, v, err) = acquire(&root, &job, "1");
     assert_eq!(code, 1, "{v}");
     assert!(err.contains("ended before it took a slot"), "{err}");
+}
+
+#[test]
+fn a_holder_lets_go_at_its_lifetime_cap_while_the_job_folder_still_exists() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (code, _, err) = dev(&[
+        "ci",
+        "slot",
+        "acquire",
+        "--max",
+        "1",
+        "--owner",
+        job.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+        "--poll-ms",
+        POLL,
+        "--max-hold-secs",
+        "1",
+    ]);
+    assert_eq!(code, 0, "{err}");
+    assert!(!is_free(&root, 1), "held at first");
+    wait_until_free(&root, 1);
+    assert!(job.exists(), "the job folder was never removed");
 }

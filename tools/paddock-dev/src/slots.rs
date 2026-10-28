@@ -27,6 +27,10 @@ use std::time::Duration;
 /// The most slots a caller may ask for.
 pub const MAX_SLOTS: u32 = 1024;
 const DEFAULT_POLL_MS: u64 = 500;
+/// A holder lets go after this long even when its job folder still exists (a job that never ended and never released).
+pub const DEFAULT_MAX_HOLD_SECS: u64 = 6 * 60 * 60;
+/// How long `acquire` waits for the holder's first line (its slot, or `none`) before it gives up and stops the holder.
+const DEFAULT_FIRST_LINE_SECS: u64 = 30;
 
 /// `acquire`'s arguments.
 #[derive(Args)]
@@ -43,6 +47,12 @@ pub struct AcquireArgs {
     /// How often the holder looks for the end of the job (milliseconds).
     #[arg(long, default_value_t = DEFAULT_POLL_MS, hide = true)]
     poll_ms: u64,
+    /// The longest the holder keeps the slot, in seconds, whether or not the job folder still exists (0: no limit).
+    #[arg(long, default_value_t = DEFAULT_MAX_HOLD_SECS)]
+    max_hold_secs: u64,
+    /// How long to wait for the holder to take a slot, in seconds.
+    #[arg(long, default_value_t = DEFAULT_FIRST_LINE_SECS, hide = true)]
+    holder_timeout_secs: u64,
 }
 
 /// `release`'s arguments.
@@ -88,6 +98,9 @@ pub struct HoldArgs {
     /// Look interval in milliseconds.
     #[arg(long, default_value_t = DEFAULT_POLL_MS)]
     poll_ms: u64,
+    /// The longest the holder keeps the slot, in seconds (0: no limit).
+    #[arg(long, default_value_t = DEFAULT_MAX_HOLD_SECS)]
+    max_hold_secs: u64,
 }
 
 fn check_max(max: u32) -> Result<(), CliError> {
@@ -124,6 +137,8 @@ pub fn holder_args(a: &AcquireArgs, owner: &Path) -> Vec<String> {
         a.root.display().to_string(),
         "--poll-ms".into(),
         a.poll_ms.to_string(),
+        "--max-hold-secs".into(),
+        a.max_hold_secs.to_string(),
     ]
 }
 
@@ -140,6 +155,21 @@ pub fn check_program_outside_owner(exe: &Path, owner: &Path) -> Result<(), CliEr
             owner.display()
         ))
         .with_hint("Build or copy the tool outside the job folder (PADDOCK_DEV_TARGET_DIR, PADDOCK_DEV_HOME) and run it from there."));
+    }
+    Ok(())
+}
+
+/// The CI home holds the holder's working folder and the lock files; inside the job folder it would stand in the way of deleting
+/// that folder just as the program would, and the slot's own files would vanish with the job.
+pub fn check_root_outside_owner(root: &Path, owner: &Path) -> Result<(), CliError> {
+    let (root, owner) = (canonical_even_if_missing(root), canonical_even_if_missing(owner));
+    if root.starts_with(&owner) {
+        return Err(CliError::usage(format!(
+            "--root {} is inside the job folder {}, so the slot would disappear with the job and keep the folder from being deleted.",
+            root.display(),
+            owner.display()
+        ))
+        .with_hint("Use a CI home outside the job folder."));
     }
     Ok(())
 }
@@ -191,13 +221,17 @@ pub fn acquire(a: &AcquireArgs) -> Result<Report, CliError> {
     acquire_with(a, &exe)
 }
 
-/// What the holder said first, or an empty string when it ended without saying anything.
-fn first_line(child: &mut std::process::Child) -> String {
-    let mut line = String::new();
-    if let Some(out) = child.stdout.take() {
+/// What the holder said first: `Some(line)` (empty when it ended without saying anything), or `None` when it said nothing within
+/// `limit`. The read happens on its own thread, which ends when the holder is stopped (its pipe closes).
+fn first_line(child: &mut std::process::Child, limit: Duration) -> Option<String> {
+    let out = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
         let _ = BufReader::new(out).read_line(&mut line);
-    }
-    line
+        let _ = tx.send(line);
+    });
+    rx.recv_timeout(limit).ok()
 }
 
 /// `acquire` with the program that will hold the slot named (the running binary in production).
@@ -208,6 +242,7 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
             .with_hint("Pass the job's own folder; it must exist.")
     })?;
     check_program_outside_owner(exe, &owner)?;
+    check_root_outside_owner(&a.root, &owner)?;
     std::fs::create_dir_all(&a.root).map_err(|e| {
         CliError::failure(format!("{} cannot be created: {e}.", a.root.display())).with_hint("Pass a writable CI home with --root.")
     })?;
@@ -216,7 +251,16 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
     let mut child = holder_command(exe, &holder_args(a, &owner), &a.root).spawn().map_err(|e| {
         CliError::failure(format!("The slot holder could not be started: {e}.")).with_hint("Check that the dev binary can run.")
     })?;
-    let line = first_line(&mut child);
+    let Some(line) = first_line(&mut child, Duration::from_secs(a.holder_timeout_secs.max(1))) else {
+        // It neither took a slot nor said "none" in time: stop it, so it cannot take one later and keep it.
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(CliError::failure(format!(
+            "The slot holder did not answer within {} seconds.",
+            a.holder_timeout_secs.max(1)
+        ))
+        .with_hint("The machine may be overloaded; try again, or run `./dev ci slot hold` by hand to see why."));
+    };
     if line.is_empty() {
         let _ = child.wait();
         return Err(
@@ -254,6 +298,7 @@ pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
         a.max,
         &a.owner,
         Duration::from_millis(a.poll_ms.max(1)),
+        (a.max_hold_secs > 0).then(|| Duration::from_secs(a.max_hold_secs)),
         &mut std::io::stdout(),
     )
     .map_err(failure)?;
@@ -330,11 +375,14 @@ mod tests {
             owner: "o".into(),
             root: "r".into(),
             poll_ms: 7,
+            max_hold_secs: 9,
+            holder_timeout_secs: 30,
         };
         let args = holder_args(&a, Path::new("/abs/o"));
         assert_eq!(args[..3], ["ci", "slot", "hold"]);
         assert!(args.windows(2).any(|w| w == ["--owner", "/abs/o"]));
         assert!(args.windows(2).any(|w| w == ["--poll-ms", "7"]));
+        assert!(args.windows(2).any(|w| w == ["--max-hold-secs", "9"]));
     }
 
     #[test]
@@ -364,6 +412,36 @@ mod tests {
     }
 
     #[test]
+    fn a_ci_home_inside_the_job_folder_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let job = d.path().join("job");
+        std::fs::create_dir(&job).unwrap();
+        let err = check_root_outside_owner(&job.join("ci"), &job).unwrap_err();
+        assert_eq!(err.exit, paddock_cli::Exit::Usage);
+        assert!(err.text().contains("inside the job folder") && err.text().contains("CI home outside"));
+        assert!(check_root_outside_owner(&d.path().join("ci"), &job).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_holder_that_never_answers_is_stopped_and_reported() {
+        let d = tempfile::tempdir().unwrap();
+        let job = d.path().join("job");
+        std::fs::create_dir(&job).unwrap();
+        let silent = d.path().join("silent-dev");
+        std::fs::write(&silent, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&silent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut a = args(&d.path().join("ci"), &job);
+        a.holder_timeout_secs = 1;
+        let err = acquire_with(&a, &silent).unwrap_err();
+        assert_eq!(err.exit, paddock_cli::Exit::Failure);
+        assert!(err.text().contains("did not answer within 1 seconds"), "{}", err.text());
+    }
+
+    #[test]
     fn a_path_with_nothing_existing_in_it_is_taken_as_it_is() {
         assert_eq!(
             canonical_even_if_missing(Path::new("no-such-relative-path")),
@@ -377,6 +455,8 @@ mod tests {
             owner: owner.to_path_buf(),
             root: root.to_path_buf(),
             poll_ms: 20,
+            max_hold_secs: 0,
+            holder_timeout_secs: 30,
         }
     }
 
