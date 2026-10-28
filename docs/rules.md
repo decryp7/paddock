@@ -65,7 +65,8 @@ changes here, every app's copy is updated in the same change.
 24. **Services survive updates:** re-register once per version change (unregister → `launchctl bootout` → wait →
     register) and repair a stale registration automatically.
 25. **Before tagging:** `cargo deny check advisories`, one CI build with bundles, the icon check, strip whitespace from
-    signing secrets, and the release notes' First launch section (until the apps are signed).
+    signing secrets, the release notes' First launch section (until the apps are signed), and for an app with a background
+    service the local VM update smoke (`tools/vm-smoke.sh macos|linux`; CI has no VMs, C21).
 26. **Process memory is measured as real memory per OS:** Linux PSS (`smaps_rollup`, skipping thread entries), macOS physical footprint (`ri_phys_footprint`), Windows private working set; never RSS. Caps, budgets and displays use this one measure from `paddock-proc`.
 
 ## Angular and SignalStore (approved 2026-10-23; reasons: [research](research/2026-10-angular-and-signalstore.md))

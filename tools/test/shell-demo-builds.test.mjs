@@ -2,7 +2,7 @@
 // bundler: nothing is compiled and nothing on the machine is touched.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { scratch, systemFolder, TOOLS, write } from './helpers.mjs';
@@ -76,4 +76,22 @@ test('a failed N+1 bundle restores the checkout too', () => {
   const res = build(r, { FAKE_FAIL_AT: BUMPED });
   assert.equal(res.status, 3, res.text);
   assert.equal(r.status(), '');
+});
+
+test('a failed first bundle restores the checkout (the lockfile the bundler rewrote)', () => {
+  const r = repo();
+  const res = build(r, { FAKE_FAIL_AT: VERSION });
+  assert.equal(res.status, 3, res.text);
+  assert.equal(r.status(), '');
+});
+
+test('refuses to start over uncommitted edits, and leaves them alone', () => {
+  const r = repo();
+  const file = join(r.root, 'apps/shell-demo/src-tauri/Cargo.toml');
+  const edited = `${readFileSync(file, 'utf8')}# my edit\n`;
+  writeFileSync(file, edited);
+  const res = build(r);
+  assert.equal(res.status, 1, res.text);
+  assert.match(res.text, /uncommitted changes/);
+  assert.equal(readFileSync(file, 'utf8'), edited, 'the edit is not thrown away');
 });

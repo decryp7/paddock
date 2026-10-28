@@ -19,6 +19,12 @@ agent_version() { "$1" --self-test | awk 'NR == 1 { print $2 }'; }
 v_old=$(sed -n 's/^version = "\(.*\)"/\1/p' "${tomls[0]}" | head -n1)
 v_new=$(echo "$v_old" | awk -F. '{ print $1 "." $2 "." $3 + 1 }')
 
+# Refuse to start over uncommitted edits: the restore on exit would throw them away.
+if [ -n "$(git status --porcelain -- "${tomls[@]}" "$lock")" ]; then
+  echo "::error::uncommitted changes in ${tomls[*]} or $lock; commit or revert them first (this script bumps and restores them)"
+  exit 1
+fi
+
 restore() { git checkout -- "${tomls[@]}" "$lock"; }
 trap restore EXIT
 

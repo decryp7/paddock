@@ -4,8 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### The update smoke runs locally, not in CI
+- The `service-smoke` workflow is gone (CI has no VMs): `tools/vm-smoke.sh macos|linux` builds N and N+1 and runs the smoke in a
+  local Tart VM, `docs/blocks/releasing.md` and rule 25 list it as a pre-tag step, and C21 checks the tool and that step.
+
 ### service-smoke: the N+1 agent check read every line of the self-test
-- The nightly update smoke failed in its build step on every run (6394, 6410, 6540): the check took the second word of
+- The update smoke (then a nightly workflow, now a local tool) failed in its build step on every run (6394, 6410, 6540): the check took the second word of
   every line of `shell-demo-agent --self-test` ("0.1.1", "executable", "service"), not the version in its header line,
   so build N+1 never matched although its agent reported the bumped version. The macOS N and N+1 builds moved into
   `scripts/shell-demo/build-macos-n-n1.sh`, which reads the header only, checks both builds and undoes the version bump

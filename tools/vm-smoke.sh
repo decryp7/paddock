@@ -2,7 +2,7 @@
 # The local entry point for tests that need a throwaway OS (login tests, services, installs, updates, system settings: rule 7).
 # First case: the service-after-update smoke (conformance C21, catalogue R03) in ONE local command: builds the shell demo as N and N+1
 # and runs the update smoke in a throw-away VM on this Mac (Tart: macOS and Ubuntu guests). Local only: CI has no VMs
-# (user decision, 2026-10-28). Run it before tagging a release (docs/release-checklist.md).
+# (user decision, 2026-10-28). Run it before tagging a release (docs/blocks/releasing.md).
 #
 #   bash tools/vm-smoke.sh macos|linux
 #
@@ -38,7 +38,17 @@ if [ -n "$volume_root" ] && [ ! -d "$volume_root" ]; then
 fi
 mkdir -p "$TART_HOME" || die "cannot create TART_HOME=$TART_HOME"
 
-out="${PADDOCK_VM_OUT:-$(mktemp -d "$TART_HOME/smoke-builds-XXXXXX")}"
+# Fail before the long builds when the disk cannot take the VM image (macos-vm-smoke.sh checks again, with the same limit).
+min_free="${PADDOCK_VM_MIN_FREE_GB:-60}"
+free_gb=$(df -k "$TART_HOME" | awk 'NR==2 {print int($4/1048576)}')
+[ "${free_gb:-0}" -ge "$min_free" ] || die "only ${free_gb:-0} GB free under $TART_HOME; at least $min_free GB are needed. Free space or set TART_HOME elsewhere."
+
+if [ -n "${PADDOCK_VM_OUT:-}" ]; then
+  out="$PADDOCK_VM_OUT"
+else
+  out="$(mktemp -d "$TART_HOME/smoke-builds-XXXXXX")"
+  trap 'rm -rf "$out"' EXIT # the builds are scratch; a PADDOCK_VM_OUT the caller named is kept
+fi
 mkdir -p "$out"
 cd "$repo"
 
@@ -49,9 +59,10 @@ if [ "$guest" = macos ]; then
   app="$(basename "$(ls -d "$out"/n/*.app | head -n 1)")"
   bash tools/macos-vm-smoke.sh --old "$out/n/$app" --new "$out/n1/$app"
 else
+  npm --prefix ui run shell-demo:build # the container build embeds this UI (needs `npm ci` at the root once)
   bash scripts/shell-demo/build-linux-arm64.sh "$out"
   read -r PADDOCK_SMOKE_OLD_VERSION PADDOCK_SMOKE_NEW_VERSION < "$out/versions"
   export PADDOCK_SMOKE_OLD_VERSION PADDOCK_SMOKE_NEW_VERSION
   bash tools/macos-vm-smoke.sh --guest linux --old "$out/n/paddock-shell-demo" --new "$out/n1/paddock-shell-demo"
 fi
-echo "vm-smoke: the $guest update smoke passed (builds in $out)"
+echo "vm-smoke: the $guest update smoke passed"
