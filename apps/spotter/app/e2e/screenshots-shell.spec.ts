@@ -83,7 +83,7 @@ for (const scheme of ['dark', 'light'] as const) {
       ['updates', 'pd.updates', { width: 560, height: 480 }, {}],
       ['about', 'pd.about', { width: 680, height: 560 }, {}],
       ['whats-new', 'pd.whats-new', { width: 680, height: 560 }, {}],
-      ['confirm', 'sp.confirm', { width: 420, height: 190 }, { title: 'Delete watch', message: 'Delete "Lumen CLI"? Its history is deleted with it.', confirmLabel: 'Delete', danger: true }],
+      ['confirm', 'sp.confirm', { width: 420, height: 160 }, { title: 'Delete watch', message: 'Delete "Lumen CLI"? Its history is deleted with it.', confirmLabel: 'Delete', danger: true }],
     ];
     for (const [name, id, size, input] of windows) {
       test(`${name} window`, async ({ page, app }) => {
