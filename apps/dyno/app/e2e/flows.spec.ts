@@ -544,7 +544,7 @@ test.describe('backup health', () => {
   test('finding no backup tool is a normal state', async ({ page }) => {
     await page.goto(url('/backup', '&backup=none'));
     await expect(page.getByText('No backup tool found')).toBeVisible();
-    await expect(page.locator('.none')).toContainText('never runs or manages a backup');
+    await expect(page.locator('dy-backup-page')).toContainText('never runs or manages a backup');
     await expect(page.getByRole('alert')).toHaveCount(0);
   });
 

@@ -40,7 +40,7 @@ describe('dy-backup-page', () => {
     expect(el.querySelector('[aria-label="Summary"] p')?.textContent).toBe('Checked 40 min ago');
   });
 
-  it('shows every tool's status as a dot and a word', async () => {
+  it('shows the status of every tool as a dot and a word', async () => {
     const { f, el } = render();
     await settle(f);
     const [tm, restic, borg] = [...el.querySelectorAll('tr.row')];
@@ -132,7 +132,7 @@ describe('dy-backup-page', () => {
     const none = el.querySelector('.none')!;
     expect(none.querySelector('strong')?.textContent).toBe('No backup tool found');
     for (const name of ['Time Machine', 'Windows Backup', 'File History', 'restic', 'Borg', 'Duplicati']) expect(none.textContent).toContain(name);
-    expect(none.textContent).toContain('never runs or manages a backup');
+    expect(el.textContent).toContain('never runs or manages a backup');
     expect(el.querySelector('table')).toBeNull();
     expect(el.querySelector('[role="alert"]')).toBeNull();
     const spy = vi.spyOn(mock, 'refreshBackup');

@@ -1,6 +1,6 @@
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import type { CommandError, CustomAlertRule } from '../../core/api.types';
+import type { CustomAlertRule } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { confirm } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
