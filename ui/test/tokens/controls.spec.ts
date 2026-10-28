@@ -60,7 +60,7 @@ describe('control styles and the Material bridge (plan X37)', () => {
     }
     // Every value is a token reference, a sized token expression or a keyword: nothing hard-coded.
     for (const m of material.matchAll(/(--mat-[\w-]+)\s*:\s*([^;]+);/g)) {
-      expect(m[2], m[1]).toMatch(/^(var\(--pd-[\w-]+\)|calc\(var\(--pd-[\w-]+\) \/ [\d.]+\)|calc\(2px \/ 0\.75\)|none|transparent|currentcolor|block|0px|0)$/);
+      expect(m[2], m[1]).toMatch(/^(var\(--pd-[\w-]+\)|calc\(var\(--pd-[\w-]+\) \/ [\d.]+\)|calc\(2px \/ 0\.75\)|none|transparent|currentcolor|block|2px|0px|0)$/);
     }
   });
 

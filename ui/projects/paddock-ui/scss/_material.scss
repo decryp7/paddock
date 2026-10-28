@@ -109,7 +109,14 @@
   --mat-sys-label-small-line-height: var(--pd-lh-caption);
   --mat-sys-title-medium-line-height: var(--pd-lh-body-lg);
   --mat-sys-title-large-line-height: var(--pd-lh-subtitle);
-  --mat-form-field-outlined-label-text-populated-size: var(--pd-text-label);
+  // Material draws the floated outlined label at scale(0.75) of this size, so ask for the size / 0.75: it renders at the 12 px label size.
+  --mat-form-field-outlined-label-text-populated-size: calc(var(--pd-text-label) / 0.75);
+  --mat-form-field-outlined-label-text-size: calc(var(--pd-text-label) / 0.75);
+  // The field's own outline is the keyboard ring: 2 px in the family ring colour (the floated label sits on the border, so no ring around it).
+  --mat-form-field-outlined-focus-outline-color: var(--pd-focus-ring);
+  --mat-form-field-outlined-focus-outline-width: 2px;
+  --mat-icon-button-state-layer-size: var(--pd-control-height);
+  --mat-icon-button-icon-size: var(--pd-space-4);
   --mat-focus-indicator-border-color: var(--pd-focus-ring);
   --mat-focus-indicator-display: block;
 
@@ -179,7 +186,6 @@
   --mat-form-field-outlined-input-text-placeholder-color: var(--pd-text-subtle);
   --mat-form-field-outlined-outline-color: var(--pd-border-control);
   --mat-form-field-outlined-hover-outline-color: var(--pd-text-muted);
-  --mat-form-field-outlined-focus-outline-color: var(--pd-accent);
   --mat-form-field-outlined-error-outline-color: var(--pd-danger);
   --mat-form-field-outlined-error-hover-outline-color: var(--pd-danger);
   --mat-form-field-outlined-error-focus-outline-color: var(--pd-danger);
@@ -628,21 +634,20 @@ html .mat-mdc-menu-item {
   display: none;
 }
 
-html .mat-calendar-period-button,
-html .mat-calendar-body-label {
-  text-transform: none;
+// Material upper-cases the calendar heading ("OCT 2026") in script; the family writes sentence case. Lower-case it and
+// capitalise the first letter again (::first-letter needs a block box).
+html .mat-calendar-period-button .mdc-button__label > span:first-child {
+  display: inline-block;
+  text-transform: lowercase;
+}
+
+html .mat-calendar-period-button .mdc-button__label > span:first-child::first-letter {
+  text-transform: uppercase;
 }
 
 // The slide toggle's label keeps a 8 px gap to the switch after the 0.75 scale.
 html .mat-mdc-slide-toggle .mdc-label {
   padding-inline-start: calc(var(--pd-space-2) / 0.75);
-}
-
-// A field with the keyboard in it shows the family ring around the box (as pd-input does).
-html .mat-mdc-form-field:has(:focus-visible) .mat-mdc-text-field-wrapper {
-  outline: 2px solid var(--pd-focus-ring);
-  outline-offset: 2px;
-  border-radius: var(--pd-radius-input);
 }
 
 html .mat-mdc-form-field-hint {
@@ -666,14 +671,6 @@ html .mat-mdc-form-field input.mat-mdc-input-element {
 
 html .mat-mdc-form-field .mat-mdc-form-field-icon-suffix {
   padding-inline: var(--pd-space-1) var(--pd-space-2);
-}
-
-html .mat-mdc-form-field .mat-mdc-form-field-icon-suffix .mat-mdc-icon-button {
-  --mat-icon-button-state-layer-size: var(--pd-control-height);
-  --mat-icon-button-icon-size: var(--pd-space-4);
-  padding: 0;
-  width: var(--pd-control-height);
-  height: var(--pd-control-height);
 }
 
 // The selected button toggle is the segmented control's look (guide section 6): accent tint, a 1 px accent ring, 600 label.

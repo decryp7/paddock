@@ -19,6 +19,10 @@ Conventional Commits; one semver tag for the whole repo.
   rules win over Material's own CSS (28 px menu items and options, 4 px panel padding, popover radius), form fields get a 12 px floated
   label, a centred input and room for the suffix icons; type scale without tracking and with the family's line heights, family font
   stack; muted hints; segmented-look button toggle; `@angular/material` and `@angular/cdk` are 22.2.4 in every workspace.
+- Round 2: the floated label now renders at 12 px (Material scales it by 0.75, so the size is asked for / 0.75; the e2e measures the rendered
+  width), the field's own 2 px outline in `--pd-focus-ring` is the keyboard ring (no ring over the floated label), calendar month names
+  are sentence case (`monthLabel` in `providePaddockMaterial`, the heading's upper-casing undone in CSS), icon buttons and the paginator select
+  follow the density, and `@angular/material` / `@angular/cdk` are hoisted to one root copy again in `package-lock.json`.
 - Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
 
 ### Dyno on the shared CI kit (WP-C4)

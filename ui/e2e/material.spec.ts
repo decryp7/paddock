@@ -73,8 +73,22 @@ for (const theme of THEMES) {
     await open(page, theme);
     const s = section(page);
     const body = await px(page, '--pd-text-label');
-    // Floated label: the 12 px label size, not Material's scaled 9.75 px.
-    expect(await s.locator('.mdc-floating-label').first().evaluate((e) => parseFloat(getComputedStyle(e).fontSize))).toBe(body);
+    // Floated label: RENDERED at the 12 px label size (Material scales a floated label by 0.75 on top of its font size), measured
+    // against a 12 px span of the same text and font, not read from the computed font-size.
+    const label = await s.locator('.mdc-floating-label').first().evaluate((e, size) => {
+      const ref = document.createElement('span');
+      ref.textContent = e.textContent;
+      ref.style.position = 'absolute';
+      ref.style.whiteSpace = 'nowrap';
+      ref.style.fontFamily = getComputedStyle(e).fontFamily;
+      ref.style.fontSize = `${size}px`;
+      document.body.append(ref);
+      const out = { rendered: e.getBoundingClientRect().width, reference: ref.getBoundingClientRect().width };
+      ref.remove();
+      return out;
+    }, body);
+    expect(label.rendered / label.reference).toBeGreaterThan(0.94);
+    expect(label.rendered / label.reference).toBeLessThan(1.06);
     // Input text is vertically centred in the 28 px box (the two gaps differ by at most 1 px).
     const gaps = await s.locator('input.mat-mdc-input-element').first().evaluate((i) => {
       const w = i.closest('.mat-mdc-text-field-wrapper') as HTMLElement;
@@ -107,12 +121,30 @@ for (const theme of THEMES) {
         return c;
       }),
     );
-    // Calendar heading is sentence case, as Material writes it.
-    expect(await s.locator('.mat-calendar-period-button').first().evaluate((e) => getComputedStyle(e).textTransform)).toBe('none');
+    // Calendar heading and first row are sentence case: Material upper-cases the heading text, the bridge lower-cases it and
+    // capitalises the first letter; the first row takes `monthLabel` from providePaddockMaterial.
+    const heading = s.locator('.mat-calendar-period-button .mdc-button__label > span').first();
+    expect(await heading.evaluate((e) => getComputedStyle(e).textTransform)).toBe('lowercase');
+    expect(await heading.evaluate((e) => getComputedStyle(e, '::first-letter').textTransform)).toBe('uppercase');
+    expect(await s.locator('.mat-calendar-body-label').first().innerText()).toMatch(/^[A-Z][a-z]+$/);
     // The selected button toggle: 600 label and an accent ring.
     const toggle = s.locator('.mat-button-toggle-checked');
     expect(await toggle.locator('.mat-button-toggle-label-content').evaluate((e) => getComputedStyle(e).fontWeight)).toBe('600');
     expect(await toggle.evaluate((e) => getComputedStyle(e).boxShadow)).toContain('inset');
+  });
+
+  test(`Material controls: controls follow the density (${theme})`, async ({ page }) => {
+    for (const density of ['compact', 'comfortable'] as const) {
+      await open(page, theme, 'debrief', density);
+      const control = await px(page, '--pd-control-height');
+      const row = await px(page, '--pd-row-height');
+      const heights = (selector: string) => section(page).locator(selector).evaluateAll((es) => es.map((e) => Math.round((e as HTMLElement).getBoundingClientRect().height)));
+      expect(new Set(await heights('.mat-mdc-text-field-wrapper')), `${density} fields`).toEqual(new Set([control]));
+      expect(await heights('.mat-mdc-paginator .mat-mdc-text-field-wrapper'), `${density} paginator select`).toEqual([control]);
+      expect(new Set(await heights('.mat-mdc-icon-button')), `${density} icon buttons`).toEqual(new Set([control]));
+      expect(await heights('tr.mat-mdc-header-row'), `${density} table header`).toEqual([control]);
+      expect(new Set(await heights('.mat-tree-node')), `${density} tree nodes (the first one too)`).toEqual(new Set([row]));
+    }
   });
 
   test(`Material controls: a real select, menu and tooltip open themed and sized (${theme})`, async ({ page }) => {
@@ -187,7 +219,7 @@ for (const theme of THEMES) {
           el.closest('.mdc-radio')?.querySelector('.mdc-radio__outer-circle') ?? null,
           el.closest('.mat-mdc-slider')?.querySelector('.mdc-slider__thumb-knob') ?? null,
           el.closest('.mat-mdc-slide-toggle')?.querySelector('.mdc-switch__track') ?? null,
-          el.closest('.mat-mdc-text-field-wrapper') ?? el.closest('.mat-mdc-form-field')?.querySelector('.mat-mdc-text-field-wrapper') ?? null,
+          el.closest('.mat-mdc-form-field')?.querySelector('.mdc-notched-outline__leading') ?? null,
         ];
         let best: { how: string; width: number; ratio: number } | null = null;
         for (const h of hosts) {
@@ -195,6 +227,10 @@ for (const theme of THEMES) {
           const cs = getComputedStyle(h);
           if (cs.outlineStyle === 'solid' && parseFloat(cs.outlineWidth) >= 2) {
             best = { how: 'outline', width: parseFloat(cs.outlineWidth), ratio: ratio(cs.outlineColor, page) };
+            break;
+          }
+          if (h.classList.contains('mdc-notched-outline__leading') && parseFloat(cs.borderTopWidth) >= 2 && cs.borderTopStyle === 'solid') {
+            best = { how: 'field outline', width: parseFloat(cs.borderTopWidth), ratio: ratio(cs.borderTopColor, page) };
             break;
           }
           const b = getComputedStyle(h, '::before');
