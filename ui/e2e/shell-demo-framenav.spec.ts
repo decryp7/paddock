@@ -32,6 +32,7 @@ for (const colorScheme of THEMES) {
     test('a page that appears later keeps its place in the arrow-key order, and labels are 600 selected, 500 otherwise', async ({ app, page }) => {
       await app.frame.open();
       await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+      await expect(app.sidebar.link('Lab')).toHaveCount(0);
       await page.getByRole('button', { name: 'Say hello' }).click();
       await page.getByRole('button', { name: 'Say hello' }).click();
       const names = async () => app.sidebar.links.evaluateAll((els) => els.map((e) => e.getAttribute('data-page-link')));
@@ -58,6 +59,9 @@ for (const colorScheme of THEMES) {
       const nameText = await row.locator('.pd-label').evaluate((el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().right; });
       expect(badge.left).toBeGreaterThanOrEqual(nameText);
       expect(item.right - badge.right).toBeLessThanOrEqual(12);
+      expect(item.right - badge.right).toBeGreaterThanOrEqual(4);
+      // The icon is inset from the row's edge (the accent bar and the focus ring need the room).
+      expect(icon.left - item.left).toBeGreaterThanOrEqual(8);
     });
 
     test('in the rail every icon is centred in its row', async ({ app }) => {

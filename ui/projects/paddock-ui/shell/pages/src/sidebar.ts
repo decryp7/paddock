@@ -77,6 +77,8 @@ export class PdSidebarLink implements FocusableOption {
       position: relative; display: flex; align-items: center; padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); color: var(--pd-text-muted); text-decoration: none; white-space: nowrap;
       transition: background var(--pd-duration-micro) var(--pd-ease-move), color var(--pd-duration-micro) var(--pd-ease-move);
     }
+    /* Material's with-leading-icon and with-trailing-meta rules zero the item's padding: the extra class wins, so the icon and the count keep their inset. */
+    .pd-item.mdc-list-item { padding: 0 var(--pd-space-2); }
     .pd-item:hover { background: var(--pd-hover); color: var(--pd-text); text-decoration: none; }
     .pd-item:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     /* One selection style in every mode (design guide §4): 14 % accent tint, accent icon, 600 label, 2 px accent bar. */
@@ -95,12 +97,12 @@ export class PdSidebarLink implements FocusableOption {
       --mat-badge-line-height: 16px;
       --mat-badge-text-size: var(--pd-text-caption);
       --mat-badge-container-shape: var(--pd-radius-pill);
-      --mat-badge-container-overlap-offset: -12px;
+      --mat-badge-container-overlap-offset: -10px;
     }
     /* The directive draws the badge outside this template's encapsulation, so its ring is reached with ::ng-deep (the colours stay tokens). */
     :host ::ng-deep .pd-count .mat-badge-content { position: static; margin: 0; box-shadow: inset 0 0 0 1px var(--pd-border-strong); font-variant-numeric: tabular-nums; }
     :host ::ng-deep .pd-icon .mat-badge-content { box-shadow: 0 0 0 2px var(--pd-surface-1), inset 0 0 0 1px var(--pd-border-strong); font-variant-numeric: tabular-nums; }
-    :host(.pd-rail) .pd-item { justify-content: center; padding: 0; }
+    :host(.pd-rail) .pd-item.mdc-list-item { justify-content: center; padding: 0; }
     :host(.pd-rail) .pd-item .pd-icon { margin: 0; }
     /* The name's slot (drawn by the list item, outside this template) takes no room in the rail, so the icon is centred. */
     :host(.pd-rail) ::ng-deep .mdc-list-item__content { flex: none; width: 0; min-width: 0; overflow: hidden; }

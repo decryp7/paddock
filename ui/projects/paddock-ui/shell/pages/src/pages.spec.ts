@@ -538,10 +538,13 @@ describe('pd-shell-frame with provideShellPages', () => {
     expect(document.activeElement).toBe(links.at(-2));
   });
 
-  it('a page that appears later is reached in its place by the arrow keys, and the labels carry the family weights', async () => {
+  it('a page hidden after the context loads, then shown, keeps its arrow-key place, and the labels carry the family weights', async () => {
     const { el, fixture } = await boot();
     document.body.append(el);
     await TestBed.inject(ShellContextHost).load();
+    await settle();
+    // Hidden after the context loaded, then shown: the page keeps its place in the arrow-key order.
+    expect(el.querySelector('[data-page-link="t.lab"]')).toBeNull();
     count.set(3);
     await settle();
     await fixture.whenStable();
