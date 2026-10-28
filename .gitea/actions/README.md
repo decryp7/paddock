@@ -16,10 +16,11 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `nightly-mark` | record a fully green nightly (the marker `plan` looks up) | Debrief's `nightly-mark` job |
 | `cache-restore`, `cache-save` | the restore, then save-always cache pattern: a failing run still warms the cache; saved only when the key had no exact hit | the `actions/cache` blocks in every job |
 | `setup-rust` | toolchain with components and targets, sccache when the runner has it (shared Redis backend on every OS, `vars.SCCACHE_REDIS_ENDPOINT`/`_DB`; sccache is `RUSTC_WRAPPER` itself, never a script around it; a job with a build folder outside its checkout sets it with `--config build.target-dir=...`, not `CARGO_TARGET_DIR`, which sccache hashes), the Tauri Linux libraries | `dtolnay/rust-toolchain` + apt lines |
-| `stable-workspace` | host runners: moves the checkout to a fixed folder under `~/.paddock-ci/src` and links the old path to it (where the folder cannot move, as under act on Windows, keeps a clone there at the same commit), and sets `PADDOCK_WORKSPACE` for the cargo steps' `working-directory`, so sccache sees the same working folder every run (the work folder is hashed per job) | new |
-| `build-folder` | a job's Rust build folder as cargo configuration: `target/` in a Linux container, a kept `~/.paddock-ci/target-<name>` on a host runner, written to the workspace's `.cargo/ci.toml` (included by its `.cargo/config.toml`), so every cargo command and `tauri build` use it; sets `PADDOCK_BUILD_FOLDER` | `CARGO_TARGET_DIR` in the app workflows, Debrief's `scripts/ci/build-folder.sh` |
-| `host-tools` | the pinned cargo-nextest: kept under `~/.paddock-ci/tools` on the host runners (checksum-verified, downloaded only when that version is missing), the image's on Linux; fails when the runner has another version | `taiki-e/install-action` in the crate job |
-| `node-caches` | npm's download cache and the Angular build cache kept between runs (hosts: `~/.paddock-ci`; Linux containers: `npm/` and `angular/<job>` on the `/sccache` mount) | nothing kept them before |
+| `job-isolation` | a host job's slot and its own temp folder (see Job isolation below): `acquire` first, `release` last with `if: always()`; nothing in a container | each job's ad hoc `~/.paddock-ci` paths |
+| `stable-workspace` | host runners: moves the checkout to a fixed folder of the job's slot (`src/<name>-<slot>` in the CI home) and links the old path to it (where the folder cannot move, as under act on Windows, keeps a clone there at the same commit), and sets `PADDOCK_WORKSPACE` for the cargo steps' `working-directory`, so sccache sees the same working folder every run (the work folder is hashed per job) | new |
+| `build-folder` | a job's Rust build folder as cargo configuration: `target/` in a Linux container, the slot's kept `target-<name>-<slot>` on a host runner, written to the workspace's `.cargo/ci.toml` (included by its `.cargo/config.toml`), so every cargo command and `tauri build` use it; sets `PADDOCK_BUILD_FOLDER` | `CARGO_TARGET_DIR` in the app workflows, Debrief's `scripts/ci/build-folder.sh` |
+| `host-tools` | the pinned cargo-nextest: kept in the CI home's shared `tools` folder on the host runners (checksum-verified, downloaded only when that version is missing), the image's on Linux; fails when the runner has another version | `taiki-e/install-action` in the crate job |
+| `node-caches` | npm's download cache and the Angular build cache kept between runs (hosts: the shared `npm` and the slot's `angular/<name>-<slot>` kept folders; Linux containers: `npm/` and `angular/<job>` on the `/sccache` mount, shared by two runs of one job on a Linux host until containers get slots, ADR 0025) | nothing kept them before |
 | `sccache-stats` | `sccache --show-stats` in the job log (last step, `if: always()`; composite actions have no post step) | new |
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
@@ -31,8 +32,8 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `sidecar-self-test` | rule 23 on Linux and Windows bundles: every sidecar starts with `--self-test` (`paddock-sidecar self-test`); a .deb is unpacked, never installed | the shell demo's release job |
 | `conformance` | `paddock-conformance` with the Paddock checkout, summary in the job | new |
 | `publish-release` | release notes with the First launch block (and an app's `notes-extra`), `latest.json`, the Gitea release for `v*` or `<app>-v*` tags, `latest.json` also on the moving `<app>-latest` release | the release job's steps |
-| `host-cleanup` | stray processes, temp folders and build outputs on a host runner | Pitwall `macos-cleanup.sh` |
-| `prune-build-folder` | caps the job's kept build folder on a host runner (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
+| `host-cleanup` | this job's stray processes (patterns anchored on `{tmp}`, `{build}` or `{slot}`), temp folders and build outputs on a host runner, never another job's | Pitwall `macos-cleanup.sh` |
+| `prune-build-folder` | caps the job's kept build folder (of its own slot) on a host runner (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
 
 Reusable workflows: `app-release.yml` (bundles on three platforms, verify, publish; in the monorepo called from `<app>-release.yml`, see below), `app-fuzz.yml` (cargo-fuzz shards from a JSON list), `app-mutants.yml` (cargo-mutants, weekly and on the changed lines) and `app-never-panics.yml` (the never-panics tests with many cases; plan X41), `app-e2e.yml` (Chrome for Testing,
 Playwright), `app-licences.yml`. They need the Gitea on dev.decryptology.net to resolve cross-repository `uses:` (plan
@@ -51,7 +52,7 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
    the code that differs there: those legs run the Rust gates only), `nextestConfig`, `prepare` and `checks` (always, Linux), `rustChecks` (Linux, only when the change reaches the Rust half), `ui`
    (the UI half: audit, lint, build, tests; one `cd` holds for the lines after it), `angularDir` (the Angular cache kept between runs), `lastPackages` (packages tested apart and last on Linux, left out of host legs), `windowsClippy` (true: clippy also on the Windows leg, which skips it by default; for Windows-only code such as a service) and
    `e2e` (commands of the end-to-end legs, run once per shard with `$E2E_SHARD`/`$E2E_INDEX`), `e2eShards` (how many run at the same time), `e2eWebkit` (commands of a WebKit leg of its own, on main, tags, the nightly and a dispatch with `webkit`; an e2e leg runs only when the change reaches the UI half, a Rust-only change adds none), `e2eArtifacts` (the failure report folder uploaded `if: failure()`), `testBrowser` and `display` (a real browser in the tests: the pinned Chrome for Testing, a virtual display on Linux) and
-   `processes` (exact names `host-cleanup` kills on a host) and `processPatterns` (`pkill -f` patterns for test processes that run under another name; each must name the job's temp or build folder, e.g. `pitcrew-it-` or `target-pitwall-app`, never a bare runner name; two concurrent jobs of the same app and job on one host share that build folder, so their clean-ups could hit each other's processes, which is fine while a host runs one such job at a time). Remove `workflow`: an app with a `workflow` is not a leg.
+   `processPatterns` (`pkill -f` patterns for the test processes `host-cleanup` ends on a host; each is anchored on a folder of the job: `{tmp}` its own temp folder, `{build}` its build folder, `{slot}` its slot in a kept folder's name, e.g. `{build}[/\\]debug[/\\]pitwall-server`, never a bare program or runner name; there are no exact process names, which would match every job on the host). Remove `workflow`: an app with a `workflow` is not a leg.
    An app with host legs needs `include = [{ path = "ci.toml", optional = true }]` in its `.cargo/config.toml` and `.cargo/ci.toml`
    in its `.gitignore` (`build-folder` fails the leg otherwise).
 2. **`.gitea/workflows/<app>-release.yml`** is the thin caller (copy `pitcrew-release.yml`): triggers (push to main, `<app>-v*` tag,
@@ -84,3 +85,62 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
 - `plan` action: inputs `app`, `tag-pattern`, `nightly-marker`, `token`. `macos-verify`: `tauri-conf`. `host-cleanup`: `process-patterns`
   (`pkill -f`; scope each to the app's own temp path, never `gitea-runner`, which is the real runner). `publish-release`: `tag-prefix`,
   `latest-tag` (skipped for a pre-release tag), `notes-extra`. `tauri-bundle`: `root`, `apple-signing-identity`.
+
+## Job isolation (ADR 0025)
+
+Any number of jobs may run on one host runner at once (its capacity: 2 on the Mac and Windows hosts, more later without a
+code change), so no job may touch another's folders, processes or ports. `conformance/ci/job-isolation.sh` is the one way
+to them; a conformance test (`conformance/test/job-isolation.test.mjs`) fails when a workflow, action or CI script spells
+a CI-home path itself, or when a host job does not take and release a slot.
+
+**The runner's job folder** (verified 2026-10-28 on the Mac's `gitea-runner` v5.2.3, host mode, `workdir_parent:
+~/gitea-runner/work`): every job gets `<workdir_parent>/<16 random hex>/` with `hostexecutor/` (the checkout), `tmp/`
+(`$RUNNER_TEMP`), `tool_cache/` and `act/`, distinct for concurrent jobs and removed when the job ends
+(sources: [act/runner/run_context.go](https://gitea.com/gitea/runner/src/branch/main/act/runner/run_context.go),
+`startHostEnvironment`: the folder from 8 random bytes, `CleanUp` removes it;
+[act/container/host_environment.go](https://gitea.com/gitea/runner/src/branch/main/act/container/host_environment.go),
+`GetRunnerContext`: `"temp": e.TmpDir`, so `RUNNER_TEMP` is the job's own `tmp/`, and `Remove` ends the job's process
+group before deleting the folder; observed on the Mac: one such folder during a running job, its `tmp/` holding that job's
+files). The Mac's `config.yaml` sets no `runner.timeout`, so a job may run 3 h (the runner's default, and Gitea's own job
+timeout: [config.example.yaml](https://gitea.com/gitea/runner/src/branch/main/internal/pkg/config/config.example.yaml)).
+The Windows runner's version, work folder and timeout are **not verified**: check them before raising its capacity.
+
+**What goes where, and why:**
+
+| State | Where | Why |
+|---|---|---|
+| Test temp folders, the clean-up's temp sweep, `{tmp}` process patterns | the job's `$RUNNER_TEMP` (the action sets `TMPDIR`, and `TMP`/`TEMP` on Windows, and `PADDOCK_JOB_TEMP` to it) | it need not outlive the job; the runner gives each job its own and deletes it after |
+| Build folder (`target`), stable checkout (`src`), Angular cache, test browser, libduckdb, Debrief's Windows `node_modules` | kept folders of the job's **slot**: `<ci-home>/<layout>-s<n>` (process patterns name one as `[/\\]<kept folder name>-{slot}`, at the end of the pattern; `{slot}` becomes `s<n>([^0-9]\|$)`) | a stable absolute path keeps them warm (cargo fingerprints and sccache keys hold absolute paths); a fresh per-job path would rebuild cold every run; one slot per concurrent job means no two jobs write one |
+| npm's download cache, sccache's disk cache, pinned tools | **shared** kept folders | safe for concurrent writers (content-addressed or renamed into place) |
+| sccache server port, the WebKit job's ports | `job-isolation.sh port <name>`, declared in `conformance/ci/ports.txt` (base, width, stride) | one block per slot; a test checks no two blocks overlap each other or any end-to-end port, for every slot up to `PADDOCK_CI_SLOTS` |
+
+The kept folders are declared once, in `conformance/ci/kept-folders.txt` (kind, layout, `slot` or `shared`). A new cache is
+one line there and `bash conformance/ci/job-isolation.sh path <kind> [<name>]` where it is used.
+
+**Slots.** The `job-isolation` action (`acquire`, the first bash step of a host job: after Git bash on Windows, before
+`stable-workspace`, `build-folder` and any kept folder) takes the first free `s1..s$PADDOCK_CI_SLOTS` (default 8) with an
+atomic `mkdir <ci-home>/slots/s<n>` and records the job's `RUNNER_TEMP` as the owner (to be replaced by the Rust command
+`./dev ci slot acquire|release|status` on an OS file lock, which the kernel releases when the job dies: ADR 0025); it
+exports `PADDOCK_CI_SLOT`. The
+job's last step is `job-isolation` with `mode: release` and `if: always()` (after `host-cleanup`, `prune-build-folder` and
+`sccache-stats`, which use the slot's folders and port). A slot whose owner is gone (its runner folder removed, older than
+`PADDOCK_SLOT_MAX_AGE_MIN`, default 360, or no owner after 5 minutes) is reclaimed; a live job's never is. In a Linux
+container acquire and release do nothing yet and everything uses the single slot `s1`; a container is a new file system per
+job, but all containers of a host share the runner's `/sccache` mount, so two runs of the same job on one Linux host share
+its Angular cache folder until containers get slots from the Rust lock (keying it per run instead would make it cold on
+every run and grow the mount without bound). Without a slot a
+host job's `build-folder`, `setup-rust` and `node-caches` fail and `stable-workspace` builds in place with a warning.
+
+**The CI home** is `ci-home.sh`'s (`PADDOCK_CI_HOME`, else `~/.paddock-ci`); a relocated home that is missing stops the job.
+
+**Raising a host's capacity:** merge the change that adds this, then raise the runner's `capacity` (Pitcrew's
+Configuration tab or its `SaveRunnerConfig`, which backs up the config and restarts the runner after the current job).
+`PADDOCK_CI_SLOTS` in the runner's `runner.envs` is needed only above 8; set `PADDOCK_CI_KEEP_SLOTS` there to the
+capacity when it is above 2.
+
+**How disk is bounded.** Kept folders exist for at most `PADDOCK_CI_KEEP_SLOTS` slots (default 2): a job in a higher slot
+removes that slot's folders when it releases it, and every acquire sweeps the folders of higher slots no job holds. Each
+build folder is capped by `prune-build-folder` (20 GB by default, its own slot only). The first job in slot `s1` renames a
+kept folder of the old unslotted layout (`target-<name>`, `src/<name>`, `angular/<name>`, `test-browser-<name>`,
+`libduckdb/<name>`) to its `-s1` name, so the switch keeps the caches warm and adds no copy. Left for a one-time manual
+removal: the crate job's old `test-browser` folder and Debrief's old `~/.debrief-ci` on Windows (other names now).

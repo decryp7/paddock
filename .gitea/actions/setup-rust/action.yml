@@ -95,8 +95,10 @@ runs:
             tar -xzf "$TMP/$NAME.$EXT" -C "$TMP"
           fi
           mkdir -p "$DEST"
-          cp "$TMP/$NAME/$BIN" "$DEST/$BIN"
-          chmod +x "$DEST/$BIN"
+          # Renamed into place whole: a runner with a shared tool cache may run two jobs that install it at once.
+          cp "$TMP/$NAME/$BIN" "$DEST/$BIN.part.$$"
+          chmod +x "$DEST/$BIN.part.$$"
+          mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
           rm -rf "$TMP"
         fi
         echo "$DEST" >> "$GITHUB_PATH"
@@ -120,8 +122,13 @@ runs:
           echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
         fi
         # CI's own server: a host runner may run a developer's sccache on the default port 4226 with its own backend, which
-        # would silently ignore the settings below. sccache-stats stops this port's server, never the default one.
-        export SCCACHE_SERVER_PORT=4227 SCCACHE_IGNORE_SERVER_IO_ERROR=1
+        # would silently ignore the settings below. sccache-stats stops this port's server, never the default one. On a host
+        # each job slot has its own port (job-isolation's ports.txt: 4227 for s1, 4228 for s2, ...), so a concurrent job's start (which
+        # stops the server first) or its sccache-stats (which stops it last) never takes this job's server away.
+        iso="${{ github.action_path }}/../../../conformance/ci/job-isolation.sh"
+        PORT=4227
+        if [ "$RUNNER_OS" != Linux ]; then PORT="$(bash "$iso" port sccache)"; fi
+        export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
         SETTINGS=()
         if [ "$BACKEND" = redis ] || { [ "$BACKEND" = auto ] && [ -n "$REDIS_ENDPOINT" ]; }; then
           export SCCACHE_REDIS_ENDPOINT="$REDIS_ENDPOINT" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
@@ -135,8 +142,7 @@ runs:
             if [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then DIR="$MOUNT"
             else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
           else
-            ci_home="$(bash "${{ github.action_path }}/../../../conformance/ci/ci-home.sh")"  # the one implementation: fails when a relocated home is missing
-            DIR="$ci_home/sccache"
+            DIR="$(bash "$iso" path sccache)"  # shared by every job of the host: sccache's disk cache takes concurrent servers
           fi
           mkdir -p "$DIR"
           if [ "$RUNNER_OS" = Windows ]; then DIR="$(cygpath -w "$DIR")"; fi
@@ -163,7 +169,7 @@ runs:
           # Cached builds are not incremental.
           echo "CARGO_INCREMENTAL=0"
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
-          echo "SCCACHE_SERVER_PORT=4227"
+          echo "SCCACHE_SERVER_PORT=$PORT"
           for kv in "${SETTINGS[@]}"; do echo "$kv"; done
         } >> "$GITHUB_ENV"
     - name: Linux dependencies for Tauri

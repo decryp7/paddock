@@ -1,11 +1,28 @@
 // Tests of scripts/affected.mjs (ADR 0014 §6): the rules on this tree's real graph, the pure parts (lock diff, base choice,
 // matrix legs) and the contracts the script relies on (doc inputs, app CI files, CODEOWNERS, Renovate).
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { describe, test } from 'node:test';
 import { affected, appOfWorkflow, cargoGraph, chooseBase, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+
+/**
+ * A paddock.ci.json process pattern as host-cleanup runs it: {tmp}, {build} and {slot} filled in by the real
+ * conformance/ci/job-isolation.sh for a sample job (its own runner folder 0123456789abcdef, slot s1, build folder
+ * target-<app>-app-s1), as a RegExp; null when the script refuses it (not anchored on a folder of the job).
+ */
+const JOB = { tmp: '/Users/x/gitea-runner/work/0123456789abcdef/tmp', ci: '/Users/x/.paddock-ci', slot: 's1' };
+function scoped(pat, app, os = 'macOS') {
+  const win = os === 'Windows';
+  const r = spawnSync('bash', [join(ROOT, 'conformance', 'ci', 'job-isolation.sh'), 'pattern', pat], {
+    env: { PATH: '/usr/bin:/bin', RUNNER_OS: os, PADDOCK_CI_SLOT: JOB.slot, PADDOCK_JOB_TEMP: (win ? 'C:' : '') + JOB.tmp, PADDOCK_BUILD_FOLDER: `${win ? 'C:' : ''}${JOB.ci}/target-${app}-app-${JOB.slot}` },
+    encoding: 'utf8',
+  });
+  return r.status === 0 ? new RegExp(r.stdout.trim()) : null;
+}
+/** Every pattern of an app, for macOS and Windows command lines. */
+const scopedAll = (app, pats) => pats.flatMap((p) => [scoped(p, app), scoped(p, app, 'Windows')]);
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
@@ -211,7 +228,7 @@ describe('matrix legs', () => {
     const rust = matrix(run('apps/pitcrew/crates/pitcrew-core/src/lib.rs'), graph);
     assert.deepEqual(rust.map((l) => [l.os, l.rust, l.ui]), [['ubuntu-latest', true, false], ['windows-latest', true, false], ['macos-latest', true, false]]);
     for (const host of rust.filter((l) => l.os !== LINUX)) assert.deepEqual([host.prepare, host.checks, host.ui_checks, host.angular_dir], ['', '', '', ''], 'the host legs carry no commands');
-    assert.ok(rust.every((l) => l.cargo === 'apps/pitcrew' && l.processes === 'fake_runner'), 'the Cargo folder is normalised and the test processes are named');
+    assert.ok(rust.every((l) => l.cargo === 'apps/pitcrew' && /fake_runner/.test(l.process_patterns) && !('processes' in l)), 'the Cargo folder is normalised and the test processes are named by patterns only');
     const ui = matrix(run('apps/pitcrew/app/src/main.ts'), graph);
     assert.deepEqual(ui.map((l) => [l.os, l.rust, l.ui]), [['ubuntu-latest', false, true]]);
     assert.equal(ui[0].angular_dir, 'apps/pitcrew/app');
@@ -274,29 +291,43 @@ describe('matrix legs', () => {
     assert.ok(!spotter.ui.some((l) => /webkit/.test(l)), 'WebKit does not lengthen the main leg');
   });
 
-  test("an app's host-cleanup patterns match its own paths and never the real runner (every app that has them)", () => {
+  test("an app's host-cleanup patterns match its own paths and never the real runner or another job (every app that has them)", () => {
     const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', 'C:\\runner\\act_runner.exe daemon', '/Users/x/actions-runner/Runner.Listener run'];
+    const t = JOB.tmp;
+    const other = '/Users/x/gitea-runner/work/fedcba9876543210/tmp';
     const ours = {
-      dyno: ['/Users/x/.paddock-ci/target-dyno-app/debug/dyno-ipc-test-child echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app\\debug\\dyno-test-plugin.exe', '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin'],
-      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
-      pitcrew: ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'],
-      spotter: ['/Users/x/.paddock-ci/test-browser-spotter/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter\\chrome-win64\\chrome.exe --headless'],
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-ipc-test-child echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
+      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
+      pitcrew: [`${t}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon', '/Users/x/.paddock-ci/target-pitcrew-app-s1/debug/examples/fake_runner --exit-after 5'],
+      spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s1/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s1\\chrome-win64\\chrome.exe --headless'],
     };
-    const near = {
-      spotter: ['/Users/x/.paddock-ci/test-browser-spotter-old/chrome', '/Users/x/.paddock-ci/test-browser-spotterx/chrome', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-old\\chrome.exe', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotterx\\chrome.exe'],
+    // Another job on the same host: the next slot's kept folders, another runner folder's temp.
+    const otherJob = {
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-ipc-test-child echo', `${other}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
+      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine'],
+      pitcrew: [`${other}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, '/Users/x/.paddock-ci/target-pitcrew-app-s2/debug/examples/fake_runner'],
+      spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s2/chrome-mac/Google Chrome for Testing', '/Users/x/.paddock-ci/test-browser-spotter-s12/chrome-mac/Google Chrome for Testing', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s2\\chrome.exe'],
     };
     let checked = 0;
     for (const [name, app] of graph.apps) {
       if (!app.processPatterns?.length) continue;
-      assert.ok(ours[name], `${name} has process patterns: list its own command lines here`);
-      const res = app.processPatterns.map((pat) => new RegExp(pat));
+      assert.ok(ours[name] && otherJob[name], `${name} has process patterns: list its own and another job's command lines here`);
+      const res = scopedAll(name, app.processPatterns);
+      assert.ok(res.every(Boolean), `${name}: every pattern is anchored on a folder of the job ({tmp}, {build} or {slot})`);
       for (const line of ours[name]) assert.ok(res.some((re) => re.test(line)), `${name}: no pattern matches ${line}`);
       for (const re of res) {
-        for (const line of [...real, ...(near[name] ?? [])]) assert.doesNotMatch(line, re, `${name}: ${re} would kill ${line}`);
+        for (const line of [...real, ...otherJob[name]]) assert.doesNotMatch(line, re, `${name}: ${re} would kill ${line}`);
         checked += 1;
       }
     }
     assert.ok(checked >= 2);
+  });
+
+  test('job-isolation refuses a process pattern that names no folder of the job, or one the job does not have', () => {
+    assert.equal(scoped('[/\\\\]pitcrew-it-[^/]+[/\\\\]gitea-runner', 'pitcrew'), null, 'a temp prefix alone matches every job');
+    assert.equal(scoped('fake_runner', 'pitcrew'), null, 'an exact name matches every job');
+    const r = spawnSync('bash', [join(ROOT, 'conformance', 'ci', 'job-isolation.sh'), 'pattern', '{tmp}/x'], { env: { PATH: '/usr/bin:/bin', RUNNER_OS: 'macOS' }, encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'no job temp folder: nothing to anchor on');
   });
 
   test("onlyApp (a tag's gates, ci.yml's `app` input) keeps one app, both halves, and no other project", () => {
@@ -344,59 +375,59 @@ describe('contracts', () => {
     const patterns = graph.apps.get('pitcrew').processPatterns;
     assert.ok(patterns?.length, 'Pitcrew names the fake runner copy the tests start');
     assert.ok(legs.every((l) => l.process_patterns === patterns.join('\n')), 'every leg hands the patterns to host-cleanup');
-    const ours = ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'];
-    const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', '/Users/x/pitcrew/runner/bin/gitea-runner daemon', '/tmp/pitcrew-it/gitea-runner', '/tmp/other-1/runner/bin/gitea-runner'];
-    for (const pat of patterns) {
-      const re = new RegExp(pat);
-      for (const line of ours) assert.match(line, re, `${pat} misses the test copy`);
-      for (const line of real) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
-    }
+    const t = JOB.tmp;
+    const ours = [`${t}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'];
+    const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', '/Users/x/pitcrew/runner/bin/gitea-runner daemon', '/tmp/pitcrew-it/gitea-runner', '/tmp/other-1/runner/bin/gitea-runner', '/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon'];
+    const res = scopedAll('pitcrew', patterns);
+    for (const line of ours) assert.ok(res.some((re) => re.test(line)), `no pattern matches the test copy ${line}`);
+    for (const re of res) for (const line of real) assert.doesNotMatch(line, re, `${re} would kill ${line}`);
   });
 
   test("every process pattern is anchored on a folder of this job, and Pitwall's never reaches an installed app, another job or the user's own engine", () => {
     for (const [name, app] of graph.apps) {
-      for (const pat of app.processPatterns ?? []) {
-        assert.match(pat, /pitcrew-it-|dyno-it-|test-browser-|\.paddock-ci|target-/, `${name}: ${pat} names no temp or build folder of the job`);
-      }
+      assert.equal(app.processes, undefined, `${name}: no exact process names (paddock.ci.json \`processes\`): they match every job's processes`);
+      for (const pat of app.processPatterns ?? []) assert.match(pat, /\{(tmp|build|slot)\}/, `${name}: ${pat} names no folder of the job ({tmp}, {build}, {slot})`);
     }
     const pitwall = graph.apps.get('pitwall');
-    assert.deepEqual(pitwall.processes ?? [], [], 'no exact process names: they would kill the user\'s installed Pitwall and its engine, and other jobs');
-    const ours = ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'];
+    const ours = ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'];
     const near = [
       '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --port 8080',
       '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --fake-engine',
-      '/Users/x/.paddock-ci/target-spotter-app/debug/pitwall-server --fake-engine',
-      '/Users/x/.paddock-ci/target-pitwall-bundle/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-pitwall-bundle-s1/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine',
       '/Users/x/.paddock/engines/llama-server --port 8081 -m model.gguf',
       '/Users/x/dev/pitwall/target/debug/pitwall-server --fake-engine',
       '/opt/homebrew/bin/llama-server --port 8080',
     ];
-    for (const pat of pitwall.processPatterns) {
-      const re = new RegExp(pat);
-      for (const line of ours) assert.match(line, re, `${pat} misses ${line}`);
-      for (const line of near) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
+    for (const re of scopedAll('pitwall', pitwall.processPatterns)) {
+      for (const line of ours) assert.match(line, re, `${re} misses ${line}`);
+      for (const line of near) assert.doesNotMatch(line, re, `${re} would kill ${line}`);
     }
   });
 
   test("Dyno's process pattern ends only test programs of its own build folder: never the installed app, its agent, another job's folder or the user's tools", () => {
     const dyno = graph.apps.get('dyno');
-    assert.deepEqual(dyno.processes ?? [], [], "no exact process names: they would kill the user's installed Dyno and its agent");
-    const ours = ['/Users/x/.paddock-ci/target-dyno-app/debug/dyno-ipc-test-child echo', '/Users/x/.paddock-ci/target-dyno-app/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app\\debug\\dyno-test-plugin.exe', '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin', 'C:\\Users\\x\\AppData\\Local\\Temp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
+    const t = JOB.tmp;
+    const ours = ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-ipc-test-child echo', '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
     const near = [
       '/Users/x/Library/Application Support/Dyno/plugins/p1/plugin',
-      '/var/folders/ab/T/other-it-plugins-Xk3a9Q/p1/plugin',
-      '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin.toml',
+      `${t}/other-it-plugins-Xk3a9Q/p1/plugin`,
+      `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin.toml`,
+      '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin',
+      '/Users/x/gitea-runner/work/fedcba9876543210/tmp/dyno-it-plugins-Xk3a9Q/p1/plugin',
       '/Applications/Dyno.app/Contents/MacOS/dyno-agent run',
       '/Applications/Dyno.app/Contents/MacOS/dyno-helper',
       '/Applications/Dyno.app/Contents/MacOS/dyno-bench',
-      '/Users/x/.paddock-ci/target-dyno-bundle/debug/dyno-ipc-test-child echo',
-      '/Users/x/.paddock-ci/target-spotter-app/debug/dyno-ipc-test-child echo',
-      '/Users/x/.paddock-ci/target-dyno-app/debug/dyno-agent run',
+      '/Users/x/.paddock-ci/target-dyno-bundle-s1/debug/dyno-ipc-test-child echo',
+      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/dyno-ipc-test-child echo',
+      '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-agent run',
+      '/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-bench cpu',
       '/Users/x/.paddock-ci/target-dyno-app2/debug/dyno-bench cpu',
       '/Users/x/dev/dyno/target/debug/dyno-ipc-test-child echo',
       'C:\\Program Files\\Dyno\\dyno-agent.exe',
     ];
-    const res = dyno.processPatterns.map((pat) => new RegExp(pat));
+    const res = scopedAll('dyno', dyno.processPatterns);
     for (const line of ours) assert.ok(res.some((re) => re.test(line)), `no pattern matches ${line}`);
     for (const re of res) for (const line of near) assert.doesNotMatch(line, re, `${re} would kill ${line}`);
   });
