@@ -1,11 +1,14 @@
 import { type Page, test } from '@playwright/test';
 import { join } from 'node:path';
+import { loaded } from './loaded';
 
 /**
  * Documentation screenshots of every screen in both themes, against the mock backend:
- * `SCREENSHOTS=1 npx playwright test --project=screenshots` → ../docs/screenshots/<theme>/<screen>.png (1440×900 at 2x).
+ * `SCREENSHOTS=1 npx playwright test --project=screenshots` → ../docs/screenshots/<theme>/<screen>.png (1440×900 at 2x), or
+ * into `SHOTS_OUT` when it is set. Each shot waits for what a user sees: no skeleton, no splash, fonts and images decoded and
+ * the layout still (never a fixed pause).
  */
-const OUT = join(__dirname, '..', '..', 'docs', 'screenshots');
+const OUT = process.env['SHOTS_OUT'] ?? join(__dirname, '..', '..', 'docs', 'screenshots');
 /** A fixed clock so elapsed times and "x min ago" read the same on every run. */
 const NOW = new Date('2026-10-22T14:40:00');
 
@@ -95,7 +98,6 @@ const SHOTS: Shot[] = [
       const text = await editor.inputValue();
       await editor.fill(text.replace('  capacity: 1\n', '  capacity: 1\n\t  retries: 3\n'));
       await page.getByTestId('yaml-status').waitFor();
-      await page.waitForTimeout(600);
       await page.getByRole('button', { name: /Error on line/ }).hover();
       await editor.evaluate((e) => e.parentElement?.parentElement?.scrollTo({ top: 0 }));
     },
@@ -204,10 +206,10 @@ for (const theme of ['dark', 'light'] as const) {
         if (shot.height) await page.setViewportSize({ width: 1440, height: shot.height });
         await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.goto(`/?simulate=0${shot.query ? '&' + shot.query : ''}#${shot.path}`);
-        await page.waitForLoadState('networkidle');
-        await page.waitForTimeout(1200);
+        await page.getByRole('navigation', { name: 'Pages' }).waitFor();
+        await loaded(page);
         await shot.prepare?.(page);
-        await page.waitForTimeout(700);
+        await loaded(page);
         await coverCutBlocks(page);
         const clip = shot.clip ? await shot.clip(page) : undefined;
         await page.screenshot({ path: join(OUT, theme, `${shot.name}.png`), clip });

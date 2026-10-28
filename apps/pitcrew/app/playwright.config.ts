@@ -16,7 +16,8 @@ export default assertChromeForTesting(
   fullyParallel: false,
   workers: 1,
   retries: process.env['CI'] ? 1 : 0,
-  reporter: [['list'], ['@decryp7/paddock-e2e/retried-reporter']],
+  // TODO: add '@decryp7/paddock-e2e/retried-reporter' once the package resolves as a workspace package (the built file is not loadable by path).
+  reporter: 'list',
   timeout: 60_000,
   use: {
     baseURL: `http://localhost:${PORT}`,
@@ -24,10 +25,10 @@ export default assertChromeForTesting(
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'chromium', testIgnore: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    { name: 'chromium', testIgnore: /screenshots.*\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
     // Only on request, so a plain `npx playwright test` never rewrites the documentation images.
     ...(process.env['SCREENSHOTS']
-      ? [{ name: 'screenshots', testMatch: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
+      ? [{ name: 'screenshots', testMatch: /screenshots.*\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
       : []),
   ],
   webServer: {

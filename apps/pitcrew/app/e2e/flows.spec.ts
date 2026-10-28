@@ -14,6 +14,12 @@ async function openSettings(page: Page, section?: string) {
   return dialog;
 }
 
+/** Picks `label` in the themed select named `name` (a combobox button; its list lives in the page's overlay). */
+async function choose(page: Page, scope: ReturnType<Page['locator']>, label: string, name = 'Theme') {
+  await scope.getByRole('combobox', { name }).click();
+  await page.getByRole('option', { name: label, exact: true }).click();
+}
+
 test.describe('Pitcrew in the browser (mock backend)', () => {
   test('the dashboard is about the runners, with the machine as context', async ({ page }) => {
     await page.goto(`${APP}/`);
@@ -81,14 +87,14 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
   test('switches the theme in Settings > Appearance and remembers it', async ({ page }) => {
     await page.goto(`${APP}/`);
     const settings = await openSettings(page, 'Appearance');
-    await settings.getByRole('combobox', { name: 'Theme' }).selectOption({ label: 'Dark' });
+    await choose(page, settings, 'Dark');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     const again = await openSettings(page, 'Appearance');
-    await again.getByRole('combobox', { name: 'Theme' }).selectOption({ label: 'Light' });
+    await choose(page, again, 'Light');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    await again.getByRole('combobox', { name: 'Theme' }).selectOption({ label: 'Same as the system' });
+    await choose(page, again, 'Same as the system');
     await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
   });
 
@@ -185,6 +191,23 @@ test.describe('native feel (ADR 0008)', () => {
     await page.waitForTimeout(300);
     expect(await page.evaluate(() => (window as unknown as { __alive?: boolean }).__alive)).toBe(true);
     expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+  });
+
+  test('right-clicking selected code opens the shell’s Copy menu, and not the browser’s', async ({ page }) => {
+    await page.goto(`${APP}/`);
+    await page.getByRole('navigation', { name: 'Pages' }).waitFor();
+    // Text is selectable where it is code or a text field (the app chrome is not); a command line is the usual case.
+    await page.evaluate(() => {
+      const pre = document.createElement('pre');
+      pre.id = 'sample-command';
+      pre.textContent = 'gitea-runner daemon --config config.yaml';
+      pre.style.cssText = 'position:fixed;top:120px;left:400px;z-index:9999;background:white;color:black;padding:8px';
+      document.body.append(pre);
+    });
+    const sample = page.locator('#sample-command');
+    await sample.click({ clickCount: 3 });
+    await sample.click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Copy' })).toBeVisible();
   });
 
   test('edits the runner configuration, reviews the diff and saves', async ({ page }) => {
