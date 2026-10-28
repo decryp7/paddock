@@ -402,6 +402,7 @@ jobs:
       # The Mac host runner: four build jobs; the host toolchain as installed.
       - name: Build jobs (macOS)
         if: runner.os == 'macOS'
+        working-directory: .  # the job's default is crates/; ci-home.sh is found from the repo root
         run: |
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
           home="$(bash conformance/ci/ci-home.sh)"
