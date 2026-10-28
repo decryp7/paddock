@@ -1,6 +1,6 @@
 use paddock_slots::{
-    Announcement, FsLocks, HoldEnd, OwnerInfo, SlotError, SlotId, SlotLocks, acquire_first,
-    acquire_retry, fresh_token, hold, release, slot_states, wait_free,
+    Announcement, FsLocks, HoldEnd, OwnerInfo, ReleaseLocks, SlotError, SlotId, SlotLocks,
+    acquire_first, acquire_retry, fresh_token, hold, release, slot_states, wait_free,
 };
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -16,6 +16,7 @@ fn id(n: u32) -> SlotId {
 
 #[test]
 fn a_held_slot_is_busy_until_dropped() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (first, guard) = acquire_first(&locks, 2).unwrap().unwrap();
@@ -32,6 +33,7 @@ fn a_held_slot_is_busy_until_dropped() {
 
 #[test]
 fn owner_records_round_trip_and_bad_ones_are_ignored() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots")).unwrap();
@@ -68,6 +70,7 @@ fn owner_records_round_trip_and_bad_ones_are_ignored() {
 
 #[test]
 fn an_unusable_root_is_a_typed_error() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("plain");
     std::fs::write(&file, "x").unwrap();
@@ -99,6 +102,7 @@ fn an_unusable_root_is_a_typed_error() {
 
 #[test]
 fn hold_announces_and_ends_when_the_owner_folder_goes() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let owner = dir.path().join("job");
     std::fs::create_dir(&owner).unwrap();
@@ -107,7 +111,7 @@ fn hold_announces_and_ends_when_the_owner_folder_goes() {
         let (locks, owner) = (locks.clone(), owner.clone());
         let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
         let mut writer = ChannelWriter(tx);
-        let t = std::thread::spawn(move || hold(&locks, 1, &owner, POLL, &mut writer));
+        let t = std::thread::spawn(move || hold(&locks, 1, &owner, POLL, None, &mut writer));
         (t, rx)
     };
     // Wait on the announcement, not on time.
@@ -123,7 +127,11 @@ fn hold_announces_and_ends_when_the_owner_folder_goes() {
     assert!(acquire_first(&locks, 1).unwrap().is_none());
     // A second holder with every slot busy reports `none`.
     let mut out = Vec::new();
-    assert!(hold(&locks, 1, &owner, POLL, &mut out).unwrap().is_none());
+    assert!(
+        hold(&locks, 1, &owner, POLL, None, &mut out)
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(out, b"none\n");
     std::fs::remove_dir(&owner).unwrap();
     let end = holder.0.join().unwrap().unwrap();
@@ -146,6 +154,7 @@ impl std::io::Write for ChannelWriter {
 
 #[test]
 fn release_asks_the_holder_and_waits_for_it() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let owner = dir.path().join("job");
     std::fs::create_dir(&owner).unwrap();
@@ -153,7 +162,7 @@ fn release_asks_the_holder_and_waits_for_it() {
     let (tx, rx) = std::sync::mpsc::channel();
     let t = {
         let (locks, owner) = (locks.clone(), owner.clone());
-        std::thread::spawn(move || hold(&locks, 1, &owner, POLL, &mut ChannelWriter(tx)))
+        std::thread::spawn(move || hold(&locks, 1, &owner, POLL, None, &mut ChannelWriter(tx)))
     };
     rx.recv_timeout(LONG).unwrap();
     let token = locks.read_owner(id(1)).unwrap().token;
@@ -166,6 +175,7 @@ fn release_asks_the_holder_and_waits_for_it() {
 
 #[test]
 fn release_of_a_holder_that_ignores_the_request_times_out() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();
@@ -192,7 +202,7 @@ type HolderThread = std::thread::JoinHandle<Result<Option<(SlotId, HoldEnd)>, Sl
 fn start_holder(locks: &FsLocks, owner: &std::path::Path) -> (HolderThread, SlotId, String) {
     let (tx, rx) = std::sync::mpsc::channel();
     let (locks, owner) = (locks.clone(), owner.to_path_buf());
-    let t = std::thread::spawn(move || hold(&locks, 1, &owner, POLL, &mut ChannelWriter(tx)));
+    let t = std::thread::spawn(move || hold(&locks, 1, &owner, POLL, None, &mut ChannelWriter(tx)));
     let said = String::from_utf8(rx.recv_timeout(LONG).unwrap()).unwrap();
     let Ok(Announcement::Slot(slot, token)) = Announcement::parse(&said) else {
         panic!("{said:?}")
@@ -202,6 +212,7 @@ fn start_holder(locks: &FsLocks, owner: &std::path::Path) -> (HolderThread, Slot
 
 #[test]
 fn a_late_release_never_frees_the_next_jobs_slot() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path().join("ci"));
     let (job_a, job_b) = (dir.path().join("a"), dir.path().join("b"));
@@ -229,6 +240,7 @@ fn a_late_release_never_frees_the_next_jobs_slot() {
 
 #[test]
 fn a_holder_ignores_a_release_request_with_another_token() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path().join("ci"));
     let job = dir.path().join("job");
@@ -244,6 +256,7 @@ fn a_holder_ignores_a_release_request_with_another_token() {
 
 #[test]
 fn a_probe_holding_a_lock_for_an_instant_does_not_make_acquire_refuse() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     // A status probe has slot s1 locked right now...
@@ -285,6 +298,8 @@ fn killed_holder_child() {
         1,
         &PathBuf::from(owner),
         Duration::from_millis(50),
+        // A child left behind by a failed test ends by itself (tests leave no process on the machine).
+        Some(Duration::from_secs(60)),
         &mut std::io::stdout(),
     );
 }
@@ -301,6 +316,7 @@ impl Drop for KillOnDrop {
 
 #[test]
 fn a_killed_holder_frees_its_slot() {
+    let _gate = crate::exclusive_gate();
     let dir = tempfile::tempdir().unwrap();
     let owner = dir.path().join("job");
     std::fs::create_dir(&owner).unwrap();
@@ -345,6 +361,7 @@ fn a_killed_holder_frees_its_slot() {
 
 #[test]
 fn a_release_whose_holder_ended_and_whose_slot_was_taken_again_meanwhile_withdraws_its_request() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();
@@ -379,11 +396,12 @@ fn a_release_whose_holder_ended_and_whose_slot_was_taken_again_meanwhile_withdra
 
 #[test]
 fn a_holder_that_cannot_record_itself_reports_it_and_frees_the_slot() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots/s1.owner")).unwrap();
     let mut said = Vec::new();
-    let err = hold(&locks, 1, dir.path(), POLL, &mut said).unwrap_err();
+    let err = hold(&locks, 1, dir.path(), POLL, None, &mut said).unwrap_err();
     assert!(matches!(err, SlotError::Io { .. }));
     assert!(said.is_empty(), "nothing was announced");
     assert!(
@@ -394,6 +412,7 @@ fn a_holder_that_cannot_record_itself_reports_it_and_frees_the_slot() {
 
 #[test]
 fn owner_records_missing_a_field_are_ignored() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots")).unwrap();
@@ -409,6 +428,7 @@ fn owner_records_missing_a_field_are_ignored() {
 
 #[test]
 fn a_lock_file_that_cannot_be_opened_is_a_typed_error() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     std::fs::create_dir_all(dir.path().join("slots/s1.lock")).unwrap();
@@ -416,12 +436,13 @@ fn a_lock_file_that_cannot_be_opened_is_a_typed_error() {
     assert!(wait_free(&locks, id(1), Duration::ZERO, POLL).is_err());
     assert!(release(&locks, id(1), "t", Duration::ZERO, POLL).is_err());
     let mut said = Vec::new();
-    assert!(hold(&locks, 1, dir.path(), POLL, &mut said).is_err());
+    assert!(hold(&locks, 1, dir.path(), POLL, None, &mut said).is_err());
     assert!(said.is_empty());
 }
 
 #[test]
 fn a_release_request_that_cannot_be_written_is_a_typed_error() {
+    let _gate = crate::share_gate();
     let dir = tempfile::tempdir().unwrap();
     let locks = FsLocks::new(dir.path());
     let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();
@@ -438,28 +459,72 @@ fn a_release_request_that_cannot_be_written_is_a_typed_error() {
     ));
 }
 
-#[cfg(unix)]
+/// A store whose slot is held until a release is requested, after which looking at the lock fails.
+struct FailingAfterRequest {
+    requested: std::cell::Cell<bool>,
+}
+
+impl SlotLocks for FailingAfterRequest {
+    type Guard = ();
+
+    fn try_lock(&self, _id: SlotId) -> Result<Option<()>, SlotError> {
+        if self.requested.get() {
+            Err(SlotError::Io {
+                path: PathBuf::from("s1.lock"),
+                source: std::io::Error::other("disk gone"),
+            })
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl ReleaseLocks for FailingAfterRequest {
+    fn read_owner(&self, _id: SlotId) -> Option<OwnerInfo> {
+        Some(OwnerInfo {
+            owner: PathBuf::from("job"),
+            pid: 1,
+            token: "mine".into(),
+        })
+    }
+    fn request_release(&self, _id: SlotId, _token: &str) -> Result<(), SlotError> {
+        self.requested.set(true);
+        Ok(())
+    }
+    fn withdraw_release(&self, _id: SlotId, _token: &str) {}
+}
+
 #[test]
 fn a_lock_that_becomes_unusable_while_waiting_for_a_release_is_a_typed_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let locks = FsLocks::new(dir.path());
-    let (_, _guard) = acquire_first(&locks, 1).unwrap().unwrap();
-    let info = OwnerInfo {
-        owner: PathBuf::from("job"),
-        pid: 1,
-        token: "mine".into(),
+    let locks = FailingAfterRequest {
+        requested: std::cell::Cell::new(false),
     };
-    locks.write_owner(id(1), &info).unwrap();
-    let result = std::thread::scope(|s| {
-        // As soon as the request is made, the lock path turns into a folder, so the next look at the slot fails.
-        s.spawn(|| {
-            while !locks.release_requested(id(1), "mine") {
-                std::thread::yield_now();
-            }
-            std::fs::remove_file(dir.path().join("slots/s1.lock")).unwrap();
-            std::fs::create_dir(dir.path().join("slots/s1.lock")).unwrap();
-        });
-        release(&locks, id(1), "mine", LONG, POLL)
-    });
-    assert!(matches!(result, Err(SlotError::Io { .. })));
+    assert!(matches!(
+        release(&locks, id(1), "mine", LONG, POLL),
+        Err(SlotError::Io { .. })
+    ));
+}
+
+#[test]
+fn a_holder_with_a_lifetime_cap_lets_go_when_it_is_reached() {
+    let _gate = crate::share_gate();
+    let dir = tempfile::tempdir().unwrap();
+    let owner = dir.path().join("job");
+    std::fs::create_dir(&owner).unwrap();
+    let locks = FsLocks::new(dir.path().join("ci"));
+    let mut said = Vec::new();
+    let end = hold(
+        &locks,
+        1,
+        &owner,
+        POLL,
+        Some(Duration::from_millis(30)),
+        &mut said,
+    )
+    .unwrap();
+    assert_eq!(end, Some((id(1), HoldEnd::Expired)));
+    assert!(
+        acquire_first(&locks, 1).unwrap().is_some(),
+        "the slot is free again"
+    );
 }

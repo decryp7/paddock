@@ -630,6 +630,21 @@ test('the nextest ci profile fails a test over its time budget, and every longer
   }
 });
 
+test('paddock-dev has the same nextest ci profile as the crates, and its longer budgets are waivers with a reason', () => {
+  const text = read(join(PADDOCK, 'tools', 'paddock-dev', '.config', 'nextest.toml'));
+  const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
+  const own = ci.slice(0, ci.search(/^\[/m));
+  assert.match(own, /^slow-timeout = \{ period = "\d+s", terminate-after = \d+ \}$/m);
+  assert.match(own, /^retries = 0$/m, 'a flaky test is fixed, not retried');
+  assert.match(text, /\[profile\.ci\.junit\]/);
+  const lines = text.split('\n');
+  for (const at of lines.flatMap((l, i) => (l.trim() === '[[profile.ci.overrides]]' ? [i] : []))) {
+    let j = at - 1;
+    while (j >= 0 && lines[j].startsWith('#') && !lines[j].startsWith('# waiver:')) j -= 1;
+    assert.ok(j >= 0 && /^# waiver: \S/.test(lines[j]), `the override at line ${at + 1} has no "# waiver:" reason`);
+  }
+});
+
 /** Runs host-tools' script with a PATH of shims; `nextest` is the version the shim `cargo-nextest` reports. */
 function runHostTools(os, { kept = null, onPath = null } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-host-tools-')));

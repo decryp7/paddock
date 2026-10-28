@@ -40,7 +40,7 @@ pub fn hash_file(path: &Path, max_bytes: u64) -> Result<String, RepoFilesError> 
     Ok(hex(hasher.finalize()))
 }
 
-/// Hashes `files` (relative to `root`) on at most `threads` threads. The result has the order of `files`, whatever the
+/// Hashes `files` (relative to `root`) on at most `threads` threads (never more than the machine's available parallelism). The result has the order of `files`, whatever the
 /// thread count; the first failure (in that order) is returned.
 pub fn hash_files(
     root: &Path,
@@ -48,7 +48,8 @@ pub fn hash_files(
     threads: usize,
     max_bytes: u64,
 ) -> Result<Vec<String>, RepoFilesError> {
-    let threads = threads.clamp(1, files.len().max(1));
+    let cores = std::thread::available_parallelism().map_or(1, usize::from);
+    let threads = threads.clamp(1, cores.min(files.len().max(1)));
     let chunk = files.len().div_ceil(threads).max(1);
     let parts: Vec<Result<Vec<String>, RepoFilesError>> = std::thread::scope(|s| {
         let handles: Vec<_> = files

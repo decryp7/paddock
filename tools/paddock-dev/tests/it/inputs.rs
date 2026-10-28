@@ -71,7 +71,7 @@ fn inputs_txt_matches_cargo_metadata() {
     assert_eq!(listed.len(), listed_set.len(), "inputs.txt lists a path twice");
     assert_eq!(
         listed_set, expected,
-        "inputs.txt and cargo metadata disagree: update tools/paddock-dev/inputs.txt (and run ./dev self lock)"
+        "inputs.txt and cargo metadata disagree: update tools/paddock-dev/inputs.txt"
     );
 }
 

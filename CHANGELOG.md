@@ -25,6 +25,17 @@ Conventional Commits; one semver tag for the whole repo.
   follow the density, and `@angular/material` / `@angular/cdk` are hoisted to one root copy again in `package-lock.json`.
 - Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
 
+### Rust developer and CI tool, phase R0 (ADR 0022)
+- New shared crates `paddock-slots` (numbered job slots over OS file locks, with a holder that always ends: job folder gone,
+  release, or `--max-hold-secs`), `paddock-repo-files` (the walk, its caps and a bounded-thread file hash) and
+  `paddock-repo-graph` (the project graph from Cargo and npm, the `History` port and its git adapter).
+- New `tools/paddock-dev` (its own workspace and lockfile) with `graph affected`, `ci slot acquire|release|status|hold` and
+  `self hash`, and the `./dev` / `dev.cmd` wrappers that build the tool or take it from `~/.paddock-dev/bin` (five newest kept).
+  The binary's name is a hash of the inputs in `inputs.txt`, the compiler, the build-affecting `CARGO_*` and `RUSTFLAGS`
+  variables and the text of every cargo config it reads (all `.cargo` folders up to the root, `$CARGO_HOME`, the tool's
+  `include` files). `./dev` says how to add `tools/` to a sparse checkout.
+- `ci.yml` gets a `paddock-dev` leg on Linux, Windows and macOS (fmt, clippy, nextest `ci` profile, cargo deny, lockfile check).
+
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
   (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the
