@@ -1,12 +1,13 @@
 // C43: a sticky table header stays above its rows (rule 40; the user's report of 2026-10-28, "the cell will cover the
 // header when scrolling", ADR 0027). In component styles and stylesheets (`.ts`, `.scss`, `.css` under `src/` or
-// `projects/`), a rule that makes an element stick to the top (`position: sticky` with `top` or `inset-block-start`) must
-// set a `z-index`: without one the header paints in tree order with the rows, and any later cell that is positioned or
-// makes a stacking context (opacity below 1 on hover actions, `position: relative` on a badge, a transform) paints over it.
-// And a sticky column (`position: sticky` with `left`, `right` or `inset-inline-*`) in the same file must not have a
-// z-index at or above the header's: the later cell wins a tie. Use the ladder `--pd-z-table-header` above
-// `--pd-z-table-sticky-column` above `--pd-z-table-row-action` (or an app's own numbers in that order). A rule that is not a
-// table header (a sticky footer, a side panel) waives with `/* conformance: not-a-header */` in the rule. Specs are skipped.
+// `projects/`), a rule that makes an element stick to the top or the bottom (`position: sticky` with `top`, `bottom`,
+// `inset-block-*`, or an `inset`/`inset-block` shorthand with a side that is not `auto`) is a header or footer row: it must
+// set a z-index of at least the header level, 3 (`--pd-z-table-header`). Without one (or with `auto` or 0) it paints in tree
+// order with the rows, and any later cell that is positioned or makes a stacking context (opacity below 1 on hover actions,
+// `position: relative` on a badge, a transform) paints over it. A column's header cell (sticky both ways) needs the corner
+// level, 4 (`--pd-z-table-corner`), and a sticky column (`left`, `right`, `inset-inline-*`) must sit below the app's lowest
+// header: the later cell wins a tie. A sticky element that is not a table row (a side panel, an action bar that is not a
+// table's) waives with `/* conformance: not-a-header */` in the rule. Specs are skipped.
 import { error } from '../finding.mjs';
 
 const SOURCE = /(^|\/)(src|projects)\/.*\.(ts|scss|css)$/;
@@ -47,16 +48,37 @@ const decl = (body, prop) => {
   return m ? m[1].trim().replace(/\s*!important$/, '') : null;
 };
 
-/** What a declaration block makes sticky: 'top' (a header), 'side' (a column), or null. */
-export function stickyKind(body) {
+/** The values of a box shorthand (`inset: 0 auto`): [top, right, bottom, left] (or [start, end] for the logical pairs). */
+const sides = (value, n) => {
+  const v = value.split(/\s+/).filter(Boolean);
+  return n === 4 ? [v[0], v[1] ?? v[0], v[2] ?? v[0], v[3] ?? v[1] ?? v[0]] : [v[0], v[1] ?? v[0]];
+};
+const set = (v) => v !== undefined && v !== null && v !== 'auto';
+
+/** The edges a sticky element sticks to: `block` (top or bottom: a header or footer row) and `inline` (left or right: a column). */
+export function stickyEdges(body) {
   if (!/position\s*:\s*sticky/i.test(body)) return null;
-  if (decl(body, 'top') !== null || decl(body, 'inset-block-start') !== null) return 'top';
-  if (['left', 'right', 'inset-inline-start', 'inset-inline-end'].some((p) => decl(body, p) !== null)) return 'side';
-  return null;
+  const inset = decl(body, 'inset');
+  const [it, ir, ib, il] = inset ? sides(inset, 4) : [];
+  const ibk = decl(body, 'inset-block');
+  const iin = decl(body, 'inset-inline');
+  const block = [decl(body, 'top'), decl(body, 'bottom'), decl(body, 'inset-block-start'), decl(body, 'inset-block-end'), it, ib, ...(ibk ? sides(ibk, 2) : [])].some(set);
+  const inline = [decl(body, 'left'), decl(body, 'right'), decl(body, 'inset-inline-start'), decl(body, 'inset-inline-end'), ir, il, ...(iin ? sides(iin, 2) : [])].some(set);
+  return block || inline ? { block, inline } : null;
 }
 
-/** Compares two z-index values: a number, or a custom property resolved by the family ladder; null when they cannot be compared. */
-const LADDER = { '--pd-z-table-row-action': 1, '--pd-z-table-sticky-column': 2, '--pd-z-table-header': 3, '--pd-z-sticky': 10 };
+/** What a declaration block makes sticky: 'edge' (a header or footer row), 'side' (a column), 'corner' (both: a column's header cell), or null. */
+export function stickyKind(body) {
+  const e = stickyEdges(body);
+  if (!e) return null;
+  return e.block && e.inline ? 'corner' : e.block ? 'edge' : 'side';
+}
+
+/** The family ladder (`_tokens.scss`): what a z-index custom property is worth; anything else cannot be compared. */
+const LADDER = { '--pd-z-table-row-action': 1, '--pd-z-table-sticky-column': 2, '--pd-z-table-header': 3, '--pd-z-table-corner': 4, '--pd-z-sticky': 10 };
+const HEADER = LADDER['--pd-z-table-header'];
+const CORNER = LADDER['--pd-z-table-corner'];
+/** A z-index as a number: an integer, or a ladder token; null when it is not set or cannot be compared (`auto`, another property). */
 export function zValue(z) {
   if (z === null) return null;
   if (/^-?\d+$/.test(z)) return Number(z);
@@ -64,25 +86,31 @@ export function zValue(z) {
   return v && v[1] in LADDER ? LADDER[v[1]] : null;
 }
 
-/** The sticky rules of one file's text: headers ([{ line, selector, z }], z null when unset) and columns (same shape). */
+/** The sticky rules of one file's text by kind: [{ line, selector, z }] (z: the declared text, null when unset). */
 export function stickyRules(text) {
   const blocks = cssBlocks(text).filter((b) => !WAIVER.test(b.body));
   const pick = (kind) => blocks.filter((b) => stickyKind(b.body) === kind).map((b) => ({ line: b.line, selector: b.selector, z: decl(b.body, 'z-index') }));
-  return { headers: pick('top'), columns: pick('side') };
+  return { headers: pick('edge'), corners: pick('corner'), columns: pick('side') };
 }
 
 /**
- * The problems of a group of files (one app, or the shared UI): every header needs a z-index, and every sticky column must sit
- * below the lowest header of the group (a header and its columns are often styled in different files).
+ * The problems of a group of files (one app, or the shared UI). A header or footer row needs a z-index of at least the header
+ * level (3, `--pd-z-table-header`), a column's header cell (sticky both ways) at least the corner level (4), and every sticky
+ * column must sit below the lowest header of the group (a header and its columns are often styled in different files).
  * `files` is [{ file, text }]; the result is [{ file, line, message }].
  */
 export function stickyProblems(files) {
   const rules = files.map(({ file, text }) => ({ file, ...stickyRules(text) }));
   const out = [];
+  const atLeast = (r, h, min, what, token) => {
+    const z = zValue(h.z);
+    if (h.z === null) out.push({ file: r.file, line: h.line, message: `\`${h.selector}\` is a sticky ${what} without a z-index: later positioned cells paint over it` });
+    else if (z === null) out.push({ file: r.file, line: h.line, message: `\`${h.selector}\` is a sticky ${what} with z-index ${h.z}, which is not a number or a ladder token: use ${token} (${min})` });
+    else if (z < min) out.push({ file: r.file, line: h.line, message: `\`${h.selector}\` is a sticky ${what} at z-index ${z}, below ${token} (${min}): a cell or column at its level paints over it` });
+  };
   for (const r of rules) {
-    for (const h of r.headers) {
-      if (h.z === null) out.push({ file: r.file, line: h.line, message: `\`${h.selector}\` sticks to the top without a z-index: later positioned cells paint over it` });
-    }
+    for (const h of r.headers) atLeast(r, h, HEADER, 'header or footer row', '`--pd-z-table-header`');
+    for (const c of r.corners) atLeast(r, c, CORNER, 'header cell of a sticky column', '`--pd-z-table-corner`');
   }
   const headerZs = rules.flatMap((r) => r.headers.map((h) => zValue(h.z))).filter((z) => z !== null);
   if (headerZs.length) {
@@ -115,7 +143,7 @@ export default {
     }
     return [...groups.values()].flatMap((files) =>
       stickyProblems(files).map((p) =>
-        error('C43', 40, p.file, p.line, p.message, 'Give the header `z-index: var(--pd-z-table-header)` (or a number above every cell and sticky column) and an opaque background, and sticky columns a lower z-index; mark a sticky element that is not a table header with `/* conformance: not-a-header */`.'),
+        error('C43', 40, p.file, p.line, p.message, 'Give a header or footer row `z-index: var(--pd-z-table-header)` (3; an app without the --pd tokens writes the number), a sticky column\'s header cell `var(--pd-z-table-corner)` (4), sticky columns `var(--pd-z-table-sticky-column)` (2), and an opaque background; mark a sticky element that is not a table row with `/* conformance: not-a-header */`.'),
       ),
     );
   },

@@ -46,19 +46,24 @@ above are fixed wherever they occur.
 
 ## Decision
 
-1. **A z-index ladder for table layers** in `_tokens.scss`, local to the table: `--pd-z-table-header: 3` above
+1. **A z-index ladder for table layers** in `_tokens.scss`, local to the table: `--pd-z-table-corner: 4` (the header cell
+   of a sticky column, which sticks both ways) above `--pd-z-table-header: 3` (header and footer rows) above
    `--pd-z-table-sticky-column: 2` above `--pd-z-table-row-action: 1` above cells (auto). All are below `--pd-z-sticky`
-   (10). Apps without the `--pd-*` tokens use the same numbers.
+   (10). Apps without the `--pd-*` tokens (Debrief, Dyno, Pitcrew, Pitwall) use the same numbers.
 2. **Every sticky header sets a z-index from the ladder and an opaque background** (the surfaces `--pd-surface-1/2` are
    opaque in both themes). `pd-table`'s grid is its own stacking context (`isolation: isolate`), so its layers never
    compete with the page's; its header moves from `--pd-z-sticky` to `--pd-z-table-header`.
-3. **C43 (conformance, rule 40)** checks every instance: a rule that sticks to the top (`position: sticky` with `top` or
-   `inset-block-start`) in an app's or the shared UI's styles must set a z-index, and a sticky column must sit below the
-   lowest header of the same app. A sticky element that is not a table header (a side panel, a list's row layer) says
-   `/* conformance: not-a-header */`. Error level; all instances are fixed or waived in the same change.
+3. **C43 (conformance, rule 40)** checks every instance in an app's or the shared UI's styles: a rule that sticks to the
+   top or the bottom (`top`, `bottom`, `inset-block-*`, or an `inset`/`inset-block` shorthand with a side that is not
+   `auto`) is a header or footer row and needs a z-index of at least 3 (not `auto`, not 0, not a property the check cannot
+   read); a rule that sticks both ways is a corner and needs at least 4; a sticky column must sit below the lowest header of
+   the same app (or shared entry point). A sticky element that is not a table row (a side panel, a list's row layer) says
+   `/* conformance: not-a-header */`. Error level; all instances are fixed or waived in the same change (the review of
+   2026-10-28 raised the nine headers at 1 and the four sticky action bars to the header level).
 4. **`headerCovers`/`expectHeaderOnTop` in `@decryp7/paddock-e2e`** (`grid.ts`) is the run-time check: it scrolls the
-   grid's body (or the page, for a header that sticks to it) in steps, hovers the row under the header and asks
-   `document.elementFromPoint` across the header row, clipped to what its scrollers show; it also fails on a header with a
+   grid's body (or the page, for a header that sticks to it) in steps and then jumps more than two viewports, and asks
+   `document.elementFromPoint` across the header row, clipped to what its scrollers show, twice at each position: in the
+   first frame after the scroll, and once a drawn row reaches the header's bottom edge with the row under it hovered; it also fails on a header with a
    translucent background and on a body that never scrolled. The gallery runs it over `pd-table`'s virtual table in both
    themes and engines; apps add it to their main grids' e2e when they move onto `@decryp7/paddock-e2e`.
 5. **Proposed: `pd-table` on Angular Material's table** (the user's decisions of 2026-10-28: "rebuild pd-table on CDK's

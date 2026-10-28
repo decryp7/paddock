@@ -5,17 +5,21 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Sticky table headers stay above their rows (ADR 0027)
-- New tokens `--pd-z-table-header` (3), `--pd-z-table-sticky-column` (2) and `--pd-z-table-row-action` (1): the layers inside
-  a table, header on top. `pd-table`'s grid is its own stacking context and its header uses `--pd-z-table-header`;
+- New tokens `--pd-z-table-corner` (4), `--pd-z-table-header` (3), `--pd-z-table-sticky-column` (2) and
+  `--pd-z-table-row-action` (1): the layers inside a table, header on top, a sticky column's header cell above both. `pd-table`'s grid is its own stacking context and its header uses `--pd-z-table-header`;
   `pd-view-table`'s header and `pd-view-matrix`'s sticky row headings and the shell's diagnostics tables use the ladder.
 - The apps' tables whose sticky header had no z-index (Debrief: alerts, tail status, query results, SQL console, store pane,
   markers, keyboard settings, runs, dashboard tiles, parser editor, format wizard; Dyno: Charted counters) set one, so
   muted or translucent rows and hover actions no longer paint over the header; Pitwall's model library keeps its sticky
   action column (2) below the header (3).
-- Conformance C43: a rule that sticks to the top must set a z-index, and a sticky column must sit below the app's lowest
-  header (`/* conformance: not-a-header */` for sticky panels); run on Paddock's CI with the other repo-wide checks.
-- `@decryp7/paddock-e2e`: `headerCovers`, `expectHeaderOnTop` and `isOpaqueColor` (scroll, hover, `elementFromPoint`
-  across the header row, opaque background); the gallery runs it over `pd-table` in both themes, Chromium and WebKit.
+- Conformance C43: a header or footer row that sticks (top, bottom, `inset-block-*`, the `inset` shorthands) needs a
+  z-index of at least 3, a sticky column's header cell at least 4, and a sticky column must sit below the app's lowest
+  header (`/* conformance: not-a-header */` for sticky panels); run on Paddock's CI with the other repo-wide checks. The
+  headers at 1 (Dyno, Spotter, Pitcrew, the workbench explorer) and the sticky action bars (Dyno cleanup, Debrief's setup
+  wizards and schedules, Spotter's editor) are at the header level.
+- `@decryp7/paddock-e2e`: `headerCovers`, `expectHeaderOnTop` and `isOpaqueColor` (scroll in steps and a jump of more than
+  two viewports, `elementFromPoint` across the header row in the first frame and again once a row reaches the header with
+  the row under it hovered, opaque background); the gallery runs it over `pd-table` in both themes, Chromium and WebKit.
 
 ### One shared Material theme (WP-0 of the Material migration, rule 47)
 - `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system

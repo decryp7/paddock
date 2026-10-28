@@ -2,9 +2,10 @@ import { expect, type Locator } from '@playwright/test';
 
 /*
  * The "header stays on top" check (ER-21: the class of bug where scrolled rows or cells paint over a grid's sticky header).
- * It scrolls the grid's body in steps, hovers the row that sits just under the header (hover row actions, tints and focus
- * rings are where stray stacking contexts come from), then asks the browser which element is on top at points across the
- * header row (`document.elementFromPoint`). Every hit must be the header or inside it, and the header must paint an opaque
+ * It scrolls the grid's body in steps and then jumps more than two viewports, and at each position asks the browser which
+ * element is on top at points across the header row (`document.elementFromPoint`): once in the first frame after the scroll
+ * (before a virtual list or a sticky offset has caught up), and again once a drawn row reaches the header's bottom edge and
+ * the row under the header is hovered (hover row actions, tints and focus rings are where stray stacking contexts come from). Every hit must be the header or inside it, and the header must paint an opaque
  * background, so nothing shows through it either. Works for `pd-table`, a `<table>` with a sticky `<thead>` and an app's
  * own div grid alike: the caller names the parts by selector, relative to the grid.
  */
@@ -20,14 +21,18 @@ export interface GridParts {
   readonly scroller?: string;
   /** The body rows. Default: `[role="row"][data-index], tbody tr`. */
   readonly rows?: string;
-  /** How many scroll steps to check (each step about a third of the visible body). Default 6. */
+  /** How many scroll steps to check (each step about a third of the visible body); a jump of more than two viewports follows. Default 6. */
   readonly steps?: number;
+  /** Where the steps start in a body that scrolls inside the grid, in pixels (deep in a long virtual table). Default 0. */
+  readonly from?: number;
 }
 
 /** One place where something other than the header was on top of it. */
 export interface HeaderCover {
   /** The scroll position of the body. */
   readonly scrollTop: number;
+  /** When it was seen: in the first frame after the scroll, or once the rows were drawn and one was hovered. */
+  readonly phase: 'first-frame' | 'settled';
   /** The point checked, in viewport pixels. */
   readonly x: number;
   readonly y: number;
@@ -71,55 +76,99 @@ export async function headerCovers(grid: Locator, parts: GridParts = {}): Promis
 
   const covers: HeaderCover[] = [];
   let scrolled = 0;
-  for (let step = 1; step <= steps; step++) {
-    const top = await grid.evaluate(
-      (root, { scrollerSel, step, steps }) => {
-        const canScroll = (e: Element) => e.scrollHeight > e.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(e).overflowY);
-        const inside = scrollerSel ? root.querySelector(scrollerSel) : canScroll(root) ? root : [...root.querySelectorAll('*')].find(canScroll);
-        if (inside) {
-          inside.scrollTop = Math.round((inside.clientHeight / 3) * step + 7);
-          inside.dispatchEvent(new Event('scroll'));
-          return inside.scrollTop;
+  // One page function does all of it (the page's CSP forbids passing code in as text): optionally scroll, wait one frame,
+  // then find the box the header paints in and what is on top across it. The box is the union of the header cells (a
+  // `<thead>`'s own box scrolls away with the table while its sticky `<th>` cells stay), cut to what its clipping ancestors
+  // and the window show (a cell scrolled out sideways is hidden by its own scroller, not covered).
+  const look = (scroll: { to: 'step' | 'jump'; step: number } | null) =>
+    grid.evaluate(
+      async (root, { headerSel, scrollerSel, scroll, steps, from }) => {
+        let top = 0;
+        if (scroll) {
+          const canScroll = (e: Element) => e.scrollHeight > e.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(e).overflowY);
+          const inside = scrollerSel ? root.querySelector(scrollerSel) : canScroll(root) ? root : [...root.querySelectorAll('*')].find(canScroll);
+          if (inside) {
+            inside.scrollTop = scroll.to === 'jump' ? inside.scrollTop + Math.round(inside.clientHeight * 2.5) + 13 : Math.round(from + (inside.clientHeight / 3) * scroll.step + 7);
+            top = inside.scrollTop;
+          } else {
+            let outer = root.parentElement;
+            while (outer && !canScroll(outer)) outer = outer.parentElement;
+            const scroller = outer ?? document.scrollingElement;
+            if (scroller) {
+              // Put the grid's top above the scroller's top by a share of its height: the header sticks, the rows pass under it.
+              const g = root.getBoundingClientRect();
+              const s = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+              const share = scroll.to === 'jump' ? Math.max(g.height * 0.9, scroller.clientHeight * 2.5) : (g.height * scroll.step) / (steps + 2);
+              scroller.scrollTop += Math.round(g.top - s + Math.min(share, Math.max(0, g.height - scroller.clientHeight / 2)));
+              top = scroller.scrollTop;
+            }
+          }
+          // The first frame after the scroll: what the user sees before anything catches up.
+          await new Promise<void>((done) => requestAnimationFrame(() => done()));
         }
-        let outer = root.parentElement;
-        while (outer && !canScroll(outer)) outer = outer.parentElement;
-        const scroller = outer ?? document.scrollingElement;
-        if (!scroller) return 0;
-        // Put the grid's top above the scroller's top by a share of its height: the header sticks, the rows pass under it.
-        const g = root.getBoundingClientRect();
-        const s = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
-        scroller.scrollTop += Math.round(g.top - s + (g.height * step) / (steps + 2));
-        scroller.dispatchEvent(new Event('scroll'));
-        return scroller.scrollTop;
+        const h = root.querySelector(headerSel);
+        if (!h) return { top, box: null, found: [] };
+        const cells = [...h.querySelectorAll('th, [role="columnheader"]')].map((c) => c.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
+        const boxes = cells.length ? cells : [h.getBoundingClientRect()];
+        let left = Math.min(...boxes.map((r) => r.left));
+        let btop = Math.min(...boxes.map((r) => r.top));
+        let right = Math.max(...boxes.map((r) => r.right));
+        let bottom = Math.max(...boxes.map((r) => r.bottom));
+        for (let a = h.parentElement; a; a = a.parentElement) {
+          if (getComputedStyle(a).overflow === 'visible') continue;
+          const r = a.getBoundingClientRect();
+          [left, btop, right, bottom] = [Math.max(left, r.left), Math.max(btop, r.top), Math.min(right, r.right), Math.min(bottom, r.bottom)];
+        }
+        [left, btop, right, bottom] = [Math.max(left, 0), Math.max(btop, 0), Math.min(right, innerWidth), Math.min(bottom, innerHeight)];
+        const box = { left, top: btop, width: Math.max(0, right - left), height: Math.max(0, bottom - btop) };
+        const found: { x: number; y: number; found: string }[] = [];
+        if (box.width && box.height) {
+          for (const fy of [0.15, 0.5, 0.85]) {
+            for (let fx = 0.02; fx <= 0.99; fx += 0.06) {
+              const x = Math.round(box.left + box.width * fx);
+              const y = Math.round(box.top + box.height * fy);
+              const hit = document.elementFromPoint(x, y);
+              if (!hit || h.contains(hit) || hit.contains(h)) continue;
+              const role = hit.getAttribute('role');
+              found.push({ x, y, found: `${hit.tagName.toLowerCase()}${hit.className && typeof hit.className === 'string' ? '.' + hit.className.trim().split(/\s+/).join('.') : ''}${role ? `[role=${role}]` : ''}` });
+            }
+          }
+        }
+        return { top, box, found };
       },
-      { scrollerSel: parts.scroller ?? null, step, steps },
+      { headerSel, scrollerSel: parts.scroller ?? null, scroll, steps, from: parts.from ?? 0 },
     );
-    scrolled = Math.max(scrolled, top);
-    // Let virtual scroll and change detection draw the rows for the new position.
-    await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
-    // The box the header paints in: the union of its header cells (a `<thead>`'s own box scrolls away with the table while
-    // its sticky `<th>` cells stay), cut to what its clipping ancestors and the window show (a cell scrolled out sideways
-    // is hidden by its own scroller, not covered). Self-contained: the page's CSP forbids passing code in as text.
-    const hbox = await header.evaluate((h) => {
-      const cells = [...h.querySelectorAll('th, [role="columnheader"]')].map((c) => c.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
-      const boxes = cells.length ? cells : [h.getBoundingClientRect()];
-      let left = Math.min(...boxes.map((r) => r.left));
-      let top = Math.min(...boxes.map((r) => r.top));
-      let right = Math.max(...boxes.map((r) => r.right));
-      let bottom = Math.max(...boxes.map((r) => r.bottom));
-      for (let a = h.parentElement; a; a = a.parentElement) {
-        if (getComputedStyle(a).overflow === 'visible') continue;
-        const r = a.getBoundingClientRect();
-        left = Math.max(left, r.left);
-        top = Math.max(top, r.top);
-        right = Math.min(right, r.right);
-        bottom = Math.min(bottom, r.bottom);
-      }
-      [left, top, right, bottom] = [Math.max(left, 0), Math.max(top, 0), Math.min(right, innerWidth), Math.min(bottom, innerHeight)];
-      return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
-    });
-    if (!hbox.width || !hbox.height) continue;
-    // Hover the row whose box reaches up to the header: the row that scrolled under it.
+
+  const positions = [...Array.from({ length: steps }, (_, i) => ({ to: 'step' as const, step: i + 1 })), { to: 'jump' as const, step: steps + 1 }];
+  for (const position of positions) {
+    const first = await look(position);
+    scrolled = Math.max(scrolled, first.top);
+    for (const f of first.found) covers.push({ scrollTop: first.top, phase: 'first-frame', ...f });
+    if (!first.box?.width || !first.box.height) continue;
+    // Wait for the condition, not for a number of frames: a drawn row reaches the header's bottom edge (the rows of the new
+    // position are there and pass under the header).
+    await grid.evaluate(
+      (root, { rowSel, headerSel }) =>
+        new Promise<void>((done, fail) => {
+          const started = performance.now();
+          const check = () => {
+            const h = root.querySelector(headerSel);
+            const edge = h ? Math.max(...[...h.querySelectorAll('th, [role="columnheader"]'), h].map((c) => c.getBoundingClientRect().bottom)) : 0;
+            const reached = [...root.querySelectorAll(rowSel)].some((r) => {
+              const b = r.getBoundingClientRect();
+              return b.height > 0 && b.top <= edge + 1 && b.bottom >= edge - 1;
+            });
+            if (reached) return done();
+            // A row that never comes is a failure of its own (nothing scrolled under the header); the test's own timeout names it.
+            if (performance.now() - started > 10_000) return fail(new Error('no drawn row reached the header’s bottom edge'));
+            requestAnimationFrame(check);
+          };
+          check();
+        }),
+      { rowSel, headerSel },
+    );
+    // Hover the row whose box reaches past the header: the row that scrolled under it.
+    const hbox = first.box;
     const rows = grid.locator(rowSel);
     const count = Math.min(await rows.count(), 200);
     for (let i = 0; i < count; i++) {
@@ -129,21 +178,8 @@ export async function headerCovers(grid: Locator, parts: GridParts = {}): Promis
         break;
       }
     }
-    const found = await header.evaluate((h, r) => {
-      const out: { x: number; y: number; found: string }[] = [];
-      for (const fy of [0.15, 0.5, 0.85]) {
-        for (let fx = 0.02; fx <= 0.99; fx += 0.06) {
-          const x = Math.round(r.left + r.width * fx);
-          const y = Math.round(r.top + r.height * fy);
-          const hit = document.elementFromPoint(x, y);
-          if (!hit || h.contains(hit) || hit.contains(h)) continue;
-          const role = hit.getAttribute('role');
-          out.push({ x, y, found: `${hit.tagName.toLowerCase()}${hit.className && typeof hit.className === 'string' ? '.' + hit.className.trim().split(/\s+/).join('.') : ''}${role ? `[role=${role}]` : ''}` });
-        }
-      }
-      return out;
-    }, hbox);
-    for (const f of found) covers.push({ scrollTop: top, ...f });
+    const settled = await look(null);
+    for (const f of settled.found) covers.push({ scrollTop: first.top, phase: 'settled', ...f });
   }
   await page.mouse.move(0, 0);
   const background = await header.evaluate((h) => {
