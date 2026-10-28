@@ -7,8 +7,8 @@ use crate::page::Page;
 use crate::process::{self, Supervised};
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// How the browser window behaves.
@@ -367,10 +367,9 @@ mod tests {
     fn keeps_the_automation_banner_and_hides_nothing() {
         let a = args(Path::new("/tmp/p"), Mode::OffScreen);
         assert!(a.contains(&"--enable-automation".to_string()));
-        assert!(
-            a.iter()
-                .all(|x| !x.contains("AutomationControlled") && !x.contains("user-agent") && !x.contains("headless"))
-        );
+        assert!(a
+            .iter()
+            .all(|x| !x.contains("AutomationControlled") && !x.contains("user-agent") && !x.contains("headless")));
         assert!(a.contains(&"--window-position=-32000,-32000".to_string()));
         assert!(a.contains(&"--user-data-dir=/tmp/p".to_string()));
         assert!(a.contains(&"--disable-extensions".to_string()));
@@ -441,11 +440,9 @@ mod tests {
 
     #[test]
     fn modes() {
-        assert!(
-            !args(Path::new("/p"), Mode::OnScreen)
-                .iter()
-                .any(|x| x.starts_with("--window-position") || x.starts_with("--headless"))
-        );
+        assert!(!args(Path::new("/p"), Mode::OnScreen)
+            .iter()
+            .any(|x| x.starts_with("--window-position") || x.starts_with("--headless")));
         assert!(args(Path::new("/p"), Mode::Headless).contains(&"--headless=new".to_string()));
     }
 
