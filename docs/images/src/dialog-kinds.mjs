@@ -172,6 +172,8 @@ function glyph(c, x, y, kind) {
 // ---------- scenes ----------
 
 const P = 20;
+/** Footer band of the viewer and the tool: a hairline, then 16 px, 32 px buttons, 16 px. */
+const FH = 64;
 
 /** A decision: glyph, heading (the question), message, optional extra body, then the footer. */
 function decisionScene(c, { heading, message, glyphKind = 'danger', actions, os = 'mac', w = 400, extraBody = null, accent = 'graphite' }) {
@@ -223,7 +225,7 @@ function requiredChoice(c) {
   return scene(c, 'New key', {
     glyphKind: 'info', heading: 'Copy the key for “debrief-laptop”',
     message: 'This is the only time Pitwall shows it.', extraBody: secret,
-    actions: [{ label: 'Copy', role: 'secondary', lead: true }, { label: 'I’ve saved it', role: 'primary', focus: true }],
+    actions: [{ label: 'Copy key', role: 'secondary', lead: true }, { label: 'I’ve saved it', role: 'primary', focus: true }],
   }, `Required choice, narrow 400 · no Cancel · ${NEUTRAL}`);
 }
 
@@ -269,8 +271,8 @@ const formError = (c) => formScene(c, 'error');
 
 /** Viewer: modeless, opens at its preferred 720 x 560 and grows with its content to the cap; the footer never scrolls. */
 function viewer(c) {
-  const ac = c.accents.graphite, w = 720, h = 560, FH = 64;
-  const bodyH = h - FH, max = w - 2 * P - 48;
+  const ac = c.accents.graphite, w = 720, h = 560;
+  const bodyH = h - FH, max = w - 2 * P;
   let b = text(P, P + 12, 'ERROR · orders-api · 14:02:31.418', { size: 12, w: 600, fill: c.subtle });
   const blocks = [
     ['p', 'The request to /orders/7731 failed because the payment service timed out after 30 s. The same timeout appears 41 times in the last hour, always after the connection pool reported 64 of 64 connections in use.'],
@@ -308,7 +310,7 @@ function viewer(c) {
   if (y > bodyH - P) throw new Error(`viewer content (${y}) overflows its preferred height (${bodyH - P}): trim the content`);
   b += rect(0, bodyH, w, 1, c.hair);
   b += footer(c, ac, P, bodyH + 16, w - 2 * P, [
-    { label: 'Copy', role: 'secondary', lead: true },
+    { label: 'Copy explanation', role: 'secondary', lead: true },
     { label: 'Show cited rows', role: 'secondary', lead: true },
     { label: 'Close', role: 'cancel', focus: true },
   ]);
@@ -324,7 +326,7 @@ const toggle = (c, ac, x, y, on) =>
 
 /** Tool: modeless, user-sized, its own layout, drawn at its preferred 960 x 680; the footer keeps a status line and Close. */
 function tool(c) {
-  const ac = c.accents.spotter, w = 960, h = 680, FH = 60, SW = 216;
+  const ac = c.accents.spotter, w = 960, h = 680, SW = 216;
   let b = rect(0, 0, SW, h - FH, c.side) + rect(SW - 0.5, 0, 0.5, h - FH, c.hair);
   ['General', 'Appearance', 'Notifications', 'Storage', 'Network', 'Updates', 'Diagnostics'].forEach((s, i) => {
     const y = 12 + i * 32;
@@ -354,8 +356,9 @@ function tool(c) {
   b += rect(X, by + 12, RW, 8, c.hair, { rx: 4 }) + rect(X, by + 12, RW * 0.24, 8, ac.text, { rx: 4 });
   b += text(X, by + 40, 'Logs 1.6 GB · Snapshots 0.7 GB · Cache 0.1 GB', { size: 12, fill: c.subtle });
   b += button(c, ac, X, by + 60, { label: 'Clear cache', role: 'secondary' }).svg;
-  b += rect(0, h - FH, w, 0.5, c.hair) + text(P, h - FH + 34, 'Changes are saved as you make them.', { size: 12, fill: c.subtle });
-  b += footer(c, ac, P, h - FH + 14, w - 2 * P, [{ label: 'Close', role: 'cancel' }]);
+  // The footer spans the window, its Close lined up with the content column's right edge (32 px in).
+  b += rect(0, h - FH, w, 1, c.hair) + text(P, h - FH + 36, 'Changes are saved as you make them.', { size: 12, fill: c.subtle });
+  b += footer(c, ac, P, h - FH + 16, R - P, [{ label: 'Close', role: 'cancel' }]);
   return windowFrame(c, 'Spotter settings', w, h, b, { caption: 'Tool at its preferred 960 × 680, user-sized · Spotter’s settings in Spotter’s accent' });
 }
 
@@ -374,7 +377,12 @@ function loading(c) {
 /** The frame's anatomy: a decision with its measurements, annotated in neutral ink (text and muted text). */
 function anatomy(c) {
   const { b, w, h, fy } = decisionScene(c, revoke('mac'));
-  const L = 270, R = 420, TOP = 64, BOT = 84;
+  // Side margins from the label widths, so the backdrop has the same 32 px beyond the longest label on both sides.
+  const leftLabels = [['Body', 600], ['scrolls only past the cap', 400], ['Footer', 600], ['declared actions, never scrolls', 400]];
+  const rightLabels = [['20 px padding all round', 600], ['heading 15/600, text 13, 12 px gap', 400], ['Buttons 32 px, 8 px apart, order native per OS', 600],
+    ['Enter = default (here Cancel; never a destructive action)', 400], ['Escape, Cmd/Ctrl+W = Cancel', 400]];
+  const widest = (ls) => Math.max(...ls.map(([s, wt]) => tw(s, 12, wt)));
+  const M = 32, L = Math.round(76 + widest(leftLabels) + M), R = Math.round(64 + widest(rightLabels) + M), TOP = 64, BOT = 84;
   const ox = L, oy = TOP + 28, A = c.muted;
   const ln = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${A}" stroke-width="1"/>`;
   const head = (x, y, s, anchor = 'start') => text(x, y, s, { size: 12, w: 600, fill: c.text, anchor });
@@ -387,7 +395,7 @@ function anatomy(c) {
   a += lab(ox + w / 2, TOP - 14, 'OS title bar: no close, minimise or zoom (ADR 0009); title from the contract or setTitle()', 'middle');
   const rx = ox + w + 64;
   a += head(rx, oy + 16, '20 px padding all round') + lab(rx, oy + 32, 'heading 15/600, text 13, 12 px gap');
-  a += head(rx, oy + fy + 2, 'Buttons 32 px, 8 px apart, order native per OS') + lab(rx, oy + fy + 18, 'Enter = default: Cancel here, a destructive action never is')
+  a += head(rx, oy + fy + 2, 'Buttons 32 px, 8 px apart, order native per OS') + lab(rx, oy + fy + 18, 'Enter = default (here Cancel; never a destructive action)')
     + lab(rx, oy + fy + 34, 'Escape, Cmd/Ctrl+W = Cancel');
   const hx = ox + w + 24;
   a += ln(hx, oy, hx, oy + h) + ln(hx - 4, oy, hx + 4, oy) + ln(hx - 4, oy + h, hx + 4, oy + h);
