@@ -8,10 +8,10 @@ Conventional Commits; one semver tag for the whole repo.
 - New entry point `@decryp7/paddock-ui/sash`: `PdSash` (`[pdSash]`), the one splitter behaviour for a pane the user resizes by hand. It owns the
   pointer drag (primary button, pointer capture), the keys (arrows by 16 px, Shift by 64, Home and End, flipped in right-to-left text), the
   `separator` aria (`aria-valuenow`, `aria-valuemin`, a dynamic `aria-valuemax` from `pdSashLimits`, `aria-controls`) and three outputs:
-  `pdSashStart`, `pdSashMove` (the clamped width) and `pdSashCommit` (once, on release, which is when a layout evaluates). The workbench
+  `pdSashStart`, `pdSashMove` (the clamped width) and `pdSashCommit` (once, on release, which is when a layout evaluates; also when the pointer capture is lost or the sash is destroyed mid-drag). `pdSash` (the width) and `pdSashLimits` are functions read when needed (pass a signal). The workbench
   frame's Explorer sash uses it unchanged in behaviour (it gains `aria-controls="pd-sidebar"` and the right-to-left key flip).
 - Debrief: the Explorer pane had no sash (a fixed 272 px column outside the dock). It now declares 240 to 640 px (default 272), is
-  resized with `PdSash`, keeps the user's width as a view preference, is shown within the room the layout plan has (the plan shrinks it
+  resized with `PdSash`, keeps the user's width as a view preference, may be dragged up to 640 px or the window's absolute limit (lower-priority panes tab, as when the window shrinks), is shown within that room (the plan shrinks it
   towards 240 before it closes it), is not judged by the plan while a drag is in progress, and follows the main window in pop-outs.
 
 ### Shell: About, health chip, notices and jobs popover fixes

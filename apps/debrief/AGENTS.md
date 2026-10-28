@@ -12,6 +12,11 @@ affected tests, ownership) are the root [AGENTS.md](../../AGENTS.md); read both 
 CI is `.gitea/workflows/debrief.yml` at the repo root (plus `debrief-bench`, `-corpus`, `-fuzz`, `-mutants`); it runs
 when `node scripts/affected.mjs --ci --app debrief` says the change reaches Debrief.
 
+**Shared UI library.** Debrief's UI imports `@decryp7/paddock-ui/*` (so far `sash`) from `ui/dist/paddock-ui` through a path in
+`app/tsconfig.json`, like Spotter. Run `npm run build -w ui` at the repo root after `npm ci` and again after changing `ui/`,
+before `ng serve`, `ng build`, `ng test`, lint or `playwright test` here; every Debrief CI job that builds or tests the
+frontend does the same.
+
 ## Design principles
 
 Apply these deliberately. They are not decoration:

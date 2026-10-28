@@ -428,6 +428,10 @@ jobs:
           (cd ../../.. && npm ci)
           npm audit --omit=dev --audit-level=high
 
+      # Debrief's UI imports the shared library from ui/dist (tsconfig path, like Spotter's): build it before lint, build and tests.
+      - name: Build the shared UI library
+        run: (cd ../../.. && npm run build -w ui)
+
       - name: Lint
         run: npm run lint
 
@@ -492,6 +496,9 @@ jobs:
 
       - name: Install
         run: (cd ../../.. && npm ci)
+
+      - name: Build the shared UI library
+        run: (cd ../../.. && npm run build -w ui)
 
       # One production build serves every project of this shard, under the Tauri CSP.
       - name: Production build for the end-to-end tests
@@ -651,6 +658,7 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         run: |
           [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
+          (cd ../../.. && npm run build -w ui)
           npm run e2e:tauri:build
 
       # macOS: a real debug .app (ad-hoc sealed by tauri.macos.conf.json) with the sidecars and libduckdb inside, the same
@@ -661,7 +669,7 @@ jobs:
         env:
           DEBRIEF_CARGO_PROFILE: debug
         run: |
-          (cd ../../.. && npm ci)
+          (cd ../../.. && npm ci && npm run build -w ui)
           npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json
 
       - name: Smoke test, sidecars and quit within 10 s (macOS)
@@ -882,6 +890,8 @@ jobs:
           DEBRIEF_CARGO_PROFILE: dist
         run: |
           [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
+          # The UI imports the shared library from ui/dist.
+          (cd ../../.. && npm run build -w ui)
           # Host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
           # installer can never be collected into this release.
           target="$PADDOCK_BUILD_FOLDER"

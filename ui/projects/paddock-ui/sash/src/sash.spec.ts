@@ -1,11 +1,12 @@
-import { Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it } from 'vitest';
 import { clampSash, PdSash, type SashLimits } from './sash';
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdSash],
-  template: `<div id="pane"></div><div class="s" [pdSash]="width()" [pdSashLimits]="limits" pdSashControls="pane" (pdSashStart)="log.push('start')" (pdSashMove)="width.set($event); log.push('move ' + $event)" (pdSashCommit)="log.push('commit')"></div>`,
+  template: `<div id="pane"></div><div class="s" [pdSash]="width" [pdSashLimits]="limits" pdSashControls="pane" (pdSashStart)="log.push('start')" (pdSashMove)="width.set($event); log.push('move ' + $event)" (pdSashCommit)="log.push('commit')"></div>`,
 })
 class Host {
   readonly width = signal(272);
@@ -24,7 +25,7 @@ function setup() {
     sash.dispatchEvent(e);
     return e;
   };
-  const key = (k: string, shiftKey = false) => (fixture.detectChanges(), sash.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, cancelable: true })));
+  const key = (k: string, shiftKey = false) => sash.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, cancelable: true }));
   return { fixture, host: fixture.componentInstance, sash, pointer, key };
 }
 
@@ -89,6 +90,35 @@ describe('PdSash', () => {
     } finally {
       document.documentElement.dir = '';
     }
+  });
+
+  it('reads the width when a gesture starts, not from the last render', () => {
+    const { host, key } = setup();
+    host.width.set(400);
+    key('ArrowRight');
+    expect(host.log).toContain('move 416');
+  });
+
+  it('a lost pointer capture ends the drag (once), whatever else was seen', () => {
+    const { host, pointer, sash } = setup();
+    pointer('pointerdown', 100);
+    pointer('pointermove', 120);
+    sash.dispatchEvent(new Event('lostpointercapture'));
+    sash.dispatchEvent(new Event('lostpointercapture'));
+    pointer('pointerup', 120);
+    pointer('pointermove', 300);
+    expect(host.log).toEqual(['start', 'move 292', 'commit']);
+    pointer('pointerdown', 100);
+    expect(host.log.at(-1)).toBe('start');
+  });
+
+  it('a sash destroyed mid-drag ends the drag, so the consumer is not left holding it', () => {
+    const { fixture, host, pointer, sash } = setup();
+    pointer('pointerdown', 100);
+    pointer('pointermove', 120);
+    fixture.destroy();
+    expect(host.log).toEqual(['start', 'move 292', 'commit']);
+    expect(() => sash.dispatchEvent(new Event('lostpointercapture'))).not.toThrow();
   });
 
   it('clamps inside inverted limits', () => {

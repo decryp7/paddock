@@ -338,7 +338,7 @@ describe('pd-workbench with provideShellWorkbench', () => {
     expect(document.activeElement?.id).toBe('pd-stage');
     const frame = TestBed.inject(WorkbenchFrameStore);
     const sash = element.querySelector<HTMLElement>('[data-testid="sidebar-sash"]')!;
-    const key = (k: string, shiftKey = false) => (fixture.detectChanges(), sash.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, cancelable: true })));
+    const key = (k: string, shiftKey = false) => sash.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, cancelable: true }));
     key('ArrowRight');
     expect(frame.explorerWidth()).toBe(288);
     key('ArrowLeft', true);

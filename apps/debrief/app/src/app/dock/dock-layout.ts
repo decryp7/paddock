@@ -347,43 +347,45 @@ export class DockLayout {
     };
   }
 
+  /**
+   * The size of the dock now: its container's box, which is where the window really is. dockview measures the container with
+   * an observer of its own and lags a frame or two behind it, so `api.width` alone is stale right after a resize or a drag.
+   * Null while the dock has no measured size.
+   */
+  private dockSize(api: DockviewApi): { width: number; height: number } | null {
+    if (!(api.width > 0 && api.height > 0)) return null;
+    const box = this.ctx.container?.getBoundingClientRect();
+    if (box && (box.width <= 0 || box.height <= 0)) return null;
+    return box ? { width: Math.round(box.width), height: Math.round(box.height) } : { width: api.width, height: api.height };
+  }
+
   /** The Explorer's declaration for the user's width: it keeps its declared minimum, and the width asked for is its preference, so the plan shrinks it before it closes it. */
   private explorerAt(width: number): ViewLayout {
     return { ...EXPLORER_LAYOUT, pref: { ...EXPLORER_LAYOUT.pref, width: Math.max(EXPLORER_LAYOUT.min.width, width) } };
   }
 
   /**
-   * The widest the Explorer can be right now without the plan shrinking it or closing it, within its declared limits (never
-   * below the minimum): the cap of a drag, and the width it is shown at when the window cannot hold the user's width.
-   * `explorerWidth` is the width it has now (it is part of the room when open).
+   * The widest the Explorer may be right now, px, within its declared limits: its maximum, or the window's absolute limit
+   * where the Explorer and the minimum of the dock (the room of the highest-priority column) must still fit together. The
+   * lower-priority panes yield to it as they do when the window shrinks: the dock's own plan tabs them. This is the cap of a
+   * drag, and the width the Explorer is shown at when the window cannot hold the user's width. It does not depend on the
+   * Explorer's own width (the room is the window less the dock's minimum), so it cannot flap. `explorerWidth` is the width the
+   * Explorer has now (it is part of the window when open).
    */
   explorerRoom(api: DockviewApi, open: boolean, explorerWidth: number): number {
-    if (!(api.width > 0 && api.height > 0)) return EXPLORER_WIDTH.max;
-    const box = this.ctx.container?.getBoundingClientRect();
-    if (box && (box.width <= 0 || box.height <= 0)) return EXPLORER_WIDTH.max;
-    const viewport = { width: api.width + (open ? explorerWidth : 0), height: api.height };
-    const docked = this.openViews(api);
-    const fits = (w: number): boolean => {
-      const explorer: OpenView = { id: EXPLORER_ID, layout: this.explorerAt(w), group: EXPLORER_ID };
-      const plan = planLayout(viewport, [...docked, explorer], this.hints());
-      return (plan.columns.find((c) => c.kind === 'left')?.width ?? 0) >= w;
-    };
-    let lo: number = EXPLORER_WIDTH.min;
-    let hi: number = EXPLORER_WIDTH.max;
-    while (lo < hi) {
-      const mid = Math.ceil((lo + hi) / 2);
-      if (fits(mid)) lo = mid;
-      else hi = mid - 1;
-    }
-    return lo;
+    const size = this.dockSize(api);
+    if (!size) return EXPLORER_WIDTH.max;
+    const viewport = { width: size.width + (open ? explorerWidth : 0), height: size.height };
+    const plan = planLayout(viewport, this.openViews(api), this.hints());
+    const dockMin = plan.columns.find((c) => c.anchor)?.minWidth ?? 0;
+    return Math.max(EXPLORER_WIDTH.min, Math.min(EXPLORER_WIDTH.max, viewport.width - dockMin));
   }
 
   /** The verdict for the Explorer (see `DockService.explorerVerdict`). */
   explorerVerdict(api: DockviewApi, open: boolean, explorerWidth: number): 'hide' | 'show' | 'keep' {
-    if (!(api.width > 0 && api.height > 0)) return 'keep';
-    const box = this.ctx.container?.getBoundingClientRect();
-    if (box && (box.width <= 0 || box.height <= 0)) return 'keep';
-    const viewport = { width: api.width + (open ? explorerWidth : 0), height: api.height };
+    const size = this.dockSize(api);
+    if (!size) return 'keep';
+    const viewport = { width: size.width + (open ? explorerWidth : 0), height: size.height };
     const explorer: OpenView = { id: EXPLORER_ID, layout: this.explorerAt(explorerWidth), group: EXPLORER_ID };
     const views = this.openViews(api, [explorer]);
     if (open) return planLayout(viewport, views, this.hints()).hidden.some((h) => h.id === EXPLORER_ID) ? 'hide' : 'keep';

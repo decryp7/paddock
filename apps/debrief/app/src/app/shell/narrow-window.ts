@@ -42,6 +42,11 @@ export class NarrowWindow {
     this.held = true;
   }
 
+  /** The sash is gone (the Explorer closed mid-drag): a drag that never ended must not leave the plan held. */
+  releaseIfHeld(): void {
+    if (this.held) this.release();
+  }
+
   /** The drag ended (or a key press finished): the Explorer is judged once, now. */
   release(): void {
     this.held = false;

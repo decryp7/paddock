@@ -1,5 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { openApp } from './app';
+import { openAiApp, openChat } from './ai-support';
+import { measureGroups } from '../src/app/layout-plan/layout-scenarios.playwright';
 
 // The Explorer is a view of the layout plan (ADR 0056) with a declared minimum and maximum width; the user resizes it by
 // dragging the sash at its inner edge. It was a fixed 272 px column with no sash at all (reported 2026-10-27).
@@ -65,20 +67,39 @@ async function flipsDuring(page: Page, body: () => Promise<void>): Promise<numbe
   return page.evaluate(() => (window as unknown as { __flips: number }).__flips);
 }
 
-/** Observation window for "it stays put": long enough for many debounced re-plans (150 ms each); it asserts an absence, so there is no condition to wait for. */
-const OBSERVE_MS = 2000;
+/** How many window plans the dock has run (`data-plan-runs` on the dock's element, set by the app after every plan). */
+const planRuns = async (page: Page): Promise<number> =>
+  Number((await page.locator('[data-plan-runs]').first().getAttribute('data-plan-runs').catch(() => null)) ?? 0);
+
+/** Resolves once the dock's plans have gone quiet: the count is the same on two reads a re-plan's debounce (150 ms) apart. A layout that fights itself keeps planning and never gets there. */
+async function planIdle(page: Page): Promise<void> {
+  let last = -1;
+  await expect
+    .poll(
+      async () => {
+        const now = await planRuns(page);
+        const quiet = now > 0 && now === last;
+        last = now;
+        return quiet;
+      },
+      { intervals: [200], timeout: 10_000, message: 'the dock keeps re-planning' },
+    )
+    .toBe(true);
+}
 
 test('a stored wide Explorer in a narrow window settles at once instead of opening and closing forever', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('debrief.prefs.v1', JSON.stringify({ explorerWidth: 640 })));
   await page.setViewportSize({ width: 1100, height: 900 });
   await openApp(page);
-  const flips = await flipsDuring(page, () => page.waitForTimeout(OBSERVE_MS));
-  expect(flips).toBeLessThanOrEqual(0);
+  const flips = await flipsDuring(page, () => planIdle(page));
+  expect(flips).toBe(0);
+  await expect(page.locator('debrief-sidebar')).toBeVisible();
 });
 
 test('dragging the Explorer wider than the window allows stops at the room the plan has, and never closes it mid-drag', async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 900 });
   await openApp(page);
+  await planIdle(page);
   const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
   const flips = await flipsDuring(page, async () => {
     const box = (await page.locator('debrief-sidebar').boundingBox())!;
@@ -88,16 +109,65 @@ test('dragging the Explorer wider than the window allows stops at the room the p
     await page.mouse.down();
     const max = Number(await sash.getAttribute('aria-valuemax'));
     expect(max).toBeLessThan(640);
+    const plans = await planRuns(page);
     await page.mouse.move(x + 600, y, { steps: 20 });
-    await page.waitForTimeout(OBSERVE_MS);
+    // The dock re-plans while the Explorer grows; it must not judge the Explorer in the middle of the drag.
+    await expect.poll(() => planRuns(page)).toBeGreaterThan(plans);
     await expect(page.locator('debrief-sidebar')).toBeVisible();
     await page.mouse.up();
     // Released: judged once. It stays open at the cap or, if the dock re-fitted, within it; never wider than the room found at the start.
-    await expect.poll(() => sidebarWidth(page)).toBeLessThanOrEqual(max);
+    await planIdle(page);
+    expect(await sidebarWidth(page)).toBeLessThanOrEqual(max);
     expect(await sidebarWidth(page)).toBeGreaterThanOrEqual(Number(await sash.getAttribute('aria-valuemin')));
   });
   expect(flips).toBe(0);
   await expect(page.locator('debrief-sidebar')).toBeVisible();
+});
+
+test('dragging the Explorer wide in a 1440 px window tabs the lower-priority panes, and the width stays after release and after a re-plan', async ({ page }) => {
+  await openAiApp(page);
+  await openChat(page);
+  await planIdle(page);
+  const groups = async (): Promise<number> => (await measureGroups(page)).length;
+  const before = await groups();
+  const sash = page.getByRole('separator', { name: 'Resize the Explorer' });
+  const start = await sidebarWidth(page);
+  const box = (await page.locator('debrief-sidebar').boundingBox())!;
+  const flips = await flipsDuring(page, async () => {
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 1 + (600 - start), box.y + box.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await planIdle(page);
+  });
+  expect(Number(await sash.getAttribute('aria-valuemax'))).toBeGreaterThanOrEqual(600);
+  await expect.poll(() => sidebarWidth(page)).toBe(600);
+  // The assistant (lower priority than the Explorer) yielded: it is a tab of another group now, as when the window shrinks.
+  await expect.poll(groups).toBeLessThan(before);
+  // A re-plan (a small window resize and back) keeps the width, and nothing flaps.
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await planIdle(page);
+  expect(await sidebarWidth(page)).toBe(600);
+  expect(flips).toBe(0);
+  await expect(page.locator('debrief-sidebar')).toBeVisible();
+});
+
+test('an Explorer closed in the middle of a drag does not leave the plan held: the window can still narrow it away', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 900 });
+  await openApp(page);
+  await planIdle(page);
+  const box = (await page.locator('debrief-sidebar').boundingBox())!;
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width + 20, box.y + box.height / 2, { steps: 4 });
+  await page.keyboard.press('ControlOrMeta+b');
+  await expect(page.locator('debrief-sidebar')).toHaveCount(0);
+  await page.mouse.up();
+  await page.keyboard.press('ControlOrMeta+b');
+  await expect(page.locator('debrief-sidebar')).toBeVisible();
+  await page.setViewportSize({ width: 700, height: 900 });
+  await expect(page.locator('debrief-sidebar')).toHaveCount(0);
 });
 
 test('the sash shows keyboard focus with the focus ring, not the hover strip', async ({ page }) => {

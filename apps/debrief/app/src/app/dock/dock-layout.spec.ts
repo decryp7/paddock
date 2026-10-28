@@ -307,19 +307,20 @@ describe('watchResize', () => {
     expect(onResize).toHaveBeenCalledTimes(1);
   });
 
-  it('the Explorer room: the widest width the plan still keeps the Explorer at, within its declared limits', () => {
+  it('the Explorer room: the window less the dock\'s minimum, within the declared limits, whatever the Explorer\'s own width', () => {
     const layout = setup();
     const dock = fakeDock(1000 - 272, 900, { 'timeline+events': { width: 1000 - 272, height: 900 } });
     const room = layout.explorerRoom(dock.api, true, 272);
     expect(room).toBeGreaterThan(EXPLORER_WIDTH.min);
     expect(room).toBeLessThan(EXPLORER_WIDTH.max);
+    // The same window with the Explorer at another width has the same room (the Explorer's width is part of the window): no flapping.
+    const other = fakeDock(1000 - 500, 900, { 'timeline+events': { width: 1000 - 500, height: 900 } });
+    expect(layout.explorerRoom(other.api, true, 500)).toBe(room);
     expect(layout.explorerVerdict(dock.api, true, room)).toBe('keep');
-    // Wider than the room: the plan shrinks the Explorer towards its minimum before it closes it.
-    expect(layout.explorerVerdict(dock.api, true, room + 1)).toBe('keep');
-    expect(layout.explorerVerdict(dock.api, true, EXPLORER_WIDTH.max)).toBe('keep');
     const wide = fakeDock(2400 - 272, 900, { 'timeline+events': { width: 2400 - 272, height: 900 } });
     expect(layout.explorerRoom(wide.api, true, 272)).toBe(EXPLORER_WIDTH.max);
     // Never below the declared minimum, even where nothing fits.
     expect(layout.explorerRoom(fakeDock(300, 900, { 'timeline+events': { width: 300, height: 900 } }).api, true, 272)).toBe(EXPLORER_WIDTH.min);
   });
+
 });

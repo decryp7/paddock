@@ -3,7 +3,7 @@ import { RovingTabindex } from '../shared/roving-tabindex';
 import { PathText } from '../shared/path-text';
 import { ScrollFade } from '../shared/scroll-fade';
 import { NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { DialogService } from '../ui/dialog.service';
 import { EncodingInfo, SourceInfo, SourceProblem, TailFileState, UnrecognizedFile } from '../core/api.types';
 import { formatCompact, formatCount, formatDateTime } from '../core/format';
@@ -182,7 +182,7 @@ function shortPath(path: string): string {
         <div class="src-error">{{ s.error }}</div>
       }
     </ng-template>
-    <div class="sash" [pdSash]="width()" [pdSashLimits]="limits" pdSashControls="debrief-explorer" aria-label="Resize the Explorer" i18n-aria-label="@@shell.sidebar.resize" data-testid="explorer-sash"
+    <div class="sash" [pdSash]="width" [pdSashLimits]="limits" pdSashControls="debrief-explorer" aria-label="Resize the Explorer" i18n-aria-label="@@shell.sidebar.resize" data-testid="explorer-sash"
       (pdSashStart)="startResize()" (pdSashMove)="prefs.setExplorerWidth($event)" (pdSashCommit)="endResize()"></div>
   `,
   styles: `
@@ -246,6 +246,8 @@ export class Sidebar {
   private readonly narrow = inject(NarrowWindow);
   /** The Explorer's width, px: the user's, within the room the layout plan has now. */
   protected readonly width = this.narrow.width;
+  // The Explorer closed in the middle of a drag (Ctrl+B): the plan is not left held.
+  private readonly releaseOnDestroy = inject(DestroyRef).onDestroy(() => this.narrow.releaseIfHeld());
   /** What the sash may do: from the declared minimum to the room the plan has (found when a gesture starts). */
   protected readonly limits = (): SashLimits => ({ min: EXPLORER_WIDTH.min, max: this.shell.explorerRoom() });
   protected readonly importRange = inject(ImportRange);

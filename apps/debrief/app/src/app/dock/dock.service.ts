@@ -852,6 +852,14 @@ export class DockService {
     this.growBack(api);
     this.keepFullScreen();
     this.windowListeners.forEach((l) => l());
+    this.countPlan();
+  }
+
+  /** How many window plans have run, on the dock's element (`data-plan-runs`): the end-to-end tests wait on it instead of on time. */
+  private planRuns = 0;
+  private countPlan(): void {
+    const container = this.ctx.container;
+    if (container) container.dataset['planRuns'] = String(++this.planRuns);
   }
 
   /** A fit moves panels, which makes dockview leave the maximized state: full screen keeps its document well maximized. */

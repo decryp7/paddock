@@ -57,7 +57,7 @@ import { WORKBENCH_CONFIG } from './provide-workbench';
         @if (!frame.overlay()) {
         <div
           class="pd-sash"
-          [pdSash]="frame.explorerWidth()"
+          [pdSash]="frame.explorerWidth"
           [pdSashLimits]="limits"
           pdSashControls="pd-sidebar"
           [attr.aria-label]="t.resize"
