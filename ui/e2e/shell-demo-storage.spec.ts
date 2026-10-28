@@ -62,7 +62,7 @@ test.describe('storage (plan X32)', () => {
     await clearFromMenu(page, 'logs', 'Clear logs');
     const confirm = page.getByRole('alertdialog', { name: 'Delete logs?' });
     await expect(confirm.getByTestId('storage-confirm-data')).toContainText('your own data');
-    await confirm.getByRole('button', { name: 'Delete data', exact: true }).click();
+    await confirm.getByRole('button', { name: 'Delete logs', exact: true }).click();
     await expect(page.getByTestId('storage-result')).toContainText('freed');
     await expect(page.locator('.pd-row[data-key="logs"]')).toBeVisible();
   });
@@ -70,7 +70,7 @@ test.describe('storage (plan X32)', () => {
   test('Cancel stops a clear between items and says what was done', async ({ app, page }) => {
     await openStorage(app, page);
     await clearFromMenu(page, 'logs', 'Clear logs');
-    await page.getByRole('alertdialog', { name: 'Delete logs?' }).getByRole('button', { name: 'Delete data', exact: true }).click();
+    await page.getByRole('alertdialog', { name: 'Delete logs?' }).getByRole('button', { name: 'Delete logs', exact: true }).click();
     await page.getByTestId('storage-cancel').click();
     await expect(page.getByTestId('storage-result')).toContainText('Stopped');
   });

@@ -6,7 +6,7 @@ import { inSentence } from '@decryp7/paddock-ui/shell/storage';
 /**
  * The clear confirmation (a modal decision, one window per question): it names what will be removed and how much, and says
  * whether it is the user's own data. Its actions are declared (ADR 0026 §2): Keep is the way out and has the focus and Enter;
- * Clear (Delete data for the user's own data) is the destructive answer and is never the Enter target. It calls nothing: it
+ * Clear (Delete for the user's own data), labelled with the heading's verb and object, is the destructive answer and is never the Enter target. It calls nothing: it
  * answers `true` and is dismissed by Keep, and the page asks the engine. A window opened without anything to clear says so
  * inline, with a Close.
  */
@@ -47,8 +47,6 @@ export class PdStorageConfirmDialog implements DialogContent<boolean> {
   readonly data = input(false);
 
   protected readonly t = {
-    clear: $localize`:@@pd.storage.confirm-yes:Clear cache`,
-    deleteData: $localize`:@@pd.storage.confirm-yes-data:Delete data`,
     keep: $localize`:@@pd.storage.confirm-keep:Keep`,
     close: $localize`:@@pd.storage.confirm-close:Close`,
     dataWarning: $localize`:@@pd.storage.confirm-data:This is your own data. It cannot be rebuilt, and clearing it cannot be undone.`,
@@ -60,12 +58,12 @@ export class PdStorageConfirmDialog implements DialogContent<boolean> {
     return this.what().trim() !== '';
   }
 
-  /** Keep and Clear cache (Delete data for the user's own data); a window without anything to clear offers only Close. */
+  /** Keep and the destructive answer, worded as the heading ("Clear cache", "Delete logs"); a window without anything to clear offers only Close. */
   readonly dialogActions = computed<readonly DialogAction<boolean>[]>(() =>
     this.valid()
       ? [
           { kind: 'dismiss', id: 'keep', label: this.t.keep },
-          { kind: 'answer', id: 'clear', label: this.data() ? this.t.deleteData : this.t.clear, role: 'destructive', answer: () => true },
+          { kind: 'answer', id: 'clear', label: this.yesLabel(), role: 'destructive', answer: () => true },
         ]
       : [{ kind: 'dismiss', id: 'close', label: this.t.close }],
   );
@@ -76,6 +74,12 @@ export class PdStorageConfirmDialog implements DialogContent<boolean> {
     const what = inSentence(this.what());
     return this.data() ? $localize`:@@pd.storage.confirm-title-data:Delete ${what}:what:?` : $localize`:@@pd.storage.confirm-title:Clear ${what}:what:?`;
   });
+
+  /** The destructive button: the heading's verb and object without the question mark. */
+  private yesLabel(): string {
+    const what = inSentence(this.what());
+    return this.data() ? $localize`:@@pd.storage.confirm-yes-data:Delete ${what}:what:` : $localize`:@@pd.storage.confirm-yes:Clear ${what}:what:`;
+  }
 
   /** The facts the heading does not repeat: how much goes. */
   protected question(): string {

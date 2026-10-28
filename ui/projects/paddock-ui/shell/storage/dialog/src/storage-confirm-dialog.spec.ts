@@ -6,13 +6,14 @@ const text = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' '
 const open = (inputs: { what?: string; bytes?: number; data?: boolean } = {}) => renderFramed(PdStorageConfirmDialog, { id: 'pd.storage.confirm', inputs });
 
 describe('the storage confirm dialog', () => {
-  it('names what goes and how much; Keep has the focus, Delete data is the destructive action for the user’s data', async () => {
+  it('names what goes and how much; Keep has the focus, Delete logs is the destructive action for the user’s data', async () => {
     const d = await open({ what: 'Logs', bytes: 5_000_000, data: true });
     // The title says what; the body gives the facts and does not say it again.
     expect(text(d.q('storage-confirm-text')!)).toBe('Up to 4.8 MB is removed.');
     expect(d.heading()).toBe('Delete logs?');
     expect(text(d.q('storage-confirm-data')!)).toContain('your own data');
-    expect(d.action('clear')!.textContent!.trim()).toBe('Delete data');
+    expect(d.action('clear')!.textContent!.trim()).toBe('Delete logs');
+    expect(d.heading()).toBe(`${d.action('clear')!.textContent!.trim()}?`);
     expect(d.action('clear')!.className).toContain('pd-frame-btn--danger');
     expect(document.activeElement).toBe(d.action('keep'));
   });
@@ -22,6 +23,7 @@ describe('the storage confirm dialog', () => {
     expect(a.q('storage-confirm-data')).toBeNull();
     expect(text(a.el)).toContain('rebuilds it');
     expect(a.action('clear')!.textContent!.trim()).toBe('Clear cache');
+    expect(a.heading()).toBe(`${a.action('clear')!.textContent!.trim()}?`);
     await a.press('clear');
     expect(a.outcome()).toEqual({ kind: 'answered', value: true });
     TestBed.resetTestingModule();
