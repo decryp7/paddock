@@ -880,6 +880,8 @@ mod tests {
         while abandoned.waiters() < 1 {
             std::thread::yield_now();
         }
+        // Limit: a spurious condvar wakeup after `finish` would let the waiter see 0 even without the notify, so a missing notify is
+        // caught with near certainty, not with proof.
         abandoned.finish(&state);
         done_rx
             .recv_timeout(Duration::from_secs(10)) // conformance: hang-guard

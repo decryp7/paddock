@@ -225,6 +225,7 @@ fn a_tool_that_hangs_is_cancelled_at_its_time_limit_and_slow_calls_cannot_pile_u
         max_abandoned: 1,
         ..Limits::default()
     });
+    let server = Arc::new(server);
     // The handler blocks until the test releases it, then reports whether its token had been cancelled.
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let (report_tx, report_rx) = mpsc::channel::<bool>();
@@ -280,7 +281,15 @@ fn a_tool_that_hangs_is_cancelled_at_its_time_limit_and_slow_calls_cannot_pile_u
     }
     // Let the abandoned call end and wait for the server to uncount it (an event, not a time).
     end_tx.send(()).unwrap();
-    server.wait_for_abandoned_calls();
+    let waiter = server.clone();
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        waiter.wait_for_abandoned_calls();
+        let _ = done_tx.send(());
+    });
+    done_rx
+        .recv_timeout(Duration::from_secs(10)) // conformance: hang-guard
+        .expect("the abandoned call never ended");
     let reply = call(&server, &s, 13, "quick", json!({}));
     assert_eq!(text(&reply), "q");
 }
