@@ -69,6 +69,9 @@ pub fn run_with_timeout(cmd: Command, timeout: Duration) -> Result<ToolOutput, E
 /// ended and `TimedOut` (naming `secs`) is returned. The tool runs in a session of its own on Unix (it leads its process
 /// group and has no controlling terminal, so an interactive login shell started from a terminal is not stopped by
 /// `SIGTTIN`) and in a kill-on-close job object on Windows (which also holds helpers that left its tree).
+///
+/// After a tool finishes normally, helpers it left running differ by platform: on Windows closing the job ends them;
+/// on Unix they survive (only a timeout signals the group), as they would when the tool ran from a shell.
 pub(crate) fn run_until(mut cmd: Command, secs: u64, mut give_up: impl FnMut(u32) -> bool) -> Result<ToolOutput, Error> {
     let program = Path::new(cmd.get_program())
         .file_name()
@@ -146,7 +149,9 @@ mod tree {
 
     impl Tree {
         /// The tree of a just-started tool. On Windows the tool joins a kill-on-close job (a program it starts later
-        /// joins too); when that fails (an old Windows, a job that forbids it) `taskkill /T` is the fallback.
+        /// joins too); when that fails (an old Windows, a job that forbids it) `taskkill /T` is the fallback. The tool
+        /// joins the job only after `spawn` returned: a program it started in that moment (before its own start-up
+        /// code ran, so in practice never) would be outside the job, which is why `end` also runs `taskkill /T`.
         #[cfg(windows)]
         pub fn of(child: &Child) -> Tree {
             Tree { job: job_for(child) }
@@ -171,10 +176,14 @@ mod tree {
             }
             #[cfg(windows)]
             match self.job {
-                // SAFETY: a job handle this value owns and has not closed.
-                Some(job) => unsafe {
-                    let _ = windows::Win32::System::JobObjects::TerminateJobObject(job, 1);
-                },
+                Some(job) => {
+                    // SAFETY: a job handle this value owns and has not closed.
+                    unsafe {
+                        let _ = windows::Win32::System::JobObjects::TerminateJobObject(job, 1);
+                    }
+                    // Anything that escaped the job (see `of`) and is still in the tool's tree.
+                    taskkill_tree(child.id());
+                }
                 None => taskkill_tree(child.id()),
             }
             let _ = child.kill();
@@ -309,8 +318,11 @@ pub(crate) mod tests {
         assert!(members.len() >= complete, "the tool started its programs: {members:?}");
         let gone = eventually_gone(&members);
         if !gone {
-            for pid in &members {
-                kill_pid(*pid);
+            // Only processes that are still the tool's own: a pid reused by an unrelated process is never touched.
+            for m in &members {
+                if running(*m) {
+                    kill_pid(m.pid);
+                }
             }
         }
         assert!(gone, "the tool's tree outlived it: {members:?}");
@@ -319,18 +331,30 @@ pub(crate) mod tests {
     /// Ends a hung test, never a product interval.
     const HANG_GUARD: Duration = Duration::from_secs(60);
 
+    /// One process of the tool's tree, with what identifies it beyond its pid: the tool's process group on Unix, its
+    /// start time on Windows.
+    #[derive(Debug, Clone, Copy)]
+    struct Member {
+        pid: u32,
+        mark: u64,
+    }
+
     /// The tool `pid` and its programs: its process group on Unix, its descendants on Windows.
     #[cfg(unix)]
-    fn tree_members(pid: u32) -> Vec<u32> {
+    fn tree_members(pid: u32) -> Vec<Member> {
         let out = quiet_command(Path::new("pgrep")).args(["-g", &pid.to_string()]).output().unwrap();
         String::from_utf8_lossy(&out.stdout)
             .lines()
             .filter_map(|l| l.trim().parse().ok())
+            .map(|p| Member {
+                pid: p,
+                mark: u64::from(pid),
+            })
             .collect()
     }
 
     #[cfg(windows)]
-    fn tree_members(pid: u32) -> Vec<u32> {
+    fn tree_members(pid: u32) -> Vec<Member> {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
         let mut sys = System::new();
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
@@ -348,19 +372,20 @@ pub(crate) mod tests {
         }
         // `cmd` gets a console host of its own, which is not one of the tool's programs.
         tree.into_iter()
-            .filter(|p| {
-                sys.process(*p)
-                    .is_some_and(|q| !q.name().to_string_lossy().eq_ignore_ascii_case("conhost.exe"))
+            .filter_map(|p| sys.process(p).map(|q| (p, q)))
+            .filter(|(_, q)| !q.name().to_string_lossy().eq_ignore_ascii_case("conhost.exe"))
+            .map(|(p, q)| Member {
+                pid: p.as_u32(),
+                mark: q.start_time(),
             })
-            .map(|p| p.as_u32())
             .collect()
     }
 
-    /// Whether every one of `pids` is gone (a zombie counts as gone), waiting on that condition up to the hang guard.
-    fn eventually_gone(pids: &[u32]) -> bool {
+    /// Whether every one of `members` is gone (a zombie counts as gone), waiting on that condition up to the hang guard.
+    fn eventually_gone(members: &[Member]) -> bool {
         let guard = Instant::now() + HANG_GUARD;
         loop {
-            if pids.iter().all(|p| !running(*p)) {
+            if members.iter().all(|m| !running(*m)) {
                 return true;
             }
             if Instant::now() > guard {
@@ -370,22 +395,29 @@ pub(crate) mod tests {
         }
     }
 
+    /// Whether the member still runs and is still the tool's (same process group).
     #[cfg(unix)]
-    fn running(pid: u32) -> bool {
+    fn running(m: Member) -> bool {
         let out = quiet_command(Path::new("ps"))
-            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .args(["-o", "stat=,pgid=", "-p", &m.pid.to_string()])
             .output()
             .unwrap();
-        let stat = String::from_utf8_lossy(&out.stdout);
-        !stat.trim().is_empty() && !stat.trim().starts_with('Z')
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut fields = text.split_whitespace();
+        match (fields.next(), fields.next().and_then(|g| g.parse::<u64>().ok())) {
+            (Some(stat), Some(pgid)) => !stat.starts_with('Z') && pgid == m.mark,
+            _ => false,
+        }
     }
 
+    /// Whether the member still runs and is still the same process (same start time).
     #[cfg(windows)]
-    fn running(pid: u32) -> bool {
+    fn running(m: Member) -> bool {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
         let mut sys = System::new();
-        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[Pid::from_u32(pid)]), true, ProcessRefreshKind::nothing());
-        sys.process(Pid::from_u32(pid)).is_some()
+        let pid = Pid::from_u32(m.pid);
+        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing());
+        sys.process(pid).is_some_and(|p| p.start_time() == m.mark)
     }
 
     #[cfg(unix)]
