@@ -18,7 +18,7 @@
   ],
   "checks": [
     "cd apps/spotter",
-    "node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs",
+    "node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs scripts/notices/generate.test.mjs",
     "node scripts/ci/check-icons.mjs"
   ],
   "ui": [

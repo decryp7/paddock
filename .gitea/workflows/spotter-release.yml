@@ -58,6 +58,45 @@ jobs:
           tag-pattern: spotter-v*
           nightly-marker: "false"
 
+      # Licences, advisories and sources, and the third-party notices bundled in the installers
+      # (resources/THIRD_PARTY_NOTICES.md) must match the lockfiles: the checks of Debrief's licences job with Spotter's own
+      # generator (apps/spotter/scripts/notices; the shared app-licences.yml expects an app-level package-lock.json, which
+      # the monorepo does not have). They run in this job so a failure stops the gates and the release before anything is
+      # built; the release job's condition is pinned by conformance/test/ci-actions.test.mjs.
+      - if: ${{ steps.plan.outputs.run == 'true' }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
+      - id: licences-cache
+        if: ${{ steps.plan.outputs.run == 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/advisory-dbs
+          key: spotter-licences-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}
+          restore-keys: spotter-licences-${{ runner.os }}-
+      - name: Licences, advisories and sources
+        if: ${{ steps.plan.outputs.run == 'true' }}
+        working-directory: apps/spotter
+        run: cargo deny --all-features --workspace check
+      - name: Third-party notices are up to date
+        if: ${{ steps.plan.outputs.run == 'true' }}
+        working-directory: apps/spotter
+        run: |
+          node --test scripts/notices/generate.test.mjs
+          scripts/notices/generate.sh
+          git diff --exit-code -- app/src-tauri/resources
+      - uses: actions/cache/save@v4
+        if: ${{ always() && steps.plan.outputs.run == 'true' }}
+        with:
+          path: |
+            /usr/local/cargo/registry/index
+            /usr/local/cargo/registry/cache
+            /usr/local/cargo/advisory-dbs
+          key: spotter-licences-${{ runner.os }}-${{ hashFiles('apps/spotter/Cargo.lock') }}-${{ github.run_id }}
+
   # A tag is gated by exactly Spotter's legs of ci.yml (all of them, both halves, on the tagged commit).
   gates:
     name: gates
@@ -88,8 +127,6 @@ jobs:
       cliff-config: apps/spotter/cliff.toml
       cliff-paths: |
         apps/spotter/**
-        crates/**
-        ui/**
       # Spotter bundles no sidecar (no bundle.externalBin), so the macOS verify has none to start; the seal, the hardened-runtime
       # and TeamIdentifier checks on the .app and the DMG still run. A sidecar added later is read from tauri.conf.json.
       setup-node: false

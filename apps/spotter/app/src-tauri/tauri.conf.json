@@ -31,6 +31,9 @@
     "active": true,
     "targets": ["nsis", "dmg", "app"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": {
+      "resources/THIRD_PARTY_NOTICES.md": "resources/THIRD_PARTY_NOTICES.md"
+    },
     "category": "Utility",
     "shortDescription": "Watches for new releases anywhere and tells you the moment one appears",
     "longDescription": "Spotter watches folders and shares, HTTP listings, JSON APIs, forges, feeds and web pages (including JavaScript-rendered ones) for new releases and tells you the moment one appears. Everything stays on your machine."
