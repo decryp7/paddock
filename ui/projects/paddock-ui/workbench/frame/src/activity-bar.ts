@@ -196,7 +196,7 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
       --mat-badge-text-size: var(--pd-text-caption);
       --mat-badge-text-weight: var(--pd-weight-semibold);
       --mat-badge-container-shape: 7px;
-      --mat-badge-container-overlap-offset: -9px;
+      --mat-badge-container-overlap-offset: -11px;
     }
     /* The directive draws the badge outside this template's encapsulation, so its ring is reached with ::ng-deep (the colours stay tokens). */
     :host ::ng-deep .pd-act .mat-badge-content { box-shadow: 0 0 0 1.5px var(--pd-surface-1); }

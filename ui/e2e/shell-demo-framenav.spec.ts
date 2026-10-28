@@ -1,0 +1,106 @@
+import { axeViolations, expect, installTauriFake, test, THEMES } from '@decryp7/paddock-e2e';
+
+// Frame navigation on Angular Material and the CDK (Material migration WP-4): the sidebar's arrow keys come from the CDK
+// FocusKeyManager, the badges are matBadge, the rail and status bar tooltips are matTooltip, and the copy menu is a CDK
+// context menu. Chromium only; console errors are collected so a CSP violation fails the test.
+test.use({ consoleErrors: true });
+
+for (const colorScheme of THEMES) {
+  test.describe(`frame navigation (${colorScheme})`, () => {
+    test.use({ colorScheme });
+
+    test('Up, Down, Home and End move focus through the page links, wrapping, with the focus ring visible', async ({ app, page, pageErrors }) => {
+      await app.frame.open();
+      const links = app.sidebar.links;
+      const count = await links.count();
+      await links.first().focus();
+      await page.keyboard.press('ArrowDown');
+      await expect(links.nth(1)).toBeFocused();
+      await page.keyboard.press('End');
+      await expect(links.nth(count - 1)).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await expect(links.first()).toBeFocused();
+      await page.keyboard.press('ArrowUp');
+      await expect(links.nth(count - 1)).toBeFocused();
+      await page.keyboard.press('Home');
+      await expect(links.first()).toBeFocused();
+      // The focus ring is drawn (keyboard focus: :focus-visible).
+      expect(await links.first().evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none');
+      expect(pageErrors).toEqual([]);
+    });
+
+    test('a labelled row keeps 8 px or more between icon and name, and its count sits at the row end, clear of the name', async ({ app, page }) => {
+      await app.frame.open();
+      await expect(app.sidebar.badges.first()).toBeVisible();
+      const row = app.sidebar.link('Runners');
+      const box = async (sel: string) => row.locator(sel).first().evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect);
+      const [icon, label, badge, item] = [await box('pd-icon'), await box('.pd-label'), await box('.mat-badge-content'), await row.evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect)];
+      expect(label.left - icon.right).toBeGreaterThanOrEqual(8);
+      // The count does not touch the name's text, and ends at the row's right edge (the old pill's place).
+      const nameText = await row.locator('.pd-label').evaluate((el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().right; });
+      expect(badge.left).toBeGreaterThanOrEqual(nameText);
+      expect(item.right - badge.right).toBeLessThanOrEqual(12);
+      expect(page.url()).toBeTruthy();
+    });
+
+    test('in the rail every icon is centred in its row', async ({ app }) => {
+      await app.frame.open();
+      await app.frame.toggle.click();
+      await expect.poll(() => app.frame.sidebarMode()).toBe('rail');
+      const off = await app.sidebar.links.evaluateAll((els) =>
+        els.map((a) => {
+          const r = a.getBoundingClientRect();
+          const i = a.querySelector('pd-icon')!.getBoundingClientRect();
+          return Math.abs(i.left + i.width / 2 - (r.left + r.width / 2));
+        }),
+      );
+      expect(Math.max(...off)).toBeLessThanOrEqual(1);
+    });
+
+    test('the page lists are lists inside one labelled navigation landmark, and axe (best practice too) finds nothing', async ({ app, page }) => {
+      await app.frame.open();
+      await expect(page.locator('nav')).toHaveCount(1);
+      // The top and the bottom group are each a list (not navigation landmarks of their own) of list items holding the links.
+      await expect(page.getByRole('list').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(2);
+      await expect(page.getByRole('listitem').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(await app.sidebar.links.count());
+      const { default: AxeBuilder } = await import('@axe-core/playwright');
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa', 'best-practice']).analyze();
+      expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    });
+
+    test('the sidebar and the status bar pass axe, and show no console errors (CSP)', async ({ app, page, pageErrors }) => {
+      await app.frame.open();
+      await expect(app.sidebar.badges.first()).toBeVisible();
+      expect(await axeViolations(page)).toEqual([]);
+      expect(pageErrors).toEqual([]);
+    });
+  });
+}
+
+test.describe('copy menu', () => {
+  test.use({ consoleErrors: false });
+  test('a right click on selected text opens Copy at the pointer, focused; Escape closes it and Copy copies', async ({ app, page, pageErrors }) => {
+    await installTauriFake(page, { platform: 'mac', otherwise: 'null' });
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await app.frame.open();
+    const text = page.getByTestId('app-context');
+    await text.evaluate((el) => {
+      el.classList.add('pd-selectable');
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      getSelection()?.removeAllRanges();
+      getSelection()?.addRange(r);
+    });
+    await text.click({ button: 'right', position: { x: 20, y: 8 } });
+    const item = page.getByRole('menuitem', { name: 'Copy' });
+    await expect(item).toBeVisible();
+    await expect(item).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(item).toHaveCount(0);
+    await text.click({ button: 'right', position: { x: 20, y: 8 } });
+    await page.getByRole('menuitem', { name: 'Copy' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Copy' })).toHaveCount(0);
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('App context');
+    expect(pageErrors).toEqual([]);
+  });
+});

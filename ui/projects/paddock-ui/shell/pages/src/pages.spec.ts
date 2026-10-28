@@ -231,7 +231,7 @@ const PAGES: PageDef<Ctx>[] = [
     icon: 'pd:window',
     order: 200,
     badge: (ctx) => ctx.count(),
-    badgeLabel: (ctx) => `${ctx.count()} things`,
+    badgeLabel: (ctx) => (ctx.count() > 5 ? `${ctx.count()} things` : null),
     providers: () => Promise.resolve([Scoped]),
     load: () => Promise.resolve(PageTwo as Type<unknown>),
   }),
@@ -337,10 +337,21 @@ describe('pd-shell-frame with provideShellPages', () => {
     await settle();
     await fixture.whenStable();
     expect(el.querySelector('[data-page-link="t.two"] .mat-badge-content')?.textContent).toBe('3');
+    // A badge without a label keeps its count in the link's name (the badge itself is aria-hidden), and the row-end count is the badge.
+    expect(el.querySelector('[data-page-link="t.two"]')?.getAttribute('aria-label')).toBe('Two, 3');
+    expect(el.querySelector('[data-page-link="t.two"] .pd-count .mat-badge-content')?.textContent).toBe('3');
+    expect(el.querySelector('[data-page-link="t.one"]')?.hasAttribute('aria-label')).toBe(false);
     // Expanded, a link has a tooltip only to say what its badge counts.
-    expect(el.querySelector('[data-page-link="t.two"]')?.getAttribute('aria-label')).toBe('Two, 3 things');
+    count.set(6);
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('[data-page-link="t.two"]')?.getAttribute('aria-label')).toBe('Two, 6 things');
     el.querySelector('[data-page-link="t.two"]')?.dispatchEvent(new MouseEvent('mouseenter'));
-    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('3 things'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('6 things'));
+    // The page groups are lists, not navigation landmarks inside the frame's own.
+    expect([...el.querySelectorAll('mat-nav-list')].map((l) => l.getAttribute('role'))).toEqual(['list', 'list']);
+    count.set(3);
+    await settle();
     expect(el.querySelector('[data-page-link="t.lab"]')).not.toBeNull();
     await router.navigateByUrl('/two');
     await settle();

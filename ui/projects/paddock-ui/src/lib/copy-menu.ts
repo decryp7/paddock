@@ -1,5 +1,5 @@
 import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem } from '@angular/cdk/menu';
-import { ChangeDetectionStrategy, Component, effect, inject, Injectable, signal, untracked, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, effect, inject, Injectable, Injector, signal, untracked, viewChild } from '@angular/core';
 import { copyText } from './clipboard';
 
 /** The open Copy menu: where, and what it copies. */
@@ -66,6 +66,9 @@ export class PdCopyMenuHost {
   protected readonly menu = inject(PdCopyMenu);
   protected readonly label = $localize`:@@pd.copyMenu.copy:Copy`;
   private readonly trigger = viewChild.required(CdkContextMenuTrigger);
+  /** The menu panel, once it is open (its template is declared here, so the query finds it in the overlay). */
+  private readonly panel = viewChild(CdkMenu);
+  private readonly injector = inject(Injector);
 
   constructor() {
     // The service's state is the one truth: the CDK menu is opened and closed to follow it (a DOM overlay is outside the signal graph).
@@ -78,7 +81,7 @@ export class PdCopyMenuHost {
           return;
         }
         trigger.open({ x: s.x, y: s.y });
-        (trigger as unknown as { childMenu?: CdkMenu }).childMenu?.focusFirstItem('program');
+        afterNextRender(() => this.panel()?.focusFirstItem('program'), { injector: this.injector });
       });
     });
   }

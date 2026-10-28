@@ -6,7 +6,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### Frame navigation on Material and the CDK (WP-4 of the Material migration, rule 47)
 - The pages sidebar is a `mat-nav-list`; the CDK `FocusKeyManager` moves focus with Up, Down, Home and End (wrapping). Tab still reaches every link.
-- Count badges (sidebar and activity bar) are `matBadge` (aria-hidden: the count stays in the link's name). The sidebar badge sits on the page icon in both modes; tones set `--mat-badge-background-color`.
+- Count badges (sidebar and activity bar) are `matBadge` (aria-hidden: the count stays in the link's name). In the sidebar the count is at the row's end (on the icon in the rail); a count without a badge label stays in the link's name. The two page groups are `role="list"` of list items, not extra navigation landmarks. Tones set `--mat-badge-background-color`.
 - Tooltips are `matTooltip`, not `title`: the rail's page names, the activity bar and its More menu, the status bar's More button, the part Retry button, the path text's Copy button. `pd-path-text` shows the full value only when the text on screen is shorter than it; the title bar no longer repeats the app name as a native title.
 - The Copy menu (`PdCopyMenuHost`) is a CDK context menu (`cdkContextMenuTrigger` and `cdkMenu`), opened at the pointer by `PdCopyMenu` as before. The `.pd-badge`/`.pd-act-badge` classes and `[data-testid="page-badge"]` are gone: the e2e page object `badges` finds `.mat-badge-content`.
 
