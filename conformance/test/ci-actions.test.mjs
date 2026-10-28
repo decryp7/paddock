@@ -805,7 +805,14 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
     assert.doesNotMatch(wf, /TRANSITION_SIGNING_KEY|OLD_REPO|--newest/, `${app}: one key for the family, no bridge release in the old repo`);
     assert.match(wf, /Existing installs/, `${app}: the First launch notes say to reinstall once`);
     const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
-    assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
+    const feed = `https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`;
+    if (conf.plugins?.updater) assert.deepEqual(conf.plugins.updater.endpoints, [feed], `${app}: the updater reads only Paddock's ${app}-latest`);
+    else {
+      // An app on the shell (paddock-updater) names its feed in Rust and takes the key from the build's environment.
+      const lib = read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'src', 'lib.rs'));
+      assert.deepEqual([...lib.matchAll(/https:\/\/[^"\s]*latest\.json/g)].map((m) => m[0]), [feed], `${app}: the updater reads only Paddock's ${app}-latest`);
+      assert.match(lib, /option_env!\("TAURI_UPDATER_PUBKEY"\)/, `${app}: the updater key comes from the build`);
+    }
   }
 });
 
