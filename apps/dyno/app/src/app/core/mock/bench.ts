@@ -13,7 +13,7 @@ export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean, cor
         millis: 3400,
         status: {
           state: 'done',
-          metrics: [m('cpu-single', 'Single core', 612 * scale, 'M rounds/s'), m('cpu-multi', `All ${cores} cores`, 612 * cores * 0.62 * scale, 'M rounds/s'), m('cpu-scaling', 'Multi-core scaling', Math.round(cores * 62) / 10, 'x')],
+          metrics: [m('cpu-single', 'Single core', 612 * scale, 'M rounds/s'), m('cpu-multi', `All ${cores} cores`, 612 * cores * 0.62 * scale, 'M rounds/s'), m('cpu-scaling', 'Multi-core scaling', Math.round(cores * 6.2) / 10, 'x')],
         },
       };
     case 'memory':

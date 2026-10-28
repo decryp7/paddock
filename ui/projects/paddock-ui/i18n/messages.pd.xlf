@@ -836,6 +836,9 @@
       <trans-unit id="pd.health.state.quarantined" datatype="html">
         <source>switched off</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.reconnecting" datatype="html">
+        <source>reconnecting</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.refused" datatype="html">
         <source>refused by the system</source>
       </trans-unit>
