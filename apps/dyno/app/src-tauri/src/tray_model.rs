@@ -466,7 +466,7 @@ mod tests {
                 ("cpu-3", Glyph::CoreBars, Opens::Main)
             ]
         );
-        assert!(items.iter().all(|i| crate::popover::valid_item_id(&i.id)));
+        assert!(items.iter().all(|i| i.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')));
         assert_eq!(parse_items(&"cpu:ring,".repeat(20)).len(), 8, "at most eight items");
         assert!(parse_items("").is_empty());
     }

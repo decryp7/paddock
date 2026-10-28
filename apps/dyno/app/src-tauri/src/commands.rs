@@ -1,12 +1,10 @@
-//! The Tauri commands: `dyno` (every engine request, forwarded to the agent), `app_info`, and the tray window's two
-//! buttons. Arguments are parsed into typed values here, at the edge; the webview is not trusted (it may not stop the
-//! agent, and it only reaches the commands below).
+//! The Tauri commands: `dyno` (every engine request, forwarded to the agent) and the commands that open an OS file dialog
+//! (the shell owns the windows, the tray popover, About and updates). Arguments are parsed into typed values here, at the
+//! edge; the webview is not trusted (it may not stop the agent, and it only reaches the commands in the table of lib.rs).
 
-use crate::dto::{AppInfo, CommandError};
+use crate::dto::CommandError;
 use crate::link::AgentLink;
 use crate::shell::Shell;
-use crate::tray;
-use crate::window;
 use dyno_core::protocol::{Reply, Request};
 use serde_json::Value;
 use std::sync::Arc;
@@ -184,12 +182,6 @@ fn open_in_browser(app: &AppHandle, url: &str) -> Result<(), CommandError> {
     })
 }
 
-/// `appInfo()`.
-#[tauri::command]
-pub async fn app_info(app: AppHandle) -> Result<AppInfo, CommandError> {
-    Ok(crate::updater::app_info(&app))
-}
-
 /// "Save bundle...": the OS save dialog (so the path is one the person chose, never one the webview supplied), then the
 /// agent writes the redacted zip there. `null` when they cancel.
 #[tauri::command]
@@ -288,38 +280,6 @@ pub async fn save_issues(app: AppHandle, link: State<'_, Arc<AgentLink>>, days: 
     })
     .await
     .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
-}
-
-/// The tray dropdown's "Open Dyno".
-#[tauri::command]
-pub async fn tray_open_main(app: AppHandle) -> Result<(), CommandError> {
-    window::show_main(&app);
-    tray::popover_blurred(&app, tray::DROPDOWN);
-    Ok(())
-}
-
-/// The popover page reports the height of its content (logical pixels); the window follows, within limits. Returns the
-/// height that was applied.
-#[tauri::command]
-pub async fn popover_resize(webview: Webview, app: AppHandle, height: f64) -> Result<f64, CommandError> {
-    crate::popover::resize(&app, webview.label(), height).map_err(CommandError::bad)
-}
-
-/// Escape in a popover page (or its own close button).
-#[tauri::command]
-pub async fn popover_close(webview: Webview, app: AppHandle) -> Result<(), CommandError> {
-    if !crate::popover::is_popover_label(webview.label()) {
-        return Err(CommandError::bad("Only a popover can be closed this way."));
-    }
-    crate::popover::close(&app, webview.label());
-    Ok(())
-}
-
-/// The tray dropdown's "Quit".
-#[tauri::command]
-pub async fn tray_quit(app: AppHandle) -> Result<(), CommandError> {
-    tray::quit(&app);
-    Ok(())
 }
 
 #[cfg(test)]
