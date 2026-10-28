@@ -1,4 +1,4 @@
 //! A supervised child process whose whole tree is ended on drop, on timeout and when it exceeds a memory cap: the shared
 //! `paddock-proc` implementation (a process group on Unix, a kill-on-close job object on Windows).
 
-pub use paddock_proc::{Supervised, kill_tree, processes_mentioning};
+pub use paddock_proc::{kill_tree, processes_mentioning, Supervised};
