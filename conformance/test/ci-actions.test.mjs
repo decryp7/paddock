@@ -264,7 +264,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['crates', 'crate', 'app'];
+  const rustJobs = ['crates', 'crate', 'app', 'paddock-dev'];
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -565,7 +565,7 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
 test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/stable-workspace'));
-  assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app'], 'the crate job and the apps\' host legs');
+  assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app', 'paddock-dev'], 'the crate job, the apps\' host legs and the developer tool');
   for (const job of jobs) {
     const at = job.text.indexOf('uses: ./.gitea/actions/stable-workspace');
     assert.match(job.text.slice(at, at + 160), /\n\s+if: runner\.os != 'Linux'/, `${job.id}: host runners only; on Windows \`shell: bash\` before Git bash is on PATH resolves to WSL`);

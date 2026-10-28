@@ -492,79 +492,6 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
-  # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
-  paddock-dev:
-    name: paddock-dev (${{ matrix.os }})
-    needs: [plan]
-    if: ${{ needs.plan.outputs.paddock_dev == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
-    defaults:
-      run:
-        working-directory: tools/paddock-dev
-        shell: bash
-    env:
-      CARGO_TERM_COLOR: always
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Git bash on PATH (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        working-directory: .
-        run: |
-          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
-          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
-
-      - name: Build jobs (macOS)
-        if: runner.os == 'macOS'
-        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-
-      - uses: ./.gitea/actions/stable-workspace
-        if: runner.os != 'Linux'
-        with:
-          name: paddock-${{ github.job }}-${{ runner.os }}
-
-      - uses: ./.gitea/actions/build-folder
-        with:
-          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-          name: paddock-${{ github.job }}
-
-      - uses: ./.gitea/actions/setup-rust
-        with:
-          components: clippy,rustfmt
-
-      - uses: ./.gitea/actions/host-tools
-
-      # The tool's lockfile must follow the lockfiles of the crates/ it uses by path (they change dependencies in their own PRs).
-      - name: Lockfile is current
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-        run: cargo metadata --locked --format-version 1 > /dev/null || { echo "::error::tools/paddock-dev/Cargo.lock is stale: run 'cargo update -w' in tools/paddock-dev and commit it"; exit 1; }
-
-      - name: Format
-        if: ${{ !cancelled() }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-        run: cargo fmt --check
-
-      - name: Clippy
-        if: ${{ !cancelled() }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-        run: cargo clippy --all-targets --locked -- -D warnings
-
-      - name: Tests
-        if: ${{ !cancelled() }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-        run: cargo nextest run --locked --no-fail-fast
-
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
-
   # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a pull request, whichever project it touches.
   # The apps' own workflows had a copy of this step each; the C23 check of "Paddock itself" skips the history before the rule.
   commits:
@@ -717,6 +644,85 @@ jobs:
           processes: ${{ matrix.processes }}
           process-patterns: ${{ matrix.process_patterns }}
           temp-prefix: ${{ matrix.app }}-it-
+
+      # The kept build folder stays within its cap (this job's own folder only, after the builds).
+      - uses: ./.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux'
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+  # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
+  # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
+  paddock-dev:
+    name: paddock-dev (${{ matrix.os }})
+    needs: [plan]
+    if: ${{ needs.plan.outputs.paddock_dev == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    defaults:
+      run:
+        working-directory: tools/paddock-dev
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
+
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux'
+        with:
+          name: paddock-${{ github.job }}-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+          name: paddock-${{ github.job }}
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+
+      - uses: ./.gitea/actions/host-tools
+
+      # The tool's lockfile must follow the lockfiles of the crates/ it uses by path (they change dependencies in their own PRs).
+      - name: Lockfile is current
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/paddock-dev/Cargo.lock is stale, run cargo update -w in tools/paddock-dev and commit it"; exit 1; }
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo fmt --check
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        if: ${{ !cancelled() }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo nextest run --locked --no-fail-fast
 
       # The kept build folder stays within its cap (this job's own folder only, after the builds).
       - uses: ./.gitea/actions/prune-build-folder
