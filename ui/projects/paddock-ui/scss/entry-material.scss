@@ -1,8 +1,10 @@
 // The one shared Material 3 theme of the Paddock apps (rule 47, Material first). `mat.theme` emits Material's own system and
-// component tokens (colour roles, typography, shape, density) on `html`; the bridge (loaded with it, higher specificity on `:root`) re-points every one that matters
-// to the --pd-* tokens on `:root` (higher specificity), so dark, light, accent, contrast and density follow our tokens and an
-// app carries no Material theme of its own. Density -3 gives the 28 px controls of the standard density (M3 steps are 4 px from
-// 40); the comfortable and compact densities move the sized tokens through --pd-control-height and --pd-row-height.
+// component tokens (colour roles, typography, shape, density) on `html`; the bridge (loaded with it, higher specificity on `:root`)
+// re-points every one that matters to the --pd-* tokens, so dark, light, accent, contrast and density follow our tokens and an app
+// carries no Material theme of its own. Density -3 gives the 28 px controls of the standard density (M3 steps are 4 px from 40);
+// the comfortable and compact densities move the sized tokens through --pd-control-height and --pd-row-height.
+// Focus: Material's strong focus indicator (a 2 px solid ring), coloured and offset in the bridge.
+@use 'sass:string';
 @use '@angular/material' as mat;
 @use 'material';
 
@@ -14,10 +16,19 @@ html {
         primary: mat.$azure-palette,
       ),
       typography: (
-        plain-family: sans-serif,
-        brand-family: sans-serif,
+        plain-family: string.unquote('var(--pd-font-sans)'),
+        brand-family: string.unquote('var(--pd-font-sans)'),
       ),
       density: -3,
     )
   );
 }
+
+@include mat.strong-focus-indicators(
+  (
+    border-style: solid,
+    border-width: string.unquote('var(--pd-focus-width)'),
+    border-color: string.unquote('var(--pd-focus-ring)'),
+    display: block,
+  )
+);

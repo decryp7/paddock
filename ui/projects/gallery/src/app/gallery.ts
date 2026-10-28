@@ -316,7 +316,11 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 
       <gal-data />
       <gal-view />
-      <gal-material />
+      @defer (on viewport) {
+        <gal-material />
+      } @placeholder {
+        <div class="gal-material-placeholder" data-testid="material-placeholder"></div>
+      }
     </main>
   `,
 })

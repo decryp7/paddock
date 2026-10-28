@@ -33,7 +33,7 @@
     "typescript": ">=5.8",
     "@angular/forms": "^22.0.0",
     "dockview": "^8.0.0",
-    "@angular/material": "^22.2.3"
+    "@angular/material": "^22.2.4"
   },
   "peerDependenciesMeta": {
     "echarts": {
