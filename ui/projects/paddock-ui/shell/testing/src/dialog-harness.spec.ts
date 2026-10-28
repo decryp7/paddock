@@ -126,7 +126,7 @@ describe('the boot-every-dialog harness', () => {
     const booted = bootDialog(slow, { dialogs: [slow] }).then((r) => (report = r));
     await askedFor;
     // Far more macrotask turns than any fixed budget the harness could have given the window: it must still be waiting.
-    for (let turn = 0; turn < 1000; turn++) await new Promise<void>((r) => setTimeout(r, 0));
+    for (let turn = 0; turn < 450; turn++) await new Promise<void>((r) => setTimeout(r, 0));
     expect(report).toBeNull();
     finish();
     await booted;

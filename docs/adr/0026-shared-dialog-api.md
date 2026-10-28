@@ -297,8 +297,8 @@ answers `answered: true` or `dismissed`, and the opener acts.
 
 ### 6. Testing helpers
 
-- **Boot harness** (`shell/testing`, with `untilDialogLoaded` from `fix/dialog-boot-flake`, which waits on the dialog's
-  own load and `whenStable` and has no turn budget). `bootDialog` adds:
+- **Boot harness** (`shell/testing`, which waits on `whenStable`, the shell's start being a pending task, and has no
+  turn budget). `bootDialog` adds:
   - the `layoutActions` problems;
   - "draws its own footer";
   - "Enter would run a destructive action";

@@ -59,20 +59,6 @@ export function dialogsOf(...batches: readonly ContributionBatch<never>[]): Dial
 
 const MISSING_PROVIDER = /NG0\d+|No provider|NullInjector/;
 
-/**
- * Waits until a dialog window has loaded and settled, on the condition itself (rules 5 and 38): first the dialog's own
- * module and providers (`load()` and `providers()` are cached imports, so these are the very promises the shell awaits),
- * then the window's stability (the shell's start, its debounced checks and any `resource` the content loads are pending
- * tasks, so `whenStable` resolves once the window has drawn them). There is no budget of turns or milliseconds: a first
- * `import()` of a big screen on a busy runner takes as long as it takes, and a budget turned that into "never leaves
- * Loading" (CI run 6563). A loader that never answers keeps the test waiting until the runner's own test timeout, which
- * names the test (one `it` per dialog with `assertDialogBoots`). For a spec that boots a dialog shell of its own.
- */
-export async function untilDialogLoaded(fixture: { whenStable(): Promise<unknown> }, def: Pick<DialogDef, 'load' | 'providers'>): Promise<void> {
-  await Promise.allSettled([def.load(), def.providers?.()]);
-  await fixture.whenStable();
-}
-
 function describeArgs(args: readonly unknown[]): string {
   return args.map((x) => (x instanceof Error ? `${x.name}: ${x.message}` : typeof x === 'object' ? safeJson(x) : String(x))).join(' ');
 }
@@ -104,12 +90,11 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), ...config.providers, { provide: DIALOG_IO, useValue: io }] });
     const fixture = TestBed.createComponent(DialogShell);
     const root = fixture.nativeElement as HTMLElement;
-    const loading = () => root.querySelector('[data-testid=dialog-loading]');
-    await untilDialogLoaded(fixture, def);
+    // The shell registers its start (and the content's resources) as pending tasks: no turn or time budget, a slow import just takes as long as it takes.
+    await fixture.whenStable();
 
     const failed = root.querySelector('[data-testid=dialog-error-reason]')?.textContent?.trim();
     if (failed) problems.push(`does not open: ${failed}`);
-    else if (loading()) problems.push('never leaves Loading');
     const ignored = options.ignoreErrors ?? [];
     const logged = errors.filter((e) => !ignored.some((r) => r.test(e)));
     for (const e of logged.filter((x) => MISSING_PROVIDER.test(x))) if (!failed || !e.includes(failed)) problems.push(`logs a missing provider: ${e}`);

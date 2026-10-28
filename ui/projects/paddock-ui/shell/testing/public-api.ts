@@ -11,7 +11,6 @@ export { checkRegistrationSource, assertRegistrationsLazy, isRegistrationFile, s
 export {
   bootDialog,
   assertDialogBoots,
-  untilDialogLoaded,
   bootEveryDialog,
   dialogsOf,
   dialogTableProblems,

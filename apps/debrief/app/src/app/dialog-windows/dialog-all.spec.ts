@@ -36,9 +36,7 @@ describe('every dialog window', () => {
         const fixture = TestBed.createComponent(DialogShell);
         await settle(fixture, 1);
         const loading = () => (fixture.nativeElement as HTMLElement).querySelector('[data-testid=dialog-loading]');
-        // Wait on the condition, not a budget of turns: the dialog's own (cached) import, then the window's stability. Debrief's
-        // shell is not yet on paddock-ui, so this mirrors untilDialogLoaded of @decryp7/paddock-ui/shell/testing.
-        await Promise.allSettled([def.load()]);
+        // Wait on the condition, not a budget of turns: the shell's content load is a pending task.
         await fixture.whenStable();
         if (loading()) throw new Error(`${def.id} never left Loading: ${errors.join(' | ')}`);
         await settle(fixture, 4);

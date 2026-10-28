@@ -13,10 +13,10 @@ Conventional Commits; one semver tag for the whole repo.
   folder as its argument (Dyno's run-path check; on macOS the bundled `dyno-agent` measures once, which replaces the old Rust-leg step).
 
 ### Dialog boot harness waits on the dialog's load, not on a turn budget
-- `bootDialog`/`assertDialogBoots` (`@decryp7/paddock-ui/shell/testing`) wait for the dialog's own `load()`/`providers()`
-  and then `whenStable`, with no turn budget: a slow first `import()` on a busy runner no longer reads as "never leaves
+- `bootDialog`/`assertDialogBoots` (`@decryp7/paddock-ui/shell/testing`) wait for `whenStable` (the shell's start is a
+  pending task), with no turn budget: a slow first `import()` on a busy runner no longer reads as "never leaves
   Loading" (CI run 6563). `DialogHarnessOptions.maxTurns` is removed; a loader that never answers is now reported by the
-  runner's test timeout. New export `untilDialogLoaded(fixture, def)` for specs that boot a dialog shell of their own.
+  runner's test timeout.
 
 ### Spotter on the shared CI kit (WP-C3)
 - Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin
