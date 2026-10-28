@@ -1059,3 +1059,21 @@ test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no tem
     }
   }
 });
+
+test("app-gates runs every command list through run-commands.sh, which names the failing command and its exit code, stops there and keeps a cd", () => {
+  const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
+  assert.doesNotMatch(gates, /bash -euo pipefail -c "\$COMMANDS"/, 'no anonymous bash -c over a command list');
+  assert.equal((gates.match(/conformance\/ci\/run-commands\.sh/g) ?? []).length, 5, 'prepare, checks, rust-checks, ui and e2e');
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-run-commands-')));
+  mkdirSync(join(dir, 'sub'));
+  const run = (commands, env = {}) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'run-commands.sh')], { cwd: dir, env: { PATH: '/usr/bin:/bin', COMMANDS: commands, ...env }, encoding: 'utf8' });
+  const bad = run('cd sub\npwd > here\nprintf x\nexit 7\ntouch never');
+  assert.equal(bad.status, 7, 'the failing command\'s exit code');
+  assert.match(bad.stdout, /::error::command failed \(exit 7\): exit 7 \(in .*sub\)/, 'it names itself');
+  assert.equal(existsSync(join(dir, 'sub', 'here')), true, 'a cd holds for the lines after it');
+  assert.equal(existsSync(join(dir, 'sub', 'never')), false, 'the lines after a failure do not run');
+  const good = run('echo one\nE2E_INDEX=2 bash -c \'echo $((4359 + E2E_INDEX))\'\n\n');
+  assert.equal(good.status, 0, good.stdout);
+  assert.match(good.stdout, /4361/, 'shell expansion works as in the old bash -c');
+  assert.equal(run('cd nowhere').status, 1);
+});
