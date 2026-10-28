@@ -13,7 +13,7 @@ export const DIAGNOSTICS_STYLES = `
   th, td { padding: var(--pd-space-1) var(--pd-space-3); text-align: left; vertical-align: top; }
   thead th { position: sticky; top: 0; background: var(--pd-surface-1); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); border-bottom: 1px solid var(--pd-border-control); }
   tbody tr + tr > * { border-top: 1px solid var(--pd-border-subtle); }
-  tbody th.pd-diag__name { font-weight: var(--pd-weight-medium); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); overflow-wrap: anywhere; }
+  tbody th.pd-diag__name { font-weight: var(--pd-weight-medium); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); overflow-wrap: anywhere; word-break: break-all; hyphens: none; }
   .pd-diag__what { overflow-wrap: anywhere; }
   .pd-diag__num { min-width: 6.5rem; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   @container (max-width: 520px) { .pd-diag__what { display: none; } }

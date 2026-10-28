@@ -327,6 +327,7 @@ describe('the Report a Problem dialog', () => {
     for (const c of used) expect(DIAGNOSTICS_STYLES, c).toContain(`.${c}`);
     expect(DIAGNOSTICS_STYLES).toMatch(/\.pd-diag__num[^}]*white-space: nowrap/);
     expect(DIAGNOSTICS_STYLES).toMatch(/\.pd-diag__what[^}]*overflow-wrap: anywhere/);
+    expect(DIAGNOSTICS_STYLES).toMatch(/th\.pd-diag__name[^}]*overflow-wrap: anywhere[^}]*word-break: break-all[^}]*hyphens: none/);
   });
 
   it('follows the description when focus leaves the box, and saves it with the report', async () => {
