@@ -20,8 +20,8 @@ This is about **Spotter's own** updates, not the releases Spotter watches for.
 ## How Spotter's updates work
 
 - **Opt-in.** Spotter never checks on its own unless the user turns on automatic update checks (off by default); a
-  manual check always works. (The checking UI is not built yet; the updater plugin is wired and the app reports
-  whether the build can update.)
+  manual check always works. The check and the install are built: Settings > Spotter updates shows the version, "Check for
+  updates", the release notes and the install; a build without the public key says so and never checks.
 - **One endpoint.** A check is one HTTPS GET of
   `https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json` (the moving `spotter-latest` release of the Paddock monorepo; copies installed before the move are reinstalled once by hand)
   (`plugins.updater.endpoints` in `tauri.conf.json`). It carries no identifier or usage data.
@@ -31,43 +31,43 @@ This is about **Spotter's own** updates, not the releases Spotter watches for.
 - `latest.json` is written by the shared `conformance/release/latest-json.mjs` from the signed installers (`*.sig` next to
   each); `node --test conformance/test/latest-json.test.mjs` (repo root) tests it.
 
-## One-time set-up: Spotter's own signing key
+## Signing key and secrets
 
-Spotter needs its **own** key pair — never reuse another product's updater key.
+Spotter uses the **family's shared updater key** (one minisign key pair for every Paddock app), kept as secrets of the
+`decryp7/paddock` repository (Settings > Actions > Secrets), not as per-app secrets:
 
-1. Generate a key pair on a trusted machine, with a strong password:
+| Secret | Value |
+| --- | --- |
+| `PADDOCK_TAURI_SIGNING_PRIVATE_KEY` | the contents of the private key file |
+| `PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
+| `PADDOCK_TAURI_UPDATER_PUBKEY` | the contents of the public key file |
+| `RELEASE_TOKEN` | optional: a Gitea access token with `write:repository`; without it the release is published with the run's `github.token` |
+| `APPLE_SIGNING_IDENTITY` | empty while the builds are ad-hoc sealed (see below) |
 
-   ```sh
-   cd app
-   npx tauri signer generate -w ~/.tauri/spotter-updater.key
-   ```
+`spotter-release.yml` maps the `PADDOCK_TAURI_*` names to the `TAURI_*` names the shared `app-release.yml` expects. The bundle jobs
+then build with `createUpdaterArtifacts` and the public key (passed as `tauri build --config`, and as `TAURI_UPDATER_PUBKEY`
+for `option_env!` in `app/src-tauri/src/updater.rs`). Without the key (forks, pull requests) the installers are built without
+update support and no `latest.json` is published.
 
-   This writes the private key `spotter-updater.key` (encrypted with the password) and the public key
-   `spotter-updater.key.pub`.
+The committed `tauri.conf.json` keeps `pubkey` empty and does not set `createUpdaterArtifacts`, so a local `npx tauri build`
+works without the private key.
 
-2. Set three **repository secrets** in Gitea (Settings ▸ Actions ▸ Secrets) of `decryp7/spotter`:
+**Back up the private key and its password** (password manager plus an offline copy). Never commit it. **If it is lost**, no
+further update can be signed for the key built into installed copies: users install the next version by hand. **If it
+leaks**, generate a new pair (`npx tauri signer generate`), publish a release signed with the new key, tell users to reinstall
+from the releases page, and replace the secrets. Because the key is shared, this affects every Paddock app.
 
-   | Secret | Value |
-   | --- | --- |
-   | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `spotter-updater.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
-   | `TAURI_UPDATER_PUBKEY` | the contents of `spotter-updater.key.pub` |
+## What a release publishes
 
-   Also `RELEASE_TOKEN`: a Gitea access token with `write:repository` scope, used to publish the release.
-
-   The bundle jobs then build with `createUpdaterArtifacts` and the public key (passed as `tauri build --config`,
-   and as `TAURI_UPDATER_PUBKEY` for `option_env!` in `app/src-tauri/src/updater.rs`). Without the secrets (forks,
-   pull requests) the installers are built without update support and the release job publishes no `latest.json`.
-
-   The committed `tauri.conf.json` keeps `pubkey` empty and does not set `createUpdaterArtifacts`, so local
-   `npx tauri build` works without the private key.
-
-3. **Back up the private key and its password** (password manager plus an offline copy). Never commit it, never put
-   it anywhere the UI is built from.
-
-**If the private key is lost**, no further update can be signed for the key built into installed copies: users
-install the next version by hand. **If it leaks**, generate a new pair, publish a release signed with the new key,
-tell users to reinstall from the releases page, and revoke the old secrets.
+- Tag `spotter-vX.Y.Z` (the version in `tauri.conf.json`, `app/package.json` and the workspace `Cargo.toml` must all equal X.Y.Z),
+  pushed from `main`; releases are made only by this workflow, never from a workstation.
+- A Gitea release in `decryp7/paddock` with the installers, their `.sig` files, `RELEASE_NOTES.md` (git-cliff over
+  `apps/spotter/**` only, so the notes list Spotter's commits) and `latest.json`.
+- The moving release `spotter-latest` carries the same `latest.json`; installed copies read
+  `https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json`.
+- `THIRD_PARTY_NOTICES.md` (Rust crates and production npm packages with their licence texts) is bundled as a resource.
+  Regenerate it with `apps/spotter/scripts/notices/generate.sh` after a dependency change; the `licences` job of
+  `spotter-release.yml` runs `cargo deny` and fails when the committed file is stale.
 
 ## The macOS bundle
 
@@ -83,4 +83,4 @@ by the same step (and `conformance/test/ci-actions.test.mjs` fails until `spotte
 
 ## First launch note
 
-Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+The macOS app is ad-hoc signed and **not notarised**, and the Windows installer is not code-signed: Apple notarisation and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
