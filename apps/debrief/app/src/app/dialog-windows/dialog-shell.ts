@@ -7,6 +7,7 @@ import {
   ElementRef,
   inject,
   Injector,
+  PendingTasks,
   signal,
   Type,
   untracked,
@@ -101,6 +102,8 @@ export class DialogShell {
   private readonly destroyRef = inject(DestroyRef);
   private readonly logger = inject(Logger);
   private readonly sync = inject(UiSync);
+  /** The content load is a pending task: `whenStable` (tests) waits for it. */
+  private readonly pending = inject(PendingTasks);
   // Only a window that loads the workspace summary has these stores (Paddock rules 32/34).
   private readonly data = this.queries ? inject(WorkspaceDataStore) : null;
   private readonly status = this.queries ? inject(WorkspaceStatusStore) : null;
@@ -206,6 +209,9 @@ export class DialogShell {
   }
 
   private async init(): Promise<void> {
+    const done = this.pending.add();
+    // A window destroyed mid-load must not leave whenStable waiting.
+    this.destroyRef.onDestroy(done);
     try {
       const def = this.lookup(this.route.id);
       if (!def) throw new Error($localize`:@@dialogWindow.unknown:This dialog is not known to this version of Debrief: ${this.route.id}:id:`);
@@ -219,6 +225,8 @@ export class DialogShell {
       if (def.fit) this.fitToContent();
     } catch (e) {
       this.fail(e);
+    } finally {
+      done();
     }
   }
 

@@ -535,3 +535,53 @@ Consolidating CI, Dyno 1.0.0 and Spotter 1.0.0 had to run together, which "one a
 releases are small, finished apps in their own folders with their own tags. The rule's reason is attention and machine
 load, and a release prep of a finished app costs little of either. **Rule:** one *large* app at a time; small,
 independent releases (separate app folders, serialized tags) may run alongside it (rule 1, amended 2026-10-28).
+
+## Rule 1 is one release at a time, not one app (2026-10-28)
+Even "one large app at a time" held back work that cost the release nothing, while the real limits that day were two
+single-job CI runners, the machine's load and conflicts in shared code (Dyno and Spotter both wait on the shared dialog
+API). **Rule:** one release at a time; release-critical work first; other apps progress in parallel only while load and
+CI capacity allow and only if they don't change shared code the release depends on (rule 1 and ER-1, amended
+2026-10-28).
+
+## A turn budget in a test wait is a timeout in disguise (2026-10-28, paddock-ui, Debrief)
+The boot-every-dialog harness gave a dialog window 200 macrotask turns to become stable, and Debrief's dialog spec 400
+render rounds to leave Loading. On a busy CI runner a first `import()` of the settings screen took longer, and both
+reported "never leaves Loading" for a dialog that was fine. **Rule:** a test waits on the condition itself (the promise the
+code awaits, `whenStable` over pending tasks), never on a count of turns, rounds or milliseconds; a wait that can hang is
+left to the runner's test timeout, which names the test (rule 5).
+
+## Material first, because it is tested (2026-10-28)
+Hand-rolled components (for example `pd-table`'s sticky header over virtual scroll) cost us bugs that the Angular
+Material and CDK equivalents already solve and test. **Rule:** use a Material component wherever one fits and CDK for
+the behaviour Material lacks; hand-roll only what neither provides, with the reason in the doc comment (rule 47).
+
+## aws-lc's jitter entropy aborts on Windows VMs; build with AWS_LC_SYS_NO_JITTER_ENTROPY=1 (2026-10-28, Spotter)
+
+Spotter's one test that completes a TLS ClientHello died twice on the Windows runner (a VM) with 0xc0000409, no panic
+and an empty stderr (runs 6457 and 6628). The probable cause: the first random draw in a process seeds aws-lc's
+generator from CPU Jitter Entropy, which calls `abort()` when the jitter source fails its health tests three times
+(aws/aws-lc-rs#1072, open, seen on Windows VMs and at early boot), and the MSVC CRT turns `abort()` into a fast fail
+with that code, which reads like a stack overrun. Not caught in a dump; on the Mac 8,680 fresh processes under load
+never failed. The shipped app takes the same path for mail and HTTPS. **Rule:** an app that links aws-lc (rustls'
+default provider, reqwest's `rustls`) sets `AWS_LC_SYS_NO_JITTER_ENTROPY = { value = "1", force = true }` in its
+`.cargo/config.toml` `[env]`, with a test that reads it through `option_env!`, and never sets the target-suffixed
+variant, which the build script reads first. Windows 0xc0000409 is any self-triggered abort (`abort()`, `__fastfail`,
+`/GS`), not proof of a buffer overrun: look for a C `abort()` first.
+
+## A fake clock next to real processes must not run away from the real one (2026-10-28, Pitcrew)
+Pitcrew's supervision tests drive the supervisor with a fake clock but real runner processes, and failed or timed out
+only on a loaded CI runner (run 6628): (1) a test took the runner's "task started" line for the job's process, then
+jumped the clock 120 s with no look at the processes in between, so the job counted as over (its process started
+after the line under load); (2) the job's start is the fake clock's time while its processes' start times come from
+the real clock, so a clock that ran ahead while the machine was slow put the leftovers outside the job
+(`ATTRIBUTION_SLACK`, 10 s) and they were never found; (3) a 60 s clock step during a leftover's stop passed the stop
+timeout before a slow process could exit; (4) real-time job lengths (`sleep 3`) and 80 clock steps, each a full
+process-table read, scaled with the load. **Rule:** a test double's job lasts until the test releases it, never a real
+time; a test waits for what the system under test has *seen* (its usage, its list), not for the input it was given;
+while the system compares the fake clock with real OS timestamps, the clock follows the real one (`until_real`) and
+holds still while a real process reacts to a signal (step it only where the product needs time to pass, such as a
+job's end after `IDLE_CONFIRM`); a tool's timeout ends its whole tree: on Unix its own session (`setsid`, so an
+interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kill-on-close job object, which also holds
+helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
+(nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
+Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.

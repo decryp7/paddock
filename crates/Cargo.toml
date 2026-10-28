@@ -140,3 +140,21 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 debug = false
 
+# The hashing, signature and deflate code of the plugin package runs in the tests of every crate that installs a plugin
+# (the 10 MB fixture program is hashed, deflated and verified several times per install). Unoptimised it takes seconds per
+# install and minutes under load (a macOS CI test hit nextest's 60 s limit); optimised it takes milliseconds. Only these
+# dependencies are optimised, the workspace's own code stays at opt-level 0 (paddock-plugin-package's tests/it/dev_profile.rs).
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.ed25519-compact]
+opt-level = 3
+
+[profile.dev.package.zlib-rs]
+opt-level = 3
+
+[profile.dev.package.flate2]
+opt-level = 3
+
+[profile.dev.package.crc32fast]
+opt-level = 3
