@@ -1,3 +1,4 @@
+import { fakeDialogContract } from './fake-contract';
 import { EnvironmentProviders, Injector, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import {
@@ -31,8 +32,8 @@ const VALID: ContributionBatch = {
   statusItems: [defineStatusItem({ id: 'sd.serving', title: msg('sd.serving', 'Serving'), side: 'end', priority: 80, load })],
   settingsPages: [defineSettingsPage({ id: 'sd.engines', group: 'application', title: msg('sd.engines', 'Engines'), icon: 'sd:engine', order: 100, load })],
   dialogs: [
-    defineDialog({ id: 'sd.create', kind: 'form', modality: 'modal', title: msg('sd.create', 'Create'), width: 560, minWidth: 400, height: 400, minHeight: 300, commands: ['apps_create', 'plugin:paddock-shell|about_*'], load }),
-    defineDialog({ id: 'sd.confirm', kind: 'decision', requiredChoice: true, title: msg('sd.confirm', 'Confirm'), commands: [], load }),
+    defineDialog(fakeDialogContract({ id: 'sd.create', kind: 'form', modality: 'modal', width: 560, height: 400, commands: ['apps_create', 'plugin:paddock-shell|about_*'] }), { title: msg('sd.create', 'Create'), load }),
+    defineDialog(fakeDialogContract({ id: 'sd.confirm', kind: 'decision', requiredChoice: true, commands: [] }), { title: msg('sd.confirm', 'Confirm'), load }),
   ],
   healthServices: [defineHealthService({ id: 'sd.engine', label: msg('sd.engine', 'the engine'), icon: 'sd:engine' })],
   notificationKinds: [defineNotificationKind({ id: 'sd.update', title: msg('sd.update', 'Update'), actions: ['install', 'later'] })],
@@ -86,20 +87,22 @@ describe('assertContributionsValid', () => {
   });
 
   it('fails on a dialog without a kind', () => {
-    expect(problems({ dialogs: [defineDialog({ id: 'sd.kindless', title: msg('sd.kindless', 'K'), commands: [], load } as never)] })).toEqual([
+    expect(problems({ dialogs: [defineDialog({ id: 'sd.kindless', commands: [] } as never, { title: msg('sd.kindless', 'K'), load })] })).toEqual([
       'dialog sd.kindless: has no kind (decision, form, viewer, tool)',
     ]);
   });
 
   it('fails on a dialog with an unknown kind or a modality its kind forbids', () => {
-    const base = { title: msg('sd.d', 'D'), commands: [], load };
+    const ui = { title: msg('sd.d', 'D'), load };
+    const fake = (id: string, kind: 'form' | 'viewer' | 'tool') => fakeDialogContract({ id, kind });
     expect(
       problems({
         dialogs: [
-          defineDialog({ ...base, id: 'sd.popup', kind: 'popup' as never }),
-          defineDialog({ ...base, id: 'sd.modal-viewer', kind: 'viewer', modality: 'modal' }),
-          defineDialog({ ...base, id: 'sd.form', kind: 'form' }),
-          defineDialog({ ...base, id: 'sd.choice', kind: 'tool', requiredChoice: true }),
+          defineDialog({ ...fake('sd.popup', 'form'), kind: 'popup' as never }, ui),
+          defineDialog({ ...fake('sd.modal-viewer', 'viewer'), modality: 'modal' }, ui),
+          defineDialog({ ...fake('sd.form', 'form'), modality: undefined as never }, ui),
+          defineDialog({ ...fake('sd.choice', 'tool'), requiredChoice: true }, ui),
+          defineDialog({ ...fake('sd.wide', 'tool'), width: 20_000, height: 0 }, ui),
         ],
       }),
     ).toEqual([
@@ -107,13 +110,8 @@ describe('assertContributionsValid', () => {
       'dialog sd.modal-viewer: a viewer dialog cannot be modal',
       'dialog sd.form: a form dialog declares its modality (modal or modeless)',
       'dialog sd.choice: only a modal can be a required choice',
-    ]);
-  });
-
-  it('fails on a min > pref layout', () => {
-    expect(problems({ dialogs: [defineDialog({ id: 'sd.squeezed', kind: 'tool', title: msg('sd.s', 'S'), width: 400, minWidth: 600, height: 300, minHeight: 500, commands: [], load })] })).toEqual([
-      'dialog sd.squeezed: layout min > pref: minWidth 600 exceeds width 400',
-      'dialog sd.squeezed: layout min > pref: minHeight 500 exceeds height 300',
+      'dialog sd.wide: width must be a number from 1 to 10000',
+      'dialog sd.wide: height must be a number from 1 to 10000',
     ]);
   });
 
@@ -145,7 +143,7 @@ describe('assertContributionsValid', () => {
         settingsPages: [defineSettingsPage({ id: 'sd.prefs', group: 'misc' as never, title: msg('sd.prefs', 'Prefs'), icon: 'bad icon', order: 1, load })],
         healthServices: [defineHealthService({ id: 'sd.db', label: msg('sd.db', 'the db'), icon: '' })],
         notificationKinds: [defineNotificationKind({ id: 'sd.n', title: msg('sd.n', 'N'), actions: ['Install', 'later', 'later'] })],
-        dialogs: [defineDialog({ id: 'sd.cmds', kind: 'viewer', title: msg('sd.c', 'C'), width: 0, commands: ['Apps Create'], load })],
+        dialogs: [defineDialog(fakeDialogContract({ id: 'sd.cmds', kind: 'viewer', width: 0, commands: ['Apps Create'] }), { title: msg('sd.c', 'C'), load })],
         commands: [defineCommand({ id: 'sd.cat', title: msg('sd.cat', 'Cat'), category: msg('Cat', 'Cat'), run: undefined as never })],
       }),
     ).toEqual([

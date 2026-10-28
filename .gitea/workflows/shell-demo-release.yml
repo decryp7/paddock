@@ -47,7 +47,7 @@ jobs:
       - name: The release notes (the version's CHANGELOG section)
         run: node scripts/demo-release.mjs shell-demo notes /tmp/notes.md && cat /tmp/notes.md
 
-      - name: UI (specs, translations, dialog contracts, the shell demo's build and browser checks)
+      - name: UI (specs, translations, the shell demo's build and browser checks)
         working-directory: ui
         env:
           PW_PORT: 4300
@@ -58,7 +58,6 @@ jobs:
           npm run test:scripts
           npm run build
           npm run i18n:check
-          npm run check:dialogs
           npm run shell-demo:build
           npx playwright install --with-deps chromium
           npx playwright test --project=shell-demo

@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { ListOrReason, ProcessDetails } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
+import { readValue, showMeasured } from '../../core/measured';
 import { formatAffinity, formatBytes, formatRate, formatCount, formatPercent, formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { PRIORITY_LABEL, signatureText } from '../../shared/labels';
@@ -24,7 +25,7 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
         <div class="titles">
           <h2 class="truncate">{{ d()?.process?.name ?? 'Process' }}</h2>
           @if (d(); as x) {
-            <span class="faint num">PID {{ pidText(x.process.pid) }} · {{ x.process.user ?? 'unknown user' }}</span>
+            <span class="faint num">PID {{ pidText(x.process.pid) }} · {{ show(x.process.user, text) }}</span>
           }
         </div>
         <button type="button" class="btn ghost icon sm" aria-label="Close details" (click)="close()"><dy-icon name="close" /></button>
@@ -39,9 +40,6 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
         <div class="skeletons" aria-busy="true"><div class="skeleton"></div><div class="skeleton" style="width: 70%"></div><div class="skeleton"></div></div>
       } @else {
         @if (d(); as x) {
-          @if (x.process.protectedReason; as why) {
-            <p class="lock"><dy-icon name="lock" /> {{ why }}. Dyno never changes it.</p>
-          }
           <div class="tabs" role="tablist" aria-label="Details">
             @for (t of tabs; track t.id) {
               <button type="button" role="tab" [attr.aria-selected]="tab() === t.id" (click)="pickTab(t.id)">{{ t.label }}</button>
@@ -66,14 +64,14 @@ type Tab = 'overview' | 'parents' | 'files' | 'connections' | 'modules';
                   <dd>
                     <span class="badge" [attr.data-tone]="sig().tone">@if (sig().verified) {<dy-icon name="shield-check" />} {{ sig().text }}</span>
                   </dd>
-                  <dt>Started</dt><dd class="num">{{ since(x.process.started) }}</dd>
+                  <dt>Started</dt><dd class="num">{{ show(x.process.started, since) }}</dd>
                   <dt>Priority</dt><dd>{{ x.priority ? priorityLabel(x.priority) : 'Not available on this PC' }}</dd>
                   <dt>Cores</dt><dd class="num">{{ x.affinity === null ? 'Not available on this PC' : affinity(x.affinity) }}</dd>
                   <dt>Efficiency mode</dt><dd>{{ x.efficiencyMode === null ? 'Not available on this PC' : x.efficiencyMode ? 'On' : 'Off' }}</dd>
                   <dt>Threads</dt><dd class="num">{{ x.threads === null ? '—' : count(x.threads) }}</dd>
                   <dt>Handles</dt><dd class="num">{{ x.handles === null ? '—' : count(x.handles) }}</dd>
                   <dt>Starts with</dt><dd>{{ x.startupSource ?? 'Not a startup item' }}</dd>
-                  <dt>Now</dt><dd class="num">{{ pct(x.process.cpu) }} CPU · {{ bytes(x.process.memory) }}</dd>
+                  <dt>Now</dt><dd class="num">{{ show(x.process.cpu, pct) }} CPU · {{ show(x.process.memory, bytes) }}</dd>
                 </dl>
               }
               @case ('parents') {
@@ -211,6 +209,8 @@ export class ProcessDetailsPanel {
   protected readonly count = formatCount;
   protected readonly priorityLabel = (p: keyof typeof PRIORITY_LABEL) => PRIORITY_LABEL[p];
   protected readonly affinity = (mask: number) => formatAffinity(mask, this.live.system()?.cpu.perCore.length ?? 1);
+  protected readonly show = showMeasured;
+  protected readonly text = (v: string): string => v;
   protected readonly since = (at: number) => formatRelative(at, this.live.system()?.at ?? Date.now());
   protected strings(l: ListOrReason<string>) {
     return 'unavailable' in l ? { reason: l.unavailable, items: [] as string[], truncated: false } : { reason: null, items: l.items.items, truncated: l.items.truncated };
@@ -246,6 +246,6 @@ export class ProcessDetailsPanel {
   }
   protected open(pid: number): void {
     const p = this.store.processes().find((x) => x.pid === pid);
-    if (p) void this.store.select({ pid: p.pid, started: p.started });
+    if (p) void this.store.select({ pid: p.pid, started: readValue(p.started) });
   }
 }

@@ -21,17 +21,18 @@
     "test:scripts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test ../scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs projects/paddock-e2e/src/*.test.ts",
     "i18n": "node projects/paddock-ui/bin/paddock-i18n.mjs build",
     "i18n:check": "node projects/paddock-ui/bin/paddock-i18n.mjs build --check",
-    "check:dialogs": "node projects/paddock-ui/bin/paddock-check-dialog-commands.mjs --config projects/shell-demo/paddock-dialog-commands.json",
     "release": "node ../scripts/publish.mjs",
-    "lint": "eslint projects e2e"
+    "lint": "eslint projects e2e",
+    "check:dialog-commands": "node ../scripts/dialog-commands.mjs --contracts projects/shell-demo/src/app/generated/dialog-contracts.ts projects/paddock-ui/shell/about/generated/dialog-contracts.ts projects/paddock-ui/shell/channels/generated/dialog-contracts.ts projects/paddock-ui/shell/confirm/generated/dialog-contracts.ts projects/paddock-ui/shell/diagnostics/generated/dialog-contracts.ts projects/paddock-ui/shell/mcp/generated/dialog-contracts.ts projects/paddock-ui/shell/setup/generated/dialog-contracts.ts projects/paddock-ui/shell/storage/generated/dialog-contracts.ts --seen dialog-check/dialog-commands-seen.json --unexercised projects/shell-demo/dialog-commands-unexercised.json --baseline projects/shell-demo/dialog-commands-unexercised.count --visited dialog-check/dialogs-visited.json"
   },
   "dependencies": {
-    "@angular/cdk": "^22.2.3",
+    "@angular/cdk": "^22.2.4",
     "@angular/common": "^22.2.0",
     "@angular/compiler": "^22.2.0",
     "@angular/core": "^22.2.0",
     "@angular/forms": "^22.2.0",
     "@angular/localize": "^22.2.3",
+    "@angular/material": "^22.2.4",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.3",
     "@ngrx/signals": "^22.0.1",

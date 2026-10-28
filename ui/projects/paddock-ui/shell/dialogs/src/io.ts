@@ -1,8 +1,28 @@
 import { InjectionToken } from '@angular/core';
-import { DIALOG_EVENTS, type DialogInfo, type DialogRequest, type DialogStart } from '@decryp7/paddock-ui/shell';
+import { DIALOG_EVENTS, type DialogInfo, type DialogRequest, type DialogSize, type DialogStart } from '@decryp7/paddock-ui/shell';
 
 /** Stops listening. */
 export type Unlisten = () => void;
+
+/**
+ * What the dialog frame measured, the dialog's own inner logical size (ADR 0026 §4.2): `content` is what it needs at its
+ * declared width (header, body at its natural height, footer), `minContent` the least it can be (header, footer, the
+ * body's declared minimum; the footer's buttons on one line), which the window system makes the OS minimum.
+ */
+export interface DialogMeasure {
+  readonly content: DialogSize;
+  readonly minContent: DialogSize;
+  /**
+   * The page's `innerHeight` when it measured, CSS px: Rust adds what the window's inner height has beyond it (the spike
+   * saw a viewport 32 px short of the window on a Mac, cutting the footer off).
+   */
+  readonly viewportHeight?: number;
+  /**
+   * The page's `window.devicePixelRatio` when it measured. Rust converts CSS px to logical px with the webview zoom,
+   * `devicePixelRatio` over the window's scale factor (1 when absent). Finite, 0.25 to 8.
+   */
+  readonly devicePixelRatio?: number;
+}
 
 /**
  * Everything the dialog layer needs from the window system, in one seam (rule: code against abstractions). The desktop
@@ -20,8 +40,14 @@ export interface DialogIo {
   listen(event: string, handler: (payload: unknown) => void): Promise<Unlisten>;
   /** Asks the dialog window `label` to close as if its Close/Cancel was pressed (it may refuse). */
   requestClose(label: string): Promise<void>;
-  /** `dialog_fit_height`: sizes this dialog window to `content` px of content (Rust bounds it); the width stays. */
-  fitHeight(content: number): Promise<void>;
+  /**
+   * The ready handshake (ADR 0026 §4.2): the frame measured its content after the content and `document.fonts.ready`,
+   * synchronously, without waiting for a frame (the 1.1-0 spike: a hidden window never runs `requestAnimationFrame` on a
+   * sleeping Mac). The window system sizes the window and shows it. Sent once.
+   */
+  ready(measure: DialogMeasure): Promise<void>;
+  /** A refit (ADR 0026 §4.5): the content's natural size, the theme, density or fonts changed, or the content asked. */
+  fit(measure: DialogMeasure): Promise<void>;
   /** Sets this dialog window's title bar text (a title the content knows only at run time). Optional: a window system without it keeps the title it was opened with. */
   setTitle?(title: string): Promise<void>;
 }
@@ -41,7 +67,13 @@ export interface TauriBridge {
   setWindowTitle?(title: string): Promise<void>;
 }
 
-/** The dialog layer over Tauri: the four `paddock_dialogs::tauri` commands and its events. */
+/**
+ * The dialog layer over Tauri: the `paddock_dialogs::tauri` commands and its events.
+ *
+ * The seam of package 1.1b (ADR 0026 §4): `ready` and `fit` are the only calls that size or show a dialog window. They
+ * send the measure (`dialog_ready { measure }`, `dialog_fit { measure }`, the wire type `DialogMeasureWire`); Rust makes
+ * `minContent` the OS minimum, sizes, and shows the window on ready. The show mechanism per OS lives in Rust alone.
+ */
 export function tauriDialogIo(tauri: TauriBridge): DialogIo {
   return {
     open: (request) => tauri.invoke<DialogInfo>('dialog_open', { request }),
@@ -49,7 +81,8 @@ export function tauriDialogIo(tauri: TauriBridge): DialogIo {
     close: (result) => tauri.invoke<void>('dialog_close', { result: result === undefined ? null : result }),
     listen: (event, handler) => tauri.listen(event, (e) => handler(e.payload)),
     requestClose: (label) => tauri.emitTo(label, DIALOG_EVENTS.closeRequested, null),
-    fitHeight: (content) => tauri.invoke<void>('dialog_fit_height', { content }),
+    ready: (measure) => tauri.invoke<void>('dialog_ready', { measure }),
+    fit: (measure) => tauri.invoke<void>('dialog_fit', { measure }),
     ...(tauri.setWindowTitle ? { setTitle: (title: string) => tauri.setWindowTitle!(title) } : {}),
   };
 }
@@ -60,8 +93,9 @@ export const BROWSER_DIALOG_RESULT_KEY = 'paddock.dialog.browserResult';
 /**
  * The browser build has no dialog windows (dialogs open in the page), but a dialog window's route can still be opened by
  * URL (`#/dialog?id=<id>&host=main&label=d-main-1&title=<title>&modality=<m>&dialogInput=<json>`), so e2e boots each
- * dialog with only its window's providers. The answer goes to `localStorage` and the tab asks to close. A fitted height
- * is published as `data-fitted-height` on `<html>` (and every height asked for in order as `data-fit-history`).
+ * dialog with only its window's providers. The answer goes to `localStorage` and the tab asks to close. The ready
+ * handshake sets `data-dialog-ready` on `<html>`; a measured height is published as `data-fitted-height` (and every height
+ * asked for in order as `data-fit-history`), the width as `data-content-width`, the minimum as `data-min-content` (`<width>x<height>`).
  */
 export function browserDialogIo(loc: Pick<Location, 'hash'> = location): DialogIo {
   const params = () => new URLSearchParams(loc.hash.split('?')[1] ?? '');
@@ -98,12 +132,21 @@ export function browserDialogIo(loc: Pick<Location, 'hash'> = location): DialogI
     setTitle: async (title) => {
       document.title = title;
     },
-    fitHeight: async (px) => {
-      const data = document.documentElement.dataset;
-      data['fittedHeight'] = String(px);
-      data['fitHistory'] = data['fitHistory'] ? `${data['fitHistory']},${px}` : String(px);
+    ready: async (m) => {
+      document.documentElement.dataset['dialogReady'] = 'true';
+      publishMeasure(m);
     },
+    fit: async (m) => publishMeasure(m),
   };
+}
+
+function publishMeasure(m: DialogMeasure): void {
+  const data = document.documentElement.dataset;
+  const px = String(m.content.height);
+  data['fittedHeight'] = px;
+  data['fitHistory'] = data['fitHistory'] ? `${data['fitHistory']},${px}` : px;
+  data['minContent'] = `${m.minContent.width}x${m.minContent.height}`;
+  data['contentWidth'] = String(m.content.width);
 }
 
 /** The window system of this window. Defaults to the browser build's; a desktop app provides `tauriDialogIo`. */

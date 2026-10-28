@@ -133,7 +133,7 @@ function failureText(f: { message: string; line: number | null }): string {
     .scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 0 14px 14px; container: markers / inline-size; }
     .rules { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
     .rules th, .rules td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-    .rules thead th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--bg-1); }
+    .rules thead th { color: var(--muted); font-weight: 500; position: sticky; top: 0; z-index: 3; background: var(--bg-1); }
     .rules th.lbl { font-weight: 600; color: var(--text); }
     .id { display: block; font-weight: 400; font-size: var(--fs-xs); }
     .desc { color: var(--text-2); max-width: 280px; overflow-wrap: anywhere; }

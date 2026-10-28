@@ -2,12 +2,8 @@
 //!
 //! A plugin is a small Rust executable that depends on this crate only. Dyno's agent starts it as a child process,
 //! talks to it over [`dyno_ipc`] and treats every failure (a panic, a hang, a crash, garbage) as that plugin's error.
-//! A plugin contributes any of:
-//!
-//! - **sensors** ([`SensorProvider`]): extra readings shown next to Dyno's own;
-//! - **cleanup categories** ([`CleanupProvider`]): the plugin only *proposes* candidates; Dyno checks every path
-//!   against its cleanup safety policy, previews and does all deleting;
-//! - **actions** ([`ActionProvider`]): what a CPU-taming rule can trigger (a webhook, a log line).
+//! A plugin contributes **sensors** ([`SensorProvider`]): extra readings shown next to Dyno's own. Dyno is
+//! monitoring-only, so a plugin never changes the machine through Dyno.
 //!
 //! ```no_run
 //! use dyno_plugin_api::{Manifest, Plugin, SensorProvider, SensorReading, Contribution};
@@ -42,7 +38,7 @@ pub mod protocol;
 mod serve;
 
 pub use manifest::{valid_id, Contribution, Manifest, API_VERSION};
-pub use model::{ActionInfo, Candidate, CategoryInfo, Risk, RuleEvent, ScanLimits, SensorReading};
-pub use plugin::{ActionProvider, CleanupProvider, Plugin, PluginError, SensorProvider};
+pub use model::SensorReading;
+pub use plugin::{Plugin, SensorProvider};
 pub use protocol::{PluginMessage, PluginReply, PluginRequest};
 pub use serve::{handle, serve};

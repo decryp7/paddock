@@ -1,8 +1,7 @@
-//! Answers the app's requests (command–query separation: queries only read; open, act, undo, save and the like
-//! mutate). Every argument is validated here even though the app validated it too.
+//! Answers the app's requests (command–query separation: queries only read; open, save and the like change only
+//! Dyno's own files). Every argument is validated here even though the app validated it too.
 
 use crate::agent::{lock, now, Shared, FACTS_TTL};
-use dyno_core::activity::{inverse, undo_state, ActivityEntry, ActivityKind, Previous, UndoRecord, UndoState};
 use dyno_core::alarms::{Alarm, AlarmEvent, ShelveFor};
 use dyno_core::anomaly;
 use dyno_core::diagnosis;
@@ -11,15 +10,10 @@ use dyno_core::forecast::{disk_full, DiskTrend};
 use dyno_core::health::{assess, HealthInput};
 use dyno_core::history::{downsample, top_consumers, window, Tier};
 use dyno_core::metrics::SystemSample;
-use dyno_core::ports::PlatformError;
-use dyno_core::process::{Pid, ProcessAction, ProcessRef, ProcessSample};
-use dyno_core::protect::Protection;
 use dyno_core::protocol::{AgentError, ErrorCode, History, LiveDetail, Message, PluginInfo, PluginState, Reply, Request};
 use dyno_core::recorder::CaptureReason;
-use dyno_core::report::{self, ReportChange, ReportDisk, ReportFormat, ReportInput, ReportIssue, SavedReport, ScorePoint, WeeklyReport};
-use dyno_core::rules::{Command as RuleCommand, Situation};
+use dyno_core::report::{self, ReportDisk, ReportFormat, ReportInput, ReportIssue, SavedReport, ScorePoint, WeeklyReport};
 use dyno_core::snapshot;
-use dyno_core::startup::StartupState;
 use dyno_core::time::{Timestamp, DAY, HOUR};
 use std::path::Path;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -85,8 +79,6 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             let d = lock(&shared.ports.details).details(target)?;
             Ok(Reply::Details(Box::new(d)))
         }
-        Request::Act { target, action } => act(shared, target, action).map(Reply::Activity),
-        Request::ActOnGroup { group_id, action } => act_on_group(shared, &group_id, action).map(Reply::Activity),
         Request::Lockers { path } => {
             let p = Path::new(&path);
             if !p.is_absolute() {
@@ -128,19 +120,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::WhySlow => Ok(Reply::Diagnosis(why_slow(shared))),
         Request::Anomalies => Ok(Reply::Anomalies(anomalies(shared))),
         Request::History { range, end } => history(shared, range, end).map(|h| Reply::History(Box::new(h))),
-        Request::Activity { limit } => Ok(Reply::Activities(activity(shared, limit)?)),
-        Request::Undo { activity_id } => undo(shared, &activity_id).map(Reply::Activity),
-        Request::ReleaseAction { target } => release_action(shared, target).map(Reply::Activity),
-        Request::Rules => Ok(Reply::Rules(Box::new(lock(&shared.core).rules.clone().for_display()))),
-        Request::SaveRules { rules } => {
-            let valid = rules.validate().map_err(bad)?;
-            let mut core = lock(&shared.core);
-            core.rules = valid;
-            core.save_rules(&shared.dirs);
-            Ok(Reply::Rules(Box::new(core.rules.clone().for_display())))
-        }
-        Request::SetProfile { profile } => change_rules(shared, |r| r.profile = profile),
-        Request::PauseRules { paused } => change_rules(shared, |r| r.paused = paused),
+        Request::Activity { limit } => Ok(Reply::Activities(
+            lock(&shared.core).store.activity(limit.clamp(1, 500)).map_err(internal)?,
+        )),
         Request::Alerts { limit } => Ok(Reply::Alerts(
             lock(&shared.core).store.alerts(limit.clamp(1, 500)).map_err(internal)?,
         )),
@@ -212,8 +194,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             crate::issues::overview(shared, query).map(|o| Reply::Issues(Box::new(o)))
         }
         Request::SaveIssues { path, days } => crate::issues::save(shared, &path, days).map(Reply::IssuesSaved),
-        Request::Unusual { include_ignored } => Ok(Reply::Unusual(Box::new(shared.unusual.overview(shared, include_ignored)))),
-        Request::UnusualAct { key, action } => shared.unusual.act(shared, &key, action).map(|o| Reply::Unusual(Box::new(o))),
+        Request::Unusual => Ok(Reply::Unusual(Box::new(shared.unusual.overview(shared)))),
         Request::ForgetBaseline => shared.unusual.forget(shared).map(|o| Reply::Unusual(Box::new(o))),
         Request::Alarms { filter } => {
             let t = now();
@@ -288,10 +269,6 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         )),
         Request::Health => Ok(Reply::Health(Box::new(health(shared)?))),
         Request::StartupEntries => Ok(Reply::Startup(lock(&shared.ports.startup).list()?)),
-        Request::SetStartupState { id, state } => set_startup(shared, &id, state).map(Reply::Activity),
-        Request::HelperStatus => Ok(Reply::Helper(Box::new(lock(&shared.ports.helper).status()))),
-        Request::InstallHelper => lock(&shared.ports.helper).install().map(|s| Reply::Helper(Box::new(s))),
-        Request::UninstallHelper => uninstall_helper(shared).map(|s| Reply::Helper(Box::new(s))),
         Request::Shutdown => {
             shared.request_stop();
             Ok(Reply::Ok)
@@ -302,23 +279,14 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             Ok(Reply::Lifespan(Box::new(shared.hardware.lifespan_overview(&core.store, now()))))
         }
         Request::Baselines => Ok(Reply::Baselines(Box::new(shared.baselines.overview(shared)))),
-        r @ (Request::CleanupCategories
-        | Request::ScanCleanup { .. }
-        | Request::RunCleanup { .. }
-        | Request::Quarantine
-        | Request::RestoreQuarantine { .. }
-        | Request::DiskUsage { .. }) => crate::handlers_cleanup::handle(shared, r),
+        Request::DiskUsage { path } => crate::disk::disk_usage(path.as_deref())
+            .map(|n| Reply::SizeTree(Box::new(n)))
+            .map_err(bad),
         r @ (Request::SearchSeed { .. }
         | Request::WebSearch { .. }
         | Request::FileHash { .. }
         | Request::VirusTotalUrl { .. }
         | Request::StartupOverview { .. }) => crate::handlers_search::handle(shared, r),
-        r @ (Request::WatchedFolders
-        | Request::AddWatchedFolder { .. }
-        | Request::SetWatchedFolder { .. }
-        | Request::RemoveWatchedFolder { .. }
-        | Request::PreviewWatchedFolder { .. }
-        | Request::SweepWatchedFolder { .. }) => crate::handlers_watch::handle(shared, r),
         r @ (Request::Changes { .. }
         | Request::SleepBlockers
         | Request::BootAnalysis
@@ -327,31 +295,12 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::SoftwareInventory
         | Request::SaveInventoryReport { .. }
         | Request::FindFiles { .. }
-        | Request::RemoveFoundFiles { .. }
         | Request::Maintenance
         | Request::Backup
         | Request::RefreshBackup) => crate::extras::handle(shared, r),
-        Request::Tuning => crate::tuning::list(shared).map(Reply::Tuning),
-        Request::ApplyTuning { id } => crate::tuning::apply(shared, &id).map(Reply::Activity),
-        Request::RevertTuning { id, force } => crate::tuning::revert(shared, &id, force).map(Reply::Activity),
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
-}
-
-/// Removes the helper (on the user's click) and records that in the activity log.
-fn uninstall_helper(shared: &Shared) -> Result<dyno_core::helper_wire::HelperStatus, AgentError> {
-    let status = lock(&shared.ports.helper).uninstall()?;
-    let entry = lock(&shared.core).log(
-        now(),
-        ActivityKind::System,
-        "Removed the privileged helper".into(),
-        "Changes it made stay in force; undoing them needs the helper again.".into(),
-        UndoRecord::None,
-        None,
-    );
-    shared.broadcast(&Message::Activity(entry));
-    Ok(status)
 }
 
 fn known_alarm(shared: &Shared, id: u64) -> Result<(), AgentError> {
@@ -387,258 +336,6 @@ fn subscribe(shared: &Arc<Shared>, conn: &Conn, detail: LiveDetail) -> Answer {
         }
     }
     Ok(Reply::Ok)
-}
-
-fn change_rules(shared: &Arc<Shared>, f: impl FnOnce(&mut dyno_core::rules::RuleSet)) -> Answer {
-    let mut core = lock(&shared.core);
-    f(&mut core.rules);
-    core.save_rules(&shared.dirs);
-    Ok(Reply::Rules(Box::new(core.rules.clone().for_display())))
-}
-
-/// Why a process may not be acted on, if it may not.
-fn protection_reason(shared: &Shared, p: &ProcessSample) -> Option<String> {
-    let core = lock(&shared.core);
-    let own = [std::process::id()];
-    Protection::new(&core.rules.protected, &own).reason(p)
-}
-
-fn find_process(shared: &Shared, target: ProcessRef) -> Result<ProcessSample, AgentError> {
-    lock(&shared.core)
-        .latest
-        .processes
-        .iter()
-        .find(|p| p.reference() == target)
-        .cloned()
-        .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That process has exited or is not in the list any more."))
-}
-
-/// The pieces of a process's state an action may change, so the undo can put them back.
-fn previous_of(shared: &Shared, target: ProcessRef) -> Previous {
-    match lock(&shared.ports.details).details(target) {
-        Ok(d) => Previous {
-            priority: d.priority,
-            affinity: d.affinity,
-            efficiency: d.efficiency_mode,
-        },
-        Err(_) => Previous::default(),
-    }
-}
-
-fn act(shared: &Arc<Shared>, target: ProcessRef, action: ProcessAction) -> Result<ActivityEntry, AgentError> {
-    action.validate(shared.cores).map_err(bad)?;
-    let p = find_process(shared, target)?;
-    if let Some(reason) = protection_reason(shared, &p) {
-        return Err(AgentError::new(ErrorCode::Protected, format!("{} is protected: {reason}", p.name)));
-    }
-    let previous = previous_of(shared, target);
-    lock(&shared.ports.control).apply(target, &action)?;
-    let actions: Vec<ProcessAction> = inverse(&action, previous).into_iter().collect();
-    let t = now();
-    let entry = lock(&shared.core).log(
-        t,
-        ActivityKind::Manual,
-        format!("{} {}", action.describe(), p.name),
-        format!("You did this from the task manager (process {}).", p.pid),
-        UndoRecord::Process {
-            target,
-            actions,
-            rule: None,
-        },
-        None,
-    );
-    shared.broadcast(&Message::Activity(entry.clone()));
-    Ok(entry)
-}
-
-fn act_on_group(shared: &Arc<Shared>, group_id: &str, action: ProcessAction) -> Result<ActivityEntry, AgentError> {
-    action.validate(shared.cores).map_err(bad)?;
-    let (group, members) = {
-        let core = lock(&shared.core);
-        let g = core
-            .latest
-            .groups
-            .iter()
-            .find(|g| g.id == group_id)
-            .cloned()
-            .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That app is no longer running."))?;
-        let m: Vec<ProcessSample> = core.latest.processes.iter().filter(|p| g.pids.contains(&p.pid)).cloned().collect();
-        (g, m)
-    };
-    let (mut done, mut skipped, mut last_error) = (0usize, 0usize, None);
-    let mut undo_all: Vec<(ProcessRef, Vec<ProcessAction>)> = Vec::new();
-    for p in &members {
-        if protection_reason(shared, p).is_some() {
-            skipped += 1;
-            continue;
-        }
-        let previous = previous_of(shared, p.reference());
-        match lock(&shared.ports.control).apply(p.reference(), &action) {
-            Ok(()) => {
-                done += 1;
-                undo_all.push((p.reference(), inverse(&action, previous).into_iter().collect()));
-            }
-            Err(PlatformError::NotFound(_)) => {}
-            Err(e) => {
-                skipped += 1;
-                last_error = Some(e);
-            }
-        }
-    }
-    if done == 0 {
-        return Err(match last_error {
-            Some(e) => e.into(),
-            None => AgentError::new(ErrorCode::Protected, format!("{} has no process Dyno may change.", group.name)),
-        });
-    }
-    // One entry per group; its undo covers the first process (the root); the rest are undone with it by the UI's
-    // per-process Undo. Keeping the record small and honest beats a half-working bulk undo.
-    let (target, actions) = undo_all.first().cloned().unwrap_or((members[0].reference(), Vec::new()));
-    let t = now();
-    let detail = if skipped > 0 {
-        format!("{done} process(es) changed, {skipped} left alone (protected or not allowed).")
-    } else {
-        format!("{done} process(es) changed.")
-    };
-    let entry = lock(&shared.core).log(
-        t,
-        ActivityKind::Manual,
-        format!("{} {}", action.describe(), group.name),
-        detail,
-        UndoRecord::Process {
-            target,
-            actions,
-            rule: None,
-        },
-        None,
-    );
-    shared.broadcast(&Message::Activity(entry.clone()));
-    Ok(entry)
-}
-
-fn activity(shared: &Shared, limit: u32) -> Result<Vec<ActivityEntry>, AgentError> {
-    let rows = lock(&shared.core).store.activity(limit.clamp(1, 500)).map_err(internal)?;
-    let t = now();
-    let alive = |r: ProcessRef| lock(&shared.core).latest.processes.iter().any(|p| p.reference() == r);
-    Ok(rows
-        .into_iter()
-        .map(|(mut e, record, undone)| {
-            e.undo = undo_state(&record, undone, t, alive);
-            e
-        })
-        .collect())
-}
-
-fn undo(shared: &Arc<Shared>, id: &str) -> Result<ActivityEntry, AgentError> {
-    let (entry, record, undone) = lock(&shared.core)
-        .store
-        .activity_entry(id)
-        .map_err(internal)?
-        .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That entry is no longer in the log."))?;
-    let t = now();
-    let alive = |r: ProcessRef| lock(&shared.core).latest.processes.iter().any(|p| p.reference() == r);
-    match undo_state(&record, undone, t, alive) {
-        UndoState::Available => {}
-        UndoState::Undone => return Err(bad("That was already undone.")),
-        UndoState::Expired => return Err(bad("That can no longer be undone: the process has exited.")),
-        UndoState::NotUndoable => return Err(bad("That cannot be undone.")),
-    }
-    match &record {
-        UndoRecord::Process { target, actions, rule } => {
-            for a in actions {
-                lock(&shared.ports.control).apply(*target, a)?;
-            }
-            if let Some((rule_id, app)) = rule {
-                let mut core = lock(&shared.core);
-                let procs = core.latest.processes.clone();
-                let rules = core.rules.clone();
-                // The user said no to this rule for this app until it calms down.
-                let _ = core.engine.snooze(&rules, rule_id, app, &procs);
-            }
-        }
-        UndoRecord::Startup { entry_id, previous } => {
-            let mut startup = lock(&shared.ports.startup);
-            let list = startup.list()?;
-            let e = list
-                .iter()
-                .find(|e| &e.id == entry_id)
-                .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That startup item no longer exists."))?;
-            startup.set_state(e, *previous)?;
-        }
-        UndoRecord::Quarantine { id: q, .. } => crate::handlers_cleanup::restore(shared, q)?,
-        UndoRecord::Tuning { .. } => crate::tuning::undo_record(shared, &record, false)?,
-        UndoRecord::None => return Err(bad("That cannot be undone here yet.")),
-    }
-    let core = lock(&shared.core);
-    core.store.mark_undone(id).map_err(internal)?;
-    let mut e = entry;
-    e.undo = UndoState::Undone;
-    Ok(e)
-}
-
-fn release_action(shared: &Arc<Shared>, target: ProcessRef) -> Result<ActivityEntry, AgentError> {
-    let (rule_id, app, name) = {
-        let core = lock(&shared.core);
-        let active = core.engine.active(&core.rules);
-        let a = active
-            .into_iter()
-            .find(|a| a.target == target)
-            .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "No rule is acting on that process."))?;
-        let group_id = core
-            .latest
-            .groups
-            .iter()
-            .find(|g| g.pids.contains(&target.pid))
-            .map(|g| g.id.clone())
-            .unwrap_or_else(|| a.app.clone());
-        (a.rule_id, group_id, a.app)
-    };
-    let commands = {
-        let mut core = lock(&shared.core);
-        let rules = core.rules.clone();
-        let procs = core.latest.processes.clone();
-        core.engine.snooze(&rules, &rule_id, &app, &procs)
-    };
-    crate::sampler::apply_commands(shared, commands, now());
-    let t = now();
-    let entry = lock(&shared.core).log(
-        t,
-        ActivityKind::Release,
-        format!("Released {name}"),
-        "You released what the rule was doing; the rule leaves this app alone until it calms down.".into(),
-        UndoRecord::None,
-        None,
-    );
-    shared.broadcast(&Message::Activity(entry.clone()));
-    Ok(entry)
-}
-
-fn set_startup(shared: &Arc<Shared>, id: &str, state: StartupState) -> Result<ActivityEntry, AgentError> {
-    let mut startup = lock(&shared.ports.startup);
-    let list = startup.list()?;
-    let e = list
-        .iter()
-        .find(|e| e.id == id)
-        .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That startup item no longer exists."))?
-        .clone();
-    startup.set_state(&e, state)?;
-    drop(startup);
-    let verb = match state {
-        StartupState::Enabled => "Turned on",
-        StartupState::Disabled => "Turned off",
-        StartupState::Delayed(_) => "Delayed",
-    };
-    Ok(lock(&shared.core).log(
-        now(),
-        ActivityKind::Startup,
-        format!("{verb} {} at login", e.name),
-        "You changed this in the startup manager.".into(),
-        UndoRecord::Startup {
-            entry_id: e.id,
-            previous: e.state,
-        },
-        None,
-    ))
 }
 
 fn history(shared: &Shared, range: dyno_core::history::HistoryRange, end: Option<Timestamp>) -> Result<History, AgentError> {
@@ -697,8 +394,6 @@ fn history(shared: &Shared, range: dyno_core::history::HistoryRange, end: Option
 fn why_slow(shared: &Shared) -> dyno_core::diagnosis::Diagnosis {
     let core = lock(&shared.core);
     let samples: Vec<SystemSample> = core.recent.iter().rev().take(60).rev().cloned().collect();
-    let own = [std::process::id()];
-    let protection = Protection::new(&core.rules.protected, &own);
     let disk = samples
         .last()
         .and_then(|s| s.disks.first())
@@ -709,7 +404,6 @@ fn why_slow(shared: &Shared) -> dyno_core::diagnosis::Diagnosis {
         samples: &samples,
         groups: &core.latest.groups,
         processes: &core.latest.processes,
-        protection: &protection,
         system_disk: &disk,
         throttle: shared.hardware.context(),
     })
@@ -747,7 +441,6 @@ pub(crate) fn facts(shared: &Shared) -> SystemFacts {
 
 fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError> {
     let facts = facts(shared);
-    let tuning = crate::tuning::plans(shared);
     let startup = lock(&shared.ports.startup).list().unwrap_or_default();
     let anomalies = anomalies(shared);
     let core = lock(&shared.core);
@@ -779,7 +472,6 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
             .store
             .count_issues(dyno_core::issues::IssueKind::AppCrash, t.minus(7 * DAY), t)
             .unwrap_or(0),
-        tuning: &tuning,
         lifespans: &lifespans,
     });
     // Bookkeeping for the weekly report's trend (one row per hour; a failed write loses one point, nothing else).
@@ -806,35 +498,8 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
     let points = s.points(Tier::QuarterHour, from, to).map_err(internal)?;
     let top_apps = top_consumers(&s.app_minutes(from, to).map_err(internal)?, 5);
     let score = live_score.or(s.score_at(to).map_err(internal)?);
-    // (from, to]: a change made in the very millisecond the report is built still counts, and adjacent weeks never share one.
+    // (from, to]: an alert raised in the very millisecond the report is built still counts, and adjacent weeks never share one.
     let in_week = |at: Timestamp| at > from && at <= to;
-    let activity: Vec<ActivityEntry> = s
-        .activity(1_000)
-        .map_err(internal)?
-        .into_iter()
-        .map(|(e, _, _)| e)
-        .filter(|e| in_week(e.at))
-        .collect();
-    let rule_actions = activity.iter().filter(|e| e.kind == ActivityKind::Rule).count() as u32;
-    let cleaned_bytes = activity
-        .iter()
-        .filter(|e| e.kind == ActivityKind::Cleanup)
-        .filter_map(|e| e.bytes)
-        .sum();
-    let changes = activity
-        .iter()
-        .filter(|e| {
-            !matches!(
-                e.kind,
-                ActivityKind::Rule | ActivityKind::Alert | ActivityKind::System | ActivityKind::Release
-            )
-        })
-        .map(|e| ReportChange {
-            at: e.at,
-            title: e.title.clone(),
-            detail: e.detail.clone(),
-        })
-        .collect();
     let issues: Vec<ReportIssue> = s
         .alerts(1_000)
         .map_err(internal)?
@@ -869,8 +534,6 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
         top_apps,
         score,
         score_before: s.score_at(from).map_err(internal)?,
-        rule_actions,
-        cleaned_bytes,
         crashes,
         alerts: issues.len() as u32,
         score_trend: s
@@ -881,7 +544,6 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
             .collect(),
         disks,
         issues,
-        changes,
         hardware: dyno_core::report::hardware_lines(
             &s.throttle_episodes(from, MAX_HARDWARE_EPISODES).map_err(internal)?,
             from,
@@ -939,22 +601,4 @@ fn plugins(shared: &Shared) -> Vec<PluginInfo> {
             contributes: p.contributes.iter().map(|c| c.as_str().to_string()).collect(),
         })
         .collect()
-}
-
-/// The situation rules reason about (None fields when the OS does not tell).
-pub fn situation(shared: &Shared, power: Option<dyno_core::metrics::PowerSource>) -> Situation {
-    let mut a = lock(&shared.ports.activity);
-    Situation {
-        user_active: a.idle_secs().map(|s| s < 60),
-        power,
-        foreground: a.foreground_pid(),
-    }
-}
-
-/// Used by the sampler's rule handling; re-exported for clarity.
-pub type Commands = Vec<RuleCommand>;
-
-/// Whether `pid` is the agent itself.
-pub fn is_self(pid: Pid) -> bool {
-    pid == std::process::id()
 }

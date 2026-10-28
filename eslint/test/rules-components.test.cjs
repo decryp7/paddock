@@ -52,3 +52,15 @@ ts().run('signal-read-before-await (rule 29)', rules['signal-read-before-await']
     { code: 'class A { a = signal(1); b = model(2); async go() { await x(); this.a(); this.b(); } }', errors: [{ messageId: 'late' }, { messageId: 'late' }] },
   ],
 });
+
+ts().run('dialog-content-footer (ADR 0026)', rules['dialog-content-footer'], {
+  valid: [
+    "@Component({ selector: 'pc-a', template: '<div class=\"pc-actions\"><button>Cancel</button></div>' }) class Page {}",
+    "@Component({ selector: 'pc-a', template: '<p>Remove?</p>' }) class A implements DialogContent { readonly dialogActions = signal([]); }",
+  ],
+  invalid: [
+    { code: "@Component({ selector: 'pc-a', template: '<p>x</p><div class=\"pc-x__actions\"></div>' }) class A implements DialogContent<boolean> {}", errors: [{ messageId: 'footer' }] },
+    { code: "@Component({ selector: 'pc-a', template: `<footer></footer><button type=\"button\"> OK </button>` }) class A { readonly dialogActions = signal([]); }", errors: [{ messageId: 'footer' }, { messageId: 'footer' }] },
+    { code: "@Component({ selector: 'pc-a', template: '<button>Close</button>' }) class A { private readonly ref = inject(DIALOG_REF); }", errors: [{ messageId: 'footer' }] },
+  ],
+});

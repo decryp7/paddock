@@ -6,6 +6,7 @@ import { DialogShell, dialogWindowConfig, mountDialogWindowHost, tauriDialogIo, 
 import { MockStartupBackend, provideStartupBackend, provideStartupContract, TauriStartupBackend } from '@decryp7/paddock-ui/shell/startup';
 import { InPageDesktop, provideDialogUiSync, tauriPanelsIo } from '@decryp7/paddock-ui/workbench/panels';
 import { desktopIpc, dialogBridge, panelsBridge, rawInvoke } from './app/desktop';
+import { DIALOG_BASE } from './app/generated/dialog-contracts';
 import { BrowserDockLayoutStore, dockLayoutDialogs, IpcDockLayoutStore } from '@decryp7/paddock-ui/workbench/dock';
 
 /**
@@ -32,6 +33,7 @@ export function bootDialogWindow(route: DialogRoute): Promise<unknown> {
         provideDialogUiSync(panels ? tauriPanelsIo(panels) : new InPageDesktop().window(route.label)),
       ],
       route,
+      baseCommands: DIALOG_BASE,
       ...(bridge ? { io: () => tauriDialogIo(bridge) } : {}),
     }),
   );

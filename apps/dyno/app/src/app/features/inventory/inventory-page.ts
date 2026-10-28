@@ -100,7 +100,7 @@ const HINT_TONE: Record<HintKind, string> = {
             } @else if (totalOnly(); as t) {
               <div class="na">
                 <strong>{{ bytes(t.total) }} installed</strong>
-                <p>Dyno could not read the individual modules: {{ t.reason.reason }}@if (t.reason.needsHelper) { Reading them needs the Dyno helper, which asks for administrator rights the first time.}</p>
+                <p>Dyno could not read the individual modules: {{ t.reason.reason }}</p>
               </div>
             }
 

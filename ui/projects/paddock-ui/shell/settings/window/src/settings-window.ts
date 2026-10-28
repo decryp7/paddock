@@ -1,4 +1,7 @@
 import { NgComponentOutlet } from '@angular/common';
+import { MatButton } from '@angular/material/button';
+import { MatSlideToggle } from '@angular/material/slide-toggle';
+import { MatTooltip } from '@angular/material/tooltip';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -50,7 +53,7 @@ interface LoadedPage {
 @Component({
   selector: 'pd-settings-window',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgComponentOutlet, PdSettingsSection],
+  imports: [MatButton, MatSlideToggle, MatTooltip, NgComponentOutlet, PdSettingsSection],
   host: { class: 'pd-settings-window' },
   template: `
     <div class="pd-top">
@@ -65,10 +68,7 @@ interface LoadedPage {
         (input)="store.setQuery($any($event.target).value)"
         (keydown.escape)="clearSearch($event)"
       />
-      <label class="pd-advanced pd-check">
-        <input type="checkbox" role="switch" [checked]="store.showAdvanced()" (change)="store.setShowAdvanced($any($event.target).checked)" />
-        {{ t.showAdvanced }}
-      </label>
+      <mat-slide-toggle class="pd-advanced" [checked]="store.showAdvanced()" (change)="store.setShowAdvanced($event.checked)">{{ t.showAdvanced }}</mat-slide-toggle>
     </div>
 
     @if (store.problem(); as p) {
@@ -78,21 +78,21 @@ interface LoadedPage {
       <div class="pd-banner pd-restart" role="status" data-testid="settings-restart">
         <span>{{ restartText() }}</span>
         @if (restart) {
-          <button type="button" class="pd-btn pd-primary" (click)="restart()">{{ t.restartNow }}</button>
+          <button matButton="filled" type="button" (click)="restart()">{{ t.restartNow }}</button>
         }
       </div>
     }
     @if (asking()) {
       <div class="pd-banner pd-warn" role="alertdialog" aria-labelledby="pd-settings-unsaved" data-testid="settings-unsaved">
         <span id="pd-settings-unsaved">{{ unsavedText() }}</span>
-        <button type="button" class="pd-btn" (click)="discardAndClose()">{{ t.discard }}</button>
-        <button type="button" class="pd-btn pd-primary" (click)="keepEditing()">{{ t.keepEditing }}</button>
+        <button matButton="outlined" type="button" (click)="discardAndClose()">{{ t.discard }}</button>
+        <button matButton="filled" type="button" (click)="keepEditing()">{{ t.keepEditing }}</button>
       </div>
     }
     @if (store.actionError(); as e) {
       <div class="pd-banner pd-err" role="alert">
         <span>{{ e }}</span>
-        <button type="button" class="pd-btn" (click)="store.dismissNotice()">{{ t.dismiss }}</button>
+        <button matButton="outlined" type="button" (click)="store.dismissNotice()">{{ t.dismiss }}</button>
       </div>
     }
 
@@ -111,7 +111,7 @@ interface LoadedPage {
                   <button type="button" class="pd-item" [attr.aria-current]="current()?.id === item.id && !searching() ? 'page' : null" [attr.data-page]="item.id" (click)="select(item.id)">
                     <span class="pd-name">{{ item.title }}</span>
                     @if (unsaved().includes(item.id)) {
-                      <span class="pd-dot" role="img" [attr.aria-label]="t.unsaved" [title]="t.unsaved"></span>
+                      <span class="pd-dot" role="img" [attr.aria-label]="t.unsaved" [matTooltip]="t.unsaved"></span>
                     }
                   </button>
                 </li>
@@ -125,7 +125,7 @@ interface LoadedPage {
         @if (store.requestError(); as e) {
           <div class="pd-banner pd-err" role="alert">
             <span>{{ loadFailed(e) }}</span>
-            <button type="button" class="pd-btn" (click)="store.load()">{{ t.retry }}</button>
+            <button matButton="outlined" type="button" (click)="store.load()">{{ t.retry }}</button>
           </div>
         } @else if (!store.isLoaded() && !store.overview()) {
           <p class="pd-muted" role="status">{{ t.loadingSettings }}</p>
@@ -142,7 +142,7 @@ interface LoadedPage {
         } @else if (loaded.error()) {
           <div class="pd-banner pd-err" role="alert">
             <span>{{ t.pageFailed }}</span>
-            <button type="button" class="pd-btn" (click)="loaded.reload()">{{ t.retry }}</button>
+            <button matButton="outlined" type="button" (click)="loaded.reload()">{{ t.retry }}</button>
           </div>
         } @else if (loaded.value(); as p) {
           <ng-container *ngComponentOutlet="p.component; injector: p.injector; environmentInjector: p.environment" />
@@ -151,18 +151,12 @@ interface LoadedPage {
         }
       </section>
     </div>
-
-    <div class="pd-foot">
-      <span class="pd-status" role="status" aria-live="polite">{{ store.notice() ?? '' }}</span>
-      <span class="pd-spacer"></span>
-      <button type="button" class="pd-btn" data-dialog-close (click)="close()">{{ t.close }}</button>
-    </div>
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); height: 100%; min-height: 0; container-type: inline-size; }
     .pd-top { display: flex; align-items: center; gap: var(--pd-space-3); flex-wrap: wrap; }
     .pd-search { flex: 1 1 12rem; min-width: 0; min-height: var(--pd-button-height); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-    .pd-advanced { display: inline-flex; align-items: center; gap: var(--pd-space-1); color: var(--pd-text-muted); white-space: nowrap; }
+    .pd-advanced { color: var(--pd-text-muted); white-space: nowrap; }
     .pd-banner { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; padding: var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text); }
     .pd-banner > span { flex: 1 1 12rem; min-width: 0; }
     .pd-banner.pd-warn { border-color: var(--pd-warning, var(--pd-border-control)); }
@@ -181,16 +175,13 @@ interface LoadedPage {
     .pd-item:focus-visible, .pd-btn:focus-visible, .pd-link:focus-visible, .pd-search:focus-visible { outline: 2px solid var(--pd-accent); outline-offset: 1px; }
     .pd-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--pd-accent); }
-    .pd-content { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--pd-space-4); padding-inline-end: var(--pd-space-1); }
+    .pd-content { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--pd-space-4); }
     .pd-content > * { flex: none; }
     .pd-muted { color: var(--pd-text-muted); }
     .pd-page-hit { margin: 0; }
     .pd-link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }
     .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-btn.pd-primary { background: var(--pd-accent); border-color: var(--pd-accent); color: var(--pd-on-accent); }
-    .pd-foot { display: flex; align-items: center; gap: var(--pd-space-2); padding-top: var(--pd-space-2); border-top: 1px solid var(--pd-hairline); }
-    .pd-status { min-width: 0; color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-spacer { flex: 1; }
     @container (max-width: 560px) {
       .pd-main { flex-direction: column; }
       .pd-nav { width: auto; max-height: 40%; border-inline-end: 0; border-bottom: 1px solid var(--pd-hairline); padding: 0 0 var(--pd-space-2); }
@@ -214,7 +205,7 @@ export class PdSettingsWindow implements DialogContent {
     loadingSettings: $localize`:@@pd.settings.loading:Loading settings…`,
     pageFailed: $localize`:@@pd.settings.page-failed:This page could not be opened.`,
     loading: $localize`:@@pd.settings.loading-page:Loading…`,
-    close: $localize`:@@pd.settings.close:Close`,
+    savedLive: $localize`:@@pd.settings.saved-live:Changes are saved as you make them.`,
   };
   protected readonly store = inject(SettingsStore);
   private readonly drafts = inject(SettingsDrafts);
@@ -346,6 +337,9 @@ export class PdSettingsWindow implements DialogContent {
   }
 
   protected close(): void {
-    this.ref?.close();
+    this.ref?.dismiss();
   }
+
+  /** The footer's status line: the last change's notice, else how saving works (the frame draws it beside Close; ADR 0026 §2). */
+  readonly dialogStatus = computed(() => this.store.notice() ?? this.t.savedLive);
 }

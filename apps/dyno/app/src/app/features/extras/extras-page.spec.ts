@@ -5,7 +5,6 @@ import type { MaintenanceSettings, SleepReport } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Chart } from '../../shared/chart';
-import { Dialogs } from '../../shared/dialog';
 import { provideIcons } from '../../shared/icons';
 import { ExtrasStore } from '../../state/extras.store';
 import { SettingsStore } from '../../state/settings.store';
@@ -269,68 +268,20 @@ describe('dy-extras-page', () => {
     const table = el.querySelector('table[aria-label="Large and duplicate files"]')!;
     expect(table.querySelectorAll('thead')).toHaveLength(1);
     expect([...table.querySelectorAll('tr.day strong')].map((s) => s.textContent)).toEqual(['Large files', '3 copies of site-redesign.psd', '2 copies of resnet50.onnx']);
-    expect(table.querySelectorAll('input[type="checkbox"]').length).toBe(8 + 5);
-    expect(el.querySelector('[aria-label="Selection"] .summary')!.textContent).toBe('3 files selected · 2.3 GB'.replace('2.3 GB', el.querySelector('[aria-label="Selection"] .summary')!.textContent!.split('· ')[1]!));
+    expect(table.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(table.querySelectorAll('tbody tr:not(.day)')).toHaveLength(8 + 5);
     expect(el.textContent).toContain('Copies are listed oldest first.');
     expect(btn(el, 'Choose another folder')).toBeTruthy();
   });
 
-  it('Files: keeps one copy, confirms with the count and bytes, removes and searches again', async () => {
-    const { f, el, mock } = render('files');
-    await settle(f);
-    btn(el, 'Choose a folder').click();
-    await settle(f);
-    const box = (name: string) => el.querySelector<HTMLInputElement>(`input[aria-label="Select ${name}"]`)!;
-    // selecting the oldest copy too would take every copy of the group
-    const oldest = el.querySelector<HTMLInputElement>('input[aria-label="Select site-redesign.psd"]')!;
-    const all = [...el.querySelectorAll<HTMLInputElement>('input[aria-label="Select site-redesign.psd"], input[aria-label="Select site-redesign (1).psd"]')];
-    expect(all).toHaveLength(3);
-    expect(oldest.checked).toBe(false);
-    const unchecked = all.find((c) => !c.checked)!;
-    unchecked.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')!.textContent).toContain('Keep at least one copy of each group');
-    expect(btn(el, 'Move to Trash').disabled).toBe(true);
-    unchecked.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')).toBeNull();
-    box('brand-video-final.mov').click();
-    await settle(f);
-    const spy = vi.spyOn(mock, 'removeFoundFiles');
-    const dialogs = TestBed.inject(Dialogs);
-    const open = vi.spyOn(dialogs, 'open');
-    btn(el, 'Quarantine').click();
-    await settle(f);
-    const data = open.mock.calls[0]![1] as { count: number; bytes: number; mode: string; rows: { name: string }[] };
-    expect(data).toMatchObject({ count: 4, mode: 'quarantine' });
-    expect(data.rows.map((r) => r.name)).toEqual(['Duplicate copies', 'Large files']);
-    expect(document.querySelector('.dy-dialog-panel')!.textContent).toContain('4 items');
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent!.includes('Move to quarantine'))!.click();
-    await settle(f);
-    expect(spy).toHaveBeenCalledWith('scan-1', expect.arrayContaining(['l1', 'd1b']), 'quarantine');
-    expect(el.querySelectorAll('input[aria-label="Select brand-video-final.mov"]')).toHaveLength(0);
-  });
-
-  it('Files: cancelling the confirmation moves nothing; filters, collapse, clear and the empty result work', async () => {
+  it('Files: filters, collapse and the empty result work', async () => {
     const { f, el, mock, store } = render('files');
     await settle(f);
     btn(el, 'Choose a folder').click();
     await settle(f);
-    const spy = vi.spyOn(mock, 'removeFoundFiles');
-    btn(el, 'Move to Trash').click();
-    await settle(f);
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent === 'Cancel')!.click();
-    await settle(f);
-    expect(spy).not.toHaveBeenCalled();
-    btn(el, 'Clear').click();
-    await settle(f);
-    expect(btn(el, 'Move to Trash').disabled).toBe(true);
-    btn(el, 'Reselect copies').click();
-    await settle(f);
-    expect(store.selected()).toHaveLength(3);
     (el.querySelector('[aria-label="Collapse Large files"]') as HTMLElement).click();
     await settle(f);
-    expect(el.querySelectorAll('table[aria-label="Large and duplicate files"] tbody input').length).toBe(5);
+    expect(el.querySelectorAll('table[aria-label="Large and duplicate files"] tbody tr:not(.day)').length).toBe(5);
     btn(el, 'Duplicates').click();
     await settle(f);
     expect(store.mode()).toBe('duplicates');
@@ -349,19 +300,6 @@ describe('dy-extras-page', () => {
     await store.search();
     await settle(f);
     expect(el.querySelector('[role="alert"]')!.textContent).toContain('Choose a folder with a full path.');
-  });
-
-  it('Files: the engine refusal to remove is shown next to the list', async () => {
-    const { f, el, mock } = render('files');
-    await settle(f);
-    btn(el, 'Choose a folder').click();
-    await settle(f);
-    vi.spyOn(mock, 'removeFoundFiles').mockRejectedValue({ code: 'badRequest', message: 'This search is too old.' });
-    btn(el, 'Move to Trash').click();
-    await settle(f);
-    [...document.querySelectorAll<HTMLButtonElement>('.dy-dialog-panel button')].find((b) => b.textContent!.includes('Move to Recycle Bin'))!.click();
-    await settle(f);
-    expect(el.querySelector('p.note.bad')!.textContent).toContain('This search is too old.');
   });
 
   describe('Maintenance', () => {

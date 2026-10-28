@@ -1,19 +1,14 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
-/** A decision: modal, fitted to its content, Cancel and one way forward. */
+/** A decision: modal, fitted to its content, Cancel and one destructive way forward (ADR 0026 §2: declared actions). */
 @Component({
   selector: 'sd-confirm-reset-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <p class="text">The greeting count goes back to zero. This cannot be undone.</p>
-    <div class="actions">
-      <button type="button" class="btn" data-dialog-close (click)="ref.close()">Cancel</button>
-      <button type="button" class="btn primary" data-default (click)="ref.close(true)">Reset</button>
-    </div>
-  `,
+  template: `<p class="text">The count goes back to zero and the log is emptied. This cannot be undone.</p>`,
   styleUrl: './dialog-content.css',
 })
-export class ConfirmResetDialog {
-  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
+export class ConfirmResetDialog implements DialogContent<boolean> {
+  readonly dialogHeading = signal('Reset the greetings?');
+  readonly dialogActions = signal<readonly DialogAction<boolean>[]>([{ kind: 'answer', id: 'reset', label: 'Reset greetings', role: 'destructive', answer: () => true }]);
 }

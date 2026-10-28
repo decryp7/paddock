@@ -1,17 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 //! The `dyno` command against a real agent over the fake platform: a real IPC connection and discovery file in a
-//! temp folder. Nothing here touches the machine: the processes acted on are the fake platform's.
+//! temp folder. Nothing here touches the machine: the processes are the fake platform's.
 
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_cli::{run, Env};
-use dyno_core::process::ProcessAction;
 use dyno_platform::fake::{process, Fake};
 
 struct Harness {
     running: Option<Running>,
-    fake: Fake,
     dirs: Dirs,
     env: Env,
     _tmp: tempfile::TempDir,
@@ -31,7 +29,6 @@ impl Harness {
         };
         Harness {
             running: Some(running),
-            fake,
             dirs,
             env,
             _tmp: tmp,
@@ -150,9 +147,8 @@ fn an_agent_of_another_protocol_is_refused_with_a_message_and_no_request_is_sent
     assert_eq!(code, 3);
     assert!(out.is_empty());
     assert!(err.contains("newer protocol") && err.contains("Update the dyno command"), "{err}");
-    let (code, _, _) = h.dyno("end 100 --yes");
+    let (code, _, _) = h.dyno("top");
     assert_eq!(code, 3);
-    assert!(h.fake.actions().is_empty());
 }
 
 #[test]
@@ -190,7 +186,7 @@ fn usage_help_and_version_work_without_an_agent() {
     };
     let (code, out, _) = dyno_in(&env, "--help");
     assert_eq!(code, 0);
-    assert!(out.contains("nothing happens without --yes"));
+    assert!(out.contains("no command changes anything"));
     assert!(dyno_in(&env, "--version").1.starts_with("dyno "));
     let (code, _, err) = dyno_in(&env, "frobnicate");
     assert_eq!(code, 2);
@@ -198,59 +194,14 @@ fn usage_help_and_version_work_without_an_agent() {
 }
 
 #[test]
-fn acting_commands_do_nothing_without_yes_even_with_no_agent_running() {
+fn commands_that_used_to_change_something_are_gone() {
     let tmp = tempfile::tempdir().unwrap();
     let env = Env {
         data_dir: tmp.path().to_path_buf(),
     };
-    for cmd in ["end 100", "cap 100 25", "undo abc"] {
-        let (code, out, err) = dyno_in(&env, cmd);
+    for cmd in ["end 100 --yes", "cap 100 25 --yes", "undo abc --yes", "status --yes"] {
+        let (code, out, _) = dyno_in(&env, cmd);
         assert_eq!(code, 2, "{cmd}");
         assert!(out.is_empty());
-        assert!(err.contains("Nothing was changed") && err.contains("--yes"), "{err}");
     }
-    let h = Harness::start();
-    let (code, _, err) = h.dyno("end 100");
-    assert_eq!(code, 2);
-    assert!(err.contains("process id 100"));
-    assert!(h.fake.actions().is_empty());
-}
-
-#[test]
-fn end_and_cap_go_through_the_agents_rules_and_cap_can_be_undone() {
-    let h = Harness::start();
-    // The protected list applies exactly as for a click.
-    let (code, _, err) = h.dyno("end 102 --yes");
-    assert_eq!(code, 1);
-    assert!(!err.is_empty());
-    assert!(h.fake.actions().is_empty(), "a protected process is never touched");
-    // A process that is not there.
-    let (code, _, err) = h.dyno("end 9999 --yes");
-    assert_eq!(code, 1);
-    assert!(err.contains("No process with id 9999"));
-    // A cap, then its undo through the activity log.
-    let (code, out, err) = h.dyno("cap 100 25 --yes");
-    assert_eq!(code, 0, "{err}");
-    assert!(out.contains("Capped") && out.contains("dyno undo"), "{out}");
-    assert_eq!(h.fake.actions().last().unwrap().1, ProcessAction::SetCpuCap(Some(25)));
-    let id = out
-        .split("dyno undo ")
-        .nth(1)
-        .unwrap()
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .to_string();
-    let (code, out, err) = h.dyno(&format!("undo {id} --yes"));
-    assert_eq!(code, 0, "{err}");
-    assert!(!out.is_empty());
-    assert_eq!(h.fake.actions().last().unwrap().1, ProcessAction::SetCpuCap(None));
-    let (code, _, err) = h.dyno("undo nosuchid --yes");
-    assert_eq!(code, 1);
-    assert!(!err.is_empty());
-    // End.
-    let (code, out, _) = h.dyno("end 101 --yes");
-    assert_eq!(code, 0);
-    assert!(out.contains("Ended"), "{out}");
-    assert_eq!(h.fake.actions().last().unwrap().1, ProcessAction::End);
 }

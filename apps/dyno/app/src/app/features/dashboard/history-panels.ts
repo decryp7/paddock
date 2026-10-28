@@ -1,3 +1,4 @@
+import { barValue, showMeasured } from '../../core/measured';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import type { HistoryRange, TimelineEventKind } from '../../core/api.types';
 import { ThemeService } from '../../core/theme';
@@ -50,7 +51,7 @@ const GLYPH: Record<string, string> = { triangle: '▲', rect: '■', circle: '�
               {{ label(e.kind) }} <span class="n num">{{ e.count }}</span>
             </button>
           } @empty {
-            <span class="faint">No rule actions, cleanups or alerts in this range.</span>
+            <span class="faint">No alerts, restarts or network changes in this range.</span>
           }
         </div>
       </dy-async>
@@ -184,7 +185,7 @@ export class DiskTrendPanel implements OnInit {
       @if (view() === 'now') {
         <ol class="now" aria-label="Busiest apps right now">
           @for (g of now(); track g.id) {
-            <li><span class="truncate">{{ g.name }}</span><span class="bar" role="presentation"><i [style.width.%]="g.cpu"></i></span><span class="num">{{ pct(g.cpu) }}</span></li>
+            <li><span class="truncate">{{ g.name }}</span><span class="bar" role="presentation"><i [style.width.%]="bar(g.cpu)"></i></span><span class="num">{{ show(g.cpu, pct) }}</span></li>
           } @empty {
             <li class="faint">Waiting for the first reading…</li>
           }
@@ -220,6 +221,8 @@ export class ConsumersPanel implements OnInit {
   private readonly live = inject(LiveStore);
   protected readonly now = computed(() => (this.live.update()?.topCpu ?? []).slice(0, 6));
   protected readonly pct = formatPercent;
+  protected readonly show = showMeasured;
+  protected readonly bar = barValue;
 
   ngOnInit(): void {
     void this.store.ensure();

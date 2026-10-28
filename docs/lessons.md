@@ -585,3 +585,38 @@ interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kil
 helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
 (nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
 Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
+
+## 2026-10-28: Chromium tests that compared a loaded machine with a wall-clock budget
+
+Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
+
+## Unrecorded benchmark conditions made 182k and 1.3M events/s look like a contradiction (2026-10-29)
+Two quoted ingest numbers, about 182k and 1.3M events/s, were argued over as if one was wrong. Neither came with machine,
+load, build profile, corpus or command, so nobody could tell whether they differed by a release build, a quiet machine, a
+different corpus or a real regression, and stale figures kept being quoted from ADRs and old job logs. **Rule:** record
+every benchmark you quote as a results block (date, commit, machine, load, build, corpus and generator, exact command,
+runs, numbers with budget and verdict, physical-footprint memory) in the owning `docs/performance.md` or
+`docs/benchmarks.md`, and link it from wherever the number is quoted; a number without a block is not evidence (rule 48).
+
+## A sticky header needs a z-index above everything that scrolls under it (2026-10-28, all apps)
+"The cell covers the header when scrolling": a `position: sticky` header with `z-index: auto` paints in tree order with the
+rows, so a later cell that is positioned or makes a stacking context (opacity on muted rows or hover actions, a relative
+badge, a transform) paints over it, and a sticky column at the header's own z-index wins the tie. Fourteen tables in three
+apps and the shared shell had it (ADR 0027 lists them); none showed with the mock data, so a run-time sweep alone would not have found them.
+**Rule:** every sticky header sets a z-index from the table ladder (`--pd-z-table-header` above sticky columns above row
+actions) and an opaque background; C43 checks every instance and `expectHeaderOnTop` checks a grid at run time (ADR 0027,
+rule 40).
+
+## 2026-10-29: a harness that stands in for a plugin must stand in for its routing and its ACL
+
+The ADR 0026 real-window probe ended "no report within 90s: the dialog page never became ready" on macOS, and it looked like
+a product fault (a hidden window that never readies). It was the harness: the page sends the shell's commands as
+`plugin:paddock-shell|dialog_take_input`, but the probe registered them as bare app commands and had no ACL, so Tauri
+refused every call ("paddock-shell.window_pong not allowed. Plugin not found") before the probe's handler saw it. The page
+booted fine (the DOM was there, and the ready of ADR 0026 §4.2 took about 10 ms once the calls arrived). "Refused" was told
+from "never made" only by silence in the probe's own log, and confirmed by calling a command from the webview by hand; the
+probe could not tell them apart. **Rule (guidance):** a probe or test that replaces the app's plugin registers a plugin of
+the same name and an ACL resolved from the app's real capability file, so a wrong capability fails it; it prints every call
+it receives, with its time, and the calls seen when it gives up. A refusal itself shows only in the webview console or as a
+`RuntimeAuthority` check, so a harness that needs to name it asks the authority, not the log. C48 checks the capability file
+of every app on the shared shell.

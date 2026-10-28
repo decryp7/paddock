@@ -111,6 +111,23 @@ const OWNERS = [
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
 ];
 
+/** An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads (the app itself is marked as their owner). */
+export const APP_CAPABILITY_INPUT = /^apps\/[^/]+\/(app\/)?src-tauri\/(Cargo\.toml|capabilities\/)/;
+
+/** Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui, `.ts` or `.json`). */
+export const GENERATED = /^ui\/.*\/generated\/[^/]+\.(ts|json)$/;
+
+/** The crate folders whose Rust sources name the generated file `f` (`generated/<name>`), for the crates' own tests. */
+export function crateDirsNaming(f, cargo) {
+  let hits = [];
+  try {
+    hits = git(['grep', '-l', '-F', `generated/${posix.basename(f)}`, '--', 'crates/**/*.rs'], ROOT).split('\n').filter(Boolean);
+  } catch {
+    // git grep exits 1 when nothing matches.
+  }
+  return [...new Set(hits.map((h) => nodeOf(h, cargo.keys())).filter((d) => d && cargo.get(d).workspace === 'crates'))];
+}
+
 /** The projects that own a path before dependencies, or null for an unknown root file. */
 export function owners(path) {
   const m = /^apps\/([^/]+)\//.exec(path);
@@ -329,6 +346,13 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     for (const p of own) kind(p, half);
     // A change to a shared workspace's own config (crates/Cargo.toml, crates/.config/...) reaches all its members.
     if (!c && own.includes('crates')) for (const [d, x] of cargo) if (x.workspace === 'crates') changedCrates.add(d);
+    // A generated TypeScript or JSON file under ui/ is compared with its Rust source by a crate's test (PADDOCK_WRITE_TS):
+    // a stale one must fail on the branch, so the crates that name the file are tested (all crates when none does).
+    if (GENERATED.test(f)) {
+      mark('crates', `generated file ${f}`);
+      const owners_ = crateDirsNaming(f, cargo);
+      for (const d of owners_.length ? owners_ : [...cargo].filter(([, x]) => x.workspace === 'crates').map(([d]) => d)) changedCrates.add(d);
+    }
     // ui/ is one Angular workspace: a change anywhere in it can change every output built from it.
     if (own.includes('ui') && f.startsWith('ui/')) changedPkgs.add('ui');
     // An app's icons (icons/<app>/) are checked by its release facts; the pipeline (icons/tools/) feeds every app.
@@ -340,6 +364,9 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
         kind(`app:${a}`, 'rust');
       }
     }
+    // An app's Cargo dependencies and capabilities are read by conformance C48 (a shell app grants its dialog windows the
+    // shell's dialog set), which runs in the conformance job.
+    if (APP_CAPABILITY_INPUT.test(f)) mark('conformance', `C48 reads ${f}`);
     // The shared actions' scripts in conformance/ run in every app's gates.
     if (f.startsWith('conformance/') && !/^conformance\/(test|fixtures)\//.test(f)) {
       for (const a of apps.keys()) {

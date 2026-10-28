@@ -1,18 +1,16 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! The extras (WP-13), backup health (WP-14) and taming proof (WP-36) end to end over the fake platform: scripted tools
+//! The extras (WP-13), backup health (WP-14) end to end over the fake platform: scripted tools
 //! (no real `tmutil`, `pmset` or `restic` is run), a real IPC connection and a SQLite file in a temp folder.
 
 use dyno_agent::cli::{ask, ask_within, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::backup::{BackupState, BackupTool};
-use dyno_core::cleanup::DeleteMode;
 use dyno_core::extras::changes::{ChangeKind, ChangesQuery};
 use dyno_core::extras::files::{FinderMode, FinderQuery};
 use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
-use dyno_core::rules::{Command, RuleSet};
 use dyno_core::time::{Timestamp, HOUR};
 use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
@@ -192,7 +190,7 @@ fn write(dir: &std::path::Path, name: &str, byte: u8, len: usize) -> std::path::
 }
 
 #[test]
-fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
+fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
     let h = Harness::start();
     let peer = h.client();
     let t = tempfile::tempdir().unwrap();
@@ -211,52 +209,12 @@ fn the_finder_lists_removes_to_the_quarantine_and_never_removes_every_copy() {
     };
     assert_eq!(r.large[0].bytes, 4 * MB as u64);
     assert_eq!(r.duplicates.len(), 1);
-    let ids: Vec<String> = r.duplicates[0].files.iter().map(|f| f.id.clone()).collect();
-
-    // Removing both copies is refused as a whole; nothing moves.
-    let both = Request::RemoveFoundFiles {
-        scan_id: r.scan_id.clone(),
-        ids: ids.clone(),
-        mode: DeleteMode::Quarantine,
-    };
-    let err = ask(&peer, both).unwrap_err();
-    assert!(err.contains("every copy"), "{err}");
-    assert!(a.exists() && b.exists());
-
-    // An unknown result is refused.
-    assert!(ask(
-        &peer,
-        Request::RemoveFoundFiles {
-            scan_id: "nope".into(),
-            ids: ids.clone(),
-            mode: DeleteMode::Quarantine
-        }
-    )
-    .is_err());
-
-    // One copy goes to the quarantine, is logged, and can be put back from Activity's quarantine.
-    let one = Request::RemoveFoundFiles {
-        scan_id: r.scan_id.clone(),
-        ids: vec![ids[1].clone()],
-        mode: DeleteMode::Quarantine,
-    };
-    let Reply::Outcome(o) = ask(&peer, one).unwrap() else {
-        panic!("outcome")
-    };
-    assert_eq!(o.deleted, 1, "{:?}", o.failed);
-    let q = o.quarantine_id.unwrap();
-    let remaining = [&a, &b].iter().filter(|p| p.exists()).count();
-    assert_eq!(remaining, 1);
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    assert!(log.iter().any(|e| e.title.starts_with("Removed 1 file")), "{log:?}");
-    assert!(ask(&peer, Request::RestoreQuarantine { id: q }).is_ok());
-    assert!(a.exists() && b.exists());
+    assert_eq!(r.duplicates[0].files.len(), 2);
+    assert!(a.exists() && b.exists(), "finding moves nothing");
 }
 
 #[test]
-fn the_finder_refuses_a_folder_that_is_not_there_and_stale_selections() {
+fn the_finder_refuses_a_folder_that_is_not_there() {
     let h = Harness::start();
     let peer = h.client();
     let missing = std::env::temp_dir().join("dyno-definitely-not-here");
@@ -268,15 +226,6 @@ fn the_finder_refuses_a_folder_that_is_not_there_and_stale_selections() {
     assert!(ask(&peer, Request::FindFiles { query: q })
         .unwrap_err()
         .contains("cannot be opened"));
-    assert!(ask(
-        &peer,
-        Request::RemoveFoundFiles {
-            scan_id: "x".into(),
-            ids: vec![],
-            mode: DeleteMode::RecycleBin
-        }
-    )
-    .is_err());
 }
 
 fn backup_report(peer: &Peer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
@@ -416,66 +365,6 @@ fn maintenance_windows_are_validated_and_reported() {
         dirs: vec!["relative".into()],
     }];
     assert!(ask(&peer, Request::SaveSettings { settings }).unwrap_err().contains("restic"));
-}
-
-#[test]
-fn a_temporary_rule_switches_itself_off_and_says_so() {
-    let h = Harness::start();
-    let peer = h.client();
-    let Reply::Rules(mut set) = ask(&peer, Request::Rules).unwrap() else {
-        panic!("rules")
-    };
-    let r = &mut set.rules[0];
-    r.enabled = true;
-    r.expires_at = Some(real_now().minus(1000));
-    let id = r.id.clone();
-    let set: RuleSet = *set;
-    ask(&peer, Request::SaveRules { rules: set }).unwrap();
-    let mut gone = false;
-    for _ in 0..100 {
-        let Reply::Rules(now_set) = ask(&peer, Request::Rules).unwrap() else {
-            panic!("rules")
-        };
-        let rule = now_set.rules.iter().find(|r| r.id == id).unwrap();
-        if !rule.enabled && rule.expires_at.is_none() {
-            gone = true;
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert!(gone, "the expired rule is switched off");
-    let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    assert!(
-        log.iter().any(|e| e.title.contains("temporary rule") && e.title.contains("ended")),
-        "{log:?}"
-    );
-}
-
-#[test]
-fn a_measured_effect_is_written_to_the_activity_log() {
-    let h = Harness::start();
-    let s = h.shared();
-    dyno_agent::sampler::apply_commands(
-        &s,
-        vec![Command::Measured {
-            rule_id: "r".into(),
-            rule_name: "Calm builds".into(),
-            app: "Chrome".into(),
-            before: 78.0,
-            after: 31.0,
-            after_secs: 21,
-            description: "lowered its priority".into(),
-        }],
-        real_now(),
-    );
-    let Reply::Activities(log) = ask(&h.client(), Request::Activity { limit: 20 }).unwrap() else {
-        panic!("activity")
-    };
-    let e = log.iter().find(|e| e.title.starts_with("Measured")).unwrap();
-    assert_eq!(e.title, "Measured: Chrome used 78% CPU before and 31% after 21 s");
-    assert!(e.detail.contains("It helped"));
 }
 
 #[test]

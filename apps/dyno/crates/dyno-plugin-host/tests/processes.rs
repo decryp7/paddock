@@ -2,7 +2,6 @@
 //! Every process is one of ours and is stopped when the host drops; the temporary folders are removed.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use dyno_plugin_api::{RuleEvent, ScanLimits};
 use dyno_plugin_host::{ErrorKind, HostConfig, PluginHost, PluginState, Policy, Timeouts};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -13,7 +12,7 @@ fn add_plugin(root: &Path, id: &str) {
     let exe = if cfg!(windows) { "plugin.exe" } else { "plugin" };
     std::fs::copy(env!("CARGO_BIN_EXE_dyno-test-plugin"), dir.join(exe)).unwrap();
     let toml = format!(
-        "id = \"{id}\"\nname = \"Test {id}\"\nversion = \"0.0.1\"\napi_version = 1\nexecutable = \"plugin\"\ncontributes = [\"sensors\", \"cleanup\", \"actions\"]\n"
+        "id = \"{id}\"\nname = \"Test {id}\"\nversion = \"0.0.1\"\napi_version = 1\nexecutable = \"plugin\"\ncontributes = [\"sensors\"]\n"
     );
     std::fs::write(dir.join("plugin.toml"), toml).unwrap();
 }
@@ -62,34 +61,6 @@ fn a_good_plugin_answers_everything_and_stops_cleanly() {
         pid > 0.0 && pid != f64::from(std::process::id()),
         "the plugin runs in its own process"
     );
-    assert_eq!(host.cleanup_categories()[0].result.as_ref().unwrap()[0].id, "tmp");
-    let found = host.scan("ok", "tmp", ScanLimits::default()).unwrap();
-    assert_eq!(found.len(), 1, "the relative path is dropped");
-    assert!(found[0].path.ends_with("a.tmp"));
-    // The plugin's own error is not a failure.
-    let missing = host
-        .scan(
-            "ok",
-            "tmp",
-            ScanLimits {
-                max_depth: 0,
-                ..ScanLimits::default()
-            },
-        )
-        .unwrap_err();
-    assert_eq!(missing.kind, ErrorKind::Failed);
-    assert_eq!(
-        host.scan("ok", "nope", ScanLimits::default()).unwrap_err().kind,
-        ErrorKind::NotFound
-    );
-    let event = RuleEvent {
-        rule: "r".into(),
-        app: "chrome".into(),
-        cpu: 95.0,
-        at: 1,
-    };
-    assert_eq!(host.run_action("ok", "echo", event).unwrap(), "chrome at 95%");
-    assert_eq!(host.actions()[0].result.as_ref().unwrap()[0].id, "echo");
     assert_eq!(state(&host, "ok"), PluginState::Running);
     host.stop_all();
     assert_eq!(state(&host, "ok"), PluginState::Stopped);

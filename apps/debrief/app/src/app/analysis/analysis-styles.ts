@@ -16,7 +16,7 @@ export const ANALYSIS_STYLES = `
   .link:hover { text-decoration: underline; }
   table.grid { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
   table.grid th, table.grid td { padding: 4px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
-  table.grid th { position: sticky; top: 0; background: var(--bg-2); color: var(--muted); font-weight: 600; z-index: 1; }
+  table.grid th { position: sticky; top: 0; background: var(--bg-2); color: var(--muted); font-weight: 600; z-index: 3; }
   table.grid th button { all: unset; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; color: inherit; font-weight: inherit; }
   table.grid th button:focus-visible { outline: 2px solid var(--focus-ring); }
   table.grid td.num, table.grid th.num { text-align: right; }

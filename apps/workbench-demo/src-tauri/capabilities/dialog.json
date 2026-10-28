@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "workbench-dialog",
-  "description": "Dialog windows (d-<host>-<n>): the shell's and the workbench's dialog sets; the guard narrows each dialog to its contract (dialog-contracts.json).",
+  "description": "Dialog windows (d-<host>-<n>): the shell's and the workbench's dialog sets; the guard narrows each dialog to its contract (the Rust dialog tables, ADR 0026).",
   "windows": ["d-*"],
   "permissions": ["core:event:default", "paddock-shell:dialog", "paddock-workbench:dialog"]
 }

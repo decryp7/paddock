@@ -1,5 +1,5 @@
 import { DIALOG_EVENTS, type DialogInfo, type DialogRemembered, type DialogRequest, type DialogStart } from '@decryp7/paddock-ui/shell';
-import type { DialogIo, Unlisten } from '@decryp7/paddock-ui/shell/dialogs';
+import type { DialogIo, DialogMeasure, Unlisten } from '@decryp7/paddock-ui/shell/dialogs';
 
 /** A scripted `DialogIo` for specs: records every call and plays the dialog layer's events. */
 export class FakeDialogIo implements DialogIo {
@@ -9,10 +9,20 @@ export class FakeDialogIo implements DialogIo {
   readonly closedWith: unknown[] = [];
   /** The titles the dialog set at run time, in order. */
   readonly titles: string[] = [];
-  /** The heights the dialog asked its window to fit. */
+  /** The heights the dialog asked its window to fit (the ready handshake's first), in order. */
   readonly fitted: number[] = [];
+  /** The ready handshake's measure (`null` until the frame sent it). */
+  readied: DialogMeasure | null = null;
+  /** Every measure sent (ready, then each fit), with its minimum content. */
+  readonly measures: DialogMeasure[] = [];
+  /**
+   * When true, `ready` never settles: the window system has not answered, as when the webview is paused, so a spec can
+   * drive the show deadline (ADR 0026 §4.3).
+   */
+  withholdReady = false;
   private readonly handlers = new Map<string, Set<(p: unknown) => void>>();
   private readonly labels = new Map<string, string>();
+  private readonly onScreen = new Set<string>();
   private next = 1;
   /** When set, `open` fails with it (the window system refused). */
   failOpen: Error | null = null;
@@ -26,7 +36,7 @@ export class FakeDialogIo implements DialogIo {
     const known = this.labels.get(key);
     const label = known ?? `d-main-${this.next++}`;
     this.labels.set(key, label);
-    return { label, dialogId: request.dialogId, existing: known !== undefined };
+    return { label, dialogId: request.dialogId, existing: known !== undefined, pending: !this.onScreen.has(label) };
   }
   async take(): Promise<DialogStart> {
     return this.start;
@@ -46,8 +56,15 @@ export class FakeDialogIo implements DialogIo {
   async setTitle(title: string): Promise<void> {
     this.titles.push(title);
   }
-  async fitHeight(px: number): Promise<void> {
-    this.fitted.push(px);
+  ready(measure: DialogMeasure): Promise<void> {
+    this.readied = measure;
+    this.measures.push(measure);
+    this.fitted.push(measure.content.height);
+    return this.withholdReady ? new Promise<void>(() => undefined) : Promise.resolve();
+  }
+  async fit(measure: DialogMeasure): Promise<void> {
+    this.measures.push(measure);
+    this.fitted.push(measure.content.height);
   }
 
   /** Plays an event of the dialog layer. */
@@ -61,7 +78,13 @@ export class FakeDialogIo implements DialogIo {
   /** The dialog window `label` is gone (and forgets its label, so opening it again opens a new one). */
   closed(label: string, dialogId: string, remembered: DialogRemembered | null = null): void {
     for (const [k, v] of this.labels) if (v === label) this.labels.delete(k);
+    this.onScreen.delete(label);
     this.emit(DIALOG_EVENTS.closed, { label, dialogId, remembered });
+  }
+  /** The window `label` of dialog `dialogId` was shown (the opener's scrim for a macOS parent starts here). */
+  shown(label: string, dialogId: string): void {
+    this.onScreen.add(label);
+    this.emit(DIALOG_EVENTS.shown, { label, dialogId });
   }
   /** A close request reached this dialog window (the OS close, or the opener's `close`). */
   closeRequested(): void {

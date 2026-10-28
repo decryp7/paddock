@@ -12,9 +12,7 @@ use crate::launcher::{Launcher, PluginConnection, ProcessLauncher};
 use crate::supervision::{Supervision, Verdict};
 use dyno_ipc::IpcError;
 use dyno_plugin_api::protocol::codes;
-use dyno_plugin_api::{
-    ActionInfo, Candidate, CategoryInfo, Contribution, PluginReply, PluginRequest, RuleEvent, ScanLimits, SensorReading, API_VERSION,
-};
+use dyno_plugin_api::{Contribution, PluginReply, PluginRequest, SensorReading, API_VERSION};
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -201,65 +199,21 @@ impl PluginHost {
 
     /// Readings of every sensor plugin, asked in parallel. Non-finite values are dropped.
     pub fn sensors(&self) -> Vec<FromPlugin<Vec<SensorReading>>> {
-        self.gather(Contribution::Sensors, |e| {
-            match self.call(e, PluginRequest::Sensors, self.config.timeouts.sensors)? {
-                PluginReply::Sensors(mut s) => {
-                    s.retain(|r| r.value.is_finite());
-                    s.truncate(MAX_SENSORS);
-                    Ok(s)
-                }
-                other => Err(self.wrong_reply(e, &other)),
-            }
-        })
+        self.gather(Contribution::Sensors, |e| self.readings(e))
     }
 
-    /// The cleanup categories of every cleanup plugin.
-    pub fn cleanup_categories(&self) -> Vec<FromPlugin<Vec<CategoryInfo>>> {
-        self.gather(Contribution::Cleanup, |e| {
-            match self.call(e, PluginRequest::CleanupCategories, self.config.timeouts.describe)? {
-                PluginReply::Categories(c) => Ok(c),
-                other => Err(self.wrong_reply(e, &other)),
-            }
-        })
+    /// The readings of one plugin (the same call as [`PluginHost::sensors`], for the plugin `plugin` only).
+    pub fn sensors_of(&self, plugin: &str) -> Result<Vec<SensorReading>, HostError> {
+        self.readings(self.entry(plugin)?)
     }
 
-    /// The actions of every action plugin.
-    pub fn actions(&self) -> Vec<FromPlugin<Vec<ActionInfo>>> {
-        self.gather(Contribution::Actions, |e| {
-            match self.call(e, PluginRequest::Actions, self.config.timeouts.describe)? {
-                PluginReply::Actions(a) => Ok(a),
-                other => Err(self.wrong_reply(e, &other)),
+    fn readings(&self, e: &Entry) -> Result<Vec<SensorReading>, HostError> {
+        match self.call(e, PluginRequest::Sensors, self.config.timeouts.sensors)? {
+            PluginReply::Sensors(mut s) => {
+                s.retain(|r| r.value.is_finite());
+                s.truncate(MAX_SENSORS);
+                Ok(s)
             }
-        })
-    }
-
-    /// The candidates `plugin` proposes for `category`. Only absolute paths are kept, at most
-    /// `limits.max_candidates`; the caller still checks each against the cleanup safety policy.
-    pub fn scan(&self, plugin: &str, category: &str, limits: ScanLimits) -> Result<Vec<Candidate>, HostError> {
-        let e = self.entry(plugin)?;
-        let req = PluginRequest::Scan {
-            category: category.to_string(),
-            limits,
-        };
-        match self.call(e, req, self.config.timeouts.scan)? {
-            PluginReply::Candidates(mut c) => {
-                c.retain(|c| !c.path.contains('\0') && Path::new(&c.path).is_absolute());
-                c.truncate(usize::try_from(limits.max_candidates).unwrap_or(usize::MAX));
-                Ok(c)
-            }
-            other => Err(self.wrong_reply(e, &other)),
-        }
-    }
-
-    /// Runs `action` of `plugin` for `event`; the text is for the action log.
-    pub fn run_action(&self, plugin: &str, action: &str, event: RuleEvent) -> Result<String, HostError> {
-        let e = self.entry(plugin)?;
-        let req = PluginRequest::RunAction {
-            action: action.to_string(),
-            event,
-        };
-        match self.call(e, req, self.config.timeouts.action)? {
-            PluginReply::ActionDone(text) => Ok(text),
             other => Err(self.wrong_reply(e, &other)),
         }
     }
@@ -419,7 +373,6 @@ impl PluginHost {
             Err(IpcError::Remote(r)) if r.code != dyno_ipc::wire::codes::PANIC => {
                 let kind = match r.code.as_str() {
                     codes::UNSUPPORTED => ErrorKind::Unsupported,
-                    codes::NOT_FOUND => ErrorKind::NotFound,
                     _ => ErrorKind::Failed,
                 };
                 Err(HostError::new(&e.id, kind, r.message))
@@ -503,10 +456,6 @@ fn reply_name(r: &PluginReply) -> &'static str {
     match r {
         PluginReply::Manifest(_) => "a manifest",
         PluginReply::Sensors(_) => "sensor readings",
-        PluginReply::Categories(_) => "cleanup categories",
-        PluginReply::Candidates(_) => "cleanup candidates",
-        PluginReply::Actions(_) => "actions",
-        PluginReply::ActionDone(_) => "an action result",
     }
 }
 
@@ -516,7 +465,7 @@ mod tests {
     use crate::clock::ManualClock;
     use crate::config::Policy;
     use dyno_ipc::RemoteError;
-    use dyno_plugin_api::{Manifest, Risk};
+    use dyno_plugin_api::Manifest;
     use std::collections::VecDeque;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -534,9 +483,7 @@ mod tests {
         fn call(&self, req: PluginRequest, _: Duration) -> Result<PluginReply, IpcError> {
             match req {
                 PluginRequest::Describe => Ok(PluginReply::Manifest(
-                    Manifest::new(&self.id, "Fake", "2.0")
-                        .contributing(Contribution::Sensors)
-                        .contributing(Contribution::Cleanup),
+                    Manifest::new(&self.id, "Fake", "2.0").contributing(Contribution::Sensors),
                 )),
                 _ => self.script.lock().unwrap().pop_front().unwrap_or(Ok(PluginReply::Sensors(vec![]))),
             }
@@ -592,7 +539,7 @@ mod tests {
             id: "p".into(),
             name: "P".into(),
             version: "1".into(),
-            contributes: vec![Contribution::Sensors, Contribution::Cleanup],
+            contributes: vec![Contribution::Sensors],
             dir: PathBuf::from("/plugins/p"),
             executable: PathBuf::from("/plugins/p/p"),
         };
@@ -639,12 +586,8 @@ mod tests {
         assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
         assert!(host.start_all().is_empty());
         assert_eq!(launcher.launches.load(Ordering::SeqCst), 1, "a running plugin is not started twice");
-        assert!(host.actions().is_empty(), "it does not contribute actions");
-        assert_eq!(host.scan("nope", "c", ScanLimits::default()).unwrap_err().kind, ErrorKind::NotFound);
-        assert_eq!(
-            host.scan("broken", "c", ScanLimits::default()).unwrap_err().kind,
-            ErrorKind::Invalid
-        );
+        assert_eq!(host.sensors_of("nope").unwrap_err().kind, ErrorKind::NotFound);
+        assert_eq!(host.sensors_of("broken").unwrap_err().kind, ErrorKind::Invalid);
     }
 
     #[test]
@@ -658,7 +601,7 @@ mod tests {
         assert_eq!(launcher.killed.load(Ordering::SeqCst), 1);
         // Within the backoff the plugin is skipped, and a direct call says when it restarts.
         assert!(host.sensors().is_empty());
-        let wait = host.scan("p", "c", ScanLimits::default()).unwrap_err();
+        let wait = host.sensors_of("p").unwrap_err();
         assert_eq!(wait.kind, ErrorKind::NotRunning);
         assert!(wait.message.contains("restarting in 1 s"), "{}", wait.message);
         clock.advance(Duration::from_secs(1));
@@ -676,7 +619,7 @@ mod tests {
         assert_eq!(state(&host, "p").state, PluginState::Quarantined);
         clock.advance(Duration::from_secs(3600));
         assert!(host.sensors().is_empty(), "a quarantined plugin is not asked");
-        assert_eq!(host.scan("p", "c", ScanLimits::default()).unwrap_err().kind, ErrorKind::Quarantined);
+        assert_eq!(host.sensors_of("p").unwrap_err().kind, ErrorKind::Quarantined);
         host.unquarantine("p").unwrap();
         assert_eq!(state(&host, "p").state, PluginState::Running);
         assert!(state(&host, "p").error.is_none());
@@ -702,75 +645,21 @@ mod tests {
     #[test]
     fn typed_errors_are_not_failures_but_wrong_replies_are() {
         let (host, launcher, _) = setup(0);
-        push(&launcher, Err(IpcError::Remote(RemoteError::new(codes::FAILED, "folder missing"))));
-        let e = host.scan("p", "c", ScanLimits::default()).unwrap_err();
-        assert_eq!((e.kind, e.message.as_str()), (ErrorKind::Failed, "folder missing"));
-        push(&launcher, Err(IpcError::Remote(RemoteError::new(codes::NOT_FOUND, "no category"))));
-        assert_eq!(host.scan("p", "x", ScanLimits::default()).unwrap_err().kind, ErrorKind::NotFound);
-        push(&launcher, Err(IpcError::Remote(RemoteError::new(codes::UNSUPPORTED, "no actions"))));
-        assert_eq!(host.run_action("p", "a", event()).unwrap_err().kind, ErrorKind::Unsupported);
+        push(
+            &launcher,
+            Err(IpcError::Remote(RemoteError::new(codes::BAD_REQUEST, "odd request"))),
+        );
+        let e = host.sensors_of("p").unwrap_err();
+        assert_eq!((e.kind, e.message.as_str()), (ErrorKind::Failed, "odd request"));
+        push(&launcher, Err(IpcError::Remote(RemoteError::new(codes::UNSUPPORTED, "no sensors"))));
+        assert_eq!(host.sensors_of("p").unwrap_err().kind, ErrorKind::Unsupported);
         assert_eq!(state(&host, "p").state, PluginState::Running);
         // A reply of the wrong kind is a protocol failure: killed and counted.
-        push(&launcher, Ok(PluginReply::Actions(vec![])));
-        let e = host.scan("p", "c", ScanLimits::default()).unwrap_err();
+        push(&launcher, Ok(PluginReply::Manifest(Manifest::new("p", "P", "1"))));
+        let e = host.sensors_of("p").unwrap_err();
         assert_eq!(e.kind, ErrorKind::Protocol);
-        assert!(e.message.contains("actions"));
+        assert!(e.message.contains("manifest"));
         assert_eq!(state(&host, "p").state, PluginState::Failed);
-    }
-
-    fn event() -> RuleEvent {
-        RuleEvent {
-            rule: "r".into(),
-            app: "a".into(),
-            cpu: 1.0,
-            at: 0,
-        }
-    }
-
-    #[test]
-    fn candidates_are_bounded_and_must_be_absolute() {
-        let (host, launcher, _) = setup(0);
-        let abs = if cfg!(windows) { "C:\\tmp\\a.tmp" } else { "/tmp/a.tmp" };
-        let cand = |p: &str| Candidate {
-            path: p.into(),
-            bytes: 1,
-            modified_ms: 0,
-            reason: "old".into(),
-        };
-        push(
-            &launcher,
-            Ok(PluginReply::Candidates(vec![
-                cand(abs),
-                cand("relative.tmp"),
-                cand("/x\0y"),
-                cand(abs),
-                cand(abs),
-            ])),
-        );
-        let got = host
-            .scan(
-                "p",
-                "c",
-                ScanLimits {
-                    max_candidates: 2,
-                    max_depth: 1,
-                },
-            )
-            .unwrap();
-        assert_eq!(got.len(), 2);
-        assert!(got.iter().all(|c| c.path == abs));
-        push(
-            &launcher,
-            Ok(PluginReply::Categories(vec![CategoryInfo {
-                id: "c".into(),
-                name: "C".into(),
-                description: "d".into(),
-                risk: Risk::Safe,
-            }])),
-        );
-        assert_eq!(host.cleanup_categories()[0].result.as_ref().unwrap()[0].id, "c");
-        push(&launcher, Ok(PluginReply::ActionDone("done".into())));
-        assert_eq!(host.run_action("p", "a", event()).unwrap(), "done");
     }
 
     #[test]
@@ -791,7 +680,7 @@ mod tests {
         assert_eq!(launcher.killed.load(Ordering::SeqCst), 1);
         assert_eq!(state(&host, "p").state, PluginState::Stopped);
         assert!(host.sensors().is_empty());
-        assert_eq!(host.scan("p", "c", ScanLimits::default()).unwrap_err().kind, ErrorKind::NotRunning);
+        assert_eq!(host.sensors_of("p").unwrap_err().kind, ErrorKind::NotRunning);
         assert!(host.start_all().is_empty());
         assert_eq!(state(&host, "p").state, PluginState::Running);
         let _ = Policy::default();

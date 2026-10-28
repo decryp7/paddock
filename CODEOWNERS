@@ -35,6 +35,7 @@ dev\.cmd @decryp7
 ci-image/.* @decryp7
 scripts/.* @decryp7
 tools/.* @decryp7
+spikes/.* @decryp7
 renovate/.* @decryp7
 
 # Family docs and diagrams.

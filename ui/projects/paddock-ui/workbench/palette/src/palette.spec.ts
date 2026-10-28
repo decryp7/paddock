@@ -427,7 +427,7 @@ describe('PdCommandPalette', () => {
     symbols.calls[1]!.resolve([{ id: 'a', label: 'alpha', icon: 'wd:sym', detail: 'src/a.rs' }]);
     await settle(fixture);
     const option = element.querySelector<HTMLElement>('[role="option"]')!;
-    expect(option.querySelector('.pd-pal-detail [data-testid="path-text"]')?.getAttribute('title')).toBe('src/a.rs');
+    expect(option.querySelector('.pd-pal-detail [data-testid="path-text"]')?.getAttribute('data-full')).toBe('src/a.rs');
     option.dispatchEvent(new MouseEvent('mousemove'));
     store.setQuery('>export');
     await settle(fixture);

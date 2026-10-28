@@ -17,7 +17,6 @@ const ROOTS = ['projects/paddock-ui/shell', 'projects/paddock-ui/src/lib'];
 const UNSTYLED_ON_PURPOSE = new Set<string>([
   // Library classes styled by the global paddock-ui stylesheet (scss/_controls.scss), not by the component.
   'needs-ai.ts:pd-btn', 'needs-ai.ts:pd-btn--ghost',
-  'undo-toast.ts:pd-btn', 'undo-toast.ts:pd-btn--sm', 'undo-toast.ts:pd-btn--icon', 'undo-toast.ts:pd-btn--ghost',
   'activity-page.ts:pd-btn', 'activity-page.ts:pd-btn--sm',
   'setting-field.ts:pd-switch', 'settings-window.ts:pd-check',
   // Structural hooks (selectors in tests, grouping) with no rule of their own.
@@ -28,7 +27,7 @@ const UNSTYLED_ON_PURPOSE = new Set<string>([
   'frame.ts:pd-drawer-open', 'setting-field.ts:pd-edited', 'status-bar.ts:pd-compact', 'service-status.ts:pd-open', 'jobs-status.ts:pd-open',
   'job.ts:pd-job',
   // Block, slot and marker classes (the component's own name, a slot wrapper, an icon marker) styled by element selectors or none.
-  'dialog-host.ts:pd-in-page-dialog', 'settings-window.ts:pd-settings-window', 'setting-field.ts:pd-setting', 'card.ts:pd-hero',
+  'dialog-host.ts:pd-in-page-dialog', 'setting-field.ts:pd-badge', 'dialog-frame.ts:pd-dialog-frame', 'settings-window.ts:pd-settings-window', 'setting-field.ts:pd-setting', 'card.ts:pd-hero',
   'job.ts:pd-state--ok', 'job.ts:pd-state--bad', 'states.ts:pd-secondary', 'status-pill.ts:pd-label',
   // The "[class]" expressions build "pd-<name> pd-<name>--<variant>": the block class is a hook, the variants are selected.
   'metric.ts:pd-metric', 'skeleton.ts:pd-skeleton', 'status-pill.ts:pd-pill', 'tray-popover.ts:pd-tray',

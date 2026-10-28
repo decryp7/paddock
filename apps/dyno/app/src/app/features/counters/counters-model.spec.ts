@@ -61,7 +61,7 @@ describe('the chart', () => {
     from: 0,
     to: 60_000,
     series: units.map((unit, i) => ({ path: `\\O\\c${i}`, unit, points: [{ at: 1000, value: 1 }, { at: 2000, value: 2 }] })),
-    events: [{ at: 1500, kind: 'cleanup', label: 'Cleanup ran' }],
+    events: [{ at: 1500, kind: 'network', label: 'Joined Wi-Fi' }],
   });
 
   it('draws one axis per unit, two at most, and says what it left out', () => {
