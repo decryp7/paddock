@@ -19,7 +19,8 @@ describe('the graph of this tree', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates && !r.ui);
     // Debrief's store worker depends on paddock-proc by path (the macOS memory footprint), so the shared crates reach Debrief too.
-    assert.deepEqual(r.apps, ['debrief', 'shell-demo', 'workbench-demo']);
+    // Pitwall's app depends on paddock-jobs by path (its long operations run on the shared job registry, ADR 0024).
+    assert.deepEqual(r.apps, ['debrief', 'pitwall', 'shell-demo', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
