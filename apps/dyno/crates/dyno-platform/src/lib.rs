@@ -28,10 +28,10 @@ pub mod readability;
 pub mod runner;
 pub mod sensors;
 pub mod toolpath;
-pub mod volumes;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_proc;
+pub mod volumes;
 
 #[cfg(target_os = "linux")]
 #[allow(unsafe_code)]
