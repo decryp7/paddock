@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { shellPorts } from '@decryp7/paddock-ui/shell/testing';
 import { Router } from '@angular/router';
 import { WatchDetailPage } from './watch-detail-page';
-import { Confirm } from '../../shared/ui/confirm-dialog';
+import { Confirm } from '../../shared/ui/confirm';
 import { WatchesStore } from '../../state/watches.store';
 import type { WatchSummary } from '../../core/api.types';
 import { appProviders, byText, flush, makeMock, routeStub, settle, text } from '../../../testing/test-helpers';
@@ -342,7 +342,7 @@ describe('WatchDetailPage', () => {
     const ask = vi.spyOn(confirm, 'ask').mockResolvedValueOnce(false);
     await pick(f, 'More actions', 'Delete watch');
     await flush();
-    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ title: 'Delete "Acme Installer"?', danger: true, confirmLabel: 'Delete watch' }));
+    expect(ask).toHaveBeenCalledWith(expect.objectContaining({ heading: 'Delete "Acme Installer"?', confirm: { label: 'Delete watch', destructive: true } }));
     expect(backend.calls).not.toContain('deleteWatch');
     ask.mockResolvedValueOnce(true);
     await pick(f, 'More actions', 'Delete watch');

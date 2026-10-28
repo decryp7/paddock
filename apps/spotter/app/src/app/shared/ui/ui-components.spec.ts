@@ -5,7 +5,7 @@ import { provideIcons } from '../icons';
 import type { CommandError, WatchSummary } from '../../core/api.types';
 import { idle, type Loadable } from '../../state/loadable';
 import { byText, settle, text } from '../../../testing/test-helpers';
-import { Confirm } from './confirm-dialog';
+import { Confirm, deleteWatchPrompt } from './confirm';
 import { KindIcon } from './kind-icon';
 import { Panel } from './panel';
 import { WatchStatus } from './watch-status';
@@ -84,19 +84,21 @@ describe('KindIcon and WatchStatus', () => {
 });
 
 describe('Confirm', () => {
-  const data = { title: 'Delete it?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true };
+  const input = deleteWatchPrompt('Acme');
   beforeEach(() => TestBed.configureTestingModule({ providers: [...provideShellTesting()] }));
 
-  it('asks the shell for the sp.confirm decision dialog and resolves true when it is confirmed', async () => {
-    shellPorts().dialogAnswers.set('sp.confirm', true);
-    expect(await TestBed.inject(Confirm).ask(data)).toBe(true);
-    expect(shellPorts().dialogs).toEqual([{ id: 'sp.confirm', inputs: { title: 'Delete it?', message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true } }]);
+  it('asks the shell for the shared pd.confirm decision and resolves true when it is confirmed', async () => {
+    shellPorts().dialogAnswers.set('pd.confirm', true);
+    expect(await TestBed.inject(Confirm).ask(input)).toBe(true);
+    expect(shellPorts().dialogs).toEqual([
+      {
+        id: 'pd.confirm',
+        inputs: { heading: 'Delete "Acme"?', message: 'Spotter stops watching it and forgets its history. Downloaded files stay where they are.', confirm: { label: 'Delete watch', destructive: true } },
+      },
+    ]);
   });
 
-  it('resolves false when dismissed or declined, and defaults danger to false', async () => {
-    expect(await TestBed.inject(Confirm).ask({ ...data, danger: undefined })).toBe(false);
-    expect(shellPorts().dialogs[0]?.inputs).toMatchObject({ danger: false });
-    shellPorts().dialogAnswers.set('sp.confirm', false);
-    expect(await TestBed.inject(Confirm).ask(data)).toBe(false);
+  it('resolves false when dismissed', async () => {
+    expect(await TestBed.inject(Confirm).ask(input)).toBe(false);
   });
 });

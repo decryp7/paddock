@@ -48,7 +48,7 @@ test.describe('row menus, keyboard rows, sticky headers and charts', () => {
     await expect(menu.getByRole('menuitem')).toHaveText([/Open details/, /Check now/, /Open latest release/, /Mark as seen|Pause/, /Pause|Copy address/, /Copy address|Edit/, /Edit|Delete watch/, /Delete watch/].slice(0, await menu.getByRole('menuitem').count()));
     await menu.getByRole('menuitem', { name: 'Delete watch' }).click();
     // A decision dialog of the shell (an OS window in the app; in the page here).
-    const dialog = app.dialogs.inPage('Confirm');
+    const dialog = app.dialogs.inPage('Delete "Lumen CLI"?');
     await expect(dialog).toContainText('Delete "Lumen CLI"?');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(row).toBeVisible();

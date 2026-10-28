@@ -26,7 +26,7 @@ and `@decryp7/paddock-ui/shell`) provides the same parts once, as declared contr
   Install, a job with Cancel). The decisions are pure functions with tests; repairs never depend on the broken service.
 - **Notifications are the shell's.** `Notifier` posts through the shell's port; toasts, their store and the banner are gone.
   OS toasts for new releases (`notifier.rs`, `toast.rs`) are Spotter's domain and stay.
-- **Dialogs are OS windows.** The confirm dialog is the `sp.confirm` decision dialog; Settings is the shell's tool window
+- **Dialogs are OS windows.** The confirm dialog is the shared `pd.confirm` decision (ADR 0026); Settings is the shell's tool window
   with Spotter's page (the existing settings page) beside the shell's Appearance and Updates pages. The theme and the
   "check for updates" settings were removed from Spotter's own settings (no compatibility before the first release).
 - **Downloads are the shell's.** Release files, the automatic download action and the browser install use the app's one

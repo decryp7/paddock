@@ -8,6 +8,7 @@
 pub mod applog;
 pub mod commands;
 pub mod credentials;
+pub mod dialogs;
 pub mod dto;
 pub mod health;
 pub mod jobs;
@@ -34,8 +35,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=spotter-v";
 /// The feed the updater reads.
 pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/spotter-latest/latest.json";
-/// The generated dialog contracts and manifest, written by the UI's specs from its registry.
-pub const DIALOG_CONTRACTS: &str = include_str!("../../dialog-contracts.json");
 /// The manifest of the UI's contributions, compared by the tests.
 pub const MANIFEST: &str = include_str!("../../paddock-manifest.json");
 
@@ -154,7 +153,7 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>) -> Builder<R> {
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
         .downloader(downloader)
         .app_commands(&COMMANDS)
-        .dialog_contracts(DIALOG_CONTRACTS)
+        .dialogs(&[&dialogs::DIALOGS])
         .health(hub.services())
         .setup(move |app| {
             app.manage(ProxyChoice(proxy.clone()));

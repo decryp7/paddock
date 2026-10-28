@@ -9,65 +9,23 @@ import {
   definePage,
   defineSettingsPage,
   msg,
-  type,
   type ContributionBatch,
 } from '@decryp7/paddock-ui/shell';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
+import { defineConfirmDialog } from '@decryp7/paddock-ui/shell/confirm';
 import type { SpotterContext } from './context';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
 // The registration file of Spotter: static data and loaders only (lazy by construction). Its lints run in
 // contributions.spec.ts (`assertContributionsValid`, the manifest and the dialog contracts).
 
-/** What the confirm dialog is asked (the opener's inputs). */
-export interface ConfirmInput {
-  readonly title: string;
-  readonly message: string;
-  readonly confirmLabel: string;
-  readonly danger: boolean;
-}
-
-// TODO(ADR 0026 §7, Spotter row): `sp.confirm` and its confirm-dialog component become `pd.confirm` of the shared dialog API
-// (the two callers pass the same inputs); delete this definition and shell/confirm-dialog.ts then.
-/** A decision: modal, fitted to its content, Cancel and one way forward. Replaces the in-page confirm dialog. */
-export const CONFIRM_DIALOG = defineDialog({
-  id: 'sp.confirm',
-  kind: 'decision',
-  title: msg('sp.dialog.confirm', 'Confirm'),
-  width: 420,
-  result: type<boolean>(),
-  commands: [],
-  load: () => import('./confirm-dialog').then((m) => m.ConfirmDialog),
-});
-
-/** Commands Spotter's settings page calls (the dialog contract names exactly these, besides the shell's settings commands). */
-export const SETTINGS_PAGE_COMMANDS = [
-  'app_info',
-  'choose_folder',
-  'get_autostart',
-  'get_settings',
-  'install_renderer',
-  'mail_status',
-  'open',
-  'pause_notifications',
-  'renderer_status',
-  'save_settings',
-  'send_test_email',
-  'set_autostart',
-  'set_mail_password',
-] as const;
-
-// TODO(ADR 0026 §7): settings, About and Updates become the shared dialogs; the page below stays Spotter's section.
 /**
- * The Settings window: the shell's window as the app's own dialog, so its contract is in this registry. A tool: modeless,
- * large, remembers its size. Spotter's page is the one below; Appearance and Updates are the shell's.
+ * The Settings window: the shell's window as the app's own dialog, since its pages are the app's choice (the contract is
+ * in `src-tauri/src/dialogs.rs`). A tool: modeless, large, remembers its size. Spotter's page is the one below;
+ * Appearance and Updates are the shell's.
  */
-export const SETTINGS_DIALOG = defineDialog({
-  id: 'pd.settings',
-  kind: 'tool',
+export const SETTINGS_DIALOG = defineDialog(DIALOG_CONTRACTS['pd.settings'], {
   title: msg('pd.settings.title', 'Settings'),
-  width: 880,
-  height: 640,
-  commands: ['settings_overview', 'settings_reset', 'settings_set', ...SETTINGS_PAGE_COMMANDS],
   providers: () => import('./settings-window').then((m) => m.SETTINGS_WINDOW),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
@@ -85,6 +43,11 @@ export const SETTINGS_PAGES = [
 
 /** The shell's About, Updates and What's New; their windows boot Spotter's About providers. */
 export const ABOUT_DIALOGS = defineAboutDialogs({ providers: () => import('./about.providers').then((m) => m.ABOUT_PROVIDERS) });
+
+/** The shared confirmation (ADR 0026 §5): the watches page and the watch's page ask with it before deleting a watch. */
+export const CONFIRM_DIALOG = defineConfirmDialog({
+  load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
+});
 
 export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, ...ABOUT_DIALOGS] as const;
 
