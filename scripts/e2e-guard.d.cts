@@ -1,0 +1,11 @@
+export const REPO_ROOT: string;
+export const PORT_RANGE_START: number;
+export const PORT_SLOTS: number;
+export const REBUILD_HINT: string;
+export function reuseServer(env?: Readonly<Record<string, string | undefined>>): boolean;
+export function hashString(text: string): number;
+export function worktreePort(base: number, root?: string, env?: Readonly<Record<string, string | undefined>>): number;
+export function e2ePortFor(name: string, base: number, env?: Readonly<Record<string, string | undefined>>, root?: string): number;
+export function newestMtime(dir: string, keep?: (relativePath: string) => boolean): number;
+export function staleBuilds(uiRoot?: string, options?: { checkDist?: boolean }): string[];
+export function assertFreshBuilds(uiRoot?: string, options?: { checkDist?: boolean }, env?: Readonly<Record<string, string | undefined>>): void;

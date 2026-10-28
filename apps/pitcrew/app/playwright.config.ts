@@ -1,12 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
+import { e2ePortFor, reuseServer } from '../../../scripts/e2e-guard.cjs';
 
 /**
  * Browser end-to-end flows against `ng serve` with the mock backend (`npx playwright test`), and the documentation
  * screenshots (`SCREENSHOTS=1 npx playwright test --project=screenshots`, written to ../docs/screenshots).
  */
-const PORT = Number(process.env['PW_PORT'] ?? 4310);
+const PORT = e2ePortFor('PW_PORT', 4310);
 
 export default defineConfig({
+  // Fails fast when ui/dist or the generated css is older than its sources (scripts/e2e-guard.cjs).
+  globalSetup: '../../../scripts/e2e-guard-apps.cjs',
   testDir: './e2e',
   // Inside .angular/, which git ignores.
   outputDir: './.angular/playwright-results',
@@ -30,7 +33,7 @@ export default defineConfig({
   webServer: {
     command: `npx ng serve --port ${PORT}`,
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: true,
+    reuseExistingServer: reuseServer(),
     timeout: 180_000,
   },
 });

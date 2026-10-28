@@ -14,7 +14,7 @@ test('the preset: chromium and webkit, the port from the variable, no retries, t
   assert.equal(c.forbidOnly, false);
   assert.equal(c.workers, 1);
   assert.equal(c.use?.trace, 'retain-on-failure');
-  assert.deepEqual(c.webServer, { command: 'serve --port 4391', url: 'http://localhost:4391', reuseExistingServer: true, timeout: 180_000 });
+  assert.deepEqual(c.webServer, { command: 'serve --port 4391', url: 'http://localhost:4391', reuseExistingServer: false, timeout: 180_000 });
   assert.deepEqual(c.reporter, [['list']]);
 });
 
@@ -24,6 +24,13 @@ test('the port: a local default, a named variable, an error for a bad value and 
   assert.throws(() => paddockConfig({ ...base, env: { PW_PORT: 'nope' } }), /PW_PORT is not a port/);
   assert.throws(() => paddockConfig({ ...base, env: { CI: 'true' } }), /CI: set PW_PORT/);
   assert.equal(paddockConfig({ ...base, env: { CI: 'true', PW_PORT: '4400' } }).use?.baseURL, 'http://localhost:4400');
+});
+
+test('a running server is reused only on request with PW_REUSE_SERVER, never on CI', () => {
+  const reuse = (env: Record<string, string>) => (paddockConfig({ ...base, serve: () => 'serve', env: { PW_PORT: '4400', ...env } }).webServer as { reuseExistingServer: boolean }).reuseExistingServer;
+  assert.equal(reuse({}), false);
+  assert.equal(reuse({ PW_REUSE_SERVER: '1' }), true);
+  assert.equal(reuse({ PW_REUSE_SERVER: '1', CI: 'true' }), false);
 });
 
 test('on CI: test.only is refused and a server already on the port is not reused', () => {

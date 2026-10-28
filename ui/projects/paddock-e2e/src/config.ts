@@ -12,7 +12,7 @@ import { e2ePort } from './env.ts';
  * - The browser is Playwright's Chromium (Chrome for Testing), or the binary named in `CHROMIUM_TEST_PATH`; the installed
  *   Chrome is refused (rule 7, {@link assertChromeForTesting}).
  * - `retries: 0` (a flake is fixed, not retried, rule 5), traces kept on failure, one worker at a time, `test.only` refused on
- *   CI, and a running server is reused only locally (on CI a stale one on the port would be tested instead of the build).
+ *   CI, and a running server is reused only when `PW_REUSE_SERVER=1` is set (never on CI; a stale one on the port would be tested instead of the build).
  * - Sharding: run `playwright test --shard=i/n` with `PADDOCK_E2E_BLOB=1`; every shard writes a blob report
  *   (`blob-report/`), and the merge job runs `npx playwright merge-reports --reporter list,html blob-report`.
  */
@@ -88,7 +88,7 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
         : []),
     ],
     ...(options.serve
-      ? { webServer: { command: options.serve(port), url: `http://localhost:${port}`, reuseExistingServer: !isOn(env['CI']), timeout: options.serveTimeoutMs ?? 180_000 } }
+      ? { webServer: { command: options.serve(port), url: `http://localhost:${port}`, reuseExistingServer: !isOn(env['CI']) && isOn(env['PW_REUSE_SERVER']), timeout: options.serveTimeoutMs ?? 180_000 } }
       : {}),
     ...options.extend,
   });

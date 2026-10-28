@@ -585,3 +585,17 @@ interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kil
 helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
 (nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
 Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
+
+## Stale servers and stale builds (e2e and screenshots, 2026-10-28)
+
+Three times in one night tests and screenshots ran against old code: (1) `reuseExistingServer: true` on fixed ports
+(4300 to 4302 and the apps' own) silently reused another worktree's or an old dev server, so the tests "passed on the old
+code"; (2) `ui/dist` and the generated, untracked `ui/projects/paddock-ui/css/*.css` were older than their sources, so
+screenshots showed old text and a reviewer reported a bug that existed only in stale CSS. **Rule:** one mechanism
+(`scripts/e2e-guard.cjs`, ER-21), not another warning. A running server is reused only with `PW_REUSE_SERVER=1`
+(default: never; `paddockConfig` too); default ports derive from the worktree's path (20000 + hash(root) mod 4000 + the
+config's offset from 4300, fixed on CI), still overridable by the existing variables; and a Playwright `globalSetup`
+(`e2e-guard-ui.cjs`, `e2e-guard-apps.cjs`) fails with "rebuild ui: npm run build -w ui" when the css is older than
+`scss/**`, or (apps) `ui/dist` is older than `ui/projects/paddock-ui/**` (tests excluded). `PW_SKIP_BUILD_GUARD=1`
+skips the check. A new Playwright config uses `e2ePortFor`, `reuseServer()` and the `globalSetup`; the guard is
+tested in `scripts/e2e-guard.test.mjs`.
