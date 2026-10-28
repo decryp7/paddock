@@ -1,6 +1,7 @@
 # 5. Secrets: the OS credential store, owned by the app
 
-- Status: accepted (2026-10-22)
+- Status: accepted (2026-10-22); amended by [ADR 0021](0021-auto-scale.md) (proposed, decided by the owner
+  2026-10-28): the service keeps its own read-only `read:user` token for the Actions queue.
 - Related: ADR 0001; code: `app/src-tauri/src/credentials.rs`, `pitcrew_core::protocol::Secret`
 
 ## Context

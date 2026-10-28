@@ -1,7 +1,9 @@
 # 21. Auto-scaling runners: a pool of pre-registered slots, started and drained from the queue and the host's load
 
-- Status: Proposed (2026-10-28). Waits for the owner's approval; the questions to settle are in "Decisions for the
-  owner" at the end.
+- Status: Proposed (2026-10-28). The owner decided D1-D8 on 2026-10-28 (see "Decisions" at the end); the ADR stays
+  Proposed until an independent review and WP-0's findings are in, then becomes Accepted.
+- Amends: ADR 0005 (the service holds its own read-only API token). Interim step: the runbook
+  [add-runners.md](../runbooks/add-runners.md).
 - Date: 2026-10-28
 - Related: ADR 0005 (credential storage; this ADR amends it), 0006 (supervisor, "between jobs"), 0011 (runner config
   editing), 0013 (holds: low-disk guard and pause windows), 0014 (update deadline), 0015 (capacity advice, which this ADR
@@ -79,7 +81,7 @@ or stop is a process, a log entry and, for a stop, a race with job pick-up (belo
 
 **What scaling cannot do.** Pitcrew cannot send a Linux job to an idle Mac. A host can only take jobs whose labels it
 serves; jobs for `ubuntu-latest` (49 of the monorepo's `runs-on` lines) wait for runners that carry that label. "14
-queued while others idle" is partly a **label topology** question (decision D3), not a capacity one.
+queued while others idle" is partly a **label topology** question (D3: not addressed for now), not a capacity one.
 
 ## Options
 
@@ -177,7 +179,10 @@ a graceful stop **cancels** it. Decision: every pool slot's `config.yaml` gets `
 `runner.timeout` (default 3h), written through ADR 0011's editor when the slot joins a pool, and checked on every tick
 (a slot without it is not available and the pool page says why). The stop then waits for that job. The same race exists
 for today's manual drain, stall restarts and updates; the fix applies to them too (the label check of ADR 0011 gains a
-warning for `shutdown_timeout: 0s`).
+warning for `shutdown_timeout: 0s`). Both defaults are confirmed in the reference config of the installed runner
+5.2.0 on the Mac (`#timeout: 3h`, `#shutdown_timeout: 0s`, "Any running jobs that haven't finished after this timeout
+will be cancelled"). Pitcrew's own side already fits: the controller terminates a runner after its stop timeout "only
+while no job runs" (`controller.rs`), so a slot that took a job during the stop is left to finish it.
 
 Server-side `disabled` before the stop would close the race fully but needs a write token (`write:user`/`write:admin`)
 in the service. Not chosen (decision D7).
@@ -213,7 +218,7 @@ service like the rest; an invalid section is ignored with a message and auto-sca
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | off until the owner turns it on |
-| `scope` | from the first slot's registration (`user`, `org:<name>`, `instance`, `repo:<o>/<r>`) | where the queue is read |
+| `scope` | `user` (D2: the runners are registered at user level, `decryp7`); also `org:<name>`, `instance`, `repo:<o>/<r>` | where the queue is read |
 | `poll_seconds` | 15 (10-300) | the check's interval |
 | `pools[].slots`, `min`, `max`, `quiet_max` | -, 1, slots, `min` | per pool |
 | `start_load_per_core` | 0.8 | ≈ 11 on 14 cores, inside rule 41's 6-16 window |
@@ -254,10 +259,10 @@ jobs waiting longer than 15 minutes, the thrash guard engaged, a slot not availa
 
 ### 10. Security
 
-- **A read token in the service (amends ADR 0005).** The service must read the queue while the app is closed, so it
-  gets its **own** token, separate from the app's: the least scope that covers the runners' registration scope
-  (`read:user` for user-level runners; `read:admin` only if the runners are instance-level, which needs a site-admin
-  token). It travels once, UI → app → `Request::SetAutoscaleToken { token: Secret }` → stored by the service through
+- **A read token in the service (amends ADR 0005, decided D2).** The service must read the queue while the app is
+  closed, so it gets its **own** token, separate from the app's. The runners are registered at user level (`decryp7`),
+  so the token is a read-only `read:user` token (the queue at `/api/v1/user/actions/jobs`, the runners at
+  `/api/v1/user/actions/runners`); no admin or write scope. It travels once, UI → app → `Request::SetAutoscaleToken { token: Secret }` → stored by the service through
   `paddock-secrets` in the service's own context (`Pitcrew auto-scale` / server URL): the user's Keychain for the macOS
   launch agent, the Secret Service or, opted in, the owner-only file fallback for the Linux user service, and the
   LocalSystem credential store on Windows (to verify in WP-0; fallback: the file store under the service's data folder,
@@ -265,8 +270,8 @@ jobs waiting longer than 15 minutes, the thrash guard engaged, a slot not availa
   the adapter never logs URLs with query strings or headers; diagnostics bundles stay redacted.
 - **No registration token at scale time.** Slots are registered once through the existing wizard, which gains "Add N
   slots": one token, passed to each `register` through `GITEA_RUNNER_REGISTRATION_TOKEN` in the child's environment
-  instead of the command line (fixes ADR 0005's "briefly visible on the command line" where the installed runner
-  supports it; checked from `register --help`), never stored.
+  or `--token-file` instead of the command line (fixes ADR 0005's "briefly visible on the command line"; both are in
+  `gitea-runner register --help` of 5.2.0), never stored.
 - **Egress** only to the configured server through `paddock-net`; response caps and timeouts; no redirects to another
   host.
 - **Ephemeral runners** (later) would need a reusable registration token in the service: whoever holds it can register a
@@ -300,7 +305,7 @@ jobs waiting longer than 15 minutes, the thrash guard engaged, a slot not availa
 
 | WP | What | Owner | Size |
 |---|---|---|---|
-| WP-0 | Spike with a read-only token on the real server: `/user` vs `/admin` jobs coverage, `queued` vs `needs`, `labels` = `runs-on`, `head_branch` on tag runs, `busy` with capacity > 1, label matching, `register` env token, a graceful stop with `shutdown_timeout`; LocalSystem credential store on the Windows VM. Results written into this ADR before Accept | researcher | 0.5 d |
+| WP-0 | Spike with a read-only token on the real server: `/user` vs `/admin` jobs coverage, `queued` vs `needs`, `labels` = `runs-on`, `head_branch` on tag runs, `busy` with capacity > 1, label matching, a graceful stop with `shutdown_timeout`; LocalSystem credential store on the Windows VM. Results written into this ADR before Accept | researcher | 0.5 d |
 | WP-1 | `pitcrew_core::autoscale`: types, parsers, `plan`, explanation, thrash guard; unit and property tests, ≥ 99% | implementer (spec'd here) | 2 d |
 | WP-2 | `[autoscale]` config schema, validation, defaults; settings DTOs | implementer | 0.5 d |
 | WP-3 | Shared: load average and available memory in `paddock-metrics`' `MachineProbe` (Windows: CPU share); tests in the crate | integrating agent (shared crate) | 1 d |
@@ -315,24 +320,21 @@ jobs waiting longer than 15 minutes, the thrash guard engaged, a slot not availa
 
 About 12 days of work; WP-1, WP-3 and WP-7 can run in parallel after WP-0; WP-6 is the integration point.
 
-## Decisions for the owner
+## Decisions (the owner, 2026-10-28)
 
-- **D1.** Approve Option A (pool of pre-registered slots, started and drained) over B (scaling `runner.capacity`).
-- **D2.** Queue scope and token: are the runners registered at user (`decryp7`), org or instance level? The service gets
-  its own read token of that scope (amends ADR 0005, which kept tokens out of the service).
-- **D3.** Cross-OS: should the Mac (or Windows) also serve the Linux labels through containers, so Linux jobs stop
-  waiting while those hosts idle? (Separate decision; the arm64 vs amd64 image question from the local-VM research
-  applies.)
-- **D4.** Defaults per host: `max` (proposal: Mac 4, Linux 4, Windows VM 2), start/shed load per core 0.8/1.2,
-  4 GB per job plus a 4 GB reserve.
-- **D5.** Release jobs (tag pattern `*-v*`, `v*`) override quiet hours and the load ceiling, never low disk, memory
-  reserve or `max`. Agree?
-- **D6.** Ephemeral runners stay a later amendment. Note: "test in a VM" for CI conflicts with the 2026-10-28 decision
-  that VMs are for local testing only; ephemeral runners on the host would not.
-- **D7.** No server-side disable before a stop (it needs a write token in the service); the stop race is closed with
-  `shutdown_timeout` instead. Agree?
-- **D8.** Interim step now, before the build: register 2-3 more slots per host by hand and run them statically
-  (Option E), accepting no load control until the scaler lands?
+- **D1. The pool (Option A)** over scaling `runner.capacity`, with the proposed defaults: `max` Mac 4, Linux 4, Windows
+  VM 2; start a job only below 0.8 load per core, shed idle extras above 1.2; 4 GB per job plus a 4 GB reserve (this was
+  D4, decided with D1).
+- **D2. User-level runners** (`decryp7`): the service gets its own read-only `read:user` token; ADR 0005 is amended
+  (section 10; ADR 0005 carries a pointer here).
+- **D3. No cross-OS containers for now:** the Mac and Windows do not serve the Linux labels; Linux jobs wait for Linux
+  slots.
+- **D5. Release jobs override** quiet hours and the load ceiling; never the low-disk hold, the memory reserve or `max`.
+- **D6. Ephemeral runners later,** in their own amendment (on the host; VMs stay local-only).
+- **D7. No server-side disable** before a stop; `runner.shutdown_timeout` = the job timeout closes the race (section 4).
+- **D8. Interim now:** 2-3 more runners per host, registered by hand and always running (Option E), until the scaler
+  lands; steps in [runbooks/add-runners.md](../runbooks/add-runners.md). When the scaler is built, these runners become
+  the pools' slots, so nothing is registered twice.
 
 ## Sources (accessed 2026-10-28)
 
