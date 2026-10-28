@@ -1,13 +1,16 @@
-//! The abbreviation rule of layer 1: `gfxbldr` is `graphic builder`, `rptbldr` is `report builder`.
+//! The abbreviation rule of layer 1: `rptbldr` is `report builder`, `netmon` is `network monitor`.
 //!
 //! The query, without separators, splits in order into one piece per word of the name. Each piece starts with its
-//! word's first letter and is a subsequence of the word (`bldr` of `builder`), or is a conventional software
-//! abbreviation of the word ([`CONVENTIONAL`]). Names of one word are never abbreviations (too many chance matches),
-//! the piece count is fixed by the name's words, and the query must be shorter than the name, so the rule cannot
-//! turn a typo or the name itself into a match. Pure and bounded ([`MAX_QUERY_CHARS`], [`MAX_WORDS`]).
+//! word's first letter and is a subsequence of the word (`bldr` of `builder`). There is no list of conventional
+//! abbreviations (`gfx` for `graphic`): the rule is generic, and a convention that matters comes later as data (the
+//! names pack), only for gaps that were measured. Names of one word are never abbreviations (too many chance
+//! matches), the piece count is fixed by the name's words, and the query must be shorter than the name, so the rule
+//! cannot turn a typo or the name itself into a match. Pure, bounded ([`MAX_QUERY_CHARS`], [`MAX_WORDS`]) and free
+//! of allocation: it runs once per name of the book.
 //!
-//! Measured on ADR 0053's invented set: 23 of 24 abbreviations found, 0 of its 18 negatives matched, still 23 of 24
-//! with 2,000 distractor names added (the miss, `lickchk`, has its `k` inside `lic|kchk`).
+//! Measured on ADR 0053's invented set (`names_eval`): 22 of 24 abbreviations found, 0 of its 18 negatives matched,
+//! the same with 2,000 distractor names added. The two misses are `gfxbldr` (`gfx` is not letters of `graphic`) and
+//! `lickchk` (its `k` is inside `lic|kchk`).
 
 /// Longest query (letters and digits) the rule looks at.
 pub const MAX_QUERY_CHARS: usize = 32;
@@ -16,60 +19,57 @@ pub const MAX_WORDS: usize = 8;
 /// Shortest query the rule answers; shorter ones match too many names by chance.
 pub const MIN_QUERY_CHARS: usize = 4;
 
-/// Abbreviations that are conventions of software naming and are not letters of the word: (abbreviation, word).
-/// A closed list of conventions, not of names; names come from the logs.
-pub const CONVENTIONAL: &[(&str, &str)] = &[("gfx", "graphic"), ("lic", "license"), ("xfer", "transfer"), ("pkg", "package")];
-
-/// Whether `piece` can stand for `word`.
-fn piece_of(piece: &[char], word: &[char]) -> bool {
-    if piece.is_empty() || piece.len() > word.len() {
-        return false;
+/// Whether `piece` can stand for `word`: it starts with the word's first letter and is a subsequence of the word.
+fn piece_of(piece: &[char], word: &str) -> bool {
+    let mut letters = word.chars();
+    match (piece.first(), letters.next()) {
+        (Some(p), Some(w)) if *p == w => {}
+        _ => return false,
     }
-    let text: String = piece.iter().collect();
-    if CONVENTIONAL.iter().any(|(a, w)| {
-        *a == text
-            && (word.iter().copied().eq(w.chars()) || (word.last() == Some(&'s') && word[..word.len() - 1].iter().copied().eq(w.chars())))
-    }) {
-        return true;
-    }
-    if piece[0] != word[0] {
-        return false;
-    }
-    let mut rest = word.iter();
-    piece.iter().all(|c| rest.any(|w| w == c))
+    piece[1..].iter().all(|c| letters.any(|w| w == *c))
 }
 
 /// Whether the squashed (lower-case letters and digits) `query` is an abbreviation of the name made of `words`.
 pub fn is_abbreviation<S: AsRef<str>>(query: &str, words: &[S]) -> bool {
-    let q: Vec<char> = query.chars().collect();
-    let w: Vec<Vec<char>> = words.iter().map(|w| w.as_ref().chars().collect()).collect();
-    let name_len: usize = w.iter().map(Vec::len).sum();
-    if w.len() < 2 || w.len() > MAX_WORDS || q.len() < MIN_QUERY_CHARS.max(w.len()) || q.len() > MAX_QUERY_CHARS || q.len() >= name_len {
+    // Cheap checks first, nothing allocated: the word count, then the first letters.
+    if words.len() < 2 || words.len() > MAX_WORDS {
         return false;
     }
-    // The word pieces cannot all start at once: the first letter of the first word is a cheap filter.
-    let first_ok = w[0].first() == q.first()
-        || CONVENTIONAL
-            .iter()
-            .any(|(a, word)| q.iter().copied().take(a.len()).eq(a.chars()) && w[0].iter().copied().eq(word.chars()));
-    if !first_ok {
+    let (Some(q0), Some(w0)) = (query.chars().next(), words[0].as_ref().chars().next()) else {
+        return false;
+    };
+    if q0 != w0 {
         return false;
     }
-    // `reach[i]`: the first k words can use exactly the first i letters.
-    let mut reach = vec![false; q.len() + 1];
-    reach[0] = true;
-    for word in &w {
-        let mut next = vec![false; q.len() + 1];
-        for i in (0..q.len()).filter(|i| reach[*i]) {
+    let mut buf = ['\0'; MAX_QUERY_CHARS];
+    let mut n = 0;
+    for c in query.chars() {
+        if n == MAX_QUERY_CHARS {
+            return false;
+        }
+        buf[n] = c;
+        n += 1;
+    }
+    let q = &buf[..n];
+    let name_len: usize = words.iter().map(|w| w.as_ref().chars().count()).sum();
+    if q.len() < MIN_QUERY_CHARS.max(words.len()) || q.len() >= name_len {
+        return false;
+    }
+    // `reach` bit i: the words so far can use exactly the first i letters (at most 33 bits).
+    let mut reach: u64 = 1;
+    for word in words {
+        let word = word.as_ref();
+        let mut next: u64 = 0;
+        for i in (0..q.len()).filter(|i| reach >> i & 1 == 1) {
             for j in i + 1..=q.len() {
                 if piece_of(&q[i..j], word) {
-                    next[j] = true;
+                    next |= 1 << j;
                 }
             }
         }
         reach = next;
     }
-    reach[q.len()]
+    reach >> q.len() & 1 == 1
 }
 
 #[cfg(test)]
@@ -89,14 +89,13 @@ mod tests {
     }
 
     #[test]
-    fn conventional_abbreviations_stand_for_their_word() {
-        assert!(is_abbreviation("gfxbldr", &words("graphic builder")));
-        assert!(is_abbreviation("licchk", &words("license checker")));
-        assert!(
-            is_abbreviation("pkgmgr", &words("packages manager")),
-            "a plural word takes the singular's abbreviation"
-        );
-        assert!(!is_abbreviation("gfxbldr", &words("graph builder")));
+    fn conventions_that_are_not_letters_of_the_word_are_not_known() {
+        // No curated list in code: `gfx` is not a subsequence of `graphic`, so it is not matched.
+        assert!(!is_abbreviation("gfxbldr", &words("graphic builder")));
+        assert!(!is_abbreviation("xfermgr", &words("transfers manager")));
+        // `pkg` happens to be letters of `packages`, so the generic rule finds it (plural or not).
+        assert!(is_abbreviation("pkgmgr", &words("packages manager")));
+        assert!(is_abbreviation("pkgmgr", &words("package manager")));
     }
 
     #[test]

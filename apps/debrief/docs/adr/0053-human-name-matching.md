@@ -78,11 +78,13 @@ Paddock rule 46 (no LLM for large jobs) and the research note
   above describes 1.1 and is superseded by this amendment as each package lands.
 - **The abbreviation rule (layer 1, `How::Abbreviation`, `names::abbreviation`).** The query without separators splits
   in order into one piece per word of a name of two or more words; each piece starts with its word's first letter and
-  is a subsequence of the word, or is one of four conventional abbreviations (`gfx` graphic, `lic` license, `xfer`
-  transfer, `pkg` package: conventions of software naming, not names). The query must be at least four characters and
+  is a subsequence of the word. There is no list of conventional abbreviations in the code (`gfx` for graphic, `xfer`
+  for transfer): a convention that is not letters of its word is data, and may come through the names pack (N3) for
+  gaps measured on real imports. The query must be at least four characters and
   shorter than the name, so a typo or the name itself never takes this way. It ranks below a prefix or an alias and
   above a typo, says "abbreviation: letters of graphic builder", and ties between two names are a question like any
-  other. Evaluated in `names_eval.rs` on the invented set of this ADR: 23 of 24 abbreviations top-1 with no model
-  (the miss is `lickchk`, whose `k` sits inside `lic|kchk`), no false suggestion, none of the 18 negatives matched, and
-  still 23 of 24 with 2,000 distractor names in the book. The evaluation asserts this without layer 2 now; synonyms
+  other. Evaluated in `names_eval.rs` on the invented set of this ADR: 22 of 24 abbreviations top-1 with no model
+  (the misses are `gfxbldr`, `gfx` not being letters of `graphic`, and `lickchk`, whose `k` sits inside `lic|kchk`; 23
+  of 24 while the rule still had its four-entry table), no false suggestion, none of the 18 negatives matched, and
+  still 22 of 24 with 2,000 distractor names in the book. The evaluation asserts this without layer 2 now; synonyms
   still need an alias or the user.

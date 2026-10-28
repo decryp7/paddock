@@ -7,7 +7,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Added
 
-- **Names:** Searching for an abbreviation of a program name now finds it: "gfxbldr" finds Graphic Builder and "rptbldr" finds Report Builder, with the reason "abbreviation: letters of graphic builder", without any AI model
+- **Names:** Searching for an abbreviation of a program name now finds it: "rptbldr" finds Report Builder and "netmon" finds Network Monitor, with the reason "abbreviation: letters of report builder", without any AI model
 
 ### Removed
 

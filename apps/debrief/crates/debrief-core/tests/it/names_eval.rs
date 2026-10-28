@@ -659,8 +659,9 @@ fn evaluation() {
     // model, and never a wrong entity. Synonyms need an AI alias (or the user): without it they find nothing.
     let abbreviations = score(&qs, layered(&plain, no_ai, false), &["abbreviation"]);
     assert_eq!(abbreviations.false_suggestions, 0, "{abbreviations:?}");
-    assert!(abbreviations.top1 >= 23, "{abbreviations:?}");
-    assert!(Score::pct(abbreviations.top1, abbreviations.n) >= 95.0, "{abbreviations:?}");
+    // The generic rule (no list of conventions): `gfxbldr` and `lickchk` are the two it cannot find.
+    assert!(abbreviations.top1 >= 22, "{abbreviations:?}");
+    assert!(Score::pct(abbreviations.top1, abbreviations.n) >= 90.0, "{abbreviations:?}");
     let k = ["synonym"];
     let without = score(&qs, layered(&plain, no_ai, false), &k);
     let with = score(&qs, layered(&with_ai, ai, false), &k);
@@ -726,7 +727,7 @@ fn distractors(n: usize) -> Vec<Candidate> {
 }
 
 /// The abbreviation rule keeps its precision in a big catalogue: with 2,000 unrelated names in the book, every
-/// abbreviation of the set still finds its entity first (23 of 24, the miss being `lickchk`), without a question, and
+/// abbreviation of the set still finds its entity first (22 of 24, the misses being `gfxbldr` and `lickchk`), without a question, and
 /// the negatives still find nothing.
 #[test]
 fn abbreviations_survive_two_thousand_distractors() {
@@ -763,7 +764,7 @@ fn abbreviations_survive_two_thousand_distractors() {
             e.abbrev
         );
     }
-    assert!(right >= 23, "{right} of 24; misses {wrong:?}");
+    assert!(right >= 22, "{right} of 24; misses {wrong:?}");
     for n in NEGATIVES {
         assert!(r.resolve(n, 5, None).matches.is_empty(), "negative {n}");
     }
