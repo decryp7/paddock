@@ -5,6 +5,10 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ## Unreleased
 
+### Removed
+
+- **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them
+
 ### Changed
 
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual

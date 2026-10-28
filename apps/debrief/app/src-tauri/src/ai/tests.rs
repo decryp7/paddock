@@ -2181,7 +2181,7 @@ fn an_install_shows_downloading_unpacking_and_the_runtime_check_as_job_phases() 
 }
 
 #[test]
-fn finding_values_builds_the_names_and_the_alias_job_runs_on_the_local_model_only_when_it_may() {
+fn finding_values_builds_the_names_and_never_asks_the_model() {
     let f = Fixture::new("names");
     let core = f.core();
     let provider = Arc::new(ScriptedProvider::new(vec![text(r#"{"items":[]}"#); 40]));
@@ -2190,25 +2190,18 @@ fn finding_values_builds_the_names_and_the_alias_job_runs_on_the_local_model_onl
     let main = window(&app, "main");
     open_samples(&main);
     let win = app.state::<crate::windows::Windows>().get("main").unwrap();
-    // The first search after the catalogue is ready rebuilds the table and queues the alias job (a quiet one).
     wait_until("the name table", || {
         ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
         win.names.names().is_built()
     });
-    // The table is built before the job is queued, so "no job pending" alone can be seen too early: wait for the
-    // model to have been asked, then for the job to finish.
-    wait_until("the alias job to ask the model", || !provider.requests().is_empty());
-    wait_until("the alias job to finish", || !win.names.job_pending());
+    // Rule 46: no background job over many names. Nothing is queued, so nothing can ask the model.
+    let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+    wait_until("no job is queued or running", || {
+        jobs.find_active(|j| j.kind == crate::jobs::JobKind::Maintenance).is_empty()
+    });
     let reply = ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
     assert!(reply["values"].is_array(), "{reply}");
-    // With the switch off the model is never asked again.
-    ipc(&main, "set_settings", json!({"section": "ai", "values": {"name_aliases": false}})).unwrap();
-    // The second search may have queued another alias job before the switch went off: let it end first.
-    wait_until("the last alias job to finish", || !win.names.job_pending());
-    let asked = provider.requests().len();
-    assert!(!crate::names::schedule_alias_job(app.handle(), "main", &win.names));
-    assert_eq!(provider.requests().len(), asked);
-    assert!(!win.names.job_pending(), "a refused job leaves no flag behind");
+    assert!(provider.requests().is_empty(), "no name is sent to the model unless the user asks");
 }
 
 #[test]
