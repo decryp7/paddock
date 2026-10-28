@@ -611,7 +611,7 @@ test.describe('dialogs (plan S6)', () => {
 
   test('the tool window loads its own providers and asks the engine', async ({ app, page }) => {
     await app.dialogs.openWindow('sd.inspector');
-    await expect(page.getByTestId('engine-status')).toContainText('running');
+    await expect(page.getByTestId('engine-state')).toHaveText('Running');
   });
 
   test('a form takes its input and answers on Enter', async ({ app, page }) => {
@@ -663,7 +663,7 @@ test.describe('dialogs (plan S6)', () => {
 
     await open('sd.inspector');
     const inspector = d.inPage('Engine inspector');
-    await expect(inspector.getByTestId('engine-status')).toContainText('running');
+    await expect(inspector.getByTestId('engine-state')).toHaveText('Running');
     // A modeless dialog answers Escape from inside it only: from the page it stays open.
     await page.locator('[data-dialog-open="sd.rename"]').focus();
     await page.keyboard.press('Escape');
