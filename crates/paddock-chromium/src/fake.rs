@@ -362,10 +362,13 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         let starting =
             START_PAGE_SLOW.load(Ordering::SeqCst) && !START_PAGE_FINISHED.load(Ordering::SeqCst);
         if method == "Page.enable" && starting {
-            let ev = json!({"method": "Page.frameStartedNavigating", "sessionId": "S1", "params": {
-                "frameId": "F", "loaderId": "L0", "url": "about:blank", "navigationType": "differentDocument"}});
-            if ws.send(Message::text(ev.to_string())).is_err() {
-                return;
+            // A child frame's navigation first: only the main frame's (frame `F`, see `Page.getFrameTree`) is waited for.
+            for (frame, loader) in [("C", "LC"), ("F", "L0")] {
+                let ev = json!({"method": "Page.frameStartedNavigating", "sessionId": "S1", "params": {
+                    "frameId": frame, "loaderId": loader, "url": "about:blank", "navigationType": "differentDocument"}});
+                if ws.send(Message::text(ev.to_string())).is_err() {
+                    return;
+                }
             }
         }
         let url = || std::fs::read_to_string(url_file).unwrap_or_else(|_| "about:blank".into());
@@ -408,6 +411,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
                     }
                 }
                 "Page.captureScreenshot" => json!({"data": "iVBORw0KGgo="}),
+                "Page.getFrameTree" => json!({"frameTree": {"frame": {"id": "F"}}}),
                 "Page.getNavigationHistory" => {
                     json!({"currentIndex": 1, "entries": [{"id": 1}, {"id": 2}]})
                 }

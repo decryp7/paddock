@@ -303,6 +303,25 @@ fn the_first_load_waits_until_the_tabs_own_first_navigation_has_settled() {
         .unwrap();
 }
 
+/// The events that would show the first navigation settled can leave the bounded event log (a busy page sends more than
+/// it keeps); the page then counts it as settled instead of waiting out the caller's whole timeout for an event it can no
+/// longer see.
+#[test]
+fn a_first_navigation_whose_events_left_the_log_counts_as_settled() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    f.fake.act(UserAction::SlowStartPage).unwrap();
+    let p = b.new_page().unwrap();
+    p.call("Debug.flood", json!({})).unwrap();
+    // The load is sent (the fake, still on its first navigation, cancels it), not held until the 20 s run out.
+    let e = p.navigate("https://a.test/", Duration::from_secs(20));
+    assert!(
+        matches!(&e, Err(Error::Protocol(m)) if m.contains("net::ERR_ABORTED")),
+        "{e:?}"
+    );
+    assert!(f.fake.calls().iter().any(|c| c == "Page.navigate"));
+}
+
 #[test]
 fn closing_the_window_ends_the_wait_for_the_tabs_first_navigation() {
     let f = Fixture::new(Mode::Obey, 1);

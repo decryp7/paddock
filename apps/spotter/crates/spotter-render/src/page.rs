@@ -1,6 +1,6 @@
 //! One page (tab) of a running browser: navigate, observe, read.
 
-use crate::cdp::{Connection, Event};
+use crate::cdp::{Connection, Event, Waited};
 use crate::challenge::{self, Challenge};
 use crate::ready::{self, Observation, Readiness, Rule};
 use crate::{Error, Result};
@@ -89,7 +89,14 @@ impl Page {
         // The tab's own first navigation (`about:blank` from `Target.createTarget`) may still be running: `Page.enable`
         // then reports it as `Page.frameStartedNavigating` before its reply (Chromium's PageHandler::Enable, read
         // 2026-10-28). A `Page.navigate` sent meanwhile can come back `net::ERR_ABORTED`.
-        p.initial = pending_at_enable(&p.conn.events_since(enabling), &p.session).map(|i| (i, enabling));
+        // Only the main frame's navigation is the tab's own (its frame id from the frame tree; for a page target Chrome
+        // uses the target id, the fallback).
+        let main = p
+            .call("Page.getFrameTree", json!({}))
+            .ok()
+            .and_then(|r| r.pointer("/frameTree/frame/id").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or(target);
+        p.initial = pending_at_enable(&p.conn.events_since(enabling), &p.session, &main).map(|i| (i, enabling));
         // For a load that fails, what the browser reported about it (see `trace`): a handful of lifecycle events per
         // document, and the document request's network events (`Network.loadingFailed` carries `canceled`,
         // `blockedReason` and `corsErrorStatus`; the connection keeps only documents' network events). Enabled here,
@@ -119,13 +126,20 @@ impl Page {
         if self.initial_settled.load(Ordering::Acquire) {
             return Ok(());
         }
-        let ev = self.conn.wait_event(*since, timeout, |e| settles(e, initial, &self.session));
+        let waited = self
+            .conn
+            .wait_event_or_lost(*since, timeout, |e| settles(e, initial, &self.session));
         if self.conn.is_closed() {
             return Err(Error::Protocol(
                 "the browser closed the connection while the page was loading".into(),
             ));
         }
-        ev.ok_or(Error::Timeout("the tab's first page"))?;
+        // Lost: the events since `Page.enable` outran the bounded log, so the settling one may have gone with them. A
+        // page that busy is past its first navigation; waiting out the whole timeout for an event nobody can see would
+        // only turn a load into a timeout.
+        if let Waited::TimedOut = waited {
+            return Err(Error::Timeout("the tab's first page"));
+        }
         self.initial_settled.store(true, Ordering::Release);
         Ok(())
     }
@@ -290,13 +304,15 @@ fn not_loaded(error: &str, reply: &Value, replaced_by: Option<&str>, trace: &str
     }
 }
 
-/// The navigation `Page.enable` reported as running (its `Page.frameStartedNavigating` for this session, sent before
-/// its reply), if any; a same-document change is not one.
-fn pending_at_enable(events: &[(u64, Event)], session: &str) -> Option<Initial> {
+/// The navigation of the main frame `main_frame` that `Page.enable` reported as running (its
+/// `Page.frameStartedNavigating` for this session, sent before its reply), if any; a child frame's navigation and a
+/// same-document change are not one.
+fn pending_at_enable(events: &[(u64, Event)], session: &str, main_frame: &str) -> Option<Initial> {
     events.iter().find_map(|(_, e)| {
         let p = &e.params;
         (e.method == "Page.frameStartedNavigating"
             && e.session.as_deref() == Some(session)
+            && p.get("frameId").and_then(Value::as_str) == Some(main_frame)
             && !matches!(
                 p.get("navigationType").and_then(Value::as_str),
                 Some("sameDocument" | "historySameDocument")
@@ -359,10 +375,26 @@ fn trace(events: &[(u64, Event)], navigate: u64, session: &str) -> String {
     out
 }
 
+/// An address cut to its scheme, host and path: no user name, password, query or fragment (the trace ends up in error
+/// messages and logs). An address without a host keeps only its scheme, except `about:` pages.
+fn brief_url(url: &str) -> String {
+    let url = url.find(['?', '#']).map_or(url, |i| &url[..i]);
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+            let host = authority.rsplit('@').next().unwrap_or(authority);
+            format!("{scheme}://{host}{path}")
+        }
+        None if url.starts_with("about:") => url.to_string(),
+        None => url.split_once(':').map_or_else(String::new, |(scheme, _)| format!("{scheme}:...")),
+    }
+}
+
 /// One trace entry, or `None` for an event that says nothing about why a load stopped.
 fn describe(e: &Event) -> Option<String> {
     let p = &e.params;
     let s = |ptr: &str| p.pointer(ptr).and_then(Value::as_str).unwrap_or("");
+    let url = |ptr: &str| brief_url(s(ptr));
     let short = |m: &str| m.rsplit('.').next().unwrap_or(m).to_string();
     let with = |fields: &[(&str, String)]| {
         let f: Vec<String> = fields
@@ -374,15 +406,15 @@ fn describe(e: &Event) -> Option<String> {
     };
     let document = s("/type") == "Document";
     Some(match e.method.as_str() {
-        "Page.frameRequestedNavigation" => with(&[("reason", s("/reason").into()), ("url", s("/url").into())]),
-        "Page.frameStartedNavigating" => with(&[("type", s("/navigationType").into()), ("url", s("/url").into())]),
-        "Page.frameNavigated" => with(&[("url", s("/frame/url").into())]),
+        "Page.frameRequestedNavigation" => with(&[("reason", s("/reason").into()), ("url", url("/url"))]),
+        "Page.frameStartedNavigating" => with(&[("type", s("/navigationType").into()), ("url", url("/url"))]),
+        "Page.frameNavigated" => with(&[("url", url("/frame/url"))]),
         "Page.frameStartedLoading" | "Page.frameStoppedLoading" | "Page.loadEventFired" | "Page.domContentEventFired" => short(&e.method),
         "Page.frameDetached" => with(&[("reason", s("/reason").into())]),
         "Page.lifecycleEvent" => with(&[("name", s("/name").into())]),
-        "Page.downloadWillBegin" => with(&[("url", s("/url").into())]),
+        "Page.downloadWillBegin" => with(&[("url", url("/url"))]),
         "Page.javascriptDialogOpening" => with(&[("type", s("/type").into())]),
-        "Network.requestWillBeSent" if document => with(&[("url", s("/request/url").into())]),
+        "Network.requestWillBeSent" if document => with(&[("url", url("/request/url"))]),
         "Network.responseReceived" if document => with(&[
             ("status", p.pointer("/response/status").map(Value::to_string).unwrap_or_default()),
             ("mime", s("/response/mimeType").into()),
@@ -526,9 +558,12 @@ mod tests {
         let at_enable = vec![
             (1, ev("Page.lifecycleEvent", Some("S"), json!({"name": "init"}))),
             (2, started("T", "G", "L9", "about:blank")),
-            (3, started("S", "F", "L0", "about:blank")),
+            // A child frame's navigation is not the tab's: only the main frame's is waited for.
+            (3, started("S", "child", "LC", "about:blank")),
+            (4, started("S", "F", "L0", "about:blank")),
         ];
-        let i = pending_at_enable(&at_enable, "S").unwrap();
+        assert_eq!(pending_at_enable(&at_enable[..3], "S", "F"), None);
+        let i = pending_at_enable(&at_enable, "S", "F").unwrap();
         assert_eq!(
             i,
             Initial {
@@ -537,10 +572,10 @@ mod tests {
             }
         );
         // Nothing running, or only a same-document change: nothing to wait for.
-        assert_eq!(pending_at_enable(&at_enable[..2], "S"), None);
+        assert_eq!(pending_at_enable(&at_enable[..2], "S", "F"), None);
         let mut same = started("S", "F", "L1", "about:blank#x");
         same.params["navigationType"] = json!("sameDocument");
-        assert_eq!(pending_at_enable(&[(1, same)], "S"), None);
+        assert_eq!(pending_at_enable(&[(1, same)], "S", "F"), None);
         let nav = |frame: &str, loader: &str| {
             ev(
                 "Page.frameNavigated",
@@ -561,6 +596,168 @@ mod tests {
             &i,
             "S"
         ));
+    }
+
+    #[test]
+    fn addresses_in_the_trace_keep_only_scheme_host_and_path() {
+        assert_eq!(
+            brief_url("https://user:secret@a.test:8443/p/q?token=abc#frag"),
+            "https://a.test:8443/p/q"
+        );
+        assert_eq!(brief_url("http://a.test"), "http://a.test");
+        assert_eq!(brief_url("http://a.test#x"), "http://a.test");
+        assert_eq!(brief_url("about:blank"), "about:blank");
+        assert_eq!(brief_url("data:text/html,<p>secret</p>"), "data:...");
+        assert_eq!(brief_url(""), "");
+        let e = ev(
+            "Network.requestWillBeSent",
+            Some("S"),
+            json!({"type": "Document", "request": {"url": "https://a.test/x?session=1"}}),
+        );
+        assert_eq!(describe(&e).unwrap(), "requestWillBeSent url=https://a.test/x");
+    }
+
+    /// A scripted DevTools endpoint for driver tests (never a browser): it answers what `Page::attach` and
+    /// `Page::navigate` send. With `slow_start` it reports a running first navigation of the main frame `F` (after a
+    /// child frame's) at `Page.enable`, as Chrome does, and cancels every load (`net::ERR_ABORTED`) until `finish` is set,
+    /// when it reports `Page.frameStoppedLoading`. With `flood` it sends more events than the connection keeps at the
+    /// end of the attach (`Browser.setDownloadBehavior`), after the running navigation was noted.
+    struct FakeCdp {
+        port: u16,
+        finish: Arc<AtomicBool>,
+        calls: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    type Ws = tungstenite::WebSocket<std::net::TcpStream>;
+
+    fn send(ws: &mut Ws, v: Value) -> bool {
+        ws.send(tungstenite::Message::text(v.to_string())).is_ok()
+    }
+
+    fn fake_session(mut ws: Ws, slow_start: bool, flood: bool, fin: &AtomicBool, log: &std::sync::Mutex<Vec<String>>) {
+        let mut told = false;
+        loop {
+            if slow_start && fin.load(Ordering::SeqCst) && !told {
+                told = true;
+                send(
+                    &mut ws,
+                    json!({"method": "Page.frameStoppedLoading", "sessionId": "S1", "params": {"frameId": "F"}}),
+                );
+            }
+            let t = match ws.read() {
+                Ok(tungstenite::Message::Text(t)) => t,
+                Ok(_) => continue,
+                Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                    continue
+                }
+                Err(_) => return,
+            };
+            let req: Value = serde_json::from_str(t.as_str()).unwrap_or(Value::Null);
+            let method = req["method"].as_str().unwrap_or("").to_string();
+            log.lock().unwrap_or_else(|e| e.into_inner()).push(method.clone());
+            let starting = slow_start && !fin.load(Ordering::SeqCst);
+            if method == "Page.enable" && starting {
+                for (frame, loader) in [("C", "LC"), ("F", "L0")] {
+                    let p = json!({"frameId": frame, "loaderId": loader, "url": "about:blank", "navigationType": "differentDocument"});
+                    send(
+                        &mut ws,
+                        json!({"method": "Page.frameStartedNavigating", "sessionId": "S1", "params": p}),
+                    );
+                }
+            }
+            if method == "Browser.setDownloadBehavior" && flood {
+                for i in 0..1100 {
+                    send(
+                        &mut ws,
+                        json!({"method": "Page.lifecycleEvent", "sessionId": "S1", "params": {"frameId": "C", "name": i.to_string()}}),
+                    );
+                }
+            }
+            let result = match method.as_str() {
+                "Target.createTarget" => json!({"targetId": "F"}),
+                "Target.attachToTarget" => json!({"sessionId": "S1"}),
+                "Page.getFrameTree" => json!({"frameTree": {"frame": {"id": "F"}}}),
+                "Page.navigate" if starting => json!({"frameId": "F", "loaderId": "L1", "errorText": "net::ERR_ABORTED"}),
+                "Page.navigate" => json!({"frameId": "F", "loaderId": "L1"}),
+                _ => json!({}),
+            };
+            let mut reply = json!({"id": req["id"], "result": result});
+            if let Some(s) = req.get("sessionId") {
+                reply["sessionId"] = s.clone();
+            }
+            send(&mut ws, reply);
+            if method == "Page.navigate" && !starting {
+                send(&mut ws, json!({"method": "Page.loadEventFired", "sessionId": "S1", "params": {}}));
+            }
+        }
+    }
+
+    impl FakeCdp {
+        fn start(slow_start: bool, flood: bool) -> FakeCdp {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port();
+            let finish = Arc::new(AtomicBool::new(false));
+            let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let (fin, log) = (finish.clone(), calls.clone());
+            std::thread::spawn(move || {
+                let Ok((stream, _)) = l.accept() else { return };
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(10)));
+                if let Ok(ws) = tungstenite::accept(stream) {
+                    fake_session(ws, slow_start, flood, &fin, &log);
+                }
+            });
+            FakeCdp { port, finish, calls }
+        }
+
+        fn page(&self) -> Page {
+            Page::attach(Arc::new(Connection::connect(self.port, "/devtools/browser/fake").unwrap())).unwrap()
+        }
+
+        fn navigated(&self) -> bool {
+            self.calls
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .any(|c| c == "Page.navigate")
+        }
+    }
+
+    /// Regression (Windows CI runs 6473 and 6563): a load sent right after the tab was created, while its own first
+    /// navigation still ran, came back `net::ERR_ABORTED`. The first load now waits for that navigation to settle.
+    #[test]
+    fn the_first_load_waits_until_the_tabs_own_first_navigation_has_settled() {
+        let f = FakeCdp::start(true, false);
+        let p = f.page();
+        // While it runs, the load is not even sent (the driver before the fix sent it and got ERR_ABORTED back).
+        let e = p.navigate("http://a.test/", Duration::from_millis(200));
+        assert!(matches!(e, Err(Error::Timeout(_))), "{e:?}");
+        assert!(!f.navigated());
+        std::thread::scope(|s| {
+            let load = s.spawn(|| p.navigate("http://a.test/", Duration::from_secs(20)));
+            f.finish.store(true, Ordering::SeqCst);
+            load.join().unwrap().unwrap();
+        });
+        assert!(f.navigated());
+        // Settled once is settled: later loads do not wait for it again.
+        p.navigate("http://b.test/", Duration::from_secs(10)).unwrap();
+    }
+
+    /// The events that would show the first navigation settled can leave the bounded event log; the page then counts it
+    /// as settled instead of waiting out the whole timeout for an event it can no longer see.
+    #[test]
+    fn a_first_navigation_whose_events_left_the_log_counts_as_settled() {
+        let f = FakeCdp::start(true, true);
+        let p = f.page();
+        let e = p.navigate("http://a.test/", Duration::from_secs(20));
+        assert!(matches!(&e, Err(Error::Protocol(m)) if m.contains("net::ERR_ABORTED")), "{e:?}");
+        assert!(f.navigated());
+    }
+
+    #[test]
+    fn a_tab_with_nothing_running_loads_at_once() {
+        let f = FakeCdp::start(false, false);
+        f.page().navigate("http://a.test/", Duration::from_secs(10)).unwrap();
+        assert!(f.navigated());
     }
 
     #[test]

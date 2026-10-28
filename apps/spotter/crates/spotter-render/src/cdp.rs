@@ -16,6 +16,17 @@ use tungstenite::Message;
 const MAX_MESSAGE: usize = 32 << 20;
 const MAX_EVENTS: usize = 1024;
 
+/// How [`Connection::wait_event_or_lost`] ended.
+#[derive(Debug, Clone)]
+pub enum Waited {
+    /// The event.
+    Found(Event),
+    /// Events after the mark left the bounded log before the awaited one was seen: it may have been among them.
+    Lost,
+    /// The time ran out, or the connection ended.
+    TimedOut,
+}
+
 /// A protocol event.
 #[derive(Debug, Clone)]
 pub struct Event {
@@ -126,6 +137,28 @@ impl Connection {
     /// The events after `since` still in the bounded log, oldest first, with their sequence numbers.
     pub fn events_since(&self, since: u64) -> Vec<(u64, Event)> {
         lock(&self.inner.events).log.iter().filter(|(s, _)| *s > since).cloned().collect()
+    }
+
+    /// [`Connection::wait_event`] that also ends, with [`Waited::Lost`], once events after `since` have left the bounded
+    /// log, so the one awaited may be among them: a caller that cannot tell then decides what that means.
+    pub fn wait_event_or_lost(&self, since: u64, timeout: Duration, pred: impl Fn(&Event) -> bool) -> Waited {
+        let end = Instant::now() + timeout;
+        let mut g = lock(&self.inner.events);
+        loop {
+            if let Some((_, e)) = g.log.iter().find(|(s, e)| *s > since && pred(e)) {
+                return Waited::Found(e.clone());
+            }
+            if g.log.front().is_some_and(|(s, _)| *s > since + 1) {
+                return Waited::Lost;
+            }
+            if self.is_closed() {
+                return Waited::TimedOut;
+            }
+            let Some(left) = end.checked_duration_since(Instant::now()) else {
+                return Waited::TimedOut;
+            };
+            g = self.inner.cv.wait_timeout(g, left).unwrap_or_else(|e| e.into_inner()).0;
+        }
     }
 
     /// Waits for an event after `since` that `pred` accepts.

@@ -533,17 +533,17 @@ requested and started navigations, crashes, detaches), and the real-browser test
 while a `Page.navigate` is unanswered gets no answer within 10 s, so it is enabled once when the tab is attached, and
 the connection keeps only documents' network events. (2) The net log showed the "hermetic" test browser talking to the
 internet: Chrome for Testing 156 with `--disable-background-networking` still connected to www.google.com,
-accounts.google.com, update.googleapis.com and clients2.google.com. **Rule:** a test browser gets
+accounts.google.com, update.googleapis.com and clients2.google.com. **Do:** give a test browser
 `--no-proxy-server` and `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1` (the rule also
-maps IP literals, so loopback must be excluded), and a test asserts from the net log that it connected to loopback only;
-"no real hosts" is checked, not assumed.
+maps IP literals, so loopback must be excluded), and assert from the net log that it connected to loopback only, so
+"no real hosts" is checked rather than assumed.
 
 **Likeliest cause, now guarded:** Chrome's `Page.enable` reports a navigation of the tab that is still running as
 `Page.frameStartedNavigating` before its reply (Chromium's PageHandler::Enable, read 2026-10-28). A new tab's own first
 navigation (`about:blank` from `Target.createTarget`) can still be running on a loaded Windows runner when the first
-`Page.navigate` is sent. **Rule:** a page notes the navigation `Page.enable` reported, and its first load waits (within
-the caller's timeout, on events, no sleep) until that navigation committed or stopped loading. Both drivers
-(paddock-chromium and Spotter's copy) do this; the fake browser's `SlowStartPage` reproduces the abort.
+`Page.navigate` is sent. **Do:** note the navigation `Page.enable` reported, and let the first load wait (within the
+caller's timeout, on events, no sleep) until that navigation committed or stopped loading. Both drivers
+(paddock-chromium and Spotter's copy) now do this; the fake browser's `SlowStartPage` reproduces the abort.
 
 ## A local model over every item turns a background task into a machine hog (2026-10-28, Debrief)
 Debrief's background "Learning human names" ran the local model over up to 2,000 names after every import. It held about

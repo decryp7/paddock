@@ -1,7 +1,7 @@
 //! One page (tab) of a running browser: navigate, observe, read. A page knows when it is gone (the user closed its window
 //! or tab, it crashed, the connection ended): every call then fails with [`Error::Closed`], whatever the browser answers.
 
-use crate::cdp::{Connection, Event};
+use crate::cdp::{Connection, Event, Waited};
 use crate::challenge::{self, Challenge, Signals};
 use crate::ready::{self, Observation, Readiness, Rule};
 use crate::{Error, Result};
@@ -153,8 +153,19 @@ impl Page {
         // A tab's own first navigation (`about:blank` from `Target.createTarget`, or the start page) may still be
         // running: `Page.enable` then reports it as `Page.frameStartedNavigating` before its reply (Chromium's
         // PageHandler::Enable, read 2026-10-28). A `Page.navigate` sent meanwhile can come back `net::ERR_ABORTED`.
-        p.initial =
-            pending_at_enable(&p.conn.events_since(enabling), &p.session).map(|i| (i, enabling));
+        // Only the main frame's navigation is the tab's own (its frame id from the frame tree; for a page target Chrome
+        // uses the target id, the fallback).
+        let main = p
+            .call("Page.getFrameTree", json!({}))
+            .ok()
+            .and_then(|r| {
+                r.pointer("/frameTree/frame/id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| p.target.clone());
+        p.initial = pending_at_enable(&p.conn.events_since(enabling), &p.session, &main)
+            .map(|i| (i, enabling));
         // For a load that fails, what the browser reported about it (see `trace`): a handful of lifecycle events per
         // document, and the document request's network events (the connection keeps only documents' network events).
         let _ = p.call("Page.setLifecycleEventsEnabled", json!({"enabled": true}));
@@ -237,13 +248,18 @@ impl Page {
             return Ok(());
         }
         let (s, t) = (self.session.clone(), self.target.clone());
-        let ev = self.conn.wait_event(*since, timeout, |e| {
+        let waited = self.conn.wait_event_or_lost(*since, timeout, |e| {
             settles(e, initial, &s) || ends(e, &s, &t)
         });
         if self.is_closed() {
             return Err(Error::Closed);
         }
-        ev.ok_or(Error::Timeout("the tab's first page"))?;
+        // Lost: the events since `Page.enable` outran the bounded log, so the settling one may have gone with them. A
+        // page that busy is past its first navigation; waiting out the whole timeout for an event nobody can see would
+        // only turn a load into a timeout.
+        if let Waited::TimedOut = waited {
+            return Err(Error::Timeout("the tab's first page"));
+        }
         self.initial_settled.store(true, Ordering::Release);
         Ok(())
     }
@@ -479,13 +495,15 @@ fn replaced_by(e: &Event, session: &str, reply: &Value) -> Option<String> {
     })
 }
 
-/// The navigation `Page.enable` reported as running (its `Page.frameStartedNavigating` for this session, sent before
-/// its reply), if any; a same-document change is not one.
-fn pending_at_enable(events: &[(u64, Event)], session: &str) -> Option<Initial> {
+/// The navigation of the main frame `main_frame` that `Page.enable` reported as running (its
+/// `Page.frameStartedNavigating` for this session, sent before its reply), if any; a child frame's navigation and a
+/// same-document change are not one.
+fn pending_at_enable(events: &[(u64, Event)], session: &str, main_frame: &str) -> Option<Initial> {
     events.iter().find_map(|(_, e)| {
         let p = &e.params;
         (e.method == "Page.frameStartedNavigating"
             && e.session.as_deref() == Some(session)
+            && p.get("frameId").and_then(Value::as_str) == Some(main_frame)
             && !matches!(
                 p.get("navigationType").and_then(Value::as_str),
                 Some("sameDocument" | "historySameDocument")
@@ -583,10 +601,28 @@ fn trace(events: &[(u64, Event)], navigate: u64, session: &str) -> String {
     out
 }
 
+/// An address cut to its scheme, host and path: no user name, password, query or fragment (the trace ends up in error
+/// messages and logs). An address without a host keeps only its scheme, except `about:` pages.
+fn brief_url(url: &str) -> String {
+    let url = url.find(['?', '#']).map_or(url, |i| &url[..i]);
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+            let host = authority.rsplit('@').next().unwrap_or(authority);
+            format!("{scheme}://{host}{path}")
+        }
+        None if url.starts_with("about:") => url.to_string(),
+        None => url
+            .split_once(':')
+            .map_or_else(String::new, |(scheme, _)| format!("{scheme}:...")),
+    }
+}
+
 /// One trace entry, or `None` for an event that says nothing about why a load stopped.
 fn describe(e: &Event) -> Option<String> {
     let p = &e.params;
     let s = |ptr: &str| -> String { p.pointer(ptr).and_then(Value::as_str).unwrap_or("").into() };
+    let url = |ptr: &str| brief_url(&s(ptr));
     let raw = |k: &str| p.pointer(k).map(Value::to_string).unwrap_or_default();
     let short = e.method.rsplit('.').next().unwrap_or(&e.method);
     let with = |fields: &[(&str, String)]| {
@@ -599,20 +635,20 @@ fn describe(e: &Event) -> Option<String> {
     };
     let document = s("/type") == "Document";
     Some(match e.method.as_str() {
-        "Page.frameRequestedNavigation" => with(&[("reason", s("/reason")), ("url", s("/url"))]),
+        "Page.frameRequestedNavigation" => with(&[("reason", s("/reason")), ("url", url("/url"))]),
         "Page.frameStartedNavigating" => {
-            with(&[("type", s("/navigationType")), ("url", s("/url"))])
+            with(&[("type", s("/navigationType")), ("url", url("/url"))])
         }
-        "Page.frameNavigated" => with(&[("url", s("/frame/url"))]),
+        "Page.frameNavigated" => with(&[("url", url("/frame/url"))]),
         "Page.frameStartedLoading"
         | "Page.frameStoppedLoading"
         | "Page.loadEventFired"
         | "Page.domContentEventFired" => short.to_string(),
         "Page.frameDetached" => with(&[("reason", s("/reason"))]),
         "Page.lifecycleEvent" => with(&[("name", s("/name"))]),
-        "Page.downloadWillBegin" => with(&[("url", s("/url"))]),
+        "Page.downloadWillBegin" => with(&[("url", url("/url"))]),
         "Page.javascriptDialogOpening" => with(&[("type", s("/type"))]),
-        "Network.requestWillBeSent" if document => with(&[("url", s("/request/url"))]),
+        "Network.requestWillBeSent" if document => with(&[("url", url("/request/url"))]),
         "Network.responseReceived" if document => with(&[
             ("status", raw("/response/status")),
             ("mime", s("/response/mimeType")),
@@ -852,6 +888,28 @@ mod tests {
     }
 
     #[test]
+    fn addresses_in_the_trace_keep_only_scheme_host_and_path() {
+        assert_eq!(
+            brief_url("https://user:secret@a.test:8443/p/q?token=abc#frag"),
+            "https://a.test:8443/p/q"
+        );
+        assert_eq!(brief_url("http://a.test"), "http://a.test");
+        assert_eq!(brief_url("http://a.test#x"), "http://a.test");
+        assert_eq!(brief_url("about:blank"), "about:blank");
+        assert_eq!(brief_url("data:text/html,<p>secret</p>"), "data:...");
+        assert_eq!(brief_url(""), "");
+        let e = ev(
+            "Network.requestWillBeSent",
+            Some("S"),
+            json!({"type": "Document", "request": {"url": "https://a.test/x?session=1"}}),
+        );
+        assert_eq!(
+            describe(&e).unwrap(),
+            "requestWillBeSent url=https://a.test/x"
+        );
+    }
+
+    #[test]
     fn the_trace_is_bounded() {
         let many: Vec<(u64, Event)> = (0..100)
             .map(|i| {
@@ -878,9 +936,12 @@ mod tests {
                 ev("Page.lifecycleEvent", Some("S"), json!({"name": "init"})),
             ),
             (2, started("T", "G", "L9", "about:blank")),
-            (3, started("S", "F", "L0", "about:blank")),
+            // A child frame's navigation is not the tab's: only the main frame's is waited for.
+            (3, started("S", "child", "LC", "about:blank")),
+            (4, started("S", "F", "L0", "about:blank")),
         ];
-        let i = pending_at_enable(&at_enable, "S").unwrap();
+        assert_eq!(pending_at_enable(&at_enable[..3], "S", "F"), None);
+        let i = pending_at_enable(&at_enable, "S", "F").unwrap();
         assert_eq!(
             i,
             Initial {
@@ -889,10 +950,10 @@ mod tests {
             }
         );
         // Nothing running, or only a same-document change: nothing to wait for.
-        assert_eq!(pending_at_enable(&at_enable[..2], "S"), None);
+        assert_eq!(pending_at_enable(&at_enable[..2], "S", "F"), None);
         let mut same = started("S", "F", "L1", "about:blank#x");
         same.params["navigationType"] = json!("sameDocument");
-        assert_eq!(pending_at_enable(&[(1, same)], "S"), None);
+        assert_eq!(pending_at_enable(&[(1, same)], "S", "F"), None);
         let nav = |frame: &str, loader: &str| {
             ev(
                 "Page.frameNavigated",
