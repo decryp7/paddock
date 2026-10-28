@@ -6,5 +6,5 @@ version = "0.1.0"
 api_version = 1
 # The executable's file name in the same folder (".exe" is added on Windows). Defaults to the id.
 executable = "dyno-plugin-mine"
-# Any of "sensors", "cleanup", "actions".
+# "sensors" (the only thing a plugin can contribute).
 contributes = ["sensors"]

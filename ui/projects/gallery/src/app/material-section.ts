@@ -26,6 +26,7 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatTimepickerModule } from '@angular/material/timepicker';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatTreeModule } from '@angular/material/tree';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 
 interface Run {
@@ -82,6 +83,7 @@ const RUNS: Run[] = [
     MatTimepickerModule,
     MatTooltipModule,
     MatTreeModule,
+    PdGlyph,
   ],
   template: `
     <section class="gal-section" data-testid="material" aria-labelledby="h-material">
@@ -98,6 +100,9 @@ const RUNS: Run[] = [
         <button matButton="filled" class="pd-button-danger">Delete run</button>
         <button matButton="outlined" class="pd-button-danger">Remove</button>
         <button matButton="text" class="pd-button-danger">Discard</button>
+        <button matButton="filled" data-testid="material-glyph-filled"><pd-glyph name="refresh" [size]="16" />Run again</button>
+        <button matButton="outlined" data-testid="material-glyph-outlined"><pd-glyph name="copy" [size]="16" />Copy path</button>
+        <button matButton="text" data-testid="material-glyph-text"><pd-glyph name="plus" [size]="16" />Add filter</button>
         <button matButton="filled" disabled>Disabled</button>
         <button matButton="outlined" disabled>Disabled</button>
       </div>

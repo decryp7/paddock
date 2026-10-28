@@ -154,7 +154,7 @@ pub fn periodic_spikes(points: &[HistoryPoint], rows: &[AppMinute]) -> Option<An
             app.as_ref().map(|a| format!(", mostly {a}")).unwrap_or_default()
         ),
         explanation: "A regular spike is usually a scheduled task, an updater or an app polling in a loop. If it disturbs you, \
-                      a rule can lower its priority, or check the app's settings for a sync or update interval."
+                      check the app's settings for a sync or update interval."
             .into(),
         evidence: vec![
             Evidence::new("Spikes", spikes.len().to_string()),
@@ -190,7 +190,7 @@ pub fn restart_loops(starts: &[(String, Timestamp)], now: Timestamp) -> Vec<Anom
                 title: format!("{app} restarted {n} times in 10 minutes"),
                 explanation: format!(
                     "{app} keeps exiting and being started again, which costs CPU and disk each time. It may be crashing; \
-                     check for an update, or disable it in the startup manager if it is a background helper."
+                     check for an update, or turn it off in the app's own settings or your system's login items if it is a background helper."
                 ),
                 evidence: vec![Evidence::new("Starts in the last hour", times.len().to_string())],
             });

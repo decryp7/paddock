@@ -284,6 +284,10 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   `appearance="outline"` with `floatLabel="always"`, button toggles show no check mark, and ripples are off. Feedback is the
   state layer (hover, pressed) and the keyboard ring, the same calm response as the rest of the family and nothing to switch
   off for Reduce Motion.
+- **State layers.** The bridge itself sets Material's hover, focus and pressed state-layer opacities from `--pd-hover-alpha` (hover and
+  keyboard focus) and `--pd-pressed-alpha`, so it never depends on `mat.theme` defining them; without them the opacity is undefined,
+  computes to 1 and Material draws an opaque disc. Both are public tokens (0.05 and 0.09, in every theme) and `--pd-hover` and
+  `--pd-pressed` are built from them, so a Material control and a family control show the same fill.
 - **Buttons are `matButton`:** `filled` = primary (accent fill), `outlined` = secondary (surface-2 + border-strong), `text` =
   ghost, and the class `pd-button-danger` on any of them = danger. `tonal` and `elevated` are bridged only so they never fall back
   to Material's blue; the family does not use them (an app review rejects them).

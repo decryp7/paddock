@@ -117,6 +117,13 @@
   --mat-form-field-outlined-focus-outline-color: var(--pd-focus-ring);
   --mat-form-field-outlined-focus-outline-width: calc(var(--pd-focus-width) + 1px);
   --mat-icon-button-state-layer-size: var(--pd-control-height);
+  // State layers: Material draws an opaque ink at these opacities, and without them (the bridge alone, no `mat.theme`) the opacity
+  // is undefined and computes to 1: a solid disc. They are the alpha of --pd-hover (hover and keyboard focus) and --pd-pressed, so a
+  // hovered or pressed Material control looks like the family's own; Material's defaults (0.08 / 0.12 / 0.12) are heavier.
+  --mat-sys-hover-state-layer-opacity: var(--pd-hover-alpha);
+  --mat-sys-focus-state-layer-opacity: var(--pd-hover-alpha);
+  --mat-sys-pressed-state-layer-opacity: var(--pd-pressed-alpha);
+  --mat-icon-button-state-layer-color: var(--pd-text);
   --mat-icon-button-icon-size: var(--pd-space-4);
   --mat-focus-indicator-border-color: var(--pd-focus-ring);
   --mat-focus-indicator-display: block;
@@ -542,6 +549,14 @@
   --mat-button-text-label-text-weight: var(--pd-weight-medium);
   --mat-button-tonal-label-text-weight: var(--pd-weight-medium);
   --mat-button-protected-label-text-weight: var(--pd-weight-medium);
+}
+
+// A projected glyph (pd-glyph, mat-icon, an svg) sits centred on the label with a 4 px gap: the label is a flex row, not a text line
+// (in a line box the 16 px glyph rests on the baseline, about 4 px above the text centre, with no gap).
+html .mat-mdc-button-base .mdc-button__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pd-space-1);
 }
 
 // The secondary button is a filled surface with the strong border (the outlined variant has no container token).

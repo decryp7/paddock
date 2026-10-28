@@ -1,7 +1,6 @@
 //! The `dyno` command (WP-27, ADR 0014): a second kind of client of the agent's one local protocol. It finds the
-//! agent through `agent.json`, refuses another protocol version with a clear message, reads by default, and changes
-//! something only for an explicit acting command with `--yes`, through the same requests, validation, protected list
-//! and activity log as a click in the app. It links `dyno-core`'s protocol types and `dyno-ipc`, never the platform
+//! agent through `agent.json`, refuses another protocol version with a clear message and only reads: no command
+//! changes anything on the computer. It links `dyno-core`'s protocol types and `dyno-ipc`, never the platform
 //! adapters or the agent.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
@@ -13,12 +12,11 @@ pub mod render;
 pub use connection::{Agent, Env, IpcAgent, Problem};
 
 use args::{Command, Invocation};
-use dyno_core::process::{ProcessAction, ProcessRef};
 use dyno_core::protocol::{LiveDetail, Reply, Request};
 use std::io::Write;
 
-/// Runs `dyno` with the arguments after the program name; returns the exit code (0 done, 1 failed, 2 wrong usage or
-/// `--yes` missing, 3 versions differ, 4 Dyno is not running).
+/// Runs `dyno` with the arguments after the program name; returns the exit code (0 done, 1 failed, 2 wrong usage, 3 versions
+/// differ, 4 Dyno is not running).
 pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let invocation = match args::parse(args) {
         Ok(i) => i,
@@ -38,11 +36,6 @@ pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write)
         }
         _ => {}
     }
-    // An acting command without --yes explains itself before touching anything, even before connecting.
-    if invocation.command.acts() && !invocation.yes {
-        let _ = writeln!(err, "dyno: {}", needs_yes(&invocation.command));
-        return 2;
-    }
     let agent = match IpcAgent::connect(env) {
         Ok(a) => a,
         Err(p) => {
@@ -51,16 +44,6 @@ pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write)
         }
     };
     run_with(&agent, &invocation, out, err)
-}
-
-fn needs_yes(c: &Command) -> String {
-    let what = match c {
-        Command::End { pid } => format!("This would ask the app with process id {pid} to exit"),
-        Command::Cap { pid, percent } => format!("This would limit the app with process id {pid} to {percent}% of the machine's CPU"),
-        Command::Undo { id } => format!("This would undo activity entry {id}"),
-        _ => "This would change something".to_string(),
-    };
-    format!("{what}. Nothing was changed. Add --yes to do it.")
 }
 
 /// Runs an already parsed command against an agent (the seam the tests use).
@@ -103,8 +86,7 @@ fn execute(agent: &dyn Agent, i: &Invocation) -> Result<String, Problem> {
         }
         Command::Snapshot => {
             let live = agent.live(LiveDetail::Processes)?;
-            let snapshot =
-                serde_json::json!({ "system": live.system, "profile": live.profile, "processes": live.processes.unwrap_or_default() });
+            let snapshot = serde_json::json!({ "system": live.system, "processes": live.processes.unwrap_or_default() });
             Ok(format!("{}\n", render::json(&snapshot)))
         }
         Command::WhySlow => match agent.call(Request::WhySlow)? {
@@ -138,12 +120,6 @@ fn execute(agent: &dyn Agent, i: &Invocation) -> Result<String, Problem> {
             _ => Err(unexpected()),
         },
         Command::CountersGet { paths } => counters_get(agent, paths, json),
-        Command::End { pid } => act(agent, *pid, ProcessAction::End),
-        Command::Cap { pid, percent } => act(agent, *pid, ProcessAction::SetCpuCap(Some(*percent))),
-        Command::Undo { id } => match agent.call(Request::Undo { activity_id: id.clone() })? {
-            Reply::Activity(a) => Ok(format!("{}\n", a.title)),
-            _ => Err(unexpected()),
-        },
         Command::Help | Command::Version => Ok(String::new()),
     }
 }
@@ -160,28 +136,4 @@ fn counters_get(agent: &dyn Agent, paths: &[String], json: bool) -> Result<Strin
         values = ask()?;
     }
     Ok(data(json, &values, || render::values_text(&values)))
-}
-
-/// Resolves a process id to the exact process (id and start time, so a reused id is never hit), then asks the agent to
-/// act on it. The agent applies the protected list and records the activity, exactly as for a click in the app.
-fn act(agent: &dyn Agent, pid: u32, action: ProcessAction) -> Result<String, Problem> {
-    let live = agent.live(LiveDetail::Processes)?;
-    let process = live
-        .processes
-        .unwrap_or_default()
-        .into_iter()
-        .find(|p| p.pid == pid)
-        .ok_or_else(|| Problem::Failed(format!("No process with id {pid} is running (it may have just exited).")))?;
-    let target: ProcessRef = process.reference();
-    match agent.call(Request::Act { target, action })? {
-        Reply::Activity(a) => {
-            let undo = if a.undo == dyno_core::activity::UndoState::Available {
-                format!(" Undo with: dyno undo {} --yes", a.id)
-            } else {
-                String::new()
-            };
-            Ok(format!("{}.{undo}\n", a.title))
-        }
-        _ => Err(unexpected()),
-    }
 }

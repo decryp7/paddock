@@ -141,7 +141,7 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
                   @for (e of events(); track e.kind) {
                     <span class="chip"><span class="glyph" [style.color]="eventColor(e.kind)" aria-hidden="true">●</span> {{ eventLabel(e.kind) }} <span class="n num">{{ e.count }}</span></span>
                   } @empty {
-                    <span class="faint">No rule actions, cleanups or alerts in this window.</span>
+                    <span class="faint">No alerts, restarts or network changes in this window.</span>
                   }
                 </div>
               } @else {

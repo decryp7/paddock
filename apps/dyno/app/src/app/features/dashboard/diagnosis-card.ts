@@ -1,12 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { Router, RouterLink } from '@angular/router';
-import type { Suggestion } from '../../core/api.types';
+import { RouterLink } from '@angular/router';
 import { errorHint } from '../../core/command-error';
 import { formatCount, formatFraction, formatPercent, formatRate } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { CAUSE_ICON } from '../../shared/labels';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { LiveStore } from '../../state/live.store';
+import { hintPath } from '../why-slow/why-slow-model';
 
 /** "Why is my PC slow?": one button, and the engine's latest answer (headline, top cause, evidence, what to do). */
 @Component({
@@ -46,10 +46,14 @@ import { LiveStore } from '../../state/live.store';
                 <p class="evidence num">@for (e of c.evidence; track e.label) {<span>{{ e.label }} {{ e.value }}</span>}<span>Confidence {{ conf(c.confidence) }}</span></p>
               </div>
             </div>
-            @if (c.suggestions.length) {
+            @if (c.hints.length) {
               <div class="actions">
-                @for (s of c.suggestions; track s.label) {
-                  <button type="button" class="btn sm" (click)="take(s)">{{ s.label }}</button>
+                @for (h of c.hints; track h.text) {
+                  @if (hintPath(h); as path) {
+                    <a class="btn sm" [routerLink]="path">{{ h.text }}</a>
+                  } @else {
+                    <span class="hint">{{ h.text }}</span>
+                  }
                 }
               </div>
             }
@@ -67,7 +71,7 @@ import { LiveStore } from '../../state/live.store';
             }
           }
         } @else {
-          <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. It only suggests: nothing changes until you click.</p>
+          <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. It only looks: Dyno changes nothing on your computer.</p>
         }
       </div>
       @if (stats(); as st) {
@@ -91,6 +95,7 @@ import { LiveStore } from '../../state/live.store';
     .txt > span { color: var(--text-2); font-size: var(--fs-sm); }
     .evidence { margin: 0; color: var(--text-3); font-size: var(--fs-sm); line-height: 1.5; }
     .evidence span + span::before { content: ' · '; }
+    .hint { color: var(--text-3); font-size: var(--fs-sm); }
     .actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding-top: var(--sp-1); }
     .more { justify-self: start; }
     .others { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); font-size: var(--fs-sm); }
@@ -110,7 +115,6 @@ import { LiveStore } from '../../state/live.store';
 })
 export class DiagnosisCard {
   protected readonly store = inject(DiagnosisStore);
-  protected readonly router = inject(Router);
   private readonly live = inject(LiveStore);
   /** The numbers the diagnosis weighs, as they are right now (formatting only; the engine does the reasoning). */
   protected readonly stats = computed(() => {
@@ -137,13 +141,7 @@ export class DiagnosisCard {
   protected readonly showOthers = signal(false);
   protected readonly others = computed(() => this.store.diagnosis()?.causes.slice(1) ?? []);
 
-  protected take(s: Suggestion): void {
-    const a = s.action;
-    if (typeof a === 'object') void this.store.act(a.process.target, a.process.action);
-    else if (a === 'openCleanup') void this.router.navigateByUrl('/cleanup');
-    else if (a === 'openTaskManager') void this.router.navigateByUrl('/processes');
-    else if (a === 'openStartup') void this.router.navigateByUrl('/health');
-  }
+  protected readonly hintPath = hintPath;
 }
 
 function CAUSE_ICON_FN(kind: keyof typeof CAUSE_ICON) {

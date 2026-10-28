@@ -33,8 +33,6 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
   removed: 'Removed',
   startupAdded: 'New at start-up',
   startupRemoved: 'Gone from start-up',
-  setting: 'Setting',
-  cleanup: 'Cleanup',
 };
 
 /** A kind's dot: calm for the routine kinds, a tone only for what is worth a look (a new start-up item). */
