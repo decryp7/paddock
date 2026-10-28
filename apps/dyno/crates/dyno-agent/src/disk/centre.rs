@@ -14,7 +14,7 @@ use dyno_core::disk::volume::{Volume, VolumeLocation};
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -38,7 +38,7 @@ pub trait StatusSink: Send + Sync {
     /// A scan's status changed.
     fn status(&self, status: DiskScanStatus);
     /// The volumes mounted now differ from the last listing (one came, one went, one stopped or started answering).
-    fn volumes_changed(&self, _volumes: Vec<Volume>) {}
+    fn volumes_changed(&self, _ticket: u64, _volumes: Vec<Volume>) {}
 }
 
 /// Whether the OS has given Dyno the right to read the whole disk (a privacy permission on macOS).
@@ -310,6 +310,10 @@ impl DiskCentre {
         self.kept_nodes.store(nodes, Ordering::Relaxed);
     }
 
+    fn limits_now(&self) -> ScanLimits {
+        (*lock(&self.limits)).validated()
+    }
+
     /// New limits for the scans that start from now on (a running scan keeps its own).
     pub fn set_limits(&self, limits: ScanLimits) {
         *lock(&self.limits) = limits;
@@ -362,7 +366,7 @@ impl DiskCentre {
             changed
         };
         if changed {
-            self.sink.volumes_changed(listed.iter().map(|l| l.volume.clone()).collect());
+            self.sink.volumes_changed(ticket, listed.iter().map(|l| l.volume.clone()).collect());
         }
         listed
     }
@@ -374,6 +378,15 @@ impl DiskCentre {
             Some(k) if !fresh => k,
             _ => self.refresh(),
         }
+    }
+
+    /// The host a path lives on, by the volume list as last asked for (this computer when no volume holds it).
+    fn folder_host(&self, path: &str) -> String {
+        self.listed(false)
+            .into_iter()
+            .filter(|l| Path::new(path).starts_with(&l.root) || Path::new(path).starts_with(&l.volume.mount))
+            .max_by_key(|l| l.volume.mount.len())
+            .map_or_else(|| host_of(&VolumeLocation::Internal), |l| host_of(&l.volume.location))
     }
 
     fn resolve(&self, target: &DiskTarget) -> Result<Resolved, AgentError> {
@@ -404,11 +417,10 @@ impl DiskCentre {
             }
             DiskTarget::Folder { path } => {
                 // Resolving the path touches the file system (a share that has gone away can hold the call): it gets the same bounded
-                // treatment as the first look at the root, and a thread that never returns counts against this computer.
-                let (alive, p) = (
-                    lock(&self.live).entry("this computer".to_string()).or_default().enter(),
-                    path.clone(),
-                );
+                // treatment as the first look at the root. A thread that never returns counts against the host the path lives on (by
+                // the volume list as last asked for), so a share that does not answer cannot hold back scans of this computer's disks.
+                let host = self.folder_host(path);
+                let (alive, p) = (lock(&self.live).entry(host).or_default().enter(), path.clone());
                 let root = super::volumes::within(STAT_LIMIT, move || {
                     let _alive = alive;
                     folder::check(&p)
@@ -439,7 +451,7 @@ impl DiskCentre {
     }
 
     /// Takes one of the running slots for `key`, or says why not. `Ok(Some(status))` is a scan of the same folder already running.
-    fn reserve(&self, key: &str, host: &str, threads_needed: bool) -> Result<Option<DiskScanStatus>, AgentError> {
+    fn reserve(&self, key: &str, host: &str, threads_needed: bool, incoming: u32) -> Result<Option<DiskScanStatus>, AgentError> {
         let scans = lock(&self.scans);
         let mut starting = lock(&self.starting);
         if let Some(e) = scans.iter().find(|e| e.key == key && e.running()) {
@@ -452,6 +464,19 @@ impl DiskCentre {
             return Err(err(
                 ErrorCode::Busy,
                 "Two scans are already running. Stop one or wait for it to finish.",
+            ));
+        }
+        // What running scans may still grow to, with this one, has to fit the budget even after every finished scan is dropped.
+        let reserved: usize = scans
+            .iter()
+            .filter(|e| e.running())
+            .map(|e| e.walk.with_index(|i| i.limits().max_nodes as usize))
+            .sum::<usize>()
+            + (starting.len() + usize::from(incoming > 0)) * (incoming as usize);
+        if incoming > 0 && reserved > self.kept_nodes.load(Ordering::Relaxed) {
+            return Err(err(
+                ErrorCode::Busy,
+                "There is not room for another scan next to the running ones. Finish or close a scan first.",
             ));
         }
         if threads_needed {
@@ -479,7 +504,7 @@ impl DiskCentre {
     pub fn start(&self, target: DiskTarget) -> Result<DiskScanStatus, AgentError> {
         let r = self.resolve(&target)?;
         let key = format!("disk-scan:{}", r.root.display());
-        if let Some(running) = self.reserve(&key, &r.host, true)? {
+        if let Some(running) = self.reserve(&key, &r.host, true, self.limits_now().max_nodes)? {
             return Ok(running);
         }
         let started = self.begin(target, &r, &key);
@@ -598,7 +623,7 @@ impl DiskCentre {
         let e = self.entry(scan)?;
         let key = format!("disk-retry:{scan}");
         // The retry takes a running slot like a start does, so two of them cannot both take the last one.
-        self.reserve(&key, &e.host, false)?;
+        self.reserve(&key, &e.host, false, 0)?;
         let result = e.walk.retry();
         self.release(&key);
         result.map_err(|x| match x {
@@ -696,7 +721,7 @@ mod tests {
             lock(&self.0).push(s);
         }
 
-        fn volumes_changed(&self, v: Vec<Volume>) {
+        fn volumes_changed(&self, _ticket: u64, v: Vec<Volume>) {
             lock(&self.1).push(v);
         }
     }
@@ -1610,8 +1635,8 @@ mod tests {
         wait_final(&r, s.scan);
     }
 
-    #[test]
-    fn running_scans_keep_room_for_their_growth_in_the_node_budget() {
+    /// A finished scan (A), a running one held at its first read (B); returns them with the rig and the gate.
+    fn finished_and_running(cap: usize) -> (Rig, u64, u64, Arc<Gate>) {
         let fs = Arc::new(FakeFs::new());
         let root = fs.root();
         let (a, b, c) = (fs.dir(&root, "a"), fs.dir(&root, "b"), fs.dir(&root, "c"));
@@ -1623,8 +1648,7 @@ mod tests {
                 vol("C", &c, VolumeLocation::Internal),
             ],
         );
-        // Budget for one scan of 10_000 nodes and a little more.
-        r.centre.set_kept_nodes(15_000);
+        r.centre.set_kept_nodes(cap);
         let done = r.centre.start(DiskTarget::Volume { id: "A".into() }).unwrap();
         wait_final(&r, done.scan);
         let gate = Gate::new();
@@ -1632,14 +1656,35 @@ mod tests {
         fs.on_read(move |_| g.pass());
         let running = r.centre.start(DiskTarget::Volume { id: "B".into() }).unwrap();
         gate.wait_arrived(1);
-        // The running scan may grow to 10_000, so with a third of 10_000 the finished one has to go.
+        (r, done.scan, running.scan, gate)
+    }
+
+    #[test]
+    fn running_scans_keep_room_for_their_growth_in_the_node_budget() {
+        // The running scan may grow to 10_000 and the new one may take 10_000: they fit in 20_000 exactly, the finished one (1 node) does not.
+        let (r, done, running, gate) = finished_and_running(20_000);
         let third = r.centre.start(DiskTarget::Volume { id: "C".into() }).unwrap();
         let kept: Vec<u64> = r.centre.scans().iter().map(|s| s.scan).collect();
-        assert!(!kept.contains(&done.scan), "the finished scan made room");
-        assert!(kept.contains(&running.scan) && kept.contains(&third.scan));
+        assert!(!kept.contains(&done), "the finished scan made room");
+        assert!(kept.contains(&running) && kept.contains(&third.scan));
         gate.open();
-        wait_final(&r, running.scan);
+        wait_final(&r, running);
         wait_final(&r, third.scan);
+    }
+
+    #[test]
+    fn a_start_that_cannot_fit_next_to_the_running_scans_is_refused_with_a_typed_error() {
+        let (r, done, running, gate) = finished_and_running(15_000);
+        let refused = r.centre.start(DiskTarget::Volume { id: "C".into() }).unwrap_err();
+        assert_eq!(refused.code, ErrorCode::Busy);
+        assert!(refused.message.contains("Finish or close a scan first"), "{}", refused.message);
+        let kept: Vec<u64> = r.centre.scans().iter().map(|s| s.scan).collect();
+        assert_eq!(kept, vec![done, running], "refusing took nothing from anyone");
+        gate.open();
+        wait_final(&r, running);
+        // With the running scan finished, the same start fits: finished scans give way.
+        let ok = r.centre.start(DiskTarget::Volume { id: "C".into() }).unwrap();
+        wait_final(&r, ok.scan);
     }
 
     #[test]
@@ -1691,6 +1736,26 @@ mod tests {
             out.root.node.bytes,
             out.root.children.iter().map(|c| c.node.bytes).sum::<u64>() + out.root.other.bytes + out.root.loose.bytes
         );
+    }
+
+    #[test]
+    fn a_folder_is_counted_against_the_host_it_lives_on() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(
+            fs,
+            vec![
+                vol("Local", Path::new("/data"), VolumeLocation::Internal),
+                vol("Share", Path::new("/data/nas"), net("nas.local")),
+            ],
+        );
+        r.centre.volumes();
+        assert_eq!(r.centre.folder_host("/data/projects"), "this computer");
+        assert_eq!(
+            r.centre.folder_host("/data/nas/films"),
+            "nas.local",
+            "the deepest volume holding the path"
+        );
+        assert_eq!(r.centre.folder_host("/elsewhere"), "this computer");
     }
 
     #[test]

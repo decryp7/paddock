@@ -107,9 +107,9 @@ impl DiskPorts {
 pub struct BroadcastStatus(pub std::sync::Weak<crate::agent::Shared>);
 
 impl centre::StatusSink for BroadcastStatus {
-    fn volumes_changed(&self, volumes: Vec<dyno_core::disk::volume::Volume>) {
+    fn volumes_changed(&self, ticket: u64, volumes: Vec<dyno_core::disk::volume::Volume>) {
         if let Some(shared) = self.0.upgrade() {
-            shared.broadcast(&dyno_core::protocol::Message::DiskVolumes(volumes));
+            shared.broadcast_volumes(ticket, &volumes);
         }
     }
 

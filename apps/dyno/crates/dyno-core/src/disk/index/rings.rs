@@ -1,7 +1,7 @@
 //! Several levels of a scan in one answer, for the sunburst: the nested children under a folder down to a depth, the small ones
 //! of each level folded into that level's "other", and the whole answer capped. It replaces many one-level reads.
 
-use super::{DiskIndex, DiskNode, Folded, IndexError, NodeId};
+use super::{DiskIndex, DiskNode, Folded, IndexError, Node, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
@@ -43,11 +43,11 @@ struct Built {
     loose: Folded,
 }
 
-fn fold(f: Folded, n: &DiskNode) -> Folded {
+fn fold(f: Folded, n: &Node) -> Folded {
     Folded {
         count: f.count + 1,
         bytes: f.bytes.saturating_add(n.bytes),
-        logical_bytes: f.logical_bytes.saturating_add(n.logical_bytes),
+        logical_bytes: f.logical_bytes.saturating_add(n.logical),
         items: f.items.saturating_add(n.items),
     }
 }
@@ -91,16 +91,17 @@ impl DiskIndex {
             }
             let mut other = Folded::default();
             for kid in self.sorted_kids(node) {
-                let info = self.info(kid);
-                if info.bytes < floor {
-                    other = fold(other, &info);
+                // What is folded is summed from the raw node; a full `DiskNode` (with its name) is made only for a node that is shown.
+                let raw = &self.nodes[kid as usize];
+                if raw.bytes < floor {
+                    other = fold(other, raw);
                 } else if built.len() >= budget {
                     capped = true;
-                    other = fold(other, &info);
+                    other = fold(other, raw);
                 } else {
                     built.push(Built {
                         loose: loose_of(kid),
-                        node: info,
+                        node: self.info(kid),
                         kids: Vec::new(),
                         other: Folded::default(),
                     });

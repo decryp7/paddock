@@ -106,6 +106,8 @@ struct Node {
     complete: bool,
     /// Something directly inside could not be read (but the folder itself could be listed): never complete.
     partial: bool,
+    /// A folder a cut-short retry made and did not get to read: incomplete, but not refused by anyone.
+    unread: bool,
     /// Folders: the listing itself (1 until finished) plus the child folders not complete yet.
     open: u32,
     child_count: u32,
@@ -217,6 +219,7 @@ impl DiskIndex {
             kind: NodeKind::Folder,
             complete: false,
             partial: false,
+            unread: false,
             open: 1,
             child_count: 0,
             bytes: 0,
@@ -321,6 +324,7 @@ impl DiskIndex {
             kind,
             complete: false,
             partial: false,
+            unread: false,
             open: 0,
             child_count: 0,
             bytes: 0,
@@ -381,6 +385,25 @@ impl DiskIndex {
         out
     }
 
+    /// Marks a folder that was made but not read yet (a retry was cut short): it stays incomplete, and is not counted as
+    /// refused. [`reopen_unread`](Self::reopen_unread) opens it again.
+    pub fn mark_unread(&mut self, node: NodeId) {
+        self.nodes[node.0 as usize].unread = true;
+    }
+
+    /// Opens every folder marked unread for another try and returns their ids.
+    pub fn reopen_unread(&mut self) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        for (id, n) in self.nodes.iter_mut().enumerate() {
+            if n.unread && n.child_count == 0 && n.loose_items == 0 {
+                n.unread = false;
+                n.open = 1;
+                out.push(NodeId(u32::try_from(id).unwrap_or(NONE)));
+            }
+        }
+        out
+    }
+
     /// Marks a folder as listed but with something in it that could not be read: its size is a lower bound, it stays incomplete
     /// for good (it cannot be read again without counting its files twice), and so do its ancestors.
     pub fn mark_partial(&mut self, node: NodeId) {
@@ -418,7 +441,7 @@ impl DiskIndex {
         while at != NONE {
             let n = &mut self.nodes[at as usize];
             n.open = n.open.saturating_sub(1);
-            if n.open > 0 || n.complete || n.partial || n.kind == NodeKind::Unreadable {
+            if n.open > 0 || n.complete || n.partial || n.unread || n.kind == NodeKind::Unreadable {
                 return;
             }
             n.complete = true;
@@ -713,6 +736,23 @@ mod tests {
         j.finish_listing(locked);
         assert!(!j.is_complete());
         assert_eq!(j.reopen_unreadable(), vec![locked], "it can be tried again later");
+    }
+
+    #[test]
+    fn an_unread_folder_is_incomplete_not_refused_and_opens_again() {
+        let mut i = DiskIndex::new("r", limits(100));
+        let r = i.root();
+        let a = i.add_folder(r, "a").unwrap();
+        i.mark_unread(a);
+        i.finish_listing(a);
+        i.finish_listing(r);
+        assert!(!i.is_complete());
+        assert_eq!(i.node(a).unwrap().kind, NodeKind::Folder, "not shown as refused");
+        assert!(i.reopen_unreadable().is_empty(), "nobody refused it");
+        assert_eq!(i.reopen_unread(), vec![a]);
+        i.finish_listing(a);
+        assert!(i.is_complete(), "read at last");
+        assert!(i.reopen_unread().is_empty());
     }
 
     #[test]

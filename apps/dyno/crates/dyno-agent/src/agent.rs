@@ -68,6 +68,26 @@ impl ScanSlot {
     }
 }
 
+/// The newest volume list waiting for one app, with the ticket of the listing it came from: an older listing never replaces a
+/// newer one, and the list is never dropped for a full queue.
+#[derive(Default)]
+pub struct VolumesSlot(Mutex<Option<(u64, Vec<dyno_core::disk::volume::Volume>)>>);
+
+impl VolumesSlot {
+    /// Keeps the list unless a newer listing's is already waiting.
+    pub fn put(&self, ticket: u64, volumes: Vec<dyno_core::disk::volume::Volume>) {
+        let mut m = lock(&self.0);
+        if m.as_ref().is_none_or(|(old, _)| *old < ticket) {
+            *m = Some((ticket, volumes));
+        }
+    }
+
+    /// The list waiting, if any; the slot is empty afterwards.
+    pub fn take(&self) -> Option<Vec<dyno_core::disk::volume::Volume>> {
+        lock(&self.0).take().map(|(_, v)| v)
+    }
+}
+
 /// A connected app that wants live updates.
 pub struct Sub {
     /// Connection id.
@@ -78,6 +98,8 @@ pub struct Sub {
     pub tx: SyncSender<Message>,
     /// Disk scan statuses, latest per scan: never a lossy queue (a final state must arrive).
     pub scans: Arc<ScanSlot>,
+    /// The volume list, newest only, same reason.
+    pub volumes: Arc<VolumesSlot>,
 }
 
 impl Sub {
@@ -430,6 +452,14 @@ impl Shared {
             // The message only wakes the push thread; the content is in the slot. A full queue means the thread is awake
             // anyway and looks at the slot after every message.
             let _ = s.tx.try_send(Message::DiskScan(Box::new(status.clone())));
+        }
+    }
+
+    /// Hands a changed volume list to every connected app, newest listing wins; like scan statuses it is never lost to a full queue.
+    pub fn broadcast_volumes(&self, ticket: u64, volumes: &[dyno_core::disk::volume::Volume]) {
+        for s in lock(&self.subs).iter() {
+            s.volumes.put(ticket, volumes.to_vec());
+            let _ = s.tx.try_send(Message::DiskVolumes(Vec::new()));
         }
     }
 

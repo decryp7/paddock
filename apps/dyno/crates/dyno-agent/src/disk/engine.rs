@@ -163,8 +163,9 @@ pub struct Walk {
     retry_pass: AtomicBool,
     /// Held while a pass ends or begins, so a retry, a cancel and a failure cannot interleave and leave the state half-changed.
     gate: Mutex<()>,
-    /// Folders reopened by a retry and not yet read again, with their paths: if the pass ends early they are marked refused again.
-    reopened: Mutex<HashMap<NodeId, PathBuf>>,
+    /// Folders reopened by a retry (or made by one) and not yet read, with their paths and whether the OS had refused them: if the pass
+    /// ends early the refused ones are marked refused again and the others unread.
+    reopened: Mutex<HashMap<NodeId, (PathBuf, bool)>>,
     /// Items seen inside folders still being listed, not in the index yet (taken off when the folder is committed).
     pending_items: AtomicU64,
     /// The highest item count shown so far: the count shown never goes back.
@@ -322,7 +323,12 @@ impl Walk {
         if !retryable {
             return Err(RetryError::NotFinished);
         }
-        let ids = lock(&self.index).reopen_unreadable();
+        // The folders the OS refused (counted as refused), then the ones an earlier cut-short retry made and did not read.
+        let (refused, unread) = {
+            let mut i = lock(&self.index);
+            (i.reopen_unreadable(), i.reopen_unread())
+        };
+        let ids: Vec<NodeId> = refused.iter().chain(unread.iter()).copied().collect();
         if ids.is_empty() {
             return Err(RetryError::NothingToRetry);
         }
@@ -339,9 +345,12 @@ impl Walk {
                 .collect()
         };
         let threads = self.cfg.threads.min(tasks.len()).max(1);
-        let tasks_len = tasks.len();
+        let tasks_len = refused.len();
         let again: HashSet<String> = tasks.iter().map(|t| t.path.to_string_lossy().into_owned()).collect();
-        *lock(&self.reopened) = tasks.iter().map(|t| (t.node, t.path.clone())).collect();
+        *lock(&self.reopened) = tasks
+            .iter()
+            .map(|t| (t.node, (t.path.clone(), refused.contains(&t.node))))
+            .collect();
         *lock(&self.queue) = Queue {
             stack: tasks,
             ..Queue::default()
@@ -380,19 +389,26 @@ impl Walk {
     /// Marks the folders a retry reopened and did not get to read as refused again, with their counts, so that a retry cut short
     /// loses nothing: the next one reads them.
     fn restore_reopened(&self) {
-        let left: Vec<(NodeId, PathBuf)> = std::mem::take(&mut *lock(&self.reopened)).into_iter().collect();
+        let left: Vec<(NodeId, (PathBuf, bool))> = std::mem::take(&mut *lock(&self.reopened)).into_iter().collect();
         if left.is_empty() {
             return;
         }
         {
             let mut i = lock(&self.index);
-            for (id, _) in &left {
-                i.mark_unreadable(*id);
+            for (id, (_, refused)) in &left {
+                if *refused {
+                    i.mark_unreadable(*id);
+                } else {
+                    i.mark_unread(*id);
+                }
                 i.finish_listing(*id);
             }
         }
-        for (_, path) in &left {
-            self.note_unreadable(path);
+        // Only what the OS refused is counted as refused; folders that were just not reached are not.
+        for (_, (path, refused)) in &left {
+            if *refused {
+                self.note_unreadable(path);
+            }
         }
     }
 
@@ -690,7 +706,7 @@ impl Walk {
                         track: task.track,
                     });
                     if task.track {
-                        lock(&self.reopened).insert(node, task.path.join(&d.name));
+                        lock(&self.reopened).insert(node, (task.path.join(&d.name), false));
                     }
                 }
             }
@@ -1347,6 +1363,12 @@ mod tests {
         gate.open();
         assert_eq!(w.wait(), End::Cancelled);
         assert!(!w.with_index(DiskIndex::is_complete));
+        let s = w.snapshot();
+        assert_eq!(
+            (s.progress.unreadable, s.unreadable_first.len()),
+            (0, 0),
+            "folders not reached are not folders the OS refused"
+        );
         fs.on_read(|_| {});
         w.retry().unwrap();
         assert_eq!(w.wait(), End::Done, "the folders the cut-short pass made are read by the next one");
