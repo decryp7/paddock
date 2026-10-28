@@ -644,7 +644,11 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         let c = crate::Supervised::spawn(child(Mode::Sleep)).unwrap();
         let pid = c.id().unwrap();
         assert!(OsSource::default().children(me).contains(&pid));
+        // On Windows a CREATE_NO_WINDOW child owns a conhost.exe, so it is never childless there (CI run 6603).
+        #[cfg(not(windows))]
         assert!(OsSource::default().children(pid).is_empty());
+        #[cfg(windows)]
+        assert!(!OsSource::default().children(pid).contains(&pid));
         assert!(OsSource::default().children(u32::MAX - 1).is_empty());
         assert!(tree_memory(me) >= process_memory(pid).unwrap());
     }
