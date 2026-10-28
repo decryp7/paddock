@@ -1,3 +1,4 @@
+import { UiPrefsStore } from './core/workspace/ui-prefs.store';
 import { RovingTabindex } from './shared/roving-tabindex';
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { WorkspaceStore } from './core/workspace.store';
@@ -39,7 +40,7 @@ import { RegionNavigator } from './shell/regions';
           <debrief-sidebar data-debrief-region="sidebar" role="complementary" aria-label="Side bar" i18n-aria-label="@@app.region.sidebar" tabindex="-1" />
         } @placeholder {
           <!-- Its room until its code arrives: the dock does not move when it appears. -->
-          <div class="sidebar-placeholder" data-testid="sidebar-placeholder" aria-hidden="true"></div>
+          <div class="sidebar-placeholder" data-testid="sidebar-placeholder" aria-hidden="true" [style.width.px]="prefs.explorerWidth()"></div>
         }
       }
       <main class="center">
@@ -106,6 +107,7 @@ import { RegionNavigator } from './shell/regions';
 })
 export class App {
   protected readonly store = inject(WorkspaceStore);
+  protected readonly prefs = inject(UiPrefsStore);
   protected readonly welcome = inject(WelcomeService);
   protected readonly modalGate = inject(ModalGate);
   protected readonly regions = inject(RegionNavigator);

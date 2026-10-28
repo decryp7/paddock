@@ -358,3 +358,35 @@ test('a pop-out window boots its shell and its one view (regression: the page ke
   await expect(page.locator('pd-popout-shell')).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
+
+test('the Explorer pane is resized by dragging its sash, keeps the width across a window resize, and stops at its declared limits', async ({ page }) => {
+  const wb = new WorkbenchApp(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await wb.frame.open();
+  await expect.poll(() => wb.frame.explorer()).toBe('wd.files');
+  const width = async (): Promise<number> => Math.round((await wb.frame.sidebar.boundingBox())!.width);
+  const min = Number(await wb.frame.sash.getAttribute('aria-valuemin'));
+  const max = Number(await wb.frame.sash.getAttribute('aria-valuemax'));
+  const drag = async (dx: number): Promise<void> => {
+    const box = (await wb.frame.sash.boundingBox())!;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y, { steps: 6 });
+    await page.mouse.up();
+  };
+  const before = await width();
+  await drag(80);
+  await expect.poll(width).toBe(before + 80);
+  // A window resize and a re-plan keep what the user dragged.
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect.poll(() => wb.frame.explorer()).toBe('wd.files');
+  expect(await width()).toBe(before + 80);
+  // The declared minimum holds.
+  await drag(-2000);
+  await expect.poll(width).toBe(min);
+  await drag(2000);
+  await expect.poll(async () => (await width()) <= max).toBe(true);
+});

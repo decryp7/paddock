@@ -1,6 +1,7 @@
 import { inject, Injectable, Injector } from '@angular/core';
 import type { DockviewApi, DockviewGroupPanel } from 'dockview';
 import { LayoutPlan, OpenView, ViewLayout, planLayout, restorable, SavedHints } from '../layout-plan/layout-plan';
+import { EXPLORER_WIDTH } from '../core/workspace/ui-prefs.store';
 import { NotificationsStore } from '../notifications/notifications.store';
 import { autoHideReduce } from './auto-hide';
 import { DockContext } from './dock-context';
@@ -33,8 +34,14 @@ export const GROW_BACK_MARGIN = { width: 64, height: 48 } as const;
  */
 /** The Explorer side bar is a view of the plan that lives outside the dock (ADR 0056). */
 export const EXPLORER_ID = 'explorer';
-/** The sidebar has a fixed width, so its minimum is its preference: the plan opens or closes it, it never resizes it. */
-export const EXPLORER_LAYOUT: ViewLayout = { area: 'side', edge: 'left', min: { width: 300, height: 240 }, pref: { width: 300, height: 400 }, priority: 80 };
+/** The Explorer's declaration: the user resizes it between `min` and `EXPLORER_WIDTH.max`; the plan opens or closes it, it never resizes it. */
+export const EXPLORER_LAYOUT: ViewLayout = {
+  area: 'side',
+  edge: 'left',
+  min: { width: EXPLORER_WIDTH.min, height: 240 },
+  pref: { width: EXPLORER_WIDTH.default, height: 400 },
+  priority: 80,
+};
 
 const NO_SLOT: DockSlot = { referencePanel: null, direction: 'within' };
 
@@ -340,13 +347,19 @@ export class DockLayout {
     };
   }
 
+  /** The Explorer's declaration at the width it has now: the plan never resizes it, so what it needs is the width it is (never below its declared minimum). */
+  private explorerAt(width: number): ViewLayout {
+    const w = Math.max(EXPLORER_LAYOUT.min.width, width);
+    return { ...EXPLORER_LAYOUT, min: { ...EXPLORER_LAYOUT.min, width: w }, pref: { ...EXPLORER_LAYOUT.pref, width: w } };
+  }
+
   /** The verdict for the Explorer (see `DockService.explorerVerdict`). */
   explorerVerdict(api: DockviewApi, open: boolean, explorerWidth: number): 'hide' | 'show' | 'keep' {
     if (!(api.width > 0 && api.height > 0)) return 'keep';
     const box = this.ctx.container?.getBoundingClientRect();
     if (box && (box.width <= 0 || box.height <= 0)) return 'keep';
     const viewport = { width: api.width + (open ? explorerWidth : 0), height: api.height };
-    const explorer: OpenView = { id: EXPLORER_ID, layout: EXPLORER_LAYOUT, group: EXPLORER_ID };
+    const explorer: OpenView = { id: EXPLORER_ID, layout: this.explorerAt(explorerWidth), group: EXPLORER_ID };
     const views = this.openViews(api, [explorer]);
     if (open) return planLayout(viewport, views, this.hints()).hidden.some((h) => h.id === EXPLORER_ID) ? 'hide' : 'keep';
     return restorable(viewport, views, [EXPLORER_ID], GROW_BACK_MARGIN, this.hints()).includes(EXPLORER_ID) ? 'show' : 'keep';

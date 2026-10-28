@@ -17,13 +17,24 @@ interface UiPrefsState {
   /** Grid sort order (not persisted). */
   descending: boolean;
   extraColumns: string[];
+  /** The Explorer's width the user dragged it to, px (always within `EXPLORER_WIDTH`). */
+  explorerWidth: number;
+}
+
+/** The Explorer's declared widths, px: `dock/dock-layout.ts` builds the Explorer's `ViewLayout` from them (ADR 0056). */
+export const EXPLORER_WIDTH = { min: 240, default: 272, max: 640 } as const;
+
+/** Clamps a width to the Explorer's declared limits; anything that is not a finite number gives the default. */
+export function clampExplorerWidth(width: unknown): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) return EXPLORER_WIDTH.default;
+  return Math.round(Math.min(EXPLORER_WIDTH.max, Math.max(EXPLORER_WIDTH.min, width)));
 }
 
 const PREFS_KEY = 'debrief.prefs.v1';
 /** The preferences kept across sessions. */
-export type Prefs = Pick<UiPrefsState, 'timezone' | 'theme' | 'scheme' | 'uiFont' | 'extraColumns' | 'alwaysShowLifecycle'>;
+export type Prefs = Pick<UiPrefsState, 'timezone' | 'theme' | 'scheme' | 'uiFont' | 'extraColumns' | 'alwaysShowLifecycle' | 'explorerWidth'>;
 
-const DEFAULTS: Prefs = { timezone: 'utc', alwaysShowLifecycle: true, theme: null, scheme: 'system', uiFont: 'system', extraColumns: [] };
+const DEFAULTS: Prefs = { timezone: 'utc', alwaysShowLifecycle: true, theme: null, scheme: 'system', uiFont: 'system', extraColumns: [], explorerWidth: EXPLORER_WIDTH.default };
 
 /** Narrows stored (untrusted) preferences: unknown or malformed values fall back to the defaults. */
 export function sanitizePrefs(raw: unknown): Prefs {
@@ -35,6 +46,7 @@ export function sanitizePrefs(raw: unknown): Prefs {
     scheme: isSchemeMode(r['scheme']) ? r['scheme'] : DEFAULTS.scheme,
     uiFont: isUiFont(r['uiFont']) ? r['uiFont'] : DEFAULTS.uiFont,
     extraColumns: Array.isArray(r['extraColumns']) ? r['extraColumns'].filter((c): c is string => typeof c === 'string') : DEFAULTS.extraColumns,
+    explorerWidth: clampExplorerWidth(r['explorerWidth']),
   };
 }
 
@@ -84,6 +96,8 @@ export const UiPrefsStore = signalStore(
     },
     /** Replaces the extra columns (a lens switch); duplicates are dropped. */
     setColumns: (fields: readonly string[]) => patchState(store, { extraColumns: [...new Set(fields)] }),
+    /** The user dragged (or keyed) the Explorer to this width; clamped to its declared limits. */
+    setExplorerWidth: (width: number) => patchState(store, { explorerWidth: clampExplorerWidth(width) }),
     removeColumn: (field: string) => patchState(store, { extraColumns: store.extraColumns().filter((c) => c !== field) }),
     /** The preferences to persist. */
     snapshot: (): Prefs => ({
@@ -93,6 +107,7 @@ export const UiPrefsStore = signalStore(
       uiFont: store.uiFont(),
       extraColumns: store.extraColumns(),
       alwaysShowLifecycle: store.alwaysShowLifecycle(),
+      explorerWidth: store.explorerWidth(),
     }),
   })),
 );

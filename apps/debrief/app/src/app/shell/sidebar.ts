@@ -7,6 +7,7 @@ import { DialogService } from '../ui/dialog.service';
 import { EncodingInfo, SourceInfo, SourceProblem, TailFileState, UnrecognizedFile } from '../core/api.types';
 import { formatCompact, formatCount, formatDateTime } from '../core/format';
 import { WorkspaceStore } from '../core/workspace.store';
+import { EXPLORER_WIDTH, UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { Icon } from '../shared/icon';
 import { FieldsPanel } from '../workspace/fields-panel';
 import { groupSources } from '../live/source-groups';
@@ -58,6 +59,7 @@ function shortPath(path: string): string {
   selector: 'debrief-sidebar',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [RovingTabindex, PathText, ScrollFade, Icon, FieldsPanel, NgTemplateOutlet, SourceSwatch, TimestampWarning],
+  host: { '[style.width.px]': 'width()' },
   template: `
     <div class="head">
       <span class="section-title" i18n="@@shell.sidebar.explorer">Explorer</span>
@@ -176,9 +178,11 @@ function shortPath(path: string): string {
         <div class="src-error">{{ s.error }}</div>
       }
     </ng-template>
+    <div class="sash" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the Explorer" i18n-aria-label="@@shell.sidebar.resize" data-testid="explorer-sash"
+      [class.dragging]="dragging()" [attr.aria-valuenow]="width()" [attr.aria-valuemin]="widthMin" [attr.aria-valuemax]="widthMax" (pointerdown)="startResize($event)" (keydown)="resizeKey($event)"></div>
   `,
   styles: `
-    :host { width: 272px; flex: none; display: flex; flex-direction: column; background: var(--bg-2); border-inline-end: 1px solid var(--border); min-height: 0; }
+    :host { position: relative; width: 272px; flex: none; display: flex; flex-direction: column; background: var(--bg-2); border-inline-end: 1px solid var(--border); min-height: 0; }
     .head { height: 34px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 12px; }
     .tools { display: flex; gap: 2px; }
     .small { font-size: var(--fs-xs); }
@@ -223,11 +227,20 @@ function shortPath(path: string): string {
     /* A guessed encoding is a small warning mark; the encoding itself is in the tooltip and read by screen readers. */
     .enc { flex: none; display: inline-flex; color: var(--faint); }
     .enc.low { color: var(--warn-text); }
+    /* The sash on the inner edge: a wide grab area over the border, drawn as the accent while hovered, focused or dragged. */
+    .sash { position: absolute; inset-block: 0; inset-inline-end: -3px; width: 6px; z-index: 2; cursor: col-resize; touch-action: none; background: transparent; outline: none; }
+    .sash:hover, .sash:focus-visible, .sash.dragging { background: var(--accent); opacity: 0.6; }
     .skew { flex: none; font-size: var(--fs-2xs); padding: 0 5px; border-radius: 7px; border: 1px solid var(--accent); color: var(--text-2); }
   `,
 })
 export class Sidebar {
   protected readonly store = inject(WorkspaceStore);
+  private readonly prefs = inject(UiPrefsStore);
+  /** The Explorer's width, px (the user's, within its declared limits). */
+  protected readonly width = this.prefs.explorerWidth;
+  protected readonly widthMin = EXPLORER_WIDTH.min;
+  protected readonly widthMax = EXPLORER_WIDTH.max;
+  protected readonly dragging = signal(false);
   protected readonly importRange = inject(ImportRange);
   private readonly dialogs = inject(DialogService);
 
@@ -430,5 +443,36 @@ export class Sidebar {
 
   protected setUpFormat(file: UnrecognizedFile): void {
     this.dialogs.openLazy(() => import('../format/format-wizard').then((m) => m.FormatWizard), { title: $localize`:@@shell.sidebar.dialog.setUpFormat:Set up format`, inputs: { path: file.path, name: file.name }, width: 760 });
+  }
+
+  /** Drags the sash: the width follows the pointer until it is released. */
+  protected startResize(e: PointerEvent): void {
+    const sash = e.currentTarget as HTMLElement;
+    const startX = e.clientX;
+    const startWidth = this.width();
+    const rtl = sash.ownerDocument.dir === 'rtl';
+    sash.setPointerCapture?.(e.pointerId);
+    this.dragging.set(true);
+    const move = (m: PointerEvent) => this.prefs.setExplorerWidth(startWidth + (rtl ? startX - m.clientX : m.clientX - startX));
+    const up = () => {
+      sash.removeEventListener('pointermove', move);
+      sash.removeEventListener('pointerup', up);
+      sash.removeEventListener('pointercancel', up);
+      this.dragging.set(false);
+    };
+    sash.addEventListener('pointermove', move);
+    sash.addEventListener('pointerup', up);
+    sash.addEventListener('pointercancel', up);
+    e.preventDefault();
+  }
+
+  /** Arrow keys resize by 16 px (Shift: 64), Home and End go to the limits. */
+  protected resizeKey(e: KeyboardEvent): void {
+    const step = e.shiftKey ? 64 : 16;
+    const w = this.width();
+    const next = e.key === 'ArrowLeft' ? w - step : e.key === 'ArrowRight' ? w + step : e.key === 'Home' ? EXPLORER_WIDTH.min : e.key === 'End' ? EXPLORER_WIDTH.max : null;
+    if (next === null) return;
+    e.preventDefault();
+    this.prefs.setExplorerWidth(next);
   }
 }
