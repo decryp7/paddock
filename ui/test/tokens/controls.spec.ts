@@ -1,15 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compile } from 'sass';
+import { compile, compileString } from 'sass';
 import { describe, expect, it } from 'vitest';
 import { contrast, parseColor } from './color';
 import { ACCENTS, readRules, resolve, type Scheme } from './css';
 
 const scss = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'projects', 'paddock-ui', 'scss');
-const compiled = (entry: string): string => compile(join(scss, entry), { style: 'expanded' }).css;
+const nodeModules = join(scss, '..', '..', '..', '..', 'node_modules');
+const compiled = (entry: string): string => compile(join(scss, entry), { style: 'expanded', loadPaths: [nodeModules] }).css;
 const controls = compiled('entry-controls.scss');
-const material = compiled('entry-material.scss');
+/** The bridge alone (our rules, every value a --pd-* token) and the whole sheet apps load (Material's own `mat.theme` first). */
+const material = compileString("@use 'material';", { style: 'expanded', loadPaths: [scss] }).css;
+const materialEntry = compiled('entry-material.scss');
 const tokens = readFileSync(join(scss, '_tokens.scss'), 'utf8');
 const rules = readRules();
 
@@ -108,5 +111,125 @@ describe('control styles and the Material bridge (plan X37)', () => {
     for (const m of material.matchAll(/(--mat-(?:slide-toggle-selected|checkbox-selected|radio-selected)[\w-]*(?:track|icon)-color):\s*([^;]+);/g)) {
       expect(m[2], m[1]).toBe('var(--pd-accent-control)');
     }
+  });
+  it('the shared entry carries one Material theme (system tokens, density -3) and our bridge after it, so ours win', () => {
+    expect(materialEntry).toContain('--mat-sys-primary');
+    // Material's theme is on `html` (specificity 0,0,1), our mapping on `:root` (0,1,0): ours win whatever the order.
+    expect(materialEntry).toMatch(/^html \{[^}]*--mat-sys-primary:/m);
+    expect(materialEntry).toMatch(/^:root \{[^}]*--mat-sys-primary: var\(--pd-accent-fill\)/m);
+    expect(materialEntry).toMatch(/density|--mat-/);
+    // No inline style attribute is ever needed: the sheets are plain CSS (CSP forbids style="").
+    expect(materialEntry).not.toMatch(/unsafe-inline/);
+  });
+
+  it('bridges every Material component of the migration plan', () => {
+    const props = new Set([...material.matchAll(/(--mat-[\w-]+)\s*:/g)].map((m) => m[1] as string));
+    const parts = ['table-background-color', 'sort-arrow-color', 'paginator-container-background-color', 'tree-container-background-color', 'button-toggle-selected-state-background-color', 'badge-background-color', 'list-list-item-label-text-color', 'expansion-container-background-color', 'timepicker-container-background-color', 'slider-active-track-color', 'chip-selected-label-text-color', 'tab-active-label-text-color', 'progress-bar-active-indicator-color', 'slide-toggle-selected-track-color', 'checkbox-selected-icon-color', 'radio-selected-icon-color', 'select-panel-background-color', 'form-field-outlined-outline-color', 'menu-container-color', 'tooltip-container-color', 'snack-bar-container-color', 'autocomplete-background-color', 'datepicker-calendar-container-background-color', 'button-filled-container-color', 'button-outlined-outline-color', 'button-text-label-text-color', 'button-tonal-container-color', 'button-protected-container-color'];
+    for (const part of parts) expect(props, part).toContain(`--mat-${part}`);
+  });
+
+  it('matButton: filled is the primary, outlined the secondary, danger a class; no ripple colour anywhere', () => {
+    expect(material).toMatch(/--mat-button-filled-container-color: var\(--pd-accent-fill\)/);
+    expect(material).toMatch(/--mat-button-outlined-outline-color: var\(--pd-border-strong\)/);
+    expect(material).toMatch(/\.mat-mdc-unelevated-button\.pd-button-danger \{[^}]*--pd-danger-fill/);
+    for (const m of material.matchAll(/(--mat-button-[a-z]+-ripple-color):\s*([^;]+);/g)) expect(m[2], m[1]).toBe('transparent');
+  });
+
+  describe.each(['dark', 'light'] as Scheme[])('contrast of the Material components, %s', (scheme) => {
+    /** [ink token, surface token, minimum]: text 4.5, icons, borders and indicators 3 (WCAG 1.4.3, 1.4.11). Read from the bridge. */
+    const PAIRS: [string, string, number][] = [
+      ['table-row-item-label-text-color', 'table-background-color', 4.5],
+      ['table-header-headline-color', 'table-background-color', 4.5],
+      ['sort-arrow-color', 'table-background-color', 3],
+      ['paginator-container-text-color', 'paginator-container-background-color', 4.5],
+      ['paginator-enabled-icon-color', 'paginator-container-background-color', 3],
+      ['tree-node-text-color', 'tree-container-background-color', 4.5],
+      ['button-toggle-text-color', 'button-toggle-background-color', 4.5],
+      ['button-toggle-selected-state-text-color', 'button-toggle-selected-state-background-color', 4.5],
+      ['badge-text-color', 'badge-background-color', 4.5],
+      ['list-list-item-label-text-color', 'sys-surface', 4.5],
+      ['list-list-item-supporting-text-color', 'sys-surface', 4.5],
+      ['list-list-item-label-text-color', 'list-list-item-selected-container-color', 4.5],
+      ['expansion-header-text-color', 'expansion-container-background-color', 4.5],
+      ['expansion-header-description-color', 'expansion-container-background-color', 4.5],
+      ['expansion-header-indicator-color', 'expansion-container-background-color', 3],
+      ['option-label-text-color', 'timepicker-container-background-color', 4.5],
+      ['slider-active-track-color', 'sys-surface', 3],
+      ['slider-handle-color', 'sys-surface', 3],
+      ['slider-label-label-text-color', 'slider-label-container-color', 4.5],
+      ['chip-label-text-color', 'chip-elevated-container-color', 4.5],
+      ['chip-selected-label-text-color', 'chip-elevated-selected-container-color', 4.5],
+      ['tab-active-label-text-color', 'sys-surface', 4.5],
+      ['tab-inactive-label-text-color', 'sys-surface', 4.5],
+      ['tab-active-indicator-color', 'sys-surface', 3],
+      ['progress-bar-active-indicator-color', 'sys-surface', 3],
+      ['slide-toggle-selected-track-color', 'sys-surface', 3],
+      ['slide-toggle-selected-handle-color', 'slide-toggle-selected-track-color', 3],
+      ['checkbox-selected-icon-color', 'sys-surface', 3],
+      ['checkbox-selected-checkmark-color', 'checkbox-selected-icon-color', 4.5],
+      ['checkbox-unselected-icon-color', 'sys-surface', 3],
+      ['radio-selected-icon-color', 'sys-surface', 3],
+      ['radio-unselected-icon-color', 'sys-surface', 3],
+      ['checkbox-label-text-color', 'sys-surface', 4.5],
+      ['radio-label-text-color', 'sys-surface', 4.5],
+      ['select-enabled-trigger-text-color', 'sys-surface', 4.5],
+      ['select-placeholder-text-color', 'sys-surface', 4.5],
+      ['option-label-text-color', 'select-panel-background-color', 4.5],
+      ['form-field-outlined-input-text-color', 'sys-surface', 4.5],
+      ['form-field-outlined-label-text-color', 'sys-surface', 4.5],
+      ['form-field-outlined-outline-color', 'sys-surface', 3],
+      ['form-field-outlined-focus-outline-color', 'sys-surface', 3],
+      ['form-field-error-text-color', 'sys-surface', 4.5],
+      ['form-field-subscript-text-color', 'sys-surface', 4.5],
+      ['menu-item-label-text-color', 'menu-container-color', 4.5],
+      ['menu-item-icon-color', 'menu-container-color', 3],
+      ['tooltip-supporting-text-color', 'tooltip-container-color', 4.5],
+      ['snack-bar-supporting-text-color', 'snack-bar-container-color', 4.5],
+      ['snack-bar-button-color', 'snack-bar-container-color', 4.5],
+      ['option-label-text-color', 'autocomplete-background-color', 4.5],
+      ['datepicker-calendar-date-text-color', 'datepicker-calendar-container-background-color', 4.5],
+      ['datepicker-calendar-header-text-color', 'datepicker-calendar-container-background-color', 4.5],
+      ['datepicker-calendar-body-label-text-color', 'datepicker-calendar-container-background-color', 4.5],
+      ['datepicker-calendar-date-selected-state-text-color', 'datepicker-calendar-date-selected-state-background-color', 4.5],
+      ['button-filled-label-text-color', 'button-filled-container-color', 4.5],
+      ['button-outlined-label-text-color', 'sys-surface-container', 4.5],
+      // The secondary button's border (border-strong) is decoration by design (guide section 9); its label identifies it.
+      ['button-text-label-text-color', 'sys-surface', 4.5],
+      ['button-tonal-label-text-color', 'button-tonal-container-color', 4.5],
+      ['button-protected-label-text-color', 'button-protected-container-color', 4.5],
+    ];
+
+    /** The --pd token a bridge entry points at (a plain var(--pd-x) value). */
+    const target = (name: string): string => {
+      const m = new RegExp(`--mat-${name}:\\s*var\\((--pd-[\\w-]+)\\)`).exec(material);
+      if (!m) throw new Error(`--mat-${name} is not a plain --pd token in the bridge`);
+      return m[1] as string;
+    };
+
+    it.each(ACCENTS)('every pair is legible (text 4.5, icons and borders 3), accent %s', (accent) => {
+      const v = resolve(rules, scheme, accent);
+      // A translucent surface (the accent tint is a colour-mix over transparent) is composited on the page surface it sits on.
+      const base = parseColor(v['--pd-surface-1'] as string);
+      const c = (n: string) => {
+        const mix = /^color-mix\(in srgb, (#[0-9a-f]{6}) ([\d.]+)%, transparent\)$/i.exec(v[n] as string);
+        if (!mix) return parseColor(v[n] as string);
+        const fg = parseColor(mix[1] as string);
+        const a = Number(mix[2]) / 100;
+        return { r: fg.r * a + base.r * (1 - a), g: fg.g * a + base.g * (1 - a), b: fg.b * a + base.b * (1 - a), a: 1 };
+      };
+      const failures: string[] = [];
+      for (const [ink, surface, min] of PAIRS) {
+        const ratio = contrast(c(target(ink)), c(target(surface)));
+        if (ratio < min) failures.push(`${ink} on ${surface}: ${ratio.toFixed(2)} < ${min}`);
+      }
+      expect(failures).toEqual([]);
+    });
+
+    it.each(ACCENTS)('the danger button (fill and ink) is legible, accent %s', (accent) => {
+      const v = resolve(rules, scheme, accent);
+      const c = (n: string) => parseColor(v[n] as string);
+      expect(contrast(c('--pd-on-danger'), c('--pd-danger-fill'))).toBeGreaterThanOrEqual(4.5);
+      for (const s of ['--pd-surface-1', '--pd-surface-2']) expect(contrast(c('--pd-danger'), c(s)), s).toBeGreaterThanOrEqual(4.5);
+    });
   });
 });

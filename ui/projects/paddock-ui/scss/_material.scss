@@ -2,7 +2,7 @@
 // apps use (tooltip, slide toggle, checkbox, radio, form field, select, autocomplete, menu, tabs, datepicker, progress,
 // snack bar, dialog surface) resolve to the --pd-* tokens, so a Material widget follows the app's theme, accent, density and
 // contrast with no per-app overrides. Nothing here has a colour of its own: every value is a var(--pd-…) or a size from the
-// tokens. Material's own theme is still included by the app (`mat.theme` / `mat.core`); this file sits after it.
+// tokens. Material's own theme (`mat.theme`, density -3) is included once by entry-material.scss, which loads this file; an app carries no theme of its own.
 //
 // Compact density: the form field and select are --pd-control-height; the slide toggle is scaled as a whole so its handle
 // geometry stays consistent (Pitcrew's rule).
@@ -233,19 +233,297 @@
 
   // ---- Progress, chips, snack bar and the dialog surface.
   --mat-progress-bar-active-indicator-color: var(--pd-accent);
-  --mat-progress-bar-track-color: var(--pd-surface-3);
+  --mat-progress-bar-track-color: var(--pd-border-strong);
   --mat-progress-spinner-active-indicator-color: var(--pd-accent);
   --mat-chip-elevated-container-color: var(--pd-surface-2);
   --mat-chip-label-text-color: var(--pd-text-muted);
   --mat-chip-outline-color: var(--pd-hairline);
   --mat-snack-bar-container-color: var(--pd-text);
   --mat-snack-bar-supporting-text-color: var(--pd-surface-1);
-  --mat-snack-bar-button-color: var(--pd-accent);
+  --mat-snack-bar-button-color: var(--pd-surface-1);
   --mat-dialog-container-color: var(--pd-surface-3);
   --mat-dialog-container-shape: var(--pd-radius-dialog);
   --mat-dialog-subhead-color: var(--pd-text);
   --mat-dialog-supporting-text-color: var(--pd-text-muted);
   --mat-icon-color: currentcolor;
+
+  // ---- Parts added by the Material migration (rule 47): every colour is a --pd-* token, every size the compact row or control.
+  // Table and sort header.
+  --mat-table-background-color: var(--pd-surface-1);
+  --mat-table-header-headline-color: var(--pd-text-muted);
+  --mat-table-header-headline-font: var(--pd-font-sans);
+  --mat-table-header-headline-size: var(--pd-text-label);
+  --mat-table-header-headline-line-height: var(--pd-lh-label);
+  --mat-table-header-container-height: var(--pd-row-height);
+  --mat-table-row-item-label-text-color: var(--pd-text);
+  --mat-table-row-item-label-text-font: var(--pd-font-sans);
+  --mat-table-row-item-label-text-size: var(--pd-text-body);
+  --mat-table-row-item-label-text-line-height: var(--pd-lh-body);
+  --mat-table-row-item-container-height: var(--pd-row-height);
+  --mat-table-row-item-outline-color: var(--pd-hairline);
+  --mat-table-footer-container-height: var(--pd-row-height);
+  --mat-table-footer-supporting-text-font: var(--pd-font-sans);
+  --mat-table-footer-supporting-text-size: var(--pd-text-label);
+  --mat-sort-arrow-color: var(--pd-text-muted);
+
+  // Paginator.
+  --mat-paginator-container-background-color: var(--pd-surface-1);
+  --mat-paginator-container-text-color: var(--pd-text-muted);
+  --mat-paginator-container-text-font: var(--pd-font-sans);
+  --mat-paginator-container-text-size: var(--pd-text-label);
+  --mat-paginator-container-text-line-height: var(--pd-lh-label);
+  --mat-paginator-container-size: var(--pd-row-height);
+  --mat-paginator-enabled-icon-color: var(--pd-text-muted);
+  --mat-paginator-disabled-icon-color: var(--pd-text-subtle);
+  --mat-paginator-form-field-container-height: var(--pd-control-height);
+  --mat-paginator-form-field-container-vertical-padding: 0px;
+  --mat-paginator-select-trigger-text-size: var(--pd-text-label);
+
+  // Tree.
+  --mat-tree-container-background-color: var(--pd-surface-1);
+  --mat-tree-node-text-color: var(--pd-text);
+  --mat-tree-node-text-font: var(--pd-font-sans);
+  --mat-tree-node-text-size: var(--pd-text-body);
+  --mat-tree-node-min-height: var(--pd-row-height);
+
+  // Button toggle (a segmented choice: the selected segment is the accent tint, as in pd-segmented).
+  --mat-button-toggle-background-color: var(--pd-surface-2);
+  --mat-button-toggle-text-color: var(--pd-text-muted);
+  --mat-button-toggle-state-layer-color: var(--pd-hover);
+  --mat-button-toggle-selected-state-background-color: var(--pd-accent-tint);
+  --mat-button-toggle-selected-state-text-color: var(--pd-text);
+  --mat-button-toggle-disabled-state-background-color: var(--pd-surface-2);
+  --mat-button-toggle-disabled-state-text-color: var(--pd-text-subtle);
+  --mat-button-toggle-disabled-selected-state-background-color: var(--pd-surface-3);
+  --mat-button-toggle-disabled-selected-state-text-color: var(--pd-text-subtle);
+  --mat-button-toggle-divider-color: var(--pd-hairline);
+  --mat-button-toggle-height: var(--pd-control-height);
+  --mat-button-toggle-shape: var(--pd-radius-control);
+  --mat-button-toggle-label-text-font: var(--pd-font-sans);
+  --mat-button-toggle-label-text-size: var(--pd-text-body);
+  --mat-button-toggle-label-text-line-height: var(--pd-lh-body);
+
+  // Badge.
+  --mat-badge-background-color: var(--pd-accent-fill);
+  --mat-badge-text-color: var(--pd-on-accent);
+  --mat-badge-disabled-state-background-color: var(--pd-surface-3);
+  --mat-badge-disabled-state-text-color: var(--pd-text-muted);
+  --mat-badge-container-shape: var(--pd-radius-pill);
+  --mat-badge-text-font: var(--pd-font-sans);
+  --mat-badge-text-size: var(--pd-text-caption);
+
+  // List.
+  --mat-list-list-item-container-color: transparent;
+  --mat-list-list-item-container-shape: var(--pd-radius-control);
+  --mat-list-list-item-label-text-color: var(--pd-text);
+  --mat-list-list-item-label-text-font: var(--pd-font-sans);
+  --mat-list-list-item-label-text-size: var(--pd-text-body);
+  --mat-list-list-item-label-text-line-height: var(--pd-lh-body);
+  --mat-list-list-item-supporting-text-color: var(--pd-text-muted);
+  --mat-list-list-item-supporting-text-font: var(--pd-font-sans);
+  --mat-list-list-item-supporting-text-size: var(--pd-text-label);
+  --mat-list-list-item-supporting-text-line-height: var(--pd-lh-label);
+  --mat-list-list-item-leading-icon-color: var(--pd-text-muted);
+  --mat-list-list-item-trailing-icon-color: var(--pd-text-muted);
+  --mat-list-list-item-hover-label-text-color: var(--pd-text);
+  --mat-list-list-item-focus-label-text-color: var(--pd-text);
+  --mat-list-list-item-hover-state-layer-color: var(--pd-hover);
+  --mat-list-list-item-focus-state-layer-color: var(--pd-hover);
+  --mat-list-list-item-selected-container-color: var(--pd-accent-tint);
+  --mat-list-active-indicator-color: var(--pd-accent-tint);
+  --mat-list-active-indicator-shape: var(--pd-radius-control);
+  --mat-list-list-item-one-line-container-height: var(--pd-row-height);
+  --mat-list-list-item-disabled-label-text-color: var(--pd-text-subtle);
+
+  // Expansion panel.
+  --mat-expansion-container-background-color: var(--pd-surface-1);
+  --mat-expansion-container-text-color: var(--pd-text);
+  --mat-expansion-container-shape: var(--pd-radius-card);
+  --mat-expansion-container-text-font: var(--pd-font-sans);
+  --mat-expansion-container-text-size: var(--pd-text-body);
+  --mat-expansion-container-elevation-shadow: none;
+  --mat-expansion-header-text-color: var(--pd-text);
+  --mat-expansion-header-text-font: var(--pd-font-sans);
+  --mat-expansion-header-text-size: var(--pd-text-body);
+  --mat-expansion-header-description-color: var(--pd-text-muted);
+  --mat-expansion-header-indicator-color: var(--pd-text-muted);
+  --mat-expansion-header-disabled-state-text-color: var(--pd-text-subtle);
+  --mat-expansion-header-hover-state-layer-color: var(--pd-hover);
+  --mat-expansion-header-focus-state-layer-color: var(--pd-hover);
+  --mat-expansion-header-collapsed-state-height: var(--pd-row-height);
+  --mat-expansion-header-expanded-state-height: var(--pd-row-height);
+  --mat-expansion-actions-divider-color: var(--pd-hairline);
+
+  // Timepicker (its options are mat-option rows, tokens above).
+  --mat-timepicker-container-background-color: var(--pd-surface-3);
+  --mat-timepicker-container-shape: var(--pd-radius-popover);
+  --mat-timepicker-container-elevation-shadow: var(--pd-shadow-2);
+
+  // Slider.
+  --mat-slider-active-track-color: var(--pd-accent-control);
+  --mat-slider-inactive-track-color: var(--pd-border-strong);
+  --mat-slider-handle-color: var(--pd-accent-control);
+  --mat-slider-hover-handle-color: var(--pd-accent-control);
+  --mat-slider-focus-handle-color: var(--pd-accent-control);
+  --mat-slider-hover-state-layer-color: var(--pd-accent-ring);
+  --mat-slider-focus-state-layer-color: var(--pd-accent-ring);
+  --mat-slider-ripple-color: var(--pd-accent-ring);
+  --mat-slider-label-container-color: var(--pd-text);
+  --mat-slider-label-label-text-color: var(--pd-surface-1);
+  --mat-slider-label-label-text-font: var(--pd-font-sans);
+  --mat-slider-label-label-text-size: var(--pd-text-label);
+  --mat-slider-with-tick-marks-active-container-color: var(--pd-on-accent-control);
+  --mat-slider-with-tick-marks-inactive-container-color: var(--pd-text-muted);
+  --mat-slider-disabled-active-track-color: var(--pd-text-subtle);
+  --mat-slider-disabled-inactive-track-color: var(--pd-surface-3);
+  --mat-slider-disabled-handle-color: var(--pd-text-subtle);
+
+  // Chips (the filled, selected and outline looks).
+  --mat-chip-container-shape-radius: var(--pd-radius-pill);
+  --mat-chip-selected-label-text-color: var(--pd-text);
+  --mat-chip-elevated-selected-container-color: var(--pd-accent-tint);
+  --mat-chip-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-chip-focus-outline-color: var(--pd-focus-ring);
+  --mat-chip-with-icon-icon-color: var(--pd-text-muted);
+  --mat-chip-with-icon-selected-icon-color: var(--pd-text);
+  --mat-chip-with-trailing-icon-trailing-icon-color: var(--pd-text-muted);
+  --mat-chip-selected-trailing-icon-color: var(--pd-text);
+  --mat-chip-hover-state-layer-color: var(--pd-hover);
+  --mat-chip-focus-state-layer-color: var(--pd-hover);
+  --mat-chip-selected-hover-state-layer-color: var(--pd-hover);
+  --mat-chip-selected-focus-state-layer-color: var(--pd-hover);
+  --mat-chip-label-text-font: var(--pd-font-sans);
+  --mat-chip-label-text-size: var(--pd-text-label);
+  --mat-chip-container-height: var(--pd-control-height);
+
+  // Tabs (more).
+  --mat-tab-background-color: transparent;
+  --mat-tab-foreground-color: var(--pd-text);
+  --mat-tab-pagination-icon-color: var(--pd-text-muted);
+  --mat-tab-active-indicator-shape: 0px;
+  --mat-tab-container-height: var(--pd-toolbar-height);
+
+  // Progress bar (more).
+  --mat-progress-bar-track-shape: var(--pd-radius-pill);
+  --mat-progress-bar-active-indicator-height: var(--pd-space-1);
+  --mat-progress-bar-track-height: var(--pd-space-1);
+
+  // Parts above, more states.
+  --mat-checkbox-disabled-label-color: var(--pd-text-subtle);
+  --mat-checkbox-disabled-selected-icon-color: var(--pd-text-subtle);
+  --mat-checkbox-disabled-unselected-icon-color: var(--pd-text-subtle);
+  --mat-checkbox-selected-hover-state-layer-color: var(--pd-accent-ring);
+  --mat-checkbox-unselected-hover-state-layer-color: var(--pd-hover);
+  --mat-checkbox-state-layer-size: var(--pd-control-height);
+  --mat-radio-disabled-label-color: var(--pd-text-subtle);
+  --mat-radio-disabled-selected-icon-color: var(--pd-text-subtle);
+  --mat-radio-disabled-unselected-icon-color: var(--pd-text-subtle);
+  --mat-radio-state-layer-size: var(--pd-control-height);
+  --mat-slide-toggle-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-select-container-elevation-shadow: var(--pd-shadow-2);
+  --mat-autocomplete-container-elevation-shadow: var(--pd-shadow-2);
+  --mat-menu-container-elevation-shadow: var(--pd-shadow-2);
+  --mat-datepicker-calendar-container-elevation-shadow: var(--pd-shadow-2);
+  --mat-datepicker-calendar-body-label-text-color: var(--pd-text-muted);
+  --mat-datepicker-calendar-date-disabled-state-text-color: var(--pd-text-subtle);
+  --mat-datepicker-calendar-date-selected-disabled-state-background-color: var(--pd-surface-3);
+  --mat-datepicker-calendar-date-in-comparison-range-state-background-color: var(--pd-accent-tint);
+  --mat-datepicker-calendar-date-preview-state-outline-color: var(--pd-border-control);
+  --mat-snack-bar-container-shape: var(--pd-radius-popover);
+  --mat-snack-bar-supporting-text-font: var(--pd-font-sans);
+  --mat-snack-bar-supporting-text-size: var(--pd-text-body);
+  --mat-form-field-outlined-disabled-input-text-color: var(--pd-text-subtle);
+  --mat-form-field-outlined-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-form-field-outlined-disabled-outline-color: var(--pd-hairline);
+  --mat-form-field-select-option-text-color: var(--pd-text);
+  --mat-form-field-subscript-text-font: var(--pd-font-sans);
+  --mat-form-field-subscript-text-size: var(--pd-text-label);
+
+  // ---- matButton, every variant (the user's decision 2026-10-28: matButton everywhere).
+  // filled = primary (accent fill), outlined = secondary (surface-2 + strong border), text = ghost, tonal = accent tint,
+  // elevated ("protected") = a raised secondary. Danger is a class on any of them (below). Hover and press use the state layer
+  // (Material state layers in the text colour, close to the guide's 7 % hover mix); there is no ripple (see providePaddockMaterial).
+  --mat-button-filled-container-color: var(--pd-accent-fill);
+  --mat-button-filled-label-text-color: var(--pd-on-accent);
+  --mat-button-filled-state-layer-color: var(--pd-on-accent);
+  --mat-button-filled-ripple-color: transparent;
+  --mat-button-filled-disabled-container-color: var(--pd-surface-3);
+  --mat-button-filled-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-button-filled-progress-active-indicator-color: var(--pd-on-accent);
+  --mat-button-outlined-label-text-color: var(--pd-text);
+  --mat-button-outlined-outline-color: var(--pd-border-strong);
+  --mat-button-outlined-state-layer-color: var(--pd-text);
+  --mat-button-outlined-ripple-color: transparent;
+  --mat-button-outlined-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-button-outlined-disabled-outline-color: var(--pd-hairline);
+  --mat-button-text-label-text-color: var(--pd-text);
+  --mat-button-text-state-layer-color: var(--pd-text);
+  --mat-button-text-ripple-color: transparent;
+  --mat-button-text-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-button-tonal-container-color: var(--pd-accent-tint);
+  --mat-button-tonal-label-text-color: var(--pd-text);
+  --mat-button-tonal-state-layer-color: var(--pd-text);
+  --mat-button-tonal-ripple-color: transparent;
+  --mat-button-tonal-disabled-container-color: var(--pd-surface-3);
+  --mat-button-tonal-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-button-protected-container-color: var(--pd-surface-2);
+  --mat-button-protected-label-text-color: var(--pd-text);
+  --mat-button-protected-state-layer-color: var(--pd-text);
+  --mat-button-protected-ripple-color: transparent;
+  --mat-button-protected-container-elevation-shadow: var(--pd-shadow-1);
+  --mat-button-protected-hover-container-elevation-shadow: var(--pd-shadow-2);
+  --mat-button-protected-focus-container-elevation-shadow: var(--pd-shadow-1);
+  --mat-button-protected-pressed-container-elevation-shadow: var(--pd-shadow-1);
+  --mat-button-protected-disabled-container-color: var(--pd-surface-3);
+  --mat-button-protected-disabled-label-text-color: var(--pd-text-subtle);
+  --mat-button-filled-container-height: var(--pd-button-height);
+  --mat-button-outlined-container-height: var(--pd-button-height);
+  --mat-button-text-container-height: var(--pd-button-height);
+  --mat-button-tonal-container-height: var(--pd-button-height);
+  --mat-button-protected-container-height: var(--pd-button-height);
+  --mat-button-filled-container-shape: var(--pd-radius-control);
+  --mat-button-outlined-container-shape: var(--pd-radius-control);
+  --mat-button-text-container-shape: var(--pd-radius-control);
+  --mat-button-tonal-container-shape: var(--pd-radius-control);
+  --mat-button-protected-container-shape: var(--pd-radius-control);
+  --mat-button-filled-label-text-font: var(--pd-font-sans);
+  --mat-button-outlined-label-text-font: var(--pd-font-sans);
+  --mat-button-text-label-text-font: var(--pd-font-sans);
+  --mat-button-tonal-label-text-font: var(--pd-font-sans);
+  --mat-button-protected-label-text-font: var(--pd-font-sans);
+  --mat-button-filled-label-text-size: var(--pd-text-body);
+  --mat-button-outlined-label-text-size: var(--pd-text-body);
+  --mat-button-text-label-text-size: var(--pd-text-body);
+  --mat-button-tonal-label-text-size: var(--pd-text-body);
+  --mat-button-protected-label-text-size: var(--pd-text-body);
+  --mat-button-filled-label-text-weight: var(--pd-weight-medium);
+  --mat-button-outlined-label-text-weight: var(--pd-weight-medium);
+  --mat-button-text-label-text-weight: var(--pd-weight-medium);
+  --mat-button-tonal-label-text-weight: var(--pd-weight-medium);
+  --mat-button-protected-label-text-weight: var(--pd-weight-medium);
+}
+
+// The secondary button is a filled surface with the strong border (the outlined variant has no container token).
+.mat-mdc-outlined-button:not(:disabled) {
+  background-color: var(--pd-surface-2);
+}
+
+// Danger: a class on any matButton variant. Filled gets the danger fill, outlined and text the danger ink.
+.mat-mdc-unelevated-button.pd-button-danger {
+  --mat-button-filled-container-color: var(--pd-danger-fill);
+  --mat-button-filled-label-text-color: var(--pd-on-danger);
+  --mat-button-filled-state-layer-color: var(--pd-on-danger);
+}
+
+.mat-mdc-outlined-button.pd-button-danger {
+  --mat-button-outlined-label-text-color: var(--pd-danger);
+  --mat-button-outlined-outline-color: var(--pd-danger);
+  --mat-button-outlined-state-layer-color: var(--pd-danger);
+}
+
+.mat-mdc-button.pd-button-danger {
+  --mat-button-text-label-text-color: var(--pd-danger);
+  --mat-button-text-state-layer-color: var(--pd-danger);
 }
 
 // ---- Shape of the pieces the tokens cannot reach.

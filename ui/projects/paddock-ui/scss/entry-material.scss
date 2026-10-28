@@ -1,1 +1,23 @@
+// The one shared Material 3 theme of the Paddock apps (rule 47, Material first). `mat.theme` emits Material's own system and
+// component tokens (colour roles, typography, shape, density) on `html`; the bridge (loaded with it, higher specificity on `:root`) re-points every one that matters
+// to the --pd-* tokens on `:root` (higher specificity), so dark, light, accent, contrast and density follow our tokens and an
+// app carries no Material theme of its own. Density -3 gives the 28 px controls of the standard density (M3 steps are 4 px from
+// 40); the comfortable and compact densities move the sized tokens through --pd-control-height and --pd-row-height.
+@use '@angular/material' as mat;
 @use 'material';
+
+html {
+  @include mat.theme(
+    (
+      color: (
+        theme-type: light,
+        primary: mat.$azure-palette,
+      ),
+      typography: (
+        plain-family: sans-serif,
+        brand-family: sans-serif,
+      ),
+      density: -3,
+    )
+  );
+}

@@ -8,6 +8,29 @@ Conventional Commits; one semver tag for the whole repo.
 - New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
   longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
 
+### One shared Material theme (WP-0 of the Material migration, rule 47)
+- `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
+  and component tokens all resolve to `--pd-*`, so theme, accent, contrast and density follow our tokens and an app carries no
+  Material theme of its own. New bridge tokens: table, sort header, paginator, tree, button toggle, badge, list, expansion, timepicker,
+  slider, chips, tabs, progress bar and every `matButton` variant (filled = primary, outlined = secondary with the surface-2 fill, text,
+  tonal, elevated; danger is the class `pd-button-danger` on any of them; no ripple).
+- New secondary entry `@decryp7/paddock-ui/material`: `providePaddockMaterial()` makes every `mat-form-field` `appearance="outline"` with
+  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.3`) of `@decryp7/paddock-ui`.
+- `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
+  icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
+  surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.
+- Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
+
+### Shell pages' controls are Angular Material (WP-2 of the Material migration, rule 47)
+- Settings window and fields, AI access (MCP), Notification channels, Set-up, Storage, Knowledge packs, Background service, Report a
+  problem and Language: the hand-made switches are `mat-slide-toggle`, checkboxes `mat-checkbox`, the language radio group
+  `mat-radio-group`, native `<progress>` `mat-progress-bar`, the "Needs restart" and "Advanced" badges static `mat-chip`s, native
+  buttons `matButton` (filled = primary, outlined = secondary, text for quiet actions) and `matIconButton`, and `title` tooltips
+  `matTooltip`. Public APIs and `data-testid`s are unchanged, but a toggle's test id is now on the Material host: tests reach the control
+  with `getByRole('switch' | 'checkbox')` inside it. A button at a limit uses `disabledInteractive` (focusable, `aria-disabled`).
+- `.pd-switch` stays in `_controls.scss` until its last users (the view form and the gallery) have moved.
+
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly
