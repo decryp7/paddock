@@ -7,7 +7,7 @@ import { join } from 'node:path';
  * Deterministic: the clock is frozen, the mock is a macOS laptop, the timezone and locale are fixed and motion is reduced.
  */
 // Playwright runs from the app folder; the images live in the repository's docs.
-const OUT = join(process.cwd(), '..', 'docs', 'screenshots');
+const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
 const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
 
 test.use({ timezoneId: 'UTC', locale: 'en-GB', reducedMotion: 'reduce', colorScheme: 'light' });

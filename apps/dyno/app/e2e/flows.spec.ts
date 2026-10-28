@@ -3,6 +3,12 @@ import { expect, test, type Page } from '@playwright/test';
 /** Browser flows against the mock backend (a macOS laptop; `?mock=desktop` has no battery or sensors). */
 const url = (path = '/', query = '') => `/?latency=0${query}#${path}`;
 
+/** Picks an option of a Material select (the list opens in an overlay on the page). */
+async function choose(page: Page, label: string, option: string | RegExp): Promise<void> {
+  await page.getByRole('combobox', { name: label }).click();
+  await page.getByRole('option', { name: option }).click();
+}
+
 /** Opens the shell's Settings window (Mod+, on the mock's macOS) and shows Dyno's page of it. */
 async function openSettings(page: Page): Promise<void> {
   await page.goto(url('/'));
@@ -59,8 +65,8 @@ test.describe('dashboard', () => {
     await expect(page.locator('dy-chart canvas').first()).toBeVisible();
     await page.getByRole('button', { name: 'Check now' }).click();
     await expect(page.getByText('A Rust build is using most of your CPU')).toBeVisible();
-    await page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '7d' }).click();
-    await expect(page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('radiogroup', { name: 'Range' }).getByRole('radio', { name: '7d' }).click();
+    await expect(page.getByRole('radiogroup', { name: 'Range' }).getByRole('radio', { name: '7d' })).toBeChecked();
   });
 
   test('a machine without a battery or sensors says so with the reason', async ({ page }) => {
@@ -83,7 +89,7 @@ test.describe('cpu per core', () => {
   test('the tile switches to per-core bars grouped by kind and the choice is remembered', async ({ page }) => {
     await page.goto(url());
     const tile = page.getByRole('group', { name: 'CPU', exact: true });
-    await tile.getByRole('button', { name: 'Per core' }).click();
+    await tile.getByRole('radio', { name: 'Per core' }).click();
     await expect(tile.getByRole('heading', { name: 'Performance cores' })).toBeVisible();
     await expect(tile.getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
     await page.reload();
@@ -93,7 +99,7 @@ test.describe('cpu per core', () => {
   test('a uniform CPU shows one plain Cores group', async ({ page }) => {
     await page.goto(url('/', '&mock=uniform'));
     const tile = page.getByRole('group', { name: 'CPU', exact: true });
-    await tile.getByRole('button', { name: 'Per core' }).click();
+    await tile.getByRole('radio', { name: 'Per core' }).click();
     await expect(tile.getByRole('heading', { name: 'Cores', exact: true })).toBeVisible();
     await expect(tile.getByRole('heading', { name: 'Performance cores' })).toHaveCount(0);
   });
@@ -104,8 +110,8 @@ test.describe('cpu per core', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'CPU' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Hottest apps' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Per-core history' }).locator('canvas').first()).toBeVisible();
-    await page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '1h' }).click();
-    await expect(page.getByRole('group', { name: 'Range' }).getByRole('button', { name: '1h' })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('radiogroup', { name: 'Range' }).getByRole('radio', { name: '1h' }).click();
+    await expect(page.getByRole('radiogroup', { name: 'Range' }).getByRole('radio', { name: '1h' })).toBeChecked();
   });
 });
 
@@ -209,7 +215,7 @@ test.describe('inventory', () => {
     await page.goto(url('/inventory', '&mock=windows'));
     await expect(page.getByRole('img', { name: /2 of 4 memory slots filled/ })).toBeVisible();
     await expect(page.getByRole('list', { name: 'Upgrade hints' }).getByRole('listitem')).toHaveCount(4);
-    await page.getByRole('button', { name: 'Table' }).click();
+    await page.getByRole('radio', { name: 'Table' }).click();
     await expect(page.getByRole('row')).toHaveCount(5);
   });
 
@@ -230,13 +236,13 @@ test.describe('widgets', () => {
     await expect(page.getByRole('region', { name: 'Widget gallery' })).toBeVisible();
     await page.getByRole('region', { name: 'Widget gallery' }).getByRole('button', { name: /Big number/ }).click();
     await expect(page.locator('dy-widget')).toHaveCount(before + 1);
-    await page.getByRole('toolbar').last().getByRole('button', { name: 'L', exact: true }).click();
+    await page.getByRole('radiogroup', { name: 'Size' }).last().getByRole('radio', { name: 'L', exact: true }).click();
     await page.getByRole('button', { name: 'Save dashboard' }).click();
     await expect(page.getByText('Dashboard saved')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Edit dashboard' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Edit dashboard' }).click();
-    await page.getByLabel('Preset').selectOption('developer');
+    await choose(page, 'Preset', 'Developer');
     await expect(page.locator('dy-widget[data-kind="heatmap"]')).toBeVisible();
     await page.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.locator('dy-widget[data-kind="heatmap"]')).toHaveCount(0);
@@ -250,7 +256,7 @@ test.describe('widgets', () => {
     await section.getByRole('button', { name: 'Add item' }).click();
     await expect(section.getByRole('listitem')).toHaveCount(4);
     await expect(section.getByRole('button', { name: 'Add item' })).toBeDisabled();
-    await section.getByLabel('Style of item 3').selectOption('ring');
+    await choose(page, 'Style of item 3', 'Ring');
     await section.getByRole('button', { name: 'Move up' }).nth(3).click();
     await expect(section.getByRole('img', { name: /Menu bar preview/ })).toBeVisible();
     await page.getByRole('button', { name: 'Save changes' }).click();
@@ -265,7 +271,7 @@ test.describe('counters', () => {
     await expect(page.getByText('Nothing charted yet')).toBeVisible();
     const objects = page.getByRole('list', { name: 'Objects' });
     await objects.getByRole('button', { name: /^Network Interface/ }).click();
-    await page.getByLabel('Instance').selectOption('en0');
+    await choose(page, 'Instance', 'en0');
     await page.getByRole('button', { name: 'Chart Bytes Sent' }).click();
     const table = page.getByRole('table', { name: 'Charted counters' });
     await expect(table.getByRole('row', { name: /Bytes Sent \(en0\)/ })).toBeVisible();
@@ -303,7 +309,7 @@ test.describe('network', () => {
     await page.getByRole('button', { name: 'Collapse Google Chrome' }).click();
     await expect(page.getByRole('row', { name: /142.250.74.46/ })).toHaveCount(0);
     await page.getByRole('button', { name: 'Expand Google Chrome' }).click();
-    await page.getByRole('group', { name: 'Group by' }).getByRole('button', { name: 'None' }).click();
+    await page.getByRole('radiogroup', { name: 'Group by' }).getByRole('radio', { name: 'None' }).click();
     await expect(page.getByRole('button', { name: 'Collapse Slack' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Look up IP 10.0.0.8' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Look up IP 142.250.74.46' })).toBeEnabled();
@@ -311,7 +317,7 @@ test.describe('network', () => {
 
   test('listening tab marks exposed listeners first; loopback shows on request; Enter opens the detail panel', async ({ page }) => {
     await page.goto(url('/network'));
-    await page.getByRole('button', { name: 'Listening' }).click();
+    await page.getByRole('radio', { name: 'Listening' }).click();
     const grid = page.getByRole('grid', { name: 'Listening ports' });
     await expect(grid.getByText('Exposed').first()).toBeVisible();
     await expect(grid.getByText('postgres')).toHaveCount(0);
@@ -326,7 +332,7 @@ test.describe('network', () => {
 
   test('settings: choosing a preset fills the address and a bad address is explained', async ({ page }) => {
     await openSettings(page);
-    await page.getByLabel('Lookup site').selectOption('bgp');
+    await choose(page, 'Lookup site', /^bgp\.he\.net/);
     await expect(page.getByLabel('Lookup address', { exact: true })).toHaveValue('https://bgp.he.net/ip/{ip}');
     await page.getByLabel('Lookup address', { exact: true }).fill('http://nope/{ip}');
     await expect(page.getByText('must start with https://')).toBeVisible();
@@ -468,7 +474,7 @@ test.describe('right-click search (nothing is sent until the click)', () => {
 
   test('a right-click on a row opens the same menu with the web and hash searches', async ({ page }) => {
     await page.goto(url('/processes'));
-    await page.getByRole('button', { name: 'All', exact: true }).click();
+    await page.getByRole('radio', { name: 'All', exact: true }).click();
     await page.getByLabel('Filter processes').fill('rustc');
     await page.locator('[role=row][data-key^="p"]').first().click({ button: 'right' });
     await expect(page.getByRole('menuitem', { name: 'Search the web…' })).toBeVisible();
@@ -588,7 +594,7 @@ test.describe('extras', () => {
 
   test('Maintenance windows can be edited and saved', async ({ page }) => {
     await page.goto(url('/extras', '').replace('#/extras', '#/extras?tab=maintenance'));
-    await page.getByRole('button', { name: 'Saturday' }).first().click();
+    await page.getByRole('button', { name: 'Sat', exact: true }).first().click();
     await page.getByRole('button', { name: 'Save windows' }).click();
     await expect(page.getByText('Maintenance windows saved')).toBeVisible();
   });
