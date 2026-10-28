@@ -207,21 +207,6 @@ struct Shared {
     gate: (Mutex<bool>, Condvar),
 }
 
-/// A loopback port taken by something that is not Pitwall: it accepts every connection and hangs up at once, until the
-/// process ends. Use it for "no Pitwall on this port". A port read from a listener that was then dropped is free again and
-/// may be handed to another process's server (on a shared CI runner, a concurrent test's fake Pitwall) before the test
-/// connects; this one stays taken, and the answer is immediate on every OS.
-pub fn hang_up_port() -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
-    let port = listener.local_addr().expect("local address").port();
-    std::thread::spawn(move || {
-        for conn in listener.incoming() {
-            drop(conn);
-        }
-    });
-    port
-}
-
 /// A running fake server.
 pub struct FakePitwall {
     /// The loopback port.
@@ -240,14 +225,8 @@ impl Drop for FakePitwall {
 impl FakePitwall {
     /// Starts a fake with this script on an ephemeral loopback port.
     pub fn start(state: FakeState) -> FakePitwall {
-        FakePitwall::try_start_on(0, state).expect("bind a loopback port")
-    }
-
-    /// Starts a fake on this loopback port (`0`: an ephemeral one); fails when the port is taken. Tests use it to play
-    /// another process's Pitwall that was handed a port the test assumed was free.
-    pub fn try_start_on(port: u16, state: FakeState) -> std::io::Result<FakePitwall> {
-        let listener = TcpListener::bind(("127.0.0.1", port))?;
-        let port = listener.local_addr()?.port();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
+        let port = listener.local_addr().expect("local address").port();
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             stop: AtomicBool::new(false),
@@ -265,11 +244,11 @@ impl FakePitwall {
                 std::thread::spawn(move || serve(conn, &s));
             }
         });
-        Ok(FakePitwall {
+        FakePitwall {
             port,
             shared,
             acceptor: Mutex::new(Some(acceptor)),
-        })
+        }
     }
 
     /// The script and the log.
