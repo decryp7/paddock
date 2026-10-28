@@ -245,6 +245,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.gitea/actions/job-isolation
+
       - uses: ./.gitea/actions/stable-workspace
         with:
           name: debrief-${{ github.job }}-${{ runner.os }}
@@ -264,8 +267,10 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
-          # Outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it.
-          echo "DEBRIEF_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser-debrief" >> "$GITHUB_ENV"
+          # Outside the checkout, which stable-workspace moves: the job slot's kept folder (the installer stamps the pinned
+          # version in it).
+          dir="$(bash ../../conformance/ci/job-isolation.sh path browser debrief)"
+          echo "DEBRIEF_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: libduckdb
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
@@ -299,6 +304,12 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      # The slot goes back last, after everything that uses its folders and its sccache port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   # The plugin SDK as an author uses it: a project of every kind from `cargo debrief-plugin new` builds, and one of them
   # passes `cargo debrief-plugin test` (conformance in the sandbox, then its own tests). The examples themselves are
@@ -555,7 +566,6 @@ jobs:
           echo TEMP=%TEMP%
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo npm_config_cache=%USERPROFILE%\.debrief-ci\npm-cache>>"%GITHUB_ENV%"
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
@@ -569,6 +579,17 @@ jobs:
         run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
       # Host runners: the same checkout path every run, so sccache hits the workspace crates (after Git bash on Windows).
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.gitea/actions/job-isolation
+
+      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the shared kept folder.
+      - name: npm cache (Windows)
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: |
+          dir="$(bash conformance/ci/job-isolation.sh path npm)"
+          echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
+
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
         with:
@@ -766,6 +787,12 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
+      # The slot goes back last, after everything that uses its folders and its sccache port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
   # Installers only on full runs: debrief-v* tags, pushes to main, the nightly run and manual runs with `bundles: true`; never
   # for branch or pull request runs. They are the slowest jobs and the Windows leg runs on a developer PC.
   bundle:
@@ -802,7 +829,6 @@ jobs:
           whoami
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner: no bash.exe in "%ProgramFiles%\Git\bin" & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-          echo npm_config_cache=%USERPROFILE%\.debrief-ci\npm-cache>>"%GITHUB_ENV%"
           echo npm_config_prefer_offline=true>>"%GITHUB_ENV%"
           echo npm_config_audit=false>>"%GITHUB_ENV%"
           echo npm_config_fund=false>>"%GITHUB_ENV%"
@@ -813,6 +839,17 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: .
         run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.gitea/actions/job-isolation
+
+      # npm's download cache on the Windows host (node-caches keeps it elsewhere): the shared kept folder.
+      - name: npm cache (Windows)
+        if: runner.os == 'Windows'
+        working-directory: .
+        run: |
+          dir="$(bash conformance/ci/job-isolation.sh path npm)"
+          echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
       - uses: ./.gitea/actions/stable-workspace
         if: runner.os != 'Linux'
@@ -982,6 +1019,12 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+      # The slot goes back last, after everything that uses its folders and its sccache port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   release:
     name: release

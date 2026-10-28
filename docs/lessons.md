@@ -523,3 +523,13 @@ A dead renderer is reloaded, not aborted; a closed or reset connection is `ERR_E
 **Rule:** the driver turns `errorText` into a reason (download; replaced by a navigation to <url>, found after one more
 browser-side call as an ordering barrier; otherwise the code), so the next failure names its cause instead of being
 retried or guessed at.
+
+## Per-host CI state keyed by app and job breaks at runner capacity 2 (2026-10-28, CI kit)
+
+Raising the host runners to two jobs at once showed that every kept folder of the kit was named after the app and job
+only: a second run of the same job would have replaced the first one's checkout (`stable-workspace`), killed its test
+processes and deleted its temp folders (`host-cleanup`), pruned its build folder, and stopped its sccache server (one
+fixed port). The runner already gives every job a folder of its own (`<workdir_parent>/<16 hex>/`, `RUNNER_TEMP` in it,
+removed after the job). **Rule (ADR 0025):** what need not outlive the job goes in the runner's job folder; what must stay
+warm is a kept folder of the job's slot, declared once in `conformance/ci/kept-folders.txt` and reached only through
+`conformance/ci/job-isolation.sh`; process patterns are anchored on `{tmp}`, `{build}` or `{slot}`, never on a shared name.

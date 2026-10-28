@@ -72,9 +72,10 @@ test('an image with another libduckdb version, or a host runner, fetches the pin
     assert.match(linux.stdout, /::notice::the CI image's libduckdb is not 1\.5\.6/);
     assert.match(linux.env, new RegExp(`^DUCKDB_LIB_DIR=${join(s.root, 'tmp', 'libduckdb')}/x$`, 'm'));
     writeFileSync(join(s.root, 'github-env'), '');
-    const mac = run(s, 'libduckdb-env.sh', { RUNNER_OS: 'macOS', DEBRIEF_FETCH_LIBDUCKDB: fakeFetch(s, '1.5.6') });
-    const kept = join(s.root, 'home', '.paddock-ci', 'libduckdb', 'tauri-smoke');
-    assert.equal(readFileSync(join(s.root, 'fetched'), 'utf8').trim(), kept, 'one kept folder per job on a host');
+    const isolation = join(APP, '..', '..', 'conformance', 'ci', 'job-isolation.sh');
+    const mac = run(s, 'libduckdb-env.sh', { RUNNER_OS: 'macOS', PADDOCK_CI_SLOT: 's2', DEBRIEF_JOB_ISOLATION: isolation, DEBRIEF_FETCH_LIBDUCKDB: fakeFetch(s, '1.5.6') });
+    const kept = join(s.root, 'home', '.paddock-ci', 'libduckdb', 'tauri-smoke-s2');
+    assert.equal(readFileSync(join(s.root, 'fetched'), 'utf8').trim(), kept, 'one kept folder per job and job slot on a host');
     // (macOS strips DYLD_* from a protected shell's environment, so the job's own entries are checked on Linux above.)
     assert.match(mac.env, new RegExp(`^DYLD_LIBRARY_PATH=${kept}/x$`, 'm'), 'the library once, no empty entry');
     assert.match(linux.env, new RegExp(`^LD_LIBRARY_PATH=${join(s.root, 'tmp', 'libduckdb')}/x:/before$`, 'm'), 'the library once, the job\'s own entries kept');

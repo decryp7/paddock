@@ -148,6 +148,9 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
 
+      # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
+      - uses: ./.paddock/.gitea/actions/job-isolation
+
       # The same physical checkout path every run on the host runners (sccache keys a compile on its folder), and the
       # release build folder as cargo configuration (.cargo/ci.toml), which `tauri build` reads like every cargo command:
       # target/ on Linux, a kept folder on the hosts.
@@ -256,6 +259,12 @@ jobs:
         if: always() && runner.os != 'Linux'
         with:
           drop-bundles: "true"
+
+      # The slot goes back last, after everything that uses its folders and its sccache port.
+      - uses: ./.paddock/.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   release:
     name: release

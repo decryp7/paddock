@@ -1,0 +1,13 @@
+name: job-isolation
+description: "Job isolation on a host runner (README, Job isolation): `acquire` (the first bash step, before stable-workspace, build-folder and every kept folder) takes a free job slot of the host and points TMPDIR at the runner's own per-job temp folder; `release` (the last step, if: always()) gives the slot back. Sets PADDOCK_CI_SLOT and PADDOCK_JOB_TEMP. Does nothing in a Linux container."
+inputs:
+  mode:
+    description: "'acquire' or 'release'."
+    default: acquire
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+      run: bash "${{ github.action_path }}/../../../conformance/ci/job-isolation.sh" "$MODE"

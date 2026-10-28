@@ -14,7 +14,7 @@
     "noSandboxOnLinux": true
   },
   "processPatterns": [
-    "[/\\\\]test-browser-spotter[/\\\\]"
+    "[/\\\\]test-browser-spotter-{slot}[/\\\\]"
   ],
   "checks": [
     "cd apps/spotter",
