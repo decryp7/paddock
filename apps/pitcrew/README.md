@@ -107,7 +107,7 @@ Taken against the mock backend with invented data (1440 x 900 at 2x; `docs/scree
 | --- | --- |
 | ![Dashboard](docs/screenshots/dark/dashboard.png) | ![Runner detail](docs/screenshots/dark/runner-detail.png) |
 | ![Insights](docs/screenshots/dark/insights.png) | ![Storage: prune preview](docs/screenshots/dark/storage-prune.png) |
-| ![Activity: jobs and their outcomes](docs/screenshots/dark/activity.png) | ![Settings, Defaults: watchdog, cleanup, leftover processes, disk guard and pause windows](docs/screenshots/dark/settings-defaults.png) |
+| ![Activity: jobs and their outcomes](docs/screenshots/dark/activity.png) | ![Settings, Defaults: watchdog, cleanup, leftover processes, disk guard and pause windows (the demo data adds a "Problems in pitcrew.toml" warning)](docs/screenshots/dark/settings-defaults.png) |
 | ![Notification channels](docs/screenshots/dark/settings-channels.png) | ![Runner updates](docs/screenshots/dark/runner-updates.png) |
 
 **Light**
@@ -116,7 +116,7 @@ Taken against the mock backend with invented data (1440 x 900 at 2x; `docs/scree
 | --- | --- |
 | ![Dashboard](docs/screenshots/light/dashboard.png) | ![Runner detail](docs/screenshots/light/runner-detail.png) |
 | ![Insights](docs/screenshots/light/insights.png) | ![Storage: prune preview](docs/screenshots/light/storage-prune.png) |
-| ![Activity: jobs and their outcomes](docs/screenshots/light/activity.png) | ![Settings, Defaults: watchdog, cleanup, leftover processes, disk guard and pause windows](docs/screenshots/light/settings-defaults.png) |
+| ![Activity: jobs and their outcomes](docs/screenshots/light/activity.png) | ![Settings, Defaults: watchdog, cleanup, leftover processes, disk guard and pause windows (the demo data adds a "Problems in pitcrew.toml" warning)](docs/screenshots/light/settings-defaults.png) |
 | ![Notification channels](docs/screenshots/light/settings-channels.png) | ![Runner updates](docs/screenshots/light/runner-updates.png) |
 
 ## Quick start

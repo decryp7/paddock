@@ -26,12 +26,12 @@ interface Shot {
  * Waits until the page has all its content: the main scroller's height is the same on several looks in a row (a runner's tab
  * fills in after its data arrives and a skeleton is not always on screen), so the whole page is what `fullPage: 'main'` measures.
  */
-async function contentSettled(page: Page): Promise<void> {
+async function contentSettled(page: Page, selector?: string): Promise<void> {
   let last = -1;
   let same = 0;
   await expect
     .poll(async () => {
-      const h = await page.evaluate(() => document.querySelector('[data-pd-region=main]')?.scrollHeight ?? 0);
+      const h = await page.evaluate((sel) => (sel ? document.querySelector(sel)?.getBoundingClientRect().height : document.querySelector('[data-pd-region=main]')?.scrollHeight) ?? 0, selector);
       same = h === last ? same + 1 : 0;
       last = h;
       return same >= 4;
@@ -77,10 +77,10 @@ const SHOTS: Shot[] = [
   { name: 'empty', path: '/', query: 'mock=empty' },
 ];
 
-/** Settings pages (a window of the shell at its declared 920 x 680; the long ones in a taller window so the whole page shows). */
-const SETTINGS: { name: string; page: string; height?: number }[] = [
+/** Settings pages (a window of the shell at its declared 920 x 680; a long one is fitted to its content, as the shell fits a window, so the whole page shows and nothing is empty). */
+const SETTINGS: { name: string; page: string; fit?: string }[] = [
   { name: 'settings', page: 'pc.general' },
-  { name: 'settings-defaults', page: 'pc.defaults', height: 3100 },
+  { name: 'settings-defaults', page: 'pc.defaults', fit: 'pc-defaults-section' },
   { name: 'settings-tokens', page: 'pc.tokens' },
   { name: 'settings-channels', page: 'pc.channels' },
 ];
@@ -110,9 +110,20 @@ for (const theme of ['dark', 'light'] as const) {
 
     for (const w of SETTINGS) {
       test(w.name, async ({ page, app }) => {
-        await page.setViewportSize({ width: 920, height: w.height ?? 680 });
+        await page.setViewportSize({ width: 920, height: w.fit ? 6000 : 680 });
         await app.dialogs.openWindow('pd.settings', { page: w.page });
         await app.dialogs.loaded();
+        if (w.fit) {
+          await expect(page.locator(w.fit)).toBeVisible();
+          await contentSettled(page, w.fit);
+          // The page's own height plus what is above it (search) and below it (the Close row): measured, not guessed.
+          const height = await page.locator(w.fit).evaluate((el) => {
+            const close = document.querySelector('[data-testid=dialog-shell-close], .pd-footer, footer');
+            const below = close ? window.innerHeight - close.getBoundingClientRect().top : 90;
+            return Math.ceil(el.getBoundingClientRect().bottom + 24 + below);
+          });
+          await page.setViewportSize({ width: 920, height });
+        }
         await captureScreen(page, join(OUT, theme, `${w.name}.png`));
       });
     }
