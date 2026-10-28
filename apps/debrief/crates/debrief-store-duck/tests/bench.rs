@@ -1,7 +1,7 @@
 //! The ADR 0014 benchmark at scale: `DEBRIEF_BENCH_EVENTS=10000000 cargo test --release --test bench -- --nocapture`
 //! generates the corpus (once, in `DEBRIEF_BENCH_DIR`, default the temp folder), imports it, reopens the store
-//! and times the interactive operations, with the peak RSS of each phase. Without `DEBRIEF_BENCH_EVENTS` it
-//! does nothing.
+//! and times the interactive operations, with the peak real memory of each phase (rule 26: macOS physical footprint,
+//! Linux PSS). Without `DEBRIEF_BENCH_EVENTS` it does nothing.
 
 mod common;
 
@@ -9,7 +9,7 @@ mod common;
 #[global_allocator]
 static GLOBAL: debrief_alloc::MiMalloc = debrief_alloc::MiMalloc;
 
-use common::rss::{current, Sampler};
+use common::rss::{real as current, Sampler};
 use common::TempDir;
 use debrief_core::api::{FacetRequest, TimelineRequest};
 use debrief_core::model::Level;
@@ -66,7 +66,7 @@ fn interactive_operations_at_scale() {
             .unwrap_or_else(|| temp.as_ref().map(|t| t.0.clone()).unwrap_or_default()),
     );
     let reuse = kept.is_some() && store_dir.0.join("data.duckdb").is_file();
-    let sampler = Sampler::start();
+    let sampler = Sampler::start_with(current);
 
     // Import, then wait for the full-text index (`DEBRIEF_BENCH_IMPORT_ONLY=1`: import only, for A/B runs).
     if !reuse {
@@ -76,7 +76,7 @@ fn interactive_operations_at_scale() {
         let import_ms = started.elapsed().as_secs_f64() * 1000.0;
         let import_peak = sampler.take_peak_mb();
         let import = format!(
-            "import: {} events in {:.1} s = {:.0} events/s, peak RSS {import_peak} MB",
+            "import: {} events in {:.1} s = {:.0} events/s, peak memory {import_peak} MB",
             r.events,
             import_ms / 1000.0,
             r.events as f64 / (import_ms / 1000.0),
@@ -91,7 +91,7 @@ fn interactive_operations_at_scale() {
         }
         let (status, index_ms) = ms(|| store.wait_for_index(Duration::from_secs(3600)).unwrap());
         eprintln!(
-            "{import}; index: {} docs in {:.1} s = {:.0} docs/s, peak RSS {} MB; store {:.0} MB (segments {:.0} MB, index {:.0} MB)",
+            "{import}; index: {} docs in {:.1} s = {:.0} docs/s, peak memory {} MB; store {:.0} MB (segments {:.0} MB, index {:.0} MB)",
             status.indexed,
             index_ms / 1000.0,
             status.indexed as f64 / (index_ms / 1000.0),
@@ -112,7 +112,7 @@ fn interactive_operations_at_scale() {
     let (store, open_ms) = ms(|| DuckStore::open(&store_dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap());
     sampler.take_peak_mb();
     let idle = current() >> 20;
-    eprintln!("reopen {open_ms:.0} ms; RSS {before} MB before, {idle} MB idle");
+    eprintln!("reopen {open_ms:.0} ms; memory {before} MB before, {idle} MB idle");
     let total = store.positioned().unwrap();
     if let Ok(file) = std::env::var("DEBRIEF_BENCH_SQL") {
         for sql in std::fs::read_to_string(file)
@@ -137,7 +137,7 @@ fn interactive_operations_at_scale() {
         let (_, warm) = ms(&mut *f);
         let peak = sampler.take_peak_mb();
         query_peak = query_peak.max(peak);
-        eprintln!("  {name}: {cold:.0} ms cold, {warm:.0} ms warm ({n}), peak RSS {peak} MB");
+        eprintln!("  {name}: {cold:.0} ms cold, {warm:.0} ms warm ({n}), peak memory {peak} MB");
         results.push((name.to_string(), cold, warm));
     };
     time("summary", &mut || store.summary().unwrap().total as u64);
@@ -270,7 +270,7 @@ fn interactive_operations_at_scale() {
             .ids;
         store.rows(&ids).unwrap().iter().map(|b| b.num_rows() as u64).sum()
     });
-    eprintln!("RSS peak while querying {query_peak} MB, idle after {} MB", current() >> 20);
+    eprintln!("memory peak while querying {query_peak} MB, idle after {} MB", current() >> 20);
     let slow: Vec<_> = results
         .iter()
         .filter(|(_, cold, _)| *cold > INTERACTIVE_MS)

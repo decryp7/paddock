@@ -602,9 +602,12 @@ impl FtsService {
         });
         let s = shared.clone();
         let store_dir = dir.to_path_buf();
-        let handle = std::thread::Builder::new()
-            .name("debrief-fts".into())
-            .spawn(move || run(&s, &store_dir, &conn, &write_lock, epoch))?;
+        let handle = std::thread::Builder::new().name("debrief-fts".into()).spawn(move || {
+            // Background priority (ER-20), also for Tantivy's indexing and merge threads: they are started from this
+            // thread and inherit its QoS class (macOS) or nice value (Linux).
+            lower_priority();
+            run(&s, &store_dir, &conn, &write_lock, epoch)
+        })?;
         Ok(FtsService {
             shared,
             epoch,
