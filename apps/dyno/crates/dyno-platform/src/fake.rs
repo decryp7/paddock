@@ -15,7 +15,7 @@ use crate::Platform;
 use dyno_core::facts::SystemFacts;
 use dyno_core::metrics::{CpuSample, DiskIo, MemoryPressure, MemorySample, Reading, SystemSample};
 use dyno_core::ports::{FactsSource, FileLocks, NetworkLinks, PlatformError, ProcessSource, StartupItems, SystemSensors, UserActivity};
-use dyno_core::process::{ListOrReason, Locker, Measured, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
+use dyno_core::process::{ListOrReason, Locker, Measured, Owner, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use dyno_core::startup::StartupEntry;
 use dyno_core::time::Timestamp;
 use std::collections::{HashMap, VecDeque};
@@ -270,6 +270,7 @@ pub fn process(pid: Pid, name: &str, cpu: f32) -> ProcessSample {
         disk_read_bps: Measured::Value(0.0),
         disk_write_bps: Measured::Value(0.0),
         started: Measured::Value(Timestamp(i64::from(pid) * 1000)),
+        owner: Owner::Own,
         state: RunState::Running,
     }
 }

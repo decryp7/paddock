@@ -178,7 +178,7 @@ impl DetailsProbe for LinuxDetails {
 mod tests {
     use super::super::tools::fake::FakeTools;
     use super::*;
-    use dyno_core::process::{Measured, ProcessSample, RunState, SignatureInfo};
+    use dyno_core::process::{Measured, Owner, ProcessSample, RunState, SignatureInfo};
     use dyno_core::time::Timestamp;
     use std::os::unix::fs::symlink;
 
@@ -195,6 +195,7 @@ mod tests {
                 disk_read_bps: Measured::Value(0.0),
                 disk_write_bps: Measured::Value(0.0),
                 started: Measured::Value(Timestamp(0)),
+                owner: Owner::Own,
                 state: RunState::Running,
             },
             command_line: vec![],

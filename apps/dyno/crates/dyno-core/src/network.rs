@@ -581,6 +581,7 @@ mod tests {
             disk_read_bps: crate::process::Measured::Value(0.0),
             disk_write_bps: crate::process::Measured::Value(0.0),
             started: crate::process::Measured::Value(Timestamp(1)),
+            owner: crate::process::Owner::Own,
             state: RunState::Running,
         }
     }

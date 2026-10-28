@@ -3,7 +3,7 @@
 //! Some sources report `0` for a value the OS refused (another user's process, a protected one). A `0` is never passed on:
 //! [`measure`] turns it into [`Measured::Unavailable`] with the reason, and only keeps the numbers that were read.
 
-use dyno_core::process::{Measured, UnavailableReason};
+use dyno_core::process::{Measured, Owner, UnavailableReason};
 use dyno_core::time::Timestamp;
 
 /// The operating system family, as far as the readability rules differ.
@@ -38,15 +38,65 @@ impl Os {
     }
 }
 
-/// Whose process it is, relative to the account Dyno runs as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Owner {
-    /// The account Dyno runs as.
-    Own,
-    /// Another account.
-    Other,
-    /// The OS did not say.
-    Unknown,
+/// The first user id of ordinary accounts on macOS: lower ids are system accounts.
+pub const MACOS_FIRST_USER_UID: u32 = 500;
+/// The default first user id of ordinary accounts on Linux when `/etc/login.defs` does not say.
+pub const LINUX_DEFAULT_UID_MIN: u32 = 1000;
+
+/// The first ordinary user id on this OS: ids below it are system accounts. `login_defs` is the text of
+/// `/etc/login.defs` (Linux), when it could be read. Windows has no such range; this gives 0.
+pub fn first_user_uid(os: Os, login_defs: Option<&str>) -> u32 {
+    match os {
+        Os::Macos => MACOS_FIRST_USER_UID,
+        Os::Linux => login_defs.and_then(uid_min_from).unwrap_or(LINUX_DEFAULT_UID_MIN),
+        Os::Windows => 0,
+    }
+}
+
+/// `UID_MIN` from the text of `/etc/login.defs`.
+pub fn uid_min_from(text: &str) -> Option<u32> {
+    text.lines().find_map(|l| {
+        let l = l.trim();
+        if l.starts_with('#') {
+            return None;
+        }
+        let mut words = l.split_whitespace();
+        (words.next() == Some("UID_MIN")).then(|| words.next()?.parse().ok()).flatten()
+    })
+}
+
+/// Whose a Unix process is: `uid` against Dyno's own and the first ordinary user id. A process with no readable owner is
+/// [`Owner::Unknown`].
+pub fn classify_uid(uid: Option<u32>, own_uid: Option<u32>, first_user: u32) -> Owner {
+    match (uid, own_uid) {
+        (Some(u), Some(own)) if u == own => Owner::Own,
+        (Some(u), _) if u < first_user => Owner::System,
+        (Some(_), Some(_)) => Owner::Other,
+        _ => Owner::Unknown,
+    }
+}
+
+/// Whose a Windows process is by its account SID: SYSTEM, LOCAL SERVICE and NETWORK SERVICE are the system; the same SID as
+/// Dyno's is its own; any other is another user's.
+pub fn classify_sid(sid: Option<&str>, own_sid: Option<&str>) -> Owner {
+    match (sid, own_sid) {
+        (Some("S-1-5-18" | "S-1-5-19" | "S-1-5-20"), _) => Owner::System,
+        (Some(a), Some(b)) if a == b => Owner::Own,
+        (Some(_), Some(_)) => Owner::Other,
+        _ => Owner::Unknown,
+    }
+}
+
+/// Whose a Windows process is by its session: session 0 is the system's, Dyno's own session is its own, any other session
+/// belongs to another user.
+pub fn classify_session(session: u32, own_session: u32) -> Owner {
+    if session == 0 {
+        Owner::System
+    } else if session == own_session {
+        Owner::Own
+    } else {
+        Owner::Other
+    }
 }
 
 /// What the OS source returned for one process; a zero may mean "not read".
@@ -203,6 +253,60 @@ mod tests {
         assert_eq!(m.disk_read.reason(), Some(UnavailableReason::NotPermitted));
         assert_eq!(m.disk_write.reason(), Some(UnavailableReason::NotPermitted));
         assert_eq!(m.user, Measured::Value("other".into()));
+    }
+
+    #[test]
+    fn owners_are_told_apart_by_uid_sid_and_session() {
+        assert_eq!(classify_uid(Some(501), Some(501), 500), Owner::Own);
+        assert_eq!(classify_uid(Some(0), Some(501), 500), Owner::System);
+        assert_eq!(classify_uid(Some(499), Some(501), 500), Owner::System);
+        assert_eq!(classify_uid(Some(502), Some(501), 500), Owner::Other);
+        assert_eq!(classify_uid(None, Some(501), 500), Owner::Unknown);
+        assert_eq!(classify_uid(Some(502), None, 500), Owner::Unknown);
+        assert_eq!(classify_sid(Some("S-1-5-18"), Some("S-1-5-21-1")), Owner::System);
+        assert_eq!(classify_sid(Some("S-1-5-20"), None), Owner::System);
+        assert_eq!(classify_sid(Some("S-1-5-21-1"), Some("S-1-5-21-1")), Owner::Own);
+        assert_eq!(classify_sid(Some("S-1-5-21-2"), Some("S-1-5-21-1")), Owner::Other);
+        assert_eq!(classify_sid(None, Some("S-1-5-21-1")), Owner::Unknown);
+        assert_eq!(classify_session(0, 2), Owner::System);
+        assert_eq!(classify_session(2, 2), Owner::Own);
+        assert_eq!(classify_session(3, 2), Owner::Other);
+    }
+
+    #[test]
+    fn the_first_user_id_comes_from_login_defs_on_linux() {
+        assert_eq!(first_user_uid(Os::Macos, None), 500);
+        assert_eq!(first_user_uid(Os::Windows, None), 0);
+        assert_eq!(first_user_uid(Os::Linux, None), 1000);
+        assert_eq!(
+            first_user_uid(
+                Os::Linux,
+                Some(
+                    "# UID_MIN 5
+UID_MIN	  1200
+UID_MAX 60000
+"
+                )
+            ),
+            1200
+        );
+        assert_eq!(
+            first_user_uid(
+                Os::Linux,
+                Some(
+                    "UID_MIN abc
+"
+                )
+            ),
+            1000
+        );
+        assert_eq!(
+            uid_min_from(
+                "UID_MAX 5
+"
+            ),
+            None
+        );
     }
 
     #[test]

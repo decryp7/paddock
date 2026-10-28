@@ -122,6 +122,18 @@ export interface PartialSum<T> {
   partial: boolean;
 }
 
+/** Whose process it is, relative to the account Dyno runs as. */
+export type Owner = 'own' | 'system' | 'other' | 'unknown';
+
+/** Other users' processes folded into one row by the engine. */
+export interface OtherUsers {
+  count: number;
+  cpu: Measured<number>;
+  memory: Measured<number>;
+  /** Some processes' CPU or memory could not be read, so the sums are lower than the real totals. */
+  partial: boolean;
+}
+
 export interface ProcessSample {
   pid: number;
   parent: number | null;
@@ -134,6 +146,7 @@ export interface ProcessSample {
   diskReadBps: Measured<number>;
   diskWriteBps: Measured<number>;
   started: Measured<Timestamp>;
+  owner: Owner;
   state: RunState;
 }
 
@@ -253,6 +266,8 @@ export interface LiveUpdate {
   /** Every process and group: only while a view subscribed to processes (the task manager). */
   processes: ProcessSample[] | null;
   groups: AppGroup[] | null;
+  /** Other users' processes, folded into one row (`processes` and `groups` leave them out); null when there are none. */
+  otherUsers: OtherUsers | null;
 }
 
 export type LiveDetail = 'summary' | 'processes';

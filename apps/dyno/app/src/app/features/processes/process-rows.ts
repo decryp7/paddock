@@ -1,4 +1,4 @@
-import type { AppGroup, Measured, ProcessRef, ProcessSample } from '../../core/api.types';
+import type { AppGroup, Measured, OtherUsers, ProcessRef, ProcessSample } from '../../core/api.types';
 import { readValue, unavailableText } from '../../core/measured';
 
 export type ViewMode = 'groups' | 'tree' | 'flat';
@@ -11,7 +11,7 @@ export interface Sort {
 /** One line of the task manager: an app group, or a process (nested under its group or parent in those views). */
 export interface Row {
   key: string;
-  kind: 'group' | 'process';
+  kind: 'group' | 'process' | 'other';
   depth: number;
   name: string;
   /** Processes in a group (1 for a process). */
@@ -105,6 +105,8 @@ export interface RowInput {
   mode: ViewMode;
   processes: readonly ProcessSample[];
   groups: readonly AppGroup[];
+  /** Other users' processes, folded into one row by the engine; shown last. */
+  otherUsers?: OtherUsers | null;
   sort: Sort;
   query: string;
   /** Keys of the group/process rows the user opened. */
@@ -113,6 +115,40 @@ export interface RowInput {
 
 /** The visible rows for a view: grouped by app, as a parent/child tree, or flat. Pure; the view only renders it. */
 export function buildRows(input: RowInput): Row[] {
+  const rows = buildListRows(input);
+  const other = otherRow(input.otherUsers ?? null, input.query);
+  return other ? [...rows, other] : rows;
+}
+
+const OTHER_USERS_NAME = 'Other users';
+
+/** The "Other users" row: like a process row, never expandable, always last. Hidden when a search does not match its name. */
+function otherRow(o: OtherUsers | null, query: string): Row | null {
+  if (!o) return null;
+  const q = query.trim().toLowerCase();
+  if (q && !OTHER_USERS_NAME.toLowerCase().includes(q)) return null;
+  return {
+    key: 'other-users',
+    kind: 'other',
+    depth: 0,
+    name: OTHER_USERS_NAME,
+    count: o.count,
+    cpu: readValue(o.cpu),
+    memory: readValue(o.memory),
+    disk: null,
+    unavailable: { cpu: unavailableText(o.cpu), memory: unavailableText(o.memory), disk: 'Unavailable: Dyno does not total disk for other users' },
+    partial: o.partial,
+    user: null,
+    pid: null,
+    ref: null,
+    groupId: null,
+    expandable: false,
+    expanded: false,
+    suspended: false,
+  };
+}
+
+function buildListRows(input: RowInput): Row[] {
   const { mode, processes, groups, sort, query, expanded } = input;
   const searching = query.trim() !== '';
   const kept = processes.filter((p) => matches(p, query));

@@ -4,6 +4,7 @@
 use crate::agent::{lock, now, Shared, RECENT_SAMPLES};
 use dyno_core::grouping::{group, AppGroup};
 use dyno_core::metrics::{derive_pressure, MemoryPressure, PowerSource, SystemSample};
+use dyno_core::others;
 use dyno_core::ports::{ProcessSource, SystemSensors};
 use dyno_core::process::ProcessSample;
 use dyno_core::protocol::{LiveDetail, LiveUpdate, Message, Overhead, TimelineEvent, TimelineEventKind};
@@ -15,6 +16,8 @@ use std::time::{Duration, Instant};
 
 /// The most groups sent as "top" lists.
 const TOP: usize = 6;
+/// Other users' processes are folded into one "Other users" row (off while Dyno runs as administrator).
+const GROUP_OTHER_USERS: bool = true;
 
 /// What the loop keeps between ticks.
 pub struct Sampler {
@@ -214,14 +217,21 @@ impl Sampler {
             .value()
             .copied()
             .unwrap_or_else(|| derive_pressure(&sample.memory));
+        let (listed, other_users) = others::split(&core.latest.processes, GROUP_OTHER_USERS);
+        let listed_groups = if other_users.is_some() {
+            group(&listed)
+        } else {
+            core.latest.groups.clone()
+        };
         let live = LiveUpdate {
             system: sample.clone(),
             pressure,
-            top_cpu: top(&core.latest.groups, |g| f64::from(g.cpu_read())),
-            top_memory: top(&core.latest.groups, |g| g.memory_read() as f64),
+            top_cpu: top(&listed_groups, |g| f64::from(g.cpu_read())),
+            top_memory: top(&listed_groups, |g| g.memory_read() as f64),
             overhead,
-            processes: Some(core.latest.processes.clone()),
-            groups: Some(core.latest.groups.clone()),
+            processes: Some(listed),
+            groups: Some(listed_groups),
+            other_users,
         };
         core.latest.live = Some(live.clone());
         drop_pressure_unused(pressure);

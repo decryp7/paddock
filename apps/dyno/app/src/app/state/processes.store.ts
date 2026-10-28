@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { AppGroup, CommandError, Locker, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
+import type { AppGroup, CommandError, Locker, OtherUsers, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { type Row, type Sort, type ViewMode, buildRows } from '../features/processes/process-rows';
@@ -8,6 +8,7 @@ import { type Row, type Sort, type ViewMode, buildRows } from '../features/proce
 interface ProcessesState {
   processes: ProcessSample[];
   groups: AppGroup[];
+  otherUsers: OtherUsers | null;
   connected: boolean;
   mode: ViewMode;
   sort: Sort;
@@ -27,6 +28,7 @@ export const ProcessesStore = signalStore(
   withState<ProcessesState>({
     processes: [],
     groups: [],
+    otherUsers: null,
     connected: false,
     mode: 'groups',
     sort: { key: 'cpu', dir: 'desc' },
@@ -39,7 +41,7 @@ export const ProcessesStore = signalStore(
     actionError: null,
   }),
   withComputed((s) => ({
-    rows: computed<Row[]>(() => buildRows({ mode: s.mode(), processes: s.processes(), groups: s.groups(), sort: s.sort(), query: s.query(), expanded: new Set(s.expanded()) })),
+    rows: computed<Row[]>(() => buildRows({ mode: s.mode(), processes: s.processes(), groups: s.groups(), otherUsers: s.otherUsers(), sort: s.sort(), query: s.query(), expanded: new Set(s.expanded()) })),
     total: computed(() => s.processes().length),
   })),
   withMethods((store, backend = inject(BACKEND)) => {
@@ -49,7 +51,7 @@ export const ProcessesStore = signalStore(
       start(): void {
         if (stop) return;
         stop = backend.onLive('processes', (u) => {
-          if (u.processes) patchState(store, { processes: u.processes, groups: u.groups ?? [], connected: true });
+          if (u.processes) patchState(store, { processes: u.processes, groups: u.groups ?? [], otherUsers: u.otherUsers, connected: true });
         });
       },
       stop(): void {

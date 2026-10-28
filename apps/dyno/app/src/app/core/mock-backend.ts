@@ -307,6 +307,7 @@ export class MockBackend implements DynoBackend {
       },
       processes: detail === 'processes' ? samples : null,
       groups: detail === 'processes' ? groups : null,
+      otherUsers: null,
     };
   }
 

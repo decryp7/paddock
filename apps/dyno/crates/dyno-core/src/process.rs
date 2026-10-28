@@ -6,6 +6,20 @@ use serde::{Deserialize, Serialize};
 /// A process id.
 pub type Pid = u32;
 
+/// Whose process it is, relative to the account Dyno runs as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Owner {
+    /// The account Dyno runs as.
+    Own,
+    /// The system or a service account (SYSTEM, LOCAL SERVICE, NETWORK SERVICE; low user ids on Unix).
+    System,
+    /// Another person's account.
+    Other,
+    /// The OS did not say; listed on its own.
+    Unknown,
+}
+
 /// Why a per-process value was not read. Typed, so the UI words it and the tests match on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -147,6 +161,8 @@ pub struct ProcessSample {
     pub disk_write_bps: Measured<f64>,
     /// When it started (with the pid, this identifies the process: pids are reused).
     pub started: Measured<Timestamp>,
+    /// Whose process it is.
+    pub owner: Owner,
     /// Run state.
     pub state: RunState,
 }
@@ -369,6 +385,7 @@ pub(crate) mod fixtures {
             disk_read_bps: Measured::Value(0.0),
             disk_write_bps: Measured::Value(0.0),
             started: Measured::Value(Timestamp(i64::from(pid) * 1_000)),
+            owner: Owner::Own,
             state: RunState::Running,
         }
     }

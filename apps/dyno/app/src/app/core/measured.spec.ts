@@ -23,7 +23,7 @@ describe('measured values', () => {
   it('matches the JSON the Rust core sends (the same literals are asserted in dyno-core process.rs)', () => {
     const wire = JSON.parse(
       '{"pid":2,"parent":1,"name":"b.exe","exe":null,"user":{"value":"me"},"cpu":{"unavailable":{"reason":"needsAdmin"}},' +
-        '"memory":{"value":5},"diskReadBps":{"value":0},"diskWriteBps":{"value":0},"started":{"value":2000},"state":"running"}',
+        '"memory":{"value":5},"diskReadBps":{"value":0},"diskWriteBps":{"value":0},"started":{"value":2000},"owner":"own","state":"running"}',
     ) as ProcessSample;
     const cpu: Measured<number> = wire.cpu;
     expect(readReason(cpu)).toBe('needsAdmin');

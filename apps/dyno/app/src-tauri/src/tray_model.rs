@@ -379,6 +379,7 @@ mod tests {
             overhead: Overhead::default(),
             processes: None,
             groups: None,
+            other_users: None,
         }
     }
 

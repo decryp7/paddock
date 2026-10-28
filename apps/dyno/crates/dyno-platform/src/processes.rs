@@ -3,9 +3,14 @@
 //! directory, and an OS-specific [`DetailsProbe`] adds priority, modules, connections, signature and so on.
 
 use crate::parse::time::{same_start, started_from_unix_secs};
-use crate::readability::{measure, Os, Owner, Raw};
+#[cfg(windows)]
+use crate::readability::classify_sid;
+#[cfg(unix)]
+use crate::readability::classify_uid;
+use crate::readability::{first_user_uid, measure, Os, Raw};
 use crate::sensors::rate;
 use dyno_core::ports::{PlatformError, ProcessSource};
+use dyno_core::process::Owner;
 use dyno_core::process::{ListOrReason, Measured, ParentLink, Pid, ProcessDetails, ProcessRef, ProcessSample, RunState, SignatureInfo};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -25,6 +30,30 @@ impl DetailsProbe for NoDetails {
     fn enrich(&mut self, _target: ProcessRef, _exe: Option<&Path>, _details: &mut ProcessDetails) {}
 }
 
+/// How an account is told apart from Dyno's own: the numeric user id on Unix, the SID text on Windows.
+#[cfg(unix)]
+type OwnUser = u32;
+#[cfg(windows)]
+type OwnUser = String;
+
+#[cfg(unix)]
+fn own_user_of(u: &sysinfo::Uid) -> OwnUser {
+    **u
+}
+#[cfg(windows)]
+fn own_user_of(u: &sysinfo::Uid) -> OwnUser {
+    u.to_string()
+}
+
+/// The text of `/etc/login.defs` on Linux, where it says where ordinary user ids start.
+fn login_defs() -> Option<String> {
+    if cfg!(target_os = "linux") {
+        std::fs::read_to_string("/etc/login.defs").ok()
+    } else {
+        None
+    }
+}
+
 /// The deepest parent chain reported (guards against cycles from reused pids).
 const MAX_PARENT_DEPTH: usize = 64;
 /// The user list is re-read at most this often when an unknown user id shows up.
@@ -37,7 +66,9 @@ pub struct SysinfoProcesses {
     users_read: Instant,
     last: Option<Instant>,
     cores: f32,
-    own_uid: Option<sysinfo::Uid>,
+    own_user: Option<OwnUser>,
+    #[cfg_attr(windows, allow(dead_code))]
+    first_user: u32,
     probe: Box<dyn DetailsProbe>,
 }
 
@@ -53,7 +84,8 @@ impl SysinfoProcesses {
             users_read: Instant::now(),
             last: None,
             cores,
-            own_uid: None,
+            own_user: None,
+            first_user: first_user_uid(Os::this(), login_defs().as_deref()),
             probe,
         }
     }
@@ -77,15 +109,14 @@ impl SysinfoProcesses {
     }
 
     fn owner_of(&self, p: &Process) -> Owner {
-        match (p.user_id(), self.own_uid.as_ref()) {
-            (Some(u), Some(own)) => {
-                if u == own {
-                    Owner::Own
-                } else {
-                    Owner::Other
-                }
-            }
-            _ => Owner::Unknown,
+        #[cfg(unix)]
+        {
+            classify_uid(p.user_id().map(|u| **u), self.own_user, self.first_user)
+        }
+        #[cfg(windows)]
+        {
+            let sid = p.user_id().map(|u| u.to_string());
+            classify_sid(sid.as_deref(), self.own_user.as_deref())
         }
     }
 
@@ -99,7 +130,8 @@ impl SysinfoProcesses {
             start_secs: p.start_time(),
             user: self.user_name(p),
         };
-        let m = measure(Os::this(), self.owner_of(p), &raw, started_from_unix_secs);
+        let owner = self.owner_of(p);
+        let m = measure(Os::this(), owner, &raw, started_from_unix_secs);
         ProcessSample {
             pid: p.pid().as_u32(),
             parent: p.parent().map(|pp| pp.as_u32()),
@@ -111,6 +143,7 @@ impl SysinfoProcesses {
             disk_read_bps: m.disk_read,
             disk_write_bps: m.disk_write,
             started: m.started,
+            owner,
             state: run_state(p.status()),
         }
     }
@@ -156,11 +189,12 @@ impl ProcessSource for SysinfoProcesses {
             self.users.refresh();
             self.users_read = Instant::now();
         }
-        if self.own_uid.is_none() {
-            self.own_uid = sysinfo::get_current_pid()
+        if self.own_user.is_none() {
+            self.own_user = sysinfo::get_current_pid()
                 .ok()
                 .and_then(|me| self.sys.process(me))
-                .and_then(|p| p.user_id().cloned());
+                .and_then(|p| p.user_id())
+                .map(own_user_of);
         }
         let mut out: Vec<ProcessSample> = self.sys.processes().values().map(|p| self.sample_of(p, secs)).collect();
         out.sort_by_key(|p| p.pid);
@@ -277,6 +311,7 @@ mod tests {
         assert!(first.len() > 3);
         let me = std::process::id();
         let mine = first.iter().find(|p| p.pid == me).expect("own process listed");
+        assert_eq!(mine.owner, Owner::Own, "the test process runs as the account that runs it");
         assert!(mine.started.copied().unwrap().0 > 0);
         assert!(mine.exe.is_some());
         let second = s.processes();

@@ -155,6 +155,7 @@ export function sampleProcess(p: MockProcess, t: number, cap: number | null, cpu
     diskReadBps: measured(Math.round(disk * 0.35)),
     diskWriteBps: measured(Math.round(disk * 0.65)),
     started: measured(p.started),
+    owner: p.system ? 'system' : 'own',
     state: suspended ? 'suspended' : cpu < 0.05 ? 'sleeping' : 'running',
   };
 }

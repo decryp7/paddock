@@ -35,6 +35,7 @@ pub mod network_alerts;
 pub mod network_names;
 pub mod network_traffic;
 pub mod os;
+pub mod others;
 pub mod ports;
 pub mod process;
 pub mod protocol;

@@ -55,6 +55,12 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
         </div>
       }
 
+      @if (store.otherUsers(); as o) {
+        <p class="note" data-testid="other-users-note">
+          <dy-icon name="info" /> “Other users” is one row for the {{ num(o.count) }} processes of other accounts on this PC. It adds up only the values Dyno can read.
+        </p>
+      }
+
       <div class="body" [class.open]="!!store.selected()">
         <section class="table card" role="treegrid" aria-label="Processes" [attr.aria-rowcount]="store.rows().length + 1">
           <div class="row head-row" role="row">
@@ -88,6 +94,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 [attr.data-key]="r.key"
                 [cdkContextMenuTriggerFor]="menu"
                 [cdkContextMenuTriggerData]="{ row: r }"
+                [cdkContextMenuDisabled]="r.kind === 'other'"
                 (click)="rowClick(r)"
                 (keydown.space)="$event.preventDefault(); rowClick(r)"
                 (dblclick)="store.toggle(r)"
@@ -101,7 +108,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                     <span class="chev-space"></span>
                   }
                   <span class="nm truncate" [title]="r.name">{{ r.name }}</span>
-                  @if (r.kind === 'group' && r.count > 1) {
+                  @if (r.kind !== 'process' && r.count > 1) {
                     <span class="badge">{{ num(r.count) }}</span>
                   }
                   @if (r.suspended) {
@@ -132,7 +139,9 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
                 <span role="gridcell" class="truncate faint">{{ r.user ?? '' }}</span>
                 <span role="gridcell" class="r num faint">{{ pid(r) }}</span>
                 <span role="gridcell" class="act">
+                  @if (r.kind !== 'other') {
                   <button type="button" class="btn ghost icon sm" [attr.aria-label]="'Actions for ' + r.name" [cdkMenuTriggerFor]="menu" [cdkMenuTriggerData]="{ row: r }" (click)="$event.stopPropagation()"><dy-icon name="more" /></button>
+                  }
                 </span>
               </div>
             </cdk-virtual-scroll-viewport>
@@ -195,6 +204,7 @@ const COLUMNS: { key: SortKey; label: string; align: 'l' | 'r' }[] = [
     .chev dy-icon { --icon-size: 14px; } .chev-space { width: 18px; flex: none; }
     .heat { border-radius: 0; }
     .faint { color: var(--text-3); }
+    .note { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-3); font-size: var(--fs-sm); }
     .na { color: var(--text-3); font-style: italic; }
     .act { padding: 0 !important; display: grid; place-items: center; }
     .skeletons { display: grid; gap: var(--sp-2); padding: var(--sp-4); } .skeleton { height: 20px; }

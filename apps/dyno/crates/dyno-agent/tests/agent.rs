@@ -82,6 +82,31 @@ fn a_subscriber_gets_live_updates_with_processes_only_when_it_asks() {
 }
 
 #[test]
+fn other_users_processes_are_folded_into_one_row_in_the_live_update() {
+    let h = Harness::start();
+    for pid in [200, 201] {
+        let mut p = process(pid, "theirs", 3.0);
+        p.owner = dyno_core::process::Owner::Other;
+        h.fake.add_process(p);
+    }
+    let (_p, rx) = h.subscriber(LiveDetail::Processes);
+    let live = loop {
+        let l = rx.recv_timeout(Duration::from_secs(10)).expect("a live update");
+        if l.other_users.is_some() {
+            break l;
+        }
+    };
+    let other = live.other_users.unwrap();
+    assert_eq!(other.count, 2);
+    let listed = live.processes.unwrap();
+    assert!(
+        listed.iter().all(|p| p.owner != dyno_core::process::Owner::Other),
+        "folded ones are not listed"
+    );
+    assert_eq!(listed.len(), 3);
+}
+
+#[test]
 fn settings_round_trip_and_survive_a_restart() {
     let h = Harness::start();
     let peer = h.client();

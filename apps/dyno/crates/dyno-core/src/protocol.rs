@@ -12,6 +12,7 @@ use crate::grouping::AppGroup;
 use crate::health::HealthReport;
 use crate::history::{Consumer, HistoryPoint, HistoryRange};
 use crate::metrics::{MemoryPressure, SystemSample};
+use crate::others::OtherUsers;
 use crate::process::{Locker, ProcessDetails, ProcessRef, ProcessSample};
 use crate::report::WeeklyReport;
 use crate::settings::Settings;
@@ -403,6 +404,9 @@ pub struct LiveUpdate {
     pub processes: Option<Vec<ProcessSample>>,
     /// Every group, likewise.
     pub groups: Option<Vec<AppGroup>>,
+    /// Other users' processes folded into one row; `processes` and `groups` leave them out. `None` when there are none
+    /// or the grouping is off.
+    pub other_users: Option<OtherUsers>,
 }
 
 /// A marker on the history timeline.
@@ -854,6 +858,7 @@ mod tests {
             overhead: Overhead::default(),
             processes: None,
             groups: Some(vec![]),
+            other_users: None,
         };
         for m in [
             Message::Request(Box::new(Request::SaveSettings { settings: Box::default() })),

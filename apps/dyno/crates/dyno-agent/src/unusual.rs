@@ -225,7 +225,7 @@ pub fn run(shared: &Shared) {
 mod tests {
     use super::*;
     use dyno_core::process::RunState;
-    use dyno_core::process::{Measured, UnavailableReason};
+    use dyno_core::process::{Measured, Owner, UnavailableReason};
     use dyno_core::time::Timestamp;
 
     fn p(pid: u32, parent: Option<u32>, name: &str, exe: &str) -> ProcessSample {
@@ -240,6 +240,7 @@ mod tests {
             disk_read_bps: Measured::Value(0.0),
             disk_write_bps: Measured::Value(0.0),
             started: Measured::Value(Timestamp(0)),
+            owner: Owner::Own,
             state: RunState::Running,
         }
     }

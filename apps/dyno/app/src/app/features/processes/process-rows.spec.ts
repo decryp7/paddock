@@ -15,7 +15,7 @@ const sample = (pid: number, name: string, extra: SampleOver = {}): ProcessSampl
     pid, parent: null, name, exe: `/bin/${name}`, state: 'running',
     user: user === null ? { unavailable: { reason: 'notPermitted' } } : { value: user },
     cpu: num(cpu), memory: num(memory), diskReadBps: num(diskReadBps), diskWriteBps: num(diskWriteBps),
-    started: { value: 1000 + pid }, ...rest,
+    started: { value: 1000 + pid }, owner: 'own', ...rest,
   };
 };
 const group = (id: string, name: string, pids: number[], cpu = 0, memory = 0): AppGroup => ({
@@ -107,6 +107,28 @@ describe('buildRows: values that were not read', () => {
     expect(rows[1]!.unavailable.memory).toBeNull();
     const g = { ...group('g', 'G', [1, 2], 4), partial: true };
     expect(buildRows(input({ processes: [hidden, sample(2, 'mine', { cpu: 4 })], groups: [g] }))[0]).toMatchObject({ partial: true, cpu: 4 });
+  });
+});
+
+describe('buildRows: other users', () => {
+  const other = { count: 3, cpu: { value: 4.5 }, memory: { value: 900 }, partial: true } as const;
+  it('adds one row that is not expandable, last in every mode, with its note values', () => {
+    const processes = [sample(1, 'a', { cpu: 50 })];
+    for (const mode of ['groups', 'tree', 'flat'] as const) {
+      const rows = buildRows(input({ mode, processes, groups: [group('a', 'A', [1], 50)], otherUsers: other }));
+      const last = rows[rows.length - 1]!;
+      expect(last).toMatchObject({ kind: 'other', name: 'Other users', count: 3, cpu: 4.5, memory: 900, disk: null, partial: true, expandable: false, expanded: false, ref: null });
+      expect(last.unavailable.disk).toContain('Unavailable');
+    }
+  });
+  it('shows an unreadable total as null with the reason and follows the search', () => {
+    const none = { ...other, cpu: { unavailable: { reason: 'needsAdmin' } }, partial: true } as const;
+    const rows = buildRows(input({ mode: 'flat', processes: [], otherUsers: none }));
+    expect(rows[0]).toMatchObject({ kind: 'other', cpu: null });
+    expect(rows[0]!.unavailable.cpu).toContain('administrator');
+    expect(buildRows(input({ mode: 'flat', processes: [], otherUsers: other, query: 'other' })).length).toBe(1);
+    expect(buildRows(input({ mode: 'flat', processes: [], otherUsers: other, query: 'zzz' }))).toEqual([]);
+    expect(buildRows(input({ mode: 'flat', processes: [], otherUsers: null }))).toEqual([]);
   });
 });
 
