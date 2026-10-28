@@ -76,6 +76,13 @@
   --pd-z-banner: 30;
   --pd-z-overlay: 1000;
   --pd-z-toast: 1100;
+  // Layers inside a table (local to its scroller, all below --pd-z-sticky): the header above sticky columns above row actions
+  // above cells, so nothing that scrolls paints over the header (C43, ADR 0027).
+  --pd-z-table-row-action: 1;
+  --pd-z-table-sticky-column: 2;
+  --pd-z-table-header: 3;
+  // The header cell of a sticky column sticks both ways: above the header row and the column.
+  --pd-z-table-corner: 4;
 
   // Layout.
   --pd-sidebar-width: 216px;

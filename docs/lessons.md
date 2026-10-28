@@ -597,3 +597,13 @@ different corpus or a real regression, and stale figures kept being quoted from 
 every benchmark you quote as a results block (date, commit, machine, load, build, corpus and generator, exact command,
 runs, numbers with budget and verdict, physical-footprint memory) in the owning `docs/performance.md` or
 `docs/benchmarks.md`, and link it from wherever the number is quoted; a number without a block is not evidence (rule 48).
+
+## A sticky header needs a z-index above everything that scrolls under it (2026-10-28, all apps)
+"The cell covers the header when scrolling": a `position: sticky` header with `z-index: auto` paints in tree order with the
+rows, so a later cell that is positioned or makes a stacking context (opacity on muted rows or hover actions, a relative
+badge, a transform) paints over it, and a sticky column at the header's own z-index wins the tie. Fourteen tables in three
+apps and the shared shell had it (ADR 0027 lists them); none showed with the mock data, so a run-time sweep alone would not have found them.
+**Rule:** every sticky header sets a z-index from the table ladder (`--pd-z-table-header` above sticky columns above row
+actions) and an opaque background; C43 checks every instance and `expectHeaderOnTop` checks a grid at run time (ADR 0027,
+rule 40).
+

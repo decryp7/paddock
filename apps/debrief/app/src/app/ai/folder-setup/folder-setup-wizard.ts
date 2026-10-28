@@ -213,7 +213,7 @@ type Step = 'survey' | 'proposals' | 'review' | 'apply';
     .ok { margin: 0; color: var(--ok); }
     .actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
     .actions.start { justify-content: flex-start; }
-    .actions.sticky { position: sticky; bottom: 0; background: var(--bg-1); padding-top: 6px; }
+    .actions.sticky { position: sticky; bottom: 0; z-index: 3; background: var(--bg-1); padding-top: 6px; }
   `,
 })
 export class FolderSetupWizard {

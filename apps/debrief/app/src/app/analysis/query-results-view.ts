@@ -63,7 +63,7 @@ import { QuerySession } from './query-session';
       .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
       table.grid { border-collapse: collapse; width: 100%; }
       table.grid th, table.grid td { padding: 4px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
-      table.grid th { position: sticky; top: 0; background: var(--bg-2); color: var(--muted); font-weight: 600; }
+      table.grid th { position: sticky; top: 0; z-index: 3; background: var(--bg-2); color: var(--muted); font-weight: 600; }
       table.grid th button { all: unset; cursor: pointer; display: inline-flex; gap: 4px; }
       table.grid th button:focus-visible { outline: 2px solid var(--focus-ring); }
       table.grid th.num { text-align: right; }

@@ -22,8 +22,8 @@ test.describe('shared table on the Runners page', () => {
     await app.frame.open();
     await app.sidebar.link(/^Runners/).click();
     const grid = page.getByRole('grid', { name: 'Runners' });
-    await grid.getByRole('button', { name: 'Sort by Jobs today' }).click();
-    await grid.getByRole('button', { name: 'Sort by Jobs today' }).click();
+    await grid.getByRole('columnheader', { name: 'Jobs today' }).getByRole('button').click();
+    await grid.getByRole('columnheader', { name: 'Jobs today' }).getByRole('button').click();
     await expect(grid.locator('[role=row][data-index]').first()).toContainText('build-linux-1');
   });
 
