@@ -19,19 +19,16 @@ export interface ConfigDiffData {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
-      <div class="head">
-        <span class="icon"><mat-icon svgIcon="pc:file-text" aria-hidden="true" /></span>
-        <h2 id="diff-title">Review changes</h2>
+      <div class="scroll">
+      <p class="keys">
         <span class="counts" aria-label="Lines added and removed">
           <span class="added"><span aria-hidden="true">+</span>{{ data().preview.diff.added }} <span class="visually-hidden">lines added</span></span>
           <span class="removed"><span aria-hidden="true">−</span>{{ data().preview.diff.removed }} <span class="visually-hidden">lines removed</span></span>
         </span>
-      </div>
-
-      @if (data().preview.changedKeys.length > 0) {
-        <p class="keys">Changes: <code>{{ data().preview.changedKeys.join(', ') }}</code></p>
-      }
-
+        @if (data().preview.changedKeys.length > 0) {
+          Changes: <code>{{ data().preview.changedKeys.join(', ') }}</code>
+        }
+      </p>
       <div class="diff" role="region" aria-label="Changes to config.yaml" tabindex="0">
         @for (h of data().preview.diff.hunks; track $index) {
           @if ($index > 0) {
@@ -69,6 +66,7 @@ export interface ConfigDiffData {
           <li><mat-icon svgIcon="pc:check" aria-hidden="true" />Only comments or layout change; the runner does not need to restart.</li>
         }
       </ul>
+      </div>
 
       <div class="btn-row end">
         <button type="button" class="btn" data-dialog-close (click)="ref.close()">Cancel</button>
@@ -77,29 +75,30 @@ export interface ConfigDiffData {
     </div>
   `,
   styles: `
-    .wrap {
-      display: grid;
-      gap: var(--space-3);
-      width: min(760px, calc(100vw - 48px));
-      padding: var(--space-5);
-    }
-    .head {
+    :host {
       display: flex;
-      align-items: center;
-      gap: var(--space-3);
+      flex-direction: column;
+      min-height: 0;
     }
-    h2 {
-      margin: 0;
+    .wrap {
+      display: flex;
       flex: 1;
+      flex-direction: column;
+      gap: var(--space-3);
+      min-height: 0;
+      min-width: 0;
     }
-    .icon {
+    .scroll {
       display: grid;
-      place-items: center;
-      width: 32px;
-      height: 32px;
-      border-radius: var(--radius-full);
-      background: var(--info-soft);
-      color: var(--info);
+      flex: 1;
+      align-content: start;
+      gap: var(--space-3);
+      min-height: 0;
+      min-width: 0;
+      overflow: auto;
+    }
+    .btn-row {
+      flex: none;
     }
     .counts {
       display: inline-flex;
@@ -119,7 +118,7 @@ export interface ConfigDiffData {
       font-size: var(--text-sm);
     }
     .diff {
-      max-height: 340px;
+      min-width: 0;
       overflow: auto;
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);

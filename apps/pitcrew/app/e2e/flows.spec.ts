@@ -221,6 +221,30 @@ test.describe('native feel (ADR 0008)', () => {
     }
   });
 
+  test('the config diff window scrolls its changes inside and keeps Save and apply fully visible', async ({ page, app }) => {
+    const lines = Array.from({ length: 60 }, (_, i) => ({
+      kind: i % 2 ? 'added' : 'removed',
+      text: `  key_${i}: ${'a very long value that does not fit the window '.repeat(6)}`,
+      oldNo: i % 2 ? null : i + 1,
+      newNo: i % 2 ? i + 1 : null,
+    }));
+    const preview = { text: '', changed: true, restartNeeded: true, diff: { hunks: [{ lines }], added: 30, removed: 30, truncated: false }, issues: [], changedKeys: ['runner.capacity'], labels: [] };
+    await page.setViewportSize({ width: 720, height: 560 });
+    await app.dialogs.openWindow('pc.config-diff', { preview, maxBackups: 5 });
+    await app.dialogs.loaded();
+    const save = page.getByRole('button', { name: 'Save and apply' });
+    await expect(save).toBeVisible();
+    const box = (await save.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(560);
+    expect(box.x + box.width).toBeLessThanOrEqual(720);
+    // The changes scroll inside their own region, both ways; the window itself does not scroll.
+    const diff = page.getByRole('region', { name: 'Changes to config.yaml' });
+    expect(await diff.evaluate((e) => e.scrollWidth > e.clientWidth && e.scrollHeight > e.clientHeight)).toBe(true);
+    expect(await page.locator('main.pd-body').evaluate((e) => e.scrollHeight <= e.clientHeight && e.scrollWidth <= e.clientWidth)).toBe(true);
+    // One title: the window's, not a second heading inside it.
+    await expect(page.getByRole('heading', { name: 'Review changes' })).toHaveCount(0);
+  });
+
   test('edits the runner configuration, reviews the diff and saves', async ({ page }) => {
     await page.goto(`${APP}/runners/build-win?tab=config`);
     await expect(page.getByRole('heading', { name: 'Runner configuration' })).toBeVisible();
