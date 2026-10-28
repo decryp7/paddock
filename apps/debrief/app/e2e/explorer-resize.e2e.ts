@@ -96,9 +96,14 @@ async function planIdle(page: Page): Promise<void> {
 
 test('a stored wide Explorer in a narrow window settles at once instead of opening and closing forever', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('debrief.prefs.v1', JSON.stringify({ explorerWidth: 640 })));
-  await page.setViewportSize({ width: 1100, height: 900 });
+  // Open wide, then shrink to a window where 640 px no longer fits beside the dock: the plan must settle, not open and close forever.
+  await page.setViewportSize({ width: 1440, height: 900 });
   await openApp(page);
-  const flips = await flipsDuring(page, () => planIdle(page));
+  await planIdle(page);
+  const flips = await flipsDuring(page, async () => {
+    await page.setViewportSize({ width: 1000, height: 900 });
+    await planIdle(page);
+  });
   expect(flips).toBe(0);
   await expect(page.locator('debrief-sidebar')).toBeVisible();
 });
