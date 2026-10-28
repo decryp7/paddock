@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { SuStatusPill } from '@decryp7/paddock-ui';
-import { SetupStore, statusView } from '@decryp7/paddock-ui/shell/setup';
+import { SetupStore, statusView, type ItemView } from '@decryp7/paddock-ui/shell/setup';
 import { SETUP_STYLES } from './styles';
 
 /**
@@ -58,7 +58,7 @@ import { SETUP_STYLES } from './styles';
               @if (item.status === 'problem') {
                 <button type="button" class="pd-setup__btn" [class.pd-setup__btn--primary]="item.id === lead()" [attr.data-testid]="'setup-repair-' + item.id" [disabled]="working" (click)="store.repair(item.id)">{{ t.repair }}</button>
               } @else if (item.status === 'todo') {
-                <button type="button" class="pd-setup__btn" [class.pd-setup__btn--primary]="item.id === lead()" [attr.data-testid]="'setup-act-' + item.id" [disabled]="working" (click)="store.act(item.id)">{{ item.action }}</button>
+                <button type="button" class="pd-setup__btn" [class.pd-setup__btn--primary]="item.id === lead()" [attr.data-testid]="'setup-act-' + item.id" [disabled]="working" (click)="store.act(item.id)">{{ actionLabel(item) }}</button>
               }
               @if (item.status !== 'done') {
                 <button type="button" class="pd-setup__btn pd-setup__btn--quiet" [attr.data-testid]="'setup-skip-' + item.id" [disabled]="working" (click)="store.skip(item.id, !item.skipped)">{{ item.skipped ? t.unskip : t.skip }}</button>
@@ -84,6 +84,11 @@ import { SETUP_STYLES } from './styles';
 export class PdSetupChecklist {
   protected readonly store = inject(SetupStore);
 
+  /** The step's button: a step that needs a Pitwall that is not installed offers to get it; the others say what the engine says. */
+  protected actionLabel(item: ItemView): string {
+    return item.needsAi?.reason.kind === 'notInstalled' ? this.t.getPitwall : item.action;
+  }
+
   protected readonly t = {
     lede: $localize`:@@pd.setup.lede:A few things the app can set up for you. Each is optional, you can skip any of them, and you can come back to this list later in Settings.`,
     settled: $localize`:@@pd.setup.settled:Everything is set up or skipped. You can change any of it later in Settings.`,
@@ -91,6 +96,7 @@ export class PdSetupChecklist {
     loading: $localize`:@@pd.setup.loading:Looking at what is set up…`,
     noState: $localize`:@@pd.setup.no-state-title:The set-up steps could not be asked.`,
     retry: $localize`:@@pd.setup.retry:Retry`,
+    getPitwall: $localize`:@@pd.setup.get-pitwall:Get Pitwall`,
     repair: $localize`:@@pd.setup.repair:Repair`,
     skip: $localize`:@@pd.setup.skip:Skip for now`,
     unskip: $localize`:@@pd.setup.unskip:Take it up again`,

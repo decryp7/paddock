@@ -107,6 +107,12 @@ describe('the Set-up page', () => {
     expect(text(q('setup-status-notifications')!)).toContain('Done');
   });
 
+  it('offers Get Pitwall while Pitwall is not installed', async () => {
+    const { q } = await open(PdSetupPage, held().memory);
+    expect(text(q('setup-act-pitwall')!)).toBe('Get Pitwall');
+    expect(text(q('setup-act-service')!)).toBe('Install');
+  });
+
   it('skips a step and takes it up again, and says when everything is settled', async () => {
     const e = held();
     const { q, click } = await open(PdSetupPage, e.memory);
