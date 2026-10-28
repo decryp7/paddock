@@ -29,12 +29,11 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
   the build when an ad-hoc Mach-O has the hardened runtime on, when bundled Mach-Os disagree on their TeamIdentifier,
   or when a sidecar does not start from the built app (`--version`), on the `.app` and on the copy inside the DMG.
 - **Linux:** `Dyno_<version>_amd64.deb` and an AppImage.
-- Every bundle carries the `dyno-agent`, `dyno-helper` and `dyno` (command line, docs/cli.md) sidecars (`externalBin`, built by `app/src-tauri/scripts/sidecar.mjs` with the `dist`
+- Every bundle carries the `dyno-agent` and `dyno` (command line, docs/cli.md) sidecars (`externalBin`, built by `app/src-tauri/scripts/sidecar.mjs` with the `dist`
   profile). On macOS the bundle also carries `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`.
 
 `scripts/check-bundle.sh` runs after the Linux and macOS bundles (`bundle-check` in `dyno-release.yml`): every executable's run paths must be relative or system
-folders (never a build directory), the macOS seal must verify, and `dyno-agent` and `dyno-helper` must be present. The helper is installed only on a user's click from the copy next to the agent
-(ADR 0016); an update brings a new copy, and Settings > Helper then offers to update the installed one (one OS prompt).
+folders (never a build directory), the macOS seal must verify, and `dyno-agent` must be present. Dyno 1.0 ships without its privileged helper: the `dyno-helper` crate stays in the workspace for 1.1 but is not built into or bundled with any installer, and no installer is expected to contain it.
 
 ## How Dyno's updates work
 
