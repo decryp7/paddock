@@ -898,7 +898,7 @@ function runNodeCaches(os, env = {}) {
 test('node-caches keeps the npm and Angular caches on the host or the container mount, never failing a job', () => {
   const host = runNodeCaches('macOS');
   const kept = join(host.root, 'home', '.paddock-ci');
-  assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm$`, 'm'));
+  assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm-s1$`, 'm'));
   assert.equal(realpathSync(join(host.root, 'ws', 'ui', '.angular', 'cache')), join(kept, 'angular', 'e2e-1-s1'), 'one Angular cache per job, shard and job slot');
   const mount = join(host.root, 'mount');
   mkdirSync(mount);

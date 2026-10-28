@@ -95,7 +95,8 @@ test('two jobs on one host get different slots from the OS-lock holder, and each
   assert.notEqual(a.later(['path', 'target', 'x-app']).stdout, b.later(['path', 'target', 'x-app']).stdout, 'the same name, two folders');
   assert.equal(a.later(['path', 'target', 'x-app']).stdout.trim(), join(h.ci, 'target-x-app-s1'));
   assert.equal(b.later(['path', 'src', 'x-app-macOS']).stdout.trim(), join(h.ci, 'src', 'x-app-macOS-s2'));
-  assert.equal(a.later(['path', 'npm']).stdout.trim(), b.later(['path', 'npm']).stdout.trim(), 'a shared store is one folder for every slot');
+  assert.equal(a.later(['path', 'tools']).stdout.trim(), b.later(['path', 'tools']).stdout.trim(), 'a shared store is one folder for every slot');
+  assert.notEqual(a.later(['path', 'npm']).stdout.trim(), b.later(['path', 'npm']).stdout.trim(), 'npm\'s cache is the slot\'s own');
   assert.equal(a.later(['acquire']).status, 0, 'a second acquire in the same job keeps its slot');
   assert.equal(a.exported().PADDOCK_CI_SLOT, 's1');
 });
@@ -273,7 +274,7 @@ test('disk: kept folders no job used for PADDOCK_CI_ORPHAN_DAYS (folders no work
   daysAgo(join(h.ci, 'target-old-unslotted'), 20);
   daysAgo(join(h.ci, 'target-recent-unslotted'), 2);
   daysAgo(join(h.ci, 'target-x-app-s1'), 20);
-  daysAgo(join(h.ci, 'npm'), 20);
+  daysAgo(join(h.ci, 'tools'), 20);
   const a = h.job('a'.repeat(16));
   a.exec(['acquire']);
   assert.ok(existsSync(join(h.ci, 'target-renamed-job-s1')), 'slot s1 is held by this job: nothing of it is swept');
@@ -283,7 +284,7 @@ test('disk: kept folders no job used for PADDOCK_CI_ORPHAN_DAYS (folders no work
   assert.ok(!existsSync(join(h.ci, 'target-old-unslotted')), 'an old-layout folder nobody took over: gone');
   assert.ok(existsSync(join(h.ci, 'target-recent-unslotted')), 'recent: stays');
   assert.ok(existsSync(join(h.ci, 'target-x-app-s1')), 'used by the job: stays');
-  assert.ok(existsSync(join(h.ci, 'npm')), 'shared stores are not swept');
+  assert.ok(existsSync(join(h.ci, 'tools')), 'shared stores are not swept');
 });
 
 test('disk: below the free-disk floor acquire removes idle slots\' kept folders, highest first, never a held slot\'s; still below, it fails and frees its slot', () => {
@@ -427,7 +428,7 @@ test('value commands print only their value on stdout (messages go to stderr), a
   const moved = a.later(['path', 'src', 'x-app-macOS']);
   assert.equal(moved.stdout, `${join(h.ci, 'src', 'x-app-macOS-s1')}\n`, 'the migration case: the path and nothing else');
   assert.match(moved.stderr, /moved src\/x-app-macOS to src\/x-app-macOS-s1/);
-  for (const args of [['path', 'npm'], ['port', 'sccache'], ['temp'], ['slots']]) assert.equal(a.later(args).stdout.trim().split('\n').length, 1, args.join(' '));
+  for (const args of [['path', 'tools'], ['port', 'sccache'], ['temp'], ['slots']]) assert.equal(a.later(args).stdout.trim().split('\n').length, 1, args.join(' '));
   const rel = a.later(['release']);
   assert.equal(rel.stdout, '', `release prints messages to stderr only: ${rel.stdout}`);
   const found = [];

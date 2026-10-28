@@ -114,8 +114,8 @@ Windows runner's `runner.timeout` is not verified. Linux jobs run in a container
 | State | Where | Why |
 |---|---|---|
 | Test temp folders, the clean-up's temp sweep, `{tmp}` process patterns | the job's `$RUNNER_TEMP` (the action sets `TMPDIR`, and `TMP`/`TEMP` on Windows, and `PADDOCK_JOB_TEMP` to it) | it need not outlive the job; the runner gives each job its own and deletes it after |
-| Build folder (`target`), stable checkout (`src`), Angular cache, test browser, libduckdb, Debrief's Windows `node_modules`, sccache's disk cache | kept folders of the job's **slot**: `<ci-home>/<layout>-s<n>` (process patterns name one as `[/\\]<kept folder name>-{slot}`, at the end of the pattern; `{slot}` becomes `s<n>([^0-9]\|$)`) | a stable absolute path keeps them warm (cargo fingerprints and sccache keys hold absolute paths); one slot per concurrent job means no two jobs write one. sccache's local storage takes one server at a time ([docs/Local.md](https://github.com/mozilla/sccache/blob/main/docs/Local.md): "Multiple concurrent servers will race and cause spurious build failures"), so each slot has its own, sized `PADDOCK_CI_SCCACHE_GB` (40) / `PADDOCK_CI_SLOTS` |
-| npm's download cache, pinned tools, the paddock-dev binary | **shared** kept folders | safe for concurrent writers (content-addressed, or renamed into place) |
+| Build folder (`target`), stable checkout (`src`), Angular cache, npm's cache, test browser, libduckdb, Debrief's Windows `node_modules`, sccache's disk cache | kept folders of the job's **slot**: `<ci-home>/<layout>-s<n>` (process patterns name one as `[/\\]<kept folder name>-{slot}`, at the end of the pattern; `{slot}` becomes `s<n>([^0-9]\|$)`) | a stable absolute path keeps them warm (cargo fingerprints and sccache keys hold absolute paths); one slot per concurrent job means no two jobs write one. sccache's local storage takes one server at a time ([docs/Local.md](https://github.com/mozilla/sccache/blob/main/docs/Local.md): "Multiple concurrent servers will race and cause spurious build failures"), so each slot has its own, sized `PADDOCK_CI_SCCACHE_GB` (40) / `PADDOCK_CI_SLOTS` |
+| pinned tools, the paddock-dev binary | **shared** kept folders | safe for concurrent writers (renamed into place) |
 | sccache server port, the WebKit job's ports | `job-isolation.sh port <name>`, declared in `conformance/ci/ports.txt` (base, width, stride) | one block per slot; a test checks no two blocks overlap each other or any end-to-end port, for every slot up to `PADDOCK_CI_SLOTS` |
 | Tart VMs (service-smoke) | a host-wide VM slot under `TART_HOME` (`tools/macos-vm-smoke.sh`), VM names with the job's `PADDOCK_VM_PREFIX` | one VM at a time on the Mac (two at most, macOS's limit); the leftover check sees only the job's own VMs |
 
@@ -154,6 +154,6 @@ more age out, old-layout ones too). At acquire, below `PADDOCK_CI_MIN_FREE_GB` (
 idle slots' folders go from the highest slot down until the floor is met; if it cannot be, the job fails with that
 message. Each build folder is capped by `prune-build-folder` (20 GB by default, its own slot only). The first job in slot
 `s1` renames a kept folder of the old unslotted layout (`target-<name>`, `src/<name>`, `angular/<name>`,
-`test-browser-<name>`, `libduckdb/<name>`, `sccache`) to its `-s1` name, so the switch keeps the caches warm and adds no
+`test-browser-<name>`, `libduckdb/<name>`, `sccache`, `npm`) to its `-s1` name, so the switch keeps the caches warm and adds no
 copy. Left for a one-time manual removal: the crate job's old `test-browser` folder and Debrief's old `~/.debrief-ci` on
 Windows (other names now).

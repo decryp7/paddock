@@ -26,8 +26,7 @@ runs:
           npm_cache="$base/npm"; ng_cache="$base/angular/$folder"
           mkdir -p "$npm_cache"
         else
-          # The host's kept folders (job-isolation): npm's cache is shared (safe for concurrent writers), the Angular cache is
-          # the job slot's own.
+          # The host's kept folders (job-isolation): npm's cache and the Angular cache are the job slot's own.
           npm_cache="$(bash "$iso" path npm)"
           ng_cache=""
           if [ -n "$ANGULAR_DIR" ]; then ng_cache="$(bash "$iso" path angular "$folder")"; fi
