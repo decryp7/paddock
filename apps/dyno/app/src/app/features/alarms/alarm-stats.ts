@@ -39,7 +39,7 @@ import { TABLE_CSS } from './alarms-css';
             <div>
               <h3>Suggestions</h3>
               @if (s.suggestions.length === 0) {
-                <p class="lead">Nothing to tune. Your alerts look healthy.</p>
+                <p class="lead">Nothing to adjust. Your alerts look healthy.</p>
               } @else {
                 <ul class="sugg">
                   @for (g of s.suggestions; track $index) {

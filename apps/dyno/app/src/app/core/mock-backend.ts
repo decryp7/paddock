@@ -677,7 +677,7 @@ export class MockBackend implements DynoBackend {
 
   private needHelper(): void {
     if (this.helperValue.state !== 'ready') {
-      throw err('accessDenied', 'This change needs Dyno\'s helper, which is not installed. Install it under Settings > Helper (the system asks for your permission once); nothing else in Dyno needs it.');
+      throw err('accessDenied', 'This reading needs Dyno\'s helper, which is not installed. Install it under Settings > Helper (the system asks for your permission once); nothing else in Dyno needs it.');
     }
   }
 

@@ -16,7 +16,7 @@ const STATE_LABEL: Record<HelperState, string> = {
   installing: 'Installing',
 };
 const STATE_TONE: Record<HelperState, Tone> = { unsupported: 'muted', notInstalled: 'muted', ready: 'ok', outdated: 'warn', unreachable: 'bad', installing: 'warn' };
-const VERDICT_LABEL: Record<HelperAuditEntry['verdict'], string> = { applied: 'Done', refused: 'Refused', failed: 'Failed' };
+const VERDICT_LABEL: Record<HelperAuditEntry['verdict'], string> = { done: 'Done', refused: 'Refused', failed: 'Failed' };
 
 /**
  * Settings, Helper: whether the privileged helper is installed, install / update / repair / remove (each its own click, the system

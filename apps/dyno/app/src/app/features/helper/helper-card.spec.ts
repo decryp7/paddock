@@ -73,7 +73,7 @@ describe('dy-helper-card', () => {
       prompt: 'p',
       error: null,
       recent: [
-        { at: 1_700_000_000, peer: 4, what: 'Turn hibernation off', verdict: 'applied', detail: '' },
+        { at: 1_700_000_000, peer: 4, what: 'Turn hibernation off', verdict: 'done', detail: '' },
         { at: 1_699_999_000, peer: 4, what: 'A connection was refused', verdict: 'refused', detail: 'process 9 is not the Dyno agent' },
       ],
     }));

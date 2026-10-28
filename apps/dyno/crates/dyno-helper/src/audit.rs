@@ -123,7 +123,7 @@ mod tests {
         let log = AuditLog::new(dir.path().join("audit.jsonl"));
         assert!(log.tail(5).is_empty());
         for i in 0..5 {
-            log.record(&entry(i, &format!("change {i}"), AuditVerdict::Applied)).unwrap();
+            log.record(&entry(i, &format!("change {i}"), AuditVerdict::Done)).unwrap();
         }
         let t = log.tail(3);
         assert_eq!(t.iter().map(|e| e.at).collect::<Vec<_>>(), [4, 3, 2]);
@@ -135,7 +135,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("audit.jsonl");
         let log = AuditLog::with_limit(path.clone(), 100);
-        log.record(&entry(1, "a", AuditVerdict::Applied)).unwrap();
+        log.record(&entry(1, "a", AuditVerdict::Done)).unwrap();
         std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
@@ -155,7 +155,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let log = AuditLog::new(dir.path().join("no-such-folder").join("audit.jsonl"));
         assert!(log
-            .record(&entry(1, "x", AuditVerdict::Applied))
+            .record(&entry(1, "x", AuditVerdict::Done))
             .unwrap_err()
             .contains("cannot be written"));
     }

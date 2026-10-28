@@ -74,7 +74,7 @@ impl Dispatcher {
                         at: (self.clock)(),
                         peer,
                         what: "Remove the Dyno helper from this computer".into(),
-                        verdict: AuditVerdict::Applied,
+                        verdict: AuditVerdict::Done,
                         detail: "Asked by the authorised user.".into(),
                     })
                     .map_err(|m| RemoteError::new(codes::FAILED, format!("{m} Nothing was removed.")))?;

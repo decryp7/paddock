@@ -70,7 +70,7 @@ pub struct HelperInfo {
 #[serde(rename_all = "camelCase")]
 pub enum AuditVerdict {
     /// Done: the request was answered, or the helper removed itself as asked.
-    Applied,
+    Done,
     /// Not allowed (wrong caller or program).
     Refused,
     /// Allowed but it did not work (for example the log could not be written).
@@ -156,7 +156,7 @@ pub fn prompt_text(host: HelperHost) -> &'static str {
 
 /// The text shown when an action needs a helper that is not there.
 pub const HELPER_MISSING: &str =
-    "This change needs Dyno's helper, which is not installed. Install it under Settings > Helper (the system asks for your \
+    "This reading needs Dyno's helper, which is not installed. Install it under Settings > Helper (the system asks for your \
      permission once); nothing else in Dyno needs it.";
 
 /// Decides what to tell the user. `supported` is `Err(reason)` when this system cannot install the helper at all.
@@ -404,10 +404,14 @@ mod tests {
             at: 5,
             peer: Some(3),
             what: "x".into(),
-            verdict: AuditVerdict::Applied,
+            verdict: AuditVerdict::Done,
             detail: String::new(),
         };
         let line = serde_json::to_string(&e).unwrap();
+        assert!(
+            line.contains("\"verdict\":\"done\""),
+            "the wire value says done, not a change: {line}"
+        );
         assert_eq!(parse_audit_line(&format!("{line}\n")), Some(e));
         assert_eq!(parse_audit_line("{not json"), None);
         assert_eq!(parse_audit_line(""), None);

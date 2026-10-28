@@ -301,13 +301,13 @@ describe('dy-alarms-page, Rules', () => {
     expect(el.querySelector('dy-alarm-stats [role="alert"]')).toBeTruthy();
   });
 
-  it('says so when no rule fired and nothing needs tuning', async () => {
+  it('says so when no rule fired and nothing needs adjusting', async () => {
     const { f, el, mock } = render();
     await settle(f);
     vi.spyOn(mock, 'alarmStats').mockResolvedValue({ open: 0, unacknowledged: 0, chattering: [], noisiest: [], meanTimeToAcknowledgeMs: null, medianTimeToAcknowledgeMs: null, suggestions: [] });
     await tab(f, el, 'Rules');
     expect(text(el)).toContain('No rule has fired yet.');
-    expect(text(el)).toContain('Nothing to tune.');
+    expect(text(el)).toContain('Nothing to adjust.');
     expect(text(el)).toContain('—');
   });
 

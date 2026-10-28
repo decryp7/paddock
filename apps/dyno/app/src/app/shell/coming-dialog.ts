@@ -9,7 +9,7 @@ import { COMING } from './nav';
   imports: [DialogFrame, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <dy-dialog title="Coming" subtitle="Not built yet. Dyno only measures until you enable a rule or click an action." icon="info">
+    <dy-dialog title="Coming" subtitle="Not built yet. Dyno only looks." icon="info">
       <ul>
         @for (c of coming; track c.label) {
           <li>

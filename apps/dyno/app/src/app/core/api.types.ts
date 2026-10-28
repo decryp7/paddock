@@ -449,7 +449,7 @@ export interface HelperAuditEntry {
   at: number;
   peer: number | null;
   what: string;
-  verdict: 'applied' | 'refused' | 'failed';
+  verdict: 'done' | 'refused' | 'failed';
   detail: string;
 }
 

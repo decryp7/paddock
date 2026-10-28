@@ -23,7 +23,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
       <header class="page-head">
         <div class="titles">
           <h1>Settings</h1>
-          <p>Dyno measures first. Everything that changes your PC is off until you turn it on.</p>
+          <p>Dyno only looks. It changes nothing on your PC.</p>
         </div>
         @if (store.saveError(); as failed) {
           <span class="save-error" role="alert">{{ failed.message }}</span>
@@ -37,7 +37,7 @@ import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup,
       <dy-async [loaded]="!!draft()" [error]="store.error()" what="settings" [rows]="4" (retry)="store.load()">
         @if (draft(); as d) {
           <div class="stack">
-            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads until you enable a rule or click an action; every change is logged and undoable where the OS allows. The few changes that need administrator rights use a small helper that is installed only when you approve one.</p>
+            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads and changes nothing on your computer. The few readings that need administrator rights use a small read-only helper that is installed only when you approve it.</p>
 
             <section class="card" aria-label="Appearance">
               <h2>Appearance</h2>
