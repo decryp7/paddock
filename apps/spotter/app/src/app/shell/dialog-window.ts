@@ -1,6 +1,8 @@
 import { bootstrapApplication } from '@angular/platform-browser';
 import { DialogShell, dialogWindowConfig, mountDialogWindowHost, tauriDialogIo, type DialogRoute } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideSettingsAppearance } from '@decryp7/paddock-ui/shell/settings';
+import { BACKEND } from '../core/backend';
+import { createBackend } from '../core/backend-factory';
 import { provideIcons } from '../shared/icons';
 import { provideSpotterAppearance } from './appearance';
 import { DIALOGS } from './contributions';
@@ -19,7 +21,8 @@ export function bootDialogWindow(route: DialogRoute): Promise<unknown> {
     DialogShell,
     dialogWindowConfig({
       dialogs: DIALOGS,
-      providers: [provideIcons(), ...dialogBaseProviders(), ...appearance],
+      // The settings page's stores are app-wide singletons of this window and read the backend: it is provided here.
+      providers: [provideIcons(), { provide: BACKEND, useFactory: createBackend }, ...dialogBaseProviders(), ...appearance],
       route,
       ...(bridge ? { io: () => tauriDialogIo(bridge) } : {}),
     }),

@@ -160,25 +160,7 @@ for (const scheme of ['dark', 'light'] as const) {
         await page.screenshot({ path: `${OUT}/${name}-${scheme}.png`, clip: { x: 0, y: 0, width: 1440, height: 560 } });
       });
     }
-    test(`settings ${scheme}`, async ({ page }) => {
-      await open(page, '/#/settings');
-      await settle(page, 1400);
-      await frames(page, 'settings', scheme, { blocks: CARDS, max: 4 });
-    });
-    test(`settings e-mail ${scheme}`, async ({ page }) => {
-      await open(page, '/#/settings');
-      await settle(page, 1000);
-      const mail = page.locator('sp-mail-settings');
-      await mail.getByLabel('Server').fill('smtp.example.org');
-      await mail.getByLabel('From').fill('spotter@example.org');
-      await mail.getByLabel('User name').fill('spotter-robot');
-      await mail.getByLabel('Password').fill('example-password');
-      await mail.getByRole('button', { name: 'Save' }).click();
-      await mail.getByLabel('Send a test message to').fill('you@example.org');
-      await mail.getByRole('button', { name: 'Send test e-mail' }).click();
-      await settle(page, 500);
-      await section(page, '#not-h', '#not-h', `${OUT}/settings-email-${scheme}.png`);
-    });
+    // Settings is a dialog window of the shell (not a route): its screenshots return with the shared dialogs (ADR 0026 §7).
     test(`cadence ${scheme}`, async ({ page }) => {
       await open(page, '/');
       await settle(page, 1400);
@@ -231,7 +213,9 @@ for (const scheme of ['dark', 'light'] as const) {
     test(`schedule ${scheme}`, async ({ page }) => {
       await open(page, '/#/watches/new');
       await page.getByRole('button', { name: /Node\.js/ }).click();
-      await settle(page, 800);
+      await page.getByRole('table', { name: 'Releases found' }).waitFor();
+      // The shell's notification toast (a browser is needed for JavaScript pages) sits over the footer buttons.
+      await page.evaluate(() => document.querySelector('pd-notification-host')?.remove());
       await page.getByRole('button', { name: 'Next' }).click();
       await page.getByRole('button', { name: 'Next' }).click();
       await page.getByRole('group', { name: 'How to schedule checks' }).getByRole('button', { name: 'Cron' }).click();

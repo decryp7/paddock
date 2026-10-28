@@ -39,6 +39,8 @@ export class BrowserEngines {
 
   constructor() {
     this.mockJobs.connect((s) => this.jobs.emit(s));
+    // The mock's "broken" scenario is an engine that cannot reach anything: the connection service says so, as Rust would.
+    if (new URLSearchParams(globalThis.location?.search ?? '').get('mock') === 'broken') this.breakSources();
   }
 
   /** The scenario "Break the connection" of the browser build (`?health=sources`): every watch unreachable. */

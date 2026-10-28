@@ -25,6 +25,8 @@ export interface ConfirmInput {
   readonly danger: boolean;
 }
 
+// TODO(ADR 0026 §7, Spotter row): `sp.confirm` and its confirm-dialog component become `pd.confirm` of the shared dialog API
+// (the two callers pass the same inputs); delete this definition and shell/confirm-dialog.ts then.
 /** A decision: modal, fitted to its content, Cancel and one way forward. Replaces the in-page confirm dialog. */
 export const CONFIRM_DIALOG = defineDialog({
   id: 'sp.confirm',
@@ -53,6 +55,7 @@ export const SETTINGS_PAGE_COMMANDS = [
   'set_mail_password',
 ] as const;
 
+// TODO(ADR 0026 §7): settings, About and Updates become the shared dialogs; the page below stays Spotter's section.
 /**
  * The Settings window: the shell's window as the app's own dialog, so its contract is in this registry. A tool: modeless,
  * large, remembers its size. Spotter's page is the one below; Appearance and Updates are the shell's.

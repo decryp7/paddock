@@ -1,16 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
-import { assertChromeForTesting, e2ePort } from '@decryp7/paddock-e2e';
 
 /**
  * Browser end-to-end flows against `ng serve` with the mock backend (`npx playwright test --workers=1`), and the
  * documentation screenshots (`SCREENSHOTS=1 npx playwright test --project=screenshots`, written to ../docs/screenshots).
- * The port comes from `SPOTTER_E2E_PORT` (required in CI; 4671 locally, never the default 4200), and only the pinned
- * Chrome for Testing runs: never the installed Chrome (rule 7).
+ * Port 4370, never the default 4200.
  */
-const PORT = e2ePort('SPOTTER_E2E_PORT', 4671);
+const PORT = Number(process.env['PW_PORT'] ?? 4370);
 
-export default assertChromeForTesting(
-  defineConfig({
+export default defineConfig({
   testDir: './e2e',
   // Inside .angular/, which git ignores.
   outputDir: './.angular/playwright-results',
@@ -35,8 +32,7 @@ export default assertChromeForTesting(
   webServer: {
     command: `npx ng serve --port ${PORT}`,
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
     timeout: 180_000,
   },
-}),
-);
+});

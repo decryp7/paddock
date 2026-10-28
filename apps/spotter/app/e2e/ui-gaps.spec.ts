@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '@decryp7/paddock-e2e';
 
 test.describe('row menus, keyboard rows, sticky headers and charts', () => {
   test('a right click on a feed row opens the row actions and Esc returns to the row', async ({ page }) => {
@@ -40,14 +40,15 @@ test.describe('row menus, keyboard rows, sticky headers and charts', () => {
     expect(stops).toBe(1);
   });
 
-  test('the watch table has the row actions on right click, Delete asks by name and cancelling keeps the watch', async ({ page }) => {
+  test('the watch table has the row actions on right click, Delete asks by name and cancelling keeps the watch', async ({ page, app }) => {
     await page.goto('/#/watches');
     const row = page.locator('tbody tr', { hasText: 'Lumen CLI' });
     await row.click({ button: 'right' });
     const menu = page.getByRole('menu');
     await expect(menu.getByRole('menuitem')).toHaveText([/Open details/, /Check now/, /Open latest release/, /Mark as seen|Pause/, /Pause|Copy address/, /Copy address|Edit/, /Edit|Delete watch/, /Delete watch/].slice(0, await menu.getByRole('menuitem').count()));
     await menu.getByRole('menuitem', { name: 'Delete watch' }).click();
-    const dialog = page.getByRole('alertdialog');
+    // A decision dialog of the shell (an OS window in the app; in the page here).
+    const dialog = app.dialogs.inPage('Confirm');
     await expect(dialog).toContainText('Delete "Lumen CLI"?');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(row).toBeVisible();

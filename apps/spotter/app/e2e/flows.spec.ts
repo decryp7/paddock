@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from '@decryp7/paddock-e2e';
 
 test.describe('Spotter against the mock backend', () => {
   test('the first load shows content, not a blank window', async ({ page }) => {
@@ -62,14 +62,13 @@ test.describe('Spotter against the mock backend', () => {
     await expect(dots).toHaveCount(before - 1);
   });
 
-  test('a settings change applies at once and is still there after navigating', async ({ page }) => {
-    await page.goto('/#/settings');
-    await page.getByRole('radio', { name: 'Dark' }).click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  test('a settings change applies at once and is still there after visiting another settings page', async ({ page, app }) => {
+    await app.settings.open({ page: 'sp.general' });
     await page.getByLabel('Show notifications').uncheck();
-    await page.getByRole('link', { name: 'Watches' }).click();
-    await page.getByRole('link', { name: 'Settings' }).click();
-    await expect(page.getByRole('radio', { name: 'Dark' })).toBeChecked();
+    await expect(page.getByLabel('Show notifications')).not.toBeChecked();
+    // The shell's Appearance page is beside Spotter's own.
+    await app.settings.nav.getByRole('button', { name: /Appearance/ }).click();
+    await app.settings.nav.getByRole('button', { name: /Spotter/ }).click();
     await expect(page.getByLabel('Show notifications')).not.toBeChecked();
   });
 
@@ -105,10 +104,10 @@ test.describe('Spotter against the mock backend', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 
-  test('a failing backend shows an inline error with Retry', async ({ page }) => {
+  test('a failing backend shows an inline error with Retry and the shell’s service chip with its repair', async ({ page, app }) => {
     await page.goto('/?mock=broken');
     await expect(page.getByRole('button', { name: 'Retry' }).first()).toBeVisible();
-    await expect(page.getByText('Spotter cannot reach its engine')).toBeVisible();
+    await expect(app.statusBar.chip).toContainText(/your sources/i);
   });
 
   test('an empty install invites you to add the first watch', async ({ page }) => {
