@@ -53,8 +53,9 @@ build logic), are supervised (timeouts, limits, backoff, quarantine, idle stop) 
 
 ## Semantic search
 
-A local vector index (per repository, opt-in) over syntax-aware chunks, fused with text and structural search (RRF) and re-ranked. Embeddings come from Pitwall
-(Qwen3-Embedding) when present, else a small local model downloaded on a click, else none (text and structural search only). Store recommendation to confirm:
+A local vector index (per repository, opt-in) over syntax-aware chunks, fused with text and structural search (RRF) and re-ranked. Embeddings are Model2Vec static vectors plus BM25 on the CPU
+(default, incremental, no Pitwall needed); Qwen through Pitwall re-ranks a query's top ~50 hits and, as an opt-in per-repository
+"Deep index with Qwen" job, can embed everything (ADR 0001, amended 2026-10-28). Shared parts planned as the family crate `paddock-embed`. Store recommendation to confirm:
 `usearch` behind the `VectorIndex` port with chunks and FTS5 in SQLite; LanceDB is the fallback. Proposal section 21.
 
 ## Views, dependency graph and review
