@@ -96,7 +96,7 @@ fn a_cancelled_load_says_whether_it_was_a_download_or_replaced() {
     // Holds `/held` (the connection stays open until the test ends) and answers everything else with a page.
     std::thread::spawn(move || {
         let held = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        for (n, s) in listener.incoming().flatten().enumerate() {
+        for (n, s) in listener.incoming().map_while(Result::ok).enumerate() {
             let (arrived, seen, held) = (arrived.clone(), seen_by_server.clone(), held.clone());
             seen.lock()
                 .unwrap_or_else(|e| e.into_inner())
