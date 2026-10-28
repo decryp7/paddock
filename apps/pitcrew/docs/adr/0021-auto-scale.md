@@ -16,8 +16,9 @@
 
 ## Context
 
-**The problem.** Each machine (the Mac mini, the Windows VM, the Linux host) runs one Gitea runner with
-`runner.capacity: 1`. CI queues are the bottleneck: 14 or more jobs wait while the runners of the other systems are
+**The problem.** The Mac mini and the Windows VM each run one Gitea runner with `runner.capacity: 1`, taking one job at
+a time. The Linux host d-gtr9 runs one runner with `runner.capacity: 4` (container jobs, four at once; the owner,
+2026-10-28), which is already the Linux pool's decided max. CI queues are the bottleneck: 14 or more jobs wait while the runners of the other systems are
 idle. The owner wants Pitcrew to watch the Actions queue and the host's load, RAM and free disk (ER-24, rule 41) and to
 run more or fewer jobs at once between a minimum and a maximum, with quiet hours and a low-disk pause; ephemeral
 per-job runners come later.
@@ -138,8 +139,8 @@ running host-mode jobs, it knows nothing of the host's load, and it is a second 
 
 **E. Static capacity only.** Register 3-4 slots, run them all, and let ADR 0013's `when-idle` hold keep the base runner
 out of the way. Simple and gets most of the wait reduction, but runs up to max jobs into a loaded host, which is the
-failure rule 41 exists for. Chosen as the **interim step** (decision D8), within the same gate: Linux container runners
-now, host-mode runners on the Mac and Windows only after family ADR 0025.
+failure rule 41 exists for. Chosen as the **interim step** (decision D8), within the same gate: Linux already runs four
+jobs at once (capacity 4), host-mode runners on the Mac and Windows only after family ADR 0025.
 
 ## Decision (proposed)
 
@@ -152,6 +153,15 @@ runner in no pool is never touched by the scaler. A slot is **available** to the
 a crash loop, not updating (ADR 0002/0014), not held (ADR 0013), not registration-broken, and not under a user's manual
 action (as with holds: if the owner starts, stops, pauses or resumes a slot by hand, the scaler leaves it alone until
 the owner hands it back with "Let auto-scale manage"). Held slots stay held: the scaler never resumes what a hold drained.
+
+**Linux: one capacity-4 runner, not a pool.** d-gtr9 runs one runner instance with `runner.capacity: 4`. The pool
+model (several capacity-1 slots started and drained) is for the host-mode machines, where a job's load and shared
+folders make the number of jobs at once worth controlling. On d-gtr9 it is not needed now: container jobs are isolated
+from each other (apart from the shared `/sccache` mount and its Angular cache, family ADR 0025 §7), and the decided max
+is already reached. The scaler leaves that runner as it is: no pool, no automatic change of its capacity, because
+changing `runner.capacity` needs a restart of a runner that is rarely idle, which D1 avoids (Option B). Its load still
+counts in the host's metrics and Insights. Should Linux later need load control, it becomes a pool by registering slots;
+this ADR does not plan that.
 
 **The family ADR 0025 gate.** A pool may run more than one job at once on a host only when the CI kit isolates
 concurrent jobs. A pool declares `ci_isolation = "none" | "slots"`. With `"none"` (the default) its effective `max` is 1
@@ -413,8 +423,9 @@ About 13 days of work; WP-1, WP-3 and WP-7 can run in parallel after WP-0; WP-6 
 - **D8. Interim now:** 2-3 more runners per host, registered by hand and always running (Option E), until the scaler
   lands; steps in [runbooks/add-runners.md](../runbooks/add-runners.md). When the scaler is built, these runners become
   the pools' slots, so nothing is registered twice. **Narrowed by the review (2026-10-28), for the owner to confirm:**
-  the Mac and the Windows VM get no extra runners before family ADR 0025 is merged; d-gtr9's container runners may be
-  added now with one known shared folder (the Angular cache on `/sccache`).
+  the Mac and the Windows VM get no extra runners before family ADR 0025 is merged. **Linux's interim need is already
+  met:** d-gtr9 is one runner instance with `runner.capacity: 4`, the decided Linux max, so nothing is added there
+  (section 1, "Linux").
 
 ## Sources (accessed 2026-10-28)
 

@@ -1,13 +1,14 @@
 # Runbook: add runners to a CI host (the interim before auto-scale)
 
-- Why: [ADR 0021](../adr/0021-auto-scale.md), decision D8 (the owner, 2026-10-28). Until the scaler is built, hosts get
-  extra runners that always run. When the scaler lands, these runners become its pools' slots: nothing is registered
-  twice.
+- Why: [ADR 0021](../adr/0021-auto-scale.md), decision D8 (the owner, 2026-10-28). Until the scaler is built, the Mac
+  and the Windows VM get extra runners that always run (d-gtr9 is one runner with capacity 4 and needs none). When the
+  scaler lands, these runners become its pools' slots: nothing is registered twice.
 - Who: the owner. Registering needs a registration token, and the hosts are only reachable by the owner.
 - Checked on 2026-10-28 on the Mac's runner (`gitea-runner --version`: v5.2.3): `register --token-file`; `config set`,
   including map keys such as `runner.envs.X`; `config get runner.labels`, which prints one label per line; and the
-  defaults `runner.timeout: 3h` and `runner.shutdown_timeout: 0s`. **Not run on d-gtr9 or the Windows VM.** The d-gtr9
-  layout below comes from the review, not from a look at the host.
+  defaults `runner.timeout: 3h` and `runner.shutdown_timeout: 0s`. **Not run on d-gtr9 or the Windows VM.** That d-gtr9
+  runs its runner as a Docker Compose service under `/root/docker-data/act_runner` comes from the review, not from a look
+  at the host.
 
 ## The gate: family ADR 0025 first for the Mac and Windows
 
@@ -21,16 +22,14 @@ machine break each other, and a separate CI home per runner does not prevent it:
   patterns are anchored on `.paddock-ci/`, so they match every runner's jobs.
 - sccache runs on one fixed port (4227) and is restarted by every job.
 
-**d-gtr9 (Linux, container jobs)** is not fully safe either. The job containers of one host share the runner's
-`/sccache` mount, which holds the compile, npm and Angular caches (family ADR 0025 §7). Two runs of the same Angular job
-at once share one Angular cache and can spoil each other's build; re-run such a job. Adding Linux runners now means
-accepting that risk; the alternative is to wait for ADR 0025, which gives containers slots too.
+**d-gtr9 (Linux) needs no extra runners.** It is one runner instance with `runner.capacity: 4` (the owner, 2026-10-28),
+so it already runs four container jobs at once, the Linux max decided in ADR 0021. Only step 1 applies there.
 
 So the order is:
 
-1. **Now, every host:** give the existing runner `runner.shutdown_timeout: 3h` (next section).
-2. **Now, d-gtr9, if the owner accepts the Angular-cache risk:** add up to three runners.
-3. **After family ADR 0025 is merged:** add runners on the Mac and the Windows VM, all sharing the host's one CI home.
+1. **Now, every host:** give the existing runner `runner.shutdown_timeout: 3h`, and on d-gtr9 also
+   `stop_grace_period: 3h` (next section).
+2. **After family ADR 0025 is merged:** add runners on the Mac and the Windows VM, all sharing the host's one CI home.
 
 ## Step 1 (every host, now): stop cancelling jobs on a stop
 
@@ -51,12 +50,9 @@ A stop that catches a running job now waits for it (up to 3 h) instead of cancel
 
 | Host | Existing runner | Add | New names | Total | When |
 |---|---|---|---|---|---|
-| Linux `d-gtr9` | its current Compose service (`<existing>`) | up to 3 | `<existing>-2` … `<existing>-4` | 4 | now, if the risk above is accepted |
+| Linux `d-gtr9` | one runner, capacity 4 | 0 | - | 4 jobs at once | already met |
 | Mac mini | `d7-mac-mini`, folder `/Users/decryp7/gitea-runner` | 2 | `d7-mac-mini-2`, `d7-mac-mini-3` | 3 (the scaler's max will be 4) | after family ADR 0025 |
 | Windows VM `decryp7ology-dev` | its current runner (`<existing>`) | 1 | `<existing>-2` | 2 (the decided max) | after family ADR 0025 |
-
-On d-gtr9, check `runner.capacity` in the existing runner's `config.yaml` first. If it is already above 1, add runners
-only until runners × capacity is 4.
 
 Every new runner gets exactly the labels of the existing runner on that host. The commands below read them from its
 `config.yaml`; never take them from `.runner`, which holds the runner's credentials.
@@ -72,54 +68,6 @@ bounded by `PADDOCK_CI_KEEP_SLOTS`.
 2. The commands below put it in a file only you can read and delete that file even when a step fails (`trap` /
    `finally`). Never paste the token on a command line, into Pitcrew's files or into a chat.
 3. When done, clear the clipboard: copy something else, or on the Mac `pbcopy </dev/null`.
-
-## d-gtr9 (Linux, Docker Compose): now, if the risk is accepted
-
-Not verified on the host. According to the review, the runners run as Docker Compose services under
-`/root/docker-data/act_runner`, one service and one `/data` volume per runner. The runner image registers itself on first
-start when `/data/.runner` is missing. It reads the server, name, labels and token from its environment
-(`GITEA_INSTANCE_URL`, `GITEA_RUNNER_NAME`, `GITEA_RUNNER_LABELS`, `GITEA_RUNNER_REGISTRATION_TOKEN` or
-`GITEA_RUNNER_REGISTRATION_TOKEN_FILE`, `CONFIG_FILE`). Those names are from the runner's compose example, read in
-secondary sources; **use whatever names the existing service uses.**
-
-1. Look at the existing setup (as root):
-
-   ```sh
-   cd /root/docker-data/act_runner
-   docker compose config --services          # the existing service's name
-   docker compose config                     # its image, environment, volumes, labels; note the CONFIG_FILE path
-   docker compose ps
-   ```
-
-2. Prepare the token file, which is deleted again on exit:
-
-   ```sh
-   umask 077
-   TOKEN_FILE=$(mktemp /root/docker-data/act_runner/regtoken.XXXXXX)
-   trap 'rm -f "$TOKEN_FILE"' EXIT
-   ${EDITOR:-nano} "$TOKEN_FILE"              # paste the token, save
-   ```
-
-3. For each new runner `N` in 2 3 4, copy the existing service's block in `compose.yaml` (or `docker-compose.yml`) to a
-   new service `<existing>-N` and change only these things:
-   - its data volume: `./data-N:/data` (a new folder; `mkdir -p data-N`);
-   - `GITEA_RUNNER_NAME=<existing>-N`;
-   - the token: `GITEA_RUNNER_REGISTRATION_TOKEN_FILE=/run/regtoken`, with the volume `<TOKEN_FILE>:/run/regtoken:ro`.
-     Remove a plain `GITEA_RUNNER_REGISTRATION_TOKEN` from the copy;
-   - `stop_grace_period: 3h`.
-
-   Keep the image, `GITEA_INSTANCE_URL`, the labels and the Docker socket. Copy the existing `config.yaml` into
-   `data-N/` (if `CONFIG_FILE` points into `/data`) and, with a text editor, set in the copy under `runner:`
-   `file: /data/.runner`, `timeout: 3h` and `shutdown_timeout: 3h`. No `PADDOCK_CI_HOME` here: container jobs have
-   their own file system.
-
-4. Start them and let them register: `docker compose up -d <existing>-2 <existing>-3 <existing>-4`, then
-   `docker compose logs <existing>-2 | tail` (look for the registration and "Starting runner daemon").
-5. Remove the token: delete the `GITEA_RUNNER_REGISTRATION_TOKEN_FILE` line and the token volume from the new services.
-   They keep their registration in `data-N/.runner`. Run `docker compose up -d` again; the `trap` deletes the file when
-   the shell exits.
-
-Each running container job takes a Docker network from the daemon's address pool; four at once fit the default pools.
 
 ## Mac mini: after family ADR 0025 is merged
 
@@ -223,23 +171,22 @@ all runners of a host share one CI home, and the scaler rejects a per-runner one
 1. **Gitea:** User settings ▸ Actions ▸ Runners lists the new runners as online (Idle) with the same labels as the
    existing one.
 2. **Pitcrew** (where it runs): every card reads Idle, and the runner's Logs show its `supervisor:` start line with no
-   registration error. **d-gtr9:** `docker compose ps` shows the new services up.
+   registration error.
 3. **A real job:** at the next busy period (or dispatch `ci.yml` for an app as usual), two or more runners of one host
    are busy at once (Gitea's runner list, Pitcrew's cards). The job log's first step prints `runner: <name>`. On the Mac
    and Windows, the job's isolation step names its slot (`s1`, `s2`, …), and two concurrent jobs never have the same one.
 4. **Queue:** the Insights page (ADR 0015) shows the queue wait falling over the next day.
 5. **Stop safety (once per host):** while a runner runs a short job, stop it (Pitcrew **Stop**, or
-   `docker compose stop <service>`). It waits for the job, and the job finishes green.
+   on d-gtr9 `docker compose stop <service>`). It waits for the job, and the job finishes green.
 
 ## Roll back
 
 For each added runner:
 
-1. Stop it after its job. In Pitcrew: **Drain**, wait for *Paused*, then remove the runner (the folder stays). On d-gtr9:
-   `docker compose stop <existing>-N`, then delete its service block and run `docker compose up -d --remove-orphans`.
+1. Stop it after its job. In Pitcrew: **Drain**, wait for *Paused*, then remove the runner (the folder stays).
 2. In Gitea: User settings ▸ Actions ▸ Runners ▸ the runner ▸ **Delete**. A runner still running exits when its
    registration is removed.
-3. Delete its folder (`gitea-runner-N`, or `data-N` on d-gtr9), which holds its `.runner`. Lower
+3. Delete its folder (`gitea-runner-N`), which holds its `.runner`. Lower
    `PADDOCK_CI_KEEP_SLOTS` on the remaining runners of the host; ADR 0025 sweeps the kept folders of slots above it.
 4. If the token may have leaked (a file left behind, a paste in the wrong place): **Reset** the registration token on
    the same Gitea page. Registered runners keep working; the old token stops registering new ones.
