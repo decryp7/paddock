@@ -274,6 +274,8 @@ const VIRTUAL_BUFFER_ROWS = 8;
             [attr.aria-hidden]="line.kind === 'skeleton' ? 'true' : null"
             [attr.aria-expanded]="line.kind === 'group' ? !line.collapsed : null"
             [attr.aria-level]="!groupBy() || line.kind === 'skeleton' ? null : line.kind === 'group' ? 1 : 2"
+            [attr.aria-posinset]="treePlace().get(line)?.pos ?? null"
+            [attr.aria-setsize]="treePlace().get(line)?.size ?? null"
             [attr.aria-rowindex]="line.kind === 'skeleton' ? null : indexOf(line) + 2"
             [attr.data-index]="line.kind === 'skeleton' ? null : indexOf(line)"
             [attr.data-key]="line.kind === 'row' ? rowKey()(line.row) : null"
@@ -559,6 +561,26 @@ export class PdTable<T> {
   /** What the table draws: the lines, five placeholders while loading, nothing on an error (the message is below the header). */
   protected readonly lines = computed<readonly PdLine<T>[]>(() => (this.state() === 'loading' ? SKELETON : this.state() === 'error' ? [] : this.items()));
   private readonly positions = computed(() => new Map<PdLine<T>, number>(this.lines().map((l, i) => [l, i])));
+  /**
+   * Where each line sits in the tree of a grouped table (a virtual table draws only some of the rows, so the tree grid says
+   * their place): a group among the groups, a row among its group's rows (the group's count). Empty when not grouped.
+   */
+  protected readonly treePlace = computed(() => {
+    const place = new Map<PdLine<T>, { pos: number; size: number }>();
+    if (!this.groupBy()) return place;
+    const lines = this.lines();
+    const groups = lines.filter((l) => l.kind === 'group').length;
+    let group = 0;
+    let row = 0;
+    let size = 0;
+    for (const l of lines) {
+      if (l.kind === 'group') {
+        place.set(l, { pos: ++group, size: groups });
+        [row, size] = [0, l.count];
+      } else if (l.kind === 'row') place.set(l, { pos: ++row, size });
+    }
+    return place;
+  });
   protected readonly isVirtual = computed(() => (this.virtual() === 'auto' ? this.items().length > PD_TABLE_VIRTUAL_FROM : this.virtual()));
   /** The scrolling body: as tall as the lines, up to `maxHeight`. */
   protected readonly bodyHeight = computed(() => Math.min(this.lines().length * this.rowPx(), this.maxHeight()));
@@ -732,9 +754,27 @@ export class PdTable<T> {
       else if (item) this.open(item.row);
       return;
     }
+    const item = this.items()[index];
+    if (item?.kind === 'group' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      // The tree grid: Right expands a collapsed group, and on an expanded one moves to its first row; Left collapses it.
+      e.preventDefault();
+      if (e.key === 'ArrowRight' && item.collapsed) this.toggleGroup(item.key);
+      else if (e.key === 'ArrowRight' && this.items()[index + 1]?.kind === 'row') this.moveTo(index + 1);
+      else if (e.key === 'ArrowLeft' && !item.collapsed) this.toggleGroup(item.key);
+      return;
+    }
+    if (e.key === 'ArrowLeft' && this.groupBy()) {
+      // Left on a row of a group moves to its group row.
+      const group = this.items().slice(0, index).map((l) => l.kind).lastIndexOf('group');
+      if (group >= 0) {
+        e.preventDefault();
+        this.moveTo(group);
+      }
+      return;
+    }
     if (e.key === 'ArrowRight') {
-      // The row's action buttons are not tab stops: Right reaches them from the row.
-      const first = target.querySelector<HTMLElement>('.pd-icon-btn');
+      // The row's action buttons are not tab stops: Right reaches the first one that is enabled.
+      const first = this.rowButtons(target)[0];
       if (first) {
         e.preventDefault();
         first.focus();
@@ -778,15 +818,27 @@ export class PdTable<T> {
     this.focusHeader(to);
   }
 
-  /** On a row's action button: Left and Right move between the buttons (Left from the first goes back to the row), Escape returns to the row. */
+  /** On a row's action button: Left and Right move between the enabled buttons (Left from the first goes back to the row), Escape returns to the row, Up and Down go to the row above or below. */
   private onButtonKeydown(e: KeyboardEvent, button: HTMLElement): void {
-    const row = button.closest<HTMLElement>('[role="row"]')!;
-    const buttons = [...row.querySelectorAll<HTMLElement>('.pd-icon-btn')];
+    const row = button.closest<HTMLElement>('[role="row"][data-index]')!;
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      // Up and Down leave the buttons for the row above or below (the buttons differ from row to row).
+      e.preventDefault();
+      const to = nextIndex(this.items().length, Number(row.dataset['index']), e.key);
+      if (to !== null) this.moveTo(to);
+      return;
+    }
+    const buttons = this.rowButtons(row);
     const at = buttons.indexOf(button);
     const to = e.key === 'ArrowRight' ? buttons[Math.min(at + 1, buttons.length - 1)] : e.key === 'ArrowLeft' ? (at > 0 ? buttons[at - 1] : row) : e.key === 'Escape' ? row : null;
     if (!to) return;
     e.preventDefault();
     to.focus();
+  }
+
+  /** A row's action buttons that can be used (disabled ones are skipped by the arrow keys). */
+  private rowButtons(row: HTMLElement): HTMLElement[] {
+    return [...row.querySelectorAll<HTMLElement>('.pd-icon-btn:not(:disabled)')];
   }
 
   /** Whether a cell's text is cut (its tooltip shows the full text only then). */

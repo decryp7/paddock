@@ -100,9 +100,14 @@ above are fixed wherever they occur.
      uniform row heights (24, 32 or 36 px and a 28 px header, also the virtual scroll's item size); the grid keyboard
      (`mat-table` has no keyboard model): one tab stop for the whole grid, the active row; Up, Down, Page Up, Page Down,
      Home, End and Enter on the rows; Up from the first row into the sort headers (not tab stops of their own), Left,
-     Right, Home and End along them, Down back; Right from a row into its action buttons (not tab stops either), Left and
-     Escape back; Shift+F10 or the Menu key for the row's menu. Grouped, the grid is a `treegrid`: group rows at
-     `aria-level` 1 say `aria-expanded`, their rows are at level 2 (axe allows `aria-expanded` on a row only in a tree grid). A row the keyboard moves to is scrolled into view only when it is out of
+     Right, Home and End along them, Down back; Right from a row into its enabled action buttons (not tab stops either;
+     disabled ones are skipped), Left and Escape back, Up and Down from a button to the row above or below (the buttons
+     differ from row to row, so not to "the same button"); Shift+F10 or the Menu key for the row's menu. Grouped, the grid
+     is a `treegrid` (axe allows `aria-expanded` on a row only in a tree grid): group rows at `aria-level` 1 say
+     `aria-expanded`, their rows are at level 2, and every line says its place (`aria-posinset`/`aria-setsize`: a group
+     among the groups, a row among its group's count), since a virtual table draws only some rows. The tree keys follow the
+     WAI-ARIA treegrid pattern: on a group row Right expands it when collapsed and moves to its first row when expanded,
+     Left collapses it when expanded; Left on a row moves to its group row; Enter still folds a group or opens a row. A row the keyboard moves to is scrolled into view only when it is out of
      view, and focused once the virtual table has drawn it (End and Home in 5,000 rows); the loading placeholders, empty
      and error states (a row of the grid).
    - **Smaller choices:** a cell's tooltip is disabled at rest and enabled only while the pointer is on a cut text (so a cell

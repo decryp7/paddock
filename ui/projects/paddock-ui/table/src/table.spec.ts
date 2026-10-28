@@ -70,7 +70,8 @@ class Host {
     return this.columnsOverride ?? COLUMNS;
   }
   readonly key = (r: Plugin): string => r.id;
-  readonly actions = (r: Plugin): readonly PdRowAction[] => (r.id === 'p3' ? [] : ACTIONS);
+  actionsOverride: ((r: Plugin) => readonly PdRowAction[]) | null = null;
+  readonly actions = (r: Plugin): readonly PdRowAction[] => (this.actionsOverride ? this.actionsOverride(r) : r.id === 'p3' ? [] : ACTIONS);
   readonly groupBy = signal<string | null>(null);
   readonly summary = signal<((rows: readonly Plugin[]) => Readonly<Record<string, string>>) | null>(null);
   readonly mono = signal<boolean | ((group: string) => boolean)>(false);
@@ -282,7 +283,7 @@ describe('pd-table', () => {
     press(rowEls(f)[0]!, 'x');
     // A key typed inside a control of the row is the control's.
     const btn = rowEls(f)[0]!.querySelector('button')!;
-    press(btn, 'ArrowDown');
+    press(btn, 'Home');
     await settle(f);
     expect(rowEls(f)[0]?.tabIndex).toBe(0);
   });
@@ -764,6 +765,73 @@ describe('pd-table', () => {
     await settle(f);
     await settle(f);
     expect(document.activeElement).toBe(input);
+  });
+  it('moves through the tree grid with the arrows: Right expands a group then enters it, Left collapses it or goes up to it', async () => {
+    const f = await setup();
+    f.componentInstance.groupBy.set('kind');
+    await settle(f);
+    // format (Zeta, Mid), viewer (alpha): group 0, rows 1-2, group 3, row 4.
+    const line = (i: number) => el(f).querySelector<HTMLElement>(`[role=row][data-index="${i}"]`)!;
+    const focused = () => (document.activeElement as HTMLElement).dataset['index'];
+    line(0).focus();
+    press(line(0), 'ArrowLeft');
+    await settle(f);
+    expect(line(0).getAttribute('aria-expanded')).toBe('false');
+    press(line(0), 'ArrowLeft');
+    await settle(f);
+    expect(line(0).getAttribute('aria-expanded')).toBe('false');
+    press(line(0), 'ArrowRight');
+    await settle(f);
+    expect(line(0).getAttribute('aria-expanded')).toBe('true');
+    expect(focused()).toBe('0');
+    // Right on an expanded group moves to its first row.
+    press(line(0), 'ArrowRight');
+    await settle(f);
+    expect(focused()).toBe('1');
+    // Left on a row of a group moves to its group row.
+    press(line(2), 'ArrowLeft');
+    await settle(f);
+    expect(focused()).toBe('0');
+    // Positions in the tree: groups among groups, rows within their group.
+    expect([0, 1, 2, 3, 4].map((i) => `${line(i).getAttribute('aria-posinset')}/${line(i).getAttribute('aria-setsize')}`)).toEqual(['1/2', '1/2', '2/2', '2/2', '1/1']);
+    // Without groups Left on a row does nothing, and the rows carry no tree positions.
+    f.componentInstance.groupBy.set(null);
+    await settle(f);
+    rowEls(f)[1]!.focus();
+    press(rowEls(f)[1]!, 'ArrowLeft');
+    expect(document.activeElement).toBe(rowEls(f)[1]);
+    expect(rowEls(f)[1]!.hasAttribute('aria-posinset')).toBe(false);
+  });
+
+  it('skips disabled buttons when Right moves into and along a row\'s buttons, and Up or Down on a button go to the row above or below', async () => {
+    const f = await setup();
+    f.componentInstance.actionsOverride = () => [
+      { id: 'off', label: 'Off', icon: 'folder', inline: true, disabled: true },
+      { id: 'on', label: 'On', icon: 'copy', inline: true },
+    ];
+    f.componentInstance.rows.set([...DATA]);
+    await settle(f);
+    const row = rowEls(f)[1]!;
+    const [off, on, more] = [...row.querySelectorAll<HTMLButtonElement>('.pd-icon-btn')];
+    expect(off!.disabled).toBe(true);
+    row.focus();
+    press(row, 'ArrowRight');
+    expect(document.activeElement).toBe(on);
+    press(on!, 'ArrowRight');
+    expect(document.activeElement).toBe(more);
+    press(more!, 'ArrowLeft');
+    expect(document.activeElement).toBe(on);
+    press(on!, 'ArrowLeft');
+    expect(document.activeElement).toBe(row);
+    press(row, 'ArrowRight');
+    press(on!, 'ArrowDown');
+    await settle(f);
+    expect(document.activeElement).toBe(rowEls(f)[2]);
+    rowEls(f)[1]!.focus();
+    press(rowEls(f)[1]!, 'ArrowRight');
+    press(document.activeElement!, 'ArrowUp');
+    await settle(f);
+    expect(document.activeElement).toBe(rowEls(f)[0]);
   });
 });
 

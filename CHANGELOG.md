@@ -12,8 +12,11 @@ Conventional Commits; one semver tag for the whole repo.
   the row actions (24 px, the family's hover fill in a 6 px shape). Group rows, middle truncation, `hideBelow`, the row
   heights and the grid keyboard stay the family's own. The public API is unchanged.
 - One tab stop for the grid (the active row): the sort headers and the row's buttons are not tab stops. Up from the first row
-  reaches the sort headers and the arrows move along them; Right reaches the row's buttons, Left and Escape go back;
-  Shift+F10 or the Menu key opens the row's menu. A grouped table is a tree grid (group rows say whether they are expanded).
+  reaches the sort headers and the arrows move along them; Right reaches the row's enabled buttons, Left and Escape go
+  back, Up and Down on a button go to the row above or below; Shift+F10 or the Menu key opens the row's menu. A grouped
+  table is a tree grid: group rows say whether they are expanded, Right expands a collapsed group and on an expanded one
+  moves to its first row, Left collapses an expanded group, Left on a row moves to its group row, and the rows say their
+  place (`aria-posinset`/`aria-setsize`: groups among groups, rows among their group's count).
   The keyboard focus follows End and Home in a virtual table once the row is drawn, and a pending focus is dropped when the
   lines change or the focus leaves the grid. A row stays marked while its menu is open. A focused button shows Material's
   focus indicator alone; a cut cell's tooltip (and its description) exists only while the pointer is on it; the loading
