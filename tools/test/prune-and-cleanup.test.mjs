@@ -76,11 +76,12 @@ test('host-cleanup: kills only processes anchored on this job, removes only the 
   mkdirSync(join(tmp, 'pitwall-def'));
   mkdirSync(join(tmp, 'other-job'));
   write(cwd, { 'dist/x': '1', 'app/dist/y': '2' });
-  const env = { PADDOCK_PKILL: join(bin, 'pkill'), RUNNER_OS: 'macOS', PADDOCK_CI_SLOT: 's2', PADDOCK_JOB_TEMP: tmp, PADDOCK_BUILD_FOLDER: '/ci/target-pitwall-app-s2' };
+  shim(bin, 'ps');
+  const env = { PADDOCK_PKILL: join(bin, 'pkill'), PADDOCK_PS: join(bin, 'ps'), RUNNER_OS: 'macOS', PADDOCK_CI_SLOT: 's2', PADDOCK_JOB_TEMP: tmp, PADDOCK_BUILD_FOLDER: '/ci/target-pitwall-app-s2' };
   const r = run('host-cleanup.sh', ['--id', 'pitwall', '--process-pattern', '{build}/debug/pitwall-server', '--process-pattern', 'fake[-_]engine', '--process-pattern', '[/\\\\]test-browser-pitwall-{slot}', '--process-pattern', 'chrome-{slot}', '--process-pattern', '{tmp}/x'], { bin, cwd, env });
   assert.equal(r.status, 0, r.out);
   const re = (p) => p.replaceAll('/', '[/\\\\]').replaceAll('.', '\\.');
-  assert.deepEqual(calls(bin), [`pkill -f ${re('/ci/target-pitwall-app-s2')}/debug/pitwall-server`, 'pkill -f [/\\\\]test-browser-pitwall-s2([^0-9]|$)', `pkill -f ${re(tmp)}/x`], 'each pattern scoped to this job');
+  assert.deepEqual(calls(bin).filter((c) => c.startsWith('pkill')), [`pkill -f ${re('/ci/target-pitwall-app-s2')}/debug/pitwall-server`, 'pkill -f [/\\\\]test-browser-pitwall-s2([^0-9]|$)', `pkill -f ${re(tmp)}/x`], 'each pattern scoped to this job');
   assert.match(r.out, /skipped the process pattern 'chrome-\{slot\}'/, '{slot} must follow a kept folder\'s name');
   assert.match(r.out, /skipped the process pattern 'fake\[-_\]engine': it is not anchored/, 'an unscoped pattern could kill another job\'s processes');
   assert.ok(!existsSync(join(tmp, 'pitwall-abc')) && !existsSync(join(tmp, 'pitwall-def')));
@@ -94,6 +95,30 @@ test('host-cleanup: kills only processes anchored on this job, removes only the 
   assert.ok(!existsSync(join(cwd, 'dist')) && !existsSync(join(cwd, 'app/dist')));
   assert.ok(!existsSync(join(target, 'dist')) && !existsSync(join(target, 'debug')));
   assert.ok(existsSync(join(target, 'release/blob')), 'only dist and debug of the target folder');
+});
+
+test('host-cleanup: the leak check names what still runs after the clean-up; on Windows PowerShell ends and lists processes (Git bash has no pkill)', () => {
+  const bin = scratch('paddock-bin-');
+  shim(bin, 'pkill');
+  // ps lists a survivor of this job, another slot's process of the same name, and an unrelated one.
+  shim(bin, 'ps', 'printf "%s\\n" "  41 /ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine" "  42 /ci/target-pitwall-app-s3/debug/pitwall-server --fake-engine" "  43 /usr/bin/other"');
+  const env = { PADDOCK_PKILL: join(bin, 'pkill'), PADDOCK_PS: join(bin, 'ps'), RUNNER_OS: 'macOS', PADDOCK_CI_SLOT: 's2', PADDOCK_BUILD_FOLDER: '/ci/target-pitwall-app-s2' };
+  const r = run('host-cleanup.sh', ['--id', 'pitwall', '--process-pattern', '{build}[/\\\\]debug[/\\\\]pitwall-server'], { bin, env });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /::warning::host-cleanup: processes of this job are still running after the clean-up/);
+  assert.match(r.out, /^ {2} {2}41 \/ci\/target-pitwall-app-s2\/debug\/pitwall-server --fake-engine$/m);
+  assert.doesNotMatch(r.out, /\b42 |\b43 /, 'only this job\'s processes');
+  // Windows: no pkill; PowerShell gets the scoped pattern in its environment, ends the matches, then lists the survivors.
+  const win = scratch('paddock-bin-');
+  shim(win, 'pkill');
+  shim(win, 'powershell.exe', `echo "pattern=$PADDOCK_KILL_PATTERN" >> "${win}/calls.log"; case "$*" in *Stop-Process*) ;; *) printf '%s\\r\\n' '77 C:\\ci\\target-pitwall-app-s2\\debug\\pitwall-server.exe' ;; esac`);
+  const rw = run('host-cleanup.sh', ['--id', 'pitwall', '--process-pattern', '{build}[/\\\\]debug[/\\\\]pitwall-server'], { bin: win, env: { RUNNER_OS: 'Windows', PADDOCK_POWERSHELL: join(win, 'powershell.exe'), PADDOCK_PKILL: join(win, 'pkill'), PADDOCK_CI_SLOT: 's2', PADDOCK_BUILD_FOLDER: 'C:/ci/target-pitwall-app-s2' } });
+  assert.equal(rw.status, 0, rw.out);
+  const log = calls(win);
+  assert.ok(!log.some((c) => c.startsWith('pkill')), 'pkill is not used on Windows');
+  assert.equal(log.filter((c) => c.startsWith('powershell.exe') && /Stop-Process/.test(c)).length, 1, 'ends the matches');
+  assert.ok(log.includes('pattern=[/\\\\]ci[/\\\\]target-pitwall-app-s2[/\\\\]debug[/\\\\]pitwall-server'), `the drive-less, separator-agnostic pattern: ${log}`);
+  assert.match(rw.out, /^ {2}77 C:\\ci\\target-pitwall-app-s2\\debug\\pitwall-server\.exe$/m, 'the survivor, without the carriage return');
 });
 
 test('host-cleanup: without a temp folder of its own the sweep leaves the shared temp alone; exact process names are gone', () => {
