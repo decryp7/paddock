@@ -15,7 +15,7 @@ export function causeOf(c: ConnectionState, installed: boolean): Cause | null {
   if (c.state === 'unavailable' && !installed) {
     return cause(
       'The Pitcrew service is not installed, so runners are not being managed.',
-      'Choose Restart to install it; Windows asks for administrator permission (a UAC prompt), macOS asks you to approve Pitcrew in System Settings.',
+      'Choose Install to install it; Windows asks for administrator permission (a UAC prompt), macOS asks you to approve Pitcrew in System Settings.',
       c.message,
       'pc.service.not-installed',
     );
@@ -64,7 +64,7 @@ export class BrowserHealth {
       const installed = connection.state === 'unavailable' ? this.backend.serviceInstall().then((s) => s.installed, () => true) : Promise.resolve(true);
       void installed.then((isInstalled) => {
         const cause = causeOf(connection, isInstalled);
-        if (cause) this.health.fail(SERVICE_ID, cause, 'restart');
+        if (cause) this.health.fail(SERVICE_ID, cause, cause.code === 'pc.service.not-installed' ? 'install' : 'restart');
         else if (connection.state === 'connected') this.health.ok(SERVICE_ID);
       });
     });

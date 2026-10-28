@@ -71,6 +71,7 @@ import { demoProcesses, keepMs } from './mock/mock-processes';
 import { demoCache, demoCachePlan, demoEngineReport, demoInsights, demoPrunePreview, emptyChannels } from './mock/mock-ops';
 import type { SuJobState } from '@decryp7/paddock-ui';
 import type { MemoryJobsBackend } from '@decryp7/paddock-ui/shell/jobs';
+import { REGISTER_JOB_KIND } from './job-kinds';
 import { toCommandError } from './command-error';
 
 /** Which world the mock shows. */
@@ -725,7 +726,7 @@ export class MockBackend implements PitcrewBackend {
   }
 
   register(request: RegisterRequest): Promise<void> {
-    return this.job('pitcrew.register-runner', 'Registering the runner', request.runner, () => this.registerWork(request));
+    return this.job(REGISTER_JOB_KIND, 'Registering the runner', request.runner, () => this.registerWork(request));
   }
 
   private async registerWork(request: RegisterRequest): Promise<void> {

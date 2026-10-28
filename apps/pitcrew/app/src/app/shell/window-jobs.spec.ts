@@ -3,9 +3,10 @@ import { TestBed } from '@angular/core/testing';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import { JobsStore, MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
+import { REGISTER_JOB_KIND } from '../core/job-kinds';
 import { followJobsStartedElsewhere } from './window-jobs';
 
-const job = (id: number, seq: number, state: 'running' | 'done', kind = 'pitcrew.register-runner'): SuJobSnapshot =>
+const job = (id: number, seq: number, state: 'running' | 'done', kind = REGISTER_JOB_KIND): SuJobSnapshot =>
   ({ id, kind, title: 'Registering the runner', subject: 'nightly', seq, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state, ...(state === 'running' ? { phase: null } : {}) }) as SuJobSnapshot;
 
 /** One window's jobs: its own store over its own backend, and what it announces. */
@@ -76,5 +77,20 @@ describe('a registration job seen by two windows', () => {
     main.backend.emit(job(3, 1, 'done'));
     await settle();
     expect(main.notices.map((n) => n.level)).toEqual(['success']);
+  });
+
+  it('says nothing more when the job ended while the window was open and the window then closes', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const main = window(TestBed.inject(EnvironmentInjector));
+    const open = signal(true);
+    runInInjectionContext(main.injector, () => followJobsStartedElsewhere(undefined, open));
+    main.backend.emit(job(4, 0, 'running'));
+    await settle();
+    main.backend.emit(job(4, 1, 'done'));
+    await settle();
+    // The wizard says how it ended; the window then closes: no notice from this window, then or later.
+    open.set(false);
+    await settle();
+    expect(main.notices).toEqual([]);
   });
 });

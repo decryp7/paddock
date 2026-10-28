@@ -5,8 +5,8 @@
       <p class="subtitle">{{ status.status() ? summary() : status.offline() ? 'Not connected to the Pitcrew service' : 'Connecting to the Pitcrew service…' }}</p>
     </div>
     <div class="btn-row">
-      <!-- One filled primary per screen: while the service is unreachable the page's own action (Install service) is the primary. -->
-      <button type="button" class="btn" [class.primary]="!!status.status()" (click)="register.open()">
+      <!-- One filled primary per screen: Install service while the service is unreachable, the empty state's button when there is no runner yet. -->
+      <button type="button" class="btn" [class.primary]="!!status.status() && runners().length > 0" (click)="register.open()">
         <mat-icon svgIcon="pc:plus" aria-hidden="true" />Register runner
       </button>
     </div>

@@ -82,6 +82,7 @@ export const DOC_INPUTS = [
   { re: /^docs\/blocks\//, projects: ['conformance', 'tools'], why: 'the shared doc blocks (conformance sync, release notes, new-app)' },
   { re: /^apps\/(shell-demo|workbench-demo)\/README\.md$/, projects: ['tools'], why: 'new-app.mjs copies its "Start a new app" section' },
   { re: /(^|\/)REVIEWED\.md$/, projects: (f) => (f.startsWith('apps/') ? owners(f) : ['conformance']), why: 'the image reviews conformance C24 checks' },
+  { re: /^apps\/pitcrew\/(README\.md|docs\/.+\.(md|png|svg))$/, why: 'apps/pitcrew/scripts/doc-images.test.mjs (every image a doc names exists)' },
   { re: /^apps\/debrief\/docs\/ai\/sql-views\.md$/, why: 'debrief-ai tests/sql_tool.rs (from the import)' },
   { re: /^apps\/debrief\/docs\/testing\/quarantine\.md$/, why: 'scripts/ci/check-quarantine (from the import)' },
 ];

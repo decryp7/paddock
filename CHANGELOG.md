@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shell: Pitcrew's service cause words
+- The health chip has words for Pitcrew's cause codes (`CAUSE_WORDS`): `pc.service.not-installed` ("not installed"),
+  `pc.service.unavailable` ("not reachable"), `pc.service.mismatch` ("different version") and `pc.service.repair`
+  ("repair failed"); the three new texts are in the i18n catalogs (`pd.health.state.not-reachable`,
+  `different-version`, `repair-failed`). `cause-codes.spec.ts` keeps the table and the Rust sources in step.
+
 ### Shell adoption checks (ER-21: Spotter and Pitcrew moves hit the same review findings)
 - `@decryp7/paddock-e2e`: `captureScreen` (waits for no skeleton or busy marker, fonts, decoded images, no running animation in
   main, a stable layout; scrolls only the main scroller; refuses a cut-off bottom edge, a scrolled frame and an opaque cover;

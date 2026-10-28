@@ -111,7 +111,9 @@ pub async fn job_result<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     id: u64,
 ) -> Result<Option<serde_json::Value>, CommandError> {
-    Ok(app.state::<Work>().take_result(id, window.label().starts_with("d-")))
+    Ok(app
+        .state::<Work>()
+        .take_result(id, window.label().starts_with(paddock_commands::labels::DIALOG_PREFIX)))
 }
 
 #[cfg(test)]

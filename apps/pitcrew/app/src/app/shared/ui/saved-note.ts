@@ -8,18 +8,23 @@ import { SettingsStore } from '../../state/settings.store';
   imports: [MatIcon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <p class="saved-note" role="status">
+    <p class="saved-note" role="status" [hidden]="!settings.savedNote()">
       @if (settings.savedNote(); as note) {
         <mat-icon svgIcon="pc:check-circle" aria-hidden="true" />{{ note }}
       }
     </p>
   `,
   styles: `
+    :host {
+      display: contents;
+    }
+    .saved-note[hidden] {
+      display: none;
+    }
     .saved-note {
       display: flex;
       align-items: center;
       gap: var(--space-2);
-      min-height: 20px;
       margin: 0;
       color: var(--success);
       font-size: var(--text-sm);

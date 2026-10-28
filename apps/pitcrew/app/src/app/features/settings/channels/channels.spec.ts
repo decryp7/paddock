@@ -57,7 +57,7 @@ describe('ChannelsSection', () => {
 
   it('shows the empty state with an Add channel button', async () => {
     const { el } = await mount();
-    expect(text(el)).toContain('No channels. Pitcrew only shows desktop notifications.');
+    expect(text(el)).toContain('Pitcrew only shows desktop notifications.');
     expect(btn(el, 'Add channel')).toBeTruthy();
   });
 
@@ -202,7 +202,7 @@ describe('ChannelsSection', () => {
     await settle(f);
     expect((await mock.channels()).channels).toHaveLength(0);
     expect(await mock.hasChannelSecret(secretKeyFor(id))).toBe(false);
-    expect(text(el)).toContain('No channels.');
+    expect(text(el)).toContain('No channels');
   });
 });
 

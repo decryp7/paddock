@@ -340,3 +340,36 @@ fn the_releases_page_lists_the_tags_the_workflow_releases_from() {
         format!("https://dev.decryptology.net/decryp7/paddock/releases?q={prefix}")
     );
 }
+
+/// The UI's list of screens a deep link may open and Rust's list of screens a window may ask for (`open_page`) are one list.
+#[test]
+fn the_screens_a_deep_link_and_open_page_may_open_agree() {
+    let ts = std::fs::read_to_string(app_dir().join("../src/app/core/deep-link.ts")).unwrap();
+    let list = ts
+        .lines()
+        .find(|l| l.contains("const PAGES = new Set(["))
+        .expect("deep-link.ts has PAGES");
+    let mut ui: Vec<String> = list.split('\'').skip(1).step_by(2).map(str::to_string).collect();
+    ui.sort();
+    let mut rust: Vec<String> = ["/runners", "/activity", "/insights", "/storage", "/logs", "/updates"]
+        .iter()
+        .filter(|r| pitcrew_app_lib::events::open_page_route(r).is_some())
+        .map(|r| r.trim_start_matches('/').to_string())
+        .collect();
+    rust.sort();
+    assert_eq!(ui, rust, "deep-link.ts PAGES and events::open_page_route");
+}
+
+/// The registration job's kind is one string in Rust and in the UI (the register window's follower, the mock, the dialog's result rule).
+#[test]
+fn the_registration_job_kind_is_the_same_in_rust_and_the_ui() {
+    let ts = std::fs::read_to_string(app_dir().join("../src/app/core/job-kinds.ts")).unwrap();
+    assert!(ts.contains(&format!("REGISTER_JOB_KIND = '{}'", pitcrew_app_lib::jobs::DIALOG_JOB_KIND)));
+    for file in ["../src/app/shell/window-jobs.ts", "../src/app/core/mock-backend.ts"] {
+        let text = std::fs::read_to_string(app_dir().join(file)).unwrap();
+        assert!(
+            !text.contains(pitcrew_app_lib::jobs::DIALOG_JOB_KIND),
+            "{file} names the kind itself; use REGISTER_JOB_KIND"
+        );
+    }
+}

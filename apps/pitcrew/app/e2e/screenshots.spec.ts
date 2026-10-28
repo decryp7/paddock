@@ -22,6 +22,23 @@ interface Shot {
 }
 
 /** The main screens: each is taken whole (`fullPage: 'main'`), so nothing is cut and nothing is scrolled to. */
+/**
+ * Waits until the page has all its content: the main scroller's height is the same on several looks in a row (a runner's tab
+ * fills in after its data arrives and a skeleton is not always on screen), so the whole page is what `fullPage: 'main'` measures.
+ */
+async function contentSettled(page: Page): Promise<void> {
+  let last = -1;
+  let same = 0;
+  await expect
+    .poll(async () => {
+      const h = await page.evaluate(() => document.querySelector('[data-pd-region=main]')?.scrollHeight ?? 0);
+      same = h === last ? same + 1 : 0;
+      last = h;
+      return same >= 4;
+    }, { timeout: 15_000 })
+    .toBe(true);
+}
+
 const SHOTS: Shot[] = [
   { name: 'dashboard', path: '/' },
   { name: 'runners', path: '/runners' },
@@ -63,7 +80,7 @@ const SHOTS: Shot[] = [
 /** Settings pages (a window of the shell at its declared 920 x 680; the long ones in a taller window so the whole page shows). */
 const SETTINGS: { name: string; page: string; height?: number }[] = [
   { name: 'settings', page: 'pc.general' },
-  { name: 'settings-defaults', page: 'pc.defaults', height: 1700 },
+  { name: 'settings-defaults', page: 'pc.defaults', height: 3100 },
   { name: 'settings-tokens', page: 'pc.tokens' },
   { name: 'settings-channels', page: 'pc.channels' },
 ];
@@ -78,12 +95,15 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     for (const shot of SHOTS) {
-      test(shot.name, async ({ page }) => {
+      test(shot.name, async ({ page, app }) => {
         await page.goto(`/?simulate=0${shot.query ? '&' + shot.query : ''}#${shot.path}`);
         await page.getByRole('navigation', { name: 'Pages' }).waitFor();
+        // The unreachable-service screens say so in the chip too, in the shell's words (a stale ui/dist says "stopped").
+        if (shot.query?.includes('notInstalled')) await expect(app.statusBar.chip).toContainText('not installed');
         await shot.prepare?.(page);
         // Grown to the page's whole height only once the page has its content (a skeleton is short).
         await expect(page.locator('pd-skeleton, .skeleton, [aria-busy=true]')).toHaveCount(0);
+        await contentSettled(page);
         await captureScreen(page, join(OUT, theme, `${shot.name}.png`), { fullPage: 'main' });
       });
     }

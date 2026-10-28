@@ -25,8 +25,8 @@ export function aboutBackend(): AboutBackend {
     {
       appName: APP_NAME,
       version: BROWSER_VERSION,
-      os: 'browser',
-      arch: 'web',
+      os: 'Windows 11',
+      arch: 'x86_64',
       commit: null,
       built: null,
       homepage: 'https://dev.decryptology.net/decryp7/paddock',

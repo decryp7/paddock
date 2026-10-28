@@ -1,10 +1,11 @@
 import { effect, inject, type Signal } from '@angular/core';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
+import { REGISTER_JOB_KIND } from '../core/job-kinds';
 import { RegisterLauncher } from './register-launcher';
 
 /** Jobs that another window of Pitcrew starts and waits for (the register window): its page says how they end. */
-export const FOLLOWED_ELSEWHERE_KINDS: ReadonlySet<string> = new Set(['pitcrew.register-runner']);
+export const FOLLOWED_ELSEWHERE_KINDS: ReadonlySet<string> = new Set([REGISTER_JOB_KIND]);
 
 /** The part of the jobs store this reads. */
 export interface FollowableJobs {

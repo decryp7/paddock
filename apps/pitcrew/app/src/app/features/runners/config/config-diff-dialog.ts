@@ -118,6 +118,7 @@ export interface ConfigDiffData {
       font-size: var(--text-sm);
     }
     .diff {
+      max-height: 320px;
       min-width: 0;
       overflow: auto;
       border: 1px solid var(--border);

@@ -124,12 +124,13 @@ test.describe('Pitcrew in the browser (mock backend)', () => {
     await expect(page.getByRole('link', { name: 'nightly', exact: true })).toBeVisible();
   });
 
-  test('a service that is not installed is one chip with its repair (Restart), and it brings the runners back', async ({ page, app }) => {
+  test('a service that is not installed is one chip that says so, with its repair (Install), and it brings the runners back', async ({ page, app }) => {
     await page.goto('/?simulate=0&mock=notInstalled#/');
-    await expect(app.statusBar.chip).toContainText(/Pitcrew service/);
+    // The chip says why in the shell's words (a build of ui/dist from before the cause words says "stopped": this fails then).
+    await expect(app.statusBar.chip).toContainText('not installed');
     await app.statusBar.chip.click();
     await expect(app.notifications.services).toContainText('is not installed');
-    await app.notifications.services.getByRole('button', { name: 'Restart' }).click();
+    await app.notifications.services.getByRole('button', { name: /^Install/ }).click();
     await expect(app.notifications.services).toBeHidden();
     await expect(page.getByRole('link', { name: 'build-win' }).first()).toBeVisible();
   });
@@ -275,7 +276,9 @@ test.describe('native feel (ADR 0008)', () => {
     await buttonsInside(/Continue/);
     await dialog.getByRole('button', { name: 'Continue' }).click();
     await dialog.getByText('Run as the service account').click();
-    await buttonsInside(/Continue|Register/);
+    await buttonsInside(/Continue/);
+    await dialog.getByRole('button', { name: 'Continue' }).click();
+    await buttonsInside(/^Register$/);
     expect(await page.locator('main.pd-body').evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
   });
 

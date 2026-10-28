@@ -57,8 +57,8 @@ export const CONFIG_DIFF_DIALOG = defineDialog({
   kind: 'form',
   modality: 'modal',
   title: msg('pc.dialog.config-diff', 'Review configuration changes'),
+  // No height: the window is fitted to its content (the changes scroll inside their own region, up to a fixed height).
   width: 720,
-  height: 560,
   result: type<boolean>(),
   commands: [],
   load: () => import('../features/runners/config/config-diff-dialog').then((m) => m.ConfigDiffDialog),

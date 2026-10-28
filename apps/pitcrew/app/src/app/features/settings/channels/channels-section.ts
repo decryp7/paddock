@@ -176,7 +176,7 @@ import { ChannelsStore, type TestResult } from './channels.store';
             </form>
           } @else {
             @if (store.list().length === 0) {
-              <pc-empty-state icon="bell" title="No channels" text="No channels. Pitcrew only shows desktop notifications.">
+              <pc-empty-state icon="bell" title="No channels" text="Pitcrew only shows desktop notifications. Add a channel to be told elsewhere too.">
                 <button type="button" class="btn primary" (click)="add()">Add channel</button>
               </pc-empty-state>
             } @else {

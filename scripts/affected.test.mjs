@@ -65,6 +65,15 @@ describe('the graph of this tree', () => {
     assert.deepEqual([rules.conformance, rules.tools, rules.docs, rules.apps], [true, true, false, []]);
   });
 
+  test('a docs-only change to Pitcrew runs its doc-images check (its README, docs and screenshots are inputs of that test)', () => {
+    for (const f of ['apps/pitcrew/README.md', 'apps/pitcrew/docs/features.md', 'apps/pitcrew/docs/screenshots/dark/dashboard.png', 'apps/pitcrew/docs/diagrams/architecture.svg']) {
+      const r = run(f);
+      assert.deepEqual(r.apps, ['pitcrew'], f);
+      assert.equal(r.docs, false, f);
+    }
+    assert.deepEqual(run('apps/spotter/README.md').apps, [], 'another app\'s docs are not');
+  });
+
   test('global inputs mark everything; an app release workflow marks one app', () => {
     for (const f of ['.gitea/workflows/ci.yml', '.gitea/actions/setup-rust/action.yml', 'package.json', '.cargo/config.toml', 'scripts/affected.mjs', 'conformance/release/latest-json.mjs']) {
       const r = run(f);

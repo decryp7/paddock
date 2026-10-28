@@ -2,7 +2,7 @@ import { captureScreen, expect, test } from '@decryp7/paddock-e2e';
 
 /**
  * The shell surfaces of Pitcrew for review (`SCREENSHOTS=1 SHOTS_OUT=<folder> npx playwright test --project=screenshots`): the
- * whole 1440x900 window at 2x, in both themes, never cropped. The shell's parts (the Jobs list with the disk clean-up, a service chip that is down with its Restart, the notification centre) and the dialog windows (Settings with
+ * whole 1440x900 window at 2x, in both themes, never cropped. The shell's parts (the Jobs list with the disk clean-up, a service chip that says not installed, with its Install, the notification centre) and the dialog windows (Settings with
  * Pitcrew's pages beside Appearance, About, Updates, What's new, the confirm and the stop-process decisions). Every image is
  * taken with `captureScreen` (loaded content, nothing cut, nothing covered).
  */
@@ -18,6 +18,19 @@ for (const theme of ['dark', 'light'] as const) {
       await page.emulateMedia({ reducedMotion: 'reduce' });
     });
 
+    /** A dialog window as the shell fits it: its width, the content's height (so no empty window is photographed). */
+    const fit = async (page: import('@playwright/test').Page) => {
+      const size = page.viewportSize()!;
+      await page.setViewportSize({ width: size.width, height: 1200 });
+      // The content's own extent (its last element's bottom plus the body's padding), not the window's.
+      const height = await page.locator('main.pd-body').evaluate((body) => {
+        const top = body.getBoundingClientRect().top;
+        const bottom = Math.max(...[...body.children].map((c) => c.getBoundingClientRect().bottom));
+        return Math.ceil(bottom - top + parseFloat(getComputedStyle(body).paddingBottom));
+      });
+      await page.setViewportSize({ width: size.width, height });
+    };
+
     const shoot = async (page: import('@playwright/test').Page, name: string, fullPage: 'viewport' | 'main' = 'viewport') => {
       await captureScreen(page, `${OUT}/${theme}/shell-${name}.png`, { fullPage });
     };
@@ -31,9 +44,9 @@ for (const theme of ['dark', 'light'] as const) {
       await shoot(page, 'jobs', 'main');
     });
 
-    test('a service that is down, with its Restart', async ({ page, app }) => {
+    test('a service that is not installed, with its Install', async ({ page, app }) => {
       await page.goto('/?simulate=0&mock=notInstalled#/');
-      await expect(app.statusBar.chip).toContainText(/Pitcrew service/);
+      await expect(app.statusBar.chip).toContainText('not installed');
       await app.statusBar.chip.click();
       await expect(app.notifications.services).toContainText('is not installed');
       await shoot(page, 'health-down');
@@ -41,7 +54,7 @@ for (const theme of ['dark', 'light'] as const) {
 
     test('the notification centre', async ({ page, app }) => {
       await page.goto('/?simulate=0&mock=notInstalled#/');
-      await expect(app.statusBar.chip).toContainText(/Pitcrew service/);
+      await expect(app.statusBar.chip).toContainText('not installed');
       await app.notifications.openCentre();
       await shoot(page, 'notification-centre');
     });
@@ -67,10 +80,11 @@ for (const theme of ['dark', 'light'] as const) {
       };
       await app.dialogs.openWindow('pc.config-diff', { preview, maxBackups: 5 });
       await app.dialogs.loaded();
+      await fit(page);
       await shoot(page, 'config-diff');
     });
 
-    test('register window, last step', async ({ page, app }) => {
+    test('register window, the Review step', async ({ page, app }) => {
       await page.setViewportSize({ width: 660, height: 640 });
       await app.dialogs.openWindow('pc.register', {});
       await app.dialogs.loaded();
@@ -81,6 +95,9 @@ for (const theme of ['dark', 'light'] as const) {
       await dialog.getByLabel('Name in Pitcrew').fill('nightly');
       await dialog.getByRole('button', { name: 'Continue' }).click();
       await dialog.getByText('Run as the service account').click();
+      await dialog.getByRole('button', { name: 'Continue' }).click();
+      await expect(dialog.getByRole('button', { name: 'Register', exact: true })).toBeVisible();
+      await fit(page);
       await shoot(page, 'register-wizard');
     });
 
@@ -98,6 +115,7 @@ for (const theme of ['dark', 'light'] as const) {
         await page.setViewportSize(size);
         await app.dialogs.openWindow(id, input);
         await app.dialogs.loaded();
+        if (name !== 'settings') await fit(page);
         await shoot(page, name);
       });
     }

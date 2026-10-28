@@ -110,6 +110,8 @@ describe('DashboardPage', () => {
     byText<HTMLButtonElement>(el, 'pc-empty-state button', 'Register a runner')!.click();
     expect(register.open).toHaveBeenCalled();
     expect(text(el.querySelector('.subtitle'))).toBe('No runners yet');
+    // One filled primary: the empty state's button, not the header's too.
+    expect(el.querySelectorAll('button.primary')).toHaveLength(1);
   });
 
   it('says what is wrong when the service is unreachable, without pointing at a banner that no longer exists', async () => {

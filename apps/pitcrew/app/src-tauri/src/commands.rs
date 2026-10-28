@@ -603,7 +603,7 @@ pub async fn register_runner<R: Runtime>(
     let subject = request.runner.clone();
     work.start(
         &jobs,
-        "pitcrew.register-runner",
+        crate::jobs::DIALOG_JOB_KIND,
         "Registering the runner",
         Some(&subject),
         move || register(c.as_ref(), request),

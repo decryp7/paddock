@@ -42,7 +42,7 @@ pub fn cause_of(c: &ConnectionState, installed: bool) -> Option<(Cause, RepairAc
                 .hint(install_hint())
                 .detail(message.clone())
                 .code("pc.service.not-installed"),
-            RepairAction::Restart,
+            RepairAction::Install,
         )),
         ConnectionState::Unavailable { message } => Some((
             Cause::new("Pitcrew cannot reach its background service, so runners are not being managed.")
@@ -64,9 +64,9 @@ pub fn cause_of(c: &ConnectionState, installed: bool) -> Option<(Cause, RepairAc
 /// What Restart does for a service that was never installed, and the OS prompt it brings.
 fn install_hint() -> &'static str {
     if cfg!(target_os = "macos") {
-        "Choose Restart to install it; macOS asks you to approve Pitcrew in System Settings > General > Login Items."
+        "Choose Install to install it; macOS asks you to approve Pitcrew in System Settings > General > Login Items."
     } else {
-        "Choose Restart to install it; Windows asks for administrator permission (a UAC prompt)."
+        "Choose Install to install it; Windows asks for administrator permission (a UAC prompt)."
     }
 }
 
@@ -165,7 +165,8 @@ mod tests {
     #[test]
     fn a_service_that_was_never_installed_says_so_and_names_the_prompt_the_install_brings() {
         let (c, a) = cause_of(&ConnectionState::Unavailable { message: "x".into() }, false).unwrap();
-        assert_eq!(a, RepairAction::Restart);
+        // The chip's button says Install (what it does), like the dashboard's.
+        assert_eq!(a, RepairAction::Install);
         assert_eq!(c.code.as_deref(), Some("pc.service.not-installed"));
         let text = format!("{c:?}");
         assert!(text.contains("not installed"), "{text}");
