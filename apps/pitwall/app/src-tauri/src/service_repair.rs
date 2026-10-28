@@ -81,51 +81,8 @@ pub fn parse_print_disabled(output: &str, label: &str) -> Option<bool> {
     })
 }
 
-/// What `launchctl print gui/<uid>/<label>` says about the job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct JobReport {
-    /// launchd knows the job at all (an empty report means it dropped it).
-    pub found: bool,
-    /// `state = running`.
-    pub running: bool,
-    /// `job state = spawn failed`.
-    pub spawn_failed: bool,
-    /// `last exit code = 78` (EX_CONFIG): launchd refused the program's code identity.
-    pub exit_config: bool,
-    /// `needs LWCR update`.
-    pub needs_lwcr_update: bool,
-    /// `has LWCR`: a launch constraint from the registered build is stored.
-    pub has_lwcr: bool,
-}
-
-/// Reads the report of `launchctl print` for the launch agent.
-pub fn parse_job(launchctl_print: &str) -> JobReport {
-    let mut job = JobReport::default();
-    for line in launchctl_print.lines().map(str::trim) {
-        if line.starts_with("state = ") {
-            job.found = true;
-            job.running = line == "state = running";
-        } else if line == "job state = spawn failed" {
-            job.spawn_failed = true;
-        } else if line.starts_with("last exit code = 78") {
-            job.exit_config = true;
-        } else if line.starts_with("properties = ") {
-            job.needs_lwcr_update = line.contains("needs LWCR update");
-            job.has_lwcr = line.contains("has LWCR");
-        }
-    }
-    job
-}
-
-impl JobReport {
-    /// Whether launchd holds a registration it can no longer start. macOS keeps the launch constraint of the build that
-    /// was registered; every ad-hoc signed build has another cdhash, so after an update launchd refuses the new binary
-    /// (spawn failed, exit 78 EX_CONFIG, has LWCR, "needs LWCR update" when it says so) until the job is replaced.
-    /// A job that holds a constraint and is not running counts too: the caller only asks when the server is unreachable.
-    pub fn stale(&self) -> bool {
-        self.found && (self.spawn_failed || self.exit_config || self.needs_lwcr_update || (self.has_lwcr && !self.running))
-    }
-}
+// The one parser of `launchctl print` lives in the shared crate (it skips the nested coalition blocks macOS 26 prints).
+pub use paddock_service::parse::{parse_job, JobReport};
 
 /// Why a repair runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,22 +386,6 @@ mod tests {
     /// The real `launchctl print gui/501/net.decryptology.pitwall.service` of a Mac after an update (trimmed).
     const SPAWN_FAILED: &str = "gui/501/net.decryptology.pitwall.service = {\n\tactive count = 0\n\tpath = (submitted by smd.362)\n\ttype = Submitted\n\tmanaged_by = com.apple.xpc.ServiceManagement\n\tstate = spawn scheduled\n\n\tprogram identifier = Contents/MacOS/pitwall-server (mode: 2)\n\tparent bundle identifier = net.decryptology.pitwall\n\tparent bundle version = 1.0.2\n\truns = 534\n\tlast exit code = 78: EX_CONFIG\n\n\tjob state = spawn failed\n\tsanitizer flags = 0x0\n\n\tproperties = partial import | keepalive | runatload | resolve program | has LWCR\n}\n";
     const HEALTHY: &str = "gui/501/net.decryptology.pitwall.service = {\n\tstate = running\n\tpid = 88412\n\truns = 1\n\tlast exit code = (never exited)\n\tjob state = running\n\tproperties = keepalive | runatload | has LWCR\n}\n";
-
-    #[test]
-    fn a_registration_launchd_cannot_start_is_stale() {
-        let job = parse_job(SPAWN_FAILED);
-        assert!(job.found && !job.running && job.spawn_failed && job.exit_config && job.has_lwcr && !job.needs_lwcr_update);
-        assert!(job.stale());
-        // Each sign alone is enough.
-        assert!(parse_job("\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n").stale());
-        assert!(parse_job("\tstate = spawn scheduled\n\tjob state = spawn failed\n").stale());
-        assert!(parse_job("\tstate = spawn scheduled\n\tproperties = keepalive | has LWCR\n").stale());
-        assert!(parse_job("\tstate = waiting\n\tproperties = keepalive | needs LWCR update\n").stale());
-        let healthy = parse_job(HEALTHY);
-        assert!(healthy.found && healthy.running && healthy.has_lwcr && !healthy.stale());
-        // Gone from launchd.
-        assert!(!parse_job("").found && !parse_job("").stale());
-    }
 
     fn observed<'a>(job: JobReport) -> Observed<'a> {
         Observed {
