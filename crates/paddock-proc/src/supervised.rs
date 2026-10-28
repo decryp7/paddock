@@ -123,7 +123,10 @@ struct Shared {
 #[cfg(windows)]
 fn default_sampler(job: Option<Arc<crate::job::Job>>) -> Sampler {
     if let Some(job) = job {
-        return Arc::new(move |_| usage::tree_memory_of(&usage::OsSource::default(), &job.pids()));
+        return Arc::new(move |pid| match job.pids() {
+            Some(pids) => usage::tree_memory_of(&usage::OsSource::default(), &pids),
+            None => usage::tree_memory(pid),
+        });
     }
     Arc::new(usage::tree_memory)
 }
@@ -595,10 +598,30 @@ mod tests {
         let mut cap = MemoryCap::new(u64::MAX, "x");
         cap.every = Duration::from_millis(1);
         let s = Supervised::spawn_in(&Registry::new(), child(Mode::Sleep), Some(cap)).unwrap();
-        while s.memory_peak() == 0 {
+        // Bounded: a sampler that never reports fails the test instead of hanging it.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while s.memory_peak() == 0 && Instant::now() < deadline {
             std::thread::yield_now();
         }
+        assert!(
+            s.memory_peak() > 0,
+            "the real sampler never reported the tree's memory"
+        );
         drop(s);
+    }
+
+    /// Windows: the job lists the child itself (the default sampler reads the job, not the machine).
+    #[cfg(windows)]
+    #[test]
+    fn the_job_lists_the_child() {
+        let s = Supervised::spawn_in(&Registry::new(), child(Mode::Sleep), None).unwrap();
+        let pids = s
+            .job
+            .as_ref()
+            .expect("a job")
+            .pids()
+            .expect("the job can be queried");
+        assert!(pids.contains(&s.id().unwrap()), "{pids:?}");
     }
 
     #[test]
