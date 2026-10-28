@@ -51,7 +51,7 @@ Conventional Commits; one semver tag for the whole repo.
   slider, chips, tabs, progress bar and every `matButton` variant (filled = primary, outlined = secondary with the surface-2 fill, text,
   tonal, elevated; danger is the class `pd-button-danger` on any of them; no ripple).
 - New secondary entry `@decryp7/paddock-ui/material`: `providePaddockMaterial()` makes every `mat-form-field` `appearance="outline"` with
-  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.3`) of `@decryp7/paddock-ui`.
+  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.4`) of `@decryp7/paddock-ui`.
 - `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
   icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
   surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.
@@ -69,6 +69,27 @@ Conventional Commits; one semver tag for the whole repo.
   public tokens `--pd-hover-alpha` / `--pd-pressed-alpha` (0.05 / 0.09; `--pd-hover` and `--pd-pressed` are built from them; Material's
   own defaults are 0.08 / 0.12 / 0.12) and the icon button's ink to `--pd-text`. The material e2e checks every icon button's rendered state
   layer (alpha and pixels) in light and dark, and a token test compiles the bridge alone. `e2e/material.spec.ts` type-checks again.
+
+### Form controls on Material (WP-1 of the Material migration, rule 47)
+- `pd-select` is a `mat-select` in an outline `mat-form-field` (keys, typeahead and ARIA are Material's; closed, the arrow keys now
+  choose the next option and Enter or Space opens the list; the chosen option has its check mark). New optional input `label` (the label
+  in the outline's notch). A `<label for>` that names it through `inputId` is read from the document: its id becomes `aria-labelledby`,
+  and a label with no id becomes the select's `aria-label` text (no id is written onto a label the select does not own).
+- `pd-field` keeps its inputs and `pdFieldControl`, and is an outline `mat-form-field` with the label always floated in the notch
+  (design rule 11, D1), `mat-hint` and `mat-error`. Whatever look the marked control brings (`pd-input`, a dialog's own input style) is
+  neutralised by the `pdFieldControl` marker. A native `<select pdFieldControl>` gets Material's arrow and a textarea its Material class.
+  A field with no control to outline (a picker made of a button) keeps the classic layout: the label above, the content in a labelled
+  group, the hint or error below. New inputs: `error` (an error the host knows without a form state) and `suffix` (a template drawn at the
+  end of the outline, for a picker's toggle). `PdField.describedBy` is now a signal fed by Material.
+- `pd-segmented-control` is a single `mat-button-toggle-group`: Home and End no longer jump (Material has no such key) and the
+  `nextEnabled` helper is removed from the public API.
+- `pd-day-picker` is a multiple `mat-button-toggle-group`; the schedule editor's mode and interval presets are button toggles too.
+- The schedule and pause editors use `mat-timepicker` instead of `type="time"`, with a toggle button, and show and read times in
+  **24 hours** (`17:45`, like the engine's `HH:MM` and the preview), a visible change from the platform's time field. The engine still gets
+  `"HH:MM"`, converted at the edge on a fixed reference day (`time-value.ts`, tested across midnight, DST and half-hour zones). Text the
+  picker cannot read keeps the last good time and shows "Enter a time such as 09:00." once the field is left; any change of the schedule
+  from outside the field clears it. Buttons are `matButton`/`matIconButton`, tooltips `matTooltip`.
+- Escape closes an open `pd-select` or time list and stops there, so a dialog around it stays open.
 
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec

@@ -165,9 +165,10 @@ test.describe('settings (plan S10)', () => {
     await app.settings.open({ page: 'sd.general' });
     const trigger = app.settings.select('style');
     await trigger.click();
-    const list = page.locator('.pd-list');
+    const list = page.locator('.mat-mdc-select-panel');
     await expect(list).toBeVisible();
-    const [t, l] = [(await trigger.boundingBox())!, (await list.boundingBox())!];
+    // the list lines up with the field's outline, of which the trigger text is inset
+    const [t, l] = [(await app.settings.field('style').locator('.mat-mdc-text-field-wrapper').boundingBox())!, (await list.boundingBox())!];
     expect(Math.abs(l.x - t.x)).toBeLessThanOrEqual(1);
     expect(l.width).toBeGreaterThanOrEqual(t.width - 1);
     expect(l.width).toBeLessThanOrEqual(t.width + 1);

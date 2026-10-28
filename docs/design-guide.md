@@ -272,8 +272,11 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Empty states**: 32 px muted icon, 15/600 title (what is missing), one muted sentence (why / what happens next), one
   button (the next step). **Error states**: icon in danger, what failed in plain words, likely cause, Retry + secondary
   ("Open logs"). Never raw exception text as the headline.
-- **Forms**: label above input 12/500, helper 12 muted, error replaces helper in danger with icon, validate on blur,
-  toggles are for immediate effects, checkboxes for form submit; group settings by consequence, not by data model.
+- **Forms**: every field is a Material outline field (`mat-form-field appearance="outline"` with `floatLabel="always"`, rule 47
+  and decision D1, 2026-10-28): the label 12/500 sits in the outline's notch and stays there, empty or not; helper 12 muted
+  under the field, replaced by the error in danger with its icon; validate on blur. Selects are `mat-select`, times
+  `mat-timepicker`, a few exclusive choices `mat-button-toggle-group`. Toggles are for immediate effects, checkboxes for form
+  submit; group settings by consequence, not by data model. (UI rule 11, "label above the input", is superseded: the label is in the notch.)
 
 ### Material controls (rule 47)
 - **One theme.** `@decryp7/paddock-ui/css/material.css` is the whole Material look: Material 3 with density -3, every system and

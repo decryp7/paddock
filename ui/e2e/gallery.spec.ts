@@ -23,14 +23,37 @@ for (const theme of THEMES) {
 
 test('keyboard: arrows move the segmented control and Tab shows a focus ring', async ({ page }) => {
   await open(page, 'dark', 'debrief');
-  const seg = page.getByRole('radiogroup', { name: 'Time range' });
+  const seg = page.getByTestId('segmented-control').getByRole('radiogroup', { name: 'Time range' });
   await seg.getByRole('radio', { name: '24 h' }).focus();
   await page.keyboard.press('ArrowRight');
   await expect(seg.getByRole('radio', { name: '7 days' })).toHaveAttribute('aria-checked', 'true');
-  await page.keyboard.press('Home');
+  // (Material's toggles wrap with the arrows; they have no Home key)
+  await page.keyboard.press('ArrowRight');
   await expect(seg.getByRole('radio', { name: '1 h' })).toHaveAttribute('aria-checked', 'true');
-  const outline = await seg.getByRole('radio', { name: '1 h' }).evaluate((e) => getComputedStyle(e).outlineStyle);
-  expect(outline).toBe('solid');
+  // Material's focus indicator (the bridge draws it as a solid border on ::before)
+  const ring = await seg.getByRole('radio', { name: '1 h' }).evaluate((e) => {
+    const cs = getComputedStyle(e, '::before');
+    return [cs.display, cs.borderTopStyle, cs.borderTopWidth];
+  });
+  expect(ring[0]).not.toBe('none');
+  expect(ring[1]).toBe('solid');
+  expect(parseFloat(ring[2]!)).toBeGreaterThanOrEqual(2);
+});
+
+test('a native select in a pd-field draws Material\'s arrow, and a field with no control keeps the classic layout', async ({ page }) => {
+  await open(page, 'light', 'debrief');
+  const arrow = await page.getByTestId('native-select-field').locator('.mat-mdc-form-field-infix').evaluate((e) => {
+    const cs = getComputedStyle(e, '::after');
+    return [cs.content, parseFloat(cs.borderTopWidth) + parseFloat(cs.borderLeftWidth), cs.borderTopColor];
+  });
+  expect(arrow[0]).not.toBe('none');
+  expect(arrow[1]).toBeGreaterThan(0);
+  const select = page.getByTestId('native-select-field').locator('select');
+  expect(await select.evaluate((e) => getComputedStyle(e).appearance)).toBe('none');
+  expect(await select.evaluate((e) => getComputedStyle(e).borderTopWidth)).toBe('0px');
+  const plain = page.getByTestId('plain-field');
+  await expect(plain.locator('mat-form-field')).toHaveCount(0);
+  await expect(plain.getByRole('group', { name: 'Folder' })).toBeVisible();
 });
 
 test('interactive card activates with Enter and Space', async ({ page }) => {
@@ -120,7 +143,7 @@ test.describe('UI basics review fixes (regressions)', () => {
         return [
           h('[data-surface="page"] [data-group="fields"] input.pd-input'),
           h('[data-surface="page"] [data-group="fields"] select.pd-select'),
-          h('[data-surface="page"] [data-group="themed-select"] pd-select .pd-trigger'),
+          h('[data-surface="page"] [data-group="themed-select"] pd-select .mat-mdc-text-field-wrapper'),
           h('[data-surface="page"] [data-group="themed-select"] input.pd-input'),
         ];
       });
@@ -130,7 +153,7 @@ test.describe('UI basics review fixes (regressions)', () => {
 
   test('inputs, selects, the themed select and the switch show a solid 2 px focus outline (P1-5)', async ({ page }) => {
     await open(page, 'light', 'debrief');
-    for (const sel of ['#g-name', '#g-native', '#g-themed', '[data-surface="page"] input.pd-switch']) {
+    for (const sel of ['#g-name', '#g-native', 'mat-select#g-themed', '[data-surface="page"] input.pd-switch']) {
       const el = page.locator(sel).first();
       await el.focus();
       const o = await el.evaluate((e) => {
@@ -186,16 +209,19 @@ test.describe('UI basics review fixes (regressions)', () => {
     await open(page, 'light', 'debrief');
     const trigger = page.locator('#g-themed');
     await trigger.click();
-    const list = page.locator('.pd-list');
+    const list = page.locator('#g-themed-panel');
     await expect(list).toBeVisible();
-    const [t, l] = [(await trigger.boundingBox())!, (await list.boundingBox())!];
+    // the list lines up with the field's outline, of which the trigger text is inset
+    const [t, l] = [(await page.locator('pd-select:has(#g-themed) .mat-mdc-text-field-wrapper').boundingBox())!, (await list.boundingBox())!];
     expect(Math.abs(l.x - t.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(l.width - t.width)).toBeLessThanOrEqual(1);
   });
 
   test('hover changes the border of an input, a native select and the themed select, and a secondary button on a white card (review 2, N-P2-2, N-P3-3)', async ({ page }) => {
     await open(page, 'light', 'debrief');
-    const border = (sel: string) => page.locator(sel).first().evaluate((e) => getComputedStyle(e).borderTopColor);
+    // the themed select's border is its outline's leading edge
+    const drawn = (sel: string) => (sel === '#g-themed' ? 'pd-select:has(#g-themed) .mdc-notched-outline__leading' : sel);
+    const border = (sel: string) => page.locator(drawn(sel)).first().evaluate((e) => getComputedStyle(e).borderTopColor);
     for (const sel of ['#g-name', '#g-native', '#g-themed']) {
       const rest = await border(sel);
       await page.locator(sel).first().hover();

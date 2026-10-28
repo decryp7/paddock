@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, inject, linkedSignal, resource, signal } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, ElementRef, inject, Injector, linkedSignal, resource, signal } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { FormField } from '@angular/forms/signals';
 import { PdField, PdFieldControl } from '@decryp7/paddock-ui/forms';
 import { SuEmptyState } from '@decryp7/paddock-ui';
@@ -28,7 +29,7 @@ export interface LayoutManageResult {
 @Component({
   selector: 'pd-layout-manage-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdField, PdFieldControl, FormField, PdGlyph, SuEmptyState],
+  imports: [PdField, PdFieldControl, FormField, PdGlyph, SuEmptyState, MatButton],
   template: `
     <div class="pd-lmd">
       @if (loaded.status() === 'loading') {
@@ -55,8 +56,8 @@ export interface LayoutManageResult {
                     (keydown.escape)="cancelRename($event)"
                   />
                 </pd-field>
-                <button type="button" class="pd-lmd__btn" data-testid="layout-manage-rename-ok" (click)="commitRename($event)">{{ t.rename }}</button>
-                <button type="button" class="pd-lmd__btn" data-testid="layout-manage-rename-cancel" (click)="cancelRename($event)">{{ t.cancel }}</button>
+                <button type="button" matButton="outlined" class="pd-lmd__rbtn" data-testid="layout-manage-rename-ok" (click)="commitRename($event)">{{ t.rename }}</button>
+                <button type="button" matButton="outlined" class="pd-lmd__rbtn" data-testid="layout-manage-rename-cancel" (click)="cancelRename($event)">{{ t.cancel }}</button>
               } @else {
                 <span class="pd-lmd__name" [attr.title]="layout.name">{{ layout.name }}</span>
                 <button type="button" class="pd-lmd__btn" data-testid="layout-manage-apply" [attr.aria-label]="t.applyLabel(layout.name)" (click)="apply(layout.name)">{{ t.apply }}</button>
@@ -85,18 +86,21 @@ export interface LayoutManageResult {
     .pd-lmd__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); }
     .pd-lmd__row + .pd-lmd__row { border-top: 1px solid var(--pd-hairline); }
     .pd-lmd__name { flex: 1 1 8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pd-lmd__row:has(.pd-lmd__rename) { align-items: flex-start; }
     .pd-lmd__rename { flex: 1 1 12rem; }
-    .pd-lmd__input { box-sizing: border-box; width: 100%; min-height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-    .pd-lmd__input[aria-invalid='true'] { border-color: var(--pd-danger); }
+    /* The buttons are the outline's height and start at its top, so their centres are the field's. */
+    .pd-lmd__rbtn { --mat-button-outlined-container-height: var(--pd-control-height); }
     .pd-lmd__btn { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-height: var(--pd-button-height, 28px); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-lmd__btn--primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
     .pd-lmd__btn--danger { color: var(--pd-danger-text, var(--pd-danger)); }
-    .pd-lmd__btn:focus-visible, .pd-lmd__input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
+    .pd-lmd__btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-lmd__undo { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-3); }
   `,
 })
 export class PdLayoutManageDialog implements DialogContent<LayoutManageResult> {
   protected readonly ref = inject<DialogRef<LayoutManageResult>>(DIALOG_REF);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
   private readonly store = inject(DOCK_LAYOUT_STORE);
   private readonly key = `${storagePrefix(inject(DOCK_OPTIONS))}.layouts`;
 
@@ -156,11 +160,24 @@ export class PdLayoutManageDialog implements DialogContent<LayoutManageResult> {
     this.undo.set(null);
     this.renameSubmitted.set(false);
     this.renaming.set(name);
+    afterNextRender(() => this.host.nativeElement.querySelector<HTMLInputElement>('[data-testid="layout-manage-rename"]')?.focus(), { injector: this.injector });
   }
 
   protected cancelRename(event?: Event): void {
     event?.stopPropagation();
+    this.endRename();
+  }
+
+  /** The rename field goes: focus returns to that row's Rename button (it would otherwise fall to the page). */
+  private endRename(name: string | null = this.renaming()): void {
     this.renaming.set(null);
+    afterNextRender(
+      () => {
+        const row = [...this.host.nativeElement.querySelectorAll<HTMLElement>('li[data-layout]')].find((li) => li.dataset['layout'] === name);
+        row?.querySelector<HTMLElement>('[data-testid="layout-manage-rename-start"]')?.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   protected commitRename(event?: Event): void {
@@ -172,7 +189,7 @@ export class PdLayoutManageDialog implements DialogContent<LayoutManageResult> {
     if (field.invalid()) return;
     const to = cleanLayoutName(field.value());
     if (to && to !== from) this.write(renameLayout(this.layouts(), from, to));
-    this.renaming.set(null);
+    this.endRename(to && to !== from ? to : from);
   }
 
   protected remove(name: string): void {

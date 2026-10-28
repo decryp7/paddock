@@ -25,9 +25,6 @@ import { cleanLayoutName } from './named-layouts';
   styles: `
     :host { display: block; color: var(--pd-text); min-width: 0; }
     .pd-lsd { display: flex; flex-direction: column; gap: var(--pd-space-3); }
-    .pd-lsd__input { box-sizing: border-box; width: 100%; min-height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-    .pd-lsd__input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .pd-lsd__input[aria-invalid='true'] { border-color: var(--pd-danger); }
   `,
 })
 export class PdLayoutSaveDialog implements DialogContent<string> {
