@@ -14,7 +14,7 @@ function deployment(file, os, o) {
   hub(d, 'agent', 'L', 'app', 'R', { rev: true, label: 'Requests' });
   hub(d, 'agent', 'L', 'sm', 'R', { rev: true, label: 'Starts' });
   hub(d, 'agent', 'R', 'data', 'L', { label: 'Reads, writes' });
-  hub(d, 'elevate', 'L', 'agent', 'R', { label: 'Restarts elevated', dash: true });
+  hub(d, 'agent', 'R', 'elevate', 'L', { rev: true, label: 'Restarts elevated', dash: true });
   d.legend([{ kind: 'accent', label: 'Dyno artefact' }, { kind: 'process', label: 'OS facility · data · process' }, { kind: 'line', label: 'Communication' }, { kind: 'dashline', label: 'Optional, one session' }]);
   save(file, d, y0 + gh);
 }

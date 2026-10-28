@@ -60,8 +60,6 @@ routes on one machine.
   your own processes, so for system processes those columns say *Unavailable: macOS shows this only for your own processes*. Other
   accounts' processes are one **Other users** row that shows how many there are; its CPU, memory and disk totals say *Unavailable* with the same reason.
 - Dyno 1.0 installs no helper and no LaunchDaemon. **Run as administrator** asks for your password once (the macOS authorisation dialog) and restarts the agent as root until you quit Dyno; it installs nothing.
-- Efficiency mode is the Darwin background policy (`setpriority` with `PRIO_DARWIN_BG`); CPU caps are a 100 ms SIGSTOP/SIGCONT
-  duty cycle; there is no CPU affinity on macOS.
 
 ## After updating Dyno
 

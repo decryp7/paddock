@@ -1,6 +1,6 @@
 import { P, save, sequence } from './common.mjs';
 
-/** parts: [id, name, tech, role]; script items: ['m', a, b, text, reply?] ['s', p, text] ['o', kind, cond] ['e', cond] ['c'] ['n', p, text, w?] ['C', from, id, text] creates a late part (5th field true) ['x', id] ends its lifeline */
+/** parts: [id, name, tech, role]; script items: ['m', a, b, text, reply?] ['s', p, text] ['o', kind, cond] ['e', cond] ['c'] ['n', p, text, w?] ['C', from, id, text] creates a late part (5th field true) ['x', id] ends its lifeline ['r', id] resumes it (in the other branch of an alt) */
 function seq(file, { title, desc, parts, script, pw = 168, gap = 40 }) {
   const w = 96 + parts.length * pw + (parts.length - 1) * gap;
   const d = P({ title, kind: 'UML · Sequence diagram', desc, w });
@@ -14,6 +14,7 @@ function seq(file, { title, desc, parts, script, pw = 168, gap = 40 }) {
     else if (k === 'n') s.note(a[0], a[1], a[2]);
     else if (k === 'C') s.create(a[0], a[1], a[2]);
     else if (k === 'x') s.end(a[0]);
+    else if (k === 'r') s.resume(a[0]);
   }
   const y = s.done();
   const names = { ui: 'Angular UI', accent: 'Dyno', core: 'Pure core', process: 'Process · OS · data', plugin: 'Plugin', external: 'External' };
@@ -64,6 +65,8 @@ seq('uml-seq-run-as-administrator', {
     ['m', 'sh', 'new', 'Dyno quits: `Request::Shutdown`'],
     ['x', 'new'],
     ['e', 'declined or cancelled'],
+    ['r', 'old'],
+    ['s', 'old', 'keeps running with the user\'s rights'],
     ['m', 'sh', 'ui', 'Dyno goes on with the user\'s rights; unreadable figures stay Unavailable', 1],
     ['c'],
   ],

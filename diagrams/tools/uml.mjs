@@ -52,7 +52,7 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
   // parts with late: true are drawn where create() is called (a UML creation message), not at the top
   parts.forEach((p, i) => { if (!p.late) d.node(p.id, x0 + i * (pw + gap), top, pw, headH, p.role || 'accent', { name: p.name, tech: p.tech }); });
   const upfront = parts.filter((p) => !p.late).length;
-  const starts = {}, ends = {};
+  const starts = {}, dead = {};
   let y = top + headH + 32;
   const xl0 = x0 - 16, xr0 = x0 + parts.length * (pw + gap) - gap + 16;
   const xl = xl0, xr = xr0;
@@ -101,8 +101,12 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
       const x = px(idx[id]);
       d.line([x - 8, y - 8], [x + 8, y + 8], { arrow: 'none', width: 2, rounded: false });
       d.line([x - 8, y + 8], [x + 8, y - 8], { arrow: 'none', width: 2, rounded: false });
-      ends[id] = y;
+      (dead[id] ||= []).push({ a: y, b: Infinity });
       y += 24;
+    },
+    /** The part is alive again from here (the other branch of an alt where it was not ended). */
+    resume(id) {
+      const l = dead[id]; if (l && l.length) l[l.length - 1].b = y;
     },
     note(p, text, w = 280) {
       const h = d.note(d.id(), Math.round(px(idx[p]) - w / 2), y, w, text);
@@ -132,11 +136,15 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
       const n = d.cells.length;
       parts.forEach((p, i) => {
         const x = px(i);
-        const cuts = gaps.filter((g) => x > g[0] && x < g[1]).sort((m, k) => m[2] - k[2]);
-        let y0 = starts[p.id] ?? top + headH;
-        const yb = ends[p.id] ?? y;
-        for (const g of cuts) { if (g[2] >= yb) break; if (g[2] > y0) d.line([x, y0], [x, g[2]], { dash: true, arrow: 'none', width: 1, color: d.t.edge }); y0 = Math.max(y0, g[3]); }
-        if (yb > y0) d.line([x, y0], [x, yb], { dash: true, arrow: 'none', width: 1, color: d.t.edge });
+        const drawSeg = (s0, e0) => {
+          let y0 = s0;
+          const cuts = gaps.filter((g) => x > g[0] && x < g[1] && g[3] > s0 && g[2] < e0).sort((m, k) => m[2] - k[2]);
+          for (const g of cuts) { if (g[2] > y0) d.line([x, y0], [x, g[2]], { dash: true, arrow: 'none', width: 1, color: d.t.edge }); y0 = Math.max(y0, g[3]); }
+          if (e0 > y0) d.line([x, y0], [x, e0], { dash: true, arrow: 'none', width: 1, color: d.t.edge });
+        };
+        let from = starts[p.id] ?? top + headH;
+        for (const dd of (dead[p.id] || [])) { if (dd.a > from) drawSeg(from, dd.a); from = Math.max(from, dd.b); }
+        if (y > from && from !== Infinity) drawSeg(from, y);
       });
       const life = d.cells.splice(n);
       d.cells.splice(behind + upfront, 0, ...life);

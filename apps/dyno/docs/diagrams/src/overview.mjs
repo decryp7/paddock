@@ -53,6 +53,7 @@ text(48, 118, 'Live and history, why slow, alarms, a disk map and benchmarks · 
 
 const AX = 48, AW = 304, BX = 472, BW = 416, CX = 1008, CW = 272, top = 160;
 const BH = 88, PITCH = 120, y = (i) => 208 + i * PITCH;
+const mid3 = () => y(3) + BH / 2;
 const gh = (rows) => 48 + (rows - 1) * PITCH + BH + 24 - 8;
 group(AX, top, AW, gh(5), 'Dyno app and command line');
 group(BX, top, BW, gh(6), 'Dyno agent [one per user, started at login]');
@@ -61,24 +62,30 @@ group(CX, top, CW, gh(6), 'Around the agent');
 // app
 box(AX + 24, y(0), AW - 48, BH, 'ui', 'Window', 'Angular 22: live and history, processes, why slow, alarms, disk map, counters, benchmarks.');
 box(AX + 24, y(1), AW - 48, BH, 'accent', 'Tauri shell', 'Commands; validates every request and speaks to the agent.');
-box(AX + 24, y(2), AW - 48, BH, 'process', 'OS prompt', 'UAC, password dialog or pkexec; asked only on your click.');
-box(AX + 24, y(3), AW - 48, BH, 'accent', 'Tray', 'A live metric and a compact menu; stays when the window closes.');
+box(AX + 24, y(2), AW - 48, BH, 'accent', 'Tray', 'A live metric and a compact menu; stays when the window closes.');
+box(AX + 24, y(3), AW - 48, BH, 'process', 'OS prompt', 'UAC, password dialog or pkexec; asked only on your click.');
 box(AX + 24, y(4), AW - 48, BH, 'accent', 'dyno command', 'status, why-slow, top, alarms, snapshot, counters. Reads only.');
 varrow(AX + 48, y(0) + BH, y(1), 'commands');
-varrow(AX + 48, y(1) + BH, y(2), 'asks');
+varrow(AX + 48, y(1) + BH, y(2), 'status');
+// the shell asks the OS prompt (Run as administrator): down the left margin, past the tray
+{
+  const lx0 = AX + 12, ys = y(1) + BH - 16, ye = mid3();
+  out.push(`<path d="M${AX + 24} ${ys} L${lx0 + 8} ${ys} Q${lx0} ${ys} ${lx0} ${ys + 8} L${lx0} ${ye - 8} Q${lx0} ${ye} ${lx0 + 8} ${ye} L${AX + 24} ${ye}" class="e" marker-end="url(#a)"/>`);
+  text(lx0 + 10, Math.round((y(2) + BH + y(3)) / 2 + 4), 'asks', 'm');
+}
 // agent
 const bx = BX + 24, bw = BW - 48;
 box(bx, y(0), bw, BH, 'accent', 'Sampler', 'Adaptive intervals: sensors, processes, grouping, diagnosis, baselines; measures its own overhead.');
 box(bx, y(1), bw, BH, 'accent', 'IPC server and handlers', 'One thread per connection, bounded push queue; answers from measured or stored data.');
-box(bx, y(2), bw, BH, 'accent', 'Elevated agent', 'Only after Run as administrator: the agent restarted elevated, until Dyno quits. Nothing is installed.', true, 'optional');
-box(bx, y(3), bw, BH, 'accent', 'Plugin host', 'Starts sensor plugins on first use; a plugin that crashes is quarantined.');
+box(bx, y(3), bw, BH, 'accent', 'Elevated agent', 'Only after Run as administrator: the agent restarted elevated, until Dyno quits. Nothing is installed.', true, 'optional');
+box(bx, y(2), bw, BH, 'accent', 'Plugin host', 'Starts sensor plugins on first use; a plugin that crashes is quarantined.');
 box(bx, y(4), bw, BH, 'accent', 'Benchmarks', 'Only on a click, one kind at a time, in a child process with a timeout.');
 box(bx, y(5), bw, BH, 'accent', 'History, alarms, recorder', 'SQLite rollups (min, average, max); alarms that notify; issues; ten-minute flight recorder.');
 // around
 const cx = CX + 24, cw = CW - 48;
 box(cx, y(0), cw, BH, 'accent', 'Platform adapters', 'Windows, macOS, Linux behind the core\'s ports.');
 box(cx, y(1), cw, BH, 'process', 'Operating system', 'Counters, /proc and /sys, OS logs, launchd, systemd.');
-box(cx, y(3), cw, BH, 'plugin', 'Plugins', 'Vendor sensors; out of process.');
+box(cx, y(2), cw, BH, 'plugin', 'Plugins', 'Vendor sensors; out of process.');
 box(cx, y(4), cw, BH, 'process', 'dyno-bench', 'CPU, memory and disk tests.');
 box(cx, y(5), cw, BH, 'process', 'Data folder', 'Dyno\'s own data: dyno.db and JSON; never uploaded.');
 varrow(cx + 24, y(0) + BH, y(1), 'reads');
@@ -87,7 +94,7 @@ const mid = (i) => y(i) + BH / 2;
 arrow(AX + AW - 24, y(1) + 22, bx, 'requests');
 arrow(bx, y(1) + 50, AX + AW - 24, 'pushes');
 // the OS prompt starts the agent elevated (dashed: optional, one session)
-arrow(AX + AW - 24, mid(2), bx, 'starts elevated', true);
+arrow(AX + AW - 24, mid(3), bx, 'starts elevated', true);
 // the command line is a second client of the same IPC server: up the gutter, into the server below the shell's pair
 {
   const gx = 352, x0 = AX + AW - 24, ye = y(1) + 72;
@@ -95,7 +102,7 @@ arrow(AX + AW - 24, mid(2), bx, 'starts elevated', true);
   text(gx + 8, Math.round((y(3) + BH + y(4)) / 2 + 4), 'requests', 'm');
 }
 arrow(bx + bw, mid(0), cx, 'samples');
-arrow(bx + bw, mid(3), cx, 'calls');
+arrow(bx + bw, mid(2), cx, 'calls');
 arrow(bx + bw, mid(4), cx, 'spawns');
 arrow(bx + bw, mid(5), cx, 'writes');
 
@@ -108,7 +115,7 @@ text(64, coreY + 72, 'Time comes in as values. The agent and the app both use it
 // legend
 let lx = 64; const ly = coreY + 136;
 const legAt = out.length;
-for (const [r, label, pl] of [['ui', 'Window'], ['accent', 'Dyno'], ['core', 'Pure core'], ['plugin', 'Plugin'], ['process', 'Process · OS · data']]) {
+for (const [r, label, pl] of [['ui', 'Window'], ['accent', 'Dyno'], ['core', 'Pure core'], ['plugin', 'Plugin'], ['process', 'Process · OS · data'], ['accent', 'Optional, one session', true]]) {
   out.push(`<rect x="${lx + 4}" y="${ly - 8}" width="28" height="16" rx="4" class="n ${roles[r]}${pl ? ' pl' : ''}"/>`);
   text(lx + 40, ly + 4, label, 'm');
   lx += 40 + tw(label, 12) + 36;

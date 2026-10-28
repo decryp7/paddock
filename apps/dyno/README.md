@@ -13,7 +13,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=30f110dd)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=202f935a)
 
 
 > **Status: 1.0.0 in preparation, unreleased.** Dyno 1.0.0 is a monitor: live and history, processes and why it is slow,
@@ -51,7 +51,7 @@ does the second:
 
 ## Key features
 
-![Dyno features](docs/images/dyno-features.svg?v=6a7c546d)
+![Dyno features](docs/images/dyno-features.svg?v=471f40ce)
 
 ![How Dyno works](docs/images/dyno-how-it-works.svg?v=a478bd02)
 

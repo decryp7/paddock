@@ -139,7 +139,8 @@ disappeared shows *Unavailable* with the reason. Rates (per second) need two rea
 ## Running with your own rights
 
 Dyno 1.0 has no privileged helper. The app and the agent run with your own rights, register no system service, and never need
-administrator rights to install or to run. What the OS shows only to administrators, or only to the account that owns a
+administrator rights to run. Installing needs none either, except that on Linux the `.deb` is a system package, so `apt` asks for
+root (the AppImage needs none). What the OS shows only to administrators, or only to the account that owns a
 process, is never guessed and never shown as zero: the figure says *Unavailable* with a plain reason (for example "Windows
 shows this only to administrators").
 

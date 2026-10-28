@@ -51,7 +51,7 @@ function dynoHero() {
     r(672, 222, 256, 330, 'mc', 10) + t(692, 254, 'Alarms', 'mt') + t(908, 254, '2 active', 'mm', 'end') +
     alarmRow(692, 276, 216, 'Disk 78% full', 'Full in about 41 days', 'Active', true, 64) +
     alarmRow(692, 340, 216, 'CPU ran hot', '6 min above 90 °C', 'Active', true, 64) +
-    alarmRow(692, 404, 216, 'Backup late', 'Last run 9 days ago', 'Acknowledged', false, 100) +
+    alarmRow(692, 404, 216, 'Backup', 'Late · last run 9 days ago', 'Acknowledged', false, 108) +
     r(692, 470, 216, 1, 'mrule', 0) + t(692, 500, 'Health 74 of 100', 'mt') + t(692, 522, 'Reasons, no fixes', 'mm');
 }
 function dynoPanel(kind) {
@@ -74,7 +74,7 @@ function dynoPanel(kind) {
     return r(40, 24, 592, 232, 'mc', 12) +
       alarmRow(64, 48, 544, 'Docker backend keeps restarting', '6 restarts in 2 hours · critical', 'Active', true) +
       alarmRow(64, 108, 544, 'Macintosh HD is 78% full', 'Full in about 41 days', 'Active', true) +
-      alarmRow(64, 168, 544, 'Backup has not run for 9 days', 'Time Machine · acknowledged', 'Acknowledged', false);
+      alarmRow(64, 168, 544, 'Backup has not run for 9 days', 'Time Machine', 'Acknowledged', false);
   }
   // bench
   const rows = [['Processor', 0.62, 0.69, '+11%'], ['Memory', 0.7, 0.78, '+11%'], ['Disk', 0.48, 0.54, '+12%']];

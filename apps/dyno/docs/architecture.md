@@ -92,7 +92,12 @@ calls agrees.
 
 **Run as administrator** is a session-only elevation. On the user's click the app asks the OS to start the agent elevated
 (`dyno_platform::elevate`: `osascript` on macOS, `pkexec` on Linux, `ShellExecuteExW runas` on Windows) and the elevated agent
-serves the app until Dyno quits; nothing is installed or registered, and the next start is unprivileged. Starting as
+serves the app until Dyno quits; nothing is installed or registered, and the next start is unprivileged.
+
+The elevated agent keeps its data in an `elevated-session` folder inside the user's own Dyno data folder. The folder is passed to
+it explicitly and is never resolved from root's `HOME`. On macOS and Linux the elevated agent re-owns everything it creates to the
+invoking user's uid and gid (at start, every 5 seconds and at exit, never following symlinks), so no root-owned file is left in
+the user's folder. On Windows, UAC elevation keeps the same account's profile, so nothing needs re-owning. Starting as
 administrator at login and the read-only helper are planned for 1.1.
 
 Plugins are out-of-process Rust programs speaking `dyno-ipc` that add sensors; the agent starts the host on
