@@ -2,8 +2,7 @@
 
 Pitwall's diagrams follow the suite spec in the Paddock repo: [`diagrams/STYLE.md`](https://dev.decryptology.net/decryp7/paddock/src/branch/main/diagrams/STYLE.md)
 (roles, type, grid, connectors, size limits, export). Start new diagrams from Paddock's templates and shape library
-([`diagrams/README.md`](https://dev.decryptology.net/decryp7/paddock/src/branch/main/diagrams/README.md)); `scripts/export-diagrams.sh` is Paddock's,
-copied unchanged. The diagrams here are written by the scripts in [`src`](src/README.md), not drawn by hand.
+([`diagrams/README.md`](https://dev.decryptology.net/decryp7/paddock/src/branch/main/diagrams/README.md)); `diagrams/scripts/export-diagrams.sh` is Paddock's (run from `apps/pitwall`). The diagrams here are written by the scripts in [`src`](src/README.md), not drawn by hand.
 
 ## Pitwall's colours
 

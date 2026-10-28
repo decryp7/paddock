@@ -369,7 +369,7 @@ impl AppState {
             let lib = self.library.clone();
             tokio::task::spawn_blocking(move || lib.installed()).await.unwrap_or_default()
         };
-        let room = crate::system::room(&self.hardware, self.serving.hot_ram().0);
+        let room = crate::system::room_from(&self.serving.memory_now(), &self.hardware, self.serving.hot_ram().0);
         let report = self
             .updates
             .check(

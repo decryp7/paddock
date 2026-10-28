@@ -188,6 +188,8 @@ struct Inner {
     library: Library,
     settings: Arc<RwLock<Settings>>,
     hardware: RwLock<Hardware>,
+    /// Live memory for load and release planning (`system::MemoryReader`); the host's unless a test pins a machine.
+    memory: RwLock<system::MemoryReader>,
     events: Arc<Mutex<EventLog>>,
     hot: Mutex<HashMap<ModelId, Arc<HotModel>>>,
     loading: Mutex<HashMap<ModelId, Arc<tokio::sync::Mutex<()>>>>,
@@ -265,6 +267,7 @@ impl Serving {
                 library,
                 settings,
                 hardware: RwLock::new(hardware),
+                memory: RwLock::new(system::host_memory()),
                 events,
                 hot: Mutex::new(HashMap::new()),
                 loading: Mutex::new(HashMap::new()),
@@ -285,6 +288,25 @@ impl Serving {
 
     fn settings(&self) -> Settings {
         self.inner.settings.read().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// Live memory as serving plans with it.
+    pub(crate) fn memory_now(&self) -> pitwall_core::memory::System {
+        let reader = self
+            .inner
+            .memory
+            .read()
+            .map(|r| r.clone())
+            .unwrap_or_else(|p| p.into_inner().clone());
+        reader(&self.hw())
+    }
+
+    /// Replaces where live memory is read from (tests pin a machine; the default is the host).
+    pub fn set_memory_reader(&self, reader: system::MemoryReader) {
+        match self.inner.memory.write() {
+            Ok(mut g) => *g = reader,
+            Err(p) => *p.into_inner() = reader,
+        }
     }
 
     fn hw(&self) -> Hardware {
@@ -442,7 +464,7 @@ impl Serving {
         if needs_tools && !req.capabilities.contains(&select::Capability::Tools) {
             req.capabilities.push(select::Capability::Tools);
         }
-        let room = system::room(&self.hw(), hot.values().map(|h| h.ram).sum());
+        let room = system::room_from(&self.memory_now(), &self.hw(), hot.values().map(|h| h.ram).sum());
         let speeds = self.inner.speeds.read().map(|g| g.clone()).unwrap_or_default();
         let cands: Vec<Candidate> = local
             .iter()
@@ -816,7 +838,7 @@ impl Serving {
             let hot = lock(&self.inner.hot);
             let room = Room {
                 ram_releasable: hot.values().map(|h| h.ram).sum(),
-                ..system::room(&hw, 0)
+                ..system::room_from(&self.memory_now(), &hw, 0)
             };
             fit::need_tokens(&library::size_of(&f), tokens, &room)
         };
@@ -827,7 +849,7 @@ impl Serving {
                     .values()
                     .map(|h| h.as_hot(s.prefs(&h.id).pinned, s.prefs(&h.id).idle_secs.map(|x| x * 1000)))
                     .collect();
-                let sys = system::read_system(&hw);
+                let sys = self.memory_now();
                 (memory::plan_load(id, need, &hots, &sys, &policy), sys)
             };
             match plan {
@@ -986,7 +1008,7 @@ impl Serving {
             .values()
             .map(|h| h.as_hot(s.prefs(&h.id).pinned, s.prefs(&h.id).idle_secs.map(|x| x * 1000)))
             .collect();
-        let sys = system::read_system(&self.hw());
+        let sys = self.memory_now();
         let actions = memory::plan_release(
             now,
             &hots,
@@ -1075,7 +1097,7 @@ impl Serving {
     /// Models in memory, for the dashboard and `/api/ps`.
     pub fn loaded(&self) -> Vec<LoadedModel> {
         let s = self.settings();
-        let sys = system::read_system(&self.hw());
+        let sys = self.memory_now();
         let policy = s.memory.policy();
         let now = now_ms();
         lock(&self.inner.hot)

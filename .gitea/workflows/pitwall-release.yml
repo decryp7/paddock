@@ -1,0 +1,101 @@
+# Pitwall's installers and release (ADR 0014; moved from decryp7/pitwall's build.yml). The gates are not here: Pitwall is a leg
+# of ci.yml (apps/pitwall/paddock.ci.json: Rust on Linux, Windows and macOS, the frontend with the Chromium and WebKit e2e), and its bundles, the macOS seal check,
+# the sidecar start and the release are the shared app-release.yml. This file is only the triggers and the app's facts.
+#
+#   push to main      installers on three OS and the real-app smoke when the change reaches Pitwall (the same plan as ci.yml)
+#   a pitwall-v* tag  the gates (ci.yml, only Pitwall's legs, WebKit e2e included), then installers, then the Gitea release with latest.json on
+#                     the release and on the moving pitwall-latest release, which installed copies update from
+#   nightly           installers again, so a toolchain or runner change shows up the night it happens
+#   manual            installers without a release (the "one CI build with bundles" before a tag, rule 25); `gates: true`
+#                     also runs Pitwall's ci.yml legs first
+#
+# Runner labels: ubuntu-latest (the paddock-ci image), windows-latest and macos-latest (host runners; they install nothing
+# system-wide and leave no processes or launch agents behind). Secrets: the family's updater key
+# (PADDOCK_TAURI_SIGNING_PRIVATE_KEY, PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD, PADDOCK_TAURI_UPDATER_PUBKEY), RELEASE_TOKEN
+# (a Gitea access token with write:repository) and, once there is a Developer ID, APPLE_SIGNING_IDENTITY.
+
+name: pitwall-release
+
+on:
+  push:
+    branches: [main]
+    tags: ["pitwall-v*"]
+  schedule:
+    - cron: "15 1 * * *"
+  workflow_dispatch:
+    inputs:
+      gates:
+        description: "Also run Pitwall's gates (ci.yml legs) before the installers"
+        type: boolean
+        default: false
+
+# A newer push to main supersedes the run still going; a tag has its own ref, so a release is never cancelled by a later push. The group differs from ci.yml's (that
+# one is called below and names this workflow too), or the called workflow would cancel its caller.
+concurrency:
+  group: ${{ github.workflow }}-run-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs the rest only when the change reaches Pitwall; a push to main whose commit carries a pitwall-v* tag is covered by
+  # the tag run.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # affected.mjs for Pitwall, and the skip of a main push whose commit carries a pitwall-v* tag (the tag run is the gate).
+      # The nightly builds installers even when main's CI nightly was green.
+      - id: plan
+        uses: ./.gitea/actions/plan
+        with:
+          app: pitwall
+          tag-pattern: pitwall-v*
+          nightly-marker: "false"
+
+  # A tag is gated by exactly Pitwall's legs of ci.yml (all of them, both halves, on the tagged commit).
+  gates:
+    name: gates
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/pitwall-v') || github.event.inputs.gates == 'true') }}
+    uses: ./.gitea/workflows/ci.yml
+    with:
+      app: pitwall
+      # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included.
+      webkit: ${{ github.event_name == 'workflow_dispatch' }}
+
+  release:
+    name: installers + release
+    needs: [plan, gates]
+    if: ${{ !cancelled() && needs.plan.outputs.run == 'true' && (needs.gates.result == 'success' || (needs.gates.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))) }}
+    uses: ./.gitea/workflows/app-release.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      app-id: pitwall
+      app-name: Pitwall
+      app-dir: apps/pitwall/app
+      cargo-dir: apps/pitwall
+      tag-prefix: pitwall-
+      latest-tag: pitwall-latest
+      notes-extra: "**Existing installs:** download this version once by hand. Pitwall now updates from the Paddock releases, which a copy installed before this version does not look at."
+      cliff-config: apps/pitwall/cliff.toml
+      cliff-paths: |
+        apps/pitwall/**
+        crates/**
+        ui/**
+      # --version: pitwall-server has no --self-test; its --version starts the binary from the built app and exits 0 (the old
+      # macos-verify-bundle.sh ran the same).
+      sidecars: pitwall-server:--version
+      setup-node: false
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}

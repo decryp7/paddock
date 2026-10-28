@@ -14,7 +14,7 @@ the one that has been run for real; see [Verified](#verified-and-not-verified).
   right-click Pitwall > **Open** and confirm, or allow it in **System Settings > Privacy & Security**. Gatekeeper may say the
   developer cannot be verified; that is expected for an unsigned build.
 - **Why ad-hoc and not unsigned:** a bundle that is only linker-signed has no sealed resources and `SMAppService` refuses to
-  register the launch agent (codesign error -67056). `scripts/ci/macos-verify-bundle.sh` checks this on a built bundle.
+  register the launch agent (codesign error -67056). The shared `conformance/release/macos-verify-bundle.sh` (the `macos-verify` action) checks this on a built bundle and starts `pitwall-server --version` from it.
 - **Requirements:** macOS 13 or later (for `SMAppService`); Apple Silicon or Intel. Apple Silicon uses the **Metal** build
   (the GPU shares system memory, so the whole RAM is the model budget). Intel Macs have only the CPU build.
 

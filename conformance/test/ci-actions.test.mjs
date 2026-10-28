@@ -397,7 +397,7 @@ test('every job that builds Rust on a host sets its build folder with the build-
       assert.equal(ignored.status, 0, `${ws[1]}/.cargo/ci.toml is git-ignored`);
     }
   }
-  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle', ...['dyno', 'pitwall'].flatMap((a) => [`${a}.yml:rust`, `${a}.yml:bundle`])]) {
+  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle', ...['dyno'].flatMap((a) => [`${a}.yml:rust`, `${a}.yml:bundle`])]) {
     assert.ok(uses.includes(want), `${want} sets its build folder with the action (found: ${uses.join(', ')})`);
   }
   const copies = spawnSync('git', ['ls-files', 'apps/*/scripts/ci/build-folder.sh'], { cwd: PADDOCK, encoding: 'utf8' });
@@ -668,9 +668,9 @@ test('the host-tools pin is a release version with SHA-256 sums', () => {
 // installers and the real-app smoke only on full runs, and the family's signing keys stripped before the bundler.
 import { parseJobs } from '../src/util/workflows.mjs';
 
-const APP_WORKFLOWS = ['dyno', 'pitwall'];
+const APP_WORKFLOWS = ['dyno'];
 // Apps on the shared kit (ci.yml's app leg through paddock.ci.json, <app>-release.yml through app-release.yml), not yet every app.
-const KIT_APPS = ['pitcrew', 'spotter'];
+const KIT_APPS = ['pitcrew', 'spotter', 'pitwall'];
 const ciContract = (app) => JSON.parse(read(join(PADDOCK, 'apps', app, 'paddock.ci.json')));
 const appWorkflow = (app) => read(join(WORKFLOWS, `${app}.yml`));
 const appJob = (app, id) => parseJobs(appWorkflow(app)).find((j) => j.id === id);
@@ -838,6 +838,26 @@ test('the app bundles get the family keys stripped of whitespace (rule 25, C06),
     const conf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
     assert.deepEqual(conf.plugins.updater.endpoints, [`https://dev.decryptology.net/decryp7/paddock/releases/download/${app}-latest/latest.json`], `${app}: the updater reads only Paddock's ${app}-latest`);
     assert.match(wf, /\*\*Existing installs:\*\* download this version once by hand/, `${app}: the First launch section says to reinstall once`);
+  }
+});
+
+test('app-gates tests last-packages apart on Linux only, and a host leg leaves them out of clippy, tests and doc tests', () => {
+  const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
+  assert.match(gates, /for pkg in \$LAST_PACKAGES; do exclude\+=\(--exclude "\$pkg"\); last\+=\(-p "\$pkg"\); done/, 'one list feeds the exclusions and the separate run');
+  assert.match(gates, /step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run --workspace \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
+  assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run \$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
+  assert.match(gates, /step cargo clippy --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
+  assert.match(gates, /step cargo test --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
+  assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');
+  assert.match(read(join(WORKFLOWS, 'ci.yml')), /last-packages: \$\{\{ matrix\.last_packages \}\}/, 'ci.yml hands the contract field to app-gates');
+});
+
+test('app-gates reports every failed check: the steps after a failed check still run', () => {
+  const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
+  for (const name of ['Rust checks', 'Rust (', 'UI (', 'End-to-end tests']) {
+    const at = gates.indexOf(`- name: ${name}`);
+    assert.ok(at > 0, name);
+    assert.match(gates.slice(at, at + 300), /if: \$\{\{ !cancelled\(\) && steps\.prepare\.outcome != 'failure' && /, `${name} runs after an earlier check failed`);
   }
 });
 

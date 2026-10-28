@@ -4,6 +4,7 @@ use crate::process;
 use pitwall_core::fit::Room;
 use pitwall_core::hardware::{self, Gpu, Hardware};
 use pitwall_core::memory::System;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Detect the hardware: CPU, RAM and GPUs (NVIDIA through `nvidia-smi` when present, Apple Silicon unified memory).
@@ -49,9 +50,17 @@ pub fn read_system(hw: &Hardware) -> System {
     crate::os_signals::current().apply(sys)
 }
 
-/// The room a fit check has right now.
-pub fn room(hw: &Hardware, releasable: u64) -> Room {
-    let sys = read_system(hw);
+/// Where serving reads live memory from when it plans a load or a release: the host by default (`read_system`), a pinned
+/// machine in tests, so a load's outcome never depends on how much memory the CI runner happens to have free.
+pub type MemoryReader = Arc<dyn Fn(&Hardware) -> System + Send + Sync>;
+
+/// The host's memory, read live.
+pub fn host_memory() -> MemoryReader {
+    Arc::new(read_system)
+}
+
+/// The room a fit check has over a memory reading already taken (see [`read_system`]).
+pub fn room_from(sys: &System, hw: &Hardware, releasable: u64) -> Room {
     Room {
         ram_total: sys.total,
         ram_available: sys.available,
@@ -113,7 +122,8 @@ mod tests {
         assert!(hw.total_ram > 0 && hw.cpu_cores >= 1);
         let s = read_system(&hw);
         assert!(s.total > 0 && s.available <= s.total);
-        assert!(room(&hw, 0).ram_total > 0);
+        assert!(host_memory()(&hw).total > 0, "the default reader is the host");
+        assert_eq!(room_from(&s, &hw, 7).ram_releasable, 7);
         assert!(pid_alive(std::process::id()));
         assert!(rss(std::process::id()) > 0);
         let _ = free_disk(std::path::Path::new("."));

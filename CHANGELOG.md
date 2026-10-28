@@ -12,6 +12,19 @@ Conventional Commits; one semver tag for the whole repo.
   tests), `e2e`/`e2eShards` (end-to-end legs, one per shard, in parallel), `e2eArtifacts` (failure report upload), `e2eWebkit` (a WebKit leg of its own), a `webkit` input on `ci.yml`'s manual run (and the Spotter release dispatch passes it),
  `tauri-bundle` `--prepare` (`app-release.yml` input `prepare`: a command after `npm ci`, e.g. building the UI library).
 
+### Pitwall on the shared CI kit (WP-C2)
+- Pitwall is a leg of `ci.yml` (`apps/pitwall/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin
+  `pitwall-release.yml` (plus the WebKit e2e); `pitwall.yml` and Pitwall's copies of the release scripts, bundle verify,
+  commit lint, diagram export and check-index are gone. `pitwall-server --version` is started from the built macOS app.
+- New contract field `rustChecks` (Linux lines that run only with the Rust half: Pitwall's coverage guard and time-zone tests).
+- New contract field `lastPackages` (`app-gates` input `last-packages`): packages tested apart and last on Linux, left out of host legs
+  (Pitwall's Tauri shell, whose build overwrites the server binary the other tests start).
+- Pitwall's server plans loads against a `MemoryReader` (`Serving::set_memory_reader`, the host by default); its tests pin a roomy machine.
+  The eight-slot slots tests answered 503 `insufficient_memory` on a Windows runner with less than about 11 GiB free (run 6456, job 12127).
+- Every memory reading of `pitwall-server` (dashboard sample, limit status, fit checks in management and updates) goes through that one reader.
+- New contract field `windowsClippy` (`app-gates` input `windows-clippy`, default off): clippy also on the Windows leg. Pitwall sets it, so
+  the server's Windows-service code is linted in CI as before. A failed `prepare` now stops the later `app-gates` steps, which otherwise all report.
+
 ### Windows CI: tests that measured the runner's disk, and a toolchain step that says why it failed
 - Four tests that timed out on a slow Windows runner (run 6461) prove their behaviour without bulk disk work: the log
   tail is read from a synthetic 1 GiB source that counts the bytes read (a real 1 GiB `set_len` file is a gigabyte of

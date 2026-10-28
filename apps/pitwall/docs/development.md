@@ -14,7 +14,7 @@ crates/pitwall-loopback  HTTP client that can only reach 127.0.0.1 (used to talk
 crates/pitwall-server    the windowless server: engines, library, serving, auth, HTTP APIs, management API
 app/src-tauri            the Tauri 2 shell: tray, window, commands, updater 
 app/src                  the Angular UI (standalone components, signals, SignalStores)
-scripts/                 commit-lint, release manifest (latest.json), export-diagrams.sh, ci/ helpers
+scripts/                 sidecar.mjs, tauri-before-build.mjs, ci/ checks (icons, privacy, UI coverage); commit lint, latest.json, publish, bundle verify and check-index are the shared kit
 docs/adr/                architecture decisions (index in docs/adr/README.md)
 docs/diagrams/           draw.io sources (.drawio) and exported SVGs; see design.md
 docs/screenshots/        UI screenshots (light and dark), produced by the Playwright capture
@@ -76,7 +76,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny --workspace check
-node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs
+node --test scripts/ci/*.test.mjs
+node --test conformance/test/*.test.mjs   # (repo root) the shared scripts: commit lint, latest.json, publish, check-index
 (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
 ```
 
@@ -86,14 +87,15 @@ Extra checks that CI runs:
   manifest ([ADR 0001](adr/0001-local-only.md)). The Rust test `crates/pitwall-server/tests/privacy.rs` checks the same
   from inside the crate, plus that handlers cannot reach the network and that engines get a scrubbed environment.
 - `scripts/ci/ui-coverage-guard.mjs`: Angular line coverage of at least 80 %.
-- `scripts/ci/check-index.mjs`: the built `index.html` has no inline elements (the Tauri CSP nonce rule in
+- `conformance/ci/check-index.mjs` (shared): the built `index.html` has no inline elements (the Tauri CSP nonce rule in
   [suite-lessons.md](suite-lessons.md)).
-- `scripts/ci/macos-verify-bundle.sh`: the `.app` is ad-hoc sealed and resolves its bundled libraries.
+- `conformance/release/macos-verify-bundle.sh` (shared, the `macos-verify` action): the `.app` and the DMG are ad-hoc sealed, resolve
+  their bundled libraries and `pitwall-server --version` starts from the built app.
 - Coverage: `cargo llvm-cov -p pitwall-core --summary-only` (target 99 % lines).
 - Cross-target type checks: `cargo clippy -p pitwall-core -p pitwall-server --target x86_64-pc-windows-msvc` and
   `--target x86_64-apple-darwin`.
 
-Commit messages are Conventional Commits, checked by `scripts/commit-lint.mjs` (the `commit-msg` hook). Never add
+Commit messages are Conventional Commits, checked by the shared `paddock-conformance commit-lint` (`ci.yml`'s `commits` job on pull requests). Never add
 Co-Authored-By or AI attribution lines.
 
 ## Tests
@@ -115,7 +117,7 @@ Tests never leave processes behind (children are killed on drop), never touch re
 Diagram sources are draw.io files in `docs/diagrams/`; SVGs are generated.
 
 ```sh
-scripts/export-diagrams.sh     # needs draw.io desktop (DRAWIO=/path overrides discovery) and node
+bash ../../diagrams/scripts/export-diagrams.sh "$PWD/docs/diagrams"   # from apps/pitwall; needs draw.io desktop (DRAWIO=/path overrides discovery) and node
 ```
 
 Follow [diagrams/STYLE.md](diagrams/STYLE.md), keep the `.drawio` uncompressed, update the footer date when a diagram

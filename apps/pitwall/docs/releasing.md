@@ -6,15 +6,17 @@ the release job publishes a Gitea release with the installers, release notes fro
 information Pitwall's updater reads. Installers are also built for nightly runs and manual runs of the workflow.
 
 ```sh
-git tag v0.2.0 && git push origin v0.2.0
+git tag pitwall-v0.2.0 && git push origin pitwall-v0.2.0
 ```
 
 The version in the tag must match `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`. Updaters read the
 `latest.json` of the latest release; pre-releases are not offered.
 
 Status today: the Tauri shell exists (`app/src-tauri`, with `externalBin` bundling the server as a sidecar and a
-separate `tauri.<os>.conf.json` per platform), `.gitea/workflows/pitwall.yml (repo root)` checks every push on all three platforms and
-the `release` job of `build.yml` builds and publishes for `v*` tags, only after every check job passed. Nothing has been released and no installer has been published yet, and
+separate `tauri.<os>.conf.json` per platform), Pitwall is a leg of the monorepo's `ci.yml` (`apps/pitwall/paddock.ci.json`: Rust on Linux, Windows and macOS, the
+frontend with the Chromium e2e), and `.gitea/workflows/pitwall-release.yml` (repo root) builds the installers on three platforms
+and publishes for `pitwall-v*` tags through the shared `app-release.yml`, only after Pitwall's `ci.yml` legs (WebKit e2e included) passed;
+`latest.json` also goes on the moving `pitwall-latest` release, which installed copies read. Nothing has been released and no installer has been published yet, and
 the installers have not been installed on real Windows and Linux machines. The server binary also builds on its own
 (`cargo build -p pitwall-server --profile dist`).
 
@@ -32,10 +34,10 @@ The signing secrets are **not set yet**. Builds must work without them, and do:
   Gatekeeper asks the user to approve the app on first launch ([macos.md](macos.md)).
 - While the build is ad hoc the **hardened runtime is off** (`hardenedRuntime: false` in `tauri.macos.conf.json`): ad-hoc
   code under the hardened runtime enforces library validation and cannot load a library signed by its vendor ("different
-  Team IDs"). When the `APPLE_SIGNING_IDENTITY` secret names a real identity, `scripts/ci/tauri-bundle.sh` passes
-  `{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). `scripts/ci/macos-verify-bundle.sh` fails the
+  Team IDs"). When the `APPLE_SIGNING_IDENTITY` secret names a real identity, the shared `tauri-bundle` action passes
+  `{"bundle":{"macOS":{"hardenedRuntime":true}}}` (notarization needs it). The shared `macos-verify` action (`conformance/release/macos-verify-bundle.sh`) fails the
   build when an ad-hoc Mach-O has the hardened runtime on, when bundled Mach-Os disagree on their TeamIdentifier, or when a
-  sidecar does not start from the built app (`--version`), on the `.app` and on the copy inside the DMG.
+  sidecar does not start from the built app (`pitwall-server --version`), on the `.app` and on the copy inside the DMG.
 - Windows installers are not Authenticode-signed; SmartScreen warns on first run ([windows.md](windows.md)).
 - Linux packages are not signed.
 
@@ -61,9 +63,9 @@ Pitwall needs its **own** updater key pair; never reuse another product's key.
    | `TAURI_UPDATER_PUBKEY` | the contents of `pitwall-updater.key.pub` |
    | `RELEASE_TOKEN` | a Gitea access token with `write:repository` scope, used to publish the release |
 
-   None of them is set yet. With them, `scripts/ci/tauri-bundle.sh` builds with `createUpdaterArtifacts` and the public
-   key passed as a `--config` override, and `scripts/release/latest-json.mjs` writes `latest.json` from the signed
-   installers (`node --test scripts/release/latest-json.test.mjs` tests it).
+   None of them is set yet. With them, the shared `tauri-bundle` action builds with `createUpdaterArtifacts` and the public
+   key passed as a `--config` override, and `conformance/release/latest-json.mjs` writes `latest.json` from the signed
+   installers (`node --test conformance/test/latest-json.test.mjs` at the repo root tests it).
 
 3. Back up the private key and its password (password manager plus an offline copy). Never commit it.
 

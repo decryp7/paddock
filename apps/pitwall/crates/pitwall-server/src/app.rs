@@ -423,7 +423,7 @@ impl AppState {
                 used,
                 requests_last_minute,
                 peak_memory_today: peak,
-                machine_bytes: system::read_system(&self.hardware).total,
+                machine_bytes: self.serving.memory_now().total,
             },
         )
     }
@@ -460,7 +460,7 @@ impl AppState {
 
     /// Memory and GPU reading for the dashboard.
     pub fn memory_sample(&self) -> mgmt::MemorySample {
-        let sys = system::read_system(&self.hardware);
+        let sys = self.serving.memory_now();
         let mut s = sysinfo::System::new();
         s.refresh_memory();
         let (hot_ram, _) = self.serving.hot_ram();
@@ -681,7 +681,7 @@ impl AppState {
         }
         let memory_bytes = self.serving.footprint(&resolved.id);
         if let Some(p) = &perms {
-            limits::check_memory(memory_bytes, system::read_system(&self.hardware).total, p.limits.max_memory_percent).map_err(denied)?;
+            limits::check_memory(memory_bytes, self.serving.memory_now().total, p.limits.max_memory_percent).map_err(denied)?;
             self.warn_limits(app.as_str(), &p.limits, now);
         }
         let queued_ms = queued.elapsed().as_millis() as u64;

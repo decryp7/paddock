@@ -5,6 +5,7 @@
 mod common;
 use common::{harness_in, Harness};
 use pitwall_core::ids::ModelId;
+use pitwall_core::memory::System;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -154,10 +155,8 @@ async fn changing_slots_never_unloads_a_busy_model_and_applies_on_the_next_load(
     // Reloaded, it uses the new count.
     h.delay_ms.store(0, Ordering::SeqCst);
     assert_eq!(h.rpc("unload_model", json!({"id": TINY})).await.status, 200);
-    assert_eq!(
-        h.call("POST", "/v1/chat/completions", Some(&key), Some(chat()), &[]).await.status,
-        200
-    );
+    let reloaded = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat()), &[]).await;
+    assert_eq!(reloaded.status, 200, "{}", reloaded.body);
     assert_eq!(*h.parallels.lock().unwrap(), vec![2, 8]);
     assert_eq!(h.st.serving.slots_for(&model()).get(), 8);
     h.st.serving.release_all();
@@ -173,7 +172,8 @@ async fn the_loaded_footprint_reflects_the_slots() {
     let one = h.st.serving.loaded()[0].ram_bytes;
     h.st.serving.release_all();
     assert_eq!(set_slots(&h, json!(8)).await.status, 200);
-    assert_eq!(ask().await.status, 200);
+    let reply = ask().await;
+    assert_eq!(reply.status, 200, "{}", reply.body);
     let eight = h.st.serving.loaded()[0].ram_bytes;
     assert!(eight > one, "eight slots hold more KV cache than one ({eight} vs {one})");
     h.st.serving.release_all();
@@ -259,4 +259,49 @@ async fn models_and_select_report_the_context_each_slot_gets() {
     let models = h.call("GET", "/x/v1/models", Some(&key), None, &[]).await.json();
     assert_eq!(models["models"][0]["contextPerSlot"].as_u64(), Some(u64::from(total / 4)));
     h.st.serving.release_all();
+}
+
+/// A machine with `available_gib` of free memory and nothing else going on.
+fn machine(available_gib: u64) -> pitwall_server::system::MemoryReader {
+    const GIB: u64 = 1 << 30;
+    std::sync::Arc::new(move |_| System {
+        total: 64 * GIB,
+        available: available_gib * GIB,
+        vram_free: None,
+        os_pressure: false,
+        os_critical: false,
+        foreground_busy: false,
+    })
+}
+
+/// The slot tests run on CI machines of any size (a Windows runner with 8 GiB answered 503 to the eight-slot load, whose KV
+/// cache needs about 9 GiB): what a load needs is compared with the memory reader serving was given, never with the host.
+#[tokio::test]
+async fn a_load_is_planned_against_the_memory_serving_reads_not_the_host() {
+    let h = fresh().await;
+    let key = h.make_key("Memory Probe").await;
+    assert_eq!(set_slots(&h, json!(8)).await.status, 200);
+
+    h.st.serving.set_memory_reader(machine(8));
+    let refused = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat()), &[]).await;
+    assert_eq!(refused.status, 503, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], "insufficient_memory");
+    assert_eq!(h.starts.load(Ordering::SeqCst), 0, "refused before an engine was started");
+
+    h.st.serving.set_memory_reader(machine(48));
+    let served = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat()), &[]).await;
+    assert_eq!(served.status, 200, "{}", served.body);
+    assert_eq!(*h.parallels.lock().unwrap(), vec![8]);
+    h.st.serving.release_all();
+}
+
+/// Every reading of memory (the dashboard sample, the limits' machine size) goes through the one reader on the state, so a
+/// test's machine is the machine everywhere, never the CI runner's.
+#[tokio::test]
+async fn every_memory_reading_uses_the_one_reader_on_the_state() {
+    let h = fresh().await;
+    h.st.serving.set_memory_reader(machine(8));
+    let sample = h.st.memory_sample();
+    assert_eq!(sample.ram_total, 64 << 30);
+    assert_eq!(sample.ram_available, 8 << 30);
 }

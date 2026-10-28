@@ -277,6 +277,7 @@ describe('matrix legs', () => {
   test("an app's host-cleanup patterns match its own paths and never the real runner (every app that has them)", () => {
     const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', 'C:\\runner\\act_runner.exe daemon', '/Users/x/actions-runner/Runner.Listener run'];
     const ours = {
+      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
       pitcrew: ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter\\chrome-win64\\chrome.exe --headless'],
     };
@@ -316,6 +317,27 @@ describe('contracts', () => {
     }
   });
 
+  test('rust checks reach only the Linux leg, and run only when the change reaches the Rust half', () => {
+    const [leg] = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.os === LINUX);
+    assert.match(leg.rust_checks, /cargo llvm-cov nextest -p pitwall-core/);
+    assert.equal(leg.rust, true);
+    for (const l of matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.os !== LINUX)) assert.equal(l.rust_checks, '', 'host legs run the Rust gates only');
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /if: \$\{\{ !cancelled\(\) && steps\.prepare\.outcome != 'failure' && inputs\.rust-checks != '' && inputs\.rust == 'true' \}\}/, 'the action skips them with the Rust half');
+  });
+
+  test('windowsClippy is opt-in: Pitwall lints its Windows-only code, an app without the field keeps the default', () => {
+    const win = (app) => matrix(run(`apps/${app}/crates/${app}-core/src/lib.rs`), graph).filter((l) => l.os === 'windows-latest').map((l) => l.windows_clippy);
+    assert.deepEqual([...new Set(win('pitwall'))], ['true']);
+    assert.deepEqual([...new Set(win('pitcrew'))], ['false']);
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /"\$RUNNER_OS" != Windows \] \|\| \[ "\$WINDOWS_CLIPPY" = true \]; then step cargo clippy/);
+  });
+
+  test("an app's last packages reach every leg, so a host leg and the Linux leg agree on what is tested apart", () => {
+    const legs = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph);
+    assert.deepEqual([...new Set(legs.map((l) => l.last_packages))], ['pitwall-app'], 'Pitwall tests its Tauri shell after the rest');
+    assert.ok(matrix(run('apps/pitcrew/crates/pitcrew-core/src/lib.rs'), graph).every((l) => l.last_packages === ''), 'an app without the field tests its workspace in one run');
+  });
+
   test("an app's process patterns (host-cleanup `pkill -f`) name its own temp folder and never match the real runner", () => {
     const legs = matrix(run('apps/pitcrew/crates/pitcrew-core/src/lib.rs'), graph);
     const patterns = graph.apps.get('pitcrew').processPatterns;
@@ -327,6 +349,31 @@ describe('contracts', () => {
       const re = new RegExp(pat);
       for (const line of ours) assert.match(line, re, `${pat} misses the test copy`);
       for (const line of real) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
+    }
+  });
+
+  test("every process pattern is anchored on a folder of this job, and Pitwall's never reaches an installed app, another job or the user's own engine", () => {
+    for (const [name, app] of graph.apps) {
+      for (const pat of app.processPatterns ?? []) {
+        assert.match(pat, /pitcrew-it-|test-browser-|\.paddock-ci|target-/, `${name}: ${pat} names no temp or build folder of the job`);
+      }
+    }
+    const pitwall = graph.apps.get('pitwall');
+    assert.deepEqual(pitwall.processes ?? [], [], 'no exact process names: they would kill the user\'s installed Pitwall and its engine, and other jobs');
+    const ours = ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'];
+    const near = [
+      '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --port 8080',
+      '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-spotter-app/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-pitwall-bundle/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock/engines/llama-server --port 8081 -m model.gguf',
+      '/Users/x/dev/pitwall/target/debug/pitwall-server --fake-engine',
+      '/opt/homebrew/bin/llama-server --port 8080',
+    ];
+    for (const pat of pitwall.processPatterns) {
+      const re = new RegExp(pat);
+      for (const line of ours) assert.match(line, re, `${pat} misses ${line}`);
+      for (const line of near) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
     }
   });
 

@@ -6,7 +6,7 @@ re-running a script overwrites its diagrams, so make lasting changes here.
 
 ```sh
 node docs/diagrams/src/c4.mjs         # one family: c4 (context, containers), c43 (components), cls, deploy, seq, state, uc, overview
-scripts/export-diagrams.sh            # then export SVG (and the git-ignored 2x PNGs); DRAWIO=/path/to/draw.io if it is not on PATH
+bash ../../diagrams/scripts/export-diagrams.sh "$PWD/docs/diagrams"   # (from apps/pitwall) then export SVG (and the git-ignored 2x PNGs); DRAWIO=/path/to/draw.io if it is not on PATH
 ```
 
 `common.mjs` holds the Pitwall theme and the output date; `uc-lib.mjs` draws use-case diagrams; `overview.mjs` writes the
