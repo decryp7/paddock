@@ -27,7 +27,6 @@ import type {
   ProcessDetails,
   ProcessRef,
   Settings,
-  SizeNode,
   DiskChildren,
   DiskChildrenQuery,
   DiskScanStatus,
@@ -267,10 +266,6 @@ export class TauriBackend implements DynoBackend {
 
   activity(limit: number): Promise<ActivityEntry[]> {
     return this.request({ activity: { limit } });
-  }
-
-  diskUsage(path: string | null): Promise<SizeNode> {
-    return this.request({ diskUsage: { path } });
   }
 
   diskVolumes(): Promise<Volume[]> {

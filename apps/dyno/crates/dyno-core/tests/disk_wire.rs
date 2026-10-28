@@ -106,6 +106,7 @@ fn sample() -> Value {
             to_value(status(7, ScanState::Failed { failure: ScanFailure::CannotStart { reason: "no".into() } }, None)).unwrap(),
             to_value(status(7, ScanState::Failed { failure: ScanFailure::Internal { detail: "bug".into() } }, None)).unwrap(),
         ],
+        "settings": to_value(dyno_core::disk::settings::DiskSettings::default()).unwrap(),
         "phases": [to_value(ScanPhase::ReadingVolumeFacts).unwrap(), to_value(ScanPhase::ReadingFolders).unwrap()],
         "children": children(),
     })

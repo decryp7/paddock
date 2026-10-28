@@ -27,7 +27,6 @@ import type {
   ProcessRef,
   ProcessSample,
   Settings,
-  SizeNode,
   DiskChildren,
   DiskChildrenQuery,
   DiskScanStatus,
@@ -90,7 +89,6 @@ import {
   demoPlugins,
   demoSettings,
   demoStartup,
-  diskTree,
   healthReasons,
 } from './mock/data';
 import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
@@ -643,10 +641,6 @@ export class MockBackend implements DynoBackend {
   }
 
   // ------------------------------------------------------------------------------------------------- rules
-
-  diskUsage(path: string | null): Promise<SizeNode> {
-    return this.reply('diskUsage', () => diskTree(path), 400);
-  }
 
   onDiskScan(listener: (s: DiskScanStatus) => void): Unsubscribe {
     return this.disk.onStatus(listener);

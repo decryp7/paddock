@@ -2,7 +2,7 @@
 //! answer one level of a scan at a time. Read-only: nothing here changes a file (ADR 0021).
 
 use super::engine::{End, LiveWorkers, Snapshot, Walk, WalkConfig, WalkHooks};
-use super::usage;
+use super::folder;
 use super::volumes::{ListedVolume, VolumeLister};
 use dyno_core::disk::index::{DiskChildren, NodeId, ScanLimits};
 use dyno_core::disk::scan::{walk_threads, DiskScanStatus, DiskTarget, EventGate, ScanFailure, ScanPhase, ScanProgress, ScanState};
@@ -183,7 +183,7 @@ pub struct DiskCentre {
     sink: Arc<dyn StatusSink>,
     clock: Arc<dyn Clock>,
     cores: usize,
-    limits: ScanLimits,
+    limits: Mutex<ScanLimits>,
     next: AtomicU64,
     scans: Mutex<Vec<Arc<Entry>>>,
     live: Mutex<HashMap<String, Arc<LiveWorkers>>>,
@@ -209,11 +209,16 @@ impl DiskCentre {
             sink,
             clock,
             cores,
-            limits,
+            limits: Mutex::new(limits),
             next: AtomicU64::new(1),
             scans: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// New limits for the scans that start from now on (a running scan keeps its own).
+    pub fn set_limits(&self, limits: ScanLimits) {
+        *lock(&self.limits) = limits;
     }
 
     /// The volumes mounted now.
@@ -243,7 +248,7 @@ impl DiskCentre {
                 })
             }
             DiskTarget::Folder { path } => {
-                let root = usage::check(path).map_err(|m| err(ErrorCode::BadRequest, m))?;
+                let root = folder::check(path).map_err(|m| err(ErrorCode::BadRequest, m))?;
                 let home = listed
                     .into_iter()
                     .filter(|l| root.starts_with(&l.root) || root.starts_with(&l.volume.mount))
@@ -315,7 +320,7 @@ impl DiskCentre {
         let threads = walk_threads(&r.location, r.rotational, self.cores);
         let cfg = WalkConfig {
             threads,
-            limits: self.limits,
+            limits: *lock(&self.limits),
             cross_volumes: false,
             total_bytes: r.total_bytes,
             live,
@@ -865,6 +870,20 @@ mod tests {
             ErrorCode::NotFound
         );
         assert_eq!(r.centre.volumes().len(), 1);
+    }
+
+    #[test]
+    fn new_limits_apply_to_the_next_scan() {
+        let fs = Arc::new(FakeFs::new());
+        let root = fs.root();
+        for i in 0..6 {
+            let d = fs.dir(&root, &format!("d{i}"));
+            fs.file(&d, "x", 1);
+        }
+        let r = rig(fs.clone(), vec![vol("V", &root, VolumeLocation::Internal)]);
+        r.centre.set_limits(ScanLimits { max_nodes: 3, notable_bytes: MB, max_hard_links: 1 });
+        let s = r.centre.start(DiskTarget::Volume { id: "V".into() }).unwrap();
+        assert!(wait_final(&r, s.scan).truncated, "the node cap of the setting was used");
     }
 
     #[test]

@@ -31,7 +31,6 @@ describe('TauriBackend: request shapes', () => {
     ['history', (b) => b.history('week', 5), { history: { range: 'week', end: 5 } }],
     ['history now', (b) => b.history('hour', null), { history: { range: 'hour', end: null } }],
     ['activity', (b) => b.activity(30), { activity: { limit: 30 } }],
-    ['diskUsage', (b) => b.diskUsage(null), { diskUsage: { path: null } }],
     ['diskVolumes', (b) => b.diskVolumes(), 'diskVolumes'],
     ['startDiskScan of a volume', (b) => b.startDiskScan({ volume: { id: '/' } }), { startDiskScan: { target: { volume: { id: '/' } } } }],
     ['startDiskScan of a folder', (b) => b.startDiskScan({ folder: { path: '/x' } }), { startDiskScan: { target: { folder: { path: '/x' } } } }],

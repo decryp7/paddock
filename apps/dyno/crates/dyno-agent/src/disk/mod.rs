@@ -1,26 +1,15 @@
-//! The disk-space map (read-only): a bounded size tree of one folder. Nothing here changes a file.
+//! The disk map (read-only): volumes, scans as jobs and one-level queries over a size index. Nothing here changes a file.
 
 pub mod centre;
 pub mod engine;
 pub mod fs;
+pub mod folder;
 #[cfg(test)]
 pub(crate) mod testing;
-pub mod usage;
 pub mod volumes;
 pub mod walk;
 
-use dyno_core::disk::SizeNode;
 use dyno_core::protocol::{AgentError, ErrorCode, Message, Reply, Request};
-use walk::Budget;
-
-/// The size tree of `path` (the system drive when `None`).
-pub fn disk_usage(path: Option<&str>) -> Result<SizeNode, String> {
-    let root = match path {
-        Some(p) => usage::check(p)?,
-        None => usage::default_root(),
-    };
-    Ok(usage::size_tree(&root, Budget::new(usage::MAX_ENTRIES, usage::MAX_SECS)))
-}
 
 /// Answers the disk map's requests (volumes, scans as jobs, one level at a time).
 pub fn handle(shared: &crate::agent::Shared, request: Request) -> Result<Reply, AgentError> {

@@ -6,7 +6,6 @@ use crate::activity::ActivityEntry;
 use crate::alerts::Alert;
 use crate::anomaly::Anomaly;
 use crate::diagnosis::Diagnosis;
-use crate::disk::SizeNode;
 use crate::forecast::DiskTrend;
 use crate::grouping::AppGroup;
 use crate::health::HealthReport;
@@ -87,11 +86,6 @@ pub enum Request {
     Activity {
         /// At most this many.
         limit: u32,
-    },
-    /// The size tree of a folder (the system disk when absent).
-    DiskUsage {
-        /// The folder.
-        path: Option<String>,
     },
     /// The health report.
     Health,
@@ -585,8 +579,6 @@ pub enum Reply {
     Anomalies(Vec<Anomaly>),
     /// History.
     History(Box<History>),
-    /// A size tree.
-    SizeTree(Box<SizeNode>),
     /// The health report.
     Health(Box<HealthReport>),
     /// Startup entries.
@@ -728,7 +720,6 @@ impl Reply {
             Reply::Diagnosis(x) => v(x),
             Reply::Anomalies(x) => v(x),
             Reply::History(x) => v(x),
-            Reply::SizeTree(x) => v(x),
             Reply::Health(x) => v(x),
             Reply::Startup(x) => v(x),
             Reply::Report(x) => v(x),

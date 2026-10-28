@@ -134,6 +134,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             core.settings = (*settings).normalised();
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
+            shared.disk.set_limits(core.settings.disk.limits());
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
@@ -289,9 +290,6 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         | Request::DiskScans
         | Request::DiskChildren { .. }
         | Request::DiskPath { .. }) => crate::disk::handle(shared, r),
-        Request::DiskUsage { path } => crate::disk::disk_usage(path.as_deref())
-            .map(|n| Reply::SizeTree(Box::new(n)))
-            .map_err(bad),
         r @ (Request::SearchSeed { .. }
         | Request::WebSearch { .. }
         | Request::FileHash { .. }

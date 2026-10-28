@@ -232,6 +232,7 @@ impl Shared {
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
         notes.extend(warn);
         let settings = settings.unwrap_or_default().normalised();
+        let settings_limits = settings.disk.limits();
         let alarms = crate::alarms::AlarmCentre::load(&store, settings.alarms);
         let mut core = Core {
             store,
@@ -327,7 +328,7 @@ impl Shared {
                 Arc::new(crate::disk::BroadcastStatus(me.clone())),
                 Arc::new(crate::disk::centre::SystemClock::default()),
                 cores,
-                dyno_core::disk::index::ScanLimits::default(),
+                settings_limits,
             ),
             cores,
             stop: AtomicBool::new(false),

@@ -26,7 +26,6 @@ import type {
   ProcessDetails,
   ProcessRef,
   Settings,
-  SizeNode,
   DiskChildren,
   DiskChildrenQuery,
   DiskScanStatus,
@@ -115,8 +114,7 @@ export interface DynoBackend {
 
   // Health.
   health(): Promise<HealthReport>;
-  /** The disk map: a folder's size with its biggest children (the system drive when `null`). */
-  diskUsage(path: string | null): Promise<SizeNode>;
+  // The disk map.
   /** The volumes mounted now: internal, external and network, with capacity. */
   diskVolumes(): Promise<Volume[]>;
   /** Starts a scan (a job) and resolves at once with its status; the same target again returns the running scan. */

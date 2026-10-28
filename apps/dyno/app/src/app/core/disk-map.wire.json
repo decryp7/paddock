@@ -91,6 +91,10 @@
       }
     }
   },
+  "settings": {
+    "notableFileMib": 10,
+    "scanFolders": 2000000
+  },
   "statuses": [
     {
       "name": "Macintosh HD",

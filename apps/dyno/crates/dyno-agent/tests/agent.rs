@@ -466,35 +466,6 @@ fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
 // ------------------------------------------------------------------------------------------------------- disk map
 
 #[test]
-fn the_disk_map_sizes_a_folder_and_validates_its_path() {
-    let h = Harness::start();
-    let peer = h.client();
-    let work = h._tmp.path().join("mapped");
-    std::fs::create_dir_all(&work).unwrap();
-    std::fs::write(work.join("one"), b"11").unwrap();
-    std::fs::write(work.join("two"), b"2222").unwrap();
-    // The disk map validates its path.
-    assert!(ask(
-        &peer,
-        Request::DiskUsage {
-            path: Some("relative".into())
-        }
-    )
-    .is_err());
-    let Reply::SizeTree(tree) = ask(
-        &peer,
-        Request::DiskUsage {
-            path: Some(work.to_string_lossy().into_owned()),
-        },
-    )
-    .unwrap() else {
-        panic!("tree")
-    };
-    assert_eq!(tree.bytes, 6);
-    assert!(work.join("one").exists() && work.join("two").exists(), "mapping moves nothing");
-}
-
-#[test]
 fn the_weekly_report_is_built_from_stored_data_and_exported_as_markdown_and_html() {
     let h = Harness::start();
     let peer = h.client();

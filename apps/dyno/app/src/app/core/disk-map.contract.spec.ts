@@ -1,4 +1,4 @@
-import type { DiskChildren, DiskScanStatus, DiskTarget, ScanPhase, Volume } from './api.types';
+import type { DiskChildren, DiskSettings, DiskScanStatus, DiskTarget, ScanPhase, Volume } from './api.types';
 import wire from './disk-map.wire.json';
 
 /**
@@ -48,6 +48,8 @@ const children: DiskChildren = {
   nextOffset: null,
 };
 
+const settings: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10 };
+
 const expected = {
   requests: {
     diskVolumes: 'diskVolumes',
@@ -68,6 +70,7 @@ const expected = {
     status({ failed: { failure: { cannotStart: { reason: 'no' } } } }, null),
     status({ failed: { failure: { internal: { detail: 'bug' } } } }, null),
   ],
+  settings,
   phases,
   children,
 };

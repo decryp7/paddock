@@ -262,6 +262,13 @@ impl Walk {
     pub fn cancel(&self) {
         self.stopped.store(true, Ordering::SeqCst);
         self.finish(End::Cancelled);
+        self.wake_workers();
+    }
+
+    /// Wakes every worker waiting for work. The queue lock is taken first: a worker that has just checked `stopped` and
+    /// is about to wait holds it, so the wake-up can never slip in between and be lost.
+    fn wake_workers(&self) {
+        drop(lock(&self.queue));
         self.wake.notify_all();
     }
 
@@ -285,7 +292,7 @@ impl Walk {
         }
         self.stopped.store(true, Ordering::SeqCst);
         self.finish(End::Failed(failure));
-        self.wake.notify_all();
+        self.wake_workers();
     }
 
     fn worker_exited(&self) {

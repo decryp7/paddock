@@ -413,11 +413,12 @@ export interface ActivityEntry {
 
 // ----------------------------------------------------------------------------------------------------- disk map
 
-export interface SizeNode {
-  name: string;
-  path: string;
-  bytes: number;
-  children: SizeNode[];
+/** `Settings.disk`: every key optional. */
+export interface DiskSettings {
+  /** The most nodes one scan keeps (10,000 to 5,000,000). */
+  scanFolders?: number;
+  /** Files of at least this many MiB get a node of their own (1 to 1,024). */
+  notableFileMib?: number;
 }
 
 /** The protocol of a network volume. */
@@ -717,6 +718,8 @@ export interface Settings {
   hardwareAlarms?: HardwareAlarms;
   /** New and unusual programs: the baseline and its learning period (the engine fills the default when absent). */
   unusual?: UnusualSettings;
+  /** The disk map's limits (the engine fills the defaults when absent). */
+  disk?: DiskSettings;
   /** Maintenance windows: when Dyno's own heavier background work may run. */
   maintenance: MaintenanceSettings;
   /** Backup health checks. */

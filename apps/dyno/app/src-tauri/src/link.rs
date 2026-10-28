@@ -759,8 +759,12 @@ mod tests {
         // The agent's own errors keep their code.
         let err = r
             .link
-            .call(Request::DiskUsage {
-                path: Some("relative".into()),
+            .call(Request::DiskChildren {
+                scan: 99,
+                node: None,
+                offset: 0,
+                limit: 1,
+                min_fraction: 0.0,
             })
             .unwrap_err();
         assert_ne!(err.code, ErrorCode::AgentUnavailable);
