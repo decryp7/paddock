@@ -543,6 +543,18 @@ API). **Rule:** one release at a time; release-critical work first; other apps p
 CI capacity allow and only if they don't change shared code the release depends on (rule 1 and ER-1, amended
 2026-10-28).
 
+## A turn budget in a test wait is a timeout in disguise (2026-10-28, paddock-ui, Debrief)
+The boot-every-dialog harness gave a dialog window 200 macrotask turns to become stable, and Debrief's dialog spec 400
+render rounds to leave Loading. On a busy CI runner a first `import()` of the settings screen took longer, and both
+reported "never leaves Loading" for a dialog that was fine. **Rule:** a test waits on the condition itself (the promise the
+code awaits, `whenStable` over pending tasks), never on a count of turns, rounds or milliseconds; a wait that can hang is
+left to the runner's test timeout, which names the test (rule 5).
+
+## Material first, because it is tested (2026-10-28)
+Hand-rolled components (for example `pd-table`'s sticky header over virtual scroll) cost us bugs that the Angular
+Material and CDK equivalents already solve and test. **Rule:** use a Material component wherever one fits and CDK for
+the behaviour Material lacks; hand-roll only what neither provides, with the reason in the doc comment (rule 47).
+
 ## A fake clock next to real processes must not run away from the real one (2026-10-28, Pitcrew)
 Pitcrew's supervision tests drive the supervisor with a fake clock but real runner processes, and failed or timed out
 only on a loaded CI runner (run 6628): (1) a test took the runner's "task started" line for the job's process, then
