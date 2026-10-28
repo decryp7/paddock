@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, part 6: dialog content polish after the visual review
+
+- `pd.about` shows its facts in a two-column label and value grid, says the system in words ("macOS (Apple silicon)", "Web browser") and links the releases page; the shared About, Updates and What's New styles use the `pd-` class names the templates use (buttons are 8 px apart again).
+- `pd.updates`, `pd.setup` and `pd.wb.dock.layout-manage` are modeless forms (medium, fitted to their content) instead of fixed-size tools; their generated contracts and the shell demo's manifest changed. Updates keeps the automatic-check box, the channel and the install-on-quit box on separate rows and says "Not checked yet" once. Set-up has one filled button (the first step to do, or Repair) and names the missing Pitwall once. Manage layouts has a designed empty state with a Save current layout action (also in the footer once layouts exist), which closes with `{ save: true }` and runs the dock's Save layout flow (`LayoutManageResult.save`).
+- `sd.inspector` is a modeless form, shows "Queued" once and the uptime as "12 min 34 s". Report a problem keeps its Size column on one line and breaks long names and `***`; the channel secret's Show button is as tall as its input. Labels are muted 12/500 and intro text muted across these dialogs, with curly quotes.
+
 ### Shared dialog API, part 5: macOS attach at show and the configured deadline
 - macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
   (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of

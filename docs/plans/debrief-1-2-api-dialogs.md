@@ -30,7 +30,8 @@ Widths are the named steps `narrow` (400), `medium` (560) and `wide` (720). "Act
 |---|---|---|---|---|
 | `pd.confirm` (new, §5 of the ADR) | decision | modal | narrow | C; P or D (`confirm.destructive`) |
 | `pd.about`, `pd.whats-new` | viewer | modeless | wide | C |
-| `pd.updates`, `pd.settings`, `pd.setup`, `pd.wb.dock.layout-manage` | tool | modeless | own sizes: updates 560 x 480, settings 880 x 620, setup 560 x 520, layout-manage 480 x 360 (user, 2026-10-28) | C; status line |
+| `pd.settings` | tool | modeless | own size 880 x 620 (user, 2026-10-28) | C; status line |
+| `pd.updates`, `pd.setup`, `pd.wb.dock.layout-manage` | form (after the visual review, 2026-10-28: their content is short and varies, so the frame measures it up to the cap) | modeless | medium | C (Close), P by phase |
 | `pd.channels.secret`, `pd.mcp.key`, `pd.wb.dock.layout-save` | form | modal | narrow | C, P |
 | `pd.channels.remove`, `pd.mcp.revoke`, `pd.storage.confirm` | decision | modal | narrow | C (Enter), D |
 | `pd.report-problem` | decision → **form**, **modeless** (a text area, a report that loads and saves; the user may look at the app while writing) | modeless | wide (680 today) | C, P "Save report"; after saving, P "Done" |
@@ -102,7 +103,7 @@ have to.
 | decision (12) | parser-import-confirm, package-review, plugin-permissions, marker-override, encoding, open-live, unsaved-changes, recent-projects, open-ask, close-prompt (`requiredChoice`), import-range, save-layout |
 | form, modal (9) | drop, mark, infer, mask, extract, paste, add-tile, redaction, **ai-setup** (fitted, medium; the download is a job) |
 | form, modeless (18) | parser-editor, clock, collector, note-editor, search-web, folder-setup, knowledge-editor, profile-native, profile-etl, profile-dotnet, report-problem (→ `pd.report-problem`), alert-rules, export, manage-layouts, report-export, **format-wizard** (fitted, wide, stepper in the header slot), **ai-propose** (fitted, wide), **redacted-copy** (fitted, medium; preview capped and scrolling in the body) |
-| viewer (7) | about (→ `pd.about`), updates (→ `pd.updates`, a tool), cheat-sheet, incident-summary, ai-narrative, ai-proposal-result, ai-regex |
+| viewer (7) | about (→ `pd.about`), updates (→ `pd.updates`, a modeless form), cheat-sheet, incident-summary, ai-narrative, ai-proposal-result, ai-regex |
 | tool (4) | settings, research, ai-models, **ai-query** (from fixed-height form: user-sized, results stream) |
 
 Notes:
