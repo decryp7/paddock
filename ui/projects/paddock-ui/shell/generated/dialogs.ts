@@ -6,6 +6,8 @@ export type DialogModality = "modal" | "modeless";
 
 export type DialogSize = { width: number, height: number, };
 
+export type DialogMeasureWire = { content: DialogSize, minContent: DialogSize, };
+
 export type DialogRemembered = { dx: number, dy: number, width: number, height: number, };
 
 export type DialogRequest = { dialogId: string, 
@@ -63,4 +65,4 @@ export const DIALOG_EVENTS = {
 } as const;
 
 /** The commands every dialog window may call whatever its contract says. */
-export const DIALOG_BASE_COMMANDS = ['dialog_take_input', 'dialog_close', 'dialog_fit_height', 'notifications_post', 'notifications_list'] as const;
+export const DIALOG_BASE_COMMANDS = ['dialog_take_input', 'dialog_close', 'dialog_ready', 'dialog_fit', 'notifications_post', 'notifications_list'] as const;

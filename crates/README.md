@@ -272,7 +272,7 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   command is a compile error, and the table's rules (ids, a modal required choice, widths, heights, duplicates) are
   checked when the `static` is built. `Contracts::from_tables(&[...])` builds the run-time contracts;
   `Contracts::allows(dialog, command)` covers `BASE_COMMANDS` (`dialog_take_input`, `dialog_close`,
-  `dialog_fit_height`, `notifications_post`, `notifications_list`), the tables' `base` and the dialog's own list.
+  `dialog_ready`, `dialog_fit`, `notifications_post`, `notifications_list`), the tables' `base` and the dialog's own list.
   `Kind::policy()` is the kind table of ADR 0026 §1 (default width and height, viewer floor 680x560 and grows only,
   `fits`, what each kind remembers), generated into `shell/generated/dialog-kinds.ts`; `ts::contracts_module` writes
   each owner's `dialog-contracts.ts` (`DIALOG_CONTRACTS`, `DialogId`, `DialogCommandOf`, `DIALOG_BASE`), checked by a
@@ -281,17 +281,29 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   the primary display as such); `place` sizes and places on that monitor's work area (remembered offset from the parent
   only when the whole dialog stays there, else centred on the parent and moved inside; shrunk to fit; mixed DPI and
   negative coordinates); `screen_position` gives points on macOS and the exact physical place elsewhere;
-  `memory_for` is what each kind keeps of a remembered place.
+  `memory_for` is what each kind keeps of a remembered place (a decision its offset only, a form its width and offset, a
+  viewer and a tool their size and offset); `Placement::physical_size` rounds up once (`physical_ceil`).
 - `Dialogs` (managed state) records open dialogs by label `d-<host>-<n>` (at most 8 per host), answers the guard
   (`grant_of(label)`, the `paddock_commands::DialogGrant`) and decides close requests (`close_request(label, now)`:
   forwarded as the dialog's Close/Cancel, closed when it did not answer within 1.5 s, a required choice kept unless the
   watchdog marked its page unresponsive).
-- `tauri` feature: `open` (window by kind, no title-bar buttons, owned or independent per OS, modal parent disabled
-  natively except on macOS, `WindowHooks` for the app's webview settings), the commands `dialog_open`,
-  `dialog_take_input`, `dialog_close`, `dialog_fit_height`, `on_window_event` (close request, move/resize, destroyed
-  dialog or host), `page_unresponsive`, `close_all_of`, `set_visible`, `grant_of` for `Guard::dialog_grants`. Events
+- `window`: the wire `Measure { content, minContent }` (TS `DialogMeasureWire`), `plan_fit` (the cap is 75 % of the work
+  area less the window's own outer-minus-inner decorations and limits the preferred size only, never below `minContent`,
+  which becomes the OS minimum; decisions and forms shrink and grow, a viewer only grows, a tool keeps its size) and
+  **`show_mechanism(os)`, the one place the per-OS way of keeping a window unseen is chosen** (`ReadyThenShow`: hidden,
+  shown on `dialog_ready`, method d of the 1.1-0 spike, on every OS today; `OffscreenThenShow`: visible off-screen, moved
+  into place on ready, method b, for Windows if its measurement disagrees).
+- `tauri` feature: `open` (window by kind, created **hidden** at the placed size on the dialog shell's surface colour,
+  no title-bar buttons, owned or independent per OS, `WindowHooks` for the app's webview settings), the commands
+  `dialog_open`, `dialog_take_input`, `dialog_close`, `dialog_ready { measure }` (sizes, then shows and focuses the
+  pending window), `dialog_fit { measure }` (refits), `on_window_event` (close request, move/resize, scale-factor change
+  refits from the last measure, destroyed dialog or host), `page_unresponsive`, `close_all_of`, `set_visible`, `grant_of` for `Guard::dialog_grants`. Events
   `paddock://dialog-result`, `paddock://dialog-closed` (to the opener), `paddock://dialog-close-requested` (to the
-  dialog).
+  dialog). The lifecycle: a window is pending until `dialog_ready`, or until `Dialogs::show_deadline` (1 s;
+  `with_show_deadline`, `paddock-startup`'s `Config::dialog_show_deadline`) passes and it is shown at the placed size
+  (a late `dialog_ready` then fits it once); a modal's parent is disabled when the window is shown, never at creation;
+  opening a pending dialog again creates no window and does not focus (show) it early. The deadline runs through a
+  `Scheduler` (`ThreadScheduler`; tests inject their own and never sleep).
 
 ```rust
 paddock_commands::command_table! {
@@ -299,7 +311,8 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] limit 9 * MIB => paddock_dialogs::tauri::dialog_open,
     Query [DIALOG] => paddock_dialogs::tauri::dialog_take_input,
     Mutation [DIALOG] limit 2 * MIB => paddock_dialogs::tauri::dialog_close,
-    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit_height,
+    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_ready,
+    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit,
     // ... the app's commands
 }
 tauri::Builder::default()
@@ -308,7 +321,7 @@ tauri::Builder::default()
     .on_window_event(|w, e| paddock_dialogs::tauri::on_window_event(w, e))
 ```
 
-Wire types are generated into `ui/projects/paddock-ui/shell/generated/dialogs.ts` (`DialogKind`, `DialogRequest`, `DialogStart`, `DialogResult`, `DialogClosed`, `DialogError`, `DIALOG_EVENTS`,
+Wire types are generated into `ui/projects/paddock-ui/shell/generated/dialogs.ts` (`DialogKind`, `DialogRequest`, `DialogMeasureWire`, `DialogStart`, `DialogResult`, `DialogClosed`, `DialogError`, `DIALOG_EVENTS`,
 `DIALOG_BASE_COMMANDS`; `PADDOCK_WRITE_TS=1 cargo test -p paddock-dialogs --lib generated`).
 ## `paddock-health` (plan S3)
 
