@@ -23,6 +23,8 @@ jobs:
     name: update smoke in a macOS VM
     runs-on: macos-latest
     timeout-minutes: 120
+    env:
+      TART_HOME: /Volumes/d7sst7/ci-tart
     steps:
       - uses: actions/checkout@v4
 
