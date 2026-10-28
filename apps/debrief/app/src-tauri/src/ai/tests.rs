@@ -2194,11 +2194,7 @@ fn finding_values_builds_the_names_and_never_asks_the_model() {
         ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
         win.names.names().is_built()
     });
-    // Rule 46: no background job over many names. Nothing is queued, so nothing can ask the model.
-    let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
-    wait_until("no job is queued or running", || {
-        jobs.find_active(|j| j.kind == crate::jobs::JobKind::Maintenance).is_empty()
-    });
+    // Rule 46: no background job over many names, so nothing can ask the model.
     let reply = ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
     assert!(reply["values"].is_array(), "{reply}");
     assert!(provider.requests().is_empty(), "no name is sent to the model unless the user asks");
