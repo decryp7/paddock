@@ -1,8 +1,7 @@
-import { afterRenderEffect, ChangeDetectionStrategy, Component, computed, ElementRef, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MatIconModule, MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
-import { ICON_GRID, ICON_STROKE } from './outline';
-import { PD_ICON_DOTS, type PdIconName } from './paths';
+import { type PdIconName } from './paths';
 import { ensurePaddockIcons, isPdIcon, pdIconId } from './register';
 
 /**
@@ -29,20 +28,7 @@ export class PdGlyph {
   readonly size = input(16);
   protected readonly id = computed(() => (isPdIcon(this.name()) ? pdIconId(this.name()) : ''));
 
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-
   constructor() {
     ensurePaddockIcons(inject(MatIconRegistry), inject(DomSanitizer), true);
-    // Dots are as heavy as the strokes: never thinner than half the stroke's width on the screen, whatever the size (a 1.5 px
-    // line at 14 px would otherwise outweigh a 0.9 unit dot). The registered literal carries the authored radius.
-    afterRenderEffect(() => {
-      const id = this.id();
-      const min = (ICON_STROKE / 2) * (ICON_GRID / this.size());
-      const dots = id ? (PD_ICON_DOTS[id.slice(3) as PdIconName] ?? []) : [];
-      this.host.nativeElement.querySelectorAll('circle').forEach((c, i) => {
-        const r = dots[i]?.[2];
-        if (r !== undefined) c.setAttribute('r', String(Math.max(r, min)));
-      });
-    });
   }
 }

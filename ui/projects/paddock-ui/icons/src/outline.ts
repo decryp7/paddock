@@ -9,7 +9,7 @@ export const ICON_STROKE = 1.5;
 /** A filled dot on the 24 px grid: centre and radius. */
 export type OutlineDot = readonly [cx: number, cy: number, r: number];
 
-const num = (n: number): number => (Number.isFinite(n) ? Math.round(n * 100) / 100 : 0);
+const num = (n: number): number => (Number.isFinite(n) ? Math.round(n * 1000) / 1000 : 0);
 
 /** The filled circles of `dots` as SVG markup (no stroke, so every engine draws them solid). */
 export function dotsMarkup(dots: readonly OutlineDot[]): string {

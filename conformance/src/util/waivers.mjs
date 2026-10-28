@@ -26,9 +26,10 @@ export function parseWaivers(text) {
 
 /**
  * Splits findings into kept and waived, and adds findings for bad waivers: a waiver without a reason or a valid date is
- * W002, one past its date is W001 (and waives nothing).
+ * W002, one past its date is W001 (and waives nothing). With `ran` (the ids of the checks that ran), a live waiver of one of them
+ * that matched no finding is a W003 warning: the debt it covered is gone, so delete it.
  */
-export function applyWaivers({ findings, waivers, problems = [], now = new Date(), file = 'paddock.waivers.toml', pathMatches }) {
+export function applyWaivers({ findings, waivers, problems = [], now = new Date(), file = 'paddock.waivers.toml', pathMatches, ran = null }) {
   const today = now.toISOString().slice(0, 10);
   const extra = problems.map((p) => ({ check: 'W002', severity: 'error', rule: 5, file, line: 1, message: `waiver file: ${p}`, fix: 'Fix the line.' }));
   const live = [];
@@ -46,10 +47,19 @@ export function applyWaivers({ findings, waivers, problems = [], now = new Date(
   }
   const kept = [];
   const waived = [];
+  const used = new Set();
   for (const f of findings) {
     const w = live.find((x) => x.check === f.check && pathMatches(x.path, f.file ?? ''));
+    if (w) used.add(w);
     if (w) waived.push({ ...f, waiver: { reason: w.reason, expires: w.expires } });
     else kept.push(f);
+  }
+  if (ran) {
+    for (const w of live) {
+      if (ran.includes(w.check) && !used.has(w)) {
+        extra.push({ check: 'W003', severity: 'warn', file, line: w.line, rule: 5, message: `waiver for ${w.check} ${w.path} matches nothing`, fix: 'The finding is gone: delete the waiver.' });
+      }
+    }
   }
   return { findings: [...kept, ...extra], waived };
 }

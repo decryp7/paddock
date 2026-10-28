@@ -23,7 +23,7 @@ export const PD_ICON_PATHS = {
   external: 'M13.5 4.5h6v6M19.5 4.5 11 13M17.5 14v5a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1h5',
   pin: 'M9 4h6l-1 5.5 3 3H7l3-3zM12 12.5V20',
   // Status
-  alert: 'M12 4 21 19.5H3zM12 9v3.5',
+  alert: 'M12 4 21 19.5H3zM12 9v3.25',
   // A status error (circle with ×); `alert` (triangle) is the warning shape, `info` (circle i) the info one.
   error: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM9 9l6 6M15 9l-6 6',
   info: 'M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17ZM12 11v5.5',
@@ -84,13 +84,13 @@ export const PD_ICON_DOTS: Readonly<Partial<Record<PdIconName, readonly PdIconDo
     [12, 12, 1.5],
     [19, 12, 1.5],
   ],
-  alert: [[12, 15.75, 0.9]],
-  info: [[12, 7.5, 1]],
+  alert: [[12, 15.75, 1.125]],
+  info: [[12, 7.5, 1.125]],
   keyboard: [
-    [6, 10, 0.9],
-    [10, 10, 0.9],
-    [14, 10, 0.9],
-    [18, 10, 0.9],
+    [6, 10, 1.125],
+    [10, 10, 1.125],
+    [14, 10, 1.125],
+    [18, 10, 1.125],
   ],
 };
 

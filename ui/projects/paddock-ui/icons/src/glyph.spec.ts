@@ -72,27 +72,19 @@ describe('pd-glyph', () => {
     expect(g.dots).toEqual((PD_ICON_DOTS.alert ?? []).map((d) => [...d]));
   });
 
-  it('keeps every dot as heavy as the stroke at any size: radius at least 0.75 * 24 / size (P1-1, rule 40)', async () => {
+  it('authors every dot at least as heavy as the stroke at 16 px (radius >= 1.125, in the data), and draws them the same everywhere', async () => {
+    const authored: Record<string, number[]> = { alert: [1.125], info: [1.125], keyboard: [1.125, 1.125, 1.125, 1.125], more: [1.5, 1.5, 1.5] };
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
-    for (const name of ['alert', 'info', 'keyboard', 'more'] as const) {
-      for (const size of [14, 16, 20, 24, 32]) {
-        const fixture = TestBed.createComponent(PdGlyph);
-        fixture.componentRef.setInput('name', name);
-        fixture.componentRef.setInput('size', size);
-        await fixture.whenStable();
-        const floor = (0.75 * 24) / size;
-        const radii = [...(fixture.nativeElement as HTMLElement).querySelectorAll('circle')].map((c) => Number(c.getAttribute('r')));
-        const authored = (PD_ICON_DOTS[name] ?? []).map((d) => d[2]);
-        expect(radii.length, `${name} ${size}`).toBe(authored.length);
-        radii.forEach((r, i) => {
-          expect(r, `${name} ${size}`).toBeGreaterThanOrEqual(floor - 1e-9);
-          expect(r, `${name} ${size}`).toBeCloseTo(Math.max(authored[i] ?? 0, floor), 6);
-        });
-        // A size change re-applies the floor to the same svg.
-        fixture.componentRef.setInput('size', 14);
-        await fixture.whenStable();
-        for (const c of (fixture.nativeElement as HTMLElement).querySelectorAll('circle')) expect(Number(c.getAttribute('r'))).toBeGreaterThanOrEqual((0.75 * 24) / 14 - 1e-9);
-      }
+    const registry = TestBed.inject(MatIconRegistry);
+    for (const [name, radii] of Object.entries(authored)) {
+      expect((PD_ICON_DOTS[name as PdIconName] ?? []).map((d) => d[2]), name).toEqual(radii);
+      const fixture = TestBed.createComponent(PdGlyph);
+      fixture.componentRef.setInput('name', name);
+      await fixture.whenStable();
+      const glyph = [...(fixture.nativeElement as HTMLElement).querySelectorAll('circle')].map((c) => Number(c.getAttribute('r')));
+      const bare = [...(await firstValueFrom(registry.getNamedSvgIcon(name, 'pd'))).querySelectorAll('circle')].map((c) => Number(c.getAttribute('r')));
+      expect(glyph, name).toEqual(radii);
+      expect(bare, name).toEqual(radii);
     }
   });
 

@@ -112,7 +112,7 @@ test.describe('UI basics review fixes (regressions)', () => {
     expect(strokes.lit24).toEqual(['1.5px', 'non-scaling-stroke', '24']);
   });
 
-  test('every pd: icon is a mat-icon of the registry: pd-glyph and <mat-icon svgIcon> draw the same paths, and no svg, image or fetch request is made (icons on Material)', async ({ page }) => {
+  test('every pd: icon is a mat-icon of the registry: pd-glyph and <mat-icon svgIcon> draw the same markup, and no svg, image or fetch request is made (icons on Material)', async ({ page }) => {
     const requests: string[] = [];
     // Every request from the first byte on: icons come from the registry's literals, so none is an svg, image, fetch or XHR.
     page.on('request', (r) => {
@@ -125,7 +125,7 @@ test.describe('UI basics review fixes (regressions)', () => {
         const name = li.querySelector('.gal-icon-name')?.textContent ?? '';
         const glyph = li.querySelector('[data-row="glyph"] pd-glyph:first-child mat-icon');
         const direct = li.querySelector('.gal-mat--16');
-        const sig = (el: Element | null): string => [...(el?.querySelectorAll('svg path') ?? [])].map((p) => p.getAttribute('d')).join('|') + '#' + (el?.querySelectorAll('svg circle').length ?? 0);
+        const sig = (el: Element | null): string => (el?.querySelector('svg')?.innerHTML ?? '').replace(/\s+/g, ' ');
         const box = (el: Element | null): number[] => [Math.round(el?.getBoundingClientRect().width ?? 0), Math.round(el?.getBoundingClientRect().height ?? 0)];
         return { name, ns: glyph?.getAttribute('data-mat-icon-namespace'), same: sig(glyph) === sig(direct) && sig(glyph) !== '', box: box(glyph), directBox: box(direct) };
       }),
@@ -133,7 +133,7 @@ test.describe('UI basics review fixes (regressions)', () => {
     expect(rows.length).toBeGreaterThanOrEqual(30);
     for (const r of rows) {
       expect(r.ns, r.name).toBe('pd');
-      expect(r.same, `${r.name} glyph and mat-icon paths and dots`).toBe(true);
+      expect(r.same, `${r.name} glyph and mat-icon markup`).toBe(true);
       expect(r.box, r.name).toEqual([16, 16]);
       expect(r.directBox, r.name).toEqual([16, 16]);
     }

@@ -17,13 +17,14 @@ Conventional Commits; one semver tag for the whole repo.
 - Conformance C46 (rule 47): no hand-written `<svg>` in a component template (`.html` or inline `template:`) under `ui/projects/**` and
   `apps/*/app/src/**`, and an svg built in code with `createElementNS(.., 'svg')` (dockview's glyphs, tab and group actions: three shared files
   and Debrief's copy are waived until their dock icons are mat-icons); charts, diagrams and illustrations carry `<!-- conformance: svg-ok — <reason> -->` (or `// conformance: svg-ok — <reason>`).
-  Inventory on 2026-10-28: Debrief 28 and Dyno 14 (dated waivers to 2026-12-31, each migrates in its own branch), shared UI and demos 17 files
-  (one waiver per file), Pitcrew, Pitwall and Spotter none (their charts carry the marker). It runs in Paddock's own conformance job.
-- `pd-glyph` keeps its dots as heavy as the strokes at every size (radius at least 0.75 x 24 / size, as before; the registered literal carries the
-  authored radius). It warns in dev mode when it had to register the set itself because the window has no `providePaddockIcons()`.
+  Inventory on 2026-10-29: Debrief 7 files (14 elements) and the dock group actions of the shared workbench (dated per-file waivers to 2026-12-31,
+  each migrates in its own branch), Dyno none, shared UI and demos 11 files, Pitcrew, Pitwall and Spotter none (charts carry the marker). It runs in Paddock's own conformance job.
+- Dots are as heavy as the strokes in the data: `PD_ICON_DOTS` radii are at least 1.125 (half the 1.5 px stroke at 16 px; alert, info and
+  keyboard were 0.9 to 1), (the alert stem is 0.25 shorter to keep its clearance from the larger dot), so `pd-glyph`, `pd-shell-icon` and a bare `<mat-icon svgIcon="pd:...">` draw the same dots. `pd-glyph` warns in dev mode when it had to register the set itself because the window has no `providePaddockIcons()`.
   `@angular/material` is now a required peer dependency of `@decryp7/paddock-ui` (the icons need it). New glyph `inbox`; `pd-empty-state` and
   `pd-error-state` draw `pd-glyph inbox` and `pd-status-glyph error` instead of their own svg. Close, check, bell, stop and the job state
-  icons of the shared UI are `pd-glyph` now (waivers removed).
+  icons of the shared UI are `pd-glyph` now (waivers removed). Visible changes: the error state's octagon is the family's circle-x, the job and
+  notice icons take the set's 1.5 px stroke (the job check and cross were 1.75), and the toast close is 14 px (was 12).
 - C46 is stricter: it looks in `src/` folders only, ignores an svg inside an HTML comment, catches `<svg:svg>`, and a decorator-head marker covers
   a template with a single svg only. Debrief's and Dyno's charts and illustrations carry svg-ok; Debrief's remaining icons are waived per file.
 - Gallery: the icons page's second row is a real `<mat-icon svgIcon="pd:name">`; e2e checks both rows draw the same literal and fetch nothing.
@@ -35,7 +36,7 @@ Conventional Commits; one semver tag for the whole repo.
   slider, chips, tabs, progress bar and every `matButton` variant (filled = primary, outlined = secondary with the surface-2 fill, text,
   tonal, elevated; danger is the class `pd-button-danger` on any of them; no ripple).
 - New secondary entry `@decryp7/paddock-ui/material`: `providePaddockMaterial()` makes every `mat-form-field` `appearance="outline"` with
-  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.3`) of `@decryp7/paddock-ui`.
+  `floatLabel="always"` and turns ripples off. `@angular/material` is a required peer dependency (`^22.2.4`) of `@decryp7/paddock-ui` (the shared icons need it).
 - `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
   icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
   surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.

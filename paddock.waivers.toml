@@ -147,12 +147,6 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C46"
-path = "ui/projects/shell-demo/src/app/tray-popover.ts"
-reason = "the tray popover icons: moves to mat-icon svgIcon"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C46"
 path = "ui/projects/paddock-ui/workbench/dock/src/dock-glyph.ts"
 reason = "dockview glyphs built in code (dockview renders outside Angular): needs a mat-icon created through ViewContainerRef or a registry-fed svg helper; follow-up"
 expires = "2026-12-31"

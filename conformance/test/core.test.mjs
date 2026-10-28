@@ -127,3 +127,11 @@ test('cli run: the hermetic wrapper passes the exit status through', async () =>
   assert.equal(await main(['run', '--', process.execPath, '-e', 'process.exit(0)'], io), 0);
   assert.equal(await main(['run', '--', process.execPath, '-e', 'process.exit(3)'], io), 3);
 });
+
+test('a waiver of a check that ran and matched nothing is a W003 warning; one of a check that did not run is silent', async () => {
+  const root = makeApp({ 'paddock.waivers.toml': '[[waiver]]\ncheck = "C46"\npath = "apps/gone/*"\nreason = "was needed"\nexpires = "2099-01-01"\n' });
+  const r = await runChecks({ root, app: 'demo', only: ['C46'] });
+  assert.deepEqual(r.findings.map((f) => [f.check, f.severity]), [['W003', 'warn']]);
+  const quiet = await runChecks({ root, app: 'demo', only: ['C06'] });
+  assert.ok(!quiet.findings.some((f) => f.check === 'W003'));
+});
