@@ -41,6 +41,7 @@ export const CHANNELS_STYLES = `
   .pd-ch__hint { color: var(--pd-text-muted); font-weight: normal; font-size: var(--pd-text-caption); }
   .pd-ch__hint--bad { color: var(--pd-danger-text, var(--pd-text)); }
   .pd-ch__check { font-weight: var(--pd-weight-medium); }
+  mat-checkbox.pd-ch__check { margin-inline-start: calc((var(--pd-control-height) - 18px) / -2); }
   .pd-ch__secret { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2) var(--pd-space-3); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-2); grid-column: 1 / -1; }
   .pd-ch__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); }
   .pd-ch__foot .pd-ch__spacer { flex: 1 1 0; }

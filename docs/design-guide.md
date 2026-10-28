@@ -281,7 +281,7 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   Material theme of its own. The accent comes from `data-accent` on `<html>`; a `data-accent` on a subtree does not reach Material
   parts (their tokens resolve on `:root`).
 - **Behaviour defaults.** `providePaddockMaterial()` (`@decryp7/paddock-ui/material`): every `mat-form-field` is
-  `appearance="outline"` with `floatLabel="always"`, button toggles show no check mark, and ripples are off. Feedback is the
+  `appearance="outline"` with `floatLabel="always"`, the slide toggle has no icon in its handle (`hideIcon`), button toggles show no check mark, and ripples are off. It MUST be provided in every bootstrap: the main window and each dialog window (a window without it shows the minus and check icons). Feedback is the
   state layer (hover, pressed) and the keyboard ring, the same calm response as the rest of the family and nothing to switch
   off for Reduce Motion.
 - **Buttons are `matButton`:** `filled` = primary (accent fill), `outlined` = secondary (surface-2 + border-strong), `text` =
