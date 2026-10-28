@@ -65,8 +65,8 @@ export function appOfWorkflow(path, appNames) {
   return hits[0] ?? null;
 }
 
-/** Editor and VCS metadata: marks nothing. */
-export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];
+/** Editor and VCS metadata, and the manual targeted.yml (a dispatch, no gate): marks nothing. */
+export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/, /^\.gitea\/workflows\/targeted\.yml$/];
 
 /** Documentation: marks only the link check... */
 export const DOCS = [/\.md$/, /^docs\//, /^apps\/[^/]+\/docs\//, /^diagrams\//, /(^|\/)LICENSE[^/]*$/];

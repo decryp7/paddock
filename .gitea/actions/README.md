@@ -42,6 +42,17 @@ which are the same steps.
 Scripts the actions run live in `conformance/ci/` and `conformance/release/` (tested with `node --test`); the actions only wire
 inputs to them.
 
+## Targeted runs on a branch (`targeted.yml`)
+
+Branches: affected push CI or `targeted.yml`; full gates once on main before a release. `targeted.yml` is a manual dispatch
+that runs one narrow test on one OS with the kit's own setup (stable workspace, build folder, sccache, pinned nextest, Chrome
+for Testing, node caches) and nothing else: no fmt, clippy, deny or coverage, and it is no gate. Inputs: `app` (an id with
+`apps/<app>/paddock.ci.json`, or `crates`, or `ui`), `os` (`macos`, `windows`, `linux`), `rust-filter` (a nextest filterset such
+as `test(=page::tests::trimmed_url)`; empty skips Rust), `rust-package` (optional `-p`), `npm-command` (run in the app's
+`angularDir`, or `ui`; for example `npx vitest run src/app/x`) and `real-browser` (the pinned Chrome for Testing, from the
+app's `testBrowser`). The cargo folder and `prepare` come from the app's `paddock.ci.json`. A wrong app or OS fails in the
+first step; inputs reach scripts through env only. The workflow marks nothing in the plan (`scripts/affected.mjs` META).
+
 ## Moving an app onto the kit (pattern, pilot: Pitcrew, WP-C1 of docs/research/2026-10-nx-vs-scripts.md)
 
 An app on the kit has no gates workflow of its own and no copy of a kit script. What it keeps is its facts:

@@ -70,6 +70,8 @@ describe('the graph of this tree', () => {
       assert.ok(r.all && r.crates && r.ui && r.eslint && r.conformance && r.tools, f);
       assert.deepEqual(r.apps, APPS, f);
     }
+    const t = run('.gitea/workflows/targeted.yml');
+    assert.deepEqual([t.all, t.crates, t.ui, t.apps], [false, false, false, []], 'the manual targeted.yml marks nothing');
     assert.deepEqual(run('.gitea/workflows/shell-demo-release.yml').apps, ['shell-demo']);
     assert.ok(!run('.gitea/workflows/shell-demo-release.yml').crates);
   });

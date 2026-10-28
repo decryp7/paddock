@@ -132,7 +132,8 @@ another database number. sccache's keys include the compiler and target, so one 
   to skip the first build: `cp -c -R ~/.<app>-target-<old> ~/.<app>-target-<new>` (APFS; no extra disk until it changes).
 - Own e2e port per worktree (each app's Playwright config reads it from the environment and requires it in CI).
 - Branches: only the affected tests, Playwright in Chromium only. The combined branch: the full gate once, both
-  browsers. Everything green locally before pushing to `main` or tagging; CI confirms, it does not find failures.
+  browsers. On a pushed branch: the affected push CI, or the dispatchable `targeted.yml` (one filter, one OS; see
+  `.gitea/actions/README.md`); the full gates once on main before a release. Everything green locally before pushing to `main` or tagging; CI confirms, it does not find failures.
 - Linux-only failures: run the CI image locally, for example
   `docker run --rm -v "$PWD:/src" -w /src <ci-image> cargo nextest run --workspace` (only containers you created).
 

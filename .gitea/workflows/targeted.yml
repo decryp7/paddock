@@ -1,0 +1,241 @@
+# A narrow, dispatchable test run on one OS, for a branch (ER-7): the affected push CI or this workflow on a branch, the full
+# gates once on main before a release. It runs only the nextest filter and the npm command it is given, on the runner of the
+# chosen OS, with the same setup the kit gives ci.yml's app legs (stable workspace, build folder, sccache, pinned nextest,
+# Chrome for Testing, node caches). It publishes nothing and is no gate: a green run says only that those tests pass there.
+#
+# Inputs reach the shell through env only, never through ${{ }} in a script; the resolve step validates them first.
+
+name: targeted
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "An app id (a folder with apps/<app>/paddock.ci.json), or crates, or ui"
+        required: true
+      os:
+        description: "macos, windows or linux"
+        required: true
+        default: linux
+      rust-filter:
+        description: "A nextest filterset, e.g. test(=page::tests::trimmed_url); empty skips Rust"
+        required: false
+        default: ""
+      rust-package:
+        description: "Only this Cargo package (cargo nextest -p); empty: the whole workspace, filtered"
+        required: false
+        default: ""
+      npm-command:
+        description: "Run in the app's UI folder (ui for the ui project), e.g. npx vitest run src/app/x; empty skips it"
+        required: false
+        default: ""
+      real-browser:
+        description: "true: the tests drive a real browser (Chrome for Testing as the kit provides it; Playwright's WebKit is not installed)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: targeted-${{ github.ref }}-${{ inputs.app }}-${{ inputs.os }}-${{ inputs.rust-package }}-${{ inputs.rust-filter }}-${{ inputs.npm-command }}
+  cancel-in-progress: true
+
+jobs:
+  targeted:
+    name: targeted ${{ inputs.app }} (${{ inputs.os }})
+    runs-on: ${{ inputs.os == 'macos' && 'macos-latest' || inputs.os == 'windows' && 'windows-latest' || 'ubuntu-latest' }}
+    container: ${{ inputs.os == 'linux' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      INPUT_APP: ${{ inputs.app }}
+      INPUT_OS: ${{ inputs.os }}
+      INPUT_RUST_FILTER: ${{ inputs.rust-filter }}
+      INPUT_RUST_PACKAGE: ${{ inputs.rust-package }}
+      INPUT_NPM_COMMAND: ${{ inputs.npm-command }}
+      INPUT_REAL_BROWSER: ${{ inputs.real-browser }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail fast on a wrong input, and read the app's facts from its paddock.ci.json.
+      - name: Resolve and validate the inputs
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - <<'JS'
+          import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+          const env = process.env;
+          const fail = (m) => { console.log(`::error::${m}`); process.exit(1); };
+          const app = env.INPUT_APP ?? '';
+          const apps = readdirSync('apps', { withFileTypes: true }).filter((d) => existsSync(`apps/${d.name}/paddock.ci.json`)).map((d) => d.name);
+          const known = [...apps, 'crates', 'ui'];
+          if (!known.includes(app)) fail(`unknown app '${app}': use one of ${known.join(', ')}`);
+          if (!['macos', 'windows', 'linux'].includes(env.INPUT_OS ?? '')) fail(`unknown os '${env.INPUT_OS}': use macos, windows or linux`);
+          const filter = env.INPUT_RUST_FILTER ?? '';
+          const pkg = env.INPUT_RUST_PACKAGE ?? '';
+          const npm = env.INPUT_NPM_COMMAND ?? '';
+          if (pkg && !/^[A-Za-z0-9_-]+$/.test(pkg)) fail(`rust-package '${pkg}' is not a Cargo package name`);
+          if (pkg && !filter) fail('rust-package needs a rust-filter (an empty filter skips Rust)');
+          if (!filter && !npm) fail('nothing to run: give a rust-filter, an npm-command, or both');
+          const facts = { cargo: '', uiDir: '', prepare: '', prefix: '', catalogue: '', noSandbox: '', display: '', processes: '', patterns: '' };
+          if (app === 'crates') {
+            facts.cargo = 'crates';
+            facts.prefix = 'PADDOCK';
+            facts.catalogue = 'crates/paddock-chromium/src/chromium.toml';
+            if (npm) fail('crates has no npm project: leave npm-command empty');
+          } else if (app === 'ui') {
+            facts.uiDir = 'ui';
+            if (filter) fail('ui has no Rust: leave rust-filter empty');
+          } else {
+            const c = JSON.parse(readFileSync(`apps/${app}/paddock.ci.json`, 'utf8'));
+            if (c.cargo) facts.cargo = c.cargo === '.' ? `apps/${app}` : `apps/${app}/${c.cargo}`;
+            if (filter && !facts.cargo) fail(`app '${app}' has no Cargo workspace: leave rust-filter empty`);
+            facts.uiDir = c.angularDir ? `apps/${app}/${c.angularDir}` : 'ui';
+            facts.prepare = (c.prepare ?? []).join('\n');
+            facts.prefix = c.testBrowser?.envPrefix ?? '';
+            facts.catalogue = c.testBrowser?.catalogue ?? '';
+            facts.noSandbox = c.testBrowser?.noSandboxOnLinux ? 'true' : '';
+            facts.display = c.display ? 'true' : '';
+            facts.processes = (c.processes ?? []).join(' ');
+            facts.patterns = (c.processPatterns ?? []).join('\n');
+            if (c.os && !c.os.includes({ linux: 'ubuntu-latest', windows: 'windows-latest', macos: 'macos-latest' }[env.INPUT_OS])) {
+              console.log(`::warning::${app} lists no ${env.INPUT_OS} leg in paddock.ci.json; running anyway`);
+            }
+          }
+          if (env.INPUT_REAL_BROWSER === 'true' && !facts.prefix) fail(`app '${app}' declares no test browser (paddock.ci.json testBrowser)`);
+          const out = [];
+          for (const [k, v] of Object.entries(facts)) {
+            const d = `EOF_${k.toUpperCase()}`;
+            out.push(`${k}<<${d}\n${v}\n${d}`);
+          }
+          appendFileSync(env.GITHUB_OUTPUT, `${out.join('\n')}\n`);
+          console.log(`app ${app} on ${env.INPUT_OS}: cargo '${facts.cargo}', ui '${facts.uiDir}'`);
+          JS
+
+      # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it) and eight build jobs.
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+          (echo CARGO_BUILD_JOBS=8)>>"%GITHUB_ENV%"
+
+      - name: Build jobs (macOS)
+        if: runner.os == 'macOS'
+        run: echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
+
+      - uses: ./.gitea/actions/stable-workspace
+        if: runner.os != 'Linux' && steps.resolve.outputs.cargo != ''
+        with:
+          name: ${{ inputs.app }}-targeted-${{ runner.os }}
+
+      - uses: ./.gitea/actions/build-folder
+        if: runner.os != 'Linux' && steps.resolve.outputs.cargo != ''
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ steps.resolve.outputs.cargo }}
+          name: ${{ inputs.app }}-targeted
+
+      - uses: ./.gitea/actions/setup-rust
+        if: steps.resolve.outputs.cargo != '' && inputs.rust-filter != ''
+
+      - uses: ./.gitea/actions/host-tools
+        if: runner.os != 'Linux' && steps.resolve.outputs.cargo != '' && inputs.rust-filter != ''
+
+      # The pinned Chrome for Testing on a host (the Linux image has it), kept under the runner user's home; never an installed browser.
+      - name: Test browser folder (macOS, Windows)
+        if: runner.os != 'Linux' && env.INPUT_REAL_BROWSER == 'true'
+        shell: bash
+        run: |
+          home="$HOME"
+          if command -v cygpath >/dev/null; then home="$(cygpath -w "$HOME")"; fi
+          echo "PADDOCK_TEST_BROWSER_DIR=$home/.paddock-ci/test-browser-$INPUT_APP" >> "$GITHUB_ENV"
+
+      - name: Chrome for Testing (macOS, Windows)
+        if: runner.os != 'Linux' && env.INPUT_REAL_BROWSER == 'true'
+        uses: ./.gitea/actions/install-test-browser
+        with:
+          catalogue: ${{ github.workspace }}/${{ steps.resolve.outputs.catalogue }}
+          env-prefix: ${{ steps.resolve.outputs.prefix }}
+          dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
+
+      # Points the tests at that browser; a missing one fails the run instead of skipping the tests. The Linux container runs as
+      # root, where Chrome refuses to start with its sandbox: tests only.
+      - name: The tests' browser
+        if: env.INPUT_REAL_BROWSER == 'true'
+        shell: bash
+        env:
+          PREFIX: ${{ steps.resolve.outputs.prefix }}
+          NO_SANDBOX: ${{ steps.resolve.outputs.noSandbox }}
+        run: |
+          if [ -z "${CHROMIUM_TEST_PATH:-}" ]; then echo "::error::no Chrome for Testing (CHROMIUM_TEST_PATH is empty)"; exit 1; fi
+          {
+            echo "${PREFIX}_TEST_BROWSER=$CHROMIUM_TEST_PATH"
+            echo "${PREFIX}_REQUIRE_TEST_BROWSER=1"
+            if [ "$NO_SANDBOX" = true ] || [ "$INPUT_APP" = crates ]; then echo "${PREFIX}_TEST_BROWSER_NO_SANDBOX=1"; fi
+            if [ "$INPUT_APP" = crates ]; then echo "PADDOCK_BROWSER_NO_SANDBOX=1"; fi
+          } >> "$GITHUB_ENV"
+
+      - uses: ./.gitea/actions/node-caches
+        if: inputs.npm-command != '' || steps.resolve.outputs.prepare != ''
+        with:
+          angular-dir: ${{ steps.resolve.outputs.uiDir || 'ui' }}
+          name: targeted-${{ inputs.app }}
+
+      - name: Install
+        if: inputs.npm-command != '' || steps.resolve.outputs.prepare != ''
+        shell: bash
+        run: npm ci
+
+      # What the app embeds (paddock.ci.json prepare), before its tests build.
+      - name: Prepare
+        if: steps.resolve.outputs.prepare != ''
+        shell: bash
+        env:
+          COMMANDS: ${{ steps.resolve.outputs.prepare }}
+        run: bash conformance/ci/run-commands.sh
+
+      # The apps import @decryp7/paddock-ui from ui/dist.
+      - name: Build @decryp7/paddock-ui
+        if: inputs.npm-command != '' && inputs.app != 'ui'
+        shell: bash
+        run: '[ -d ui/dist ] || npm run build -w ui'
+
+      - name: Rust tests (nextest)
+        if: ${{ !cancelled() && inputs.rust-filter != '' }}
+        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ steps.resolve.outputs.cargo }}
+        env:
+          FILTER: ${{ inputs.rust-filter }}
+          PACKAGE: ${{ inputs.rust-package }}
+          DISPLAY_TESTS: ${{ steps.resolve.outputs.display }}
+        run: |
+          set -uo pipefail
+          args=(--workspace)
+          if [ -n "$PACKAGE" ]; then args=(-p "$PACKAGE"); fi
+          if [ "$INPUT_APP" = crates ]; then args+=(--all-features); fi
+          wrap=()
+          if [ "$DISPLAY_TESTS" = true ] && [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session --); fi
+          "${wrap[@]+"${wrap[@]}"}" cargo nextest run "${args[@]}" --profile ci -E "$FILTER"
+
+      - name: npm command
+        if: ${{ !cancelled() && inputs.npm-command != '' }}
+        shell: bash
+        env:
+          UI_DIR: ${{ steps.resolve.outputs.uiDir }}
+          COMMAND: ${{ inputs.npm-command }}
+        run: bash conformance/ci/run-commands.sh "cd $UI_DIR"$'\n'"$COMMAND"
+
+      # Nothing may stay behind on a host.
+      - uses: ./.gitea/actions/host-cleanup
+        if: always() && runner.os != 'Linux'
+        with:
+          app-id: ${{ inputs.app }}
+          processes: ${{ steps.resolve.outputs.processes }}
+          process-patterns: ${{ steps.resolve.outputs.patterns }}
+          temp-prefix: ${{ inputs.app }}-it-
+
+      - uses: ./.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux' && steps.resolve.outputs.cargo != ''
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always() && steps.resolve.outputs.cargo != '' && inputs.rust-filter != ''
