@@ -86,6 +86,7 @@ pd-part-outlet.pd-page {
   --border-subtle: var(--pd-hairline);
   --border-strong: var(--pd-border-strong);
   --accent: var(--pd-accent-fill);
+  --accent-control: var(--pd-accent-control);
   --accent-hover: var(--pd-accent-fill-hover);
   --accent-text: var(--pd-accent);
   --accent-soft: var(--pd-accent-tint);
@@ -433,7 +434,7 @@ code,
   &:focus-visible,
   &:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: var(--accent-control);
     box-shadow: 0 0 0 3px var(--accent-soft-2);
   }
 
@@ -464,7 +465,7 @@ textarea.input {
 
 input[type='checkbox'],
 input[type='radio'] {
-  accent-color: var(--accent);
+  accent-color: var(--accent-control);
   width: 15px;
   height: 15px;
   margin: 0;
