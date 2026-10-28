@@ -208,8 +208,8 @@ pub fn why_slow_text(d: &Diagnosis) -> String {
             let who: Vec<String> = c.involved.iter().map(|i| format!("{} ({})", i.name, i.share)).collect();
             out += &format!("  Mostly: {}\n", who.join(", "));
         }
-        for s in &c.suggestions {
-            out += &format!("  You could: {}\n", s.label);
+        for h in &c.hints {
+            out += &format!("  You could: {}\n", h.text);
         }
     }
     out
