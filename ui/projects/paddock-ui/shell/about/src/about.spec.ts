@@ -5,6 +5,7 @@ import { assertContributionsValid, createFramed } from '@decryp7/paddock-ui/shel
 import { MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
 import type { AboutInfo, UpdateStatus, WhatsNew } from '../generated/about';
 import { ABOUT_COMMANDS } from '../generated/about-commands';
+import { FILES_COMMANDS } from '../../files/generated/files-commands';
 import {
   MemoryAboutBackend,
   MemoryUpdatesBackend,
@@ -144,6 +145,8 @@ describe('the wire', () => {
     expect(await about.legal('mit')).toBe('MIT License');
     expect(await about.whatsNew()).toBe(NOTES);
     expect(await about.whatsNewOnStart()).toBe('show');
+    await about.openUrl('https://updates.example/releases');
+    expect(calls.at(-1)).toEqual(['files_open_url', { url: 'https://updates.example/releases' }]);
     const updates = new TauriUpdatesBackend(ipc);
     for (const run of [
       () => updates.status(),
@@ -162,7 +165,7 @@ describe('the wire', () => {
     handler?.({ nonsense: true });
     expect(seen).toEqual([status]);
     const names = calls.map(([c]) => c);
-    expect(names.every((n) => n in ABOUT_COMMANDS)).toBe(true);
+    expect(names.every((n) => n in ABOUT_COMMANDS || n in FILES_COMMANDS)).toBe(true);
     expect(calls).toContainEqual(['about_legal', { id: 'mit' }]);
     expect(calls).toContainEqual(['updates_install_on_quit', { enabled: true }]);
     expect(calls).toContainEqual(['updates_set_preferences', { preferences: { autoCheck: true, channel: 'beta' } }]);
@@ -177,7 +180,9 @@ describe('the wire', () => {
   });
 
   it('every dialog contract names only commands of the generated table', () => {
-    for (const list of Object.values(ABOUT_DIALOG_COMMANDS)) for (const c of list) expect(c in ABOUT_COMMANDS).toBe(true);
+    // The one foreign command: About's releases link opens through the files adapter.
+    for (const list of Object.values(ABOUT_DIALOG_COMMANDS)) for (const c of list) expect(c in ABOUT_COMMANDS || c === 'files_open_url', c).toBe(true);
+    expect(FILES_COMMANDS.files_open_url.windows).toContain('dialog');
     expect(ABOUT_COMMANDS.about_whats_new_start.windows).toEqual(['main']);
   });
 });
@@ -390,9 +395,35 @@ describe('the dialogs', () => {
     expect(link.tagName).toBe('A');
     expect(link.getAttribute('href')).toBe('https://updates.example/releases');
     expect(link.rel).toContain('noopener');
+    // A webview window opens no links itself: the click asks the engine to open the page in the system browser.
+    const opened: string[] = [];
+    vi.spyOn(MemoryAboutBackend.prototype, 'openUrl').mockImplementation((url: string) => (opened.push(url), Promise.resolve()));
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(opened).toEqual(['https://updates.example/releases']);
     // The stale-selector class of bug: a class the template uses but the stylesheet does not define.
     const used = new Set([...el.querySelectorAll('[class]')].flatMap((n) => [...n.classList].filter((c) => c.startsWith('pd-'))));
     for (const c of used) expect(ABOUT_STYLES, c).toContain(`.${c}`);
+  });
+
+  it('About says why the releases page did not open, and the memory backend records what it opened', async () => {
+    const { about } = bed('none');
+    expect(about.openedUrls).toEqual([]);
+    const fixture = TestBed.createComponent(PdAboutDialog);
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!.click();
+    await fixture.whenStable();
+    expect(about.openedUrls).toEqual(['https://updates.example/releases']);
+    expect(el.querySelector('[data-testid="about-open-failed"]')).toBeNull();
+    vi.spyOn(about, 'openUrl').mockRejectedValue(new Error('only http, https and mailto addresses open'));
+    el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!.click();
+    await fixture.whenStable();
+    const failed = el.querySelector('[data-testid="about-open-failed"]');
+    expect(failed?.getAttribute('role')).toBe('alert');
+    expect(text(failed as HTMLElement)).toContain('The releases page could not be opened');
+    expect(text(failed as HTMLElement)).toContain('only http, https and mailto addresses open');
   });
 
   it('says the operating system and architecture in words', () => {

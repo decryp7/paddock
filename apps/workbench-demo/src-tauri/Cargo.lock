@@ -2962,6 +2962,7 @@ dependencies = [
  "paddock-commands",
  "paddock-dialogs",
  "paddock-download",
+ "paddock-files",
  "paddock-jobs",
  "paddock-workspace-hack",
  "semver",

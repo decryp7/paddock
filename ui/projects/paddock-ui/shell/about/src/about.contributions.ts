@@ -22,7 +22,7 @@ export const ABOUT_DIALOG_COMMANDS = {
   about: DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.about].commands,
   updates: DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.updates].commands,
   whatsNew: DIALOG_CONTRACTS[ABOUT_DIALOG_IDS.whatsNew].commands,
-} as const satisfies Record<keyof typeof ABOUT_DIALOG_IDS, readonly AboutCommand[]>;
+} as const satisfies Record<keyof typeof ABOUT_DIALOG_IDS, readonly (AboutCommand | 'files_open_url')[]>;
 
 export interface AboutDialogsOptions {
   /**

@@ -14,7 +14,7 @@ export function fakeServer(search: string = globalThis.location?.search ?? ''): 
   return SERVERS.find((s) => s === wanted) ?? 'release';
 }
 
-let about: AboutBackend | null = null;
+let about: MemoryAboutBackend | null = null;
 let updates: UpdatesBackend | null = null;
 
 /**
@@ -56,6 +56,8 @@ export function demoAboutBackend(): AboutBackend {
       },
     },
   );
+  // The browser build has no engine to ask: the releases link opens in a new tab.
+  about.opener = (url) => void window.open(url, '_blank', 'noopener,noreferrer');
   return about;
 }
 

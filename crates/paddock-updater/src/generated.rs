@@ -106,3 +106,13 @@ fn generated_dialog_contracts_are_current() {
         paddock_dialogs::ts::contracts_module("paddock-updater", &crate::DIALOGS, REGENERATE);
     testing::sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
 }
+
+/// About's releases link opens in the system browser, so its window may ask the files adapter to open a web address.
+#[test]
+fn the_about_window_may_open_its_releases_page() {
+    let about = crate::DIALOGS
+        .get("pd.about")
+        .expect("pd.about is declared");
+    let names: Vec<String> = about.commands.iter().map(|c| c.wire()).collect();
+    assert!(names.iter().any(|n| n == "files_open_url"), "{names:?}");
+}

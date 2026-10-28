@@ -14,6 +14,7 @@ export const ABOUT_STYLES = `
   .pd-facts dt { color: var(--pd-text-muted); }
   .pd-facts dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .pd-link { color: var(--pd-accent); text-decoration: underline; text-underline-offset: 2px; }
+  .pd-error { margin: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); overflow-wrap: anywhere; }
   .pd-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); }
   .pd-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--pd-space-2); }
   .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }

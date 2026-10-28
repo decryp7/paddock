@@ -33,9 +33,12 @@ import { ABOUT_STYLES } from './styles';
             <dd>{{ a.updatesAvailable ? t.updatesItself : t.updatesUnavailable }}</dd>
             @if (a.releasesPage) {
               <dt>{{ t.releases }}</dt>
-              <dd><a class="pd-link" [href]="a.releasesPage" target="_blank" rel="noopener noreferrer" data-testid="about-releases">{{ a.releasesPage }}</a></dd>
+              <dd><a class="pd-link" [href]="a.releasesPage" target="_blank" rel="noopener noreferrer" data-testid="about-releases" (click)="openReleases($event, a.releasesPage)">{{ a.releasesPage }}</a></dd>
             }
           </dl>
+          @if (openFailed(); as reason) {
+            <p class="pd-error" role="alert" data-testid="about-open-failed">{{ t.openFailed }} {{ reason }}</p>
+          }
           @if (a.legal.length) {
             <section aria-labelledby="pd-about-legal">
               <h3 id="pd-about-legal">{{ t.legal }}</h3>
@@ -87,6 +90,7 @@ export class PdAboutDialog {
     infoFailed: $localize`:@@pd.about.failed:The app did not say what it is.`,
     retry: $localize`:@@pd.about.retry:Retry`,
     loading: $localize`:@@pd.about.loading:Loading…`,
+    openFailed: $localize`:@@pd.about.open-failed:The releases page could not be opened:`,
   };
   private readonly backend = inject(AboutBackend);
   protected readonly info = resource({ loader: () => this.backend.info() });
@@ -104,6 +108,20 @@ export class PdAboutDialog {
 
   protected versionText(version: string): string {
     return $localize`:@@pd.about.version:Version ${version}:version:`;
+  }
+
+  /** Why the releases page did not open, in the engine's words; null when it did. */
+  protected readonly openFailed = signal<string | null>(null);
+
+  /** A webview window opens no links itself: the engine opens the page in the system browser (`files_open_url`). */
+  protected async openReleases(event: MouseEvent, url: string): Promise<void> {
+    event.preventDefault();
+    this.openFailed.set(null);
+    try {
+      await this.backend.openUrl(url);
+    } catch (e) {
+      this.openFailed.set(e instanceof Error ? e.message : String(e));
+    }
   }
 
   protected show(id: string): void {

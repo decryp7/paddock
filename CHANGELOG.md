@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API: About opens its releases page in the system browser
+
+- `pd.about` may call `files_open_url` (`paddock-updater` depends on `paddock-files` for the marker): the releases link asks
+  the engine to open the page, since a webview window opens no links itself, and says why when it was refused.
+  `AboutBackend.openUrl` (Tauri: `files_open_url`; memory: `openedUrls`, and `opener` for a browser build).
+
 ### Shared dialog API, review fixes (Rust)
 
 - `Measure` has an optional `viewportHeight` (the page's `window.innerHeight`, wire type `DialogMeasureWire`). Rust adds

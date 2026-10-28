@@ -11,7 +11,7 @@ export const DIALOG_CONTRACTS = {
     height: 560,
     instanced: false,
     requiredChoice: false,
-    commands: ['about_info', 'about_legal'],
+    commands: ['about_info', 'about_legal', 'files_open_url'],
   },
   'pd.whats-new': {
     id: 'pd.whats-new',
