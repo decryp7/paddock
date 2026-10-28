@@ -29,7 +29,25 @@ for (const colorScheme of THEMES) {
       expect(pageErrors).toEqual([]);
     });
 
-    test('a labelled row keeps 8 px or more between icon and name, and its count sits at the row end, clear of the name', async ({ app, page }) => {
+    test('a page that appears later keeps its place in the arrow-key order, and labels are 600 selected, 500 otherwise', async ({ app, page }) => {
+      await app.frame.open();
+      await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+      await page.getByRole('button', { name: 'Say hello' }).click();
+      await page.getByRole('button', { name: 'Say hello' }).click();
+      const names = async () => app.sidebar.links.evaluateAll((els) => els.map((e) => e.getAttribute('data-page-link')));
+      await expect.poll(names).toContain('sd.lab');
+      const order = await names();
+      const keyboard = order.indexOf('sd.keys');
+      expect(order[keyboard + 1]).toBe('sd.lab');
+      await page.locator('[data-page-link="sd.keys"]').focus();
+      await page.keyboard.press('ArrowDown');
+      await expect(page.locator('[data-page-link="sd.lab"]')).toBeFocused();
+      const weight = (id: string) => page.locator(`[data-page-link="${id}"] .pd-label`).evaluate((el) => getComputedStyle(el).fontWeight);
+      expect(await weight('sd.home')).toBe('600');
+      expect(await weight('sd.lab')).toBe('500');
+    });
+
+    test('a labelled row keeps 8 px or more between icon and name, and its count sits at the row end, clear of the name', async ({ app }) => {
       await app.frame.open();
       await expect(app.sidebar.badges.first()).toBeVisible();
       const row = app.sidebar.link('Runners');
@@ -40,7 +58,6 @@ for (const colorScheme of THEMES) {
       const nameText = await row.locator('.pd-label').evaluate((el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect().right; });
       expect(badge.left).toBeGreaterThanOrEqual(nameText);
       expect(item.right - badge.right).toBeLessThanOrEqual(12);
-      expect(page.url()).toBeTruthy();
     });
 
     test('in the rail every icon is centred in its row', async ({ app }) => {
@@ -59,7 +76,7 @@ for (const colorScheme of THEMES) {
 
     test('the page lists are lists inside one labelled navigation landmark, and axe (best practice too) finds nothing', async ({ app, page }) => {
       await app.frame.open();
-      await expect(page.locator('nav')).toHaveCount(1);
+      await expect(page.getByRole('navigation')).toHaveCount(1);
       // The top and the bottom group are each a list (not navigation landmarks of their own) of list items holding the links.
       await expect(page.getByRole('list').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(2);
       await expect(page.getByRole('listitem').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(await app.sidebar.links.count());
@@ -78,7 +95,6 @@ for (const colorScheme of THEMES) {
 }
 
 test.describe('copy menu', () => {
-  test.use({ consoleErrors: false });
   test('a right click on selected text opens Copy at the pointer, focused; Escape closes it and Copy copies', async ({ app, page, pageErrors }) => {
     await installTauriFake(page, { platform: 'mac', otherwise: 'null' });
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -101,6 +117,7 @@ test.describe('copy menu', () => {
     await page.getByRole('menuitem', { name: 'Copy' }).click();
     await expect(page.getByRole('menuitem', { name: 'Copy' })).toHaveCount(0);
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('App context');
-    expect(pageErrors).toEqual([]);
+    // The fake IPC does not answer the shell's version call; that message is the only one expected.
+    expect(pageErrors.filter((e) => !/did not say its version/.test(e))).toEqual([]);
   });
 });

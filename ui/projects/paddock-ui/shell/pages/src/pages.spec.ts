@@ -346,8 +346,10 @@ describe('pd-shell-frame with provideShellPages', () => {
     await settle();
     await fixture.whenStable();
     expect(el.querySelector('[data-page-link="t.two"]')?.getAttribute('aria-label')).toBe('Two, 6 things');
+    // The name already says what the count is, so the labelled sidebar adds no tooltip that would read it twice.
     el.querySelector('[data-page-link="t.two"]')?.dispatchEvent(new MouseEvent('mouseenter'));
-    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('6 things'));
+    expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
+    expect(el.querySelector('[data-page-link="t.two"]')?.hasAttribute('aria-describedby')).toBe(false);
     // The page groups are lists, not navigation landmarks inside the frame's own.
     expect([...el.querySelectorAll('mat-nav-list')].map((l) => l.getAttribute('role'))).toEqual(['list', 'list']);
     count.set(3);
@@ -534,6 +536,27 @@ describe('pd-shell-frame with provideShellPages', () => {
     const bottom = links.at(-1) as HTMLElement;
     key(bottom, 'ArrowUp');
     expect(document.activeElement).toBe(links.at(-2));
+  });
+
+  it('a page that appears later is reached in its place by the arrow keys, and the labels carry the family weights', async () => {
+    const { el, fixture } = await boot();
+    document.body.append(el);
+    await TestBed.inject(ShellContextHost).load();
+    count.set(3);
+    await settle();
+    await fixture.whenStable();
+    const link = (id: string) => el.querySelector<HTMLAnchorElement>(`[data-page-link="${id}"]`)!;
+    expect([...el.querySelectorAll('nav a.pd-item')].map((a) => (a as HTMLElement).dataset['pageLink'])).toEqual(['t.one', 't.two', 't.lab', 't.about']);
+    link('t.two').focus();
+    link('t.two').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(link('t.lab'));
+    link('t.lab').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(link('t.about'));
+    // The list item's title directive is applied (the weights of its label are its tokens, measured in the e2e).
+    expect(link('t.two').querySelector('.pd-label')?.classList.contains('mdc-list-item__primary-text')).toBe(true);
+    expect(link('t.two').querySelector('pd-icon')?.classList.contains('mdc-list-item__start')).toBe(true);
+    count.set(0);
+    await settle();
   });
 
   it('the native menu bar waits for ready; the recovery and checkpoint are wired', async () => {

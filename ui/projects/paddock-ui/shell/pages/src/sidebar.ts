@@ -1,8 +1,8 @@
 import { FocusKeyManager, type FocusableOption } from '@angular/cdk/a11y';
-import { ChangeDetectionStrategy, Component, Directive, ElementRef, effect, inject, input, output, viewChildren } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, Directive, ElementRef, inject, Injector, input, output, viewChildren } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { MatBadge } from '@angular/material/badge';
-import { MatListItem, MatNavList } from '@angular/material/list';
+import { MatListItem, MatListItemIcon, MatListItemMeta, MatListItemTitle, MatNavList } from '@angular/material/list';
 import { MatTooltip } from '@angular/material/tooltip';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { PdIcon } from '@decryp7/paddock-ui/shell';
@@ -25,7 +25,7 @@ export class PdSidebarLink implements FocusableOption {
 @Component({
   selector: 'pd-pages-sidebar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, RouterLink, RouterLinkActive, PdIcon, PdSidebarLink, MatNavList, MatListItem, MatBadge, MatTooltip],
+  imports: [NgTemplateOutlet, RouterLink, RouterLinkActive, PdIcon, PdSidebarLink, MatNavList, MatListItem, MatListItemIcon, MatListItemTitle, MatListItemMeta, MatBadge, MatTooltip],
   host: { '[class.pd-rail]': '!labelled()' },
   template: `
     <ng-template #link let-p>
@@ -84,9 +84,9 @@ export class PdSidebarLink implements FocusableOption {
     .pd-item.active .pd-icon { color: var(--pd-accent); }
     /* The gap between icon and name, and the rail's centring, are set here, not left to the list item's start-slot margins. */
     .pd-item .pd-icon { width: 20px; height: 20px; flex: none; margin: 0 var(--pd-space-3) 0 0; color: inherit; }
-    .pd-count { flex: none; display: inline-flex; margin-inline-start: var(--pd-space-2); }
+    .pd-item .pd-count { flex: none; display: inline-flex; margin: 0 0 0 var(--pd-space-2); }
     .pd-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    /* The count sits off the icon's top-right corner, ringed in the sidebar's colour so it never covers a stroke. */
+    /* In the rail the count sits at the icon's top-right corner, ringed in the sidebar's colour; it overlaps the corner by a few pixels, which holds no stroke. */
     .pd-icon, .pd-count {
       --mat-badge-background-color: var(--pd-surface-3);
       --mat-badge-text-color: var(--pd-text);
@@ -95,7 +95,7 @@ export class PdSidebarLink implements FocusableOption {
       --mat-badge-line-height: 16px;
       --mat-badge-text-size: var(--pd-text-caption);
       --mat-badge-container-shape: var(--pd-radius-pill);
-      --mat-badge-container-overlap-offset: -10px;
+      --mat-badge-container-overlap-offset: -12px;
     }
     /* The directive draws the badge outside this template's encapsulation, so its ring is reached with ::ng-deep (the colours stay tokens). */
     :host ::ng-deep .pd-count .mat-badge-content { position: static; margin: 0; box-shadow: inset 0 0 0 1px var(--pd-border-strong); font-variant-numeric: tabular-nums; }
@@ -121,25 +121,20 @@ export class PdPagesSidebar {
     return badge ? $localize`:@@pd.pages.link-with-badge:${title}:page:, ${badge}:badge:` : title;
   }
 
-  /** The tooltip: the rail names the page (with its badge); the labelled sidebar only explains a badge (what it counts), else nothing. */
+  /** The tooltip: the rail names the page (with its badge); the labelled sidebar has none, its link name already says what a badge counts. */
   protected tip(title: string, id: string): string {
-    return this.labelled() ? (this.pages.badgeLabels()[id] ?? '') : this.label(title, id);
+    return this.labelled() ? '' : this.label(title, id);
   }
 
   private readonly links = viewChildren(PdSidebarLink);
-  /** The links in template order (the top list, then the bottom one); the key manager reads this array, kept in step with the view. */
-  private readonly ordered: PdSidebarLink[] = [];
-  private readonly keys = new FocusKeyManager<PdSidebarLink>(this.ordered).withVerticalOrientation().withHomeAndEnd().withWrap();
-
-  constructor() {
-    // The array the manager walks follows the links of the view (they come and go with the pages' conditions).
-    effect(() => this.ordered.splice(0, this.ordered.length, ...this.links()));
-  }
+  /** The links in document order: a page that appears later is inserted into its list, but its view is created after the others. */
+  private readonly ordered = computed(() => [...this.links()].sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)));
+  private readonly keys = new FocusKeyManager<PdSidebarLink>(this.ordered, inject(Injector)).withVerticalOrientation().withHomeAndEnd().withWrap();
 
   /** Arrow keys, Home and End move focus between the links; any other key is left alone. */
   protected onKey(e: KeyboardEvent): void {
     if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
-    const from = this.ordered.find((l) => l.el === e.target);
+    const from = this.ordered().find((l) => l.el === e.target);
     if (!from) return;
     e.preventDefault();
     this.keys.updateActiveItem(from);

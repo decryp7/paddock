@@ -94,8 +94,9 @@ test.describe('pages frame (plan S14)', () => {
     await expect(bar.getByTestId('runners-status')).toHaveAttribute('aria-label', '2 of 4 runners online, 1 updating, 1 offline');
     await expect(app.sidebar.badges).toHaveText('1');
     await expect(app.sidebar.link('Runners')).toHaveAttribute('aria-label', 'Runners, 1 runner offline');
+    // The name says what the count is; the labelled sidebar adds no tooltip that would repeat it.
     await app.sidebar.link('Runners').hover();
-    await expect(page.locator('.mat-mdc-tooltip')).toHaveText('1 runner offline');
+    await expect(page.locator('.mat-mdc-tooltip')).toHaveCount(0);
     await expect(app.statusBar.items('end')).toHaveCount(3);
     expect(await app.statusBar.ids('end')).toEqual(['pd.health', 'pd.jobs', 'pd.notifications']);
     await expect(bar.getByRole('button', { name: 'Jobs' })).toBeVisible();
