@@ -33,12 +33,13 @@ import { DialogPresenter, type DialogContent } from './types';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [DialogFrame, CdkTrapFocus],
   host: {
-    role: 'dialog',
+    '[attr.role]': "entry().def.kind === 'decision' ? 'alertdialog' : 'dialog'",
     class: 'pd-in-page-dialog',
     '[class.pd-modeless]': "entry().def.modality === 'modeless'",
     '[class.pd-pending]': '!shown()',
     '[attr.aria-modal]': "entry().def.modality === 'modal'",
-    '[attr.aria-labelledby]': 'titleId()',
+    '[attr.aria-labelledby]': 'labelledBy()',
+    '[attr.aria-describedby]': "entry().def.kind === 'decision' ? frame().describedBy() : null",
     '[attr.data-dialog]': 'entry().def.id',
     '[attr.data-kind]': 'entry().def.kind',
     '[attr.data-modality]': 'entry().def.modality',
@@ -61,6 +62,8 @@ import { DialogPresenter, type DialogContent } from './types';
         [failure]="failure()"
         [content]="content()"
         [declaredWidth]="width()"
+        [ownsRole]="false"
+        [headingId]="headingId()"
         (answered)="entry().ref.answer($event.value)"
         (dismissed)="dismissed()"
       >
@@ -86,13 +89,16 @@ export class InPageDialogView implements AfterViewInit {
   private readonly pendingTasks = inject(PendingTasks);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly host = viewChild.required('contentHost', { read: ViewContainerRef });
-  private readonly frame = viewChild.required(DialogFrame);
+  protected readonly frame = viewChild.required(DialogFrame);
   protected readonly state = signal<FrameState>('loading');
   protected readonly failure = signal<string | null>(null);
   protected readonly content = signal<DialogContent | null>(null);
   /** Shown once the frame is ready or the show deadline passed (ADR 0026 §4.3). */
   protected readonly shown = signal(false);
   protected readonly titleId = computed(() => `pd-dialog-title-${this.entry().n}`);
+  protected readonly headingId = computed(() => `pd-dialog-heading-${this.entry().n}`);
+  /** A decision is named by its question once it has one, else by the title bar. */
+  protected readonly labelledBy = computed(() => (this.entry().def.kind === 'decision' && this.content()?.dialogHeading?.() ? this.headingId() : this.titleId()));
   private readonly size = computed(() => resolveSize(this.entry().def));
   protected readonly width = computed(() => this.size().width);
   /** A tool keeps its height; the other kinds take what their content needs (bounded by the page). */

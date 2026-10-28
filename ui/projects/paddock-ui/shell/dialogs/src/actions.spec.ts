@@ -79,6 +79,13 @@ describe('layoutActions: Enter and the first focus', () => {
     const viewer = lay([], 'viewer');
     expect([viewer.enterTarget, viewer.focus]).toEqual([null, 'dismiss']);
   });
+  it('never focuses a destructive action: a required choice that only destroys focuses its heading', () => {
+    const l = layoutActions('decision', 'modal', true, [answer('wipe', 'destructive')], 'macos', labels);
+    expect([l.dismiss, l.enterTarget, l.focus]).toEqual([null, null, 'heading']);
+    const both = layoutActions('decision', 'modal', true, [answer('wipe', 'destructive'), answer('keep', 'secondary')], 'macos', labels);
+    expect(both.focus).toBe('keep');
+  });
+
   it('focuses the answer of a required choice without a primary', () => {
     const l = layoutActions('decision', 'modal', true, [answer('a', 'secondary')], 'windows', labels);
     expect([l.dismiss, l.enterTarget, l.focus]).toEqual([null, null, 'a']);
@@ -108,10 +115,14 @@ describe('dialog keys', () => {
     expect(dialogKeyAction(key('a'))).toBeNull();
   });
 
-  it('reads the platform from the user agent', () => {
-    expect(dialogPlatform({ platform: 'MacIntel' })).toBe('macos');
-    expect(dialogPlatform({ userAgent: 'Mozilla/5.0 (Windows NT 10.0)' })).toBe('windows');
-    expect(dialogPlatform({ platform: 'Linux x86_64' })).toBe('linux');
-    expect(dialogPlatform(undefined)).toBe('linux');
+  it('reads the platform from the shell’s data-platform, else the user agent', () => {
+    const doc = (platform?: string) => ({ documentElement: { dataset: platform ? { platform } : {} } }) as unknown as Document;
+    expect(dialogPlatform({ platform: 'MacIntel' }, doc('windows'))).toBe('windows');
+    expect(dialogPlatform({ platform: 'Win32' }, doc('linux'))).toBe('linux');
+    expect(dialogPlatform({ platform: 'Win32' }, doc('beos'))).toBe('windows');
+    expect(dialogPlatform({ platform: 'MacIntel' }, doc())).toBe('macos');
+    expect(dialogPlatform({ userAgent: 'Mozilla/5.0 (Windows NT 10.0)' }, doc())).toBe('windows');
+    expect(dialogPlatform({ platform: 'Linux x86_64' }, doc())).toBe('linux');
+    expect(dialogPlatform(undefined, undefined)).toBe('linux');
   });
 });

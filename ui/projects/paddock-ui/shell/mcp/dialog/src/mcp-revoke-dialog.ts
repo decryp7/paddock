@@ -1,5 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
-import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
 /**
  * The revoke confirmation (a modal decision, one window per key): it names the client and says what revoking does. Its
@@ -13,7 +13,7 @@ import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } fro
   template: `
     @if (valid()) {
       <div class="pd-rv">
-        <p class="pd-rv__text" data-testid="mcp-revoke-text">{{ question() }} {{ t.effect }}</p>
+        <p class="pd-rv__text" data-testid="mcp-revoke-text">{{ t.effect }}</p>
       </div>
     } @else {
       <div class="pd-rv">
@@ -22,14 +22,13 @@ import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } fro
     }
   `,
   styles: `
-    :host { display: block; color: var(--pd-text); min-width: 0; }
+    :host { display: block; min-width: 0; }
     .pd-rv { display: flex; flex-direction: column; gap: var(--pd-space-3); }
     .pd-rv__text, .pd-rv__error { margin: 0; overflow-wrap: anywhere; }
     .pd-rv__error { padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); }
   `,
 })
 export class PdMcpRevokeDialog implements DialogContent<boolean> {
-  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
 
   /** The key to revoke. */
   readonly keyId = input<number | null>(null);
@@ -58,15 +57,11 @@ export class PdMcpRevokeDialog implements DialogContent<boolean> {
       : [{ kind: 'dismiss', id: 'close', label: this.t.close }],
   );
 
+  /** The question, as the decision's heading (ADR 0026: icon, heading, message). */
+  readonly dialogHeading = computed(() => (this.valid() ? this.question() : null));
+
   protected question(): string {
     const client = this.client().trim() || String(this.keyId());
-    return $localize`:@@pd.mcp.revoke-question:Revoke the key of "${client}:client:"?`;
-  }
-
-  constructor() {
-    // The title names the client; it is known only once the opener's inputs are set (a side effect on the window's title).
-    effect(() => {
-      if (this.valid()) this.ref.setTitle?.(this.question());
-    });
+    return $localize`:@@pd.mcp.revoke-question:Revoke the key of “${client}:client:”?`;
   }
 }

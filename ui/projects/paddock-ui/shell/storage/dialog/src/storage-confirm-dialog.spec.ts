@@ -10,7 +10,7 @@ describe('the storage confirm dialog', () => {
     const d = await open({ what: 'Logs', bytes: 5_000_000, data: true });
     // The title says what; the body gives the facts and does not say it again.
     expect(text(d.q('storage-confirm-text')!)).toBe('Up to 4.8 MB is removed.');
-    expect(d.title()).toBe('Clear logs?');
+    expect(d.heading()).toBe('Delete logs?');
     expect(text(d.q('storage-confirm-data')!)).toContain('your own data');
     expect(d.action('clear')!.textContent!.trim()).toBe('Delete data');
     expect(d.action('clear')!.className).toContain('pd-frame-btn--danger');

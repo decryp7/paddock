@@ -6,7 +6,7 @@ export const CONFIRM_DIALOG_ID = 'pd.confirm';
 
 /** What `pd.confirm` asks: plain, already localised text (it crosses to the dialog's window). */
 export interface ConfirmInput {
-  /** The question, as the window's title and heading ("Delete the watch?"). */
+  /** The question, as the decision's heading ("Delete the watch?"). */
   readonly heading: string;
   /** What happens, in a sentence or two. */
   readonly message: string;
@@ -42,6 +42,7 @@ export interface ConfirmOpener {
 
 /** Asks `input` in `pd.confirm`'s window; true when the user chose the affirmative, false when they dismissed it. */
 export async function confirm(dialogs: ConfirmOpener, input: ConfirmInput): Promise<boolean> {
-  const outcome = await dialogs.open(CONFIRM_DIALOG_ID, { inputs: { ...input }, title: input.heading }).closed;
+  // The window's title is the affirmative ("Delete watch"); the question is the heading inside.
+  const outcome = await dialogs.open(CONFIRM_DIALOG_ID, { inputs: { ...input }, title: input.confirm.label }).closed;
   return outcome.kind === 'answered';
 }

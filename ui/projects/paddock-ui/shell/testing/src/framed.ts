@@ -35,6 +35,8 @@ export interface Framed {
   outcome(): DialogOutcome<unknown> | null;
   /** The title shown in the dialog's title bar. */
   title(): string;
+  /** A decision's heading (its question), '' when it has none. */
+  heading(): string;
   stable(): Promise<void>;
 }
 
@@ -83,6 +85,7 @@ export async function renderFramed(component: Type<unknown>, options: FramedOpti
     },
     outcome: () => outcome,
     title: () => (el().querySelector('.pd-title')?.textContent ?? '').trim(),
+    heading: () => (el().querySelector('[data-testid="dialog-heading"]')?.textContent ?? '').trim(),
     stable,
   };
 }

@@ -15,7 +15,8 @@ describe('pd.confirm', () => {
 
   it('asks a destructive question: the danger action is never the focus or the Enter target', async () => {
     const d = await open({ heading: 'Delete the watch?', message: 'Its history goes too.', details: ['Downloads', '3 rules'], confirm: { label: 'Delete watch', destructive: true } });
-    expect(d.title()).toBe('Delete the watch?');
+    expect(d.heading()).toBe('Delete the watch?');
+    expect(d.q('dialog-icon')!.dataset['tone']).toBe('danger');
     expect(text(d.q('confirm-message')!)).toBe('Its history goes too.');
     expect([...d.q('confirm-details')!.querySelectorAll('li')].map(text)).toEqual(['Downloads', '3 rules']);
     expect(d.action('confirm')!.className).toContain('pd-frame-btn--danger');
@@ -51,6 +52,6 @@ describe('pd.confirm', () => {
     const input: ConfirmInput = { heading: 'Remove?', message: 'm', confirm: { label: 'Remove channel', destructive: true } };
     expect(await confirm(answer('answered'), input)).toBe(true);
     expect(await confirm(answer('dismissed'), input)).toBe(false);
-    expect(opened[0]).toEqual(['pd.confirm', { inputs: input, title: 'Remove?' }]);
+    expect(opened[0]).toEqual(['pd.confirm', { inputs: input, title: 'Remove channel' }]);
   });
 });

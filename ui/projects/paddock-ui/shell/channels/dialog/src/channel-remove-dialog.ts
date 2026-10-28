@@ -1,5 +1,5 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
-import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
 /**
  * The remove confirmation (a modal decision, one window per channel): it names the channel and says its stored secret goes
@@ -13,7 +13,7 @@ import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } fro
   template: `
     @if (valid()) {
       <div class="pd-rm">
-        <p class="pd-rm__text" data-testid="channel-remove-text">{{ question() }} {{ t.secretGoes }}</p>
+        <p class="pd-rm__text" data-testid="channel-remove-text">{{ t.secretGoes }}</p>
       </div>
     } @else {
       <div class="pd-rm">
@@ -22,14 +22,13 @@ import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } fro
     }
   `,
   styles: `
-    :host { display: block; color: var(--pd-text); min-width: 0; }
+    :host { display: block; min-width: 0; }
     .pd-rm { display: flex; flex-direction: column; gap: var(--pd-space-3); }
     .pd-rm__text, .pd-rm__error { margin: 0; overflow-wrap: anywhere; }
     .pd-rm__error { padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); }
   `,
 })
 export class PdChannelRemoveDialog implements DialogContent<boolean> {
-  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
 
   /** The channel to remove. */
   readonly channelId = input('');
@@ -58,15 +57,11 @@ export class PdChannelRemoveDialog implements DialogContent<boolean> {
       : [{ kind: 'dismiss', id: 'close', label: this.t.close }],
   );
 
+  /** The question, as the decision's heading (ADR 0026: icon, heading, message). */
+  readonly dialogHeading = computed(() => (this.valid() ? this.question() : null));
+
   protected question(): string {
     const name = this.name().trim() || this.channelId();
-    return $localize`:@@pd.channels.remove-question:Remove "${name}:name:"?`;
-  }
-
-  constructor() {
-    // The title names the channel; it is known only once the opener's inputs are set (a side effect on the window's title).
-    effect(() => {
-      if (this.valid()) this.ref.setTitle?.(this.question());
-    });
+    return $localize`:@@pd.channels.remove-question:Remove the channel “${name}:name:”?`;
   }
 }

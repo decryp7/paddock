@@ -1,6 +1,6 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { formatBytes } from '@decryp7/paddock-ui/format';
-import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { inSentence } from '@decryp7/paddock-ui/shell/storage';
 
 /**
@@ -30,7 +30,7 @@ import { inSentence } from '@decryp7/paddock-ui/shell/storage';
     }
   `,
   styles: `
-    :host { display: block; color: var(--pd-text); min-width: 0; }
+    :host { display: block; min-width: 0; }
     .pd-sc { display: flex; flex-direction: column; gap: var(--pd-space-3); }
     .pd-sc__text, .pd-sc__error { margin: 0; overflow-wrap: anywhere; }
     .pd-sc__muted { color: var(--pd-text-muted); }
@@ -38,7 +38,6 @@ import { inSentence } from '@decryp7/paddock-ui/shell/storage';
   `,
 })
 export class PdStorageConfirmDialog implements DialogContent<boolean> {
-  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
 
   /** What will be cleared, as the page names it ("Cache", "Logs", "Logs and Models"). */
   readonly what = input('');
@@ -71,16 +70,17 @@ export class PdStorageConfirmDialog implements DialogContent<boolean> {
       : [{ kind: 'dismiss', id: 'close', label: this.t.close }],
   );
 
-  /** The facts the title does not repeat: how much goes. */
+  /** The question, as the decision's heading: Delete for the user's own data, Clear for a cache (ADR 0026: icon, heading, message). */
+  readonly dialogHeading = computed(() => {
+    if (!this.valid()) return null;
+    const what = inSentence(this.what());
+    return this.data() ? $localize`:@@pd.storage.confirm-title-data:Delete ${what}:what:?` : $localize`:@@pd.storage.confirm-title:Clear ${what}:what:?`;
+  });
+
+  /** The facts the heading does not repeat: how much goes. */
   protected question(): string {
     const size = formatBytes(this.bytes());
     return $localize`:@@pd.storage.confirm-question:Up to ${size}:size: is removed.`;
   }
 
-  constructor() {
-    // The title names what is cleared; it is known only once the opener's inputs are set (a side effect on the window's title).
-    effect(() => {
-      if (this.valid()) this.ref.setTitle?.($localize`:@@pd.storage.confirm-title:Clear ${inSentence(this.what())}:what:?`);
-    });
-  }
 }

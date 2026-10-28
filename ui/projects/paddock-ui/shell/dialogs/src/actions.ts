@@ -48,8 +48,16 @@ export class DialogActionError extends Error {
 /** The OS the dialog runs on: it decides the button order (D1). */
 export type DialogPlatform = 'macos' | 'windows' | 'linux';
 
-/** The platform of this webview, from its user agent (the shell's `data-platform`). */
-export function dialogPlatform(nav: { readonly platform?: string; readonly userAgent?: string } | undefined = globalThis.navigator): DialogPlatform {
+/**
+ * The OS this window runs on: the shell's `data-platform` on `<html>` (set by Rust before the page boots), else the
+ * user agent (the browser build).
+ */
+export function dialogPlatform(
+  nav: { readonly platform?: string; readonly userAgent?: string } | undefined = globalThis.navigator,
+  doc: Pick<Document, 'documentElement'> | undefined = globalThis.document,
+): DialogPlatform {
+  const set = doc?.documentElement?.dataset?.['platform'];
+  if (set === 'macos' || set === 'windows' || set === 'linux') return set;
   const p = `${nav?.platform ?? ''} ${nav?.userAgent ?? ''}`;
   if (/Mac|iPhone|iPad/.test(p)) return 'macos';
   if (/Win/.test(p)) return 'windows';
@@ -74,7 +82,7 @@ export interface ActionLayout {
   readonly dismiss: DismissAction | null;
   /** What Enter runs (when enabled): the primary; Cancel for a destructive decision; `null`: Enter does nothing. */
   readonly enterTarget: string | null;
-  /** What has the focus first: `'field'` (a form's first field) or an action id. */
+  /** What has the focus first: `'field'` (a form's first field), `'heading'` (no safe action) or an action id. */
   readonly focus: 'field' | string | null;
   /** What is wrong with the declaration (empty when it is valid). A defect lays out the fallback: one Close. */
   readonly problems: readonly string[];
@@ -100,7 +108,8 @@ const ID = /^[a-z][a-z0-9-]*$/;
  * - Counts: at most one primary and one destructive; exactly one dismiss, none for a required choice; without a declared
  *   dismiss the frame adds Cancel (modal) or Close (modeless).
  * - Enter: the primary; never a destructive action (a destructive decision's Enter is Cancel).
- * - Focus: a form's first field; a destructive decision's Cancel; anything else the Enter target.
+ * - Focus: a form's first field; a destructive decision's Cancel; anything else the Enter target; never a destructive
+ *   action (a required choice that only destroys focuses its heading).
  * - A declaration that breaks a rule never throws: the layout is one Close, and `problems` says why.
  */
 export function layoutActions(
@@ -169,8 +178,10 @@ export function layoutActions(
   }
   const enterTarget = primary ? primary.id : destructive && dismiss ? dismiss.id : null;
   const destructiveDecision = kind === 'decision' && destructive !== null;
-  const firstAnswer = valid.find((a) => a.kind === 'answer')?.id ?? null;
-  const focus = kind === 'form' ? 'field' : destructiveDecision && dismiss ? dismiss.id : (enterTarget ?? dismiss?.id ?? affirmative?.id ?? firstAnswer);
+  // Never a destructive action: a required choice whose only answer destroys something focuses its heading instead.
+  const safe = (a: DialogAction | null | undefined) => (a && !(a.kind === 'answer' && a.role === 'destructive') ? a.id : null);
+  const firstSafe = valid.find((a) => a.kind !== 'dismiss' && safe(a) !== null)?.id ?? null;
+  const focus = kind === 'form' ? 'field' : destructiveDecision && dismiss ? dismiss.id : (enterTarget ?? dismiss?.id ?? safe(affirmative) ?? firstSafe ?? 'heading');
   return { lead: lead.map(place), trail: trail.map(place), dismiss, enterTarget, focus, problems };
 }
 

@@ -44,6 +44,11 @@ export interface DialogContent<R = unknown> {
   readonly dialogStatus?: Signal<string | null>;
   /** The body's declared minimum height, px (default two lines): with the header and footer, the window's OS minimum. */
   readonly dialogMinBodyHeight?: number;
+  /**
+   * The question a decision asks ("Remove the channel “Ops Hook”?"): drawn as the body's heading beside the decision's
+   * icon, and the dialog's accessible name. The message and details follow in the content.
+   */
+  readonly dialogHeading?: Signal<string | null>;
   /** A header above the body that does not scroll (a stepper, a toolbar). */
   readonly dialogHeader?: Signal<TemplateRef<unknown> | null>;
 }

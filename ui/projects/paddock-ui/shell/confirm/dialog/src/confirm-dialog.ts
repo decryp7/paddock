@@ -1,8 +1,8 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
-import { DIALOG_REF, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
 /**
- * `pd.confirm` (ADR 0026 §5): the question as the title, the message and any details, and the frame's footer from two
+ * `pd.confirm` (ADR 0026 §5): the question as the heading beside the decision's icon, the message and any details, and the frame's footer from two
  * declared actions: the way out (Cancel, or the opener's label) and the affirmative, a primary or, for `destructive`, the
  * danger action that is never the Enter target and leaves the first focus on the way out. A window opened without a
  * question says so, with Close only.
@@ -25,14 +25,13 @@ import { DIALOG_REF, type DialogAction, type DialogContent } from '@decryp7/padd
     }
   `,
   styles: `
-    :host { display: flex; flex-direction: column; gap: var(--pd-space-3); color: var(--pd-text); min-width: 0; }
+    :host { display: flex; flex-direction: column; gap: var(--pd-space-3); min-width: 0; }
     .pd-confirm__text, .pd-confirm__error { margin: 0; overflow-wrap: anywhere; }
     .pd-confirm__details { margin: 0; padding-inline-start: var(--pd-space-4); color: var(--pd-text-muted); overflow-wrap: anywhere; }
     .pd-confirm__error { padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); }
   `,
 })
 export class PdConfirmDialog implements DialogContent<true> {
-  private readonly ref = inject(DIALOG_REF);
   readonly heading = input('');
   readonly message = input('');
   readonly details = input<readonly string[]>([]);
@@ -44,6 +43,9 @@ export class PdConfirmDialog implements DialogContent<true> {
     close: $localize`:@@pd.confirm.close:Close`,
     invalid: $localize`:@@pd.confirm.invalid:This window was opened without a question. Close it and try again from where you started.`,
   };
+
+  /** The question, as the decision's heading beside its icon. */
+  readonly dialogHeading = computed(() => (this.valid() ? this.heading().trim() : null));
 
   protected readonly valid = computed(() => this.heading().trim() !== '' && (this.confirm()?.label ?? '').trim() !== '');
 
@@ -57,10 +59,4 @@ export class PdConfirmDialog implements DialogContent<true> {
     ];
   });
 
-  constructor() {
-    // The heading is the window's title; it is known only once the opener's inputs are set.
-    effect(() => {
-      if (this.valid()) this.ref.setTitle?.(this.heading().trim());
-    });
-  }
 }

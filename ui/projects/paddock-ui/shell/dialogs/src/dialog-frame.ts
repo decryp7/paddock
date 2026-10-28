@@ -82,12 +82,26 @@ export function oncePerFrame(work: () => void, doc: Pick<Document, 'visibilitySt
       class="pd-frame-body"
       #body
       data-testid="dialog-body"
+      [class.pd-frame-body--decision]="decision()"
       [attr.inert]="busy() !== null ? '' : null"
-      [attr.role]="kind() === 'decision' ? 'alertdialog' : null"
-      [attr.aria-label]="kind() === 'decision' ? title() : null"
-      [attr.aria-describedby]="describedBy()"
+      [attr.role]="ownsRole() && kind() === 'decision' ? 'alertdialog' : null"
+      [attr.aria-labelledby]="ownsRole() && heading() ? headingId() : null"
+      [attr.aria-label]="ownsRole() && kind() === 'decision' && !heading() ? title() : null"
+      [attr.aria-describedby]="ownsRole() ? describedBy() : null"
     >
+      @if (decision(); as tone) {
+        <span class="pd-frame-icon" [class.pd-frame-icon--danger]="tone === 'danger'" aria-hidden="true" data-testid="dialog-icon" [attr.data-tone]="tone">
+          @if (tone === 'danger') {
+            <svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 4v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /><circle cx="10" cy="15.5" r="1.3" fill="currentColor" /></svg>
+          } @else {
+            <svg viewBox="0 0 20 20" width="20" height="20"><circle cx="10" cy="5" r="1.3" fill="currentColor" /><path d="M10 8.5v7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" /></svg>
+          }
+        </span>
+      }
       <div class="pd-frame-content" #content>
+        @if (heading(); as h) {
+          <h2 class="pd-frame-heading" [id]="headingId()" data-testid="dialog-heading">{{ h }}</h2>
+        }
         @if (state() === 'failed') {
           <div class="pd-frame-failed" role="alert" data-testid="dialog-error">
             <p class="pd-frame-failed-title">{{ t.openFailed }}</p>
@@ -142,6 +156,14 @@ export function oncePerFrame(work: () => void, doc: Pick<Document, 'visibilitySt
     .pd-frame-head { flex: none; padding: var(--pd-space-3, 12px) var(--pd-space-4, 16px) 0; }
     .pd-frame-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: var(--pd-space-4, 16px); outline: none; }
     .pd-frame-content { display: flex; flex-direction: column; gap: var(--pd-space-3, 12px); min-width: 0; }
+    .pd-frame-body--decision { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--pd-space-4, 16px); align-items: start; padding-block-end: var(--pd-space-2, 8px); }
+    .pd-frame-icon { display: inline-grid; place-items: center; inline-size: 40px; block-size: 40px; border-radius: 50%; background: var(--pd-info-tint); color: var(--pd-info); }
+    .pd-frame-icon--danger { background: var(--pd-danger-tint); color: var(--pd-danger); }
+    .pd-frame-heading { margin: 0; font-size: var(--pd-text-subtitle, 15px); font-weight: var(--pd-weight-semibold, 600); line-height: 1.35; overflow-wrap: anywhere; }
+    :host([data-kind='decision']) .pd-frame-content { gap: var(--pd-space-2, 8px); color: var(--pd-text-muted); }
+    :host([data-kind='decision']) .pd-frame-heading { color: var(--pd-text); }
+    /* A decision is one continuous surface: no divider or band under its question (ADR 0026 mockups). */
+    :host([data-kind='decision']) .pd-frame-foot { border-top: 0; background: transparent; padding-block-start: var(--pd-space-2, 8px); padding-block-end: var(--pd-space-4, 16px); }
     :host([data-kind='tool']) .pd-frame-content { height: 100%; }
     :host([data-kind='tool']) .pd-frame-content > :not(.pd-frame-loading):not(.pd-frame-failed) { flex: 1 1 auto; min-height: 0; }
     .pd-frame-loading { margin: var(--pd-space-4, 16px) auto; color: var(--pd-text-muted); }
@@ -186,6 +208,13 @@ export class DialogFrame {
   readonly platform = input<DialogPlatform>(dialogPlatform());
   /** The contract's width, logical px: what the frame is measured at. */
   readonly declaredWidth = input(0);
+  /**
+   * Whether the frame's body carries the dialog's role (a dialog window, where the OS window is the dialog). In the page
+   * the host element is the dialog (or alertdialog) and the body takes no role of its own: no nested dialog roles.
+   */
+  readonly ownsRole = input(true);
+  /** The id of the decision's heading (the host labels itself with it in the page). */
+  readonly headingId = input('pd-dialog-heading');
 
   /** The dialog answered. The host closes it with the value (no `dialogCanClose`: the content answered). */
   readonly answered = output<{ readonly value: unknown }>();
@@ -209,7 +238,8 @@ export class DialogFrame {
   /** A dismissal waits for a non-abortable action to settle (the signal draws "Finishing…"; the field is read after awaits). */
   private readonly finishing = signal(false);
   private finishingNow = false;
-  protected readonly describedBy = signal<string | null>(null);
+  /** The id of the decision's description (its first paragraph after the heading). */
+  readonly describedBy = signal<string | null>(null);
   private controller: AbortController | null = null;
   private done = false;
   private watching = false;
@@ -224,6 +254,14 @@ export class DialogFrame {
     const layout = layoutActions(this.kind(), this.modality(), this.requiredChoice(), actions, this.platform(), labels);
     if (layout.problems.length) console.error(`[paddock-dialogs] dialog ${this.dialogId()} declares invalid actions: ${layout.problems.join('; ')}`);
     return layout;
+  });
+  /** The question a decision asks (or a content's heading), drawn as the body's `h2`. */
+  protected readonly heading = computed(() => (this.state() === 'ready' ? (this.content()?.dialogHeading?.() ?? null) : null));
+  /** A decision with a heading draws its icon: `danger` when it has a destructive action, else `info`. */
+  protected readonly decision = computed<'danger' | 'info' | null>(() => {
+    if (this.kind() !== 'decision' || !this.heading()) return null;
+    const l = this.layout();
+    return [...l.lead, ...l.trail].some((p) => p.action.kind === 'answer' && p.action.role === 'destructive') ? 'danger' : 'info';
   });
   protected readonly header = computed(() => (this.state() === 'ready' ? (this.content()?.dialogHeader?.() ?? null) : null));
   protected readonly statusLine = computed(() => (this.finishing() ? this.t.finishing : this.state() === 'ready' ? (this.content()?.dialogStatus?.() ?? null) : null));
@@ -355,6 +393,11 @@ export class DialogFrame {
     this.render();
     const focus = this.layout().focus;
     const body = this.bodyEl().nativeElement;
+    if (focus === 'heading') {
+      const heading = this.host.nativeElement.querySelector<HTMLElement>('.pd-frame-heading') ?? body;
+      heading.tabIndex = -1;
+      return heading.focus();
+    }
     if (focus === 'field') {
       const field = body.querySelector<HTMLElement>('[data-autofocus]') ?? body.querySelector<HTMLElement>(FIELD);
       if (field) return field.focus();
@@ -373,7 +416,7 @@ export class DialogFrame {
     if (this.kind() !== 'decision') return;
     const p = this.contentEl().nativeElement.querySelector<HTMLElement>('p');
     if (!p) return;
-    p.id ||= `pd-dialog-desc-${this.dialogId().replace(/[^a-z0-9-]/g, '-') || 'x'}`;
+    p.id ||= `${this.headingId()}-desc`;
     this.describedBy.set(p.id);
     this.render();
   }

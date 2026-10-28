@@ -87,13 +87,13 @@ describe('the key dialog', () => {
 describe('the revoke dialog', () => {
   const open = (inputs: { keyId?: number; client?: string } = {}) => renderFramed(PdMcpRevokeDialog, { id: 'pd.mcp.revoke', inputs });
 
-  it('names the client, makes Keep the focus and Enter target, and the title the question', async () => {
+  it('names the client in its question, makes Keep the focus and Enter target', async () => {
     const d = await open({ keyId: 3, client: 'Pitwall' });
-    expect(text(d.q('mcp-revoke-text')!)).toContain('Revoke the key of "Pitwall"?');
+    expect(d.heading()).toBe('Revoke the key of “Pitwall”?');
     expect(text(d.q('mcp-revoke-text')!)).toContain('stops working at once');
     expect(document.activeElement).toBe(d.action('keep'));
     expect(d.action('revoke')!.textContent!.trim()).toBe('Revoke key');
-    expect(d.title()).toBe('Revoke the key of "Pitwall"?');
+
   });
 
   it('answers true on Revoke key and is dismissed by Keep', async () => {
@@ -116,6 +116,6 @@ describe('the revoke dialog', () => {
 
   it('names the key by its number when the client is unknown', async () => {
     const d = await open({ keyId: 9 });
-    expect(text(d.q('mcp-revoke-text')!)).toContain('"9"');
+    expect(d.heading()).toContain('“9”');
   });
 });

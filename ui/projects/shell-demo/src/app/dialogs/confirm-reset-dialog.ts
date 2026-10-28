@@ -5,9 +5,10 @@ import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dial
 @Component({
   selector: 'sd-confirm-reset-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<p class="text">The greeting count goes back to zero. This cannot be undone.</p>`,
+  template: `<p class="text">The count goes back to zero and the log is emptied. This cannot be undone.</p>`,
   styleUrl: './dialog-content.css',
 })
 export class ConfirmResetDialog implements DialogContent<boolean> {
+  readonly dialogHeading = signal('Reset the greetings?');
   readonly dialogActions = signal<readonly DialogAction<boolean>[]>([{ kind: 'answer', id: 'reset', label: 'Reset greetings', role: 'destructive', answer: () => true }]);
 }

@@ -138,9 +138,10 @@ describe('the dialog frame (ADR 0026 §2)', () => {
     expect(f.actions()).toEqual(platform === 'windows' ? ['save', 'dont-save', 'dismiss'] : ['dont-save', 'dismiss', 'save']);
     expect(f.el.querySelectorAll('.pd-frame-btn--filled')).toHaveLength(1);
     expect(f.q('dialog-status')!.textContent!.trim()).toBe('3 things');
-    const body = f.q('dialog-body')!;
-    expect(body.getAttribute('role')).toBe('alertdialog');
-    expect(body.getAttribute('aria-describedby')).toBe(f.q('scripted')!.id);
+    // In the page the dialog element is the alertdialog; the body takes no role of its own.
+    expect(f.el.getAttribute('role')).toBe('alertdialog');
+    expect(f.q('dialog-body')!.getAttribute('role')).toBeNull();
+    expect(f.el.getAttribute('aria-describedby')).toBe(f.q('scripted')!.id);
   });
 
   it('renders the fallback Close for an invalid declaration and logs it', async () => {
@@ -278,6 +279,16 @@ describe('the dialog frame (ADR 0026 §2)', () => {
     g.q('field')!.focus();
     await g.key('Enter');
     expect(g.outcome()).toEqual({ kind: 'dismissed' });
+  });
+
+  it('focuses the heading of a required choice whose only answer destroys something', async () => {
+    @Component({ selector: 'pd-test-wipe', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>Everything goes.</p>` })
+    class Wipe implements DialogContent {
+      readonly dialogHeading = signal('Wipe the workspace?');
+      readonly dialogActions = signal<readonly DialogAction[]>([{ kind: 'answer', id: 'wipe', label: 'Wipe workspace', role: 'destructive', answer: () => true }]);
+    }
+    const f = await renderFramed(Wipe, { requiredChoice: true });
+    expect(document.activeElement).toBe(f.q('dialog-heading'));
   });
 
   it('keeps a required choice open on every dismissal; the content may answer through its ref', async () => {
