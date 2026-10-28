@@ -407,8 +407,5 @@ mod tests {
             .unwrap();
         assert!(total > 0 && free <= total);
         assert!(capacity("no-such-mount-for-dyno-tests").is_none());
-        for mt in m.iter().take(2) {
-            let _ = media_traits(mt);
-        }
     }
 }

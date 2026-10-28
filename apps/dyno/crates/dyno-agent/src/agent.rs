@@ -197,6 +197,8 @@ pub struct Shared {
     pub hardware: crate::hardware::HardwareCentre,
     /// "Is this normal?" baselines learned from history.
     pub baselines: crate::baselines::BaselineCentre,
+    /// The disk map: volumes and scans (read-only).
+    pub disk: crate::disk::centre::DiskCentre,
     /// Logical cores (for validating affinity and normalising overhead).
     pub cores: usize,
     stop: AtomicBool,
@@ -290,7 +292,7 @@ impl Shared {
             issues,
             links,
         } = platform;
-        let shared = Shared {
+        let shared = Arc::new_cyclic(|me| Shared {
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
             dirs,
             core: Mutex::new(core),
@@ -319,12 +321,20 @@ impl Shared {
             ),
             hardware: crate::hardware::HardwareCentre::os(),
             baselines: crate::baselines::BaselineCentre::new(),
+            disk: crate::disk::centre::DiskCentre::new(
+                Arc::new(crate::disk::fs::OsDirSource),
+                Arc::new(crate::disk::volumes::OsVolumes),
+                Arc::new(crate::disk::BroadcastStatus(me.clone())),
+                Arc::new(crate::disk::centre::SystemClock::default()),
+                cores,
+                dyno_core::disk::index::ScanLimits::default(),
+            ),
             cores,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
-        };
-        Ok((Arc::new(shared), sensors, processes))
+        });
+        Ok((shared, sensors, processes))
     }
 
     /// A new connection id.

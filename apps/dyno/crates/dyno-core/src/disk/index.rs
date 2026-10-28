@@ -328,20 +328,25 @@ impl DiskIndex {
 
     /// Adds a file under `parent`. A notable file gets a node; any other is folded into `parent`'s loose totals.
     pub fn add_file(&mut self, parent: NodeId, name: &str, bytes: u64, mtime: Timestamp) {
-        let notable = bytes >= self.limits.notable_bytes && self.room();
-        if notable {
+        if bytes >= self.limits.notable_bytes && self.room() {
             let mut n = self.blank(name, NodeKind::File);
             n.complete = true;
             n.bytes = bytes;
             n.items = 1;
             n.newest = mtime.0;
             self.link(parent, n);
+            self.bump(parent.0, bytes, 1, mtime.0);
         } else {
-            let p = &mut self.nodes[parent.0 as usize];
-            p.loose_bytes = p.loose_bytes.saturating_add(bytes);
-            p.loose_items += 1;
+            self.add_folded_files(parent, bytes, 1, mtime);
         }
-        self.bump(parent.0, bytes, 1, mtime.0);
+    }
+
+    /// Adds files that were already summed by the caller (small ones, folded into `parent`).
+    pub fn add_folded_files(&mut self, parent: NodeId, bytes: u64, items: u64, newest: Timestamp) {
+        let p = &mut self.nodes[parent.0 as usize];
+        p.loose_bytes = p.loose_bytes.saturating_add(bytes);
+        p.loose_items = p.loose_items.saturating_add(items);
+        self.bump(parent.0, bytes, items, newest.0);
     }
 
     /// Ends the listing of a folder: it is complete once every child folder is too.

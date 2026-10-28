@@ -27,6 +27,8 @@ pub mod events {
     pub const AGENT: &str = "dyno://agent";
     /// `AlarmChange`.
     pub const ALARM: &str = "dyno://alarm";
+    /// `DiskScanStatus`.
+    pub const DISK_SCAN: &str = "dyno://disk-scan";
 }
 
 /// The icons are redrawn at most this often (and only when their picture changed).
@@ -180,6 +182,10 @@ impl Sink for Shell {
             }
         }
         self.emit(events::ALARM, change);
+    }
+
+    fn disk_scan(&self, status: dyno_core::disk::scan::DiskScanStatus) {
+        self.emit(events::DISK_SCAN, status);
     }
 
     fn agent(&self, status: AgentStatus) {

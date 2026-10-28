@@ -377,6 +377,43 @@ pub enum Request {
     Backup,
     /// Checks the backups now (read-only tools with timeouts) and answers the report. Appended.
     RefreshBackup,
+
+    // ---- the disk map (ADR 0024 job: pushed `Message::DiskScan` events, no polling) ----
+    /// The volumes mounted now: internal, external and network, with capacity. Appended.
+    DiskVolumes,
+    /// Starts a scan of a volume or a folder and answers its status at once; a second start of the same target answers
+    /// the running scan. Appended.
+    StartDiskScan {
+        /// What to scan.
+        target: crate::disk::scan::DiskTarget,
+    },
+    /// Stops a scan and returns at once; what was counted stays. Appended.
+    CancelDiskScan {
+        /// The scan.
+        scan: u64,
+    },
+    /// The status of every kept scan (what a window that opens late needs). Appended.
+    DiskScans,
+    /// One page of one level of a scan: the children of a folder, biggest first, the small ones folded into "other". Appended.
+    DiskChildren {
+        /// The scan.
+        scan: u64,
+        /// The folder (the scan's root when absent).
+        node: Option<u32>,
+        /// Where the page starts.
+        offset: u32,
+        /// How many children at most (1 to 256).
+        limit: u32,
+        /// Children below this share of the folder (0 to 1) are folded into "other"; 0 shows all.
+        min_fraction: f64,
+    },
+    /// The full path of a node, for Reveal and Copy path. Appended.
+    DiskPath {
+        /// The scan.
+        scan: u64,
+        /// The node.
+        node: u32,
+    },
 }
 
 /// Dyno's own cost.
@@ -653,6 +690,16 @@ pub enum Reply {
     Maintenance(crate::extras::maintenance::MaintenanceStatus),
     /// Backup health. Appended.
     Backup(Box<crate::backup::BackupReport>),
+    /// The volumes. Appended.
+    DiskVolumes(Vec<crate::disk::volume::Volume>),
+    /// One scan's status. Appended.
+    DiskScan(Box<crate::disk::scan::DiskScanStatus>),
+    /// Every kept scan's status. Appended.
+    DiskScans(Vec<crate::disk::scan::DiskScanStatus>),
+    /// One page of one level. Appended.
+    DiskChildren(Box<crate::disk::index::DiskChildren>),
+    /// A node's full path. Appended.
+    DiskPath(String),
 }
 
 /// The inventory report that was written.
@@ -728,6 +775,11 @@ impl Reply {
             Reply::FileFinder(x) => v(x),
             Reply::Maintenance(x) => v(x),
             Reply::Backup(x) => v(x),
+            Reply::DiskVolumes(x) => v(x),
+            Reply::DiskScan(x) => v(x),
+            Reply::DiskScans(x) => v(x),
+            Reply::DiskChildren(x) => v(x),
+            Reply::DiskPath(x) => v(x),
         }
     }
 }
@@ -805,6 +857,8 @@ pub enum Message {
     Activity(ActivityEntry),
     /// Agent → app: an alarm changed (raised, acknowledged, cleared...). Appended.
     Alarm(crate::alarms::AlarmChange),
+    /// Agent → app: a disk scan's status changed (at most four per second per scan, a final one at the end). Appended.
+    DiskScan(Box<crate::disk::scan::DiskScanStatus>),
 }
 
 #[cfg(test)]

@@ -19,6 +19,7 @@ pub mod issues;
 pub mod links;
 pub mod network;
 pub mod parse;
+pub mod priority;
 pub mod process;
 pub mod processes;
 pub mod runner;
