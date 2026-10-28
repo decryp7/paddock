@@ -1,0 +1,25 @@
+# Sighter's own Cargo workspace (ADR 0014: no root workspace; each app builds with its own lockfile). The pure crates come
+# first; the VNC target (SG4), the detector (SG5) and the Tauri app join later behind the ports of `sighter-core`.
+[workspace]
+resolver = "3"
+members = ["crates/sighter-core"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+thiserror = "2"
+proptest = "1"
+sighter-core = { path = "crates/sighter-core" }
+sighter-frames = { path = "crates/sighter-frames" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

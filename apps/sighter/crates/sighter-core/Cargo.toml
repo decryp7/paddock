@@ -1,0 +1,16 @@
+[package]
+name = "sighter-core"
+version = "0.0.0"
+description = "Sighter's pure core: frames, geometry, calibrated scores, the margin rule, the result enum and the ports (frames, input, detector, labels, VLM)."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
