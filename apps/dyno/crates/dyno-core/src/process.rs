@@ -510,17 +510,29 @@ mod tests {
         let other: OtherUsers = serde_json::from_value(fixture["otherUsers"].clone()).unwrap();
         assert_eq!((other.count, other.partial), (3, true));
         assert_eq!(serde_json::to_value(&other).unwrap(), fixture["otherUsers"]);
-        let reasons: Vec<UnavailableReason> = serde_json::from_value(fixture["reasons"].clone()).unwrap();
-        assert_eq!(
-            reasons,
-            [
-                UnavailableReason::NeedsAdmin,
-                UnavailableReason::NotPermitted,
-                UnavailableReason::NotSupported,
-                UnavailableReason::ResidentMemoryOnly
-            ],
-            "a new reason must be added to the fixture and to the TypeScript union"
-        );
+        // Exhaustive: a new variant does not compile until it is named here, which sends you to the fixture and the
+        // TypeScript union (`UnavailableReason` in api.types.ts, `ALL_REASONS` in measured.ts).
+        let wire_name = |r: UnavailableReason| match r {
+            UnavailableReason::NeedsAdmin => "needsAdmin",
+            UnavailableReason::NotPermitted => "notPermitted",
+            UnavailableReason::NotSupported => "notSupported",
+            UnavailableReason::ResidentMemoryOnly => "residentMemoryOnly",
+        };
+        let all = [
+            UnavailableReason::NeedsAdmin,
+            UnavailableReason::NotPermitted,
+            UnavailableReason::NotSupported,
+            UnavailableReason::ResidentMemoryOnly,
+        ];
+        let names: Vec<&str> = fixture["reasons"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(names, all.map(wire_name), "the fixture lists every reason, in this order");
+        for r in all {
+            assert_eq!(
+                serde_json::to_value(r).unwrap(),
+                wire_name(r),
+                "the name on the wire is the fixture's"
+            );
+        }
     }
 
     #[test]
