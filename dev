@@ -1,0 +1,77 @@
+#!/bin/sh
+# ./dev: runs paddock-dev, the Paddock developer and CI tool (ADR 0022). Works from any subfolder: it finds the repository
+# root with git and runs the tool in the folder you are in. The tool is a content-addressed binary: the hash of its inputs
+# (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache, the
+# prebuilt download (R0b: not wired yet), then a local build. A build also happens whenever an input has uncommitted
+# changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
+# Environment: PADDOCK_DEV_TARGET_DIR (build folder, default tools/paddock-dev/target, which is ignored by git),
+# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a
+# compiler wrapper, as release jobs do).
+set -eu
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
+tool="$root/tools/paddock-dev"
+inputs=$(grep -v '^[[:space:]]*#' "$tool/inputs.txt" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+
+# The compiler cargo will use: RUSTC, CARGO_BUILD_RUSTC, `rustc =` under [build] in a .cargo/config.toml on the tool's path
+# (closest first) or in $CARGO_HOME, else rustc run from the tool's folder (so a rustup override applies).
+rustc_cmd=${RUSTC:-${CARGO_BUILD_RUSTC:-}}
+if [ -z "$rustc_cmd" ]; then
+  for dir in "$tool/.cargo" "$root/tools/.cargo" "$root/.cargo" "${CARGO_HOME:-${HOME:-}/.cargo}"; do
+    [ -f "$dir/config.toml" ] || continue
+    rustc_cmd=$(awk '
+      /^[ \t]*\[/ { sec = $0; gsub(/[ \t]/, "", sec); next }
+      sec == "[build]" && /^[ \t]*rustc[ \t]*=/ {
+        v = $0; sub(/^[^=]*=[ \t]*/, "", v); sub(/^"/, "", v); sub(/"[ \t]*(#.*)?$/, "", v); print v; exit
+      }' "$dir/config.toml")
+    [ -n "$rustc_cmd" ] && break
+  done
+fi
+vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV | tr -d '\r')
+compiler=$(printf '%s\n' "$vv" | grep -E '^(commit-hash|release):')
+host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
+
+# shellcheck disable=SC2086 # inputs.txt holds paths without spaces
+hash=$({ git -C "$root" ls-tree HEAD -- $inputs; printf '%s\n' "$compiler"; } | git -C "$root" hash-object --stdin)
+# shellcheck disable=SC2086
+dirty=$(git -C "$root" status --porcelain --untracked-files=all -- $inputs)
+
+if [ "${1:-}" = "--wrapper-hash" ]; then
+  echo "$hash"
+  [ -n "$dirty" ] && echo dirty || echo clean
+  exit 0
+fi
+
+exe=
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
+name="paddock-dev-$host$exe"
+export PADDOCK_DEV_WRAPPER_HASH="$hash"
+
+build() { # build <target dir>: the binary ends up in <target dir>/release/paddock-dev
+  (cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet)
+}
+
+if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
+  fresh=$(mktemp -d)
+  trap 'rm -rf "$fresh"' EXIT
+  (unset RUSTC_WRAPPER; cd "$tool" && CARGO_TARGET_DIR="$fresh" PADDOCK_DEV_HASH="$hash" cargo build --release --locked --quiet)
+  "$fresh/release/paddock-dev$exe" "$@"
+  exit $?
+fi
+
+if [ -n "$dirty" ]; then
+  build "${PADDOCK_DEV_TARGET_DIR:-$tool/target}" dirty
+  exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
+fi
+
+cache="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}/bin/$hash"
+if [ ! -x "$cache/$name" ]; then
+  # R0b: download the published binary for this hash (Gitea generic package `paddock-dev`, version <hash>) and check its
+  # .sha256 here. Until the publishing workflow exists, every miss builds.
+  target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
+  build "$target" "$hash"
+  mkdir -p "$cache"
+  cp "$target/release/paddock-dev$exe" "$cache/$name.$$"
+  mv -f "$cache/$name.$$" "$cache/$name"
+fi
+exec "$cache/$name" "$@"

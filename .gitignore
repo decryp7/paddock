@@ -11,6 +11,8 @@ node_modules/
 # Generated from scss/ by `npm run build:css`.
 /ui/projects/paddock-ui/css/
 /crates/target/
+# The paddock-dev tool's local build folder (./dev builds it there on a cache miss).
+/tools/paddock-dev/target/
 /crates/.cargo/ci.toml
 .DS_Store
 
