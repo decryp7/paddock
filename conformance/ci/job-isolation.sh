@@ -380,7 +380,7 @@ cmd_release() {
     echo "::error::job-isolation: the holder of $s ended before the job did (killed with the job's processes?), so another job could have taken $s meanwhile: this job's isolation was not guaranteed. See ADR 0025, \"Stalled holder\"." >&2
   fi
   # Only this job's own holder: release honours only its token.
-  dev_tool ci slot release --slot "$s" --token "$token" --root "$(native "$home")" >/dev/null \
+  dev_tool ci slot release --slot "$s" --token "$token" --root "$(native "$home")" --timeout-secs 30 >/dev/null \
     || echo "::warning::job-isolation: $s did not let go in time (./dev ci slot status shows its holder)" >&2
   echo "job-isolation: released $s" >&2
   sweep "$home"
