@@ -414,6 +414,7 @@ pub fn now_ts() -> Timestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use pitcrew_core::hygiene::CacheReason;
 
     fn temp(name: &str) -> PathBuf {

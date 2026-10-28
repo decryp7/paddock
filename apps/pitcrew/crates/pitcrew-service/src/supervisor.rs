@@ -66,8 +66,8 @@ pub const STATE_FILE: &str = "state.json";
 const TAIL_LINES: usize = 5000;
 /// Bytes kept per runner for the log view.
 const TAIL_BYTES: usize = 4 * 1024 * 1024;
-/// How often processes are looked at.
-const PROBE_EVERY: Duration = Duration::from_secs(5);
+/// How often processes are looked at (on the supervisor's clock; tests step it by this much to get one look).
+pub const PROBE_EVERY: Duration = Duration::from_secs(5);
 /// How often a runner folder is scanned for housekeeping.
 const SCAN_EVERY: Duration = Duration::from_secs(30 * 60);
 /// A cleanup is not repeated sooner than this, even under disk pressure.
