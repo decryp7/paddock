@@ -761,7 +761,7 @@ describe('pd-view', () => {
       await settle(f);
       expect(host.paths).toEqual([{ fieldId: 'out', label: 'Output folder', folder: true }]);
       // The field shows the name the host gave the choice (cut in the middle, the full path as its tooltip), never the grant.
-      expect(one(form(f), '[data-testid=path-text]').getAttribute('title')).toBe('/work/releases/1.4/out');
+      expect(one(form(f), '[data-testid=path-text]').getAttribute('data-full')).toBe('/work/releases/1.4/out');
       expect(form(f).innerHTML).not.toContain('grant-7');
       publish(f).click();
       await settle(f);

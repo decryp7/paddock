@@ -34,7 +34,7 @@ test.describe('knowledge packs (plan X15/X23)', () => {
     await expect(rows.nth(0)).toContainText('Built in');
     await expect(rows.nth(1)).toContainText('Yours');
     // The full name is the tooltip; the shown text is shortened without a horizontal scroll.
-    await expect(rows.nth(1).getByTestId('path-text')).toHaveAttribute('title', /my-very-long-pack-file-name.*\.toml/);
+    await expect(rows.nth(1).getByTestId('path-text')).toHaveAttribute('data-full', /my-very-long-pack-file-name.*\.toml/);
     await expectNoHorizontalScroll(page);
   });
 
