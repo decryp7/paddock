@@ -37,11 +37,22 @@ test('C44 only flags JOBS_EVENT imported from paddock-ui: aliases and namespaces
   assert.equal(multi.length, 1);
 });
 
-test('C44 flags the jobs backends outside provider setup, with rule 42', async () => {
-  const use = "import { TauriJobsBackend, JobsBackend } from '@decryp7/paddock-ui/shell/jobs';\nconst b = inject(JobsBackend);\nconst t = new TauriJobsBackend();\n";
-  const bad = await findingsOf('C44', app({ 'app/src/app/page.ts': use }));
-  assert.equal(bad.length, 2);
+test('C44 flags a LISTEN on a jobs backend, or inject(JobsBackend) outside provider wiring (rule 42)', async () => {
+  const listen = "import { TauriJobsBackend, JobsBackend } from '@decryp7/paddock-ui/shell/jobs';\nexport class S {\n  private readonly backend = inject(JobsBackend);\n  start() { this.backend.listen((e) => toast(e)); }\n}\n";
+  const bad = await findingsOf('C44', app({ 'app/src/app/page.ts': listen }));
+  assert.deepEqual(bad.map((f) => f.line), [3, 4]);
   assert.equal(bad[0].rule, 42);
-  assert.match(messages(bad), /jobs backend outside its provider setup/);
-  assert.deepEqual(await findingsOf('C44', app({ 'app/src/app/provide-app.ts': use, 'app/src/app/app.config.ts': use, 'app/src/main.ts': use })), []);
+  assert.match(messages(bad), /listens to the shell’s jobs backend/);
+  const built = "import { TauriJobsBackend as T } from '@decryp7/paddock-ui/shell/jobs';\nconst b = new T(ipc);\nb.listen(f);\nnew T(ipc).listen(g);\n";
+  assert.deepEqual((await findingsOf('C44', app({ 'app/src/app/x.ts': built }))).map((f) => f.line), [3, 4]);
+  // inject in provider wiring is the shell's own pattern
+  assert.deepEqual(await findingsOf('C44', app({ 'app/src/app/provide-app.ts': "import { JobsBackend } from '@decryp7/paddock-ui/shell/jobs';\nconst b = inject(JobsBackend);\nb.listen(f);\n" })).then((f) => f.map((x) => x.line)), [3]);
+});
+
+test('C44 does not flag provider wiring shaped like the pending Spotter and Pitcrew moves', async () => {
+  const engines = "import { JobsBackend, MemoryJobsBackend, TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';\nexport function jobsBackend(engine: Engine): JobsBackend {\n  return engine === 'tauri' ? new TauriJobsBackend(ipc) : new MemoryJobsBackend();\n}\nexport const browser = { jobs: new MemoryJobsBackend() };\n";
+  const main = "import { TauriJobsBackend } from '@decryp7/paddock-ui/shell/jobs';\nexport const opts = { jobs: { backend: () => new TauriJobsBackend(ipc) } };\n";
+  const mock = "import { MemoryJobsBackend } from '@decryp7/paddock-ui/shell/jobs';\nexport class MockBackend {\n  readonly jobs = new MemoryJobsBackend();\n  seed() { this.jobs.add(1); }\n}\n";
+  const f = await findingsOf('C44', app({ 'app/src/app/shell/engines.ts': engines, 'app/src/app/shell/main-window.ts': main, 'app/src/app/core/mock-backend.ts': mock }));
+  assert.deepEqual(f, []);
 });

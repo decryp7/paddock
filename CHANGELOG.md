@@ -13,8 +13,8 @@ Conventional Commits; one semver tag for the whole repo.
 - `pd-page-host` is a flex column that fills `<main>` (`height: 100%`, `min-height: 0`), and the loaded page's box is a shrinkable
   flex item, so `height: 100%` inside a routed page resolves instead of collapsing to 0.
 - Conformance C44 (rule 42): an app must not name `paddock://jobs` or a `JOBS_EVENT` imported from paddock-ui (aliases and
-  namespaces too; an app's own constant of that name is fine), nor use `JobsBackend`/`TauriJobsBackend`/`MemoryJobsBackend`
-  outside `provide*.ts`, `*.config.ts`, `main.ts`; apps wait through `JobFollow` / `JobsStore.follow` (documented in
+  namespaces too; an app's own constant of that name is fine), nor listen on a `JobsBackend`/`TauriJobsBackend`/`MemoryJobsBackend`
+  (constructing one in provider wiring or a mock is fine) or inject `JobsBackend` outside `provide*.ts`, `*.config.ts`, `main.ts`; apps wait through `JobFollow` / `JobsStore.follow` (documented in
   `shell/jobs`). It runs in every app's gates (`app-gates` action) and in Paddock's conformance job; the e2e kit's self-test
   runs in the `ui` job of ci.yml.
 - `captureDocScreens` goes through `captureScreen` (settled, not cut, not scrolled, no cover); its `element` and `clip` crops
