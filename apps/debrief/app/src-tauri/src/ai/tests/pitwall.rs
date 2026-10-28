@@ -207,7 +207,7 @@ fn pitwall_works_without_the_built_in_worker() {
     assert_eq!(ai_health_of(&s), AiHealth::Fine);
     let r = w.core.provider().unwrap().chat(&hello(), &mut |_| {}).unwrap();
     assert_eq!(r.text, "Hello from Pitwall.");
-    assert!(w.core.engine(debrief_ai::engine::pitwall::Priority::Background).is_ok());
+    assert!(w.core.engine(debrief_ai::engine::pitwall::Priority::Interactive).is_ok());
     // The built-in engine itself is still reported unavailable when it is the one selected.
     assert!(w.core.built_in_availability().is_err());
     let mut next = w.core.settings();

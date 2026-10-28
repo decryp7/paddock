@@ -14,15 +14,12 @@ use serde_json::{json, Value};
 pub enum Priority {
     /// Something the user waits for (chats, use cases).
     Interactive,
-    /// Work nobody waits for (name aliases).
-    Background,
 }
 
 impl Priority {
     pub fn header(self) -> &'static str {
         match self {
             Priority::Interactive => "interactive",
-            Priority::Background => "background",
         }
     }
 }
@@ -186,9 +183,6 @@ mod tests {
         assert_eq!((b["stream"].as_bool(), b["max_tokens"].as_u64()), (Some(true), Some(9)));
         assert_eq!(b["response_format"]["json_schema"]["schema"], json!({"type": "object"}));
         assert_eq!((finish_of(Some("length")), finish_of(None)), (Finish::Length, Finish::Stop));
-        assert_eq!(
-            (Priority::Interactive.header(), Priority::Background.header()),
-            ("interactive", "background")
-        );
+        assert_eq!(Priority::Interactive.header(), "interactive");
     }
 }
