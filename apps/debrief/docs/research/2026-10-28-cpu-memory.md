@@ -11,6 +11,15 @@ DuckDB 2.0 and large-data research (`docs/research/2026-10-duckdb-2-and-large-da
 What is **measured** here is marked with the command that produced it. What is **read from the code** cites the file and
 line. What is **estimated** (no measurement possible without a model or real Event Viewer data) says so.
 
+**Update, 2026-10-28 (user decisions).** D7 taken: the budgets of section 4 are gates (counting tests on PRs, the
+nightly regression gate in `debrief-bench.yml`). D11 taken: the patterns of section 6 are family
+[ADR 0024](../../../../docs/adr/0024-background-work-contract.md) (Proposed). From the LLM research
+(`docs/research-debrief-llm`) and rule 46 ("No LLM for large jobs"): the background alias job is removed, `autoload` is
+off by default and the names pack (~1,500 entries, all OS) is that research's package. So section 3 is kept as the
+record of the estimate but no longer drives work, D8-D10 are superseded, and the packages N2-N7 of section 5 are
+replaced in the plan by **NR1** (this note's N1), **BP1** (background priority and thread bounds, ADR 0024 rule 1) and
+the unchanged P0-P4, J1, B1 and A1: 10 packages, about 18 agent-days. The plan's table is the current one.
+
 ## 0. Method and reproduction
 
 - **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, APFS SSD, macOS (Darwin 27.2). Shared with other agents: load
