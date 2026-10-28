@@ -676,15 +676,8 @@ mod tests {
 
     #[test]
     fn refused_garbage_and_header_injection() {
-        let held = paddock_testkit::net::HeldPort::hang_up();
-        let closed = send_via(
-            &Refuses,
-            held.port(),
-            "t",
-            &Request::get("/"),
-            Timeouts::QUICK,
-            None,
-        );
+        // Any port will do: `Refuses` never opens a connection, so nothing can be listening behind it.
+        let closed = send_via(&Refuses, 1, "t", &Request::get("/"), Timeouts::QUICK, None);
         assert!(
             matches!(closed, Err(HttpError::Refused(_))),
             "{:?}",

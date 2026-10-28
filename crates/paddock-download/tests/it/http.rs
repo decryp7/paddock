@@ -824,7 +824,7 @@ fn a_stalled_transfer_ends_as_stalled_and_keeps_the_partial_file() {
 }
 
 #[test]
-fn an_unreachable_host_is_a_network_error_after_the_attempts() {
+fn a_reset_connection_is_a_network_error_after_the_attempts() {
     // A held port that resets every connection, not a port read off a dropped listener (ADR 0023).
     let held = paddock_testkit::net::HeldPort::reset();
     let port = held.port();
@@ -1055,7 +1055,7 @@ fn transport_failures_are_classified() {
         "not retried by the downloader"
     );
     let plain = Server::start(|r, _| partial(r, b"x"));
-    // A proxy that is not there.
+    // A proxy that resets the connection.
     let held = paddock_testkit::net::HeldPort::reset();
     let closed = held.port();
     let d = Downloader::http(HttpConfig {

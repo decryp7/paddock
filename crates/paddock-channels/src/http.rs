@@ -100,3 +100,17 @@ fn to_transport(e: NetError) -> TransportError {
     };
     TransportError::new(kind, e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_connect_failure_stays_a_connect_failure() {
+        // paddock-net maps a refused, reset or aborted connection to `NetError::Connect` (its own unit test, with a
+        // constructed `ConnectionRefused`); this is the next step of that mapping.
+        let e = to_transport(NetError::Connect("127.0.0.1".into()));
+        assert_eq!(e.kind, TransportErrorKind::Connect);
+        assert!(e.message.contains("127.0.0.1"));
+    }
+}
