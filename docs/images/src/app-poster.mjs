@@ -1,7 +1,8 @@
 // Marketing art for every Paddock app, from one small data file per app (apps/<app>.mjs). Plain Node, no dependencies.
 //   node docs/images/src/app-poster.mjs <app|all> [--png]
 // Writes into the app's own checkout (sibling directory of paddock, or $PADDOCK_APPS/<app>):
-//   docs/images/<app>-hero.svg          1600x900, theme-aware, real screenshot in a window frame (a concept mock for planned apps)
+//   docs/images/<app>-hero.svg          1600x900, theme-aware, real screenshot in a window frame (a concept mock for planned apps,
+//                                       an illustration for apps with `illustrated: true` whose screenshots are out of date)
 //   docs/images/<app>-features.svg      four feature panels with zoomed screenshot crops, plus the "Works with" strip
 //   docs/images/<app>-how-it-works.svg  one line of 3-5 steps
 //   docs/images/<app>-social.svg        1280x640 repository card
@@ -110,6 +111,9 @@ const shotBody = (idl, idd, w, h) => `<g class="lt"><use href="#${idl}" width="$
 const imgDef = (id, uri, w, h) => `<image id="${id}" href="${uri}" width="${w}" height="${h}" preserveAspectRatio="none"/>`;
 const mockBody = (g, w, designW, designH) => `<g transform="scale(${w / designW})">${g}</g>`;
 
+/** Drawn instead of screenshots: a planned app (concept) or `illustrated: true` (the screenshots show an older app). */
+const drawn = (d) => d.planned || d.illustrated;
+
 // ---- screenshots -------------------------------------------------------------------------------------------------------
 // layout 'dir': screenshots/<theme>/<name>.png; 'light-suffix': <name>.png is dark and <name>-light.png light (Debrief); otherwise <name>-<theme>.png.
 const shotFile = (d, app, name, theme) => d.shots.layout === 'dir' ? join(appsRoot, app, 'docs/screenshots', theme, `${name}.png`)
@@ -117,7 +121,7 @@ const shotFile = (d, app, name, theme) => d.shots.layout === 'dir' ? join(appsRo
   : join(appsRoot, app, 'docs/screenshots', `${name}-${theme}.png`);
 /** Collect crop tasks for an app and return {key: {light,dark}} data URIs. */
 function shotsFor(d) {
-  if (d.planned) return {};
+  if (drawn(d)) return {};
   const jobs = [];
   const add = (key, name, rect, outW, q) => ['light', 'dark'].forEach((th) => jobs.push({ key, th, src: shotFile(d, d.id, name, th), x: rect[0], y: rect[1], w: rect[2], h: rect[3], outW, q }));
   // heroH: the hero screenshot's height in CSS px when it is shorter than the 900 px window (a frame that ends between rows).
@@ -137,14 +141,15 @@ function heroSvg(d, S, { W = 900 * 16 / 9, H = 900 } = {}) {
   const a = d.accent;
   // main window geometry: body aspect 1.6
   const fw = 920, fbh = 575, fx = 650, fy = 214, bw = 860, bbh = 537, bx = 740, by = 112;
-  const defs = d.planned ? '' : imgDef('hero-l', S.hero.light, fw, fbh) + imgDef('hero-d', S.hero.dark, fw, fbh) + imgDef('back-l', S.back.light, bw, bbh) + imgDef('back-d', S.back.dark, bw, bbh);
-  const front = windowFrame(fx, fy, fw, fbh, d.planned ? mockBody(mock.hero(d.id), fw, 960, 600) + `<rect width="${fw}" height="${fbh}" fill="none"/>` : shotBody('hero-l', 'hero-d', fw, fbh));
-  const back = d.planned ? '' : windowFrame(bx, by, bw, bbh, shotBody('back-l', 'back-d', bw, bbh), { opacity: 0.55, shadow: true });
+  const defs = drawn(d) ? '' : imgDef('hero-l', S.hero.light, fw, fbh) + imgDef('hero-d', S.hero.dark, fw, fbh) + imgDef('back-l', S.back.light, bw, bbh) + imgDef('back-d', S.back.dark, bw, bbh);
+  const front = windowFrame(fx, fy, fw, fbh, drawn(d) ? mockBody(mock.hero(d.id), fw, 960, 600) + `<rect width="${fw}" height="${fbh}" fill="none"/>` : shotBody('hero-l', 'hero-d', fw, fbh));
+  const back = drawn(d) ? '' : windowFrame(bx, by, bw, bbh, shotBody('back-l', 'back-d', bw, bbh), { opacity: 0.55, shadow: true });
   const lines = d.headline.map((l, i) => `<text class="h1" x="96" y="${372 + i * 66}">${esc(l)}</text>`).join('');
   const sub = d.sub.map((l, i) => `<text class="sub" x="96" y="${372 + (d.headline.length - 1) * 66 + 58 + i * 34}">${esc(l)}</text>`).join('');
   const subEnd = 372 + (d.headline.length - 1) * 66 + 26 + d.sub.length * 34;
   const tag = d.planned ? pill(96, subEnd + 46, 'Planned · coming soon') : pill(96, subEnd + 46, STATUS[d.id]?.text ?? d.status);
-  const mockNote = d.planned ? `<text class="small" x="${fx}" y="${fy + fbh + 54}" style="font-size:17px">Concept: the screen is a mock-up, not a product screenshot.</text>` : '';
+  const note = d.planned ? 'Concept: the screen is a mock-up, not a product screenshot.' : d.illustrated ? 'Illustration of the app, not a product screenshot.' : '';
+  const mockNote = note ? `<text class="small" x="${fx}" y="${fy + fbh + 54}" style="font-size:17px">${note}</text>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="t d">
 <title id="t">${d.name}: ${esc(d.headline.join(' '))}</title><desc id="d">${esc(d.sub.join(' '))}</desc>
 ${css(a)}<defs>${defs}</defs>
@@ -241,8 +246,8 @@ ${items}
 function socialSvg(d, S) {
   // d.social = { fx, fy } moves the bleeding window so the right and bottom edges cut between columns and rows, not through text.
   const a = d.accent, fw = 880, fbh = 550, fx = d.social?.fx ?? 600, fy = d.social?.fy ?? 118;
-  const defs = d.planned ? '' : imgDef('hero-l', S.hero.light, fw, fbh) + imgDef('hero-d', S.hero.dark, fw, fbh);
-  const win = windowFrame(fx, fy, fw, fbh, d.planned ? mockBody(mock.hero(d.id), fw, 960, 600) : shotBody('hero-l', 'hero-d', fw, fbh));
+  const defs = drawn(d) ? '' : imgDef('hero-l', S.hero.light, fw, fbh) + imgDef('hero-d', S.hero.dark, fw, fbh);
+  const win = windowFrame(fx, fy, fw, fbh, drawn(d) ? mockBody(mock.hero(d.id), fw, 960, 600) : shotBody('hero-l', 'hero-d', fw, fbh));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="t">
 <title id="t">${d.name}: ${esc(d.headline.join(' '))}</title>${css(a)}<defs>${defs}</defs>
 <rect width="1280" height="640" fill="var(--wbg)"/>${glow(1280, 640, 960, 340, 640)}${tracks(1280, 640)}

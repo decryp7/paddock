@@ -1,11 +1,10 @@
 # Writing Dyno plugins
 
-A Dyno plugin is a small **Rust** executable that adds sensors, cleanup categories or rule actions. Dyno's agent
+A Dyno plugin is a small **Rust** executable that adds sensors (a plugin can add nothing else: [ADR 0021](adr/0021-monitoring-only.md)). Dyno's agent
 starts it as a separate process and talks to it over Dyno's one IPC; a plugin can never take Dyno down.
 
 - Start from [`templates/plugin`](../templates/plugin) (copy it) and read
-  [`plugins/dyno-plugin-example`](../plugins/dyno-plugin-example) for a complete plugin with a sensor and a cleanup
-  category.
+  [`plugins/dyno-plugin-example`](../plugins/dyno-plugin-example) for a complete plugin with a sensor.
 - A plugin depends on **`dyno-plugin-api` only**. Its `main` is one line: `dyno_plugin_api::serve(MyPlugin)`.
 
 ## What a plugin can contribute
@@ -13,17 +12,10 @@ starts it as a separate process and talks to it over Dyno's one IPC; a plugin ca
 | Contribution | Trait | Called | Timeout |
 |---|---|---|---|
 | `sensors` | `SensorProvider::sensors() -> Vec<SensorReading>` | about once a second | 2 s |
-| `cleanup` | `CleanupProvider::categories()`, `scan(category, limits) -> Result<Vec<Candidate>, PluginError>` | when the user scans | 60 s |
-| `actions` | `ActionProvider::actions()`, `run(action_id, RuleEvent) -> Result<String, PluginError>` | when a rule fires | 10 s |
 
-`Plugin::manifest()` names the plugin and lists its contributions; `Plugin::as_sensors()` / `as_cleanup()` / `as_actions()`
-return `Some(self)` for each one it implements. Calls can arrive on several threads at once (a scan does not block
+`Plugin::manifest()` names the plugin and lists its contributions; `Plugin::as_sensors()`
+returns `Some(self)` when it implements them. Calls can arrive on several threads at once (a slow read does not block
 sensor readings), so providers take `&self`; use a `Mutex` for state that changes.
-
-**Cleanup plugins only propose.** A `Candidate` (absolute path, size, modification time, reason) is a suggestion:
-Dyno drops relative paths, applies its cleanup safety policy (protected locations, personal files, Recycle Bin /
-Trash or quarantine), shows the preview and deletes only what the user accepts. A plugin must never delete anything
-itself. Choose the category's `risk` honestly: `safe` (regenerated caches), `review`, or `personal`.
 
 Return a `PluginError` for an expected failure ("the folder is missing"): it is shown to the user and does not count
 against the plugin. Panics, hangs and crashes do.
@@ -38,7 +30,7 @@ name = "Dyno example"
 version = "0.1.0"
 api_version = 1                    # dyno_plugin_api::API_VERSION it was built against
 executable = "dyno-plugin-example" # a file name in the same folder; ".exe" is added on Windows; default: the id
-contributes = ["sensors", "cleanup"]
+contributes = ["sensors"]
 ```
 
 The id, the folder name and the manifest's id must agree, and `api_version` must be the one this Dyno speaks;
@@ -84,13 +76,7 @@ Running a plugin by hand only prints that Dyno starts it itself.
 Test providers as plain Rust: they are ordinary methods. `dyno_plugin_api::handle(&plugin, request)` runs the same
 dispatch `serve` uses, without a connection, so a test can send `PluginRequest`s and check the `PluginReply`s.
 
-## Cleanup packs (tier 2, no code)
+## Packs (tier 2, no code)
 
-A cleanup pack is a TOML file. The built-in one is `crates/dyno-core/src/cleanup/builtin.toml` (every key is shown there);
-yours go in the data folder's `packs/` folder (`*.toml`, at most 32 files of 128 KiB). One `format = 1` line, then
-`[[category]]` tables with `id`, `name`, `description`, `group`, `risk`, optional `os` (`windows`, `macos`, `linux`; empty
-means all), `paths` and optional `selector` (`children` or `installers`) and `min_age_days`. A path is a template: it starts with
-`{home}`, `{temp}`, `{cache}`, `{data}` or `{localAppData}`, then folder names (`*` stands for one whole level), for example
-`{home}/.gradle/caches`. Unknown keys, `..`, personal folders such as `{home}/Documents`, a `safe` risk with
-`min_age_days = 0`, ids that already exist and anything over the limits make Dyno ignore the whole pack and say which file and
-why in the activity log. Every path a pack yields still passes the cleanup policy (ADR 0005); a pack can narrow, never widen.
+Declarative TOML packs are planned for after 1.0 (roadmap WP-15). They will carry read-only data only (backup detectors,
+known helpers); there are no cleanup, tuning or rule packs ([ADR 0021](adr/0021-monitoring-only.md)).
