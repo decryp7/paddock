@@ -1,20 +1,31 @@
 import { TestBed } from '@angular/core/testing';
 import type { ShellContext } from '@decryp7/paddock-ui/shell';
-import { describe, expect, it } from 'vitest';
+import { MATERIAL_ANIMATIONS } from '@angular/material/core';
+import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
+import { describe, expect, it, vi } from 'vitest';
+import { UNDO_TOAST_MS } from './undo-config';
+
+// Read from disk (vitest runs in ui/), as template-classes.spec does.
+const nodeFs = (): Promise<{ readFileSync(path: string, encoding: 'utf8'): string }> => import(/* @vite-ignore */ ['node', 'fs'].join(':')) as never;
 import { provideShellUndo } from './provide-undo';
 import { bed, settle } from './spec-helpers';
-import { PdUndoToast } from './undo-toast';
+import { PdUndoToast, UNDO_SNACK_CLASS } from './undo-toast';
 import { REDO_COMMAND, stepHistory, UNDO_COMMAND, UNDO_CONTRIBUTIONS, type UndoContext } from './undo.contributions';
 import { UndoStore } from './undo.store';
 
-describe('pd-undo-toast', () => {
+describe('pd-undo-toast (a Material snack bar)', () => {
   function mount() {
-    const b = bed([provideShellUndo()]);
+    const b = bed([provideShellUndo(), { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } }, providePaddockMaterial()]);
     const store = TestBed.inject(UndoStore);
     const f = TestBed.createComponent(PdUndoToast);
-    const el: HTMLElement = f.nativeElement;
-    return { ...b, store, f, el, toast: () => el.querySelector<HTMLElement>('[data-testid=undo-toast]') };
+    // The snack bar is drawn in the overlay, not inside the component.
+    const toast = () => document.querySelector<HTMLElement>('[data-testid=undo-toast]');
+    const buttons = () => [...(toast()?.querySelectorAll('button') ?? [])];
+    return { ...b, store, f, toast, buttons, container: () => document.querySelector<HTMLElement>('.mat-mdc-snack-bar-container') };
   }
+  /** The snack bar leaves the page after its exit step (a microtask or a timer, never a fixed wait): wait for the condition. */
+  const gone = (t: { toast: () => HTMLElement | null }) => vi.waitFor(() => expect(t.toast()).toBeNull());
+  const announce = (store: InstanceType<typeof UndoStore>, label: string) => store.record({ label, announce: true, do: () => undefined, undo: () => undefined });
 
   it('shows what was done with an Undo button that takes it back, and a close button', async () => {
     const t = mount();
@@ -23,26 +34,79 @@ describe('pd-undo-toast', () => {
     expect(t.toast()).toBeNull();
     await t.store.execute({ label: 'rename to b', announce: true, do: () => void (value = 2), undo: () => void (value = 1) });
     await settle();
-    expect(t.toast()?.getAttribute('role')).toBe('status');
     expect(t.toast()?.textContent).toContain('Done: rename to b');
-    t.toast()!.querySelector<HTMLButtonElement>('button.pd-btn:not(.pd-btn--icon)')!.click();
+    expect(t.buttons().map((b) => b.textContent?.trim() || b.getAttribute('aria-label'))).toEqual(['Undo', 'Dismiss']);
+    t.buttons()[0]!.click();
     await settle();
     expect(value).toBe(1);
-    expect(t.toast()).toBeNull();
-    t.store.record({ label: 'again', announce: true, do: () => undefined, undo: () => undefined });
+    await gone(t);
+    announce(t.store, 'again');
     await settle();
-    const close = t.toast()!.querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!;
-    close.click();
+    t.toast()!.querySelector<HTMLButtonElement>('button[aria-label="Dismiss"]')!.click();
     await settle();
-    expect(t.toast()).toBeNull();
+    await gone(t);
     expect(t.store.canUndo()).toBe(true);
+  });
+
+  it('is announced politely, takes no focus and has no timer of its own', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const t = mount();
+      announce(t.store, 'x');
+      await settle();
+      expect(t.container()?.querySelector('[aria-live="polite"]')).not.toBeNull();
+      // The snack bar moves the content into its live region after a short delay, which is what screen readers read.
+      await vi.advanceTimersByTimeAsync(500);
+      expect(t.container()?.querySelector('[aria-live="polite"] [data-testid=undo-toast]')).not.toBeNull();
+      expect(t.toast()?.contains(document.activeElement)).toBe(false);
+      // The store's clock (UNDO_TOAST_MS) is the only one: the snack bar's own would end the toast far earlier (its default is
+      // none, and a configured one would show here).
+      await vi.advanceTimersByTimeAsync(UNDO_TOAST_MS - 1);
+      expect(t.toast()).not.toBeNull();
+      t.clock.advance(UNDO_TOAST_MS);
+      await settle();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(t.toast()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('goes by itself when the store hides it, and a newer toast replaces the older one', async () => {
+    const t = mount();
+    announce(t.store, 'one');
+    await settle();
+    announce(t.store, 'two');
+    await settle();
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid=undo-toast]')).toHaveLength(1));
+    expect(t.toast()?.textContent).toContain('Done: two');
+    t.clock.advance(UNDO_TOAST_MS);
+    await settle();
+    await gone(t);
+  });
+
+  it('closes with its component', async () => {
+    const t = mount();
+    announce(t.store, 'x');
+    await settle();
+    expect(t.toast()).not.toBeNull();
+    t.f.destroy();
+    await gone(t);
   });
 
   it('draws its close icon at 14 px or more', async () => {
     const t = mount();
-    t.store.record({ label: 'x', announce: true, do: () => undefined, undo: () => undefined });
+    announce(t.store, 'x');
     await settle();
-    expect(Number(t.el.querySelector('pd-glyph svg')!.getAttribute('width'))).toBeGreaterThanOrEqual(14);
+    expect(Number(t.toast()!.querySelector('pd-glyph svg')!.getAttribute('width'))).toBeGreaterThanOrEqual(14);
+  });
+
+  it('keeps the page-footer safe area above the status bar, from tokens, so it never covers a footer action', async () => {
+    const MATERIAL_SCSS = (await nodeFs()).readFileSync('projects/paddock-ui/scss/_material.scss', 'utf8');
+    // jsdom has no layout: the rule is read from the stylesheet source; e2e/shell-demo-undo.spec.ts measures it in a browser.
+    const rule = /\.mat-mdc-snack-bar-container\.pd-undo-snack \{([^}]*)\}/.exec(MATERIAL_SCSS)?.[1]?.replace(/\s+/g, ' ') ?? '';
+    expect(rule).toMatch(/margin-bottom: calc\(var\(--pd-statusbar-height[^)]*\) \+ var\(--pd-page-footer-safe[^)]*\) \+ var\(--pd-space-2\)\)/);
+    expect(UNDO_SNACK_CLASS).toBe('pd-undo-snack');
   });
 });
 

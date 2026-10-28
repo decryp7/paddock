@@ -59,6 +59,18 @@ test('a package with a bad signature is refused, with the next step', async ({ a
   await expect(page.getByRole('button', { name: 'Check again' })).toBeVisible();
 });
 
+test('the Updates preferences are Material checkboxes and pass axe in both themes', async ({ app, page }) => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await app.dialogs.openWindow('pd.updates');
+    const auto = page.locator('pd-updates-dialog mat-checkbox').first();
+    await expect(auto).toContainText('Check for updates automatically');
+    await auto.getByRole('checkbox').check();
+    await expect(auto.getByRole('checkbox')).toBeChecked();
+    expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
+  }
+});
+
 test('a build without an update key says updates are not available, with nothing to press but Close', async ({ app, page }) => {
   await app.dialogs.openWindow('pd.updates', {}, { query: '?updates=unavailable' });
   await expect(page.getByTestId('updates-phase')).toHaveText('Updates are not available in this build.');

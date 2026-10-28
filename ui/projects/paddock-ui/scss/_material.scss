@@ -696,6 +696,12 @@ html .mat-mdc-snack-bar-action {
   font-weight: var(--pd-weight-semibold);
 }
 
+// The undo toast keeps the family's toast safe area (guide section 8): clear of the status bar and of the page footer, so a
+// wizard's Next or a form's Save is never covered.
+html .mat-mdc-snack-bar-container.pd-undo-snack {
+  margin-bottom: calc(var(--pd-statusbar-height, 28px) + var(--pd-page-footer-safe, 56px) + var(--pd-space-2));
+}
+
 // ---- Keyboard focus (SC 2.4.7, 2.4.13). Material's strong focus indicator (mat.strong-focus-indicators in entry-material.scss)
 // draws a 2 px --pd-focus-ring border 2 px outside the control (each component offsets its own `.mat-focus-indicator` child); the slide toggle's track is ringed as well (its zoom thins
 // the indicator).

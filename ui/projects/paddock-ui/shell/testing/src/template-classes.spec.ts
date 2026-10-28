@@ -17,7 +17,6 @@ const ROOTS = ['projects/paddock-ui/shell', 'projects/paddock-ui/src/lib'];
 const UNSTYLED_ON_PURPOSE = new Set<string>([
   // Library classes styled by the global paddock-ui stylesheet (scss/_controls.scss), not by the component.
   'needs-ai.ts:pd-btn', 'needs-ai.ts:pd-btn--ghost',
-  'undo-toast.ts:pd-btn', 'undo-toast.ts:pd-btn--sm', 'undo-toast.ts:pd-btn--icon', 'undo-toast.ts:pd-btn--ghost',
   'activity-page.ts:pd-btn', 'activity-page.ts:pd-btn--sm',
   'setting-field.ts:pd-switch', 'settings-window.ts:pd-check',
   // Structural hooks (selectors in tests, grouping) with no rule of their own.

@@ -436,12 +436,23 @@ describe('the dialogs', () => {
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('Downloading: 20 MB of 39 MB');
-    expect(el.querySelector('progress')?.getAttribute('value')).toBe('0.5');
+    const bar = el.querySelector('mat-progress-bar')!;
+    expect(bar.getAttribute('role')).toBe('progressbar');
+    expect(bar.getAttribute('aria-valuenow')).toBe('50');
+    expect(bar.getAttribute('aria-label')).toBe('Downloading: 20 MB of 39 MB');
+    expect(el.querySelector('progress')).toBeNull();
+    // A phase without a total is an indeterminate bar, not a static 0 (rule 18).
+    jobs.emit({ id: id ?? -1, kind: 'update-download', title: 'Downloading the update', subject: '1.5.0', seq: 2, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: null, done: 1000 } });
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('mat-progress-bar')?.getAttribute('mode')).toBe('indeterminate');
+    expect(el.querySelector('mat-progress-bar')?.hasAttribute('aria-valuenow')).toBe(false);
     hold.forEach((s) => s());
     await settle();
     await fixture.whenStable();
     expect(text(el)).toContain('downloaded and its signature verified');
-    el.querySelector<HTMLInputElement>('label.pd-check input[type="checkbox"]')?.click();
+    expect(el.querySelector('label.pd-check input[type="checkbox"]')).toBeNull();
+    el.querySelector<HTMLInputElement>('mat-checkbox input[type="checkbox"]')?.click();
     await settle();
     expect((await updates.status()).autoCheck).toBe(true);
     expect(el.querySelector('select')).toBeNull();
@@ -589,7 +600,7 @@ describe('the edges', () => {
     button(el, 'Download').click();
     await settle();
     await f.whenStable();
-    const quit = [...el.querySelectorAll('label.pd-check')].find((l) => text(l as HTMLElement).includes('Install when the app quits'));
+    const quit = [...el.querySelectorAll('mat-checkbox')].find((l) => text(l as HTMLElement).includes('Install when the app quits'));
     quit?.querySelector('input')?.click();
     await settle();
     expect((await updates.status()).phase).toMatchObject({ kind: 'ready', installOnQuit: true });

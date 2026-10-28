@@ -20,7 +20,6 @@ export const ABOUT_STYLES = `
   .pd-problem .pd-detail { color: var(--pd-text-muted); overflow-wrap: anywhere; }
   label.pd-check { display: inline-flex; align-items: center; gap: var(--pd-space-2); }
   select { min-height: var(--pd-button-height); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-  progress { width: 100%; }
   ul { margin: 0; padding-left: var(--pd-space-6); }
   li + li { margin-top: var(--pd-space-1); }
 `;

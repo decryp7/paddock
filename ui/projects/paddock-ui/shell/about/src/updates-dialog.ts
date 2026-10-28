@@ -1,4 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { MatCheckbox, type MatCheckboxChange } from '@angular/material/checkbox';
+import { MatProgressBar } from '@angular/material/progress-bar';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import type { SuJobPhase } from '@decryp7/paddock-ui';
@@ -15,7 +17,7 @@ import { formatBytes } from './format';
 @Component({
   selector: 'pd-updates-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdSelect],
+  imports: [MatCheckbox, MatProgressBar, PdSelect],
   template: `
     @if (store.status(); as s) {
       <p class="pd-muted" data-testid="updates-current">{{ current(s.currentVersion) }}</p>
@@ -40,7 +42,7 @@ import { formatBytes } from './format';
             <p role="status">{{ downloading() }}</p>
             @if (progress(); as p) {
               <p class="pd-muted">{{ p.label }}</p>
-              <progress [attr.value]="p.fraction" max="1" [attr.aria-label]="p.label"></progress>
+              <mat-progress-bar [mode]="p.fraction === null ? 'indeterminate' : 'determinate'" [value]="(p.fraction ?? 0) * 100" [aria-label]="p.label" />
             } @else {
               <p class="pd-muted">{{ t.progressInJobs }}</p>
             }
@@ -72,10 +74,7 @@ import { formatBytes } from './format';
       }
       @if (s.phase.kind !== 'unavailable') {
         <div class="pd-row">
-          <label class="pd-check">
-            <input type="checkbox" [checked]="s.autoCheck" (change)="setAuto($any($event.target).checked)" />
-            {{ t.autoCheck }}
-          </label>
+          <mat-checkbox [checked]="s.autoCheck" (change)="setAuto($event)">{{ t.autoCheck }}</mat-checkbox>
           @if (s.channels.length > 1) {
             <!-- eslint-disable-next-line @angular-eslint/template/label-has-associated-control -- the label wraps a pd-select, whose trigger button is the labelled control (ariaLabel is set) -->
             <label class="pd-check">
@@ -85,10 +84,7 @@ import { formatBytes } from './format';
           }
         </div>
         @if (s.phase.kind === 'ready') {
-          <label class="pd-check">
-            <input type="checkbox" [checked]="installOnQuit()" (change)="store.installOnQuit($any($event.target).checked)" />
-            {{ t.installOnQuit }}
-          </label>
+          <mat-checkbox [checked]="installOnQuit()" (change)="store.installOnQuit($event.checked)">{{ t.installOnQuit }}</mat-checkbox>
         }
         <p class="pd-muted">{{ checkedText() }}</p>
       }
@@ -204,9 +200,9 @@ export class PdUpdatesDialog {
     return { label, fraction };
   });
 
-  protected setAuto(autoCheck: boolean): void {
+  protected setAuto(change: MatCheckboxChange): void {
     const s = this.store.status();
-    if (s) void this.store.setPreferences({ autoCheck, channel: s.channel });
+    if (s) void this.store.setPreferences({ autoCheck: change.checked, channel: s.channel });
   }
 
   protected readonly channelOptions = computed(() => (this.store.status()?.channels ?? []).map((c) => ({ value: c.id, label: c.label })));
