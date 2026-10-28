@@ -1,4 +1,5 @@
-import type { Browser } from '@playwright/test';
+import { writeFileSync } from 'node:fs';
+import type { Browser, Page } from '@playwright/test';
 import { dialogWindowUrl, type DialogContractEntry } from './shell.ts';
 
 /** The scales and work areas of ADR 0016 check 1 (ADR 0026 §6). */
@@ -68,4 +69,51 @@ export async function dialogFitProblems(browser: Browser, id: string, contract: 
     }
   }
   return problems;
+}
+
+/**
+ * Opens the window of every dialog in `contracts` by URL, as Rust loads it, and waits for its ready handshake (ADR 0026
+ * §6). Returns the ids it opened; with `out`, also writes them (`{ "visited": [...] }`) for the nightly check, which
+ * compares them with the contracts. A dialog that never becomes ready is a problem, listed with its id.
+ */
+export async function openEveryDialog(
+  page: Page,
+  contracts: Readonly<Record<string, unknown>>,
+  options: { readonly inputs?: Readonly<Record<string, unknown>>; readonly out?: string } = {},
+): Promise<{ readonly visited: string[]; readonly problems: string[] }> {
+  const visited: string[] = [];
+  const problems: string[] = [];
+  for (const id of Object.keys(contracts).sort()) {
+    await page.goto(dialogWindowUrl(id, options.inputs?.[id] ?? {}, { title: id }));
+    try {
+      await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+      visited.push(id);
+    } catch {
+      problems.push(`${id} never sent its ready handshake`);
+    }
+  }
+  if (options.out) writeFileSync(options.out, `${JSON.stringify({ visited }, null, 2)}\n`);
+  return { visited, problems };
+}
+
+/** What a real dialog window measures (e2e-tauri, WebDriver on the app): the window's inner size and its footer. */
+export interface DialogWindowMeasure {
+  readonly innerWidth: number;
+  readonly innerHeight: number;
+  /** The footer's bottom edge, CSS px from the top; `null` without a footer. */
+  readonly footerBottom: number | null;
+  /** Space below the footer, px. */
+  readonly gap: number | null;
+}
+
+/**
+ * The real-window helper of ADR 0026 §6 (`e2e-tauri`): reads, in the dialog window's own page, its inner size and where
+ * the footer ends, so a spec can assert the window fits (footer in view, at most 24 px below it).
+ */
+export async function measureDialogWindow(page: Pick<Page, 'evaluate'>): Promise<DialogWindowMeasure> {
+  return page.evaluate(() => {
+    const foot = document.querySelector('[data-testid=dialog-footer]');
+    const bottom = foot ? foot.getBoundingClientRect().bottom : null;
+    return { innerWidth: window.innerWidth, innerHeight: window.innerHeight, footerBottom: bottom, gap: bottom === null ? null : window.innerHeight - bottom };
+  });
 }

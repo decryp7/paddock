@@ -1,4 +1,4 @@
-import { axeViolations, dialogContracts, dialogFitProblems, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.
@@ -580,6 +580,16 @@ test.describe('dialogs (plan S6)', () => {
       await expect.poll(fitted).toBe(before);
       await check();
     });
+  });
+
+  test('every dialog opens by its window URL and sends its ready handshake (ADR 0026 §6; the nightly check reads the list)', async ({ page }) => {
+    const out = process.env['PADDOCK_DIALOGS_VISITED'];
+    const { visited, problems } = await openEveryDialog(page, CONTRACTS, { inputs: { 'pd.confirm': { heading: 'Forget?', message: 'It goes.', confirm: { label: 'Forget greetings' } } }, out });
+    expect(problems).toEqual([]);
+    expect(visited).toEqual(Object.keys(CONTRACTS).sort());
+    // The real-window helper reads the same page.
+    const m = await measureDialogWindow(page);
+    expect(m.gap).not.toBeNull();
   });
 
   test('every dialog fits at 1, 1.25 and 1.5 on 1920x1080 and 1366x768: its footer in view, on top, no gap (ADR 0026 §6)', async ({ browser, baseURL }) => {

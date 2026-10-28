@@ -38,9 +38,42 @@ jobs:
     with:
       webkit: true
 
+  # ADR 0026 §3 (D4): every command a dialog contract declares was sent by some run, or is listed as unexercised with a
+  # reason, and every dialog opened. It needs the union of the runs, so it runs here only, never in affected-only CI.
+  dialog-commands:
+    name: dialog commands (declared but never sent)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/node-caches
+        with:
+          name: nightly-dialog-commands
+      - name: Install
+        working-directory: .
+        run: npm ci
+      - name: Record the commands and the visited dialogs
+        env:
+          PW_PORT: "4330"
+          SHELL_DEMO_PORT: "4331"
+          WORKBENCH_DEMO_PORT: "4332"
+        run: |
+          mkdir -p dialog-check
+          npm run build:css
+          PADDOCK_DIALOG_COMMANDS_SEEN="$PWD/dialog-check/dialog-commands-seen.json" npx ng test paddock-ui --watch=false --include='projects/paddock-ui/shell/testing/src/reference-dialogs.spec.ts'
+          PADDOCK_DIALOGS_VISITED="$PWD/dialog-check/dialogs-visited.json" npx playwright test --project=shell-demo e2e/shell-demo.spec.ts -g "opens by its window URL"
+      - name: Check
+        run: npm run check:dialog-commands
+
   mark:
     name: mark the green nightly
-    needs: [ci]
+    needs: [ci, dialog-commands]
     if: ${{ github.event_name == 'schedule' && success() }}
     runs-on: ubuntu-latest
     container:

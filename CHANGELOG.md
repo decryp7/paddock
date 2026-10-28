@@ -4,6 +4,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, part 6: the command recorder and the nightly check (ADR 0026 §3, §6; package 1.2b)
+- Every command a dialog window sends through `shellInvoke` is recorded for its dialog (`dialogCommandLedger`;
+  `dialogWindowConfig({ baseCommands })` names what it may send); an undeclared one is reported at once. The boot harness
+  records too; `PADDOCK_DIALOG_COMMANDS_SEEN` writes `dialog-commands-seen.json`.
+- `scripts/dialog-commands.mjs` (`npm run check:dialog-commands`, nightly only): every declared command was sent, or is
+  listed in the app's `dialog-commands-unexercised.json` with a reason, whose count may only fall
+  (`dialog-commands-unexercised.count`); every dialog was opened (`openEveryDialog`'s list).
+- `@decryp7/paddock-e2e`: `openEveryDialog`, `measureDialogWindow`. ESLint `dialog-content-footer` checks every component
+  that is a dialog content, whatever its file name.
+- workbench-demo's dialog windows may send the start-up handshake (the recorder found the base set lacked it).
+
 ### Shared dialog API, part 5: macOS attach at show and the configured deadline
 - macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
   (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of
