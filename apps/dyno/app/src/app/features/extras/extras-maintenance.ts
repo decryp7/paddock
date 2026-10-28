@@ -50,8 +50,8 @@ import { TimeField } from '../../shared/time-field';
               @for (w of d.windows; track $index; let i = $index) {
                 <li class="win" [class.off]="!d.enabled">
                   <pd-day-picker [value]="w.days" [label]="'Days of window ' + (i + 1)" (valueChange)="setDays(i, w, $event)" />
-                  <dy-time-field [label]="'Window ' + (i + 1) + ' starts'" [value]="time(w.startMinute)" (timeChange)="setTime(i, w, 'startMinute', $event)" />
-                  <dy-time-field [label]="'Window ' + (i + 1) + ' ends'" [value]="time(w.endMinute)" (timeChange)="setTime(i, w, 'endMinute', $event)" />
+                  <dy-time-field shown="From" [label]="'Window ' + (i + 1) + ' starts'" [value]="time(w.startMinute)" (timeChange)="setTime(i, w, 'startMinute', $event)" />
+                  <dy-time-field shown="To" [label]="'Window ' + (i + 1) + ' ends'" [value]="time(w.endMinute)" (timeChange)="setTime(i, w, 'endMinute', $event)" />
                   <span class="sum muted">{{ summary(w) }}</span>
                   <button type="button" matIconButton [attr.aria-label]="'Remove window ' + (i + 1)" title="Remove window" (click)="remove(i)"><dy-icon name="trash" /></button>
                 </li>

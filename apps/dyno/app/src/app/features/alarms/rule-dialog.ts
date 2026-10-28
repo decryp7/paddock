@@ -41,7 +41,7 @@ const MAX_HOLD_SECS = 3600;
       </div>
       <div class="two">
         <div class="hold">
-          <pd-field label="For at least" size="short" hint="0 raises the alarm right away. At most 60 min.">
+          <pd-field label="For at least" size="short">
             <input pdFieldControl aria-label="Duration" type="text" inputmode="numeric" [value]="hold()" (input)="hold.set($any($event.target).value)" />
           </pd-field>
           <pd-segmented-control label="Duration unit" [options]="unitSegs" [value]="unit()" (valueChange)="setUnit($event === 'min' ? 'min' : 'sec')" />
@@ -50,6 +50,7 @@ const MAX_HOLD_SECS = 3600;
           <pd-segmented-control label="Severity" [options]="severitySegs" [value]="severity()" (valueChange)="setSeverity($event)" />
         </pd-field>
       </div>
+      <p class="hint">For at least: 0 raises the alarm right away. At most 60 min.</p>
       <mat-slide-toggle [checked]="enabled()" (change)="enabled.set($event.checked)">Enabled</mat-slide-toggle>
       @if (problem(); as p) {
         <p class="err" role="alert"><dy-icon name="alert" /> {{ p }}</p>
@@ -59,13 +60,13 @@ const MAX_HOLD_SECS = 3600;
   styles: `
     :host { display: grid; gap: var(--sp-3); min-width: 0; }
     .lead { color: var(--text-2); }
-    .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); align-items: start; }
-    .stepper { display: flex; align-items: flex-start; gap: var(--sp-1); }
-    .stepper pd-field { flex: 1; min-width: 0; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); align-items: end; }
+    .hint { margin: calc(-1 * var(--sp-1)) 0 0; color: var(--text-3); font-size: var(--fs-xs); }
+    .stepper { display: flex; align-items: center; justify-content: flex-start; gap: var(--sp-1); }
+    .stepper pd-field { flex: 0 1 8rem; min-width: 0; }
     .stepper dy-icon { --icon-size: 14px; }
     .unit { color: var(--text-3); font-size: var(--fs-sm); }
-    .hold { display: flex; gap: var(--sp-2); align-items: flex-start; }
-    .hold pd-segmented-control { margin-top: var(--sp-1); }
+    .hold { display: flex; gap: var(--sp-2); align-items: center; }
     .err { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); background: var(--bad-soft); font-size: var(--fs-sm); }
     .err dy-icon { --icon-size: 15px; color: var(--bad); margin-top: 1px; }
   `,

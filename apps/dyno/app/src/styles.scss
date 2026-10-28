@@ -827,3 +827,10 @@ kbd,
 .mat-mdc-tooltip {
   --mat-tooltip-container-shape: 6px;
 }
+
+/* The memory slot's tooltip: one fact per line. */
+.dy-slot-tip .mdc-tooltip__surface {
+  max-width: 320px;
+  white-space: pre-line;
+  text-align: start;
+}

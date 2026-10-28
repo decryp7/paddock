@@ -7,6 +7,20 @@ import { join } from 'node:path';
  * Deterministic: the clock is frozen, the mock is a macOS laptop, the timezone and locale are fixed and motion is reduced.
  */
 // Playwright runs from the app folder; the images live in the repository's docs.
+/** Picks an option of a Material select (the list opens in an overlay on the page). */
+async function choose(page: Page, label: string, option: string | RegExp): Promise<void> {
+  await page.getByRole('combobox', { name: label }).click();
+  await page.getByRole('option', { name: option, exact: typeof option === 'string' }).click();
+}
+
+/** Opens the shell's Settings window (Mod+, on the mock's macOS) and shows Dyno's page of it. */
+async function openSettings(page: Page): Promise<void> {
+  await page.keyboard.press('Meta+,');
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByText('Dyno', { exact: true }).click();
+}
+
 const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
 const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
 
@@ -79,7 +93,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     name: 'network',
     path: '/#/network',
     ready: async (page) => {
-      await page.getByRole('button', { name: 'Listening' }).click();
+      await page.getByRole('radio', { name: 'Listening' }).click();
       await expect(page.getByRole('grid', { name: 'Listening ports' })).toBeVisible();
     },
   },
@@ -155,7 +169,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/',
     ready: async (page) => {
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await page.getByLabel('Preset').selectOption('developer');
+      await choose(page, 'Preset', 'Developer');
       await page.clock.runFor(2_000);
     },
   },
@@ -164,7 +178,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/',
     ready: async (page) => {
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await page.getByLabel('Preset').selectOption('battery');
+      await choose(page, 'Preset', 'Battery');
       await page.clock.runFor(2_000);
     },
   },
@@ -173,26 +187,28 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/',
     ready: async (page) => {
       await page.getByRole('button', { name: 'Edit dashboard' }).click();
-      await page.getByLabel('Preset').selectOption('gaming');
+      await choose(page, 'Preset', 'Gaming');
       await page.clock.runFor(2_000);
     },
   },
   {
     name: 'settings-menu-bar',
-    path: '/#/settings',
+    path: '/#/',
+    size: { width: 1440, height: 1900 },
     ready: async (page) => {
+      await openSettings(page);
       const section = page.getByRole('region', { name: 'Menu bar items' });
       await section.getByRole('button', { name: 'Add item' }).click();
       await expect(section.getByRole('listitem')).toHaveCount(3);
       await section.getByRole('button', { name: 'Add item' }).click();
       await expect(section.getByRole('listitem')).toHaveCount(4);
-      await section.getByLabel('Style of item 1').selectOption('graphAndNumber');
-      await section.getByLabel('Metric of item 2').selectOption('memory');
-      await section.getByLabel('Style of item 2').selectOption('ring');
-      await section.getByLabel('Metric of item 3').selectOption('networkDown');
-      await section.getByLabel('Style of item 3').selectOption('lineGraph');
-      await section.getByLabel('Metric of item 4').selectOption('temperature');
-      await section.getByLabel('Style of item 4').selectOption('number');
+      await choose(page, 'Style of item 1', 'Graph and number');
+      await choose(page, 'Metric of item 2', 'Memory');
+      await choose(page, 'Style of item 2', 'Ring');
+      await choose(page, 'Metric of item 3', 'Network down');
+      await choose(page, 'Style of item 3', 'Line graph');
+      await choose(page, 'Metric of item 4', 'Temperature');
+      await choose(page, 'Style of item 4', 'Number');
       await section.scrollIntoViewIfNeeded();
       await page.clock.runFor(2_000);
     },
@@ -255,7 +271,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/extras?tab=maintenance',
     ready: async (page) => void (await expect(page.getByRole('region', { name: 'Maintenance windows' })).toContainText('Mon to Fri')),
   },
-  { name: 'settings', path: '/#/settings', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()) },
+  { name: 'settings', path: '/#/', size: { width: 1440, height: 1500 }, ready: async (page) => openSettings(page) },
   { name: 'alarms', path: '/#/alarms', ready: async (page) => void (await expect(page.getByRole('button', { name: /Acknowledge all/ })).toBeVisible()) },
   {
     name: 'alarms-rules',
@@ -281,7 +297,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     name: 'hash-search',
     path: '/#/processes',
     ready: async (page) => {
-      await page.getByRole('button', { name: 'All', exact: true }).click();
+      await page.getByRole('radio', { name: 'All', exact: true }).click();
       await page.getByLabel('Filter processes').fill('rustc');
       await page.locator('[role=row][data-key^="p"]').first().click({ button: 'right' });
       await page.getByRole('menuitem', { name: 'Search file hash on VirusTotal…' }).click();
@@ -371,7 +387,7 @@ for (const theme of ['dark', 'light'] as const) {
       if (screen.size) await page.setViewportSize(screen.size);
       await prepare(page, theme);
       await page.goto(`${screen.path.replace('/#/', `/?latency=0&chrome=macos${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
-      await expect(page.locator('dy-shell, dy-tray').first()).toBeVisible();
+      await expect(page.locator('pd-shell-frame, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);
       await screen.ready(page);
       if (screen.name === 'tray') {
@@ -393,10 +409,10 @@ for (const theme of ['dark', 'light'] as const) {
         await page.screenshot({ path: join(OUT, `${screen.name}-${theme}.png`) });
       }
       if (screen.name === 'dashboard') {
-        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('button', { name: 'Per core' }).click();
+        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('radio', { name: 'Per core' }).click();
         await page.clock.runFor(1_000);
         await page.getByRole('group', { name: 'CPU', exact: true }).screenshot({ path: join(OUT, `cpu-per-core-tile-${theme}.png`) });
-        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('button', { name: 'Overall' }).click();
+        await page.getByRole('group', { name: 'CPU', exact: true }).getByRole('radio', { name: 'Overall' }).click();
       }
       if (screen.name === 'dashboard') {
         // The whole page, for the README and for review (the 1440x900 image only shows the top).

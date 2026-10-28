@@ -228,8 +228,6 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .problem { color: var(--bad); font-size: var(--fs-sm); }
     .lbl { display: grid; gap: 2px; min-width: 0; }
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
-    .num-in { display: inline-flex; align-items: center; gap: var(--sp-1); height: var(--control-h); padding: 0 var(--sp-3) 0 var(--sp-1); border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface-inset); color: var(--text-3); white-space: nowrap; }
-    .num-in:focus-within { border-color: var(--focus); outline: 1px solid var(--focus); }
     .num-in { width: 148px; }
     .num-in input { text-align: right; font-variant-numeric: tabular-nums; }
     .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }

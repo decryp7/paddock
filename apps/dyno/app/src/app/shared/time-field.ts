@@ -15,7 +15,7 @@ import { dateToTime, PdKeepTimeOnEscape, TIME_PROVIDERS, TimeProblems, timeOptio
   imports: [PdField, PdFieldControl, MatTimepicker, MatTimepickerInput, MatTimepickerToggle, PdKeepTimeOnEscape],
   providers: [TIME_PROVIDERS],
   template: `
-    <pd-field [label]="label()" size="short" [suffix]="toggle" [error]="problems.shown('time') ? 'Enter a time such as 22:00.' : null">
+    <pd-field [label]="shown() || label()" size="short" [suffix]="toggle" [error]="problems.shown('time') ? 'Enter a time such as 22:00.' : null">
       <input
         pdFieldControl
         pdKeepTime
@@ -41,6 +41,8 @@ import { dateToTime, PdKeepTimeOnEscape, TIME_PROVIDERS, TimeProblems, timeOptio
 export class TimeField {
   /** The visible label ("From", "Quiet hours start"). */
   readonly label = input.required<string>();
+  /** A shorter visible label for the narrow field ('From'); the accessible name stays `label`. */
+  readonly shown = input('');
   /** The time as `HH:MM`. */
   readonly value = input.required<string>();
   readonly disabled = input(false);
