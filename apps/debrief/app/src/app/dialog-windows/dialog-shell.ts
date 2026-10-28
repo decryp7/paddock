@@ -210,6 +210,8 @@ export class DialogShell {
 
   private async init(): Promise<void> {
     const done = this.pending.add();
+    // A window destroyed mid-load must not leave whenStable waiting.
+    this.destroyRef.onDestroy(done);
     try {
       const def = this.lookup(this.route.id);
       if (!def) throw new Error($localize`:@@dialogWindow.unknown:This dialog is not known to this version of Debrief: ${this.route.id}:id:`);
