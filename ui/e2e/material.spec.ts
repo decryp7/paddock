@@ -147,6 +147,57 @@ for (const theme of THEMES) {
     }
   });
 
+  test(`Material controls: a hovered or focused icon button draws a translucent state layer (${theme})`, async ({ page }) => {
+    await open(page, theme);
+    const button = section(page).locator('.mat-mdc-icon-button').first();
+    await button.scrollIntoViewIfNeeded();
+    // The state layer is the ripple host's ::before: its fill is the token colour, shown at Material's state-layer opacity.
+    const layer = () =>
+      button.evaluate((e) => {
+        const cs = getComputedStyle(e.querySelector('.mat-mdc-button-persistent-ripple') ?? e, '::before');
+        return { colour: cs.backgroundColor, opacity: parseFloat(cs.opacity) };
+      });
+    const shot = async (name: string) => {
+      if (SHOTS) {
+        mkdirSync(SHOTS, { recursive: true });
+        await button.screenshot({ path: join(SHOTS, `icon-button-${name}-${theme}.png`) });
+      }
+    };
+    const alpha = (colour: string) => {
+      const slash = /\/\s*([\d.]+%?)\s*\)/.exec(colour);
+      const comma = /^rgba\(([^)]*)\)$/.exec(colour);
+      const raw = slash?.[1] ?? comma?.[1]?.split(',')[3]?.trim();
+      return raw === undefined ? 1 : raw.endsWith('%') ? parseFloat(raw) / 100 : parseFloat(raw);
+    };
+    // The family's hover fill is already translucent; Material must not dim it further, so the effective alpha is the token's.
+    const effective = async () => {
+      const l = await layer();
+      return alpha(l.colour) * l.opacity;
+    };
+    const hoverAlpha = alpha(await token(page, '--pd-hover'));
+    const pressedAlpha = alpha(await token(page, '--pd-pressed'));
+
+    await button.hover();
+    await settled(page);
+    await shot('hover');
+    expect(await effective(), 'hover').toBeCloseTo(hoverAlpha, 2);
+    expect(hoverAlpha).toBeLessThan(0.2);
+
+    await page.mouse.move(0, 0);
+    await button.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await settled(page);
+    await shot('focus');
+    expect(await effective(), 'focus').toBeCloseTo(hoverAlpha, 2);
+
+    await button.hover();
+    await page.mouse.down();
+    await settled(page);
+    expect(await effective(), 'pressed').toBeCloseTo(pressedAlpha, 2);
+    await page.mouse.up();
+  });
+
   test(`Material controls: a glyph in a matButton is centred on the label with a gap (${theme})`, async ({ page }) => {
     await open(page, theme);
     for (const id of ['filled', 'outlined', 'text']) {
@@ -188,7 +239,7 @@ for (const theme of THEMES) {
     expect(sel.radius).toBe(popover);
     expect(sel.top).toBe(popover);
     expect(sel.pad).toBe('4px');
-    expect(await select.locator('.mat-mdc-option').first().evaluate((e) => e.offsetHeight)).toBe(rowH);
+    expect(await select.locator('.mat-mdc-option').first().evaluate((e) => (e as HTMLElement).offsetHeight)).toBe(rowH);
     await closeOverlays(page);
 
     await page.getByTestId('material-menu').click();
@@ -197,7 +248,7 @@ for (const theme of THEMES) {
     await settled(page);
     expect(await menu.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(await token(page, '--pd-surface-3'));
     expect(await menu.locator('.mat-mdc-menu-content').evaluate((e) => getComputedStyle(e).paddingTop)).toBe('4px');
-    expect(await menu.locator('.mat-mdc-menu-item').first().evaluate((e) => e.offsetHeight)).toBe(rowH);
+    expect(await menu.locator('.mat-mdc-menu-item').first().evaluate((e) => (e as HTMLElement).offsetHeight)).toBe(rowH);
     await closeOverlays(page);
 
     await page.getByTestId('material-tooltip').hover();

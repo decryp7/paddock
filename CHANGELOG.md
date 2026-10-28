@@ -24,6 +24,9 @@ Conventional Commits; one semver tag for the whole repo.
   are sentence case (`monthLabel` in `providePaddockMaterial`, the heading's upper-casing undone in CSS), icon buttons and the paginator select
   follow the density, and `@angular/material` / `@angular/cdk` are hoisted to one root copy again in `package-lock.json`.
 - Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
+- State layers: the bridge sets Material's hover, focus and pressed state-layer opacities to the alpha of `--pd-hover` / `--pd-pressed`
+  (new tokens `--pd-hover-alpha` / `--pd-pressed-alpha`, 0.05 / 0.05 / 0.09, Material's own are 0.08 / 0.10 / 0.10) and the icon button's ink to `--pd-text`; the material e2e checks the
+  rendered state layer of a hovered, focused and pressed icon button against the tokens in light and dark. `e2e/material.spec.ts` type-checks again.
 
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec

@@ -54,6 +54,9 @@
   // Radii.
   --pd-radius-tag: 4px;
   --pd-radius-control: 6px;
+  // The alpha of --pd-hover and --pd-pressed (they are written out below per theme): Material's state layers use them as opacities.
+  --pd-hover-alpha: 0.05;
+  --pd-pressed-alpha: 0.09;
   --pd-radius-input: 6px;
   --pd-radius-card: 10px;
   --pd-radius-popover: 10px;

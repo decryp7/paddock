@@ -314,3 +314,14 @@ describe('density and structure', () => {
     expect(rules.get(':root')?.['--pd-hit-min']).toBe('24px');
   });
 });
+
+describe('state-layer alphas', () => {
+  // The Material bridge draws its state layers at these opacities (--mat-sys-*-state-layer-opacity), so they must be the fills' alpha.
+  for (const [scheme, contrastMode] of MODES) {
+    it(`--pd-hover-alpha and --pd-pressed-alpha are the alpha of the hover and pressed fills (${scheme}, ${contrastMode})`, () => {
+      const v = resolve(rules, scheme, 'debrief', contrastMode);
+      expect(Number(v['--pd-hover-alpha'])).toBeCloseTo(col(v, '--pd-hover').a, 5);
+      expect(Number(v['--pd-pressed-alpha'])).toBeCloseTo(col(v, '--pd-pressed').a, 5);
+    });
+  }
+});
