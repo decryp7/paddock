@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, Injectable, input, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { defineDialog, DIALOG_EVENTS, msg, provideContributions, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { fakeDialogContract, FakeDialogIo, renderFramed } from '@decryp7/paddock-ui/shell/testing';
@@ -62,6 +62,14 @@ class Scripted implements DialogContent {
   readonly ref = inject(DIALOG_REF);
   readonly dialogActions = signal(scripted);
   readonly dialogStatus = signal<string | null>('3 things');
+}
+
+/** A content with a header that does not scroll (a stepper). */
+@Component({ selector: 'pd-test-headed', changeDetection: ChangeDetectionStrategy.OnPush, template: `<ng-template #step><span data-testid="step">Step 1 of 3</span></ng-template><p>Body</p>` })
+class Headed implements DialogContent {
+  private readonly step = viewChild<TemplateRef<unknown>>('step');
+  readonly dialogHeader = computed(() => this.step() ?? null);
+  readonly dialogMinBodyHeight = 120;
 }
 
 type Spec = Partial<Pick<DialogDef, 'kind' | 'modality' | 'instanced' | 'requiredChoice' | 'result' | 'load' | 'providers'>>;
@@ -281,6 +289,12 @@ describe('the dialog frame (ADR 0026 §2)', () => {
     TestBed.inject(InPageDialogBackend).stack()[0]!.ref.answer('picked');
     await f.stable();
     expect(f.outcome()).toEqual({ kind: 'answered', value: 'picked' });
+  });
+
+  it('draws the content’s header above the body, outside the scroller', async () => {
+    const f = await renderFramed(Headed, { kind: 'form', modality: 'modeless' });
+    expect(f.q('dialog-header')!.textContent).toContain('Step 1 of 3');
+    expect(f.q('dialog-body')!.contains(f.q('dialog-header'))).toBe(false);
   });
 
   it('coalesces refits to one per frame, on the next task while the document is hidden', () => {
@@ -641,6 +655,18 @@ describe('a dialog window', () => {
     expect(document.title).toBe('Delete 3 runners?');
     expect(root.querySelector('main')!.getAttribute('aria-label')).toBe('Delete 3 runners?');
     expect(io.titles).toEqual(['Delete 3 runners?']);
+  });
+
+  it('starts even when the window system cannot listen for close requests', async () => {
+    const io = new FakeDialogIo();
+    io.listen = () => Promise.reject(new Error('no events'));
+    io.start = { dialogId: 't.form', title: 'F', kind: 'form', modality: 'modeless', requiredChoice: false, input: {} };
+    const config = dialogWindowConfig({ dialogs: ALL, route: { id: 't.form', host: 'main', label: 'd-main-1' } });
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), ...config.providers, { provide: DIALOG_IO, useValue: io }] });
+    const fixture = TestBed.createComponent(DialogShell);
+    await tick();
+    await fixture.whenStable();
+    expect(io.readied).not.toBeNull();
   });
 
   it('keeps working when the window system cannot set a title', async () => {
