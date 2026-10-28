@@ -1231,9 +1231,9 @@ export class MockBackend implements DynoBackend {
 /** The helper as the mock reports it (the real wording comes from the engine). */
 function mockHelper(state: HelperStatus['state']): HelperStatus {
   const text: Record<HelperStatus['state'], string> = {
-    notInstalled: 'The helper is not installed. Dyno works without it; install it to apply the changes that need administrator rights.',
+    notInstalled: 'The helper is not installed. Dyno works without it; install it to read the few things that need administrator rights (for example programs\' network traffic on Windows).',
     installing: "Waiting for you to answer the system's permission prompt.",
-    ready: 'The helper is installed and ready. It does nothing until you approve a change.',
+    ready: 'The helper is installed and ready. It only reads and changes nothing on this computer.',
     outdated: 'The installed helper is older than this Dyno. Update the helper.',
     unreachable: 'The helper is installed but did not answer. Install it again from Settings to repair it.',
     unsupported: 'The helper cannot be installed on this computer.',

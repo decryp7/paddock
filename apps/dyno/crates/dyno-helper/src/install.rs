@@ -355,7 +355,7 @@ pub fn install_plan(paths: &HelperPaths, windows: &WindowsRoots, params: &Instal
                 &[
                     "description",
                     WINDOWS_SERVICE,
-                    "Makes the few system changes Dyno asks for, for one approved user.",
+                    "Answers the few read-only questions Dyno asks that need administrator rights, for one approved user.",
                 ],
             ));
             steps.push(run(

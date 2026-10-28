@@ -681,7 +681,6 @@ export interface MemoryArray {
 export interface InventoryUnavailable {
   reason: string;
   /** Reading it needs the privileged helper (a later work package). */
-  needsHelper: boolean;
 }
 
 /** Externally tagged, like Rust's serde default. */

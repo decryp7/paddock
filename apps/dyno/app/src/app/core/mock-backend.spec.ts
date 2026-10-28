@@ -343,7 +343,7 @@ describe('reports, settings, plugins, tray', () => {
     const before = await b.weeklyReport(1);
     expect(before.to).toBe(now.from);
     const empty = await b.weeklyReport(6);
-    expect(empty).toMatchObject({ nothingToReport: true, score: null, issues: [], changes: [] });
+    expect(empty).toMatchObject({ nothingToReport: true, score: null, issues: [] });
     await expect(b.weeklyReport(53)).rejects.toMatchObject({ code: 'badRequest' });
   });
   it('saveReport records the format and the week and answers the path', async () => {

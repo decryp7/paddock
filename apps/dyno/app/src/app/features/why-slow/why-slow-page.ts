@@ -11,7 +11,7 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
 
 /**
  * "Why is my PC slow?" in full: the engine's likeliest causes with what was measured, the apps behind each, pages to look
- * closer, and the fixes it proposes. Every fix asks first; nothing changes until you click it.
+ * closer, and hints in words. Dyno only looks: nothing here changes the computer.
  */
 @Component({
   selector: 'dy-why-slow-page',
@@ -22,7 +22,7 @@ import { causeLinks, diagnosisText, hintPath, historyLine, windowText } from './
       <header class="page-head">
         <div class="titles">
           <h1>Why is my PC slow?</h1>
-          <p>Dyno weighs CPU, memory, disk, heat and background work together. It only suggests; nothing changes until you click.</p>
+          <p>Dyno weighs CPU, memory, disk, heat and background work together. It only looks; Dyno changes nothing on your computer.</p>
         </div>
         <button type="button" class="btn" [disabled]="!shown()" (click)="copy()"><dy-icon name="copy" /> Copy as text</button>
         <button type="button" class="btn primary" [disabled]="store.running()" (click)="store.run()">

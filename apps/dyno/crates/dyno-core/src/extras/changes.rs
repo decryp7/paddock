@@ -1,6 +1,6 @@
-//! "What changed": a timeline of installs, updates, removals, new startup items and setting changes, so a slowdown can be
-//! put next to what happened just before it. Software and startup items are compared snapshot against snapshot; settings
-//! and cleanups come from Dyno's own activity log (everything Dyno changed is already recorded there).
+//! "What changed": a timeline of installs, updates, removals and new or gone startup items, so a slowdown can be put next
+//! to what happened just before it. Software and startup items are compared snapshot against snapshot. Dyno itself
+//! changes nothing, so nothing here is its own doing.
 
 use super::software::SoftwareItem;
 use crate::time::{Timestamp, HOUR};
@@ -26,10 +26,6 @@ pub enum ChangeKind {
     StartupAdded,
     /// A startup item went away.
     StartupRemoved,
-    /// A setting changed (tuning, startup state).
-    Setting,
-    /// A cleanup ran.
-    Cleanup,
 }
 
 /// One change.
@@ -234,7 +230,7 @@ mod tests {
         let now = Timestamp(100 * HOUR);
         let mk = |h: i64| Change {
             at: Timestamp(h * HOUR),
-            kind: ChangeKind::Setting,
+            kind: ChangeKind::Installed,
             title: format!("c{h}"),
             detail: String::new(),
         };

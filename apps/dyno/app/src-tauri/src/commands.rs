@@ -405,6 +405,11 @@ mod tests {
         assert_eq!(parse_request(json!("forgetBaseline")).unwrap(), Request::ForgetBaseline);
         // The ignore and protect actions are gone.
         assert!(parse_request(json!({"unusualAct": {"key": "k", "action": "protect"}})).is_err());
+        assert!(matches!(
+            parse_request(json!({"fileHash": {"source": {"path": "/a"}}})).unwrap(),
+            Request::FileHash { .. }
+        ));
+        assert!(parse_request(json!({"fileHash": {"source": {"pid": 1}}})).is_err());
     }
 
     #[test]

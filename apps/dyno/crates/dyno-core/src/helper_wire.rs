@@ -69,11 +69,11 @@ pub struct HelperInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AuditVerdict {
-    /// Done and read back.
+    /// Done: the request was answered, or the helper removed itself as asked.
     Applied,
-    /// Not allowed (not an allowed action, invalid arguments, wrong caller).
+    /// Not allowed (wrong caller or program).
     Refused,
-    /// Allowed but it did not work (the previous value was put back where possible).
+    /// Allowed but it did not work (for example the log could not be written).
     Failed,
 }
 
@@ -175,7 +175,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
             Err(reason) => status(HelperState::Unsupported, reason, None, vec![]),
             Ok(()) => status(
                 HelperState::NotInstalled,
-                "The helper is not installed. Dyno works without it; install it to apply the changes that need administrator rights."
+                "The helper is not installed. Dyno works without it; install it to read the few things that need administrator rights (for example programs' network traffic on Windows)."
                     .into(),
                 None,
                 vec![],
@@ -198,7 +198,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
         ),
         Probe::Answered(info, recent) => status(
             HelperState::Ready,
-            "The helper is installed and ready. It does nothing until you approve a change.".into(),
+            "The helper is installed and ready. It only reads and changes nothing on this computer.".into(),
             Some(info.version),
             recent,
         ),

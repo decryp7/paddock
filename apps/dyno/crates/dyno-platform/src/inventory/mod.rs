@@ -40,7 +40,7 @@ fn read_impl(total: u64) -> MemoryLayout {
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
             return MemoryLayout::TotalOnly {
                 total,
-                reason: Unavailable::linux_dmi_needs_helper(),
+                reason: Unavailable::linux_dmi_root_only(),
             }
         }
         Err(_) => {

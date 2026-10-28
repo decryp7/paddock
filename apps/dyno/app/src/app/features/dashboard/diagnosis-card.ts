@@ -71,7 +71,7 @@ import { hintPath } from '../why-slow/why-slow-model';
             }
           }
         } @else {
-          <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. It only suggests: nothing changes until you click.</p>
+          <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. It only looks: Dyno changes nothing on your computer.</p>
         }
       </div>
       @if (stats(); as st) {
