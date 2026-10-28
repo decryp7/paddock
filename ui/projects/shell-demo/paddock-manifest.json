@@ -339,7 +339,8 @@
       "height": 560,
       "commands": [
         "about_info",
-        "about_legal"
+        "about_legal",
+        "files_open_url"
       ]
     },
     "pd.channels.remove": {
