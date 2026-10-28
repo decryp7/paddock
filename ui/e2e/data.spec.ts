@@ -300,7 +300,7 @@ test('forms: the error shows after the field was left, with the 14 px alert icon
   await name.blur();
   const error = forms.getByTestId('field-error');
   await expect(error).toContainText('This is required.');
-  expect(await error.locator('svg').getAttribute('width')).toBe('14');
+  expect(await error.locator('svg').evaluate((e) => Math.round(e.getBoundingClientRect().width))).toBe(14);
   await expect(name).toHaveAttribute('aria-invalid', 'true');
   await name.fill('Alpha');
   await expect(forms.getByTestId('field-error')).toHaveCount(0);

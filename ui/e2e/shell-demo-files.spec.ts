@@ -21,8 +21,7 @@ test.describe('user files (plan X31)', () => {
     await expectNoHorizontalScroll(page);
 
     // A glyph of the pd: set draws each entry's kind, 16 px (a log is a text page; the second path has no known extension).
-    const icon = entries.first().getByTestId('recent-icon').locator('svg');
-    await expect(icon).toHaveAttribute('width', '16');
+    await expect(entries.first().getByTestId('recent-icon').locator('mat-icon')).toHaveCSS('width', '16px');
     expect(await entries.first().getByTestId('recent-icon').locator('path').getAttribute('d')).toContain('M8.75 12.5h6.5');
     // The file name leads; the folder is the muted second line, with its separator kept.
     await expect(entries.first().locator('.pd-entry > .pd-text > .pd-name')).toHaveText('session-2026-10-24.log');
