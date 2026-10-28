@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, Injectable, input, provideZonelessChangeDetection, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { defineDialog, DIALOG_EVENTS, msg, provideContributions, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { defineDialog, DIALOG_EVENTS, dialogCommandLedger, msg, provideContributions, resetDialogCommands, SHELL_PORTS, type DialogDef } from '@decryp7/paddock-ui/shell';
 import { fakeDialogContract, FakeDialogIo, renderFramed } from '@decryp7/paddock-ui/shell/testing';
 import { DialogActionError, type DialogAction } from './actions';
 import { loadDialogBounds, rememberDialogBounds } from './bounds';
@@ -847,6 +847,9 @@ describe('dialog bootstraps', () => {
     expect(TestBed.inject(DIALOG_ROUTE)?.id).toBe('t.decision');
     expect(TestBed.inject(DIALOG_LOOKUP)('t.decision')).toBe(DECISION);
     expect(TestBed.inject('base' as never)).toBe(1);
+    // The window's commands are recorded for its dialog, against its contract (ADR 0026 §3).
+    expect([dialogCommandLedger().active, dialogCommandLedger().allowed?.includes('dialog_close')]).toEqual(['t.decision', true]);
+    resetDialogCommands();
     expect(TestBed.inject(DialogPresenter).windowed).toBe(false);
     TestBed.resetTestingModule();
     location.hash = '#/dialog?id=t.decision&host=main&label=d-main-2';

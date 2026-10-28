@@ -2,12 +2,13 @@ import { DIALOG_BASE_COMMANDS, SHELL_COMMANDS, type DialogDef } from '@decryp7/p
 import { assertDialogBoots, dialogTableProblems } from '@decryp7/paddock-ui/shell/testing';
 import { WORKBENCH_COMMANDS } from '@decryp7/paddock-ui/workbench';
 import { dockLayoutDialogs } from '@decryp7/paddock-ui/workbench/dock';
+import { DIALOG_BASE } from '../../../../workbench-demo/src/app/generated/dialog-contracts';
 
 // The workbench demo's dialogs (the dock's Save layout and Manage layouts) through the boot-every-dialog harness and its
 // command table (ADR 0009 §4); their contracts are the workbench's Rust table (ADR 0026 §3).
 const DIALOGS = dockLayoutDialogs({ storageKey: 'wd' }) as readonly DialogDef[];
 /** Every dialog window of the workbench publishes its display state to its host (`provideDialogUiSync`). */
-const BASE = [...DIALOG_BASE_COMMANDS, 'ui_sync_publish'];
+const BASE = [...DIALOG_BASE_COMMANDS, ...DIALOG_BASE];
 
 describe('workbench-demo dialogs', () => {
   for (const def of DIALOGS) {

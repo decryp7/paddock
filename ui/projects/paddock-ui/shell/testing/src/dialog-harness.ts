@@ -1,6 +1,6 @@
 import { EnvironmentProviders, Provider, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import type { ContributionBatch, DialogDef } from '@decryp7/paddock-ui/shell';
+import { recordDialogCommand, type ContributionBatch, type DialogDef } from '@decryp7/paddock-ui/shell';
 import {
   allowedCommands,
   commandCovered,
@@ -99,7 +99,7 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
   try {
     TestBed.resetTestingModule();
     const providers = typeof options.providers === 'function' ? options.providers() : options.providers;
-    const config = dialogWindowConfig({ dialogs: options.dialogs, providers, route: { id: def.id, host: 'main', label: 'd-main-1' } });
+    const config = dialogWindowConfig({ dialogs: options.dialogs, providers, route: { id: def.id, host: 'main', label: 'd-main-1' }, baseCommands: options.baseCommands });
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), ...config.providers, { provide: DIALOG_IO, useValue: io }] });
     const fixture = TestBed.createComponent(DialogShell);
     const root = fixture.nativeElement as HTMLElement;
@@ -118,8 +118,10 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     const content = box ? [...box.children].filter((c) => !c.matches('[data-testid=dialog-loading], [data-testid=dialog-error], [data-testid=dialog-denied]')) : [];
     if (!failed && !content.some((c) => (c.textContent ?? '').trim() !== '' || c.querySelector('input, button, select, textarea, canvas, svg'))) problems.push('has an empty body');
 
-    // Every command it sent is one its contract (or the base sets) allows: what Rust's guard would refuse fails here.
+    // Every command it sent is one its contract (or the base sets) allows: what Rust's guard would refuse fails here. The
+    // commands are recorded for the nightly "declared but never sent" check (ADR 0026 §3).
     const allowed = allowedCommands(def, options.baseCommands);
+    for (const c of ipc.sent) recordDialogCommand(def.id, c);
     for (const c of [...new Set(ipc.sent)].filter((x) => !commandCovered(allowed, x))) problems.push(`sends ${c}, which its contract does not declare`);
 
     // The ready handshake (ADR 0026 §4.2): sent once, whatever the kind; Rust sizes the window by the kind.
