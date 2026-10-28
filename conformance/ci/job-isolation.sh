@@ -40,6 +40,7 @@
 # PADDOCK_DEV: the paddock-dev program to run (tests); default the repository's ./dev wrapper, which keeps its binary in the
 # shared kept folder tools/ (outside every job folder, so a Windows job folder can still be deleted while the holder runs).
 set -euo pipefail
+shopt -s inherit_errexit 2>/dev/null || true # bash 4.4+: command substitutions stop on errors too
 here="$(cd "$(dirname "$0")" && pwd)"
 table="$here/kept-folders.txt"
 ports="$here/ports.txt"
@@ -57,7 +58,10 @@ job_temp() {
 # The CI home: ci-home.sh is the one implementation (PADDOCK_CI_HOME or ~/.paddock-ci; a missing relocated home fails).
 ci_home() {
   local h
+  # A caller's home="$(ci_home)" must fail, never go on with an empty home (paths at the root of the disk): bash before 4.4
+  # keeps -e here, later ones with inherit_errexit (set above), and the empty check covers any other shell.
   h="$(bash "$here/ci-home.sh")"
+  [ -n "$h" ] || exit 1
   printf '%s\n' "$h"
 }
 
@@ -234,21 +238,32 @@ path_regex() {
   printf '%s' "$out"
 }
 
+# fill <text> <placeholder> <value>: every <placeholder> in <text> replaced by <value>, as plain text. Not ${text//p/v}: bash
+# 5.2's patsub_replacement treats a backslash in v as an escape there, which turned the separator class [/\\] into [/\].
+fill() {
+  local text="$1" key="$2" value="$3" out=""
+  while [[ "$text" == *"$key"* ]]; do
+    out+="${text%%"$key"*}$value"
+    text="${text#*"$key"}"
+  done
+  printf '%s' "$out$text"
+}
+
 cmd_pattern() {
   local pat="${1:-}" scoped=0 v
   case "$pat" in *'{tmp}'*)
     v="${PADDOCK_JOB_TEMP:-}"; [ -n "$v" ] || return 1
-    pat="${pat//\{tmp\}/$(path_regex "$v")}"; scoped=1 ;;
+    pat="$(fill "$pat" '{tmp}' "$(path_regex "$v")")"; scoped=1 ;;
   esac
   case "$pat" in *'{build}'*)
     v="${PADDOCK_BUILD_FOLDER:-}"; [ -n "$v" ] || return 1
-    pat="${pat//\{build\}/$(path_regex "$v")}"; scoped=1 ;;
+    pat="$(fill "$pat" '{build}' "$(path_regex "$v")")"; scoped=1 ;;
   esac
   case "$pat" in *'{slot}'*)
     v="$(slot 2>/dev/null)" || return 1
     slot_anchored "$pat" || return 1
     # A boundary after the slot: s1 must not match s12.
-    pat="${pat//\{slot\}/$v([^0-9]|\$)}"; scoped=1 ;;
+    pat="$(fill "$pat" '{slot}' "$v([^0-9]|\$)")"; scoped=1 ;;
   esac
   [ "$scoped" = 1 ] || return 1
   printf '%s\n' "$pat"

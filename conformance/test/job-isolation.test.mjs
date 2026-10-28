@@ -397,3 +397,20 @@ test('every kind a CI file asks for is in kept-folders.txt, and every kind there
   for (const k of used) assert.ok(kinds.has(k), `${k} is asked for but not declared`);
   for (const k of kinds) assert.ok(used.has(k), `${k} is declared but nothing uses it`);
 });
+
+// Two bash 5 differences the Mac's bash 3.2 does not show (CI's containers run bash 5.2): patsub_replacement treats a
+// backslash in ${v//p/r}'s replacement as an escape (the separator class [/\\] became [/\]), and command substitutions
+// drop -e unless inherit_errexit is set (a missing CI home became an empty one, paths at the root of the disk).
+test('job-isolation.sh fills patterns as plain text and keeps -e in command substitutions (bash 5)', () => {
+  const text = read(SCRIPT);
+  assert.doesNotMatch(text, /\$\{pat\/\/[^}]*\$\(/, 'no ${pat//...} with a computed replacement: use fill');
+  assert.match(text, /^shopt -s inherit_errexit 2>\/dev\/null \|\| true/m);
+  const h = host();
+  const a = h.job('a'.repeat(16));
+  a.exec(['acquire']);
+  const p = a.later(['pattern', '{build}[/\\\\]x'], { PADDOCK_BUILD_FOLDER: '/ci/target-x-s1' });
+  assert.equal(p.stdout.trim(), '[/\\\\]ci[/\\\\]target-x-s1[/\\\\]x');
+  const gone = a.later(['path', 'target', 'x'], { PADDOCK_CI_HOME: join(h.root, 'unmounted') });
+  assert.notEqual(gone.status, 0);
+  assert.equal(gone.stdout, '', 'no path is printed for a home that is not there');
+});
