@@ -26,6 +26,9 @@ Conventional Commits; one semver tag for the whole repo.
   parent) once its window is on screen, not when it is opened; one closed before that never blocks. `FakeDialogIo.shown()`
   plays the event.
 
+- `scripts/affected.mjs` maps a change to a generated file under `ui/**/generated/` (`.ts`, `.json`) to the crates that
+  name it (all crates when none does), so a stale generated file fails branch CI, not the merge.
+
 ### Shared dialog API, part 5: macOS attach at show and the configured deadline
 - macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
   (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of

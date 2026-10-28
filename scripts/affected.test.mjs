@@ -50,6 +50,18 @@ describe('the graph of this tree', () => {
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
   });
 
+  test('a generated ui file marks the crate that checks it, so a stale one fails on the branch', () => {
+    const r = run('ui/projects/paddock-ui/shell/generated/dialogs.ts');
+    assert.ok(r.crates && r.ui);
+    assert.ok(r.packages.crates.includes('paddock-dialogs'));
+    // A generated file no crate names marks every crate of the workspace (fail safe).
+    const unknown = run('ui/projects/paddock-ui/shell/generated/no-such-file.json');
+    assert.ok(unknown.crates);
+    assert.ok(unknown.packages.crates.length > 5);
+    // Other files in ui/ (not generated) do not mark crates.
+    assert.ok(!run('ui/projects/paddock-ui/shell/src/public-api.ts').crates);
+  });
+
   test("ui's ESLint config reaches ../eslint, so a preset change runs ui's lint", () => {
     const r = run('eslint/src/preset.cjs');
     assert.ok(r.eslint && r.ui);
