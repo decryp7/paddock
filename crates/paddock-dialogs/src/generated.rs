@@ -23,6 +23,7 @@ fn text() -> String {
         crate::Size::decl(),
         crate::Measure::decl(),
         crate::Remembered::decl(),
+        crate::Theme::decl(),
         crate::DialogRequest::decl(),
         crate::DialogInfo::decl(),
         crate::DialogStart::decl(),

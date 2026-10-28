@@ -20,6 +20,13 @@ export function parseClosed(p: unknown): DialogClosed | null {
   return { label: p['label'], dialogId: p['dialogId'], remembered: isRememberedPlace(r) ? { dx: r.dx, dy: r.dy, width: r.width, height: r.height } : null };
 }
 
+/** The app's resolved theme: its `data-theme`, else the system's colour scheme (a dialog window's background before its page paints). */
+export function currentTheme(): 'light' | 'dark' {
+  const set = document.documentElement.dataset['theme'];
+  if (set === 'light' || set === 'dark') return set;
+  return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
 /** What a dialog window is opened with: its id, title and input, and what was remembered. Its size is the Rust contract's. */
 export function windowRequest(request: DialogShowRequest, remembered = loadDialogBounds()[request.def.id]): DialogRequest {
   const def = request.def;
@@ -30,6 +37,7 @@ export function windowRequest(request: DialogShowRequest, remembered = loadDialo
     input: request.inputs,
     // Where it goes is Rust's decision (on the parent's monitor); the kind's floor applies to a remembered size.
     remembered: remembered ? raiseToKindMinimum(def.kind, remembered) : undefined,
+    theme: currentTheme(),
   };
 }
 

@@ -54,7 +54,7 @@ use crate::window::{
 };
 use ::tauri::window::Color;
 use ::tauri::{
-    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, PhysicalSize, Runtime, Theme,
+    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, PhysicalSize, Runtime,
     WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window, WindowEvent,
 };
 use paddock_commands::labels::{Label, resolve};
@@ -300,7 +300,13 @@ fn open_on<R: Runtime>(
         title: &title,
         modality: contract.modality,
         os,
-        dark: matches!(parent.theme(), Ok(Theme::Dark)),
+        theme: request.theme.unwrap_or_else(|| {
+            if matches!(parent.theme(), Ok(::tauri::Theme::Dark)) {
+                crate::window::Theme::Dark
+            } else {
+                crate::window::Theme::Light
+            }
+        }),
     };
     if let Err(e) = build_window(app, &spec, &place, (min_w, min_h), &parent) {
         dialogs.remove(&label);
@@ -370,6 +376,7 @@ fn build_window<R: Runtime>(
         .maximizable(c.maximizable)
         .visible(false)
         .background_color(Color(r, g, b, 255))
+        .initialization_script(c.init_script.clone())
         .focused(false);
     // On macOS a child window is ordered in with its parent as soon as it exists, hidden or not: the parent is attached
     // when the dialog is shown instead (`attach_at_show`).

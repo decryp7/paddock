@@ -544,7 +544,7 @@ describe('dialogs as windows', () => {
     const ref = service.open(VIEWER, { inputs: { a: 1 }, title: 'Mine' });
     await tick();
     // The size is the Rust contract's: the request names none (ADR 0026 §3).
-    expect(io.opened[0]).toEqual({ dialogId: 't.viewer', instance: undefined, title: 'Mine', input: { a: 1 }, remembered: { dx: 5, dy: 6, width: 680, height: 560 } });
+    expect(io.opened[0]).toEqual({ dialogId: 't.viewer', instance: undefined, title: 'Mine', input: { a: 1 }, remembered: { dx: 5, dy: 6, width: 680, height: 560 }, theme: expect.stringMatching(/^(light|dark)$/) });
     expect(gate.blocked()).toBe(false);
     io.emit(DIALOG_EVENTS.result, { nonsense: true });
     io.result('d-main-9', 't.viewer', 'other window');
@@ -605,7 +605,12 @@ describe('dialogs as windows', () => {
   });
 
   it('builds the request and parses the events defensively', () => {
-    expect(windowRequest({ def: DECISION, title: 'T', inputs: {} }, undefined)).toEqual({ dialogId: 't.decision', instance: undefined, title: 'T', input: {}, remembered: undefined });
+    document.documentElement.dataset['theme'] = 'light';
+    expect(windowRequest({ def: DECISION, title: 'T', inputs: {} }, undefined)).toEqual({ dialogId: 't.decision', instance: undefined, title: 'T', input: {}, remembered: undefined, theme: 'light' });
+    document.documentElement.dataset['theme'] = 'dark';
+    expect(windowRequest({ def: DECISION, title: 'T', inputs: {} }, undefined).theme).toBe('dark');
+    delete document.documentElement.dataset['theme'];
+    expect(['light', 'dark']).toContain(windowRequest({ def: DECISION, title: 'T', inputs: {} }, undefined).theme);
     expect(parseResult(null)).toBeNull();
     expect(parseClosed({ label: 'a', dialogId: 'b', remembered: { dx: 'x' } })).toEqual({ label: 'a', dialogId: 'b', remembered: null });
     expect(parseClosed({ label: 1 })).toBeNull();

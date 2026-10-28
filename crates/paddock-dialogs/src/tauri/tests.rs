@@ -144,6 +144,7 @@ fn request(id: &str) -> DialogRequest {
         title: "Set up the assistant".into(),
         input: Some(json!({ "modelId": "m1" })),
         remembered: None,
+        theme: None,
     }
 }
 

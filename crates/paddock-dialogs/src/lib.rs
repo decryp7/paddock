@@ -59,7 +59,7 @@ pub use table::{DialogTable, Entry, Shape, Width};
 pub use window::{
     CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode, DialogInfo,
     DialogRequest, DialogResult, DialogStart, Measure, Parenting, RESULT_EVENT, ShowMechanism,
-    WindowConfig, show_mechanism,
+    Theme, WindowConfig, show_mechanism,
 };
 
 #[cfg(feature = "tauri")]

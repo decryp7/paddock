@@ -16,6 +16,8 @@ viewportHeight?: number, };
 
 export type DialogRemembered = { dx: number, dy: number, width: number, height: number, };
 
+export type DialogTheme = "light" | "dark";
+
 export type DialogRequest = { dialogId: string, 
 /**
  * Tells apart the windows of a dialog that is open once per input (a hash of the input; letters and digits).
@@ -29,7 +31,12 @@ input?: unknown,
  * What the UI remembered of this dialog: its size and its offset from the parent window (never an absolute
  * screen position). The shell decides where it goes ([`placement::place`]).
  */
-remembered?: DialogRemembered, };
+remembered?: DialogRemembered, 
+/**
+ * The opener's resolved theme (its `data-theme`): the window's background before the page paints is that theme's
+ * `--pd-surface-2`. Without it the parent window's OS theme is used.
+ */
+theme?: DialogTheme, };
 
 export type DialogInfo = { label: string, dialogId: string, 
 /**

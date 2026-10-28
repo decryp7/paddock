@@ -53,6 +53,20 @@ pub struct DialogRequest {
     #[serde(default)]
     #[cfg_attr(test, ts(optional))]
     pub remembered: Option<Remembered>,
+    /// The opener's resolved theme (its `data-theme`): the window's background before the page paints is that theme's
+    /// `--pd-surface-2`. Without it the parent window's OS theme is used.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub theme: Option<Theme>,
+}
+
+/// A colour scheme of the app (`data-theme`).
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DialogTheme"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Light,
+    Dark,
 }
 
 /// A dialog window as the opener sees it.
@@ -290,6 +304,23 @@ pub struct WindowConfig {
     pub minimizable: bool,
     /// The native zoom / maximise button: none.
     pub maximizable: bool,
+    /// Run in the page before the app ([`platform_script`]).
+    pub init_script: String,
+}
+
+/// The script run in a dialog page before the app: `<html data-platform>` is the OS the window was built for (`macos`,
+/// `windows` or `linux`; any other OS counts as Linux), so the shell's platform-dependent layout (the footer's button
+/// order) does not depend on the user agent. Set at once, or when the document element appears.
+pub fn platform_script(os: &str) -> String {
+    let os = match os {
+        "macos" => "macos",
+        "windows" => "windows",
+        _ => "linux",
+    };
+    format!(
+        "(function(){{var set=function(){{var d=document.documentElement;if(!d)return false;d.dataset.platform='{os}';return true;}};\
+if(!set()){{var o=new MutationObserver(function(){{if(set())o.disconnect();}});o.observe(document,{{childList:true}});}}}})();"
+    )
 }
 
 /// The title-bar buttons of a dialog window: (closable, minimizable, maximizable). None, for every kind: a dialog closes
@@ -309,8 +340,8 @@ pub struct WindowSpec<'a> {
     pub modality: Modality,
     /// The OS (`std::env::consts::OS`).
     pub os: &'a str,
-    /// The parent's colour scheme, for the background ([`window_surface`]).
-    pub dark: bool,
+    /// The colour scheme, for the background ([`window_surface`]).
+    pub theme: Theme,
 }
 
 /// The builder configuration of a dialog at `place` with logical minimum `min`.
@@ -330,7 +361,8 @@ pub fn window_config(
         title: spec.title.to_string(),
         inner: (w, h),
         position: at.logical,
-        background: window_surface(spec.dark),
+        background: window_surface(spec.theme),
+        init_script: platform_script(spec.os),
         min_inner: (min.0.min(w), min.1.min(h)),
         resizable: true,
         owned: Parenting::of(spec.modality, spec.os) == Parenting::Owned,
@@ -409,14 +441,12 @@ pub fn show_mechanism(os: &str) -> ShowMechanism {
     ShowMechanism::ReadyThenShow
 }
 
-/// The background of a dialog window before its page paints, RGB: the dialog shell's own surface (`--pd-surface-2` of
-/// `_tokens.scss`, dark `#1b1e23`, light `#f0f2f5`), so the window never flashes another colour. The scheme is the parent
-/// window's theme, since the request carries none.
-pub const fn window_surface(dark: bool) -> (u8, u8, u8) {
-    if dark {
-        (0x1b, 0x1e, 0x23)
-    } else {
-        (0xf0, 0xf2, 0xf5)
+/// The background of a dialog window before its page paints, RGB: the dialog shell's own surface, `--pd-surface-2` of
+/// `_tokens.scss` for `theme` (a test compares these values with the file), so the window never flashes another colour.
+pub const fn window_surface(theme: Theme) -> (u8, u8, u8) {
+    match theme {
+        Theme::Dark => (0x1b, 0x1e, 0x23),
+        Theme::Light => (0xf0, 0xf2, 0xf5),
     }
 }
 
@@ -580,6 +610,7 @@ mod tests {
             title: "Set up".into(),
             input: Some(json!({ "modelId": "m1" })),
             remembered: None,
+            theme: None,
         }
     }
 
@@ -608,6 +639,44 @@ mod tests {
             outer: None,
             monitor,
             os,
+        }
+    }
+
+    /// The `--pd-surface-2` of the `@mixin dark` or `@mixin light` block of `_tokens.scss`, as RGB.
+    fn token_surface(mixin: &str) -> (u8, u8, u8) {
+        let scss = include_str!("../../../ui/projects/paddock-ui/scss/_tokens.scss");
+        let block = scss
+            .split(&format!("@mixin {mixin} {{"))
+            .nth(1)
+            .expect("the mixin exists");
+        let line = block
+            .lines()
+            .find(|l| l.trim_start().starts_with("--pd-surface-2:"))
+            .expect("the block sets --pd-surface-2");
+        let hex = line.split('#').nth(1).unwrap().trim_end_matches(';').trim();
+        let n = u32::from_str_radix(hex, 16).unwrap();
+        ((n >> 16) as u8, (n >> 8) as u8, n as u8)
+    }
+
+    #[test]
+    fn the_window_surfaces_are_the_tokens_surface_2_of_each_theme() {
+        assert_eq!(window_surface(Theme::Dark), token_surface("dark"));
+        assert_eq!(window_surface(Theme::Light), token_surface("light"));
+    }
+
+    #[test]
+    fn a_dialog_page_is_told_its_platform_before_the_app_runs() {
+        for (os, platform) in [
+            ("macos", "macos"),
+            ("windows", "windows"),
+            ("linux", "linux"),
+            ("freebsd", "linux"),
+        ] {
+            let script = platform_script(os);
+            assert!(
+                script.contains(&format!("d.dataset.platform='{platform}'")),
+                "{os}: {script}"
+            );
         }
     }
 
@@ -677,8 +746,8 @@ mod tests {
         for os in ["macos", "windows", "linux"] {
             assert_eq!(show_mechanism(os), ShowMechanism::ReadyThenShow, "{os}");
         }
-        assert_eq!(window_surface(true), (0x1b, 0x1e, 0x23));
-        assert_eq!(window_surface(false), (0xf0, 0xf2, 0xf5));
+        assert_eq!(window_surface(Theme::Dark), (0x1b, 0x1e, 0x23));
+        assert_eq!(window_surface(Theme::Light), (0xf0, 0xf2, 0xf5));
     }
 
     #[test]
@@ -981,7 +1050,7 @@ mod tests {
                 title: "Set up",
                 modality,
                 os,
-                dark: true,
+                theme: Theme::Dark,
             };
             let at = placement::screen_position(&place, os);
             let c = window_config(&spec, &at, &place, (680.0, 300.0));
@@ -1000,17 +1069,17 @@ mod tests {
             assert_eq!(c.min_inner, (500.0, 300.0));
             assert_eq!(c.title, "Set up");
             // Created unseen, on the dialog shell's own surface.
-            assert_eq!(c.background, window_surface(true));
+            assert_eq!(c.background, window_surface(Theme::Dark));
             let light = window_config(
                 &WindowSpec {
-                    dark: false,
+                    theme: Theme::Light,
                     ..spec
                 },
                 &at,
                 &place,
                 (680.0, 300.0),
             );
-            assert_eq!(light.background, window_surface(false));
+            assert_eq!(light.background, window_surface(Theme::Light));
         }
     }
 
