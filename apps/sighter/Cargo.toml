@@ -2,7 +2,7 @@
 # first; the VNC target (SG4), the detector (SG5) and the Tauri app join later behind the ports of `sighter-core`.
 [workspace]
 resolver = "3"
-members = ["crates/sighter-core"]
+members = ["crates/sighter-core", "crates/sighter-frames"]
 
 [workspace.package]
 edition = "2024"

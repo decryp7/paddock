@@ -1,0 +1,18 @@
+[package]
+name = "sighter-frames"
+version = "0.0.0"
+description = "Frame handling for Sighter (SG2): perceptual hashes, SSIM, scene change, near-duplicate removal and bounded PNG decoding."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sighter-core.workspace = true
+thiserror.workspace = true
+png = "0.17"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
