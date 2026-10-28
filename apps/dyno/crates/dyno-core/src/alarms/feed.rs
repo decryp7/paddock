@@ -1,5 +1,4 @@
-//! Feeds: turn what Dyno already produces (alerts, rule notifications, custom thresholds, issues, taming and cleanup
-//! events) into alarm events through one generic [`Observation`].
+//! Feeds: turn what Dyno already produces (alerts, custom thresholds, issues and hardware findings) into alarm events through one generic [`Observation`].
 
 use super::AlarmEvent;
 use crate::alerts::{Alert, AlertKind};
@@ -7,7 +6,7 @@ use crate::health::Severity;
 use crate::time::{Timestamp, MINUTE};
 use crate::widgets::Metric;
 
-/// How long a one-off event (an alert that fires once, a cleanup that ran) stays an open alarm by itself.
+/// How long a one-off event (an alert that fires once) stays an open alarm by itself.
 pub const EVENT_TTL_MS: i64 = 30 * MINUTE;
 
 /// Where an observation comes from; it becomes the alarm's rule prefix, so muting and the statistics group by it.
@@ -19,10 +18,6 @@ pub enum Source {
     Issue,
     /// A custom threshold on a widget or metric.
     Threshold,
-    /// A rule that tamed an app.
-    Taming,
-    /// A cleanup that ran or found something.
-    Cleanup,
     /// A network event: a new exposed listener or a new remote host.
     Network,
     /// The CPU running slower than it should (heat, a power limit or battery saver).
@@ -41,8 +36,6 @@ impl Source {
             Source::Alert => "alert",
             Source::Issue => "issue",
             Source::Threshold => "threshold",
-            Source::Taming => "taming",
-            Source::Cleanup => "cleanup",
             Source::Network => "network",
             Source::Throttling => "throttling",
             Source::Lifespan => "lifespan",
@@ -154,22 +147,6 @@ pub fn from_alert(alert: &Alert) -> Observation {
     }
 }
 
-/// A rule's "Notify" step firing for `app`.
-pub fn from_rule_notify(rule_id: &str, rule_name: &str, app: &str) -> Observation {
-    Observation {
-        source: Source::Taming,
-        name: rule_id.into(),
-        subject: app.into(),
-        severity: Severity::Info,
-        title: format!("{rule_name}: {app}"),
-        detail: format!("The rule \"{rule_name}\" notified you about {app}."),
-        value: None,
-        metric: Some(Metric::Process(app.into())),
-        active: true,
-        one_off: true,
-    }
-}
-
 /// A user threshold crossed (or no longer crossed) by `value`.
 pub fn from_threshold(name: &str, metric: Metric, severity: Severity, value: f64, limit: f64, crossed: bool) -> Observation {
     Observation {
@@ -211,22 +188,6 @@ pub fn alarms_on(kind: crate::issues::IssueKind) -> bool {
         kind,
         K::BadShutdown | K::DiskError | K::MemoryError | K::Overheating | K::MemoryExhaustion
     )
-}
-
-/// A finished cleanup (or one that found something) as an informational event.
-pub fn from_cleanup(title: &str, detail: &str) -> Observation {
-    Observation {
-        source: Source::Cleanup,
-        name: "cleanup".into(),
-        subject: title.into(),
-        severity: Severity::Info,
-        title: title.into(),
-        detail: detail.into(),
-        value: None,
-        metric: None,
-        active: true,
-        one_off: true,
-    }
 }
 
 /// A throttling episode that has lasted long enough to count; `active` is false once it ended. Heat is a warning (it can
@@ -398,18 +359,14 @@ mod tests {
     }
 
     #[test]
-    fn rules_issues_and_cleanup_events() {
-        let n = from_rule_notify("tame-chrome", "Tame Chrome", "Chrome");
-        assert_eq!(n.key(), "taming:tame-chrome:Chrome");
-        assert_eq!(n.metric, Some(Metric::Process("Chrome".into())));
-        let c = from_cleanup("Cleanup finished", "Freed 2 GB");
-        assert_eq!(c.rule(), "cleanup:cleanup");
-        assert_eq!(c.severity, Severity::Info);
+    fn observation_keys() {
+        let o = from_threshold("hot", Metric::Process("a".into()), Severity::Warning, 5.0, 4.0, true);
+        assert_eq!(o.rule(), "threshold:hot");
         for s in [Source::Issue, Source::Custom, Source::Threshold] {
             let o = Observation {
                 source: s,
                 subject: String::new(),
-                ..from_cleanup("x", "y")
+                ..o.clone()
             };
             assert_eq!(o.key(), o.rule());
         }

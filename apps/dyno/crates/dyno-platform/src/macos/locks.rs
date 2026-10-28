@@ -1,7 +1,7 @@
 //! "What is locking this file?" through `lsof` (macOS has no Restart Manager).
 
 use crate::parse::lsof::{parse_fields, processes};
-use crate::unix_control::started_of;
+use crate::unix_proc::started_of;
 use dyno_core::ports::{FileLocks, PlatformError};
 use dyno_core::process::{Locker, ProcessRef};
 use std::path::Path;
@@ -27,7 +27,10 @@ impl FileLocks for LsofLocks {
             .filter_map(|(pid, name)| {
                 let started = started_of(pid)?;
                 Some(Locker {
-                    process: ProcessRef { pid, started },
+                    process: ProcessRef {
+                        pid,
+                        started: Some(started),
+                    },
                     name,
                     kind: Some("Application".into()),
                 })

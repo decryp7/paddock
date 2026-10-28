@@ -96,11 +96,10 @@ mod tests {
     use super::*;
     use crate::audit::AuditLog;
     use crate::dispatch::Parts;
-    use dyno_core::helper::{HelperAction, HelperOutcome, TuningHost};
+    use dyno_core::helper::HelperHost;
     use dyno_core::helper_wire::{HelperInfo, HelperReply, HelperRequest, HelperUser};
     use dyno_core::ports::{PlatformError, ProcessTraffic};
     use dyno_ipc::{Client, Token};
-    use dyno_platform::tuning::FakeTuning;
     use std::path::PathBuf;
 
     struct NoTraffic;
@@ -120,7 +119,6 @@ mod tests {
     struct Rig {
         name: String,
         token: Token,
-        fake: FakeTuning,
         dispatcher: Arc<Dispatcher>,
         stop: Arc<AtomicBool>,
         daemon: Option<std::thread::JoinHandle<Result<(), String>>>,
@@ -132,15 +130,13 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let host = Host::listen().unwrap();
             let (name, token) = (host.name().to_string(), host.token().clone());
-            let fake = FakeTuning::new(TuningHost::Windows);
             let dispatcher = Arc::new(Dispatcher::new(Parts {
                 info: HelperInfo {
                     version: "1.0.0".into(),
                     api: 1,
-                    host: TuningHost::Windows,
+                    host: HelperHost::Windows,
                     agent_exe: "/x".into(),
                 },
-                tuning: Box::new(fake.clone()),
                 traffic: Box::new(NoTraffic),
                 audit: AuditLog::new(dir.path().join("audit.jsonl")),
                 clock: Box::new(|| 42),
@@ -160,7 +156,6 @@ mod tests {
             Rig {
                 name,
                 token,
-                fake,
                 dispatcher,
                 stop,
                 daemon: Some(std::thread::spawn(move || daemon.run())),
@@ -208,31 +203,18 @@ mod tests {
     fn the_authorised_user_with_the_agent_program_gets_its_requests_answered_in_process() {
         let rig = Rig::start(this_user(), "/opt/dyno/dyno-agent");
         assert!(matches!(rig.call(HelperRequest::Info).unwrap(), HelperReply::About(i) if i.version == "1.0.0"));
-        let a = HelperAction::SetHibernate(false);
-        assert_eq!(
-            rig.call(HelperRequest::Apply(a.clone())).unwrap(),
-            HelperReply::Outcome(HelperOutcome::Done)
-        );
-        assert_eq!(rig.fake.applied(), vec![a]);
-        // A refusal is a typed remote failure, not a dropped connection.
-        let refused = rig
-            .call(HelperRequest::Apply(HelperAction::SetPowerScheme(
-                dyno_core::helper::BALANCED_SCHEME.into(),
-            )))
-            .unwrap_err();
-        assert!(matches!(refused, IpcError::Remote(e) if e.code == codes::REFUSED));
+        assert!(matches!(rig.call(HelperRequest::Traffic).unwrap_err(), IpcError::Remote(e) if e.code == codes::UNSUPPORTED));
         rig.stop();
     }
 
     #[test]
     fn another_program_is_dropped_and_recorded_without_an_answer() {
         let rig = Rig::start(this_user(), "/tmp/evil/dyno-agent");
-        let err = rig.call(HelperRequest::Apply(HelperAction::SetHibernate(false))).unwrap_err();
+        let err = rig.call(HelperRequest::Info).unwrap_err();
         assert!(
             matches!(err, IpcError::Closed | IpcError::Io { .. } | IpcError::Timeout(_)),
             "{err:?}"
         );
-        assert!(rig.fake.applied().is_empty());
         let log = match rig.dispatcher.handle(None, HelperRequest::Audit(5)).unwrap() {
             HelperReply::Entries(e) => e,
             other => panic!("{other:?}"),

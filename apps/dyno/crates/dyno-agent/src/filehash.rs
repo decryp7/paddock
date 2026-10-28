@@ -51,7 +51,7 @@ impl FileHasher {
     /// what the program is). The message says what to do when it fails.
     pub fn hash(&self, path: &str) -> Result<FileHashInfo, String> {
         let p = Path::new(path);
-        if !p.is_absolute() || dyno_core::cleanup::has_dot_segment(p) {
+        if !p.is_absolute() || dyno_core::disk::has_dot_segment(p) {
             return Err("That is not a full path to a file.".into());
         }
         let real = std::fs::canonicalize(p).map_err(|e| match e.kind() {
