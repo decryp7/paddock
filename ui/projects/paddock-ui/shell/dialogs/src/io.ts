@@ -17,6 +17,11 @@ export interface DialogMeasure {
    * saw a viewport 32 px short of the window on a Mac, cutting the footer off).
    */
   readonly viewportHeight?: number;
+  /**
+   * The page's `window.devicePixelRatio` when it measured. Rust converts CSS px to logical px with the webview zoom,
+   * `devicePixelRatio` over the window's scale factor (1 when absent). Finite, 0.25 to 8.
+   */
+  readonly devicePixelRatio?: number;
 }
 
 /**

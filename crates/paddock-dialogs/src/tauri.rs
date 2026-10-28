@@ -50,7 +50,7 @@ use crate::window::{
     Around, CLOSE_REQUESTED_EVENT, CLOSED_EVENT, DialogClosed, DialogError, DialogErrorCode,
     DialogInfo, DialogRequest, DialogResult, DialogShown, DialogStart, MAX_RESULT_BYTES, Measure,
     RESULT_EVENT, SHOWN_EVENT, WindowSpec, clean_title, disables_parent_natively, geometry,
-    json_len, plan_fit, validate, window_config,
+    json_len, plan_fit, validate, viewport_delta, window_config, zoom_of,
 };
 use ::tauri::window::Color;
 use ::tauri::{
@@ -414,7 +414,47 @@ fn on_main_thread<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce() + Send + 'sta
 
 #[cfg(any(test, feature = "mock-runtime"))]
 fn on_main_thread<R: Runtime>(_app: &AppHandle<R>, f: impl FnOnce() + Send + 'static) {
+    #[cfg(test)]
+    if DEFER_MAIN.with(|d| d.get()) {
+        MAIN_QUEUE.with(|q| q.borrow_mut().push(Box::new(f)));
+        return;
+    }
     f();
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests that order the main thread's queue by hand switch deferral on; the queue then holds what was posted.
+    static DEFER_MAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static MAIN_QUEUE: std::cell::RefCell<Vec<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Queues the application of `parent`'s desired enabled state on the main thread (ADR 0026 §4.4). Nothing but the
+/// parent's label is captured: the task reads the LATEST desired state from the registry when it runs, so a show and a
+/// close that raced each other converge on whichever came last, whatever order the tasks run in. Never called under the
+/// registry lock.
+fn queue_parent_state<R: Runtime>(app: &AppHandle<R>, parent: &str) {
+    let (handle, parent) = (app.clone(), parent.to_string());
+    on_main_thread(app, move || apply_parent_state(&handle, &parent));
+}
+
+/// Applies the parent's desired state if it differs from the one applied last. The registry lock is held only to read
+/// it; the window API is called after it is released.
+fn apply_parent_state<R: Runtime>(app: &AppHandle<R>, parent: &str) {
+    let Some(dialogs) = app.try_state::<Dialogs>() else {
+        return;
+    };
+    if dialogs.exiting() {
+        return;
+    }
+    let Some(disabled) = dialogs.parent_change(parent) else {
+        return;
+    };
+    let Some(p) = app.get_webview_window(parent) else {
+        return;
+    };
+    native(if disabled { "disable" } else { "enable" }, parent);
+    let _ = p.set_enabled(!disabled);
 }
 
 /// Whether an owned dialog window is attached to its parent when it is shown rather than when it is built: macOS, where
@@ -514,29 +554,16 @@ fn on_destroyed_on<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str) {
     let Some(dialogs) = app.try_state::<Dialogs>() else {
         return;
     };
-    // Resolved before the registry lock is taken (lock order: the registry's is always innermost).
-    let parent = dialogs
-        .get(label)
-        .and_then(|e| app.get_webview_window(&e.parent));
     let exiting = dialogs.exiting();
-    // The parent's re-enabling is decided under the registry lock, against the shown modals only, and queued on the main
-    // thread in the same order as the disabling at show.
-    let Some(entry) = dialogs.remove_with(label, |entry, last_shown| {
-        if let Some(p) = parent.clone()
-            && !exiting
-            && entry.shown
-            && entry.modality == Modality::Modal
-            && disables_parent_natively(os)
-            && last_shown
-        {
-            on_main_thread(app, move || {
-                native("enable", p.label());
-                let _ = p.set_enabled(true);
-            });
-        }
-    }) else {
+    let Some(entry) = dialogs.remove(label) else {
         return;
     };
+    // Only a shown modal held its parent: the parent is released by a queued "apply the latest state" task, which counts
+    // the shown modals left when it runs.
+    if !exiting && entry.shown && entry.modality == Modality::Modal && disables_parent_natively(os)
+    {
+        queue_parent_state(app, &entry.parent);
+    }
     log::info!(
         target: TARGET,
         Dialog = entry.dialog_id.as_str(), Host = entry.host.as_str(), Window = label;
@@ -785,6 +812,20 @@ fn fit<R: Runtime>(
         outer: outer_rect(window),
         monitor,
         os,
+        viewport_delta: 0.0,
+    };
+    // The page reports CSS px: logical px once the webview zoom is taken out. The viewport delta is measured once, on the
+    // window as it is at the first fit, and kept (a later fit must not read it off a resized window).
+    let measure = measure.checked()?;
+    let measure = measure.logical(zoom_of(measure.device_pixel_ratio, scale));
+    let viewport_delta = dialogs
+        .viewport_delta_or(window.label(), || {
+            viewport_delta(around.current.height, measure.viewport_height)
+        })
+        .ok_or_else(not_a_dialog)?;
+    let around = Around {
+        viewport_delta,
+        ..around
     };
     let plan = plan_fit(entry.kind, measure, floor, &around)?;
     dialogs.set_measure(window.label(), measure);
@@ -824,21 +865,14 @@ fn show<R: Runtime>(app: &AppHandle<R>, label: &str, os: &str, deadline: bool) {
         return;
     };
     let parent = app.get_webview_window(&entry.parent);
-    // Marked shown and the parent's disabling queued under the registry lock: a close racing this show is ordered
-    // against it, and one that came first leaves nothing to show.
-    let Some(entry) = dialogs.mark_shown_with(label, |entry| {
-        if let Some(p) = parent.clone()
-            && entry.modality == Modality::Modal
-            && disables_parent_natively(os)
-        {
-            on_main_thread(app, move || {
-                native("disable", p.label());
-                let _ = p.set_enabled(false);
-            });
-        }
-    }) else {
+    // Marked shown under the registry lock (a close racing this show is ordered against it, and one that came first
+    // leaves nothing to show); the parent's disabling is queued after the lock is released.
+    let Some(entry) = dialogs.mark_shown(label) else {
         return;
     };
+    if entry.modality == Modality::Modal && disables_parent_natively(os) {
+        queue_parent_state(app, &entry.parent);
+    }
     let Some(w) = app.get_webview_window(label) else {
         return;
     };
