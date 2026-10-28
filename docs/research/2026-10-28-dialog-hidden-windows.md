@@ -7,10 +7,10 @@
   0026 §4.4's three show methods fits each OS, how long does it take, and is the size exact at first paint?
 - Probe: `spikes/dialog-hidden/` (a minimal Tauri 2.12.5 app, tao 0.37.2, wry 0.57.1; not product code). Raw logs and
   summaries: see "Runs" below.
-- Status: **partial.** Measured: macOS (displays asleep and session locked, methods a to c) and Linux (Xvfb, methods a
-  to d). **Not measured: Windows** (its run was queued behind the main CI when this note was committed; see Runs), macOS
-  with the displays awake, macOS method d, a second monitor, and Linux under a real window manager. The proposed ADR
-  amendment is at the end and is conditional on the Windows run.
+- Status: measured on all three OS: macOS (displays asleep and session locked, methods a to c), Windows (WebView2
+  156, CI host runner in a disconnected session, methods a to d) and Linux (Xvfb, methods a to d). **Not measured:**
+  macOS with the displays awake, macOS method d, a second monitor, Windows in a connected interactive session, and
+  Linux under a real window manager. The proposed ADR amendment is at the end.
 
 ## Method
 
@@ -99,17 +99,53 @@ Per signal, in every trial and every method:
 - Webview zoom: `devicePixelRatio` follows the zoom (1.25, 1.5) and the CSS height shrinks with the wider CSS
   viewport; converting by `dpr / scale` gave the right logical height (381 and 492 px).
 
-### Windows (WebView2), CI host runner in the user's desktop session
+### Windows (WebView2 156.0.4314.50), CI host runner, user session disconnected
 
-**Not measured.** The first dispatch (run 6611, on 88b0b8e4c) sat queued for an hour and was cancelled at 15:38, just
-before the Mac and the Windows host crashed. The second (run 6637, on 3af528725, all four methods) was dispatched once
-the runner was back and was still queued behind 13 Windows jobs of the main CI when this note was committed. Its job
-log prints the summary tables and the raw JSONL between `=== PROBE JSONL BEGIN ===` markers; the table goes here.
+Run 6663 (job 14720) on 70d993987, three repetitions. `query session` showed the runner's user session (ID 1) as
+disconnected and the console connected with no user, after the host's reboot; Tauri saw one 1920 x 1065 monitor at
+scale 1 (`WinDisc`). A connected, interactive session was not measured.
 
-What the documentation says (read, not verified here or by this probe): WebView2 keeps running script in a hidden controller but may throttle
-timers and suspend rendering when `IsVisible` is false
-([Microsoft: ICoreWebView2Controller.IsVisible](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/win32/icorewebview2controller#get_isvisible)),
-so rAF before show is not to be relied on there either; a synchronous layout read should work, as it did on the other two.
+| method | scenario | n | JS runs hidden | rAF before show | fonts.ready before show | ResizeObserver before show | setTimeout(0) lag ms (median) | ready ms median / max | missed 3 s deadline | font loaded at ready | size exact after show | resize events after show |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| a | font_slow | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 851 / 952 | 0/3 | 3/3 | 3/3 | 0 |
+| a | normal | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 575 / 713 | 0/3 | 3/3 | 3/3 | 0 |
+| a | route_slow | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 1102 / 1115 | 0/3 | 3/3 | 3/3 | 0 |
+| a | unowned | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 423 / 573 | 0/3 | 3/3 | 3/3 | 0 |
+| a | zoom125 | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 3 | 568 / 578 | 0/3 | 3/3 | 3/3 | 0 |
+| a | zoom150 | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 478 / 576 | 0/3 | 3/3 | 3/3 | 0 |
+| b | font_slow | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 844 / 992 | 0/3 | 3/3 | 3/3 | 0 |
+| b | normal | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 466 / 603 | 0/3 | 3/3 | 3/3 | 0 |
+| b | route_slow | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 1126 / 1153 | 0/3 | 3/3 | 3/3 | 0 |
+| b | unowned | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 517 / 599 | 0/3 | 3/3 | 3/3 | 0 |
+| b | zoom125 | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 513 / 581 | 0/3 | 3/3 | 3/3 | 0 |
+| b | zoom150 | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 440 / 499 | 0/3 | 3/3 | 3/3 | 0 |
+| c | font_slow | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 857 / 903 | 0/3 | 3/3 | 3/3 | 0 |
+| c | normal | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 429 / 573 | 0/3 | 3/3 | 3/3 | 0 |
+| c | route_slow | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 1092 / 1096 | 0/3 | 3/3 | 3/3 | 0 |
+| c | unowned | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 1 | 430 / 567 | 0/3 | 3/3 | 3/3 | 0 |
+| c | zoom125 | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 556 / 569 | 0/3 | 3/3 | 3/3 | 0 |
+| c | zoom150 | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 446 / 449 | 0/3 | 3/3 | 3/3 | 0 |
+| d | font_slow | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 941 / 1211 | 0/3 | 3/3 | 0/3 | 1 |
+| d | normal | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 467 / 550 | 0/3 | 3/3 | 0/3 | 2 |
+| d | route_slow | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 1086 / 1104 | 0/3 | 3/3 | 0/3 | 2 |
+| d | unowned | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 483 / 571 | 0/3 | 3/3 | 0/3 | 2 |
+| d | zoom125 | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 565 / 569 | 0/3 | 3/3 | 0/3 | 2 |
+| d | zoom150 | 3 | 3/3 | 3/3 | 3/3 | 3/3 | 2 | 482 / 577 | 0/3 | 3/3 | 0/3 | 2 |
+
+- **WebView2 does not throttle a hidden window here.** `document.visibilityState` is `visible` while the window is
+  hidden, and JS, `fonts.ready`, `ResizeObserver` and **`requestAnimationFrame` all ran before show in every trial**.
+  So methods a, b and c were all exact after show (54 of 54), with no resize after show.
+- Creating a window costs about 340 ms whether it is hidden or visible, so every method is ready at about 420 to 570
+  ms, plus the font's or route's delay. c reads synchronously, but saves nothing here because the build dominates.
+- The window's inner size equals the page's viewport (560 x 520 for 560 x 520): **no viewport delta** on Windows.
+- **Method d was not exact (0 of 18), and the cause is the probe, not the method.** Its height while hidden was right
+  (260, the same as a to c), and so was the window that Rust fitted. At show, the probe drops the fixed width by
+  rewriting the `<style>` that also holds the `@font-face` rule. WebView2 then loaded the face again
+  (`fonts.status` was `loading` at show in d only, `loaded` in a to c). For one frame or two it drew the fallback
+  font, 305 px tall with a scroll bar, then went back to 260 (settled height 260 in every trial). Product code must
+  drop the declared width with a class or attribute, and never rewrite a stylesheet holding `@font-face`.
+  Re-running d with that change was not done.
+- Webview zoom: the `dpr / scale` conversion was exact at 1.25 and 1.5 (381 and 492 px).
 
 ### Linux (WebKitGTK 2.52, GTK 3.24), paddock-ci:v2 under Xvfb, no window manager
 
@@ -158,24 +194,26 @@ e2e) and `GDK_SCALE=2` (one repetition) gave the same pattern; their tables are 
 
 ## What this means for the three methods
 
-| | macOS (asleep) | Linux (Xvfb) | Windows |
+| | macOS (asleep) | Linux (Xvfb) | Windows (disconnected session) |
 |---|---|---|---|
-| a hidden, wait a frame | never ready (rAF never fires); deadline, then guess | never ready before the deadline; guess, then jump | not measured |
-| b visible off-screen | never ready (rAF never fires) | ready ~580 ms; exact after settle, sometimes one frame at the guess | not measured |
-| c hidden, sync read | ready ~65 ms; viewport 32 px short of the window | wrong (0-wide viewport) | not measured |
-| d hidden, sync read at declared width | not measured (expected as c) | ready ~75 ms; exact 42/42 | not measured |
+| a hidden, wait a frame | never ready (rAF never fires); deadline, then guess | never ready before the deadline; guess, then jump | ready ~570 ms; exact 18/18 |
+| b visible off-screen | never ready (rAF never fires) | ready ~580 ms; exact after settle, sometimes one frame at the guess | ready ~470 ms; exact 18/18 |
+| c hidden, sync read | ready ~65 ms; viewport 32 px short of the window | wrong (0-wide viewport) | ready ~430 ms; exact 18/18 |
+| d hidden, sync read at declared width | not measured (expected as c) | ready ~75 ms; exact 42/42 | right height hidden; a font reload at show in the probe (see Windows) |
 
-Common to every measured case: **no frame callback can be relied on before show** (rAF, and so Angular's
+Common to every measured case except Windows: **no frame callback can be relied on before show** (rAF, and so Angular's
 `afterNextRender`), while script, `fonts.ready` and synchronous layout work everywhere. Today's shell waits for
-`afterNextRender`, so it cannot report ready from a hidden window.
+`afterNextRender`, so it cannot report ready from a hidden window on macOS or Linux. Windows would accept any method;
+only a frame-free read with a declared width (d) works on all three.
 
 ## Recommendation
 
-**Method d on every OS, provisionally until the Windows run confirms it:** create the dialog hidden; in the page, wait
+**Method d on every OS; Windows does not need b:** create the dialog hidden; in the page, wait
 for the content and `document.fonts.ready`, give the frame its declared width in CSS px, read its height synchronously
 (`getBoundingClientRect`), and if that read set `document.fonts.status` to `loading`, wait for `fonts.ready` and read
 again; send `dialog_ready` without waiting for a frame. Release the fixed width at show; the natural-height
-`ResizeObserver` refit (§4.5) covers anything that differs after show.
+`ResizeObserver` refit (§4.5) covers anything that differs after show. Drop the width by a class or attribute, never by
+rewriting a stylesheet that holds `@font-face` (on WebView2 that reloads the face and draws the fallback for a frame).
 
 Two fixes are needed whatever the method:
 
@@ -186,8 +224,8 @@ Two fixes are needed whatever the method:
    hidden window and add it to the content height. On the asleep Mac the delta was 32 px (the cut-off footer of ADR
    0016); elsewhere it was 0.
 
-Fallback if Windows shows that a hidden WebView2 does not lay out: method b on Windows only (visible off-screen,
-unfocused), which keeps the same handshake and costs a slower ready.
+Fallback: none needed per OS today. If a connected Windows session or an awake Mac turns out to differ, d still
+needs no frame, so the only expected change is the viewport delta, which the fit already measures.
 
 ## Edge cases
 
@@ -195,9 +233,9 @@ unfocused), which keeps the same handshake and costs a slower ready.
   read catches a face the read itself requested. The 400 ms late font was loaded at ready in every trial (macOS, Linux).
 - **Slow route:** ready waits for the content; the deadline (1 s) covers routes slower than that, showing Loading and
   refitting once (ADR 0026 §4.3). A 600 ms route came in under the deadline on both OS.
-- **HiDPI and zoom:** webview zoom 1.25 and 1.5 and `GDK_SCALE=2` were exact with d; converting with
+- **HiDPI and zoom:** webview zoom 1.25 and 1.5 and `GDK_SCALE=2` were exact with d on Linux and with a to c on Windows; converting with
   `dpr / scale` is correct. Real mixed-DPI monitors were not tested.
-- **Multiple displays:** not measured (the Mac had no screens attached during its run; Xvfb has one). The placement code
+- **Multiple displays:** not measured (the Mac had no screens attached during its run; Xvfb and the Windows runner have one). The placement code
   is unaffected by the method; the 1.1b tests must cover it.
 - **Display asleep or session locked (macOS):** no frames at all, so only a frame-free method (c or d) can report ready.
 
@@ -206,20 +244,22 @@ unfocused), which keeps the same handshake and costs a slower ready.
 - macOS, local, 2026-10-28 14:30 to 14:47, 711 events (`mac.jsonl`), methods a to c, displays asleep. A method d run was
   started at 15:39 and lost in the crash (empty log).
 - Linux, CI run 6614 (job 14072) on 478b0b309, methods a to c; CI run 6638 (job 14426) on 3af528725, methods a to d.
-- Windows, CI run 6611 cancelled while queued; CI run 6637 (job 14423) on 3af528725 queued, result pending.
+- Windows, CI run 6611 cancelled while queued; run 6637 failed before the probe (the workflow's `cmd` step kept
+  `query session`'s exit code 1); run 6663 (job 14720) on 70d993987, methods a to d.
+- The temporary workflow was deleted from the branch after run 6663.
 - Raw logs (synthetic page content only): `/Volumes/d7sst7/dev-targets/dialog-spike/logs/` on the Mac mini; summarise with
   `node spikes/dialog-hidden/summarize.mjs <file> [--trials]`.
 
 ## Proposed amendment to ADR 0026
 
-Proposed, conditional on the Windows run:
+Proposed:
 
 - §4.2: the ready handshake must not wait for a frame (`afterNextRender`, rAF). The frame reports `dialog_ready` after
   content and `document.fonts.ready`, from a synchronous layout read with the frame at the declared width, re-reading
   once if the read started a font load.
 - §4.2: fit with the viewport delta (the window's inner height minus the page's `innerHeight`, read hidden) added to the
   content height.
-- §4.4: replace the spike paragraph with "Method d on all three OS (research note 2026-10-28)", naming b on Windows as
-  the fallback if the Windows result requires it.
+- §4.4: replace the spike paragraph with "Method d on all three OS (research note 2026-10-28)"; the declared width
+  is dropped at show by a class or attribute, never by rewriting a stylesheet.
 - §4.6: on macOS the parent is attached at show, not at create (tao orders a child window in at creation).
 - §6: the probe stays as the `#[ignore]` real-window test, with method d and the exactness check.
