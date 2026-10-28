@@ -740,10 +740,10 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
 
 **Totals:**
 
-- Implementation: **36 to 59 days** (rows 1 to 23; row 15 re-estimated for three OS; rows 20 to 23 added in revision
+- Implementation: **35.5 to 60 days** (rows 1 to 23; row 15 re-estimated for three OS; rows 20 to 23 added in revision
   3).
 - The local VM matrix below: **6 to 8 days** (a first pass of about 5 days on three OS, then a re-run after fixes).
-- Together: **42 to 67 days**.
+- Together: **41.5 to 68 days**.
 - For comparison, rows 1-11 of the first draft summed to 8.5 to 14.5 days (review P2).
 
 **Tests in CI** (nothing is installed on a runner; rule 7):
