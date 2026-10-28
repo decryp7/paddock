@@ -153,7 +153,10 @@ export async function assertDialogBoots(def: DialogDef, options: DialogHarnessOp
   return report;
 }
 
-/** Boots every dialog of `options.dialogs`, one after another. */
+/**
+ * Boots every dialog of `options.dialogs`, one after another. A loader that never answers hangs this whole `it` until the
+ * runner's timeout without naming the dialog, so prefer one `it` per dialog with `assertDialogBoots`.
+ */
 export async function bootEveryDialog(options: DialogHarnessOptions): Promise<DialogBootReport[]> {
   const out: DialogBootReport[] = [];
   for (const def of options.dialogs) out.push(await bootDialog(def, options));
