@@ -3221,6 +3221,7 @@ version = "0.1.0"
 dependencies = [
  "lettre",
  "paddock-commands",
+ "paddock-dialogs",
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
@@ -3259,6 +3260,7 @@ dependencies = [
  "chrono",
  "log",
  "paddock-commands",
+ "paddock-dialogs",
  "paddock-env",
  "paddock-jobs",
  "paddock-log",
@@ -3373,6 +3375,7 @@ dependencies = [
  "getrandom 0.3.4",
  "log",
  "paddock-commands",
+ "paddock-dialogs",
  "paddock-env",
  "paddock-jobs",
  "paddock-log",
@@ -3558,6 +3561,7 @@ name = "paddock-storage"
 version = "0.1.0"
 dependencies = [
  "paddock-commands",
+ "paddock-dialogs",
  "paddock-env",
  "paddock-files",
  "paddock-jobs",
@@ -3575,6 +3579,7 @@ dependencies = [
  "log",
  "minisign-verify",
  "paddock-commands",
+ "paddock-dialogs",
  "paddock-download",
  "paddock-jobs",
  "paddock-workspace-hack",

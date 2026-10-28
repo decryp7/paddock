@@ -143,21 +143,29 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": {
-        "width": 680,
-        "height": 560
-      },
+      "width": 720,
+      "height": 560,
       "commands": [
         "about_info",
         "about_legal"
       ]
+    },
+    "pd.confirm": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": true,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
     },
     "pd.settings": {
       "kind": "tool",
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 880,
+      "height": 640,
       "commands": [
         "app_info",
         "choose_folder",
@@ -172,9 +180,7 @@
         "send_test_email",
         "set_autostart",
         "set_mail_password",
-        "settings_overview",
-        "settings_reset",
-        "settings_set"
+        "settings_*"
       ]
     },
     "pd.updates": {
@@ -182,7 +188,8 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": null,
+      "width": 560,
+      "height": 480,
       "commands": [
         "updates_cancel",
         "updates_check",
@@ -198,21 +205,11 @@
       "modality": "modeless",
       "instanced": false,
       "requiredChoice": false,
-      "minSize": {
-        "width": 680,
-        "height": 560
-      },
+      "width": 720,
+      "height": 560,
       "commands": [
         "about_whats_new"
       ]
-    },
-    "sp.confirm": {
-      "kind": "decision",
-      "modality": "modal",
-      "instanced": false,
-      "requiredChoice": false,
-      "minSize": null,
-      "commands": []
     }
   },
   "healthServices": [
@@ -233,6 +230,7 @@
     "pd.about.title": "About",
     "pd.category.app": "Application",
     "pd.category.help": "Help",
+    "pd.confirm.title": "Confirm",
     "pd.settings.appearance": "Appearance",
     "pd.settings.open": "Settings…",
     "pd.settings.title": "Settings",
@@ -244,7 +242,6 @@
     "sp.category.notifications": "Notifications",
     "sp.category.watches": "Watches",
     "sp.check-all": "Check all now",
-    "sp.dialog.confirm": "Confirm",
     "sp.health.renderer": "the page browser",
     "sp.health.scheduler": "the watch scheduler",
     "sp.health.sources": "your sources",

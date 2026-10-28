@@ -12,5 +12,5 @@ export function dialogBaseProviders(): (Provider | EnvironmentProviders)[] {
   return [provideStartupBackend(() => (ipc ? new TauriStartupBackend(ipc) : new MockStartupBackend())), provideStartupContract()];
 }
 
-/** The commands the base providers send (`dialogContractFile(..., { base })`). */
+/** The commands the base providers send: the `base` of Spotter's Rust dialog table (`src-tauri/src/dialogs.rs`). */
 export const DIALOG_BASE_COMMANDS = ['window_pong', 'window_ready'] as const;
