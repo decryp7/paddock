@@ -118,21 +118,42 @@ struct Shared {
     peak: AtomicU64,
 }
 
+/// The sampler of a cap without one of its own: the tree's memory. On Windows a child in a job is measured through the
+/// job's member list, which needs no scan of the machine; otherwise the tree is walked pid by pid.
+#[cfg(windows)]
+fn default_sampler(job: Option<Arc<crate::job::Job>>) -> Sampler {
+    if let Some(job) = job {
+        return Arc::new(move |_| usage::tree_memory_of(&usage::OsSource::default(), &job.pids()));
+    }
+    Arc::new(usage::tree_memory)
+}
+
+#[cfg(not(windows))]
+fn default_sampler() -> Sampler {
+    Arc::new(usage::tree_memory)
+}
+
 struct Watcher {
     stop: mpsc::Sender<()>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Watcher {
-    fn start(pid: u32, cap: MemoryCap, shared: Arc<Shared>) -> Watcher {
+    fn start(
+        pid: u32,
+        cap: MemoryCap,
+        shared: Arc<Shared>,
+        #[cfg(windows)] job: Option<Arc<crate::job::Job>>,
+    ) -> Watcher {
         let (stop, stopped) = mpsc::channel::<()>();
         let thread = std::thread::Builder::new()
             .name("paddock-proc-memory".into())
             .spawn(move || {
-                let sample = cap
-                    .sampler
-                    .clone()
-                    .unwrap_or_else(|| Arc::new(usage::tree_memory));
+                #[cfg(windows)]
+                let fallback = default_sampler(job);
+                #[cfg(not(windows))]
+                let fallback = default_sampler();
+                let sample = cap.sampler.clone().unwrap_or(fallback);
                 let tell = |e: MemoryEvent| {
                     if let Some(l) = &cap.listener {
                         l.tell(&cap.label, e);
@@ -179,7 +200,7 @@ pub struct Supervised {
     child: Option<Child>,
     /// Windows: the kill-on-close job the child runs in (`None` when Windows refused one; the tree kill still applies).
     #[cfg(windows)]
-    job: Option<crate::job::Job>,
+    job: Option<Arc<crate::job::Job>>,
     pid: u32,
     registry: Registry,
     watcher: Option<Watcher>,
@@ -207,9 +228,12 @@ impl Supervised {
         let child = cmd.spawn()?;
         let pid = child.id();
         #[cfg(windows)]
-        let job = crate::job::Job::assign(&child).ok();
+        let job = crate::job::Job::assign(&child).ok().map(Arc::new);
         registry.add(pid);
         let shared = Arc::new(Shared::default());
+        #[cfg(windows)]
+        let watcher = cap.map(|c| Watcher::start(pid, c, shared.clone(), job.clone()));
+        #[cfg(not(windows))]
         let watcher = cap.map(|c| Watcher::start(pid, c, shared.clone()));
         Ok(Supervised {
             child: Some(child),

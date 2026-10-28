@@ -11,14 +11,41 @@ use std::process::Child;
 use std::ptr::null;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectExtendedLimitInformation, SetInformationJobObject,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
 };
 
 /// A kill-on-close job; closing its handle (on drop) ends every process in it.
-pub(crate) struct Job(#[allow(dead_code)] OwnedHandle);
+pub(crate) struct Job(OwnedHandle);
 
 impl Job {
+    /// The ids of the processes in the job (the child and every helper it started, even orphans), read from the job itself:
+    /// no walk of the machine's process list. At most [`crate::MAX_TREE`] ids.
+    pub(crate) fn pids(&self) -> Vec<u32> {
+        // The list header is two u32 and then the ids (usize); a u64 buffer is aligned for it.
+        let words = 1 + crate::MAX_TREE;
+        let mut buf = vec![0u64; words];
+        let list = buf.as_mut_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
+        // SAFETY: the buffer is `words * 8` bytes, the size passed; the job handle is valid while `self` lives. On success
+        // the kernel filled `NumberOfProcessIdsInList` ids, which fit the buffer (it never writes more than the size given).
+        unsafe {
+            let ok = QueryInformationJobObject(
+                self.0.as_raw_handle(),
+                JobObjectBasicProcessIdList,
+                list.cast(),
+                (words * std::mem::size_of::<u64>()) as u32,
+                std::ptr::null_mut(),
+            );
+            if ok == 0 {
+                return Vec::new();
+            }
+            let n = ((*list).NumberOfProcessIdsInList as usize).min(crate::MAX_TREE);
+            let ids = (&raw const (*list).ProcessIdList).cast::<usize>();
+            (0..n).map(|i| *ids.add(i) as u32).collect()
+        }
+    }
+
     /// Puts `child` into a new kill-on-close job. Processes it starts afterwards join the job too (nested jobs: Windows 8
     /// and later, also when the app itself runs in a job).
     pub(crate) fn assign(child: &Child) -> io::Result<Job> {
