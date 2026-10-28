@@ -336,7 +336,9 @@ windows, ER-14, and the Mac host's displays sleep at night): it runs on a manual
 `PADDOCK_REAL_WINDOW_PROBE` is `true`, and gates nothing. Run it by hand from `crates` (`--features tauri`, not
 `--all-features`, which pulls in the mock runtime):
 `PADDOCK_REAL_WINDOWS=1 PADDOCK_PROBE_DIST=../ui/dist/shell-demo/browser cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture`. Exit 0 passes, 1 fails
-(the reason is printed), 2 means no report within 90 s. It opens a window on the desktop, so run it on purpose.
+(the reason is printed), 2 means no report within 90 s (the calls the page made are printed with it; none means the page's
+calls were refused: the probe supplies the `paddock-shell` plugin and an ACL for the `d-*` windows itself). Every call prints with
+its time. It opens a window on the desktop, so run it on purpose.
 ## `paddock-health` (plan S3)
 
 Service health and the cause-key notification centre (ADR 0010, ADR 0012 §3), ported from Debrief ADR 0055

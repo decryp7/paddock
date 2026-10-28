@@ -11,7 +11,13 @@
 //!
 //! Run it (from `crates`; `--features tauri`, NOT `--all-features`, which pulls in the mock runtime):
 //! `PADDOCK_REAL_WINDOWS=1 PADDOCK_PROBE_DIST=../ui/dist/shell-demo/browser cargo test -p paddock-dialogs
-//! --features tauri --test show_probe -- --nocapture`. A Tauri app owns the main thread, hence `harness = false`; the result is the exit
+//! --features tauri --test show_probe -- --nocapture` (an absolute `PADDOCK_PROBE_DIST` works from any folder). The
+//! probe stands in for the app's shell plugin: the page sends the shell's commands (`dialog_take_input`, `dialog_ready`, ...)
+//! as `plugin:paddock-shell|<command>`, so the probe registers a plugin of that name and an ACL that lets the `d-*`
+//! windows call it (`probe_context`, built from the app's real `paddock-shell:dialog` capability and the plugin's
+//! generated permission set); without either Tauri refuses the calls before the probe sees them, the page never
+//! gets its input and the run ends "no report within 90s" (2026-10-29: a harness gap, not a product fault). Every call
+//! the page makes is printed with its time (`show_probe: <ms> ms  <command> from <label>`). A Tauri app owns the main thread, hence `harness = false`; the result is the exit
 //! code (0 pass, 1 failed, 2 timed out).
 
 use paddock_dialogs::tauri::WindowHooks;
@@ -92,6 +98,132 @@ struct Report {
     footer_height: f64,
 }
 
+/// The shell plugin's name, as the page's `shellInvoke` addresses it.
+const SHELL_PLUGIN: &str = "paddock-shell";
+
+/// The app's dialog-window capability and the shell plugin's generated permission sets: the probe grants exactly what they
+/// grant, so a missing or wrong capability (a command left out of the `dialog` set, the set left out of the capability, a
+/// window pattern that does not match `d-*`) fails the probe the way it would fail an app's dialogs.
+const DIALOG_CAPABILITY: &str =
+    include_str!("../../../apps/shell-demo/src-tauri/capabilities/dialog.json");
+const WINDOW_CLASSES: &str = include_str!("../../paddock-shell/permissions/window-classes.toml");
+
+/// The commands of the shell plugin's `dialog` permission set (`allow-dialog-take-input` is `dialog_take_input`).
+fn dialog_set_commands() -> Vec<String> {
+    let mut in_set = false;
+    let mut in_list = false;
+    let mut commands = Vec::new();
+    for line in WINDOW_CLASSES.lines().map(str::trim) {
+        if line == "[[set]]" {
+            in_set = false;
+            in_list = false;
+        } else if line == "identifier = \"dialog\"" {
+            in_set = true;
+        } else if in_set && line.starts_with("permissions = [") {
+            in_list = true;
+        } else if in_set && in_list && line == "]" {
+            break;
+        } else if in_set && in_list {
+            let id = line.trim_end_matches(',').trim_matches('"');
+            commands.push(
+                id.strip_prefix("allow-")
+                    .expect("an allow- permission")
+                    .replace('-', "_"),
+            );
+        }
+    }
+    assert!(
+        !commands.is_empty(),
+        "the shell plugin has no `dialog` permission set"
+    );
+    commands
+}
+
+/// The mock context with an ACL built from the real `paddock-shell:dialog` capability. Without a plugin and an ACL Tauri
+/// refuses every `plugin:paddock-shell|...` call ("Plugin not found") before the probe's handler sees it, and the page
+/// never gets its input or sends its ready. (`core:event:default`, which the capability also grants, is not modelled: the
+/// page's event listening is not part of what the probe asserts.)
+fn probe_context<A: Assets<Wry>>(assets: A) -> tauri::Context<Wry> {
+    use tauri::utils::acl::manifest::Manifest;
+    use tauri::utils::acl::resolved::{Resolved, ResolvedCommand};
+    let capability: serde_json::Value =
+        serde_json::from_str(DIALOG_CAPABILITY).expect("the dialog capability is JSON");
+    let grants_set = capability["permissions"]
+        .as_array()
+        .is_some_and(|p| p.iter().any(|x| x == "paddock-shell:dialog"));
+    assert!(
+        grants_set,
+        "the dialog capability does not grant paddock-shell:dialog"
+    );
+    let windows: Vec<glob::Pattern> = capability["windows"]
+        .as_array()
+        .expect("the capability names its windows")
+        .iter()
+        .map(|w| {
+            glob::Pattern::new(w.as_str().expect("a window pattern"))
+                .expect("a valid label pattern")
+        })
+        .collect();
+    let allowed = dialog_set_commands()
+        .into_iter()
+        .map(|c| {
+            let cmd = ResolvedCommand {
+                windows: windows.clone(),
+                webviews: windows.clone(),
+                ..Default::default()
+            };
+            (format!("plugin:{SHELL_PLUGIN}|{c}"), vec![cmd])
+        })
+        .collect();
+    let manifest = Manifest {
+        default_permission: None,
+        permissions: Default::default(),
+        permission_sets: Default::default(),
+        global_scope_schema: None,
+    };
+    let mut context = mock_context(assets);
+    *context.runtime_authority_mut() = tauri::ipc::RuntimeAuthority::new(
+        [(SHELL_PLUGIN.to_string(), manifest)].into_iter().collect(),
+        Resolved {
+            allowed_commands: allowed,
+            ..Default::default()
+        },
+    );
+    context
+}
+
+/// The calls the page made, with the milliseconds since the probe started: printed as it goes (the per-step timings of a
+/// good run) and again when the probe gives up, so a page whose calls are refused or never made shows it.
+struct Trace {
+    start: std::time::Instant,
+    calls: std::sync::Mutex<Vec<String>>,
+}
+
+impl Default for Trace {
+    fn default() -> Self {
+        Self {
+            start: std::time::Instant::now(),
+            calls: Default::default(),
+        }
+    }
+}
+
+impl Trace {
+    fn note(&self, what: &str) {
+        let line = format!("{:>5} ms  {what}", self.start.elapsed().as_millis());
+        eprintln!("show_probe: {line}");
+        self.calls.lock().unwrap().push(line);
+    }
+    fn seen(&self) -> String {
+        let calls = self.calls.lock().unwrap();
+        if calls.is_empty() {
+            "none".into()
+        } else {
+            calls.join("; ")
+        }
+    }
+}
+
 /// The built shell-demo's folder, or why the probe does not run.
 fn dist() -> Result<PathBuf, String> {
     let dist = std::env::var_os("PADDOCK_PROBE_DIST").map(PathBuf::from);
@@ -123,8 +255,15 @@ fn main() {
     let hidden_at_ready = Arc::new(AtomicBool::new(false));
     let saw_ready = Arc::new(AtomicBool::new(false));
     let (hidden_flag, ready_flag) = (hidden_at_ready.clone(), saw_ready.clone());
-    let app = tauri::Builder::<Wry>::new()
-        .invoke_handler(move |invoke| match invoke.message.command() {
+    let trace = Arc::new(Trace::default());
+    let watchdog_trace = trace.clone();
+    let on_invoke = Arc::new(move |invoke: tauri::ipc::Invoke<Wry>| -> bool {
+        trace.note(&format!(
+            "{} from {}",
+            invoke.message.command(),
+            invoke.message.webview().label()
+        ));
+        match invoke.message.command() {
             "probe_report" => {
                 if let tauri::ipc::InvokeBody::Json(v) = invoke.message.payload()
                     && let Ok(r) = serde_json::from_value::<Report>(v.clone())
@@ -152,8 +291,20 @@ fn main() {
                 guarded(invoke)
             }
             _ => guarded(invoke),
-        })
-        .build(mock_context(DistAssets { dist }))
+        }
+    });
+    // The page sends the shell's commands (`dialog_*` among them) as `plugin:paddock-shell|<command>` (`shellInvoke`),
+    // which only a plugin of that name receives; the probe's own `probe_*` calls go to the app.
+    let plugin_invoke = on_invoke.clone();
+    let app_invoke = on_invoke.clone();
+    let app = tauri::Builder::<Wry>::new()
+        .plugin(
+            tauri::plugin::Builder::<Wry, ()>::new("paddock-shell")
+                .invoke_handler(move |invoke| plugin_invoke(invoke))
+                .build(),
+        )
+        .invoke_handler(move |invoke| app_invoke(invoke))
+        .build(probe_context(DistAssets { dist }))
         .expect("the real-runtime app builds");
     let rename = Entry::new("sd.rename", Shape::Form(paddock_dialogs::Modality::Modal));
     let rename = Entry {
@@ -187,7 +338,8 @@ fn main() {
     std::thread::spawn(move || {
         if done_rx.recv_timeout(GIVE_UP).is_err() {
             eprintln!(
-                "show_probe: no report within {GIVE_UP:?}: the dialog page never became ready"
+                "show_probe: no report within {GIVE_UP:?}: the dialog page never became ready; calls seen: {}",
+                watchdog_trace.seen()
             );
             watchdog_handle.exit(2);
         }

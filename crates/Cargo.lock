@@ -3287,6 +3287,7 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.2.0"
 dependencies = [
+ "glob",
  "log",
  "objc2-app-kit",
  "paddock-commands",
