@@ -213,7 +213,14 @@ pub fn downloader() -> Arc<Downloader> {
         disk_reserve: 0,
         ..Config::default()
     };
-    Arc::new(Downloader::http(HttpConfig::default()).unwrap().with_config(config))
+    Arc::new(
+        Downloader::http(HttpConfig {
+            proxy: paddock_download::ProxyMode::Direct,
+            ..Default::default()
+        })
+        .unwrap()
+        .with_config(config),
+    )
 }
 
 /// Downloads as the app does: the shell's downloader, a shell job nobody watches, nothing cancelling.
@@ -233,9 +240,12 @@ pub async fn download(
         ..paddock_download::Config::default()
     };
     let downloader = Arc::new(
-        paddock_download::Downloader::http(paddock_download::HttpConfig::default())
-            .unwrap()
-            .with_config(config),
+        paddock_download::Downloader::http(paddock_download::HttpConfig {
+            proxy: paddock_download::ProxyMode::Direct,
+            ..Default::default()
+        })
+        .unwrap()
+        .with_config(config),
     );
     let fetch = Fetch {
         downloader: &downloader,

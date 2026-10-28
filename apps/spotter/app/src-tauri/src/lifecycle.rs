@@ -94,7 +94,11 @@ pub fn init<R: Runtime>(app: &AppHandle<R>, hub: &Hub<R>) -> Result<Shared, Stri
         .map(|d| d.join("Spotter"))
         .unwrap_or_else(|_| data_dir.join("downloads"));
     let version = app.package_info().version.to_string();
-    let http = Http::new(&version)?;
+    // The metadata client takes the proxy decision the shell's downloader was built with.
+    let http = match app.try_state::<crate::ProxyChoice>() {
+        Some(choice) => Http::with_proxy(&version, choice.0.clone())?,
+        None => Http::new(&version)?,
+    };
 
     let downloader = paddock_download::tauri::downloader(app).ok_or("The shell's downloader is not set up.")?;
     let registry = crate::jobs::registry(app).ok_or("The shell's jobs are not set up.")?;
@@ -206,11 +210,15 @@ pub fn on_menu<R: Runtime>(app: &AppHandle<R>, id: &str) {
     let Some(state) = app.try_state::<Shared>() else { return };
     let engine = state.engine.clone();
     match id {
-        "check-all" => {
-            tauri::async_runtime::spawn(async move {
-                let _ = engine.check_now(None).await;
-            });
-        }
+        "check-all" => match crate::jobs::registry(app) {
+            // A job with progress and Cancel, like the command (rule 18).
+            Some(registry) => crate::jobs::spawn_check_all(&registry, engine),
+            None => {
+                tauri::async_runtime::spawn(async move {
+                    let _ = engine.check_now(None).await;
+                });
+            }
+        },
         "pause" => {
             let _ = engine.pause_notifications(Some(60));
         }

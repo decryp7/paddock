@@ -4,6 +4,7 @@ import { BACKEND } from '../core/backend';
 import { createBackend } from '../core/backend-factory';
 import { TrayPage } from '../features/tray/tray-page';
 import { provideIcons } from '../shared/icons';
+import { provideSpotterAppearance } from './appearance';
 
 @Component({
   selector: 'sp-root',
@@ -19,5 +20,5 @@ class TrayRoot {}
  */
 export function bootTrayWindow(): Promise<unknown> {
   document.documentElement.classList.add('pd-tray');
-  return bootstrapApplication(TrayRoot, { providers: [provideIcons(), { provide: BACKEND, useFactory: createBackend }] });
+  return bootstrapApplication(TrayRoot, { providers: [provideIcons(), provideSpotterAppearance(), { provide: BACKEND, useFactory: createBackend }] });
 }

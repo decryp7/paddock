@@ -10,8 +10,9 @@ import type { ConfirmInput } from './contributions';
     <h2 class="title">{{ input.title }}</h2>
     <p class="text">{{ input.message }}</p>
     <div class="actions">
-      <button type="button" class="btn" data-dialog-close (click)="ref.close()">Cancel</button>
-      <button type="button" class="btn" [class.primary]="!input.danger" [class.danger-fill]="input.danger" data-default (click)="ref.close(true)">
+      <!-- A dangerous action never is the default: Enter and the first focus go to Cancel. -->
+      <button type="button" class="btn" data-dialog-close [attr.data-default]="input.danger ? '' : null" (click)="ref.close()">Cancel</button>
+      <button type="button" class="btn" [class.primary]="!input.danger" [class.danger-fill]="input.danger" [attr.data-default]="input.danger ? null : ''" (click)="ref.close(true)">
         {{ input.confirmLabel }}
       </button>
     </div>

@@ -123,7 +123,7 @@ fn source(kind: &str, values: &[(&str, &str)]) -> Source {
 #[tokio::test]
 async fn forge_answers_are_listed() {
     let base = serve().await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let src = source("github", &[("repo", "o/r"), ("server", &base)]);
     let checker = for_plan(src.plan(&Default::default()), &http, None);
     let c = checker.list(10).await.unwrap();
@@ -134,7 +134,7 @@ async fn forge_answers_are_listed() {
 #[tokio::test]
 async fn registries_answer_bearer_challenges() {
     let base = serve().await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let host = base.trim_start_matches("http://");
     // The container source speaks https; point a request at the local server directly.
     let req = spotter_core::source::HttpRequest::get(format!("{base}/v2/o/app/tags/list?n=1000"));
@@ -149,7 +149,7 @@ async fn registries_answer_bearer_challenges() {
 #[tokio::test]
 async fn statuses_sizes_and_connection_failures_map_to_errors() {
     let base = serve().await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let get = |p: &str, max: usize| {
         let http = http.clone();
         let url = format!("{base}{p}");
@@ -190,7 +190,7 @@ fn release(location: &str) -> Release {
 #[tokio::test]
 async fn downloads_resume_and_verify_checksums() {
     let base = serve().await;
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let dest = tempfile::tempdir().unwrap();
     // A bare part with no resume state is not trusted (its bytes were never hashed): the file is fetched whole.
     std::fs::write(dest.path().join("app-1.2.0.zip.part"), &FILE[..20]).unwrap();
@@ -234,7 +234,7 @@ async fn downloads_resume_and_verify_checksums() {
 
 #[tokio::test]
 async fn files_on_shares_are_copied_with_resume_and_sidecar_checksums() {
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let src = tempfile::tempdir().unwrap();
     let dest = tempfile::tempdir().unwrap();
     let file = src.path().join("R1.02.00T01.zip");

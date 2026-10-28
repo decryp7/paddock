@@ -31,38 +31,37 @@ This is about **Spotter's own** updates, not the releases Spotter watches for.
 - `latest.json` is written by the shared `conformance/release/latest-json.mjs` from the signed installers (`*.sig` next to
   each); `node --test conformance/test/latest-json.test.mjs` (repo root) tests it.
 
-## One-time set-up: Spotter's own signing key
+## One-time set-up: the family's signing key
 
-Spotter needs its **own** key pair — never reuse another product's updater key.
+Spotter signs its updates with the **Paddock family key** (one key pair for every Paddock app, kept as repository secrets of
+`decryp7/paddock`); it needs no key of its own. If the family key does not exist yet, generate it once on a trusted machine
+with a strong password:
 
-1. Generate a key pair on a trusted machine, with a strong password:
+```sh
+npx tauri signer generate -w ~/.tauri/paddock-updater.key
+```
 
-   ```sh
-   cd app
-   npx tauri signer generate -w ~/.tauri/spotter-updater.key
-   ```
+This writes the encrypted private key `paddock-updater.key` and the public key `paddock-updater.key.pub`.
 
-   This writes the private key `spotter-updater.key` (encrypted with the password) and the public key
-   `spotter-updater.key.pub`.
-
-2. Set three **repository secrets** in Gitea (Settings ▸ Actions ▸ Secrets) of `decryp7/spotter`:
+1. The repository secrets (Settings ▸ Actions ▸ Secrets of `decryp7/paddock`) are the family's:
 
    | Secret | Value |
    | --- | --- |
-   | `TAURI_SIGNING_PRIVATE_KEY` | the contents of `spotter-updater.key` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
-   | `TAURI_UPDATER_PUBKEY` | the contents of `spotter-updater.key.pub` |
+   | `PADDOCK_TAURI_SIGNING_PRIVATE_KEY` | the contents of the private key file |
+   | `PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
+   | `PADDOCK_TAURI_UPDATER_PUBKEY` | the contents of the public key file |
 
    Also `RELEASE_TOKEN`: a Gitea access token with `write:repository` scope, used to publish the release.
 
-   The bundle jobs then build with `createUpdaterArtifacts` and the public key (passed as `tauri build --config`,
-   and as `TAURI_UPDATER_PUBKEY` for `option_env!` in `app/src-tauri/src/lib.rs`, read by the shell's updater). Without the secrets (forks,
-   pull requests) the installers are built without update support and the release job publishes no `latest.json`.
+   `spotter-release.yml` maps them to the `TAURI_*` names of the shared `app-release.yml`. The bundle jobs then build with
+   `createUpdaterArtifacts` and the public key (passed as `tauri build --config`, and as `TAURI_UPDATER_PUBKEY` for
+   `option_env!` in `app/src-tauri/src/lib.rs`, read by the shell's updater). Without the secrets (forks, pull requests)
+   the installers are built without update support and the release job publishes no `latest.json`.
 
    The committed `tauri.conf.json` keeps `pubkey` empty and does not set `createUpdaterArtifacts`, so local
    `npx tauri build` works without the private key.
 
-3. **Back up the private key and its password** (password manager plus an offline copy). Never commit it, never put
+2. **Back up the private key and its password** (password manager plus an offline copy). Never commit it, never put
    it anywhere the UI is built from.
 
 **If the private key is lost**, no further update can be signed for the key built into installed copies: users

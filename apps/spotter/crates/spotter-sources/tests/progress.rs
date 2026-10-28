@@ -66,8 +66,14 @@ async fn copy_of(
 ) -> Result<spotter_sources::download::Downloaded, String> {
     let registry = Arc::new(paddock_jobs::JobRegistry::new(Arc::new(Quiet)));
     let ctx = registry.register("sp.download", "Copying", None);
-    let downloader = Arc::new(paddock_download::Downloader::http(paddock_download::HttpConfig::default()).unwrap());
-    let http = Http::new("t").unwrap();
+    let downloader = Arc::new(
+        paddock_download::Downloader::http(paddock_download::HttpConfig {
+            proxy: paddock_download::ProxyMode::Direct,
+            ..Default::default()
+        })
+        .unwrap(),
+    );
+    let http = Http::direct("t").unwrap();
     let fetch = Fetch {
         downloader: &downloader,
         http: &http,

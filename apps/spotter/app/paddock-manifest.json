@@ -127,7 +127,9 @@
     "sp.dashboard",
     "sp.watches"
   ],
-  "statusItems": [],
+  "statusItems": [
+    "sp.paused"
+  ],
   "settingsPages": [
     "pd.appearance",
     "sp.general"
@@ -253,6 +255,7 @@
     "sp.page.watches": "Watches",
     "sp.pause-notifications": "Pause notifications for 1 hour",
     "sp.resume-notifications": "Resume notifications",
-    "sp.settings.general": "Spotter"
+    "sp.settings.general": "Spotter",
+    "sp.status.paused": "Notifications are paused"
   }
 }

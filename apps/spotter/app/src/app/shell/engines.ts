@@ -68,7 +68,7 @@ export function aboutBackend(): AboutBackend {
       commit: null,
       built: null,
       homepage: null,
-      releasesPage: 'https://dev.decryptology.net/decryp7/spotter/releases',
+      releasesPage: 'https://dev.decryptology.net/decryp7/paddock/releases?q=spotter-v',
       legal: [{ id: 'mit', title: 'MIT licence' }],
       updatesAvailable: true,
     },

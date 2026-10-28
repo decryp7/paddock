@@ -12,7 +12,7 @@ import { BACKEND } from '../core/backend';
 import { createBackend } from '../core/backend-factory';
 import { applyWindowChrome } from '../core/window-chrome';
 import { platformFromUserAgent } from '../core/tauri-backend';
-import { provideNativeFeel } from '../core/native-feel';
+import { provideQuietJobNotices } from './quiet-jobs';
 import { provideIcons } from '../shared/icons';
 import { provideSpotterAppearance } from './appearance';
 import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS } from './contributions';
@@ -22,7 +22,8 @@ import { tauriBridge, tauriIpc } from './ipc';
 import { WatchesStore } from '../state/watches.store';
 import { SettingsStore } from '../state/settings.store';
 import type { SpotterContext } from './context';
-import { Routes } from '@angular/router';
+import { Router, Routes } from '@angular/router';
+import { listenForRoutes } from '../core/navigation';
 
 /** The detail routes of the Watches page, matched before the pages. */
 export const DETAIL_ROUTES: Routes = [
@@ -48,7 +49,6 @@ export function bootMainWindow(): Promise<unknown> {
   return bootstrapApplication(SpotterShell, {
     providers: [
       provideIcons(),
-      provideNativeFeel(),
       { provide: BACKEND, useFactory: createBackend },
       provideSpotterAppearance(),
       {
@@ -70,7 +70,11 @@ export function bootMainWindow(): Promise<unknown> {
         applyWindowChrome(document.documentElement, platformFromUserAgent(navigator.userAgent));
         inject(WatchesStore).start();
         void inject(SettingsStore).loadSettings();
+        // A tray click, an OS toast click and the tray menu ask this window to show a page (`spotter://navigate`).
+        const router = inject(Router);
+        void listenForRoutes(inject(BACKEND), (route) => void router.navigateByUrl(route));
       }),
+      // The shell's frame already provides the native feel (browser keys, context menu, the Copy menu).
       provideShellPages({
         appName: 'Spotter',
         icon: SpotterIcon,
@@ -81,6 +85,7 @@ export function bootMainWindow(): Promise<unknown> {
         ...(ipc ? { nativeMenu: tauriNativeMenuPort(ipc) } : {}),
         ...(bridge ? { dialogs: { io: () => tauriDialogIo(bridge) } } : {}),
       }),
+      provideQuietJobNotices(),
     ],
   }).catch((e: unknown) => {
     console.error(e);

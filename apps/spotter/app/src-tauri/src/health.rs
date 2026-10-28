@@ -55,6 +55,14 @@ pub fn sources_problem(watches: &[WatchSummary]) -> Option<Cause> {
     )
 }
 
+/// The degraded connection when the system's proxy settings cannot be used.
+pub fn proxy_cause(why: &str) -> Cause {
+    Cause::new("Spotter cannot use the system's proxy settings and connects directly.")
+        .hint("If your network needs a proxy, use an address of the form http://host:port (SOCKS and PAC scripts are not supported).")
+        .detail(why.to_string())
+        .code("sp.sources.proxy")
+}
+
 /// Why the page browser is down: a watch needs JavaScript pages and no browser is available.
 pub fn renderer_problem(needed_by: usize, kind: RendererKind) -> Option<Cause> {
     if needed_by == 0 || kind != RendererKind::None {
@@ -71,11 +79,34 @@ pub fn renderer_problem(needed_by: usize, kind: RendererKind) -> Option<Cause> {
     )
 }
 
+/// The outcome of the Install repair, from what the install said and what the browser lookup then found. A cancelled install
+/// is neutral: nothing failed, so the service stays as it was (down with its original cause), not "could not be installed".
+pub fn after_install(result: Result<(), String>, cancelled: bool, kind_now: RendererKind, needed: usize) -> Result<(), Cause> {
+    let still_missing = || renderer_problem(needed.max(1), kind_now);
+    match result {
+        Ok(()) => match still_missing() {
+            None => Ok(()),
+            Some(_) => Err(Cause::new("The browser was installed, but Spotter still cannot find it.")
+                .hint("Try the install again; if it keeps failing, open the log from Settings.")
+                .code("sp.renderer.not-found")),
+        },
+        Err(_) if cancelled => {
+            Err(still_missing().unwrap_or_else(|| Cause::new("The install was cancelled.").code("sp.renderer.cancelled")))
+        }
+        Err(e) => Err(Cause::new("The browser could not be installed.")
+            .hint("Check the connection and try again.")
+            .detail(e)
+            .code("sp.renderer.install")),
+    }
+}
+
 /// What the services' repairs reach: the app, once it is set up (the specs are built before the app exists).
 pub struct Hub<R: Runtime> {
     app: Arc<OnceLock<AppHandle<R>>>,
     last_needed: Arc<Mutex<Option<usize>>>,
     restart: Arc<Notify>,
+    /// Why the downloader runs without the system's proxy settings (reported as a degraded connection).
+    proxy_problem: Arc<Mutex<Option<String>>>,
 }
 
 impl<R: Runtime> Clone for Hub<R> {
@@ -84,6 +115,7 @@ impl<R: Runtime> Clone for Hub<R> {
             app: self.app.clone(),
             last_needed: self.last_needed.clone(),
             restart: self.restart.clone(),
+            proxy_problem: self.proxy_problem.clone(),
         }
     }
 }
@@ -94,6 +126,7 @@ impl<R: Runtime> Default for Hub<R> {
             app: Arc::new(OnceLock::new()),
             last_needed: Arc::new(Mutex::new(None)),
             restart: Arc::new(Notify::new()),
+            proxy_problem: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -102,6 +135,24 @@ impl<R: Runtime> Hub<R> {
     /// Connects the repairs to the running app.
     pub fn attach(&self, app: &AppHandle<R>) {
         let _ = self.app.set(app.clone());
+        self.report_proxy_problem();
+    }
+
+    /// Remembers why the system's proxy settings could not be used (`None`: they could, or there are none).
+    pub fn note_proxy_problem(&self, why: Option<String>) {
+        *self.proxy_problem.lock().unwrap_or_else(PoisonError::into_inner) = why;
+    }
+
+    fn proxy_problem(&self) -> Option<String> {
+        self.proxy_problem.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// The connection is degraded, not down: downloads and checks work, but not through the proxy the system names.
+    fn report_proxy_problem(&self) {
+        let (Some(why), Some(health)) = (self.proxy_problem(), self.health()) else {
+            return;
+        };
+        health.set(SOURCES, paddock_health::ServiceState::Degraded, Some(proxy_cause(&why)), None);
     }
 
     /// The scheduler's restart signal.
@@ -128,10 +179,10 @@ impl<R: Runtime> Hub<R> {
             }),
             ServiceSpec::new(SOURCES, "your sources").repair(move || {
                 let state = check.state()?;
-                let engine = state.engine.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = engine.check_now(None).await;
-                });
+                let app = check.app.get().cloned().ok_or_else(|| Cause::new("Spotter is still starting."))?;
+                let registry = crate::jobs::registry(&app).ok_or_else(|| Cause::new("The shell's jobs are not set up."))?;
+                // A job with progress and Cancel (rule 18), not a silent background call.
+                crate::jobs::spawn_check_all(&registry, state.engine.clone());
                 Ok(())
             }),
             ServiceSpec::new(RENDERER, "the page browser").repair(move || {
@@ -145,13 +196,12 @@ impl<R: Runtime> Hub<R> {
                     op.ctx(),
                     &op.job,
                 ));
+                let cancelled = op.job.is_cancelled();
                 op.end(result.is_ok(), &result.as_ref().err().map(ToString::to_string).unwrap_or_default());
-                result.map(drop).map_err(|e| {
-                    Cause::new("The browser could not be installed.")
-                        .hint("Check the connection and try again.")
-                        .detail(e.to_string())
-                        .code("sp.renderer.install")
-                })
+                // Looked at again after the install, whatever it said: the renderer's own status decides.
+                let needed = install.last_needed.lock().unwrap_or_else(PoisonError::into_inner).unwrap_or(1);
+                let kind = spotter_render::renderer_status(&state.data_dir).kind;
+                after_install(result.map(drop).map_err(|e| e.to_string()), cancelled, kind, needed)
             }),
         ]
     }
@@ -164,7 +214,9 @@ impl<R: Runtime> Hub<R> {
                 health.down(SOURCES, cause, Some(RepairAction::Retry));
             }
             None => {
-                if health.is_in_outage(SOURCES) {
+                if self.proxy_problem().is_some() {
+                    self.report_proxy_problem();
+                } else if health.is_in_outage(SOURCES) {
                     health.ok(SOURCES);
                 }
             }
@@ -276,6 +328,20 @@ mod tests {
             schedule_text: String::new(),
             product_count: 0,
         }
+    }
+
+    #[test]
+    fn a_cancelled_install_is_neutral_and_a_finished_one_is_checked_again() {
+        // Cancelled: the original cause comes back, not "could not be installed".
+        let c = after_install(Err("Cancelled.".into()), true, RendererKind::None, 2).unwrap_err();
+        assert_eq!(c.code.as_deref(), Some("sp.renderer.missing"));
+        // A failure that is not a cancel says so.
+        let c = after_install(Err("offline".into()), false, RendererKind::None, 1).unwrap_err();
+        assert_eq!(c.code.as_deref(), Some("sp.renderer.install"));
+        // Installed and found: repaired. Installed but still not found: not repaired.
+        assert!(after_install(Ok(()), false, RendererKind::ChromiumDownloaded, 1).is_ok());
+        let c = after_install(Ok(()), false, RendererKind::None, 1).unwrap_err();
+        assert_eq!(c.code.as_deref(), Some("sp.renderer.not-found"));
     }
 
     #[test]

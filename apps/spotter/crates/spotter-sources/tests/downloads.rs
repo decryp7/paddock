@@ -34,7 +34,7 @@ async fn run(
 ) -> Result<spotter_sources::download::Downloaded, String> {
     let (_registry, ctx) = job();
     let downloader = downloader();
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let fetch = Fetch {
         downloader: &downloader,
         http: &http,
@@ -151,11 +151,14 @@ async fn a_full_disk_is_refused_before_anything_is_written() {
     let dir = tempfile::tempdir().unwrap();
     let (_registry, ctx) = job();
     let downloader = std::sync::Arc::new(
-        paddock_download::Downloader::http(paddock_download::HttpConfig::default())
-            .unwrap()
-            .with_free_space(|_| Ok(10 * 1024)),
+        paddock_download::Downloader::http(paddock_download::HttpConfig {
+            proxy: paddock_download::ProxyMode::Direct,
+            ..Default::default()
+        })
+        .unwrap()
+        .with_free_space(|_| Ok(10 * 1024)),
     );
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let fetch = Fetch {
         downloader: &downloader,
         http: &http,
@@ -181,7 +184,7 @@ async fn cancel_stops_a_slow_download_at_once_keeps_the_part_and_a_later_run_fin
     let dir = tempfile::tempdir().unwrap();
     let (_registry, ctx) = job();
     let downloader = downloader();
-    let http = Http::new("test").unwrap();
+    let http = Http::direct("test").unwrap();
     let token = ctx.cancel_token().clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(250));

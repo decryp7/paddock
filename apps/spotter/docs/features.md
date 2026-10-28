@@ -37,3 +37,17 @@ The checksum is computed while the file is written, so nothing is read a second 
 publisher's SHA-256 (the release's own, or the `.sha256` file next to it); a file that does not match is deleted, never
 left looking finished. Before it starts Spotter checks that the disk has room for the file. Every download is a job in the
 status bar (Connecting, Resuming, Downloading, Verifying) with Cancel at any moment; Spotter never gives up on one on its own.
+
+### Behind a proxy
+Downloads and the checks of your watches use the proxy your system names: the `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`
+variables first, then the operating system's own setting (macOS network settings; Windows Internet Options, else the
+WinHTTP setting), and the same decision for a file, its checksum and the listing it came from. Addresses on your local
+network and loopback go direct.
+
+- **An automatic configuration script (PAC) or WPAD is not supported.** If that is all your system names, Spotter connects
+  directly. Name the proxy itself (`http://host:port`) in the system's setting or the variable to use it.
+- **A SOCKS proxy is not supported.** Spotter says so in the status bar (the "your sources" chip shows the connection as
+  degraded) and connects directly, instead of failing to start.
+- **A proxy's login** (the operating system's settings carry none) can only come from the environment, and only file downloads send it; the listings and checksums that go with them do not, so a proxy that needs a login for those is not supported. An address of the form `http://user:password@host:port` in
+  the environment is a cleartext (HTTP Basic) login to the proxy: it is sent unencrypted when the proxy itself is an
+  `http://` address, so use an `https://` proxy address, or one on a network you trust.
