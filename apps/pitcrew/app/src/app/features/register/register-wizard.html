@@ -1,11 +1,7 @@
 @let d = draft();
 <div class="wizard">
   <header class="top">
-    <div>
-      <h2 id="register-title">Register a runner</h2>
-      <p class="muted small">Pitcrew registers it with your server, then keeps it running and up to date.</p>
-    </div>
-    <button type="button" class="btn ghost icon" aria-label="Close" (click)="close()"><mat-icon svgIcon="pc:x" aria-hidden="true" /></button>
+    <p class="muted small">Pitcrew registers it with your server, then keeps it running and up to date.</p>
   </header>
 
   <ol class="stepper" aria-label="Steps">
@@ -150,7 +146,7 @@
         <button type="button" class="btn" (click)="back()" [disabled]="submitting()">Back</button>
       }
       <span class="spacer"></span>
-      <button type="button" class="btn ghost" (click)="close()" [disabled]="submitting()">Cancel</button>
+      <button type="button" class="btn ghost" data-dialog-close (click)="close()" [disabled]="submitting()">Cancel</button>
       @if (step() < steps.length - 1) {
         <button type="submit" class="btn primary">Continue</button>
       } @else {

@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 import type { ActivityReply, FinishedJob } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
 import { ThemeService } from '../../core/theme.service';
-import { RegisterLauncher } from '../../layout/register-launcher';
+import { RegisterLauncher } from '../../shell/register-launcher';
 import { Chart } from '../../shared/charts/chart';
 import { diskOption, durationOption, jobsPerDayOption, loadOption, queueOption, sumJobDays } from '../../shared/charts/chart-options';
 import { formatBytes, formatDateTime, formatPermille, plural } from '../../shared/format';

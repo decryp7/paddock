@@ -3,12 +3,12 @@ import { BACKEND } from '../core/backend';
 import { MockBackend } from '../core/mock-backend';
 import { flush, makeMock } from '../../testing/test-helpers';
 import { SettingsStore } from './settings.store';
-import { ToastStore } from './toast.store';
+import { NoticeLog, recordShell } from '../../testing/test-helpers';
 
 function setup(scenario: 'demo' | 'unavailable' = 'demo') {
   const mock = makeMock({ scenario });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }] });
-  return { mock, store: TestBed.inject(SettingsStore), toasts: TestBed.inject(ToastStore) };
+  TestBed.configureTestingModule({ providers: [...recordShell(), { provide: BACKEND, useValue: mock }] });
+  return { mock, store: TestBed.inject(SettingsStore), toasts: TestBed.inject(NoticeLog) };
 }
 
 describe('SettingsStore', () => {
@@ -53,10 +53,10 @@ describe('SettingsStore', () => {
     config.defaults.logs.keep = 9;
     expect(await s.store.save(config)).toBe(true);
     expect(s.store.saving()).toBe(false);
-    expect(s.toasts.toasts().at(-1)?.title).toBe('Settings saved');
+    expect(s.toasts.notices.at(-1)?.message).toContain('Settings saved');
     expect(s.store.config()?.defaults.logs.keep).toBe(9);
     expect(await s.store.save(config, 'Custom')).toBe(true);
-    expect(s.toasts.toasts().at(-1)?.title).toBe('Custom');
+    expect(s.toasts.notices.at(-1)?.message).toContain('Custom');
   });
 
   it('reports a refused save', async () => {
@@ -66,7 +66,8 @@ describe('SettingsStore', () => {
     const config = structuredClone(s.store.config()!);
     config.defaults.watchdog.threshold = 0;
     expect(await s.store.save(config)).toBe(false);
-    expect(s.toasts.toasts().at(-1)).toMatchObject({ tone: 'danger', title: 'The settings were not saved' });
+    expect(s.toasts.notices.at(-1)).toMatchObject({ level: 'error' });
+    expect(s.toasts.notices.at(-1)?.message).toContain('The settings were not saved');
     expect(s.store.saving()).toBe(false);
   });
 
@@ -79,7 +80,7 @@ describe('SettingsStore', () => {
     await flush();
     expect(s.store.runnerConfig('ui-tests')?.labels).toEqual(['only']);
     expect(s.store.runnerConfig('build-win')?.labels).toEqual(['windows', 'x64', 'msvc']);
-    expect(s.toasts.toasts().at(-1)?.title).toBe('Labels saved');
+    expect(s.toasts.notices.at(-1)?.message).toContain('Labels saved');
   });
 
   it('refuses to save a runner before the config is loaded', async () => {

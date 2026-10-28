@@ -1,8 +1,8 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { TestBed } from '@angular/core/testing';
 import type { ConfigPreview } from '../../../core/api.types';
-import { appProviders, byText, flush, makeMock, text, type as typeInto } from '../../../../testing/test-helpers';
-import { reviewConfigChanges } from './config-diff-dialog';
+import { appProviders, byText, makeMock, text, type as typeInto } from '../../../../testing/test-helpers';
+import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
+import { ConfigDiffDialog, reviewConfigChanges } from './config-diff-dialog';
 import { FieldIssues } from './field-issues';
 import { StringList } from './string-list';
 
@@ -60,12 +60,19 @@ describe('config parts', () => {
     expect(out.at(-1)).toEqual([]);
   });
 
-  it('the diff dialog shows hunks with symbols and words, notes, and closes with the choice', async () => {
-    const dialog = TestBed.inject(Dialog);
-    const result = reviewConfigChanges(dialog, { preview, maxBackups: 10 });
-    await flush(20);
-    const d = document.querySelector('[role="dialog"]') as HTMLElement;
-    expect(d.getAttribute('aria-labelledby')).toBe('diff-title');
+  /** The dialog's content in a fake dialog window: its inputs as the opener sends them, and the choice it closes with. */
+  function mountDiff(inputs: { preview: typeof preview; maxBackups: number }) {
+    const close = vi.fn();
+    TestBed.configureTestingModule({ providers: [{ provide: DIALOG_REF, useValue: { close } }] });
+    const f = TestBed.createComponent(ConfigDiffDialog);
+    f.componentRef.setInput('preview', inputs.preview);
+    f.componentRef.setInput('maxBackups', inputs.maxBackups);
+    f.detectChanges();
+    return { f, d: f.nativeElement as HTMLElement, close };
+  }
+
+  it('the diff dialog shows hunks with symbols and words, notes, and closes with the choice', () => {
+    const { d, close } = mountDiff({ preview, maxBackups: 10 });
     expect(text(d.querySelector('.counts'))).toContain('+1');
     expect(d.querySelectorAll('table')).toHaveLength(2);
     expect(text(d)).toContain('Removed:old');
@@ -73,20 +80,27 @@ describe('config parts', () => {
     expect(text(d)).toContain('The list of changes is cut off');
     expect(text(d)).toContain('Warning: Odd key.');
     expect(text(d)).toContain('does not need to restart');
-    expect(d.contains(document.activeElement)).toBe(true);
-    byText<HTMLButtonElement>(d, 'button', 'Cancel')!.click();
-    expect(await result).toBe(false);
+    const cancel = byText<HTMLButtonElement>(d, 'button', 'Cancel')!;
+    expect(cancel.hasAttribute('data-dialog-close')).toBe(true);
+    cancel.click();
+    expect(close).toHaveBeenCalledWith();
   });
 
-  it('the diff dialog says when no lines changed', async () => {
-    const dialog = TestBed.inject(Dialog);
-    const result = reviewConfigChanges(dialog, { preview: { ...preview, diff: { hunks: [], added: 0, removed: 0, truncated: false }, changedKeys: ['runner.capacity'], restartNeeded: true }, maxBackups: 3 });
-    await flush(20);
-    const d = document.querySelector('[role="dialog"]') as HTMLElement;
+  it('the diff dialog says when no lines changed', () => {
+    const { d, close } = mountDiff({ preview: { ...preview, diff: { hunks: [], added: 0, removed: 0, truncated: false }, changedKeys: ['runner.capacity'], restartNeeded: true }, maxBackups: 3 });
     expect(text(d)).toContain('No lines changed');
     expect(text(d)).toContain('Changes: runner.capacity');
     expect(text(d)).toContain('the last 3 are kept');
-    byText<HTMLButtonElement>(d, 'button', 'Save and apply')!.click();
-    expect(await result).toBe(true);
+    const save = byText<HTMLButtonElement>(d, 'button', 'Save and apply')!;
+    expect(save.hasAttribute('data-default')).toBe(true);
+    save.click();
+    expect(close).toHaveBeenCalledWith(true);
+  });
+
+  it('opens as a window of its own and answers with the choice', async () => {
+    const openDialog = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(undefined);
+    expect(await reviewConfigChanges({ openDialog }, { preview, maxBackups: 10 })).toBe(true);
+    expect(openDialog).toHaveBeenCalledWith('pc.config-diff', { preview, maxBackups: 10 });
+    expect(await reviewConfigChanges({ openDialog }, { preview, maxBackups: 10 })).toBe(false);
   });
 });

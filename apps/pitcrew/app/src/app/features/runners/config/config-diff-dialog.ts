@@ -1,7 +1,7 @@
-import { DIALOG_DATA, Dialog, DialogRef } from '@angular/cdk/dialog';
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { firstValueFrom } from 'rxjs';
+import type { ShellPorts } from '@decryp7/paddock-ui/shell';
+import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
 import type { ConfigPreview } from '../../../core/api.types';
 import { diffSymbol, diffWord } from './config-issues';
 import { FieldIssues } from './field-issues';
@@ -23,17 +23,17 @@ export interface ConfigDiffData {
         <span class="icon"><mat-icon svgIcon="pc:file-text" aria-hidden="true" /></span>
         <h2 id="diff-title">Review changes</h2>
         <span class="counts" aria-label="Lines added and removed">
-          <span class="added"><span aria-hidden="true">+</span>{{ data.preview.diff.added }} <span class="visually-hidden">lines added</span></span>
-          <span class="removed"><span aria-hidden="true">−</span>{{ data.preview.diff.removed }} <span class="visually-hidden">lines removed</span></span>
+          <span class="added"><span aria-hidden="true">+</span>{{ data().preview.diff.added }} <span class="visually-hidden">lines added</span></span>
+          <span class="removed"><span aria-hidden="true">−</span>{{ data().preview.diff.removed }} <span class="visually-hidden">lines removed</span></span>
         </span>
       </div>
 
-      @if (data.preview.changedKeys.length > 0) {
-        <p class="keys">Changes: <code>{{ data.preview.changedKeys.join(', ') }}</code></p>
+      @if (data().preview.changedKeys.length > 0) {
+        <p class="keys">Changes: <code>{{ data().preview.changedKeys.join(', ') }}</code></p>
       }
 
       <div class="diff" role="region" aria-label="Changes to config.yaml" tabindex="0">
-        @for (h of data.preview.diff.hunks; track $index) {
+        @for (h of data().preview.diff.hunks; track $index) {
           @if ($index > 0) {
             <div class="gap" aria-hidden="true">⋯</div>
           }
@@ -51,19 +51,19 @@ export interface ConfigDiffData {
             </tbody>
           </table>
         }
-        @if (data.preview.diff.truncated) {
+        @if (data().preview.diff.truncated) {
           <p class="gap">The list of changes is cut off.</p>
         }
-        @if (data.preview.diff.hunks.length === 0) {
+        @if (data().preview.diff.hunks.length === 0) {
           <p class="gap">No lines changed.</p>
         }
       </div>
 
-      <pc-field-issues [issues]="data.preview.issues" prefix="diff-issue" />
+      <pc-field-issues [issues]="data().preview.issues" prefix="diff-issue" />
 
       <ul class="notes">
-        <li><mat-icon svgIcon="pc:folder" aria-hidden="true" />Saves a backup of the current file (config.yaml.bak-…; the last {{ data.maxBackups }} are kept).</li>
-        @if (data.preview.restartNeeded) {
+        <li><mat-icon svgIcon="pc:folder" aria-hidden="true" />Saves a backup of the current file (config.yaml.bak-…; the last {{ data().maxBackups }} are kept).</li>
+        @if (data().preview.restartNeeded) {
           <li><mat-icon svgIcon="pc:refresh" aria-hidden="true" />The runner restarts after its current job to use these settings.</li>
         } @else {
           <li><mat-icon svgIcon="pc:check" aria-hidden="true" />Only comments or layout change; the runner does not need to restart.</li>
@@ -71,8 +71,8 @@ export interface ConfigDiffData {
       </ul>
 
       <div class="btn-row end">
-        <button type="button" class="btn" (click)="ref.close(false)">Cancel</button>
-        <button type="button" class="btn primary" (click)="ref.close(true)">Save and apply</button>
+        <button type="button" class="btn" data-dialog-close (click)="ref.close()">Cancel</button>
+        <button type="button" class="btn primary" data-default (click)="ref.close(true)">Save and apply</button>
       </div>
     </div>
   `,
@@ -194,19 +194,18 @@ export interface ConfigDiffData {
   `,
 })
 export class ConfigDiffDialog {
-  protected readonly data = inject<ConfigDiffData>(DIALOG_DATA);
-  protected readonly ref = inject<DialogRef<boolean>>(DialogRef);
+  readonly preview = input.required<ConfigPreview>();
+  readonly maxBackups = input.required<number>();
+  protected readonly data = computed<ConfigDiffData>(() => ({ preview: this.preview(), maxBackups: this.maxBackups() }));
+  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
   protected readonly sym = diffSymbol;
   protected readonly word = diffWord;
 }
 
-/** Opens {@link ConfigDiffDialog}; resolves true when the user chose Save and apply. */
-export async function reviewConfigChanges(dialog: Dialog, data: ConfigDiffData): Promise<boolean> {
-  const ref = dialog.open<boolean>(ConfigDiffDialog, {
-    data,
-    ariaLabelledBy: 'diff-title',
-    panelClass: 'pc-dialog-panel',
-    backdropClass: 'pc-dialog-backdrop',
-  });
-  return (await firstValueFrom(ref.closed)) === true;
+/** The dialog's id (`pc.config-diff` in the contributions). */
+export const CONFIG_DIFF_DIALOG_ID = 'pc.config-diff';
+
+/** Opens the review as its own window (modal); resolves true when the user chose Save and apply. */
+export async function reviewConfigChanges(ports: Pick<ShellPorts, 'openDialog'>, data: ConfigDiffData): Promise<boolean> {
+  return (await ports.openDialog(CONFIG_DIFF_DIALOG_ID, data)) === true;
 }

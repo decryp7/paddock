@@ -111,14 +111,27 @@ pub async fn engine_prune_preview(client: State<'_, SharedClient>, selection: Pr
 
 /// `engine_prune`: removes what the selection names (the UI asks for confirmation after the preview).
 #[tauri::command]
-pub async fn engine_prune(client: State<'_, SharedClient>, selection: PruneSelection) -> Result<PruneResult, CommandError> {
+pub async fn engine_prune<R: Runtime>(
+    app: AppHandle<R>,
+    client: State<'_, SharedClient>,
+    work: State<'_, crate::jobs::Work>,
+    selection: PruneSelection,
+) -> Result<u64, CommandError> {
     selection.validate().map_err(CommandError::bad)?;
     let c = client.inner().clone();
-    blocking(move || match ask(c.as_ref(), Request::EnginePrune { selection })? {
-        Response::EnginePruned { result } => Ok(result),
-        other => Err(unexpected(other)),
-    })
-    .await
+    let jobs = crate::jobs::registry(&app)?;
+    work.start(
+        &jobs,
+        "pitcrew.engine-prune",
+        "Pruning the container engine",
+        None,
+        move || -> Result<PruneResult, CommandError> {
+            match ask(c.as_ref(), Request::EnginePrune { selection })? {
+                Response::EnginePruned { result } => Ok(result),
+                other => Err(unexpected(other)),
+            }
+        },
+    )
 }
 
 /// `cache_report`.
@@ -161,18 +174,28 @@ pub struct CacheCleanedReply {
 
 /// `cache_clean`: trims the cache.
 #[tauri::command]
-pub async fn cache_clean(client: State<'_, SharedClient>, runner: String, limits: CacheLimits) -> Result<CacheCleanedReply, CommandError> {
+pub async fn cache_clean<R: Runtime>(
+    app: AppHandle<R>,
+    client: State<'_, SharedClient>,
+    work: State<'_, crate::jobs::Work>,
+    runner: String,
+    limits: CacheLimits,
+) -> Result<u64, CommandError> {
     limits.validate().map_err(CommandError::bad)?;
-    let req = Request::CacheClean {
-        runner: name(&runner)?,
-        limits,
-    };
+    let n = name(&runner)?;
+    let req = Request::CacheClean { runner: n.clone(), limits };
     let c = client.inner().clone();
-    blocking(move || match ask(c.as_ref(), req)? {
-        Response::CacheCleaned { plan, failures } => Ok(CacheCleanedReply { plan, failures }),
-        other => Err(unexpected(other)),
-    })
-    .await
+    let jobs = crate::jobs::registry(&app)?;
+    work.start(
+        &jobs,
+        "pitcrew.cache-clean",
+        "Trimming the Actions cache",
+        Some(n.as_str()),
+        move || match ask(c.as_ref(), req)? {
+            Response::CacheCleaned { plan, failures } => Ok(CacheCleanedReply { plan, failures }),
+            other => Err(unexpected(other)),
+        },
+    )
 }
 
 /// `debrief_status`.

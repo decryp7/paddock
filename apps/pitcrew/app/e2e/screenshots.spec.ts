@@ -21,6 +21,14 @@ interface Shot {
   prepare?: (page: Page) => Promise<void>;
 }
 
+/** Opens Settings (a window of the shell; in the browser build it opens in the page) at one of its pages. */
+const inSettings = (section: string, then?: (page: Page) => Promise<void>) => async (page: Page) => {
+  await page.getByRole('navigation', { name: 'Pages' }).waitFor();
+  await page.keyboard.press('ControlOrMeta+,');
+  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: section, exact: true }).click();
+  await then?.(page);
+};
+
 const scrollMain = (y: number) => async (page: Page) => {
   await page.evaluate((top) => document.querySelector('main')?.scrollTo({ top }), y);
 };
@@ -141,36 +149,31 @@ const SHOTS: Shot[] = [
   },
   { name: 'logs', path: '/logs?runner=build-win' },
   { name: 'updates', path: '/updates' },
-  { name: 'settings', path: '/settings' },
-  { name: 'settings-defaults', path: '/settings?section=defaults' },
+  { name: 'settings', path: '/', prepare: inSettings('General') },
+  { name: 'settings-defaults', path: '/', prepare: inSettings('Defaults') },
   {
     name: 'settings-processes',
-    path: '/settings?section=defaults',
-    prepare: async (page) => {
+    path: '/',
+    prepare: inSettings('Defaults', async (page) => {
       await page.getByRole('heading', { name: 'Leftover processes' }).scrollIntoViewIfNeeded();
-      await page.evaluate(() => document.querySelector('main')?.scrollBy({ top: 200 }));
-    },
+    }),
   },
-  { name: 'settings-tokens', path: '/settings?section=tokens' },
+  { name: 'settings-tokens', path: '/', prepare: inSettings('Gitea tokens') },
   {
     name: 'settings-disk-guard',
-    path: '/settings?section=defaults',
-    height: 2800,
-    clip: async (page) => {
-      const top = await page.getByRole('heading', { name: 'Disk guard' }).evaluate((h) => h.closest('section,article')?.getBoundingClientRect().top ?? 0);
-      const bottom = await page.getByRole('heading', { name: 'Pause windows' }).evaluate((h) => h.closest('section,article')?.getBoundingClientRect().bottom ?? 0);
-      return { x: 320, y: Math.max(0, top - 10), width: 1100, height: Math.min(1000, bottom - top + 20) };
-    },
+    path: '/',
+    prepare: inSettings('Defaults', async (page) => {
+      await page.getByRole('heading', { name: 'Disk guard' }).scrollIntoViewIfNeeded();
+    }),
   },
   {
     name: 'settings-channels',
-    path: '/settings?section=channels',
-    height: 1400,
-    prepare: async (page) => {
+    path: '/',
+    prepare: inSettings('Notification channels', async (page) => {
       await page.getByRole('button', { name: 'Add channel' }).first().click();
       await page.getByLabel('Name', { exact: true }).fill('Team chat webhook');
       await page.getByLabel('Address').fill('https://hooks.example.com/pitcrew');
-    },
+    }),
   },
   {
     name: 'register-wizard',

@@ -142,30 +142,6 @@ impl std::fmt::Debug for RegisterRequest {
     }
 }
 
-/// `AppUpdateStatus`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppUpdateStatusDto {
-    /// Whether this build can update itself.
-    pub available: bool,
-    /// Why not.
-    pub reason: Option<String>,
-    /// Pitcrew's version.
-    pub current_version: String,
-}
-
-/// `AppUpdateInfo`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppUpdateInfo {
-    /// The version.
-    pub version: String,
-    /// Release notes.
-    pub notes: Option<String>,
-    /// Publication date.
-    pub date: Option<String>,
-}
-
 /// `ConnectionState`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]

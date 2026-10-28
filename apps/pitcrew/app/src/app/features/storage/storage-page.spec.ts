@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
-import { appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
+import { NoticeLog, appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 import { StatusStore } from '../../state/status.store';
 import { StoragePage } from './storage-page';
 
@@ -31,9 +31,10 @@ describe('StoragePage', () => {
     await flush();
     f.detectChanges();
   };
-  const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
+  const log = () => TestBed.inject(NoticeLog);
+  /** What the last confirmation was opened with, as one string. */
+  const asked = () => JSON.stringify(log().dialogs.at(-1)?.inputs ?? null);
   const btn = (el: HTMLElement, testid: string) => el.querySelector<HTMLButtonElement>(`[data-testid="${testid}"]`)!;
-  const dlgButton = (label: string) => byText(dialog()!, 'button', label)!;
 
   describe('container engine', () => {
     it('shows a card per usage row with words and the engine name', async () => {
@@ -136,9 +137,8 @@ describe('StoragePage', () => {
       const prune = vi.spyOn(mock, 'pruneEngine');
       await click(f, btn(el, 'preview'));
       await click(f, btn(el, 'prune'));
-      expect(dialog()).not.toBeNull();
-      expect(text(dialog())).toContain('cannot be undone');
-      await click(f, dlgButton('Cancel'));
+      expect(log().dialogs.at(-1)?.id).toBe('pc.confirm');
+      expect(asked()).toContain('cannot be undone');
       expect(prune).not.toHaveBeenCalled();
       expect(el.querySelector('[data-testid="engine-result"]')).toBeNull();
     });
@@ -149,9 +149,10 @@ describe('StoragePage', () => {
       const prune = vi.spyOn(mock, 'pruneEngine');
       const report = vi.spyOn(mock, 'engineReport');
       await click(f, btn(el, 'preview'));
+      log().answerNext(true);
       await click(f, btn(el, 'prune'));
-      expect(text(dialog())).toContain('Remove');
-      await click(f, dlgButton('Prune now'));
+      expect(asked()).toContain('Remove');
+      expect(asked()).toContain('Prune now');
       await settle(f, 3);
       expect(prune).toHaveBeenCalledWith({ kinds: ['stoppedContainers', 'danglingImages', 'unusedImages', 'buildCache'], olderThanDays: 0 });
       expect(report).toHaveBeenCalled();
@@ -164,9 +165,9 @@ describe('StoragePage', () => {
       vi.spyOn(mock, 'pruneEngine').mockResolvedValueOnce({ freed: [['buildCache', 1024 * 1024 * 1024]], failures: [['volumes', 'volume pgdata is in use']], at: 0 });
       await click(f, el.querySelector('[data-kind="volumes"]'));
       await click(f, btn(el, 'preview'));
+      log().answerNext(true);
       await click(f, btn(el, 'prune'));
-      expect(text(dialog())).toContain('Volumes hold data');
-      await click(f, dlgButton('Prune now'));
+      expect(asked()).toContain('Volumes hold data');
       await settle(f, 3);
       const r = text(el.querySelector('[data-testid="engine-result"]'));
       expect(r).toContain('Volumes failed: volume pgdata is in use');
@@ -177,14 +178,13 @@ describe('StoragePage', () => {
       const { f, el } = await mount();
       vi.spyOn(mock, 'pruneEngine').mockRejectedValueOnce({ code: 'busy', message: 'Try again when it is idle.' });
       await click(f, btn(el, 'preview'));
+      log().answerNext(true);
       await click(f, btn(el, 'prune'));
-      await click(f, dlgButton('Prune now'));
       await settle(f, 3);
       const err = el.querySelector('[data-testid="engine-action-error"]')!;
       expect(text(err)).toContain('A job is running, so nothing is removed right now.');
       await click(f, byText(err, 'button', 'Retry'));
-      expect(dialog()).not.toBeNull();
-      await click(f, dlgButton('Cancel'));
+      expect(log().dialogs).toHaveLength(2);
     });
   });
 
@@ -238,10 +238,9 @@ describe('StoragePage', () => {
       expect(btn(el, 'cache-clean').disabled).toBe(true);
       await click(f, btn(el, 'cache-preview'));
       await click(f, btn(el, 'cache-clean'));
-      await click(f, dlgButton('Cancel'));
       expect(clean).not.toHaveBeenCalled();
+      log().answerNext(true);
       await click(f, btn(el, 'cache-clean'));
-      await click(f, dlgButton('Delete now'));
       await settle(f, 3);
       expect(clean).toHaveBeenCalledWith('build-win', { maxMb: 4096, maxAgeDays: 30 });
       expect(text(el.querySelector('[data-testid="cache-result"]'))).toContain('Deleted');
@@ -255,8 +254,8 @@ describe('StoragePage', () => {
       typeInto(el.querySelector<HTMLInputElement>('#older-days')!, '1');
       f.detectChanges();
       await click(f, btn(el, 'cache-preview'));
+      log().answerNext(true);
       await click(f, btn(el, 'cache-clean'));
-      await click(f, dlgButton('Delete now'));
       await settle(f, 3);
       expect(text(el.querySelector('[data-testid="cache-result"]'))).toContain('actions-cache-npm-4f2a was not deleted: file is in use');
     });

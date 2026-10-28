@@ -17,6 +17,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
+# The Paddock app shell (ADR 0012), from the `decryp7` registry: the plugin lockstep with @decryp7/paddock-ui, and the crates
+# whose types the app names itself (health causes and repairs, jobs).
+paddock-shell = { version = "0.2", registry = "decryp7", features = ["tray", "install", "native-dialogs"] }
+paddock-commands = { version = "0.1", registry = "decryp7", features = ["tauri"] }
+paddock-dialogs = { version = "0.1", registry = "decryp7", features = ["tauri"] }
+paddock-health = { version = "0.1", registry = "decryp7", features = ["tauri"] }
+paddock-jobs = { version = "0.1", registry = "decryp7", features = ["tauri"] }
+paddock-settings = { version = "0.1", registry = "decryp7", features = ["tauri"] }
+paddock-startup = { version = "0.1", registry = "decryp7", features = ["tauri"] }
+paddock-updater = { version = "0.1", registry = "decryp7", features = ["tauri"] }
+paddock-window = { version = "0.1", registry = "decryp7", features = ["tauri", "tray", "wry"] }
+tauri-plugin-dialog = "2"
 pitcrew-core.workspace = true
 notify-channels = { path = "../../crates/notify-channels" }
 serde.workspace = true
@@ -57,3 +69,12 @@ objc2-service-management = { version = "0.3", default-features = false, features
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tauri = { version = "2.12.4", features = ["test"] }
+paddock-shell = { version = "0.2", registry = "decryp7", features = ["tray", "install", "native-dialogs", "mock-runtime"] }
+paddock-dialogs = { version = "0.1", registry = "decryp7", features = ["tauri", "mock-runtime"] }
+# The capabilities are resolved through Tauri's own ACL in the tests.
+tauri-utils = "2.10"
+tempfile = "3"
+toml = "0.9"

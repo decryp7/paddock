@@ -86,10 +86,14 @@ The service is deliberately thin around the core (level 3, [service components](
 - **Probe** (`probe.rs`). One `sysinfo` snapshot per tick: whether a runner has job processes, whether a runner binary
   already runs outside Pitcrew, the machine's CPU, memory and free disk, and the CPU and memory of each runner's process
   tree ([ADR 0007](adr/0007-runner-scoped-metrics.md)).
-- **Work** (`work.rs`, `net.rs`, `cleanup.rs`). Release discovery, download (HTTPS only, size cap, SHA-256 computed
-  while streaming), verification, the binary swap and its roll-back, asking a binary for its version, registration, and
-  folder scans and deletions. Each runs on a worker thread and reports a result to the supervisor; none of them touches
-  supervision state.
+- **Work** (`work.rs`, `net.rs`, `jobs.rs`, `cleanup.rs`). Release discovery (`net.rs`: HTTPS text, size caps), the
+  download, the binary swap and its roll-back, asking a binary for its version, registration, and folder scans and deletions.
+  Each runs on a worker thread and reports a result to the supervisor; none of them touches supervision state. The download is
+  `paddock-download`'s (segmented Range requests, per-host caps, 429/`Retry-After` back-off, resume from `<binary>.download.part`,
+  the free-space check, one SHA-256 computed while writing and compared with the checksum the two publisher hosts agreed on
+  before the first byte), run as a `paddock-jobs` job on the service's `JobHub`: each snapshot is pushed to the app as
+  `ServiceEvent::Job`, the app mirrors it onto the shell's Jobs list (`service_jobs.rs`), and Cancel there reaches the service as
+  `Request::CancelJob` in every phase (protocol 5).
 - **Log file** (`logfile.rs`). The service owns the runner's output pipes, so it writes the log itself, adds its own
   `supervisor:` lines and rotates the file between two lines.
 - **Transport** (`ipc.rs`). A named pipe with an ACL on Windows, a 0600 Unix socket elsewhere; hello first; bounded

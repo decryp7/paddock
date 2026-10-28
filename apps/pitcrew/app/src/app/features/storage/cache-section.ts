@@ -1,5 +1,5 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { RouterLink } from '@angular/router';
 import { MatIcon } from '@angular/material/icon';
 import { ClockService } from '../../core/clock.service';
@@ -185,7 +185,7 @@ const REASONS: Record<CacheReason, string> = { old: 'older than limit', overLimi
 export class CacheSection {
   protected readonly store = inject(CacheStore);
   private readonly status = inject(StatusStore);
-  private readonly dialog = inject(Dialog);
+  private readonly ports = inject(SHELL_PORTS);
   private readonly clock = inject(ClockService);
   private readonly lastAction = signal<'preview' | 'clean'>('preview');
 
@@ -259,7 +259,7 @@ export class CacheSection {
     this.lastAction.set('clean');
     const p = this.store.currentPreview();
     if (!p || !this.store.canClean()) return;
-    const ok = await confirmAction(this.dialog, {
+    const ok = await confirmAction(this.ports, {
       title: `Delete ${formatBytes(p.bytes)} from the cache of ${this.store.runner()}?`,
       body: `This deletes ${plural(p.entries.length, 'cache entry', 'cache entries')}. Workflows that need them will rebuild them. It cannot be undone.`,
       confirm: 'Delete now',

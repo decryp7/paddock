@@ -100,6 +100,8 @@ pub enum Msg {
         /// The result.
         work: Done,
     },
+    /// A snapshot of one of the service's jobs (a download): pushed to the app as `ServiceEvent::Job`.
+    Job(Box<paddock_jobs::JobSnapshot>),
     /// Someone logged on or off (Windows session change).
     LogonChanged,
     /// Stop supervising (the service is stopping).
@@ -112,8 +114,8 @@ pub enum Done {
     Checked(Result<RunnerVersion, String>),
     /// The installed binary's version.
     Version(Option<RunnerVersion>),
-    /// The download.
-    Downloaded(Result<(), String>),
+    /// The download (a note on success: how its checksum was verified).
+    Downloaded(Result<String, String>),
     /// The verification (a note on success).
     Verified(Result<String, String>),
     /// The swap.
@@ -348,6 +350,7 @@ impl Supervisor {
             service_log.supervisor(now, &format!("state: {p}"));
         }
         let console = env.launcher.console().session;
+        env.sources.jobs.attach(tx.clone());
         let mut sup = Supervisor {
             tx,
             config: loaded.config.clone(),
@@ -530,6 +533,9 @@ impl Supervisor {
             }
             Msg::Line { runner, generation, text } => self.line(&runner, generation, text, now),
             Msg::Done { runner, work } => self.done(&runner, work, now),
+            Msg::Job(job) => self.broadcast(Response::Event {
+                event: ServiceEvent::Job { job: *job },
+            }),
             Msg::LogonChanged => self.logon_changed(now),
             Msg::Shutdown => {}
         }
@@ -1202,7 +1208,10 @@ impl Supervisor {
             Done::Downloaded(res) => {
                 r.update_worker = false;
                 let ev = match res {
-                    Ok(()) => UpdateEvent::Downloaded,
+                    Ok(note) => {
+                        r.log.supervisor(now, &format!("update: {note}"));
+                        UpdateEvent::Downloaded
+                    }
                     Err(reason) => UpdateEvent::DownloadFailed { reason },
                 };
                 self.update_event(name, ev, now);
@@ -1622,6 +1631,13 @@ impl Supervisor {
                 return None;
             }
             Request::Diagnostics => self.diagnostics(now),
+            Request::CancelJob { id } => {
+                if self.env.sources.jobs.cancel(id) {
+                    Response::Ok
+                } else {
+                    err(ErrorCode::BadRequest, "that job is not running")
+                }
+            }
         };
         Some((reply, resp))
     }
@@ -1893,7 +1909,7 @@ impl Supervisor {
             ServiceEvent::Status { runners, service } => {
                 serde_json::to_string(&(runners, &service.machine, &service.config_problems)).unwrap_or_default()
             }
-            ServiceEvent::Notification { .. } => String::new(),
+            ServiceEvent::Notification { .. } | ServiceEvent::Job { .. } => String::new(),
         };
         if key != self.last_status {
             self.last_status = key;

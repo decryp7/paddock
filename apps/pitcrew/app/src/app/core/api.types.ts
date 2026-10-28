@@ -7,7 +7,7 @@
  * - the configuration (`pitcrew_core::config::Config` and the policies inside it) is the `pitcrew.toml` schema
  *   verbatim, so its keys are snake_case.
  *
- * App-only types (`AppUpdateStatus`, `CommandError`, `ConnectionState`, …) mirror `app/src-tauri/src/dto.rs`.
+ * App-only types (`CommandError`, `ConnectionState`, …) mirror `app/src-tauri/src/dto.rs`.
  * Change both sides in the same commit.
  */
 
@@ -529,22 +529,6 @@ export interface RegisterRequest {
   loggedOff: LoggedOffMode;
   /** Keep the token in the OS credential store (Windows Credential Manager / macOS Keychain) for re-registering. */
   rememberToken: boolean;
-}
-
-/** Whether Pitcrew can update itself (Tauri updater). */
-export interface AppUpdateStatus {
-  /** False in builds without the update public key. */
-  available: boolean;
-  /** Why not, for the user. */
-  reason: string | null;
-  currentVersion: string;
-}
-
-/** A Pitcrew release found by a check. */
-export interface AppUpdateInfo {
-  version: string;
-  notes: string | null;
-  date: string | null;
 }
 
 /** The app's connection to the service. */

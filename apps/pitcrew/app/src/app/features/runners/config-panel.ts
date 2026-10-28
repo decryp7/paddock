@@ -1,5 +1,5 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
 import { MatIcon } from '@angular/material/icon';
 import type { ConfigIssue, LogLevel, RunnerSettings } from '../../core/api.types';
 import { ClockService } from '../../core/clock.service';
@@ -87,7 +87,7 @@ export class ConfigPanel {
   protected readonly store = inject(RunnerConfigStore);
   private readonly status = inject(StatusStore);
   private readonly clock = inject(ClockService);
-  private readonly dialog = inject(Dialog);
+  private readonly ports = inject(SHELL_PORTS);
 
   protected readonly jobFields = JOB_FIELDS;
   protected readonly cacheFields = CACHE_FIELDS;
@@ -198,6 +198,6 @@ export class ConfigPanel {
     await this.store.review();
     const preview = this.store.preview();
     if (!preview || !this.store.canSave()) return;
-    if (await reviewConfigChanges(this.dialog, { preview, maxBackups: this.maxBackups })) await this.store.save();
+    if (await reviewConfigChanges(this.ports, { preview, maxBackups: this.maxBackups })) await this.store.save();
   }
 }

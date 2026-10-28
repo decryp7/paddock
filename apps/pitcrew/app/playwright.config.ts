@@ -1,19 +1,22 @@
 import { defineConfig, devices } from '@playwright/test';
+import { assertChromeForTesting, e2ePort } from '@decryp7/paddock-e2e';
 
 /**
  * Browser end-to-end flows against `ng serve` with the mock backend (`npx playwright test`), and the documentation
  * screenshots (`SCREENSHOTS=1 npx playwright test --project=screenshots`, written to ../docs/screenshots).
  */
-const PORT = Number(process.env['PW_PORT'] ?? 4310);
+// Required from the environment on CI; 4661 is Pitcrew's port on a developer's machine (rule 3).
+const PORT = e2ePort('PITCREW_E2E_PORT', 4661);
 
-export default defineConfig({
+export default assertChromeForTesting(
+  defineConfig({
   testDir: './e2e',
   // Inside .angular/, which git ignores.
   outputDir: './.angular/playwright-results',
   fullyParallel: false,
   workers: 1,
   retries: process.env['CI'] ? 1 : 0,
-  reporter: 'list',
+  reporter: [['list'], ['@decryp7/paddock-e2e/retried-reporter']],
   timeout: 60_000,
   use: {
     baseURL: `http://localhost:${PORT}`,
@@ -30,7 +33,8 @@ export default defineConfig({
   webServer: {
     command: `npx ng serve --port ${PORT}`,
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env['CI'],
     timeout: 180_000,
   },
-});
+  }),
+);

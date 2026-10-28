@@ -3,7 +3,7 @@ import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
 import type { DebriefStatus } from '../core/api.types';
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
-import { ToastStore } from './toast.store';
+import { Notify } from './notify';
 
 interface DebriefState {
   status: DebriefStatus | null;
@@ -17,7 +17,7 @@ interface DebriefState {
 export const DebriefStore = signalStore(
   { providedIn: 'root' },
   withState<DebriefState>({ status: null, busy: false }),
-  withMethods((store, backend = inject(BACKEND), toasts = inject(ToastStore)) => ({
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Notify)) => ({
     /** Looks for Debrief once (cheap; call from the places that show the button). */
     async load(): Promise<void> {
       if (store.status() !== null) return;

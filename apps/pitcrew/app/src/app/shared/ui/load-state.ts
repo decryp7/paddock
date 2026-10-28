@@ -33,7 +33,7 @@ import { ServiceStore } from '../../state/service.store';
     @if (hasValue()) {
       <ng-content />
     } @else if (!error()) {
-      <div class="skeletons" aria-busy="true" [attr.aria-label]="'Loading ' + what().toLowerCase()">
+      <div class="skeletons" role="status" aria-busy="true" [attr.aria-label]="'Loading ' + what().toLowerCase()">
         @for (h of bars(); track $index) {
           <span class="skeleton" [style.height.px]="h" [style.width]="$last && bars().length > 1 ? '60%' : '100%'"></span>
         }

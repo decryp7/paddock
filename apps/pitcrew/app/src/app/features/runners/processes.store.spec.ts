@@ -3,12 +3,12 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { ClockService } from '../../core/clock.service';
 import { flush, makeMock } from '../../../testing/test-helpers';
-import { ToastStore } from '../../state/toast.store';
+import { NoticeLog, recordShell } from '../../../testing/test-helpers';
 import { PROCESS_POLL_MS, ProcessesStore } from './processes.store';
 
 function setup() {
   const mock = makeMock();
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, ProcessesStore] });
+  TestBed.configureTestingModule({ providers: [...recordShell(), { provide: BACKEND, useValue: mock }, ProcessesStore] });
   return { mock, store: TestBed.inject(ProcessesStore) };
 }
 
@@ -102,7 +102,7 @@ describe('ProcessesStore', () => {
     const e = s.store.list().value!.entries.find((x) => x.leftover?.rule === '*GradleDaemon*')!;
     expect(await s.store.stop(e)).toBe(true);
     expect(s.store.list().value!.entries.some((x) => x.pid === e.pid)).toBe(false);
-    expect(TestBed.inject(ToastStore).toasts()[0]!.title).toBe('Stopped java.exe');
+    expect(TestBed.inject(NoticeLog).notices[0]!.message).toContain('Stopped java.exe');
     expect(s.store.busy()).toBeNull();
   });
 
@@ -113,7 +113,7 @@ describe('ProcessesStore', () => {
     const runner = s.store.list().value!.entries.find((x) => x.isRunner)!;
     expect(await s.store.stop(runner)).toBe(false);
     expect(s.store.actionError()).toContain('runner process itself');
-    expect(TestBed.inject(ToastStore).toasts()[0]!.tone).toBe('danger');
+    expect(TestBed.inject(NoticeLog).notices[0]!.level).toBe('error');
     s.store.dismissError();
     expect(s.store.actionError()).toBeNull();
     expect(await s.store.stop(runner, true)).toBe(true);

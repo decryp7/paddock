@@ -4,7 +4,7 @@ import type { CommandError, ConfigEdit, ConfigPreview, ConfigSaved, RunnerConfig
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { idle, pending, settle, type Loadable } from '../../state/loadable';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 import { errorCount } from './config/config-issues';
 import { latestLabelCheck, type LabelCheck } from './config/label-check';
 
@@ -89,7 +89,7 @@ export const RunnerConfigStore = signalStore(
   }),
   // The debounce timer and the request counter are not state: nothing renders them.
   withProps(() => ({ _ctl: { timer: null as ReturnType<typeof setTimeout> | null, seq: 0 } })),
-  withMethods((store, backend = inject(BACKEND), toasts = inject(ToastStore)) => {
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Notify)) => {
     const ctl = store._ctl;
 
     const cancelTimer = () => {

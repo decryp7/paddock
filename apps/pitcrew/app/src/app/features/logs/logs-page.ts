@@ -9,7 +9,7 @@ import { ClockService } from '../../core/clock.service';
 import { DebriefButton } from '../../shared/ui/debrief-button';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { StatusStore } from '../../state/status.store';
-import { ToastStore } from '../../state/toast.store';
+import { Notify } from '../../state/notify';
 import { highlight, levelTone, parseLogLine } from './log-line';
 import { LogsStore } from './logs.store';
 
@@ -35,7 +35,7 @@ export class LogsPage {
   private readonly clock = inject(ClockService);
   private readonly router = inject(Router);
   private readonly backend = inject(BACKEND);
-  private readonly toasts = inject(ToastStore);
+  private readonly toasts = inject(Notify);
   private readonly viewport = viewChild(CdkVirtualScrollViewport);
 
   protected readonly row = ROW;

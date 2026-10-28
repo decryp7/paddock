@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { MockBackend } from '../../core/mock-backend';
-import { NOW, appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
+import { NOW, NoticeLog, appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 import { ConfigPanel, parseCapacity, parseTriState, triState } from './config-panel';
 import { PREVIEW_DEBOUNCE_MS } from './runner-config.store';
 
@@ -41,7 +41,9 @@ describe('ConfigPanel', () => {
     await settle(f, 6);
     return { f, el: f.nativeElement as HTMLElement };
   }
-  const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
+  const log = () => TestBed.inject(NoticeLog);
+  /** What the review window was last opened with, as one string (the diff itself is tested with the dialog). */
+  const reviewed = () => JSON.stringify(log().dialogs.at(-1)?.inputs ?? null);
   const input = (el: HTMLElement, id: string) => el.querySelector(`#${id}`) as HTMLInputElement;
   async function edit(f: { detectChanges(): void }, field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string, ev = 'input') {
     typeInto(field, value, ev);
@@ -115,28 +117,20 @@ describe('ConfigPanel', () => {
     await settle(f, 2);
     byText<HTMLButtonElement>(el, 'button', 'Review changes')!.click();
     await settle(f, 4);
-    const d = text(dialog());
+    expect(log().dialogs.at(-1)?.id).toBe('pc.config-diff');
+    const d = reviewed();
     for (const k of ['runner.labels', 'runner.envs', 'cache.enabled', 'log.level', 'cache.size_limit']) expect(d).toContain(k);
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Cancel')!.click();
-    await settle(f, 2);
   });
 
   it('reviews the diff, then saves and shows the restart notice', async () => {
     const { f, el } = await mount('build-win');
     await edit(f, input(el, 'cfg-capacity'), '4');
+    log().answerNext(true);
     byText<HTMLButtonElement>(el, 'button', 'Review changes')!.click();
     await settle(f, 4);
-    const d = dialog()!;
-    expect(d.getAttribute('aria-labelledby')).toBe('diff-title');
-    expect(text(d)).toContain('Review changes');
-    expect(text(d)).toContain('capacity: 4');
-    expect(d.querySelector('tr.added')).not.toBeNull();
-    expect(d.querySelector('tr.removed')).not.toBeNull();
-    expect(text(d.querySelector('tr.added'))).toContain('+');
-    expect(text(d.querySelector('tr.removed'))).toContain('−');
-    expect(text(d)).toContain('Saves a backup of the current file (config.yaml.bak-…; the last 10 are kept)');
-    expect(text(d)).toContain('The runner restarts after its current job');
-    byText<HTMLButtonElement>(d, 'button', 'Save and apply')!.click();
+    expect(log().dialogs.at(-1)?.id).toBe('pc.config-diff');
+    expect(reviewed()).toContain('capacity: 4');
+    expect(reviewed()).toContain('"maxBackups":10');
     await settle(f, 8);
     expect(text(el.querySelector('[data-testid="saved-banner"]'))).toContain('Saved. The runner restarts after the current job.');
     expect(text(el.querySelector('[data-testid="restart-pending"]'))).toBe('Restarts after the current job');
@@ -152,18 +146,19 @@ describe('ConfigPanel', () => {
     await settle(f, 2);
     const ta = el.querySelector('textarea') as HTMLTextAreaElement;
     await edit(f, ta, `# note\n${ta.value}`);
+    log().answerNext(true);
     byText<HTMLButtonElement>(el, 'button', 'Review changes')!.click();
     await settle(f, 4);
-    expect(text(dialog())).toContain('Only comments or layout change');
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Save and apply')!.click();
+    expect(reviewed()).toContain('"restartNeeded":false');
+
     await settle(f, 8);
     expect(text(el.querySelector('[data-testid="saved-banner"]'))).toContain('Only comments or layout changed; no restart needed.');
     expect(text(el.querySelector('[data-testid="saved-banner"]'))).toContain('config.yaml.bak-');
     const { f: f2, el: el2 } = await mount('docker-lab');
     await edit(f2, input(el2, 'cfg-capacity'), '2');
+    log().answerNext(true);
     byText<HTMLButtonElement>(el2, 'button', 'Review changes')!.click();
     await settle(f2, 4);
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Save and apply')!.click();
     await settle(f2, 8);
     expect(text(el2.querySelector('[data-testid="saved-banner"]'))).toContain('used the next time the runner starts');
   });
@@ -204,8 +199,7 @@ describe('ConfigPanel', () => {
     expect(byText<HTMLButtonElement>(el, 'button', 'Review changes')!.disabled).toBe(false);
     byText<HTMLButtonElement>(el, 'button', 'Review changes')!.click();
     await settle(f, 4);
-    expect(text(dialog())).toContain('Warning:');
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Cancel')!.click();
+    expect(reviewed()).toContain('surprise');
     await settle(f, 2);
     byText<HTMLButtonElement>(el, 'button', 'Discard changes')!.click();
     await settle(f, 2);
@@ -221,9 +215,8 @@ describe('ConfigPanel', () => {
     await edit(f, input(el, 'cfg-capacity'), '2');
     const other = await mock.runnerConfig('ui-tests');
     await mock.saveRunnerConfig('ui-tests', { mode: 'raw', text: `# other\n${other.text}` }, other.fingerprint);
+    log().answerNext(true);
     byText<HTMLButtonElement>(el, 'button', 'Review changes')!.click();
-    await settle(f, 4);
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Save and apply')!.click();
     await settle(f, 6);
     expect(text(el.querySelector('[data-testid="conflict"]'))).toContain('The file changed on disk');
     byText<HTMLButtonElement>(el.querySelector('[data-testid="conflict"]') as HTMLElement, 'button', 'Reload')!.click();
@@ -235,9 +228,8 @@ describe('ConfigPanel', () => {
     const { f, el } = await mount();
     await edit(f, input(el, 'cfg-capacity'), '2');
     vi.spyOn(mock, 'saveRunnerConfig').mockRejectedValueOnce({ code: 'permissionDenied', message: 'config.yaml is read-only' });
+    log().answerNext(true);
     byText<HTMLButtonElement>(el, 'button', 'Review changes')!.click();
-    await settle(f, 4);
-    byText<HTMLButtonElement>(dialog()!, 'button', 'Save and apply')!.click();
     await settle(f, 6);
     expect(text(el.querySelector('[role="alert"]'))).toContain('config.yaml is read-only');
   });

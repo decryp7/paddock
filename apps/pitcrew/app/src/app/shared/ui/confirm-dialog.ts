@@ -1,7 +1,7 @@
-import { DIALOG_DATA, Dialog, DialogRef } from '@angular/cdk/dialog';
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
-import { firstValueFrom } from 'rxjs';
+import type { ShellPorts } from '@decryp7/paddock-ui/shell';
+import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
 
 export interface ConfirmData {
   title: string;
@@ -18,13 +18,13 @@ export interface ConfirmData {
   template: `
     <div class="wrap">
       <div class="head">
-        <span class="icon" [class.danger]="data.danger"><mat-icon [svgIcon]="data.danger ? 'pc:alert' : 'pc:info'" aria-hidden="true" /></span>
-        <h2 id="confirm-title">{{ data.title }}</h2>
+        <span class="icon" [class.danger]="data().danger"><mat-icon [svgIcon]="data().danger ? 'pc:alert' : 'pc:info'" aria-hidden="true" /></span>
+        <h2 id="confirm-title">{{ data().title }}</h2>
       </div>
-      <p class="muted">{{ data.body }}</p>
+      <p class="muted">{{ data().body }}</p>
       <div class="btn-row end">
-        <button type="button" class="btn" (click)="ref.close(false)">Cancel</button>
-        <button type="button" class="btn" [class.primary]="!data.danger" [class.danger]="data.danger" (click)="ref.close(true)">{{ data.confirm }}</button>
+        <button type="button" class="btn" data-dialog-close (click)="ref.close()">Cancel</button>
+        <button type="button" class="btn" [class.primary]="!data().danger" [class.danger]="data().danger" data-default (click)="ref.close(true)">{{ data().confirm }}</button>
       </div>
     </div>
   `,
@@ -59,17 +59,18 @@ export interface ConfirmData {
   `,
 })
 export class ConfirmDialog {
-  protected readonly data = inject<ConfirmData>(DIALOG_DATA);
-  protected readonly ref = inject<DialogRef<boolean>>(DialogRef);
+  readonly title = input.required<string>();
+  readonly body = input.required<string>();
+  readonly confirm = input.required<string>();
+  readonly danger = input(false);
+  protected readonly data = computed<ConfirmData>(() => ({ title: this.title(), body: this.body(), confirm: this.confirm(), danger: this.danger() }));
+  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
 }
 
-/** Opens {@link ConfirmDialog}; resolves true when confirmed. */
-export async function confirmAction(dialog: Dialog, data: ConfirmData): Promise<boolean> {
-  const ref = dialog.open<boolean>(ConfirmDialog, {
-    data,
-    ariaLabelledBy: 'confirm-title',
-    panelClass: 'pc-dialog-panel',
-    backdropClass: 'pc-dialog-backdrop',
-  });
-  return (await firstValueFrom(ref.closed)) === true;
+/** The dialog's id (`pc.confirm` in the contributions). */
+export const CONFIRM_DIALOG_ID = 'pc.confirm';
+
+/** Opens the confirmation as its own window (modal); resolves true when confirmed. */
+export async function confirmAction(ports: Pick<ShellPorts, 'openDialog'>, data: ConfirmData): Promise<boolean> {
+  return (await ports.openDialog(CONFIRM_DIALOG_ID, data)) === true;
 }
