@@ -45,6 +45,29 @@ pub const RECENT_SAMPLES: usize = 180;
 /// Facts are refreshed at most this often.
 pub const FACTS_TTL: Duration = Duration::from_secs(300);
 
+/// Disk scan statuses waiting for one app: the latest of each scan. A status replaces the older one of its scan, so a slow app
+/// sees fewer events but always the newest, and a final state (done, cancelled, failed) is never dropped.
+#[derive(Default)]
+pub struct ScanSlot(Mutex<std::collections::BTreeMap<u64, dyno_core::disk::scan::DiskScanStatus>>);
+
+impl ScanSlot {
+    /// Keeps `status` unless a newer event of the same scan is already waiting.
+    pub fn put(&self, status: dyno_core::disk::scan::DiskScanStatus) {
+        let mut m = lock(&self.0);
+        match m.get(&status.scan) {
+            Some(old) if old.seq >= status.seq => {}
+            _ => {
+                m.insert(status.scan, status);
+            }
+        }
+    }
+
+    /// Everything waiting, oldest scan first; the slot is empty afterwards.
+    pub fn take(&self) -> Vec<dyno_core::disk::scan::DiskScanStatus> {
+        std::mem::take(&mut *lock(&self.0)).into_values().collect()
+    }
+}
+
 /// A connected app that wants live updates.
 pub struct Sub {
     /// Connection id.
@@ -53,6 +76,8 @@ pub struct Sub {
     pub detail: Arc<AtomicU8>,
     /// Bounded: a slow app loses frames, it never slows the sampler.
     pub tx: SyncSender<Message>,
+    /// Disk scan statuses, latest per scan: never a lossy queue (a final state must arrive).
+    pub scans: Arc<ScanSlot>,
 }
 
 impl Sub {
@@ -395,6 +420,17 @@ impl Shared {
             }
         }
         best
+    }
+
+    /// Hands a scan status to every connected app: it replaces the older one of the same scan that has not been sent yet, and
+    /// the connection's push thread is woken. Nothing is lost but intermediate events.
+    pub fn broadcast_scan(&self, status: &dyno_core::disk::scan::DiskScanStatus) {
+        for s in lock(&self.subs).iter() {
+            s.scans.put(status.clone());
+            // The message only wakes the push thread; the content is in the slot. A full queue means the thread is awake
+            // anyway and looks at the slot after every message.
+            let _ = s.tx.try_send(Message::DiskScan(Box::new(status.clone())));
+        }
     }
 
     /// Sends `m` to every connected app (dropping it for a slow one).

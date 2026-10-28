@@ -424,11 +424,13 @@ mod tests {
         assert!(capacity("no-such-mount-for-dyno-tests").is_none());
     }
 
-    /// The one test that lists this machine's real mounts (ER-14: unit tests never depend on them). Run it by hand with
-    /// `cargo test -p dyno-platform -- --ignored real_mounts`; it only reads the mount table, it runs no program.
+    /// The one test that lists this machine's real mounts (ER-14: tests never depend on them). It does nothing unless
+    /// `DYNO_REAL_MACHINE_TESTS` is set; it only reads the mount table, it runs no program.
     #[test]
-    #[ignore = "reads this machine's real mount table"]
     fn real_mounts_are_listed() {
+        if std::env::var_os("DYNO_REAL_MACHINE_TESTS").is_none() {
+            return;
+        }
         assert!(!mounts().is_empty());
     }
 

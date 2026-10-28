@@ -54,6 +54,30 @@ pub fn facts_from(raw: RawHandleInfo) -> FileFacts {
     }
 }
 
+/// `path` in the form the Win32 file calls accept past 260 characters (`\\?\C:\...`, `\\?\UNC\server\share\...`). A path that is
+/// not absolute, or already in that form, is returned as it is. Slashes become backslashes, which the verbatim form requires.
+pub fn verbatim(path: &std::path::Path) -> std::path::PathBuf {
+    let mut b = path.as_os_str().as_encoded_bytes().to_vec();
+    if b.starts_with(br"\\?\") {
+        return path.to_path_buf();
+    }
+    for c in &mut b {
+        if *c == b'/' {
+            *c = b'\\';
+        }
+    }
+    let joined = if b.starts_with(br"\\") {
+        [&br"\\?\UNC\"[..], &b[2..]].concat()
+    } else if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' {
+        [&br"\\?\"[..], &b[..]].concat()
+    } else {
+        return path.to_path_buf();
+    };
+    // SAFETY: `joined` is the encoded bytes of `path` with ASCII bytes replaced by ASCII bytes and an ASCII prefix added, which
+    // keeps it a valid encoding of the same platform.
+    std::path::PathBuf::from(unsafe { std::ffi::OsString::from_encoded_bytes_unchecked(joined) })
+}
+
 /// Opens `path` without following a link (and without needing any access to the content) and reads its facts.
 #[cfg(windows)]
 pub fn file_facts(path: &std::path::Path) -> std::io::Result<FileFacts> {
@@ -77,7 +101,7 @@ pub fn file_facts(path: &std::path::Path) -> std::io::Result<FileFacts> {
     }
 
     use std::os::windows::ffi::OsStrExt;
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = verbatim(path).as_os_str().encode_wide().chain(std::iter::once(0)).collect();
     // SAFETY: `wide` is NUL-terminated and outlives the call; no security attributes and no template file are passed.
     let handle = unsafe {
         CreateFileW(
@@ -159,6 +183,17 @@ mod tests {
             ..raw()
         });
         assert_eq!(big.allocated, i64::MAX as u64);
+    }
+
+    #[test]
+    fn long_windows_paths_get_the_verbatim_prefix() {
+        use std::path::{Path, PathBuf};
+        let v = |s: &str| verbatim(Path::new(s));
+        assert_eq!(v(r"C:\Users\alex\file"), PathBuf::from(r"\\?\C:\Users\alex\file"));
+        assert_eq!(v(r"\\nas\media\films"), PathBuf::from(r"\\?\UNC\nas\media\films"));
+        assert_eq!(v(r"\\?\C:\already"), PathBuf::from(r"\\?\C:\already"));
+        assert_eq!(v("relative\\path"), PathBuf::from("relative\\path"));
+        assert_eq!(v("/unix/path"), PathBuf::from("/unix/path"), "not a Windows path: untouched");
     }
 
     #[cfg(windows)]

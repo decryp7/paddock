@@ -20,8 +20,8 @@ pub enum EntryKind {
 /// One entry of a folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirEntryInfo {
-    /// File name.
-    pub name: String,
+    /// File name exactly as the file system gave it (not necessarily valid text).
+    pub name: std::ffi::OsString,
     /// Kind.
     pub kind: EntryKind,
     /// Bytes the entry occupies on the volume (allocated: blocks on Unix, clusters on Windows; the length where the OS

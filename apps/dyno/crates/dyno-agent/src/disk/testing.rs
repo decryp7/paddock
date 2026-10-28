@@ -4,6 +4,7 @@
 use dyno_core::disk::source::{DirEntryInfo, DirSource, EntryKind, ReadError};
 use dyno_core::time::Timestamp;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -18,6 +19,7 @@ pub struct FakeFs {
     stat_errors: Mutex<HashMap<PathBuf, ReadError>>,
     entry_errors: Mutex<HashMap<PathBuf, Vec<ReadError>>>,
     hook: Mutex<Option<Hook>>,
+    stat_hook: Mutex<Option<Hook>>,
     next_ino: AtomicU64,
     pub reads: AtomicU64,
 }
@@ -31,6 +33,7 @@ impl FakeFs {
             stat_errors: Mutex::new(HashMap::new()),
             entry_errors: Mutex::new(HashMap::new()),
             hook: Mutex::new(None),
+            stat_hook: Mutex::new(None),
             next_ino: AtomicU64::new(100),
             reads: AtomicU64::new(0),
         };
@@ -50,9 +53,9 @@ impl FakeFs {
         self.entries.lock().unwrap().entry(parent.to_path_buf()).or_default().push(e);
     }
 
-    fn entry(&self, name: &str, kind: EntryKind, bytes: u64, dev: u64, ino: u64, links: u64) -> DirEntryInfo {
+    fn entry(&self, name: &OsStr, kind: EntryKind, bytes: u64, dev: u64, ino: u64, links: u64) -> DirEntryInfo {
         DirEntryInfo {
-            name: name.into(),
+            name: name.to_os_string(),
             kind,
             bytes,
             logical: bytes,
@@ -64,40 +67,40 @@ impl FakeFs {
     }
 
     /// A folder under `parent` (on device 1); returns its path.
-    pub fn dir(&self, parent: &Path, name: &str) -> PathBuf {
+    pub fn dir(&self, parent: &Path, name: impl AsRef<OsStr>) -> PathBuf {
         self.dir_on(parent, name, 1, self.ino())
     }
 
     /// A folder with an explicit device and file id (a mount point, a loop).
-    pub fn dir_on(&self, parent: &Path, name: &str, dev: u64, ino: u64) -> PathBuf {
-        self.push(parent, self.entry(name, EntryKind::Dir, 0, dev, ino, 1));
-        let p = parent.join(name);
+    pub fn dir_on(&self, parent: &Path, name: impl AsRef<OsStr>, dev: u64, ino: u64) -> PathBuf {
+        self.push(parent, self.entry(name.as_ref(), EntryKind::Dir, 0, dev, ino, 1));
+        let p = parent.join(name.as_ref());
         self.entries.lock().unwrap().entry(p.clone()).or_default();
         p
     }
 
-    pub fn file(&self, parent: &Path, name: &str, bytes: u64) {
-        self.push(parent, self.entry(name, EntryKind::File, bytes, 1, self.ino(), 1));
+    pub fn file(&self, parent: &Path, name: impl AsRef<OsStr>, bytes: u64) {
+        self.push(parent, self.entry(name.as_ref(), EntryKind::File, bytes, 1, self.ino(), 1));
     }
 
     /// A file whose allocation and length differ (a sparse or compressed file, or a small one in a whole block).
-    pub fn file_sized(&self, parent: &Path, name: &str, on_disk: u64, logical: u64) {
-        let mut e = self.entry(name, EntryKind::File, on_disk, 1, self.ino(), 1);
+    pub fn file_sized(&self, parent: &Path, name: impl AsRef<OsStr>, on_disk: u64, logical: u64) {
+        let mut e = self.entry(name.as_ref(), EntryKind::File, on_disk, 1, self.ino(), 1);
         e.logical = logical;
         self.push(parent, e);
     }
 
     /// A file with `links` names sharing one file id.
-    pub fn linked_file(&self, parent: &Path, name: &str, bytes: u64, ino: u64) {
-        self.push(parent, self.entry(name, EntryKind::File, bytes, 1, ino, 2));
+    pub fn linked_file(&self, parent: &Path, name: impl AsRef<OsStr>, bytes: u64, ino: u64) {
+        self.push(parent, self.entry(name.as_ref(), EntryKind::File, bytes, 1, ino, 2));
     }
 
-    pub fn symlink(&self, parent: &Path, name: &str) {
-        self.push(parent, self.entry(name, EntryKind::Link, 0, 1, self.ino(), 1));
+    pub fn symlink(&self, parent: &Path, name: impl AsRef<OsStr>) {
+        self.push(parent, self.entry(name.as_ref(), EntryKind::Link, 0, 1, self.ino(), 1));
     }
 
-    pub fn socket(&self, parent: &Path, name: &str) {
-        self.push(parent, self.entry(name, EntryKind::Other, 0, 1, self.ino(), 1));
+    pub fn socket(&self, parent: &Path, name: impl AsRef<OsStr>) {
+        self.push(parent, self.entry(name.as_ref(), EntryKind::Other, 0, 1, self.ino(), 1));
     }
 
     /// Opening this folder fails.
@@ -120,6 +123,11 @@ impl FakeFs {
         self.entry_errors.lock().unwrap().insert(path.to_path_buf(), errors);
     }
 
+    /// Runs before every `stat` (to hold the first look at a root at a known point).
+    pub fn on_stat(&self, f: impl Fn(&Path) + Send + Sync + 'static) {
+        *self.stat_hook.lock().unwrap() = Some(Arc::new(f));
+    }
+
     /// Runs before every folder read (to block, count or cancel at a known point).
     pub fn on_read(&self, f: impl Fn(&Path) + Send + Sync + 'static) {
         *self.hook.lock().unwrap() = Some(Arc::new(f));
@@ -128,14 +136,18 @@ impl FakeFs {
 
 impl DirSource for FakeFs {
     fn stat(&self, path: &Path) -> Result<DirEntryInfo, ReadError> {
+        let hook = self.stat_hook.lock().unwrap().clone();
+        if let Some(h) = hook {
+            h(path);
+        }
         if let Some(e) = self.stat_errors.lock().unwrap().get(path) {
             return Err(e.clone());
         }
         if path == self.root {
-            return Ok(self.entry("fake-root", EntryKind::Dir, 0, 1, 1, 1));
+            return Ok(self.entry(OsStr::new("fake-root"), EntryKind::Dir, 0, 1, 1, 1));
         }
         let parent = path.parent().ok_or(ReadError::NotFound)?;
-        let name = path.file_name().and_then(|n| n.to_str()).ok_or(ReadError::NotFound)?;
+        let name = path.file_name().ok_or(ReadError::NotFound)?;
         let entries = self.entries.lock().unwrap();
         entries
             .get(parent)

@@ -74,7 +74,10 @@ mod tests {
 
     #[test]
     fn the_real_probe_answers_without_changing_anything() {
-        // Only opens the shielded file (macOS) and reports; on other systems it is always false.
+        // Opens a system file of this machine (macOS) and reports; it does nothing unless the opt-in variable is set (ER-14).
+        if std::env::var_os("DYNO_REAL_MACHINE_TESTS").is_none() {
+            return;
+        }
         let missing = full_disk_access_missing();
         #[cfg(not(target_os = "macos"))]
         assert!(!missing);

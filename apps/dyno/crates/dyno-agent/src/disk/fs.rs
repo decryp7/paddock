@@ -2,6 +2,7 @@
 //! reports the volume and file id of every entry. Nothing here writes.
 
 use dyno_core::disk::source::{DirEntryInfo, DirSource, EntryKind, ReadError};
+use std::ffi::OsString;
 use std::fs::Metadata;
 use std::io;
 use std::path::Path;
@@ -59,8 +60,9 @@ fn identity(meta: &Metadata, _path: &Path) -> (u64, u64, u64, u64) {
 }
 
 /// On Windows the identity and the allocation come from an open handle (volume serial plus file index, link count,
-/// allocation size). A file that cannot be opened (a sharing violation, no rights) is counted by its length with no
-/// identity, so it is neither lost nor treated as a hard link of anything.
+/// allocation size). An entry that cannot be opened (a sharing violation, no rights, a path the API refuses) is counted by its
+/// length with device 0, which the walk reads as "volume unknown": the entry is neither lost, nor taken for a mount point,
+/// nor treated as a hard link of anything.
 #[cfg(windows)]
 fn identity(meta: &Metadata, path: &Path) -> (u64, u64, u64, u64) {
     match dyno_platform::fileid::file_facts(path) {
@@ -74,29 +76,24 @@ fn identity(meta: &Metadata, _path: &Path) -> (u64, u64, u64, u64) {
     (meta.len(), 0, 0, 1)
 }
 
-fn is_link(meta: &Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        // FILE_ATTRIBUTE_REPARSE_POINT: symlinks, junctions and mount points are never followed.
-        meta.file_type().is_symlink() || meta.file_attributes() & 0x400 != 0
-    }
-    #[cfg(not(windows))]
-    {
-        meta.file_type().is_symlink()
-    }
-}
-
-fn info(name: String, path: &Path, meta: &Metadata) -> DirEntryInfo {
-    let kind = if is_link(meta) {
+/// What an entry is. Only a name-surrogate reparse point (a symlink or a junction, which `FileType::is_symlink` reports) is a
+/// link that is not followed. Other reparse points are ordinary files and folders to the walk: a OneDrive placeholder, a
+/// deduplicated file, a compressed or cloud file all keep their size and their place in the tree.
+fn classify(is_symlink: bool, is_dir: bool, is_file: bool) -> EntryKind {
+    if is_symlink {
         EntryKind::Link
-    } else if meta.is_dir() {
+    } else if is_dir {
         EntryKind::Dir
-    } else if meta.is_file() {
+    } else if is_file {
         EntryKind::File
     } else {
         EntryKind::Other
-    };
+    }
+}
+
+fn info(name: OsString, path: &Path, meta: &Metadata) -> DirEntryInfo {
+    let ft = meta.file_type();
+    let kind = classify(ft.is_symlink(), meta.is_dir(), meta.is_file());
     let (bytes, dev, ino, links) = if kind == EntryKind::Link {
         (0, 0, 0, 1)
     } else {
@@ -117,18 +114,13 @@ fn info(name: String, path: &Path, meta: &Metadata) -> DirEntryInfo {
 impl DirSource for OsDirSource {
     fn stat(&self, path: &Path) -> Result<DirEntryInfo, ReadError> {
         let meta = std::fs::symlink_metadata(path).map_err(|e| read_error(&e))?;
-        let name = path
-            .file_name()
-            .map_or_else(|| path.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
+        let name = path.file_name().map_or_else(|| path.as_os_str().to_owned(), OsString::from);
         Ok(info(name, path, &meta))
     }
 
     fn read_dir(&self, path: &Path, each: &mut dyn FnMut(Result<DirEntryInfo, ReadError>) -> bool) -> Result<(), ReadError> {
         for entry in std::fs::read_dir(path).map_err(|e| read_error(&e))? {
-            let item = entry.and_then(|e| {
-                e.metadata()
-                    .map(|m| info(e.file_name().to_string_lossy().into_owned(), &e.path(), &m))
-            });
+            let item = entry.and_then(|e| e.metadata().map(|m| info(e.file_name(), &e.path(), &m)));
             if !each(item.map_err(|e| read_error(&e))) {
                 break;
             }
@@ -140,6 +132,20 @@ impl DirSource for OsDirSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_link_is_a_link_and_other_reparse_points_stay_files_and_folders() {
+        // A OneDrive placeholder or a deduplicated file is a reparse point whose type is not a symlink: `is_symlink` is false.
+        assert_eq!(classify(false, false, true), EntryKind::File);
+        assert_eq!(classify(false, true, false), EntryKind::Dir);
+        assert_eq!(classify(true, false, true), EntryKind::Link);
+        assert_eq!(
+            classify(true, true, false),
+            EntryKind::Link,
+            "a junction or symlink to a folder is not entered"
+        );
+        assert_eq!(classify(false, false, false), EntryKind::Other);
+    }
 
     #[test]
     fn entries_have_kind_size_and_identity() {
@@ -154,7 +160,7 @@ mod tests {
             })
             .unwrap();
         seen.sort_by(|a, b| a.name.cmp(&b.name));
-        assert_eq!(seen[0].name, "file.bin");
+        assert_eq!(seen[0].name, OsString::from("file.bin"));
         assert_eq!(seen[0].kind, EntryKind::File);
         assert!(seen[0].bytes >= 5000, "allocated bytes are at least the length");
         assert_eq!(seen[0].logical, 5000, "the length is kept next to the allocation");

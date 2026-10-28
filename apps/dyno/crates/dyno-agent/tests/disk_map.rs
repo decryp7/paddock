@@ -84,6 +84,18 @@ fn start() -> (Running, Dirs, tempfile::TempDir, Shown) {
     (running, dirs, tmp, shown)
 }
 
+/// The final status of the scan's current pass. The agent never drops a final state, and the wait is on the scan itself, so
+/// the test cannot hang on a lost event.
+fn final_status(running: &Running, statuses: &Receiver<DiskScanStatus>, scan: u64) -> DiskScanStatus {
+    running.shared.disk.wait_finished(scan).unwrap();
+    loop {
+        let s = statuses.recv().unwrap();
+        if s.scan == scan && s.state.is_final() {
+            return s;
+        }
+    }
+}
+
 /// A connection that forwards the pushed disk scan statuses.
 fn listener(dirs: &Dirs) -> (Peer<Message>, Receiver<DiskScanStatus>) {
     let d = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
@@ -121,13 +133,7 @@ fn a_folder_scan_is_pushed_and_read_one_level_at_a_time() {
     .unwrap() else {
         panic!("a scan status")
     };
-    let last = loop {
-        let s = statuses.recv().unwrap();
-        assert_eq!(s.scan, started.scan);
-        if s.state.is_final() {
-            break s;
-        }
-    };
+    let last = final_status(&running, &statuses, started.scan);
     assert_eq!(last.state, ScanState::Done);
     assert!(last.progress.bytes >= 200_000);
     assert_eq!(last.progress.total_bytes, None, "a folder has no known total");
@@ -238,7 +244,7 @@ fn a_node_is_revealed_by_id_and_only_a_node_of_a_kept_scan_can_be() {
     .unwrap() else {
         panic!("a scan status")
     };
-    while !statuses.recv().unwrap().state.is_final() {}
+    final_status(&running, &statuses, started.scan);
     let Reply::DiskChildren(top) = ask(
         &peer,
         Request::DiskChildren {
@@ -313,12 +319,7 @@ fn a_folder_that_was_refused_is_read_again_by_a_retry_and_full_disk_access_is_na
     let Reply::DiskScan(started) = ask(&peer, Request::StartDiskScan { target }).unwrap() else {
         panic!("a scan status")
     };
-    let first = loop {
-        let s = statuses.recv().unwrap();
-        if s.state.is_final() {
-            break s;
-        }
-    };
+    let first = final_status(&running, &statuses, started.scan);
     assert_eq!(first.progress.unreadable, 1);
     assert!(
         first.needs_full_disk_access,
@@ -330,12 +331,7 @@ fn a_folder_that_was_refused_is_read_again_by_a_retry_and_full_disk_access_is_na
         panic!("a scan status")
     };
     assert_eq!(again.scan, started.scan);
-    let second = loop {
-        let s = statuses.recv().unwrap();
-        if s.state.is_final() {
-            break s;
-        }
-    };
+    let second = final_status(&running, &statuses, started.scan);
     assert_eq!(second.state, ScanState::Done);
     assert_eq!(second.progress.unreadable, 0);
     assert!(second.progress.bytes > first.progress.bytes, "what was inside is now counted");

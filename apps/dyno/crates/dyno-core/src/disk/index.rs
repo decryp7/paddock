@@ -7,14 +7,15 @@
 
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
 
 const NONE: u32 = u32::MAX;
 /// The most nodes any scan may hold, whatever the Setting says (about 400 MB at the bound).
 pub const HARD_MAX_NODES: u32 = 5_000_000;
 /// The most children one page returns.
 pub const MAX_PAGE: u32 = 256;
-/// Names longer than this many bytes are cut (no file system allows more).
-const MAX_NAME: usize = 255;
+/// Names longer than this many bytes are cut (no supported file system allows more: 255 UTF-8 bytes, or 255 UTF-16 units).
+const MAX_NAME: usize = 1024;
 
 /// What a node is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +101,8 @@ struct Node {
     name_len: u16,
     kind: NodeKind,
     complete: bool,
+    /// Something directly inside could not be read (but the folder itself could be listed): never complete.
+    partial: bool,
     /// Folders: the listing itself (1 until finished) plus the child folders not complete yet.
     open: u32,
     child_count: u32,
@@ -179,20 +182,13 @@ pub struct DiskIndex {
     skipped_folders: u64,
 }
 
-fn clamp_name(name: &str) -> &str {
-    if name.len() <= MAX_NAME {
-        return name;
-    }
-    let mut end = MAX_NAME;
-    while !name.is_char_boundary(end) {
-        end -= 1;
-    }
-    &name[..end]
+fn clamp_name(name: &[u8]) -> &[u8] {
+    &name[..name.len().min(MAX_NAME)]
 }
 
 impl DiskIndex {
     /// An index with a root folder called `root_name` (its listing is open until [`finish_listing`](Self::finish_listing)).
-    pub fn new(root_name: &str, limits: ScanLimits) -> DiskIndex {
+    pub fn new(root_name: impl AsRef<OsStr>, limits: ScanLimits) -> DiskIndex {
         let mut i = DiskIndex {
             nodes: Vec::new(),
             names: Vec::new(),
@@ -200,7 +196,7 @@ impl DiskIndex {
             truncated: false,
             skipped_folders: 0,
         };
-        let name = i.intern(root_name);
+        let name = i.intern(root_name.as_ref());
         i.nodes.push(Node {
             parent: NONE,
             first_child: NONE,
@@ -209,6 +205,7 @@ impl DiskIndex {
             name_len: name.1,
             kind: NodeKind::Folder,
             complete: false,
+            partial: false,
             open: 1,
             child_count: 0,
             bytes: 0,
@@ -222,10 +219,10 @@ impl DiskIndex {
         i
     }
 
-    fn intern(&mut self, name: &str) -> (u32, u16) {
-        let name = clamp_name(name);
+    fn intern(&mut self, name: &OsStr) -> (u32, u16) {
+        let name = clamp_name(name.as_encoded_bytes());
         let off = u32::try_from(self.names.len()).unwrap_or(u32::MAX);
-        self.names.extend_from_slice(name.as_bytes());
+        self.names.extend_from_slice(name);
         (off, u16::try_from(name.len()).unwrap_or(u16::MAX))
     }
 
@@ -302,7 +299,7 @@ impl DiskIndex {
         NodeId(id)
     }
 
-    fn blank(&mut self, name: &str, kind: NodeKind) -> Node {
+    fn blank(&mut self, name: &OsStr, kind: NodeKind) -> Node {
         let (off, len) = self.intern(name);
         Node {
             parent: NONE,
@@ -312,6 +309,7 @@ impl DiskIndex {
             name_len: len,
             kind,
             complete: false,
+            partial: false,
             open: 0,
             child_count: 0,
             bytes: 0,
@@ -326,12 +324,12 @@ impl DiskIndex {
 
     /// Adds a folder under `parent`, to be listed later. `None` when the node limit is reached (the folder is counted as
     /// skipped and must not be walked).
-    pub fn add_folder(&mut self, parent: NodeId, name: &str) -> Option<NodeId> {
+    pub fn add_folder(&mut self, parent: NodeId, name: impl AsRef<OsStr>) -> Option<NodeId> {
         if !self.room() {
             self.skipped_folders += 1;
             return None;
         }
-        let mut n = self.blank(name, NodeKind::Folder);
+        let mut n = self.blank(name.as_ref(), NodeKind::Folder);
         n.open = 1;
         let id = self.link(parent, n);
         self.nodes[parent.0 as usize].open += 1;
@@ -340,11 +338,11 @@ impl DiskIndex {
     }
 
     /// Adds a mount point under `parent`: another volume, shown but not entered, complete with no size.
-    pub fn add_mount_point(&mut self, parent: NodeId, name: &str) -> bool {
+    pub fn add_mount_point(&mut self, parent: NodeId, name: impl AsRef<OsStr>) -> bool {
         if !self.room() {
             return false;
         }
-        let mut n = self.blank(name, NodeKind::MountPoint);
+        let mut n = self.blank(name.as_ref(), NodeKind::MountPoint);
         n.complete = true;
         self.link(parent, n);
         self.bump(parent.0, Sizes::default(), 1, 0);
@@ -372,10 +370,16 @@ impl DiskIndex {
         out
     }
 
+    /// Marks a folder as listed but with something in it that could not be read: its size is a lower bound, it stays incomplete
+    /// for good (it cannot be read again without counting its files twice), and so do its ancestors.
+    pub fn mark_partial(&mut self, node: NodeId) {
+        self.nodes[node.0 as usize].partial = true;
+    }
+
     /// Adds a file under `parent`. A notable file gets a node; any other is folded into `parent`'s loose totals.
-    pub fn add_file(&mut self, parent: NodeId, name: &str, sizes: Sizes, mtime: Timestamp) {
+    pub fn add_file(&mut self, parent: NodeId, name: impl AsRef<OsStr>, sizes: Sizes, mtime: Timestamp) {
         if sizes.on_disk >= self.limits.notable_bytes && self.room() {
-            let mut n = self.blank(name, NodeKind::File);
+            let mut n = self.blank(name.as_ref(), NodeKind::File);
             n.complete = true;
             n.bytes = sizes.on_disk;
             n.logical = sizes.logical;
@@ -403,7 +407,7 @@ impl DiskIndex {
         while at != NONE {
             let n = &mut self.nodes[at as usize];
             n.open = n.open.saturating_sub(1);
-            if n.open > 0 || n.complete || n.kind == NodeKind::Unreadable {
+            if n.open > 0 || n.complete || n.partial || n.kind == NodeKind::Unreadable {
                 return;
             }
             n.complete = true;
@@ -426,10 +430,15 @@ impl DiskIndex {
         }
     }
 
-    fn name(&self, id: u32) -> String {
+    fn name_bytes(&self, id: u32) -> &[u8] {
         let n = &self.nodes[id as usize];
         let s = n.name_off as usize;
-        String::from_utf8_lossy(&self.names[s..s + n.name_len as usize]).into_owned()
+        &self.names[s..s + n.name_len as usize]
+    }
+
+    /// The name for display: what cannot be shown as text is replaced, so never use it to rebuild a path.
+    fn name(&self, id: u32) -> String {
+        String::from_utf8_lossy(self.name_bytes(id)).into_owned()
     }
 
     /// One node's summary.
@@ -440,15 +449,16 @@ impl DiskIndex {
         Ok(self.info(id.0))
     }
 
-    /// The names from the root down to `id` (the root's own name first).
-    pub fn path_names(&self, id: NodeId) -> Result<Vec<String>, IndexError> {
+    /// The names from the root down to `id` (the root's own name first) exactly as the file system gave them, as the bytes of
+    /// `OsStr::as_encoded_bytes`. Unlike the display names, they rebuild the path of a name that is not valid text.
+    pub fn path_components(&self, id: NodeId) -> Result<Vec<Vec<u8>>, IndexError> {
         if (id.0 as usize) >= self.nodes.len() {
             return Err(IndexError::NoSuchNode);
         }
         let mut out = Vec::new();
         let mut at = id.0;
         while at != NONE {
-            out.push(self.name(at));
+            out.push(self.name_bytes(at).to_vec());
             at = self.nodes[at as usize].parent;
         }
         out.reverse();
@@ -470,7 +480,10 @@ impl DiskIndex {
         }
         kids.sort_unstable_by(|a, b| {
             let (x, y) = (&self.nodes[*a as usize], &self.nodes[*b as usize]);
-            y.bytes.cmp(&x.bytes).then_with(|| self.name(*a).cmp(&self.name(*b))).then(a.cmp(b))
+            y.bytes
+                .cmp(&x.bytes)
+                .then_with(|| self.name_bytes(*a).cmp(self.name_bytes(*b)))
+                .then(a.cmp(b))
         });
         let min_bytes = if min_fraction > 0.0 {
             (parent.bytes as f64 * min_fraction.min(1.0)).ceil() as u64
@@ -596,7 +609,7 @@ mod tests {
         let mut i = DiskIndex::new("r", limits(1000));
         let r = i.root();
         for n in 0..10 {
-            let f = i.add_folder(r, &format!("f{n}")).unwrap();
+            let f = i.add_folder(r, format!("f{n}")).unwrap();
             i.add_file(f, "x", Sizes::same(2 * MB + n), Timestamp(1));
             i.finish_listing(f);
         }
@@ -682,6 +695,23 @@ mod tests {
         j.finish_listing(locked);
         assert!(!j.is_complete());
         assert_eq!(j.reopen_unreadable(), vec![locked], "it can be tried again later");
+    }
+
+    #[test]
+    fn a_partly_unreadable_folder_keeps_the_tree_incomplete() {
+        let mut i = DiskIndex::new("r", limits(100));
+        let r = i.root();
+        let a = i.add_folder(r, "a").unwrap();
+        i.add_file(a, "x", Sizes::same(5), Timestamp(1));
+        i.mark_partial(a);
+        i.finish_listing(a);
+        i.finish_listing(r);
+        assert!(!i.node(a).unwrap().complete && !i.is_complete());
+        assert!(
+            i.reopen_unreadable().is_empty(),
+            "a partial folder is not retried: its files are counted"
+        );
+        assert_eq!(i.node(a).unwrap().kind, NodeKind::Folder, "it is still a folder you can open");
     }
 
     #[test]
@@ -794,23 +824,67 @@ mod tests {
         let kids = i.children(i.root(), 0, 10, 0.0).unwrap();
         let a = NodeId(kids.children[0].id);
         let big = NodeId(i.children(a, 0, 1, 0.0).unwrap().children[0].id);
-        assert_eq!(i.path_names(big).unwrap(), ["vol", "a", "big.bin"]);
+        let names: Vec<String> = i
+            .path_components(big)
+            .unwrap()
+            .iter()
+            .map(|n| String::from_utf8(n.clone()).unwrap())
+            .collect();
+        assert_eq!(names, ["vol", "a", "big.bin"]);
         assert_eq!(i.node(big).unwrap().name, "big.bin");
         assert_eq!(i.node(NodeId(9999)), Err(IndexError::NoSuchNode));
-        assert_eq!(i.path_names(NodeId(9999)), Err(IndexError::NoSuchNode));
+        assert_eq!(i.path_components(NodeId(9999)), Err(IndexError::NoSuchNode));
         assert_eq!(i.children(NodeId(9999), 0, 1, 0.0), Err(IndexError::NoSuchNode));
         assert_eq!(IndexError::NoSuchNode.to_string(), "that folder is not in this scan");
         assert!(i.children(big, 0, 10, 0.0).unwrap().children.is_empty());
     }
 
     #[test]
-    fn long_names_are_cut_on_a_character_boundary() {
+    fn names_are_kept_as_the_file_system_gave_them() {
         let mut i = DiskIndex::new("r", limits(10));
-        let long = "é".repeat(200);
-        let f = i.add_folder(i.root(), &long).unwrap();
-        let name = i.node(f).unwrap().name;
-        assert!(name.len() <= 255 && name.chars().all(|c| c == 'é'));
-        assert_eq!(clamp_name("short"), "short");
+        let odd = unsafe_free_odd_name();
+        let f = i.add_folder(i.root(), &odd).unwrap();
+        assert_eq!(
+            i.path_components(f).unwrap()[1],
+            odd.as_encoded_bytes(),
+            "exact bytes for rebuilding the path"
+        );
+        assert!(
+            i.node(f).unwrap().name.contains('\u{fffd}') || odd.to_str().is_some(),
+            "display text may replace what is not text"
+        );
+        let long = "é".repeat(500);
+        let g = i.add_folder(i.root(), &long).unwrap();
+        assert_eq!(
+            i.path_components(g).unwrap()[1].len(),
+            1000,
+            "a name no file system allows is cut only past 1024 bytes"
+        );
+    }
+
+    /// A name that is not valid text where the platform allows one (Unix); a plain one elsewhere.
+    fn unsafe_free_odd_name() -> std::ffi::OsString {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(vec![b'a', 0xff, b'b'])
+        }
+        #[cfg(not(unix))]
+        {
+            std::ffi::OsString::from("ab")
+        }
+    }
+
+    #[test]
+    fn children_of_equal_size_are_ordered_by_name_bytes() {
+        let mut i = DiskIndex::new("r", limits(10));
+        let r = i.root();
+        for n in ["b", "a", "c"] {
+            let f = i.add_folder(r, n).unwrap();
+            i.finish_listing(f);
+        }
+        let names: Vec<String> = i.children(r, 0, 10, 0.0).unwrap().children.into_iter().map(|c| c.name).collect();
+        assert_eq!(names, ["a", "b", "c"]);
     }
 
     #[test]

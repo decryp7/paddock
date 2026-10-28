@@ -76,11 +76,12 @@ fn children() -> Value {
         Timestamp(1_700_000_000_000),
     );
     i.add_file(root, "swap", Sizes::same(4), Timestamp(1_600_000_000_000));
+    i.add_file(root, "vm.img", Sizes { on_disk: 100, logical: 90 }, Timestamp(1_650_000_000_000));
     i.add_mount_point(root, "Volumes");
     let locked = i.add_folder(root, "private").unwrap();
     i.mark_unreadable(locked);
     i.finish_listing(users);
-    to_value(i.children(root, 0, 2, 0.5).unwrap()).unwrap()
+    to_value(i.children(root, 0, 10, 0.0).unwrap()).unwrap()
 }
 
 fn sample() -> Value {

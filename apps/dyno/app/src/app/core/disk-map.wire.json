@@ -11,6 +11,39 @@
         "logicalBytes": 480,
         "name": "Users",
         "newestChange": 1700000000000
+      },
+      {
+        "bytes": 100,
+        "complete": true,
+        "hasChildren": false,
+        "id": 3,
+        "items": 1,
+        "kind": "file",
+        "logicalBytes": 90,
+        "name": "vm.img",
+        "newestChange": 1650000000000
+      },
+      {
+        "bytes": 0,
+        "complete": true,
+        "hasChildren": false,
+        "id": 4,
+        "items": 0,
+        "kind": "mountPoint",
+        "logicalBytes": 0,
+        "name": "Volumes",
+        "newestChange": 0
+      },
+      {
+        "bytes": 0,
+        "complete": false,
+        "hasChildren": false,
+        "id": 5,
+        "items": 0,
+        "kind": "unreadable",
+        "logicalBytes": 0,
+        "name": "private",
+        "newestChange": 0
       }
     ],
     "loose": {
@@ -21,24 +54,24 @@
     },
     "nextOffset": null,
     "node": {
-      "bytes": 504,
+      "bytes": 604,
       "complete": false,
       "hasChildren": true,
       "id": 0,
-      "items": 5,
+      "items": 6,
       "kind": "folder",
-      "logicalBytes": 484,
+      "logicalBytes": 574,
       "name": "Macintosh HD",
       "newestChange": 1700000000000
     },
     "offset": 0,
     "other": {
       "bytes": 0,
-      "count": 2,
+      "count": 0,
       "items": 0,
       "logicalBytes": 0
     },
-    "shown": 1
+    "shown": 4
   },
   "phases": [
     "readingVolumeFacts",

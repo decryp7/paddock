@@ -9,7 +9,7 @@ const MIB: u64 = 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DiskSettings {
-    /// The most nodes one scan keeps (`disk.scan.folders`); 10,000 to the hard limit of 5,000,000.
+    /// The most nodes one scan keeps (`disk.scanFolders`); 10,000 to the hard limit of 5,000,000.
     pub scan_folders: u32,
     /// Files of at least this many MiB get a node of their own; smaller ones are folded into their folder (1 to 1,024).
     pub notable_file_mib: u32,
@@ -56,9 +56,17 @@ mod tests {
 
     #[test]
     fn values_are_clamped_and_become_limits() {
-        let low = DiskSettings { scan_folders: 0, notable_file_mib: 0 }.clamped();
+        let low = DiskSettings {
+            scan_folders: 0,
+            notable_file_mib: 0,
+        }
+        .clamped();
         assert_eq!((low.scan_folders, low.notable_file_mib), (10_000, 1));
-        let high = DiskSettings { scan_folders: u32::MAX, notable_file_mib: u32::MAX }.limits();
+        let high = DiskSettings {
+            scan_folders: u32::MAX,
+            notable_file_mib: u32::MAX,
+        }
+        .limits();
         assert_eq!((high.max_nodes, high.notable_bytes), (HARD_MAX_NODES, 1024 * MIB));
     }
 

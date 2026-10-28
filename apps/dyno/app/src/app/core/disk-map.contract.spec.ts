@@ -43,12 +43,29 @@ const status = (state: DiskScanStatus['state'], volume: Volume | null): DiskScan
 
 const phases: ScanPhase[] = ['readingVolumeFacts', 'readingFolders'];
 
+const child = (id: number, name: string, kind: DiskChildren['children'][number]['kind'], bytes: number, logicalBytes: number, items: number, complete: boolean, newestChange: number, hasChildren = false) => ({
+  id,
+  name,
+  kind,
+  bytes,
+  logicalBytes,
+  items,
+  newestChange,
+  complete,
+  hasChildren,
+});
+
 const children: DiskChildren = {
-  node: { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 504, logicalBytes: 484, items: 5, newestChange: 1_700_000_000_000, complete: false, hasChildren: true },
-  children: [{ id: 1, name: 'Users', kind: 'folder', bytes: 500, logicalBytes: 480, items: 1, newestChange: 1_700_000_000_000, complete: true, hasChildren: true }],
-  other: { count: 2, bytes: 0, logicalBytes: 0, items: 0 },
+  node: { id: 0, name: 'Macintosh HD', kind: 'folder', bytes: 604, logicalBytes: 574, items: 6, newestChange: 1_700_000_000_000, complete: false, hasChildren: true },
+  children: [
+    child(1, 'Users', 'folder', 500, 480, 1, true, 1_700_000_000_000, true),
+    child(3, 'vm.img', 'file', 100, 90, 1, true, 1_650_000_000_000),
+    child(4, 'Volumes', 'mountPoint', 0, 0, 0, true, 0),
+    child(5, 'private', 'unreadable', 0, 0, 0, false, 0),
+  ],
+  other: { count: 0, bytes: 0, logicalBytes: 0, items: 0 },
   loose: { count: 1, bytes: 4, logicalBytes: 4, items: 1 },
-  shown: 1,
+  shown: 4,
   offset: 0,
   nextOffset: null,
 };
@@ -90,7 +107,7 @@ describe('the disk map wire contract with the engine', () => {
 
   it('covers every variant the engine can send', () => {
     const kinds = new Set(wire.children.children.map((c) => c.kind));
-    expect(kinds.size).toBeGreaterThan(0);
+    expect([...kinds].sort()).toEqual(['file', 'folder', 'mountPoint', 'unreadable']);
     expect(wire.statuses.map((s) => (typeof s.state === 'string' ? s.state : Object.keys(s.state)[0]))).toEqual(['running', 'done', 'cancelled', 'failed', 'failed', 'failed']);
   });
 });

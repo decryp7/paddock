@@ -4,7 +4,7 @@
 use super::engine::{End, LiveWorkers, RetryError, Snapshot, Walk, WalkConfig, WalkHooks};
 use super::folder;
 use super::volumes::{ListedVolume, VolumeLister};
-use dyno_core::disk::index::{DiskChildren, NodeId, ScanLimits};
+use dyno_core::disk::index::{DiskChildren, DiskIndex, NodeId, ScanLimits};
 use dyno_core::disk::scan::{
     eta_seconds, hidden_bytes, per_second, walk_threads, DiskScanStatus, DiskTarget, EventGate, ScanFailure, ScanPhase, ScanProgress,
     ScanState,
@@ -13,15 +13,19 @@ use dyno_core::disk::source::{DirSource, ReadError};
 use dyno_core::disk::volume::{Volume, VolumeLocation};
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::time::Timestamp;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Scans running at once.
 pub const MAX_RUNNING: usize = 2;
 /// Scans kept (running and finished); the oldest finished one goes first.
 pub const MAX_KEPT: usize = 3;
+/// The most nodes the kept scans may hold together, counting the room a new scan may take (the memory bound across scans).
+pub const MAX_KEPT_NODES: usize = 8_000_000;
+/// How long the first look at a scan's root may take before the start is refused (a dead share must not hold the request).
+pub const STAT_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Threads of one server still inside calls that never returned before a new scan of it is refused.
 pub const MAX_ABANDONED_PER_HOST: usize = 4;
 
@@ -251,6 +255,11 @@ pub struct DiskCentre {
     access: Arc<dyn AccessProbe>,
     cores: usize,
     limits: Mutex<ScanLimits>,
+    /// The volume list as last asked for.
+    known: Mutex<Option<Vec<ListedVolume>>>,
+    /// Scans (and retries) that have a slot but are not kept yet: counted as running, so two starts cannot both take the last slot.
+    starting: Mutex<HashSet<String>>,
+    kept_nodes: AtomicUsize,
     next: AtomicU64,
     scans: Mutex<Vec<Arc<Entry>>>,
     live: Mutex<HashMap<String, Arc<LiveWorkers>>>,
@@ -279,10 +288,18 @@ impl DiskCentre {
             access,
             cores,
             limits: Mutex::new(limits),
+            known: Mutex::new(None),
+            starting: Mutex::new(HashSet::new()),
+            kept_nodes: AtomicUsize::new(MAX_KEPT_NODES),
             next: AtomicU64::new(1),
             scans: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The most nodes kept scans may hold together (tests lower it; the default is [`MAX_KEPT_NODES`]).
+    pub fn set_kept_nodes(&self, nodes: usize) {
+        self.kept_nodes.store(nodes, Ordering::Relaxed);
     }
 
     /// New limits for the scans that start from now on (a running scan keeps its own).
@@ -290,18 +307,35 @@ impl DiskCentre {
         *lock(&self.limits) = limits;
     }
 
-    /// The volumes mounted now.
+    /// The volumes mounted now. Asks the system (slow on a Mac with a share that has gone away) and remembers the answer, which
+    /// starting a scan then uses instead of asking again.
     pub fn volumes(&self) -> Vec<Volume> {
-        self.lister.list().into_iter().map(|l| l.volume).collect()
+        self.refresh().into_iter().map(|l| l.volume).collect()
+    }
+
+    fn refresh(&self) -> Vec<ListedVolume> {
+        let listed = self.lister.list();
+        *lock(&self.known) = Some(listed.clone());
+        listed
+    }
+
+    /// The volumes as last listed; listed now only when never listed (or `fresh`).
+    fn listed(&self, fresh: bool) -> Vec<ListedVolume> {
+        let known = lock(&self.known).clone();
+        match known {
+            Some(k) if !fresh => k,
+            _ => self.refresh(),
+        }
     }
 
     fn resolve(&self, target: &DiskTarget) -> Result<Resolved, AgentError> {
-        let listed = self.lister.list();
         match target {
             DiskTarget::Volume { id } => {
-                let ListedVolume { volume, root } = listed
-                    .into_iter()
-                    .find(|l| &l.volume.id == id)
+                let find = |l: Vec<ListedVolume>| l.into_iter().find(|l| &l.volume.id == id);
+                // A volume the last listing did not know, or knew as not answering, is looked for once more.
+                let ListedVolume { volume, root } = find(self.listed(false))
+                    .filter(|l| l.volume.reachable)
+                    .or_else(|| find(self.listed(true)))
                     .ok_or_else(|| err(ErrorCode::NotFound, "That volume is not mounted any more."))?;
                 if !volume.reachable {
                     return Err(err(ErrorCode::Timeout, format!("{} is not answering.", volume.name)));
@@ -318,7 +352,8 @@ impl DiskCentre {
             }
             DiskTarget::Folder { path } => {
                 let root = folder::check(path).map_err(|m| err(ErrorCode::BadRequest, m))?;
-                let home = listed
+                let home = self
+                    .listed(false)
                     .into_iter()
                     .filter(|l| root.starts_with(&l.root) || root.starts_with(&l.volume.mount))
                     .max_by_key(|l| l.volume.mount.len());
@@ -340,43 +375,62 @@ impl DiskCentre {
         }
     }
 
-    /// Starts a scan, or returns the one already running for the same folder. Returns at once.
-    pub fn start(&self, target: DiskTarget) -> Result<DiskScanStatus, AgentError> {
-        let r = self.resolve(&target)?;
-        let key = format!("disk-scan:{}", r.root.display());
-        let live = lock(&self.live).entry(r.host.clone()).or_default().clone();
-        let mut scans = lock(&self.scans);
+    /// Takes one of the running slots for `key`, or says why not. `Ok(Some(status))` is a scan of the same folder already running.
+    fn reserve(&self, key: &str, host: &str, threads_needed: bool) -> Result<Option<DiskScanStatus>, AgentError> {
+        let scans = lock(&self.scans);
+        let mut starting = lock(&self.starting);
         if let Some(e) = scans.iter().find(|e| e.key == key && e.running()) {
-            return Ok(e.meta.current(&e.walk));
+            return Ok(Some(e.meta.current(&e.walk)));
         }
-        if scans.iter().filter(|e| e.running()).count() >= MAX_RUNNING {
+        if starting.contains(key) {
+            return Err(err(ErrorCode::Busy, "That scan is just starting."));
+        }
+        if scans.iter().filter(|e| e.running()).count() + starting.len() >= MAX_RUNNING {
             return Err(err(
                 ErrorCode::Busy,
                 "Two scans are already running. Stop one or wait for it to finish.",
             ));
         }
-        // Threads of this host that are alive although no running scan owns them: stuck in calls that never returned.
-        let owned: usize = scans.iter().filter(|e| e.running() && e.host == r.host).map(|e| e.threads).sum();
-        let abandoned = live.count().saturating_sub(owned);
-        if abandoned >= MAX_ABANDONED_PER_HOST {
-            return Err(err(
-                ErrorCode::Busy,
-                format!(
-                    "{} still has {abandoned} reads that have not returned, so Dyno will not start another scan of it.",
-                    r.host
-                ),
-            ));
+        if threads_needed {
+            // Threads of this host that are alive although no running scan owns them: stuck in calls that never returned.
+            let live = lock(&self.live).entry(host.to_string()).or_default().clone();
+            let owned: usize = scans.iter().filter(|e| e.running() && e.host == host).map(|e| e.threads).sum();
+            let abandoned = live.count().saturating_sub(owned);
+            if abandoned >= MAX_ABANDONED_PER_HOST {
+                return Err(err(
+                    ErrorCode::Busy,
+                    format!("{host} still has {abandoned} reads that have not returned, so Dyno will not start another scan of it."),
+                ));
+            }
         }
-        while scans.len() >= MAX_KEPT {
-            // At most MAX_RUNNING (< MAX_KEPT) scans run, so a finished one is always there to drop.
-            let old = scans.iter().position(|e| !e.running()).unwrap_or(0);
-            scans.remove(old);
+        starting.insert(key.to_string());
+        Ok(None)
+    }
+
+    fn release(&self, key: &str) {
+        lock(&self.starting).remove(key);
+    }
+
+    /// Starts a scan, or returns the one already running for the same folder. Returns at once: the volume list is the one last
+    /// asked for, and the slow parts (the access probe, the first look at the root) happen outside the lock on the scans.
+    pub fn start(&self, target: DiskTarget) -> Result<DiskScanStatus, AgentError> {
+        let r = self.resolve(&target)?;
+        let key = format!("disk-scan:{}", r.root.display());
+        if let Some(running) = self.reserve(&key, &r.host, true)? {
+            return Ok(running);
         }
+        let started = self.begin(target, &r, &key);
+        self.release(&key);
+        started
+    }
+
+    fn begin(&self, target: DiskTarget, r: &Resolved, key: &str) -> Result<DiskScanStatus, AgentError> {
+        let live = lock(&self.live).entry(r.host.clone()).or_default().clone();
         let meta = Arc::new(Meta {
             scan: self.next.fetch_add(1, Ordering::Relaxed),
             name: r.name.clone(),
             target,
-            volume: r.volume,
+            volume: r.volume.clone(),
             fda_missing: self.access.full_disk_access_missing(),
             state: Mutex::new(Pub {
                 gate: EventGate::default(),
@@ -391,13 +445,16 @@ impl DiskCentre {
             clock: self.clock.clone(),
         });
         let threads = walk_threads(&r.location, r.rotational, self.cores);
+        let limits = *lock(&self.limits);
         let cfg = WalkConfig {
             threads,
-            limits: *lock(&self.limits),
+            limits,
             cross_volumes: false,
             total_bytes: r.total_bytes,
             live,
             spawn: super::engine::os_spawn,
+            stat_limit: STAT_LIMIT,
+            listing_progress_every: super::engine::LISTING_PROGRESS_EVERY,
         };
         meta.announce(r.total_bytes);
         let walk = Walk::start(self.source.clone(), r.root.clone(), &r.name, cfg, meta.clone()).map_err(|e| {
@@ -411,15 +468,32 @@ impl DiskCentre {
             err(code, message)
         })?;
         let status = meta.current(&walk);
+        let mut scans = lock(&self.scans);
+        // Only now, with the new scan running, do old ones make room: a failed start loses nobody's results.
+        self.evict(&mut scans, limits.max_nodes);
         scans.push(Arc::new(Entry {
             meta,
             walk,
-            key,
-            root: r.root,
-            host: r.host,
+            key: key.to_string(),
+            root: r.root.clone(),
+            host: r.host.clone(),
             threads,
         }));
         Ok(status)
+    }
+
+    /// Drops the oldest finished scans until there are at most [`MAX_KEPT`] with the new one, and the nodes they hold, with room
+    /// for a new scan of up to `incoming` nodes, stay within [`MAX_KEPT_NODES`]. A running scan is never dropped.
+    fn evict(&self, scans: &mut Vec<Arc<Entry>>, incoming: u32) {
+        let nodes = |scans: &Vec<Arc<Entry>>| scans.iter().map(|e| e.walk.with_index(DiskIndex::len)).sum::<usize>() + incoming as usize;
+        while scans.len() >= MAX_KEPT || nodes(scans) > self.kept_nodes.load(Ordering::Relaxed) {
+            match scans.iter().position(|e| !e.running()) {
+                Some(old) => {
+                    scans.remove(old);
+                }
+                None => break,
+            }
+        }
     }
 
     fn entry(&self, scan: u64) -> Result<Arc<Entry>, AgentError> {
@@ -428,6 +502,12 @@ impl DiskCentre {
             .find(|e| e.meta.scan == scan)
             .cloned()
             .ok_or_else(|| err(ErrorCode::NotFound, "That scan is no longer kept. Scan again."))
+    }
+
+    /// Blocks until the scan's current pass has ended (tests wait on this instead of on events or time).
+    pub fn wait_finished(&self, scan: u64) -> Result<(), AgentError> {
+        self.entry(scan)?.walk.wait();
+        Ok(())
     }
 
     /// Stops a scan and returns at once; what was counted stays. Stopping one that has ended does nothing.
@@ -440,13 +520,12 @@ impl DiskCentre {
     /// (new events, same id) and the tree completes if nothing else was missing. Returns at once with the status.
     pub fn retry(&self, scan: u64) -> Result<DiskScanStatus, AgentError> {
         let e = self.entry(scan)?;
-        if lock(&self.scans).iter().filter(|x| x.running()).count() >= MAX_RUNNING {
-            return Err(err(
-                ErrorCode::Busy,
-                "Two scans are already running. Stop one or wait for it to finish.",
-            ));
-        }
-        e.walk.retry().map_err(|x| match x {
+        let key = format!("disk-retry:{scan}");
+        // The retry takes a running slot like a start does, so two of them cannot both take the last one.
+        self.reserve(&key, &e.host, false)?;
+        let result = e.walk.retry();
+        self.release(&key);
+        result.map_err(|x| match x {
             RetryError::NotFinished => err(ErrorCode::Busy, "That scan has not finished. Wait for it, or scan again."),
             RetryError::NothingToRetry => err(
                 ErrorCode::BadRequest,
@@ -478,16 +557,20 @@ impl DiskCentre {
             .map_err(|x| err(ErrorCode::NotFound, x.to_string()))
     }
 
-    /// The full path of a node (for Reveal and Copy path).
+    /// The full path of a node as text (for Copy path; a name that is not text is shown with replacement characters).
     pub fn path(&self, scan: u64, node: u32) -> Result<String, AgentError> {
+        self.path_buf(scan, node).map(|p| p.to_string_lossy().into_owned())
+    }
+
+    /// The exact path of a node (for Reveal).
+    pub fn path_buf(&self, scan: u64, node: u32) -> Result<PathBuf, AgentError> {
         let e = self.entry(scan)?;
         let names = e
             .walk
-            .with_index(|i| i.path_names(NodeId(node)))
+            .with_index(|i| i.path_components(NodeId(node)))
             .map_err(|x| err(ErrorCode::NotFound, x.to_string()))?;
         // The root's own name is the scan's name, not part of the path: its path is the folder the scan started from.
-        let full = names.iter().skip(1).fold(e.root.clone(), |acc, n| acc.join(n));
-        Ok(full.to_string_lossy().into_owned())
+        Ok(super::names::join_components(&e.root, &names))
     }
 }
 
@@ -505,8 +588,8 @@ mod tests {
     use crate::disk::fs::OsDirSource;
     use crate::disk::testing::{FakeFs, Gate};
     use dyno_core::disk::index::NodeKind;
-    use std::path::Path;
     use dyno_core::disk::volume::NetworkProtocol;
+    use std::path::Path;
     use std::sync::atomic::AtomicU64;
 
     const MB: u64 = 1024 * 1024;
@@ -538,10 +621,12 @@ mod tests {
         }
     }
 
-    struct Fixed(Mutex<Vec<ListedVolume>>);
+    /// A fixed volume list that counts how often it was asked.
+    struct Fixed(Mutex<Vec<ListedVolume>>, AtomicUsize);
 
     impl VolumeLister for Fixed {
         fn list(&self) -> Vec<ListedVolume> {
+            self.1.fetch_add(1, Ordering::SeqCst);
             lock(&self.0).clone()
         }
     }
@@ -595,6 +680,7 @@ mod tests {
         events: Arc<Events>,
         clock: Arc<Manual>,
         access: Arc<Access>,
+        lister: Arc<Fixed>,
     }
 
     fn rig(source: Arc<dyn DirSource>, volumes: Vec<ListedVolume>) -> Rig {
@@ -603,9 +689,10 @@ mod tests {
             Arc::new(Manual::default()),
             Arc::new(Access::default()),
         );
+        let lister = Arc::new(Fixed(Mutex::new(volumes), AtomicUsize::new(0)));
         let centre = DiskCentre::new(
             source,
-            Arc::new(Fixed(Mutex::new(volumes))),
+            lister.clone(),
             events.clone(),
             clock.clone(),
             access.clone(),
@@ -621,6 +708,7 @@ mod tests {
             events,
             clock,
             access,
+            lister,
         }
     }
 
@@ -685,7 +773,7 @@ mod tests {
         let fs = Arc::new(FakeFs::new());
         let root = fs.root();
         for i in 0..8 {
-            let d = fs.dir(&root, &format!("d{i}"));
+            let d = fs.dir(&root, format!("d{i}"));
             fs.file(&d, "x", 10);
         }
         let mut v = vol("V", &root, VolumeLocation::Internal);
@@ -830,7 +918,7 @@ mod tests {
         for n in ["s1", "s2", "s3"] {
             let d = fs.dir(&root, n);
             for k in 0..2 {
-                let sub = fs.dir(&d, &format!("d{k}"));
+                let sub = fs.dir(&d, format!("d{k}"));
                 fs.file(&sub, "f", 1);
             }
             vols.push(vol(n, &d, net("nas.local")));
@@ -1005,7 +1093,7 @@ mod tests {
         let fs = Arc::new(FakeFs::new());
         let root = fs.root();
         for i in 0..6 {
-            let d = fs.dir(&root, &format!("d{i}"));
+            let d = fs.dir(&root, format!("d{i}"));
             fs.file(&d, "x", 1);
         }
         let r = rig(fs.clone(), vec![vol("V", &root, VolumeLocation::Internal)]);
@@ -1214,6 +1302,102 @@ mod tests {
             .filter(|e| e.seq > first.seq && e.state == ScanState::Running)
             .collect();
         assert!(during.iter().all(|e| e.eta_seconds.is_none()), "no estimate for a retry");
+    }
+
+    #[test]
+    fn starting_a_scan_uses_the_volume_list_already_asked_for() {
+        let fs = Arc::new(FakeFs::new());
+        tree(&fs, &fs.root());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        assert_eq!(r.centre.volumes().len(), 1);
+        let s = r.centre.start(DiskTarget::Volume { id: "V".into() }).unwrap();
+        wait_final(&r, s.scan);
+        assert_eq!(
+            r.lister.1.load(Ordering::SeqCst),
+            1,
+            "the system was asked once, not again by the start"
+        );
+        // A volume the list did not know is looked for once more; one that is still unknown is not found.
+        assert_eq!(
+            r.centre.start(DiskTarget::Volume { id: "gone".into() }).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        assert_eq!(r.lister.1.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_start_held_at_the_first_look_does_not_block_the_other_requests() {
+        let fs = Arc::new(FakeFs::new());
+        tree(&fs, &fs.root());
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_stat(move |_| g.pass());
+        let r = Arc::new(rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]));
+        let starting = r.clone();
+        let t = std::thread::spawn(move || starting.centre.start(DiskTarget::Volume { id: "V".into() }));
+        gate.wait_arrived(1);
+        // The start is inside the first look at the root: everything else still answers.
+        assert!(r.centre.scans().is_empty());
+        assert_eq!(r.centre.retry(1).unwrap_err().code, ErrorCode::NotFound);
+        let second = r.centre.start(DiskTarget::Volume { id: "V".into() });
+        assert_eq!(second.unwrap_err().code, ErrorCode::Busy, "the same scan is just starting");
+        gate.open();
+        let s = t.join().unwrap().unwrap();
+        wait_final(&r, s.scan);
+    }
+
+    #[test]
+    fn a_start_that_fails_keeps_every_finished_scan_and_a_good_one_makes_room() {
+        let fs = Arc::new(FakeFs::new());
+        let root = fs.root();
+        let dirs: Vec<PathBuf> = ["a", "b", "c", "d"].iter().map(|n| fs.dir(&root, n)).collect();
+        let r = rig(
+            fs.clone(),
+            dirs.iter()
+                .enumerate()
+                .map(|(i, d)| vol(&format!("V{i}"), d, VolumeLocation::Internal))
+                .chain([vol("Dead", Path::new("fake-root/missing"), VolumeLocation::Internal)])
+                .collect(),
+        );
+        for i in 0..MAX_KEPT {
+            let s = r.centre.start(DiskTarget::Volume { id: format!("V{i}") }).unwrap();
+            wait_final(&r, s.scan);
+        }
+        assert_eq!(r.centre.scans().len(), MAX_KEPT);
+        assert_eq!(
+            r.centre.start(DiskTarget::Volume { id: "Dead".into() }).unwrap_err().code,
+            ErrorCode::NotFound
+        );
+        assert_eq!(r.centre.scans().len(), MAX_KEPT, "a start that failed took nobody's results");
+        let s = r.centre.start(DiskTarget::Volume { id: "V3".into() }).unwrap();
+        wait_final(&r, s.scan);
+        let kept: Vec<u64> = r.centre.scans().iter().map(|s| s.scan).collect();
+        assert_eq!(kept.len(), MAX_KEPT);
+        assert!(kept.contains(&s.scan) && !kept.contains(&1), "the oldest made room");
+    }
+
+    #[test]
+    fn kept_scans_together_are_held_to_a_node_budget() {
+        let fs = Arc::new(FakeFs::new());
+        let root = fs.root();
+        let (a, b) = (fs.dir(&root, "a"), fs.dir(&root, "b"));
+        for d in [&a, &b] {
+            for n in 0..5 {
+                fs.dir(d, format!("d{n}"));
+            }
+        }
+        let r = rig(
+            fs.clone(),
+            vec![vol("A", &a, VolumeLocation::Internal), vol("B", &b, VolumeLocation::Internal)],
+        );
+        // A kept scan holds 6 nodes and a new one may take 10_000: with a budget of 10_003 nothing fits next to it, so the older goes.
+        r.centre.set_kept_nodes(10_003);
+        let first = r.centre.start(DiskTarget::Volume { id: "A".into() }).unwrap();
+        wait_final(&r, first.scan);
+        let second = r.centre.start(DiskTarget::Volume { id: "B".into() }).unwrap();
+        wait_final(&r, second.scan);
+        let kept: Vec<u64> = r.centre.scans().iter().map(|s| s.scan).collect();
+        assert_eq!(kept, vec![second.scan]);
     }
 
     #[test]

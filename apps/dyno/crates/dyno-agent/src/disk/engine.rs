@@ -7,7 +7,7 @@ use dyno_core::disk::index::{DiskIndex, NodeId, ScanLimits, Sizes};
 use dyno_core::disk::scan::{ScanFailure, ScanProgress, UNREADABLE_LISTED};
 use dyno_core::disk::source::{DirEntryInfo, DirSource, EntryKind, ReadError};
 use dyno_core::time::Timestamp;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -40,7 +40,8 @@ pub trait WalkHooks: Send + Sync {
 /// Why a retry did not start.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetryError {
-    /// The walk is still running, or it ended by Cancel or an error (only a pass that finished can be retried).
+    /// The walk is still running, or its first pass ended by Cancel or an error (only a finished tree, or one whose retry was
+    /// cut short, can be retried).
     NotFinished,
     /// Every folder was read.
     NothingToRetry,
@@ -110,11 +111,20 @@ pub struct WalkConfig {
     pub live: Arc<LiveWorkers>,
     /// How threads are started ([`os_spawn`]; tests give one that fails).
     pub spawn: Spawn,
+    /// How long the first look at the root may take (a dead share must not hold the caller).
+    pub stat_limit: std::time::Duration,
+    /// A folder being listed reports its progress every this many entries (a huge folder is no longer silent).
+    pub listing_progress_every: usize,
 }
+
+/// Entries read between two progress reports inside one folder.
+pub const LISTING_PROGRESS_EVERY: usize = 4096;
 
 struct Task {
     node: NodeId,
     path: PathBuf,
+    /// A second try of a refused folder: "not found" then means the path could not be rebuilt, not that the folder is empty.
+    retry: bool,
 }
 
 #[derive(Default)]
@@ -143,6 +153,18 @@ pub struct Walk {
     /// Every folder was read (set by the worker that saw the queue run dry).
     completed: AtomicBool,
     root_dev: u64,
+    /// Counts the passes; a worker of an earlier one is told apart from the current ones by it.
+    epoch: AtomicU64,
+    /// The latest pass was a retry: if it was cut short, the first pass's tree is still whole, so a retry may follow.
+    retry_pass: AtomicBool,
+    /// Held while a pass ends or begins, so a retry, a cancel and a failure cannot interleave and leave the state half-changed.
+    gate: Mutex<()>,
+    /// Folders reopened by a retry and not yet read again, with their paths: if the pass ends early they are marked refused again.
+    reopened: Mutex<HashMap<NodeId, PathBuf>>,
+    /// Items seen inside folders still being listed, not in the index yet (taken off when the folder is committed).
+    pending_items: AtomicU64,
+    /// The highest item count shown so far: the count shown never goes back.
+    shown_items: AtomicU64,
     /// The folder the walk started from.
     root: PathBuf,
     cfg: WalkConfig,
@@ -177,7 +199,11 @@ impl Walk {
         cfg: WalkConfig,
         hooks: Arc<dyn WalkHooks>,
     ) -> Result<Arc<Walk>, ReadError> {
-        let me = source.stat(&root)?;
+        let me = {
+            let (src, path) = (source.clone(), root.clone());
+            super::volumes::within(cfg.stat_limit, move || src.stat(&path))
+                .ok_or_else(|| ReadError::Unreachable("the first look at the folder did not return in time".into()))??
+        };
         if me.kind != EntryKind::Dir {
             return Err(ReadError::Other("that is not a folder".into()));
         }
@@ -195,6 +221,7 @@ impl Walk {
                 stack: vec![Task {
                     node: root_node,
                     path: root,
+                    retry: false,
                 }],
                 ..Queue::default()
             }),
@@ -204,6 +231,12 @@ impl Walk {
             alive: AtomicUsize::new(cfg.threads.max(1)),
             completed: AtomicBool::new(false),
             root_dev: me.dev,
+            gate: Mutex::new(()),
+            retry_pass: AtomicBool::new(false),
+            epoch: AtomicU64::new(0),
+            reopened: Mutex::new(HashMap::new()),
+            pending_items: AtomicU64::new(0),
+            shown_items: AtomicU64::new(0),
             entered: Mutex::new(entered),
             linked: Mutex::new(HashSet::new()),
             folders: AtomicU64::new(0),
@@ -216,12 +249,16 @@ impl Walk {
                 ..cfg
             },
         });
-        walk.launch(walk.cfg.threads)?;
+        let failed = walk.launch(walk.cfg.threads)?;
+        walk.forget_unstarted(failed);
         Ok(walk)
     }
 
-    /// Starts `threads` workers (the caller has set `alive` to the same number). Fails only when not even one starts.
-    fn launch(self: &Arc<Self>, threads: usize) -> Result<(), ReadError> {
+    /// Starts `threads` workers (the caller has set `alive` to the same number); returns how many could not start. Fails only
+    /// when not even the first starts.
+    fn launch(self: &Arc<Self>, threads: usize) -> Result<usize, ReadError> {
+        let mut failed = 0;
+        let epoch = self.epoch.load(Ordering::SeqCst);
         for n in 0..threads {
             let w = self.clone();
             let guard = self.cfg.live.enter();
@@ -230,7 +267,7 @@ impl Walk {
                 Box::new(move || {
                     dyno_platform::priority::background_current_thread();
                     // A bug in one reader ends the scan with a message; it never takes the agent down.
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker())).is_err() {
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| w.worker(epoch))).is_err() {
                         w.fail(ScanFailure::Internal {
                             detail: "a reader thread stopped unexpectedly".into(),
                         });
@@ -238,30 +275,40 @@ impl Walk {
                     // Done is announced by the last worker out, after its thread has left the host's count: a finished scan
                     // never looks like one with threads still stuck in calls.
                     drop(guard);
-                    w.worker_exited();
+                    if w.epoch.load(Ordering::SeqCst) == epoch {
+                        w.worker_exited();
+                    }
                 }),
             );
             if spawned.is_err() {
                 if n == 0 {
                     return Err(ReadError::Other("Dyno could not start a thread to read folders.".into()));
                 }
-                self.alive.fetch_sub(1, Ordering::SeqCst);
+                failed += 1;
             }
         }
-        Ok(())
+        Ok(failed)
+    }
+
+    /// Accounts for `failed` workers that never started, as if they had started and ended at once: if the others have finished
+    /// the walk already, the last one to be accounted for announces it. Called without the gate held.
+    fn forget_unstarted(&self, failed: usize) {
+        for _ in 0..failed {
+            self.worker_exited();
+        }
     }
 
     /// Reads once more the folders the finished pass could not open, and only those, into the same index: what they hold is
     /// added, and the tree completes if nothing else is missing. Returns at once; the pass runs on its own threads and ends
-    /// like any other (hooks `restarted`, then `progress`, then `ended`).
+    /// like any other (hooks `restarted`, then `progress`, then `ended`). A pass that is still ending is waited for (the gate).
     pub fn retry(self: &Arc<Self>) -> Result<(), RetryError> {
-        let mut end = lock(&self.end.0);
-        // The final event goes out just before the outcome is set, so a caller that reacts to the event at once can get
-        // here in between: wait for the outcome of a pass that is ending.
-        while end.is_none() && self.finishing.load(Ordering::SeqCst) {
-            end = self.end.1.wait(end).unwrap_or_else(|p| p.into_inner());
-        }
-        if *end != Some(End::Done) {
+        let gate = lock(&self.gate);
+        let retryable = match &*lock(&self.end.0) {
+            Some(End::Done) => true,
+            Some(_) => self.retry_pass.load(Ordering::SeqCst),
+            None => false,
+        };
+        if !retryable {
             return Err(RetryError::NotFinished);
         }
         let ids = lock(&self.index).reopen_unreadable();
@@ -271,21 +318,23 @@ impl Walk {
         let tasks: Vec<Task> = {
             let i = lock(&self.index);
             ids.iter()
-                .filter_map(|id| i.path_names(*id).ok().map(|names| (*id, names)))
+                .filter_map(|id| i.path_components(*id).ok().map(|names| (*id, names)))
                 .map(|(node, names)| Task {
                     node,
-                    path: names.iter().skip(1).fold(self.root.clone(), |p, n| p.join(n)),
+                    path: super::names::join_components(&self.root, &names),
+                    retry: true,
                 })
                 .collect()
         };
         let threads = self.cfg.threads.min(tasks.len()).max(1);
         let tasks_len = tasks.len();
-        let paths: Vec<PathBuf> = tasks.iter().map(|t| t.path.clone()).collect();
-        let again: HashSet<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let again: HashSet<String> = tasks.iter().map(|t| t.path.to_string_lossy().into_owned()).collect();
+        *lock(&self.reopened) = tasks.iter().map(|t| (t.node, t.path.clone())).collect();
         *lock(&self.queue) = Queue {
             stack: tasks,
             ..Queue::default()
         };
+        self.epoch.fetch_add(1, Ordering::SeqCst);
         self.stopped.store(false, Ordering::SeqCst);
         self.completed.store(false, Ordering::SeqCst);
         self.alive.store(threads, Ordering::SeqCst);
@@ -296,27 +345,43 @@ impl Walk {
             .store(self.unreadable.load(Ordering::Relaxed).saturating_sub(taken), Ordering::Relaxed);
         lock(&self.problems).unreadable_first.retain(|p| !again.contains(p));
         self.finishing.store(false, Ordering::SeqCst);
-        *end = None;
-        drop(end);
+        self.retry_pass.store(true, Ordering::SeqCst);
+        *lock(&self.end.0) = None;
+        // Still under the gate: no cancel or failure can end the pass before its start has been announced.
         self.hooks.restarted(self);
-        if self.launch(threads).is_err() {
-            // Nothing could start: leave every folder as it was and say the pass is over.
-            let mut i = lock(&self.index);
-            for id in ids {
-                i.mark_unreadable(id);
-                i.finish_listing(id);
+        match self.launch(threads) {
+            Ok(failed) => {
+                drop(gate);
+                self.forget_unstarted(failed);
+                Ok(())
             }
-            drop(i);
-            lock(&self.queue).stack.clear();
-            for p in &paths {
-                self.note_unreadable(p);
+            Err(_) => {
+                // Nothing could start: the folders are as they were, and the pass is over.
+                lock(&self.queue).stack.clear();
+                self.restore_reopened();
+                self.finish_locked(End::Done);
+                Err(RetryError::NoThread)
             }
-            self.finishing.store(true, Ordering::SeqCst);
-            *lock(&self.end.0) = Some(End::Done);
-            self.end.1.notify_all();
-            return Err(RetryError::NoThread);
         }
-        Ok(())
+    }
+
+    /// Marks the folders a retry reopened and did not get to read as refused again, with their counts, so that a retry cut short
+    /// loses nothing: the next one reads them.
+    fn restore_reopened(&self) {
+        let left: Vec<(NodeId, PathBuf)> = std::mem::take(&mut *lock(&self.reopened)).into_iter().collect();
+        if left.is_empty() {
+            return;
+        }
+        {
+            let mut i = lock(&self.index);
+            for (id, _) in &left {
+                i.mark_unreadable(*id);
+                i.finish_listing(*id);
+            }
+        }
+        for (_, path) in &left {
+            self.note_unreadable(path);
+        }
     }
 
     /// The numbers as of now, consistent with the index.
@@ -324,7 +389,9 @@ impl Walk {
         let (bytes, items, truncated) = {
             let i = lock(&self.index);
             let (b, it) = i.totals();
-            (b, it, i.truncated())
+            // What folders still being listed hold so far is counted too, and the count never goes back.
+            let now = it.saturating_add(self.pending_items.load(Ordering::Relaxed));
+            (b, self.shown_items.fetch_max(now, Ordering::Relaxed).max(now), i.truncated())
         };
         Snapshot {
             progress: ScanProgress {
@@ -376,8 +443,19 @@ impl Walk {
     }
 
     fn finish(&self, end: End) {
+        let _gate = lock(&self.gate);
+        self.finish_locked(end);
+    }
+
+    /// [`finish`](Self::finish) for a caller that holds the gate.
+    fn finish_locked(&self, end: End) {
         if self.finishing.swap(true, Ordering::SeqCst) {
             return;
+        }
+        if end != End::Done {
+            // A cancel that waited for the gate must still stop a pass that began meanwhile.
+            self.stopped.store(true, Ordering::SeqCst);
+            self.restore_reopened();
         }
         // The hook first, then the outcome: whoever sees the outcome can rely on the final event having been sent.
         self.hooks.ended(self, &end);
@@ -404,12 +482,15 @@ impl Walk {
         }
     }
 
-    fn worker(&self) {
+    /// One worker of the pass `epoch`. A worker left over from an earlier pass (it was inside a call that did not return when the
+    /// pass was cancelled) finds the epoch changed when it comes back and leaves without touching the new pass.
+    fn worker(&self, epoch: u64) {
+        let stale = || self.epoch.load(Ordering::SeqCst) != epoch;
         loop {
             let task = {
                 let mut q = lock(&self.queue);
                 loop {
-                    if self.stopped.load(Ordering::SeqCst) || q.finished {
+                    if stale() || self.stopped.load(Ordering::SeqCst) || q.finished {
                         return;
                     }
                     if let Some(t) = q.stack.pop() {
@@ -426,7 +507,10 @@ impl Walk {
                     q = self.wake.wait(q).unwrap_or_else(|p| p.into_inner());
                 }
             };
-            let children = self.process(&task);
+            let children = self.process(&task, epoch);
+            if stale() {
+                return;
+            }
             {
                 let mut q = lock(&self.queue);
                 q.in_flight -= 1;
@@ -458,16 +542,26 @@ impl Walk {
     }
 
     /// Reads one folder and commits it; returns the child folders to read next.
-    fn process(&self, task: &Task) -> Vec<Task> {
+    fn process(&self, task: &Task, epoch: u64) -> Vec<Task> {
         let notable = self.cfg.limits.notable_bytes;
         let mut dirs: Vec<DirEntryInfo> = Vec::new();
-        let mut mounts: Vec<String> = Vec::new();
+        let mut mounts: Vec<std::ffi::OsString> = Vec::new();
         let mut big: Vec<DirEntryInfo> = Vec::new();
         let (mut small, mut small_items, mut small_newest) = (Sizes::default(), 0u64, Timestamp(0));
         let mut unreachable: Option<String> = None;
+        let mut entry_denied = false;
+        // Entries seen that will be committed: counted at once as pending, so a huge folder shows its progress while it is read.
+        let mut seen = 0u64;
+        let every = self.cfg.listing_progress_every.max(1);
+        let mut until_report = every;
         let listed = self.source.read_dir(&task.path, &mut |entry| {
             if self.stopped.load(Ordering::Relaxed) {
                 return false;
+            }
+            until_report -= 1;
+            if until_report == 0 {
+                until_report = every;
+                self.hooks.progress(self);
             }
             match entry {
                 Ok(e) => match e.kind {
@@ -476,6 +570,8 @@ impl Walk {
                         if self.already_counted(&e) {
                             return true;
                         }
+                        seen += 1;
+                        self.pending_items.fetch_add(1, Ordering::Relaxed);
                         if e.bytes >= notable {
                             big.push(e);
                         } else {
@@ -486,14 +582,20 @@ impl Walk {
                         }
                     }
                     EntryKind::Dir => {
-                        if e.dev != self.root_dev && !self.cfg.cross_volumes {
+                        // A device of 0 is "not known" (the identity could not be read): never a reason to call it another volume.
+                        let other_volume = e.dev != 0 && self.root_dev != 0 && e.dev != self.root_dev;
+                        if other_volume && !self.cfg.cross_volumes {
+                            seen += 1;
+                            self.pending_items.fetch_add(1, Ordering::Relaxed);
                             mounts.push(e.name);
                         } else if e.ino == 0 || lock(&self.entered).insert((e.dev, e.ino)) {
+                            seen += 1;
+                            self.pending_items.fetch_add(1, Ordering::Relaxed);
                             dirs.push(e);
                         }
                     }
                 },
-                Err(ReadError::PermissionDenied) => self.note_unreadable(&task.path),
+                Err(ReadError::PermissionDenied) => entry_denied = true,
                 Err(ReadError::Unreachable(d)) => {
                     unreachable = Some(d);
                     return false;
@@ -503,26 +605,36 @@ impl Walk {
             true
         });
         if let Some(detail) = unreachable {
+            self.pending_items.fetch_sub(seen, Ordering::Relaxed);
             self.fail(ScanFailure::VolumeUnreachable { detail });
             return Vec::new();
         }
         let unreadable_here = match &listed {
             Ok(()) => false,
             Err(ReadError::Unreachable(d)) => {
+                self.pending_items.fetch_sub(seen, Ordering::Relaxed);
                 self.fail(ScanFailure::VolumeUnreachable { detail: d.clone() });
                 return Vec::new();
             }
-            Err(ReadError::NotFound) => false,
+            // Gone since it was listed: nothing to read. On a retry the path was rebuilt from the index, so "not found" may mean
+            // the path is wrong; the folder then stays refused rather than being called complete and empty.
+            Err(ReadError::NotFound) if !task.retry => false,
             Err(_) => {
                 self.note_unreadable(&task.path);
                 true
             }
         };
+        // A folder that listed but had entries the OS refused is partial: counted once, and incomplete for good.
+        let partial = entry_denied && !unreadable_here;
+        if partial {
+            self.note_unreadable(&task.path);
+        }
 
         let mut next = Vec::with_capacity(dirs.len());
         {
             let mut i = lock(&self.index);
-            if self.stopped.load(Ordering::SeqCst) {
+            if self.stopped.load(Ordering::SeqCst) || self.epoch.load(Ordering::SeqCst) != epoch {
+                self.pending_items.fetch_sub(seen, Ordering::Relaxed);
                 return Vec::new();
             }
             for d in &dirs {
@@ -530,6 +642,7 @@ impl Walk {
                     next.push(Task {
                         node,
                         path: task.path.join(&d.name),
+                        retry: false,
                     });
                 }
             }
@@ -553,6 +666,12 @@ impl Walk {
             if unreadable_here {
                 i.mark_unreadable(task.node);
             }
+            if partial {
+                i.mark_partial(task.node);
+            }
+            lock(&self.reopened).remove(&task.node);
+            // Taken off and put in the index in one step (the lock is held), so the count shown never dips or doubles.
+            self.pending_items.fetch_sub(seen, Ordering::Relaxed);
             i.finish_listing(task.node);
         }
         self.folders.fetch_add(1, Ordering::Relaxed);
@@ -603,6 +722,8 @@ mod tests {
             total_bytes: None,
             live: Arc::new(LiveWorkers::default()),
             spawn: os_spawn,
+            stat_limit: std::time::Duration::from_secs(30),
+            listing_progress_every: LISTING_PROGRESS_EVERY,
         }
     }
 
@@ -662,9 +783,9 @@ mod tests {
             let fs = FakeFs::new();
             let r = fs.root();
             for i in 0..6 {
-                let d = fs.dir(&r, &format!("d{i}"));
+                let d = fs.dir(&r, format!("d{i}"));
                 for j in 0..5 {
-                    let e = fs.dir(&d, &format!("e{j}"));
+                    let e = fs.dir(&d, format!("e{j}"));
                     fs.file(&e, "x", (i * 10 + j) as u64 * MB / 4);
                     let f = fs.dir(&e, "deep");
                     fs.file(&f, "y", 77 + j as u64);
@@ -751,8 +872,8 @@ mod tests {
         let fs = FakeFs::new();
         let r = fs.root();
         for ino in 0..4u64 {
-            fs.linked_file(&r, &format!("f{ino}"), 10, 900 + ino);
-            fs.linked_file(&r, &format!("g{ino}"), 10, 900 + ino);
+            fs.linked_file(&r, format!("f{ino}"), 10, 900 + ino);
+            fs.linked_file(&r, format!("g{ino}"), 10, 900 + ino);
         }
         let mut c = cfg(1);
         c.limits.max_hard_links = 2;
@@ -959,22 +1080,259 @@ mod tests {
     }
 
     #[test]
-    fn a_failure_to_start_one_of_several_threads_leaves_the_others_to_finish_the_walk() {
+    fn a_walk_whose_other_threads_could_not_start_still_ends() {
         use std::sync::atomic::AtomicBool;
         static FIRST: AtomicBool = AtomicBool::new(true);
-        fn once(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+        // The first thread does all the work before the next start is even tried; the others then fail. Nobody is left to
+        // announce the end except the accounting of the threads that never started.
+        fn inline_then_fail(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
             if FIRST.swap(false, Ordering::SeqCst) {
-                os_spawn(name, job)
+                job();
+                Ok(())
             } else {
-                Err(std::io::Error::other("no more threads"))
+                no_threads(name, job)
             }
         }
         let fs = Arc::new(sample());
         let mut c = cfg(3);
-        c.spawn = once;
-        let (w, _, end) = run(fs.clone(), fs.root(), c);
-        assert_eq!(end, End::Done, "the one thread that started finishes the walk");
+        c.spawn = inline_then_fail;
+        let rec = Arc::new(Rec::default());
+        let w = Walk::start(fs.clone(), fs.root(), "vol", c, rec.clone()).unwrap();
+        assert_eq!(
+            w.outcome(),
+            Some(End::Done),
+            "ended without anyone waiting for a thread that never ran"
+        );
         assert_eq!(w.snapshot().progress.bytes, 9 * MB + 125);
+        assert_eq!(*lock(&rec.ended), vec![End::Done]);
+    }
+
+    #[test]
+    fn an_unknown_device_is_not_another_volume() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        // What the Windows reader reports for a folder it could not open: device 0, no file id.
+        let unknown = fs.dir_on(&r, "unknown", 0, 0);
+        fs.file(&unknown, "inside", 77);
+        let (w, _, end) = run(Arc::new(fs), r, cfg(1));
+        assert_eq!(end, End::Done);
+        assert_eq!(w.snapshot().progress.bytes, 77, "walked, not skipped as a mount point");
+        let top = level(&w, 0);
+        assert_eq!(top.children[0].kind, dyno_core::disk::index::NodeKind::Folder);
+    }
+
+    #[test]
+    fn a_file_the_os_refuses_makes_its_folder_partial_and_is_counted_once() {
+        let (fs, _, _) = with_two_refused();
+        let ok = fs.root().join("ok");
+        fs.fail_entries(
+            &ok,
+            vec![
+                ReadError::PermissionDenied,
+                ReadError::PermissionDenied,
+                ReadError::PermissionDenied,
+            ],
+        );
+        let (w, _, _) = run(fs.clone(), fs.root(), cfg(1));
+        assert_eq!(w.snapshot().progress.unreadable, 2, "Library, and ok once for its three files");
+        let top = level(&w, 0);
+        let ok = top.children.iter().find(|c| c.name == "ok").unwrap();
+        assert_eq!(ok.kind, dyno_core::disk::index::NodeKind::Folder, "still a folder you can open");
+        assert!(!ok.complete, "but its size is a lower bound");
+    }
+
+    #[test]
+    fn a_retry_that_finds_nothing_at_the_path_keeps_the_folder_refused() {
+        let (fs, lib, _) = with_two_refused();
+        let (w, _, _) = run(fs.clone(), fs.root(), cfg(1));
+        // The path rebuilt for the retry leads nowhere (it was removed, or the name did not survive): not "empty and done".
+        fs.fail_open(&lib, ReadError::NotFound);
+        w.retry().unwrap();
+        w.wait();
+        assert_eq!(w.snapshot().progress.unreadable, 1);
+        assert!(!w.with_index(DiskIndex::is_complete));
+        let lib = level(&w, 0).children.into_iter().find(|c| c.name == "Library").unwrap();
+        assert_eq!(lib.kind, dyno_core::disk::index::NodeKind::Unreadable);
+    }
+
+    #[test]
+    fn a_retry_cut_short_by_cancel_leaves_the_refusals_as_they_were_and_can_be_repeated() {
+        let (fs, lib, _) = with_two_refused();
+        let (w, _, _) = run(fs.clone(), fs.root(), cfg(1));
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_read(move |_| g.pass());
+        fs.allow_open(&lib);
+        w.retry().unwrap();
+        gate.wait_arrived(1);
+        w.cancel();
+        gate.open();
+        assert_eq!(w.wait(), End::Cancelled);
+        let s = w.snapshot();
+        assert_eq!(
+            (s.progress.unreadable, s.unreadable_first.len()),
+            (1, 1),
+            "Library is still counted as refused"
+        );
+        let lib_node = level(&w, 0).children.into_iter().find(|c| c.name == "Library").unwrap();
+        assert_eq!(lib_node.kind, dyno_core::disk::index::NodeKind::Unreadable);
+        fs.on_read(|_| {});
+        w.retry().unwrap();
+        assert_eq!(w.wait(), End::Done, "the next retry reads it");
+        assert!(w.with_index(DiskIndex::is_complete));
+    }
+
+    /// Records the order of what the hooks are told; `restarted` can be held at a known point.
+    struct Order {
+        log: Mutex<Vec<&'static str>>,
+        in_restart: mpsc::Sender<()>,
+        hold: Arc<Gate>,
+    }
+
+    impl WalkHooks for Order {
+        fn progress(&self, _: &Walk) {}
+        fn ended(&self, _: &Walk, _: &End) {
+            lock(&self.log).push("ended");
+        }
+        fn restarted(&self, _: &Walk) {
+            lock(&self.log).push("restarted");
+            let _ = self.in_restart.send(());
+            self.hold.pass();
+        }
+    }
+
+    #[test]
+    fn a_cancel_that_meets_the_start_of_a_retry_ends_it_after_the_start_was_announced() {
+        let (fs, lib, _) = with_two_refused();
+        let (tx, rx) = mpsc::channel();
+        // Hold the retry inside `restarted`, cancel from another thread, then let the retry go on.
+        let hold2 = Gate::new();
+        let order2 = Arc::new(Order {
+            log: Mutex::new(Vec::new()),
+            in_restart: tx,
+            hold: hold2.clone(),
+        });
+        let w2 = Walk::start(fs.clone(), fs.root(), "vol", cfg(1), order2.clone()).unwrap();
+        w2.wait();
+        fs.allow_open(&lib);
+        let retrying = w2.clone();
+        let t = std::thread::spawn(move || retrying.retry());
+        rx.recv().unwrap();
+        let cancelling = w2.clone();
+        let c = std::thread::spawn(move || cancelling.cancel());
+        hold2.open();
+        t.join().unwrap().unwrap();
+        c.join().unwrap();
+        assert_eq!(w2.wait(), End::Cancelled);
+        assert_eq!(
+            *lock(&order2.log),
+            vec!["ended", "restarted", "ended"],
+            "never ended before it was announced as started"
+        );
+    }
+
+    #[test]
+    fn a_retry_that_cannot_start_a_thread_still_tells_the_hooks_it_ended() {
+        static OUT: AtomicBool = AtomicBool::new(false);
+        fn flaky(name: String, job: Box<dyn FnOnce() + Send + 'static>) -> std::io::Result<()> {
+            if OUT.load(Ordering::SeqCst) {
+                no_threads(name, job)
+            } else {
+                os_spawn(name, job)
+            }
+        }
+        let (fs, _, _) = with_two_refused();
+        let mut c = cfg(1);
+        c.spawn = flaky;
+        let (w, rec, _) = run(fs.clone(), fs.root(), c);
+        OUT.store(true, Ordering::SeqCst);
+        assert_eq!(w.retry(), Err(RetryError::NoThread));
+        assert_eq!(rec.restarts.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            *lock(&rec.ended),
+            vec![End::Done, End::Done],
+            "the pass that began also ended: nothing stays Running"
+        );
+    }
+
+    #[test]
+    fn the_first_look_at_a_root_that_does_not_return_is_given_up() {
+        let fs = FakeFs::new();
+        let gate = Gate::new();
+        let g = gate.clone();
+        fs.on_stat(move |_| g.pass());
+        let mut c = cfg(1);
+        c.stat_limit = std::time::Duration::from_millis(0);
+        let fs = Arc::new(fs);
+        let err = Walk::start(fs.clone(), fs.root(), "vol", c, Arc::new(Rec::default()))
+            .err()
+            .unwrap();
+        assert!(matches!(err, ReadError::Unreachable(_)));
+        gate.open();
+    }
+
+    /// Records the item count shown at every progress report.
+    #[derive(Default)]
+    struct Items(Mutex<Vec<u64>>);
+
+    impl WalkHooks for Items {
+        fn progress(&self, w: &Walk) {
+            lock(&self.0).push(w.snapshot().progress.items);
+        }
+        fn ended(&self, _: &Walk, _: &End) {}
+        fn restarted(&self, _: &Walk) {}
+    }
+
+    #[test]
+    fn a_big_folder_reports_while_it_is_read_and_the_count_never_goes_back() {
+        let fs = FakeFs::new();
+        let r = fs.root();
+        for n in 0..10 {
+            fs.file(&r, format!("f{n}"), 10);
+        }
+        let mut c = cfg(1);
+        c.listing_progress_every = 3;
+        let items = Arc::new(Items::default());
+        let w = Walk::start(Arc::new(fs), r, "vol", c, items.clone()).unwrap();
+        w.wait();
+        let seen = lock(&items.0).clone();
+        assert!(seen.len() >= 4, "three reports inside the folder, one after it: {seen:?}");
+        assert!(seen.windows(2).all(|p| p[0] <= p[1]), "never goes back: {seen:?}");
+        assert_eq!(
+            seen.iter().filter(|n| **n > 0 && **n < 10).count(),
+            3,
+            "counts of the folder still being read: {seen:?}"
+        );
+        assert_eq!(*seen.last().unwrap(), 10);
+        assert_eq!(
+            w.snapshot().progress.items,
+            10,
+            "nothing counted twice when the folder is committed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_whose_name_is_not_text_is_read_again_by_its_exact_name() {
+        use std::os::unix::ffi::OsStringExt;
+        let fs = FakeFs::new();
+        let r = fs.root();
+        let odd = std::ffi::OsString::from_vec(vec![b'M', 0xff, b'l']);
+        let dir = fs.dir(&r, &odd);
+        fs.file(&dir, "inside", 500);
+        fs.fail_open(&dir, ReadError::PermissionDenied);
+        let fs = Arc::new(fs);
+        let (w, _, _) = run(fs.clone(), r, cfg(1));
+        assert_eq!(w.snapshot().progress.bytes, 0);
+        fs.allow_open(&dir);
+        w.retry().unwrap();
+        w.wait();
+        assert_eq!(
+            w.snapshot().progress.bytes,
+            500,
+            "the lossy display name was not used to find the folder"
+        );
+        assert!(w.with_index(DiskIndex::is_complete));
     }
 
     #[test]
@@ -1018,7 +1376,7 @@ mod tests {
         let fs = FakeFs::new();
         let r = fs.root();
         for n in 0..15 {
-            let d = fs.dir(&r, &format!("locked{n}"));
+            let d = fs.dir(&r, format!("locked{n}"));
             fs.fail_open(&d, ReadError::PermissionDenied);
         }
         let (w, _, _) = run(Arc::new(fs), r, cfg(1));
@@ -1130,7 +1488,7 @@ mod tests {
         let fs = FakeFs::new();
         let r = fs.root();
         for i in 0..20 {
-            let d = fs.dir(&r, &format!("d{i}"));
+            let d = fs.dir(&r, format!("d{i}"));
             fs.file(&d, "x", 100);
         }
         let fs = Arc::new(fs);
@@ -1163,7 +1521,7 @@ mod tests {
         let fs = FakeFs::new();
         let r = fs.root();
         for i in 0..10 {
-            let d = fs.dir(&r, &format!("d{i}"));
+            let d = fs.dir(&r, format!("d{i}"));
             fs.file(&d, "x", 5);
         }
         let mut c = cfg(1);
