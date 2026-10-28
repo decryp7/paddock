@@ -1,5 +1,5 @@
 name: job-isolation
-description: "Job isolation on a host runner (README, Job isolation): `acquire` (the first bash step, before stable-workspace, build-folder and every kept folder) takes a free job slot of the host and points TMPDIR at the runner's own per-job temp folder; `release` (the last step, if: always()) gives the slot back. Sets PADDOCK_CI_SLOT and PADDOCK_JOB_TEMP. Does nothing in a Linux container."
+description: "Job isolation on a host runner (README, Job isolation): `acquire` (the first bash step, before stable-workspace, build-folder and every kept folder) takes a free job slot of the host and points TMPDIR at the runner's own per-job temp folder; `release` (the last step, if: always()) gives the slot back. Sets PADDOCK_CI_SLOT and PADDOCK_JOB_TEMP. Does nothing in a Linux container yet (only the /sccache mount is shared there; ADR 0025)."
 inputs:
   mode:
     description: "'acquire' or 'release'."

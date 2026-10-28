@@ -160,13 +160,86 @@ test('owns, port and pattern scope to the job\'s own slot and folders', () => {
   assert.notEqual(a.later(['owns', mine, 'src']).status, 0, 'not a folder of that kind');
   assert.notEqual(a.later(['owns', h.ci]).status, 0);
   assert.notEqual(a.later(['owns', join(h.root, 'home')]).status, 0);
-  assert.equal(a.later(['port', '4227']).stdout.trim(), '4227');
-  assert.equal(a.later(['port', '4320', '10'], { PADDOCK_CI_SLOT: 's3' }).stdout.trim(), '4340');
-  const p = a.later(['pattern', '{tmp}/x-{slot}']);
-  assert.equal(p.status, 0, p.stderr);
-  assert.ok(new RegExp(p.stdout.trim()).test(`${a.temp}/x-s1`));
-  assert.ok(!new RegExp(p.stdout.trim()).test(`${a.temp}/x-s2`));
+  assert.equal(a.later(['port', 'sccache']).stdout.trim(), '4227');
+  assert.equal(a.later(['port', 'webkit'], { PADDOCK_CI_SLOT: 's3' }).stdout.trim(), '4520');
+  assert.notEqual(a.later(['port', 'nope']).status, 0, 'only declared port blocks');
   assert.notEqual(a.later(['pattern', 'gitea-runner']).status, 0, 'a pattern that names no folder of the job is refused');
+});
+
+test('{slot} in a process pattern ends it, right after a kept folder\'s name, and never matches a longer slot number', () => {
+  const h = host();
+  const a = h.job('a'.repeat(16));
+  a.exec(['acquire']);
+  const p = a.later(['pattern', '[/\\\\]test-browser-spotter-{slot}']);
+  assert.equal(p.status, 0, p.stderr);
+  const re = new RegExp(p.stdout.trim());
+  for (const line of ['/ci/test-browser-spotter-s1/chrome --headless', 'C:\\ci\\test-browser-spotter-s1\\chrome.exe', '/ci/test-browser-spotter-s1']) assert.match(line, re);
+  for (const line of ['/ci/test-browser-spotter-s12/chrome', '/ci/test-browser-spotter-s2/chrome', '/ci/test-browser-spotter/chrome']) assert.doesNotMatch(line, re);
+  assert.match(a.later(['pattern', '[/\\\\]src[/\\\\]paddock-crate-macOS-{slot}']).stdout, /src\[\/\\\\\]paddock-crate-macOS-s1/);
+  for (const bad of ['chrome-{slot}', '{tmp}/x-{slot}', '[/\\\\]test-browser-spotter-{slot}[/\\\\]', '[/\\\\]target-x-{slot}-{slot}', 'xtarget-x-{slot}']) {
+    assert.notEqual(a.later(['pattern', bad]).status, 0, `${bad} is not anchored on a kept folder of the slot`);
+  }
+});
+
+test('disk: the first s1 job takes over a kept folder of the old layout; slots above PADDOCK_CI_KEEP_SLOTS are removed when idle', () => {
+  const h = host();
+  mkdirSync(join(h.ci, 'target-x-app', 'debug'), { recursive: true });
+  writeFileSync(join(h.ci, 'target-x-app', 'debug', 'warm'), '');
+  mkdirSync(join(h.ci, 'src', 'x-app-macOS'), { recursive: true });
+  const a = h.job('a'.repeat(16));
+  a.exec(['acquire']);
+  assert.equal(a.later(['path', 'target', 'x-app']).stdout.trim(), join(h.ci, 'target-x-app-s1'));
+  assert.ok(existsSync(join(h.ci, 'target-x-app-s1', 'debug', 'warm')), 'renamed, not copied: warm and no second copy');
+  assert.ok(!existsSync(join(h.ci, 'target-x-app')));
+  a.later(['path', 'src', 'x-app-macOS']);
+  assert.ok(!existsSync(join(h.ci, 'src', 'x-app-macOS')) && existsSync(join(h.ci, 'src', 'x-app-macOS-s1')));
+  // A third concurrent job (slot s3, above the two kept slots): its folders go when it releases.
+  const b = h.job('b'.repeat(16));
+  const c = h.job('c'.repeat(16));
+  b.exec(['acquire']);
+  c.exec(['acquire']);
+  assert.equal(c.exported().PADDOCK_CI_SLOT, 's3');
+  const third = c.later(['path', 'target', 'x-app']).stdout.trim();
+  const secondFolder = b.later(['path', 'target', 'x-app']).stdout.trim();
+  c.later(['release']);
+  assert.ok(!existsSync(third), 'slot s3 is above the kept slots: its folders are removed with it');
+  assert.ok(existsSync(secondFolder), 'slot s2 is kept');
+  // Folders of an idle slot above the limit (its job died without releasing, its lock reclaimed): swept at the next acquire.
+  mkdirSync(join(h.ci, 'test-browser-y-s5'), { recursive: true });
+  mkdirSync(join(h.ci, 'test-browser-y-s1x'), { recursive: true });
+  h.job('d'.repeat(16)).exec(['acquire']);
+  assert.ok(!existsSync(join(h.ci, 'test-browser-y-s5')));
+  assert.ok(existsSync(join(h.ci, 'test-browser-y-s1x')), 'only exact slot folders');
+  assert.ok(existsSync(join(h.ci, 'target-x-app-s1')) && existsSync(secondFolder));
+});
+
+test('the declared port blocks never overlap each other or an end-to-end port, for every slot up to the default PADDOCK_CI_SLOTS', () => {
+  const slots = Number(/PADDOCK_CI_SLOTS:-(\d+)/.exec(read(SCRIPT))[1]);
+  const blocks = read(join(PADDOCK, 'conformance', 'ci', 'ports.txt')).split('\n').filter((l) => l.trim() && !l.startsWith('#')).map((l) => l.trim().split(/\s+/));
+  const used = new Map();
+  const take = (port, who) => {
+    assert.ok(!used.has(port), `port ${port}: ${used.get(port)} and ${who}`);
+    used.set(port, who);
+  };
+  for (const [name, base, width, stride] of blocks) {
+    for (let n = 1; n <= slots; n += 1) for (let i = 0; i < Number(width); i += 1) take(Number(base) + (n - 1) * Number(stride) + i, `${name} s${n}`);
+  }
+  // Every app's end-to-end ports (paddock.ci.json) and the workflows' fixed ports.
+  for (const app of spawnSync('git', ['ls-files', 'apps/*/paddock.ci.json'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean)) {
+    const c = JSON.parse(read(join(PADDOCK, app)));
+    for (const line of [...(c.e2e ?? []), ...(c.e2eWebkit ?? [])]) {
+      const range = /PORT=\$\(\((\d+) \+ E2E_INDEX\)\)/.exec(line);
+      if (range) for (let i = 1; i <= (c.e2eShards ?? 1); i += 1) take(Number(range[1]) + i, `${app} shard ${i}`);
+      for (const m of line.matchAll(/PORT=(\d+)/g)) take(Number(m[1]), app);
+    }
+  }
+  for (const f of ['ci.yml', 'debrief.yml']) {
+    for (const m of read(join(WORKFLOWS, f)).matchAll(/^\s*\w*PORT: (.+)$/gm)) {
+      for (const n of m[1].matchAll(/['"](\d{4})['"]/g)) take(Number(n[1]), `${f} ${m[0].trim()}`);
+      for (const n of m[1].matchAll(/"(\d{3})\$\{\{ matrix\.shard \}\}"/g)) for (const sh of [1, 2]) take(Number(`${n[1]}${sh}`), `${f} shard ${sh}`);
+    }
+  }
+  assert.ok(used.size > slots * 4, `counted the ports (${used.size})`);
 });
 
 // ---- The contract over every workflow: a host job takes a slot before any kept folder and gives it back last. ----

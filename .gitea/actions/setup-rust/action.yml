@@ -123,11 +123,11 @@ runs:
         fi
         # CI's own server: a host runner may run a developer's sccache on the default port 4226 with its own backend, which
         # would silently ignore the settings below. sccache-stats stops this port's server, never the default one. On a host
-        # each job slot has its own port (job-isolation: 4227 for s1, 4228 for s2, ...), so a concurrent job's start (which
+        # each job slot has its own port (job-isolation's ports.txt: 4227 for s1, 4228 for s2, ...), so a concurrent job's start (which
         # stops the server first) or its sccache-stats (which stops it last) never takes this job's server away.
         iso="${{ github.action_path }}/../../../conformance/ci/job-isolation.sh"
         PORT=4227
-        if [ "$RUNNER_OS" != Linux ]; then PORT="$(bash "$iso" port 4227)"; fi
+        if [ "$RUNNER_OS" != Linux ]; then PORT="$(bash "$iso" port sccache)"; fi
         export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
         SETTINGS=()
         if [ "$BACKEND" = redis ] || { [ "$BACKEND" = auto ] && [ -n "$REDIS_ENDPOINT" ]; }; then

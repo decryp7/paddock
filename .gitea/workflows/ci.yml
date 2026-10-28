@@ -206,13 +206,10 @@ jobs:
       - name: Reference app checks in WebKit
         env:
           PADDOCK_WEBKIT: "1"
-          PW_PORT: "4320"
-          SHELL_DEMO_PORT: "4321"
-          WORKBENCH_DEMO_PORT: "4322"
         run: |
-          # The job slot's own ports: the base ports above for s1, ten higher for each further slot.
-          off=$(bash ../conformance/ci/job-isolation.sh port 0 10)
-          export PW_PORT=$((PW_PORT + off)) SHELL_DEMO_PORT=$((SHELL_DEMO_PORT + off)) WORKBENCH_DEMO_PORT=$((WORKBENCH_DEMO_PORT + off))
+          # The job slot's own block of three ports (conformance/ci/ports.txt `webkit`: 4320-4322 for s1).
+          port=$(bash ../conformance/ci/job-isolation.sh port webkit)
+          export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
           npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
 
       - uses: ./.gitea/actions/job-isolation

@@ -1,0 +1,7 @@
+# The ports a host job binds, per job slot (job-isolation.sh port <name>): one block of <width> ports for each slot, the
+# block of slot s<n> starting at <base> + (n-1) * <stride>. conformance/test/job-isolation.test.mjs checks that no two
+# blocks overlap, for every slot up to PADDOCK_CI_SLOTS' default, nor with any app's or workflow's end-to-end port.
+#
+#   <name>   <base>  <width>  <stride>
+sccache      4227    1        1
+webkit       4320    3        100
