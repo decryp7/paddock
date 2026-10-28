@@ -37,7 +37,7 @@ import { HeapSelection, sparkline } from './heap-selection';
               @for (r of res.data()?.rows ?? []; track r.name) {
                 <tr>
                   <td class="ellipsis fn"><button class="link" type="button" (click)="sel.showInstances(r.name)">{{ r.name }}</button></td>
-                  <td><svg width="80" height="20" viewBox="0 0 80 20" role="img" [attr.aria-label]="trendLabel(r.name, r.bytes)"><polyline [attr.points]="spark(r.bytes)" fill="none" stroke-width="2" [class.steady]="r.steady" /></svg></td>
+                  <td><!-- conformance: svg-ok — trend sparkline --><svg width="80" height="20" viewBox="0 0 80 20" role="img" [attr.aria-label]="trendLabel(r.name, r.bytes)"><polyline [attr.points]="spark(r.bytes)" fill="none" stroke-width="2" [class.steady]="r.steady" /></svg></td>
                   <td class="mono">{{ seriesText(r.bytes) }}</td>
                   <td class="num" [class.up]="r.growthBytes > 0" [class.down]="r.growthBytes < 0" [title]="exactDelta(r.growthBytes)">{{ delta(r.growthBytes, 'bytes') }}</td>
                   <td>@if (r.steady) { <span class="tag steady" title="Never shrank and grew overall: a leak candidate" i18n-title="@@profiling.heapGrowth.steadyTitle" i18n="@@profiling.heapGrowth.steadyTag">⚠ steady growth</span> }</td>

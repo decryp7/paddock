@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, ElementRef, inject, input
 import { NotificationsStore } from './notifications.store';
 import { PdNotificationsPanel } from './notifications-panel';
 import { notificationsStatusText } from './notice-text';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 let nextId = 0;
 
@@ -13,7 +14,7 @@ let nextId = 0;
 @Component({
   selector: 'pd-notifications-status',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdNotificationsPanel],
+  imports: [PdGlyph, PdNotificationsPanel],
   host: {
     '[class.pd-open]': 'open()',
     '[class.pd-below]': 'placement() === "below"',
@@ -22,7 +23,7 @@ let nextId = 0;
   },
   template: `
     <button type="button" class="pd-pill" data-testid="notifications-status" [class.pd-unread]="store.unread() > 0" [attr.aria-expanded]="open()" [attr.aria-controls]="panelId" [attr.aria-label]="label()" (click)="toggle()">
-      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.5 1.5h-11L4 11ZM6.5 14h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      <pd-glyph name="bell" [size]="14" />
       @if (store.unread() > 0) {
         <span class="pd-count" [class.pd-error]="unreadError()" aria-hidden="true">{{ store.unread() }}</span>
       }

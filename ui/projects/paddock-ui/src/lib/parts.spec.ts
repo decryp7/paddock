@@ -178,10 +178,11 @@ describe('pd-empty-state icon', () => {
     f.componentRef.setInput('icon', 'folder');
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('pd-glyph')).not.toBeNull();
+    expect(el.querySelector('mat-icon')?.getAttribute('data-mat-icon-name')).toBe('folder');
     f.componentRef.setInput('icon', '');
     f.detectChanges();
-    expect(el.querySelector('pd-glyph')).toBeNull();
+    // The default is the set's own inbox glyph, at 32 px.
+    expect(el.querySelector('mat-icon')?.getAttribute('data-mat-icon-name')).toBe('inbox');
     expect(el.querySelector('svg path')).not.toBeNull();
   });
 });

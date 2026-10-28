@@ -26,7 +26,7 @@ import { clockSeconds, momentInRange, overviewPoints, panelHeadings, rangeFromDr
     <div class="brush-row">
       <div class="brush" role="group" aria-label="Zoom range. Drag across the strip to zoom the timeline to that stretch."
         (pointerdown)="brushStart($event)" (pointermove)="brushMove($event)" (pointerup)="brushEnd($event)" (pointercancel)="drag.set(null)">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline [attr.points]="overview()" /></svg>
+        <!-- conformance: svg-ok — overview chart --><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline [attr.points]="overview()" /></svg>
         @if (shown(); as r) {
           <i class="sel" [style.left.%]="r.left" [style.width.%]="r.width"></i>
         }

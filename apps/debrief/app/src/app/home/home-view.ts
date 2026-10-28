@@ -69,11 +69,11 @@ const VISIBLE_ROWS = 6;
               <div class="hero"><dt i18n="@@home.view.events">Events</dt><dd>{{ count(s.events) }}</dd></div>
               <div class="hero" [class.bad]="s.errors > 0">
                 <dt i18n="@@home.view.errors">Errors</dt><dd>{{ count(s.errors) }}<button class="cover" type="button" data-testid="home-tile-errors" (click)="showLevels(['Error', 'Fatal'])" aria-label="Show the errors and fatal events" i18n-aria-label="@@home.view.showErrors"></button></dd>
-                @if (errorSpark(); as d) { <svg class="spark bad" [attr.viewBox]="viewBox" preserveAspectRatio="none" aria-hidden="true"><path [attr.d]="d" /></svg> }
+                @if (errorSpark(); as d) { <!-- conformance: svg-ok — sparkline --><svg class="spark bad" [attr.viewBox]="viewBox" preserveAspectRatio="none" aria-hidden="true"><path [attr.d]="d" /></svg> }
               </div>
               <div class="hero" [class.warn]="s.warnings > 0">
                 <dt i18n="@@home.view.warnings">Warnings</dt><dd>{{ count(s.warnings) }}<button class="cover" type="button" data-testid="home-tile-warnings" (click)="showLevels(['Warning'])" aria-label="Show the warning events" i18n-aria-label="@@home.view.showWarnings"></button></dd>
-                @if (warningSpark(); as d) { <svg class="spark warn" [attr.viewBox]="viewBox" preserveAspectRatio="none" aria-hidden="true"><path [attr.d]="d" /></svg> }
+                @if (warningSpark(); as d) { <!-- conformance: svg-ok — sparkline --><svg class="spark warn" [attr.viewBox]="viewBox" preserveAspectRatio="none" aria-hidden="true"><path [attr.d]="d" /></svg> }
               </div>
               <div class="hero"><dt i18n="@@home.view.anomalies">Anomalies</dt><dd [attr.aria-busy]="!s.analysed">{{ s.analysed ? count(s.anomalyCount) : '…' }}<button class="cover" type="button" data-testid="home-tile-anomalies" (click)="show('anomalies')" aria-label="Open the Anomalies view" i18n-aria-label="@@home.view.showAnomalies"></button></dd></div>
               <div class="chip"><dt i18n="@@home.view.sources">Sources</dt><dd>{{ count(s.sources) }}</dd></div>

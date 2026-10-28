@@ -10,7 +10,7 @@ import { Swatch } from './source-colors';
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'img', '[attr.aria-label]': 'label()', '[attr.title]': 'label()', '[attr.data-slot]': 'swatch().slot', '[attr.data-pattern]': 'swatch().pattern' },
   template: `
-    <svg [attr.width]="size()" [attr.height]="size()" viewBox="0 0 10 10" aria-hidden="true">
+    <!-- conformance: svg-ok — colour swatch --><svg [attr.width]="size()" [attr.height]="size()" viewBox="0 0 10 10" aria-hidden="true">
       @if (swatch().pattern === 'solid') {
         <circle cx="5" cy="5" r="4.5" [attr.fill]="swatch().color" />
       } @else {

@@ -16,7 +16,7 @@ export type DeviceArtKind = 'cpu' | DriveKind;
   selector: 'dy-device-art',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <svg [attr.viewBox]="box()" aria-hidden="true" focusable="false">
+    <!-- conformance: svg-ok — device illustration --><svg [attr.viewBox]="box()" aria-hidden="true" focusable="false">
       <defs>
         <linearGradient [attr.id]="id + '-pcb'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="pcb-a" /><stop offset="1" class="pcb-b" /></linearGradient>
         <linearGradient [attr.id]="id + '-pkg'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="pkg-a" /><stop offset="1" class="pkg-b" /></linearGradient>

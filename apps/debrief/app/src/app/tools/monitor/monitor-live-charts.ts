@@ -43,7 +43,7 @@ import { MonitorChartsStore } from './monitor-charts.store';
           <div class="legend" role="group" aria-label="Processes" i18n-aria-label="@@tools.monitor.live.processes">
             @for (l of store.legend(); track l.key) {
               <button type="button" class="chip key" [attr.aria-pressed]="!store.hiddenSet().has(l.key)" [title]="toggleTitle(l.key)" (click)="store.toggle(l.key)">
-                <svg class="swatch" width="16" height="6" aria-hidden="true">
+                <!-- conformance: svg-ok — legend swatch of a chart --><svg class="swatch" width="16" height="6" aria-hidden="true">
                   <line x1="0" y1="3" x2="16" y2="3" [attr.stroke]="color(l.slot)" stroke-width="2.5" />
                 </svg>
                 <span class="mono">{{ l.key }}</span>

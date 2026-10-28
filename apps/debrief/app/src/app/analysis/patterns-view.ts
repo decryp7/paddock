@@ -36,7 +36,7 @@ import { CoverageNote } from './coverage-note';
                 </span>
               </span>
               @if (p.trend.length) {
-                <svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" [attr.aria-label]="trendLabel(p)" data-testid="pattern-trend">
+                <!-- conformance: svg-ok — trend sparkline --><svg class="spark" width="72" height="18" viewBox="0 0 72 18" role="img" [attr.aria-label]="trendLabel(p)" data-testid="pattern-trend">
                   @for (b of bars(p); track b.x) { <rect [attr.x]="b.x" [attr.y]="b.y" [attr.width]="b.width" [attr.height]="b.height" /> }
                 </svg>
               } @else {

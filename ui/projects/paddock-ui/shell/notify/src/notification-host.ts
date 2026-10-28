@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, injec
 import { errorMessage } from '@decryp7/paddock-ui/shell/store';
 import { NOTIFY_CLOCK, TOAST_MS } from './notify-config';
 import { NOTIFICATION_SOURCES, persists, visibleNotifications, type HostAction, type HostNotification } from './notification-host.model';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 /** How often the host checks its toasts' time. */
 const TICK_MS = 250;
@@ -24,6 +25,7 @@ interface Timer {
 @Component({
   selector: 'pd-notification-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdGlyph],
   template: `
     <div class="pd-stack" role="region" [attr.aria-label]="t.toasts" aria-live="polite">
       @for (n of items(); track n.cause) {
@@ -62,7 +64,7 @@ interface Timer {
             <div class="pd-body pd-err" role="alert">{{ why }}</div>
           }
           <button type="button" class="pd-x" [attr.aria-label]="t.dismissToast" data-testid="notification-dismiss" (click)="n.dismiss()">
-            <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+            <pd-glyph name="close" [size]="14" />
           </button>
         </div>
       }

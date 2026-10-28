@@ -56,9 +56,6 @@
     },
     "dockview": {
       "optional": true
-    },
-    "@angular/material": {
-      "optional": true
     }
   },
   "dependencies": {

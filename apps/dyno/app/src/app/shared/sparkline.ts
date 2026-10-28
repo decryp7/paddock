@@ -50,7 +50,7 @@ export function sparkMax(series: readonly (readonly number[])[], max: number | n
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'img', '[attr.aria-label]': 'label()' },
   template: `
-    <svg [attr.viewBox]="'0 0 ' + width + ' 100'" preserveAspectRatio="none" aria-hidden="true">
+    <!-- conformance: svg-ok — sparkline --><svg [attr.viewBox]="'0 0 ' + width + ' 100'" preserveAspectRatio="none" aria-hidden="true">
       @if (fill() && area()) {
         <path class="area" [attr.d]="area()" [style.fill]="color()" />
       }

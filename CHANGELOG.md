@@ -19,6 +19,13 @@ Conventional Commits; one semver tag for the whole repo.
   and Debrief's copy are waived until their dock icons are mat-icons); charts, diagrams and illustrations carry `<!-- conformance: svg-ok — <reason> -->` (or `// conformance: svg-ok — <reason>`).
   Inventory on 2026-10-28: Debrief 28 and Dyno 14 (dated waivers to 2026-12-31, each migrates in its own branch), shared UI and demos 17 files
   (one waiver per file), Pitcrew, Pitwall and Spotter none (their charts carry the marker). It runs in Paddock's own conformance job.
+- `pd-glyph` keeps its dots as heavy as the strokes at every size (radius at least 0.75 x 24 / size, as before; the registered literal carries the
+  authored radius). It warns in dev mode when it had to register the set itself because the window has no `providePaddockIcons()`.
+  `@angular/material` is now a required peer dependency of `@decryp7/paddock-ui` (the icons need it). New glyph `inbox`; `pd-empty-state` and
+  `pd-error-state` draw `pd-glyph inbox` and `pd-status-glyph error` instead of their own svg. Close, check, bell, stop and the job state
+  icons of the shared UI are `pd-glyph` now (waivers removed).
+- C46 is stricter: it looks in `src/` folders only, ignores an svg inside an HTML comment, catches `<svg:svg>`, and a decorator-head marker covers
+  a template with a single svg only. Debrief's and Dyno's charts and illustrations carry svg-ok; Debrief's remaining icons are waived per file.
 - Gallery: the icons page's second row is a real `<mat-icon svgIcon="pd:name">`; e2e checks both rows draw the same literal and fetch nothing.
 
 ### One shared Material theme (WP-0 of the Material migration, rule 47)

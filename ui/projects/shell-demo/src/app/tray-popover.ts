@@ -71,7 +71,7 @@ function platform(doc: Document): SuTrayPlatform {
     <pd-tray-popover [label]="name" [platform]="platform" [translucent]="true" (dismissed)="close()">
       <div slot="header" class="head">
         <!-- The app's 16 px icon: artwork in the icon pipeline's colours (icons/shell-demo/small), not UI tokens. -->
-        <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <!-- conformance: svg-ok — the tray popover's illustration of the demo app --><svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
           <defs><linearGradient id="sd-tray-tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#DDE1E7" /><stop offset="1" stop-color="#B5BCC7" /></linearGradient></defs>
           <path d="M4 0.5H12A3.5 3.5 0 0 1 15.5 4V12A3.5 3.5 0 0 1 12 15.5H4A3.5 3.5 0 0 1 0.5 12V4A3.5 3.5 0 0 1 4 0.5Z" fill="url(#sd-tray-tile)" stroke="#4A5361" stroke-opacity="0.45" stroke-width="0.5" />
           <path d="M4.5 3H11.5A2 2 0 0 1 13.5 5V11A2 2 0 0 1 11.5 13H4.5A2 2 0 0 1 2.5 11V5A2 2 0 0 1 4.5 3ZM2.5 6H13.5M8 8.75H11.5" fill="none" stroke="#1E2530" stroke-width="1.5" />

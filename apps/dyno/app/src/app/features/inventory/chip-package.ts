@@ -15,7 +15,7 @@ let nextId = 0;
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <figure class="pkg">
-      <svg role="img" [attr.aria-label]="model().alt" [attr.viewBox]="'0 0 ' + layout().width + ' ' + layout().height" [style.max-width.px]="layout().width * 1.5">
+      <!-- conformance: svg-ok — chip package diagram --><svg role="img" [attr.aria-label]="model().alt" [attr.viewBox]="'0 0 ' + layout().width + ' ' + layout().height" [style.max-width.px]="layout().width * 1.5">
         <defs>
           <linearGradient [attr.id]="id + '-sub'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="sub-a" /><stop offset="1" class="sub-b" /></linearGradient>
           <linearGradient [attr.id]="id + '-pcb'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="pcb-a" /><stop offset="1" class="pcb-b" /></linearGradient>

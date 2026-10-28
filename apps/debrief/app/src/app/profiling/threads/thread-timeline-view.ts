@@ -99,7 +99,7 @@ interface EventVm {
                     <span class="faint mono">{{ l.thread.osId ?? '' }}</span>
                   </button>
                   <div class="plot">
-                    <svg viewBox="0 0 1000 100" preserveAspectRatio="none" role="img" [attr.aria-label]="laneLabel(l.thread.name, l.total)"><path [attr.d]="path(l)" /></svg>
+                    <!-- conformance: svg-ok — thread lane chart --><svg viewBox="0 0 1000 100" preserveAspectRatio="none" role="img" [attr.aria-label]="laneLabel(l.thread.name, l.total)"><path [attr.d]="path(l)" /></svg>
                     @for (ev of laneEvents().get(i) ?? []; track $index) {
                       <span class="ev" [class.dim]="state.eventKind() !== null && state.eventKind() !== ev.e.kind" [style.left.%]="ev.left" [title]="eventTitle(ev.e)">
                         @if (ev.width > 0.3) { <span class="dur" [style.width.%]="(ev.width / (100 - ev.left)) * 100" [style.background]="glyph(ev.e.kind).color"></span> }

@@ -64,6 +64,7 @@ export const PD_ICON_PATHS = {
   layers: 'M12 4 20 8.5 12 13 4 8.5zM5.5 12.5 12 16.2l6.5-3.7M5.5 16 12 19.7l6.5-3.7',
   'dock-in': 'M3.5 5h17v14h-17zM12 5v6.5M9 8.5l3 3 3-3M7 15h10',
   file: 'M5.75 3.5h7.75l4.75 5v12H5.75zM13.5 3.5v5h4.75',
+  inbox: 'M3.5 13.5 6 5.5h12l2.5 8M3.5 13.5v5h17v-5M3.5 13.5h5l1 2h5l1-2h5',
   // Code symbols (plan X50, review 2 P3-5): the kind of a symbol in a palette row or an outline, instead of a letter badge.
   'symbol-function': 'M16 4.5h-1.5C12.8 4.5 12 5.4 12 7.2v10.1c0 1.6-.8 2.2-2.3 2.2H8M8.5 10.5h7',
   'symbol-type': 'M9 4.5H8c-1.4 0-2 .7-2 2V10l-1.5 2L6 14v3.5c0 1.3.6 2 2 2h1M15 4.5h1c1.4 0 2 .7 2 2V10l1.5 2-1.5 2v3.5c0 1.3-.6 2-2 2h-1',

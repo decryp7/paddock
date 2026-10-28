@@ -85,7 +85,7 @@ function timelineSource(): TimelineSource {
               }
             </div>
             <div class="plot">
-              <svg class="hist" [attr.viewBox]="histViewBox()" preserveAspectRatio="none" aria-hidden="true">
+              <!-- conformance: svg-ok — histogram chart --><svg class="hist" [attr.viewBox]="histViewBox()" preserveAspectRatio="none" aria-hidden="true">
                 @for (p of hist().paths; track p.level) {
                   <path [attr.d]="p.d" [style.fill]="p.color" [attr.data-level]="p.level" />
                 }

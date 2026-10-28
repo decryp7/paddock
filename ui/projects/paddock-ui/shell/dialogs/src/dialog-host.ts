@@ -21,6 +21,7 @@ import { resolveSize } from './kind';
 import { ModalGate } from './modal-gate';
 import { contentInjector, errorText, mountContent } from './mount';
 import { DialogPresenter, type DialogContent } from './types';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -28,6 +29,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
 @Component({
   selector: 'pd-in-page-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdGlyph],
   host: {
     role: 'dialog',
     class: 'pd-in-page-dialog',
@@ -46,7 +48,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select
       <h2 class="pd-title" [id]="titleId()">{{ entry().title() }}</h2>
       @if (!entry().def.requiredChoice) {
         <button type="button" class="pd-close" data-dialog-close data-testid="dialog-close" [attr.aria-label]="t.close" [title]="t.close" (click)="entry().ref.close()">
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+          <pd-glyph name="close" [size]="14" />
         </button>
       }
     </header>

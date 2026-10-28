@@ -47,7 +47,7 @@ export class PdShellIcon {
   protected readonly letter = computed(() => iconLetter(this.name()));
 
   constructor() {
-    ensurePaddockIcons(inject(MatIconRegistry), inject(DomSanitizer));
+    ensurePaddockIcons(inject(MatIconRegistry), inject(DomSanitizer), true);
   }
 }
 

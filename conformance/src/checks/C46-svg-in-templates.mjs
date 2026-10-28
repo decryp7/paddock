@@ -8,9 +8,11 @@
 // component's decorator head, before `template:`, for the whole template).
 import { error } from '../finding.mjs';
 
-const SOURCE = /^(?:ui\/projects\/.+|(?:apps\/[^/]+\/)?app\/src\/.+)\.(?:html|ts)$/;
+const SOURCE = /^(?:ui\/projects\/.+\/src\/.+|(?:apps\/[^/]+\/)?app\/src\/.+)\.(?:html|ts)$/;
 const SKIP = /\.(?:spec|test)\.ts$|(?:^|\/)(?:e2e|node_modules|dist|testing)\//;
-const SVG = /<svg(?=[\s>/])/g;
+const SVG = /<(?:svg:)?svg(?=[\s>/])/g;
+/** `text` with the insides of HTML comments blanked (newlines and offsets kept), so an svg in a comment does not count. */
+const unComment = (text) => text.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '));
 const MARKER = /conformance:\s*svg-ok\s*(?:[—–]|-{1,2}(?=\s))\s*(?!-*>)(\S.{2,})/;
 const BARE_MARKER = /conformance:\s*svg-ok/;
 
@@ -43,9 +45,12 @@ export function svgElements(file, source) {
   const lines = source.split('\n');
   const out = [];
   const scan = (text, offset, head) => {
-    for (const m of text.matchAll(SVG)) {
+    const found = [...unComment(text).matchAll(SVG)];
+    // A marker in the decorator head covers a template with a single svg; with several, each needs its own marker.
+    const whole = found.length === 1 ? head : false;
+    for (const m of found) {
       const line = lineOf(source, offset + m.index);
-      out.push({ line, waived: markerAt(lines, line) || head });
+      out.push({ line, waived: markerAt(lines, line) || whole });
     }
   };
   if (file.endsWith('.html')) scan(source, 0, false);
@@ -71,7 +76,7 @@ export default {
     for (const f of ctx.files()) {
       if (!SOURCE.test(f) || SKIP.test(f)) continue;
       const text = ctx.read(f);
-      if (!text || (!text.includes('<svg') && !text.includes('createElementNS'))) continue;
+      if (!text || !/<(?:svg:)?svg|createElementNS/.test(text)) continue;
       for (const s of svgElements(f, text)) {
         if (s.waived === 'reason') continue;
         if (s.waived === 'no-reason') out.push(error('C46', 47, f, s.line, 'the svg-ok marker gives no reason', 'Write `conformance: svg-ok — <why this is a chart, diagram or illustration, not an icon>`.'));

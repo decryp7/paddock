@@ -47,7 +47,7 @@ export function cellText(column: string, value: unknown, tz: 'utc' | 'local'): s
             <span class="value" data-testid="stat-value">{{ statText() }}@if (d.unit) {<span class="unit"> {{ d.unit }}</span>}</span>
             <span class="label faint">{{ d.label }}</span>
             @if (spark(); as pts) {
-              <svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><polyline [attr.points]="pts" /></svg>
+              <!-- conformance: svg-ok — sparkline --><svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><polyline [attr.points]="pts" /></svg>
             }
           </div>
         }

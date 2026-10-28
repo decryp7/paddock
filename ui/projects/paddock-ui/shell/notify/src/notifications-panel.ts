@@ -5,6 +5,7 @@ import { NoticeActions } from './notice-actions';
 import { LOCAL_SOURCE, NotificationsStore, type ReadFilter } from './notifications.store';
 import type { Notice, NoticeAction } from './wire.types';
 import { noticeTime, titleWithCount } from './notice-text';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 
 /** The headings of the shell's own sources (read when shown, so they are in the window's language). */
@@ -23,7 +24,7 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
 @Component({
   selector: 'pd-notifications-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [SuEmptyState, SuSegmentedControl],
+  imports: [PdGlyph, SuEmptyState, SuSegmentedControl],
   template: `
     <div class="pd-bar">
       <pd-segmented-control [label]="t.filter" [options]="filters()" [value]="store.read()" (valueChange)="setRead($event)" />
@@ -57,11 +58,11 @@ const BUILT_IN_SOURCES: Readonly<Record<string, () => string>> = {
               <span class="pd-row-actions">
                 @if (!n.read) {
                   <button type="button" class="pd-icon-btn" [attr.aria-label]="markReadLabel(n.title)" [attr.data-testid]="'notice-read-' + n.id" (click)="store.markRead(n.id)">
-                    <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M2.5 7.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    <pd-glyph name="check" [size]="14" />
                   </button>
                 }
                 <button type="button" class="pd-icon-btn" [attr.aria-label]="dismissLabel(n.title)" [attr.data-testid]="'notice-dismiss-' + n.id" (click)="store.dismiss(n.id)">
-                  <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" focusable="false"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
+                  <pd-glyph name="close" [size]="14" />
                 </button>
               </span>
             </div>

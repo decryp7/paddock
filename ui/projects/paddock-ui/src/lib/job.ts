@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { jobView, type SuJobSnapshot } from './job-view';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 
 /**
  * One long operation (ADR 0008): title and subject, the current phase with its own count, a determinate bar or an indeterminate
@@ -10,6 +11,7 @@ import { jobView, type SuJobSnapshot } from './job-view';
 @Component({
   selector: 'pd-job',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdGlyph, PdStatusGlyph],
   host: { '[class]': '"pd-job pd-job--" + view().tone + (flat() ? " pd-job--flat" : "")', '[attr.data-state]': 'job().state' },
   template: `
     <div class="pd-head">
@@ -20,9 +22,9 @@ import { jobView, type SuJobSnapshot } from './job-view';
     </div>
     <div class="pd-line">
       @if (view().tone === 'success') {
-        <svg class="pd-state pd-state--ok" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        <pd-glyph class="pd-state pd-state--ok" name="check" [size]="14" />
       } @else if (view().tone === 'danger') {
-        <svg class="pd-state pd-state--bad" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="m4.5 4.5 7 7m0-7-7 7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" /></svg>
+        <pd-glyph class="pd-state pd-state--bad" name="close" [size]="14" />
       }
       @if (!repeatsTitle()) {
         <span class="pd-headline">{{ view().headline }}</span>
@@ -51,7 +53,7 @@ import { jobView, type SuJobSnapshot } from './job-view';
     @if (view().detail) {
       <p class="pd-detail">
         @if (stalled() && job().state === 'running') {
-          <svg class="pd-warn" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M8 2.5 14 13H2L8 2.5ZM8 6.5v3M8 11.25h.01" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          <pd-status-glyph class="pd-warn" status="warning" [size]="14" />
         }
         <span>{{ view().detail }}</span>
       </p>

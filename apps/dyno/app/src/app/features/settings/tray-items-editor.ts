@@ -36,7 +36,7 @@ import { MAX_TRAY_ITEMS, METRICS, TRAY_STYLES, type TrayStyleId, metricLabel, mo
               <span class="meter"><i [style.width.%]="level(it)"></i></span>
             }
             @case ('ring') {
-              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="3" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" [attr.stroke-dasharray]="ringDash(it)" transform="rotate(-90 10 10)" /></svg>
+              <!-- conformance: svg-ok — progress ring --><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="3" /><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" [attr.stroke-dasharray]="ringDash(it)" transform="rotate(-90 10 10)" /></svg>
             }
             @default {
               <span class="n num">{{ numberLabel(it) }}{{ read(it).text[0] }}{{ numberUnit(it) || read(it).text[1] }}</span>

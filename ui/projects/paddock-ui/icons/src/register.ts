@@ -1,4 +1,4 @@
-import { inject, makeEnvironmentProviders, provideAppInitializer, type EnvironmentProviders } from '@angular/core';
+import { inject, isDevMode, makeEnvironmentProviders, provideAppInitializer, type EnvironmentProviders } from '@angular/core';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
 import { outlineIconWithDots } from './outline';
@@ -17,7 +17,7 @@ export function pdIconLiterals(): ReadonlyArray<readonly [PdIconName, string]> {
   return (Object.keys(PD_ICON_PATHS) as PdIconName[]).map((n) => [n, pdIconSvg(n)] as const);
 }
 
-/** The part of Angular Material's `MatIconRegistry` that registration uses (the shell does not depend on Material). */
+/** The part of Angular Material's `MatIconRegistry` that registration uses (structural, so tests can pass a fake). */
 export interface IconLiteralRegistry {
   addSvgIconLiteralInNamespace(namespace: string, iconName: string, literal: never): unknown;
 }
@@ -46,10 +46,13 @@ export function registerPaddockIcons(registry: IconLiteralRegistry, sanitizer: T
 
 const registered = new WeakSet<object>();
 
-/** Registers the set once per registry (the glyph calls it on first use, the provider at start-up). */
-export function ensurePaddockIcons(registry: IconLiteralRegistry, sanitizer: TrustedHtmlFactory): void {
+/** Registers the set once per registry (the provider at start-up; the glyph on first use as a fallback, with `fallback` set, which warns in dev mode). */
+export function ensurePaddockIcons(registry: IconLiteralRegistry, sanitizer: TrustedHtmlFactory, fallback = false): void {
   if (registered.has(registry)) return;
   registered.add(registry);
+  if (fallback && isDevMode()) {
+    console.warn('[paddock-ui] the pd: icons were registered on first use: add providePaddockIcons() (or providePaddockMaterial()) to this window\'s bootstrap.');
+  }
   registerPaddockIcons(registry, sanitizer);
 }
 

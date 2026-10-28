@@ -35,7 +35,7 @@ interface Drag {
         (pointerdown)="stripDown($event)"
         (dblclick)="fit()"
       >
-        <svg class="mini" [attr.viewBox]="viewBox()" preserveAspectRatio="none" aria-hidden="true">
+        <!-- conformance: svg-ok — minimap chart --><svg class="mini" [attr.viewBox]="viewBox()" preserveAspectRatio="none" aria-hidden="true">
           @for (p of hist().paths; track p.level) {
             <path [attr.d]="p.d" [style.fill]="p.color" />
           }

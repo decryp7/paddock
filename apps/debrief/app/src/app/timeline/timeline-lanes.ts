@@ -64,16 +64,16 @@ export type LanesEmpty = 'noSources' | 'noMatchMain' | 'noMatchOwn' | null;
               <debrief-annotation-track [items]="items" (hovered)="annHover.emit($event)" (activated)="showEvidence.emit($event.ann)" (menuRequested)="spanMenu.emit($event)" />
             }
             <!-- The theme's lane fill decides which of these shows (data-lane-fill). -->
-            <svg class="density" [attr.viewBox]="densityViewBox()" preserveAspectRatio="none" aria-hidden="true">
+            <!-- conformance: svg-ok — density chart --><svg class="density" [attr.viewBox]="densityViewBox()" preserveAspectRatio="none" aria-hidden="true">
               <path class="area" [attr.d]="l.densityArea" />
               <path class="edge" [attr.d]="l.densityEdge" />
               <path class="bars" [attr.d]="l.densityPath" />
             </svg>
             @if (l.sparse) {
-              <svg class="sparse-ticks" [attr.viewBox]="densityViewBox()" preserveAspectRatio="none" aria-hidden="true"><path [attr.d]="l.sparsePath" /></svg>
+              <!-- conformance: svg-ok — density chart ticks --><svg class="sparse-ticks" [attr.viewBox]="densityViewBox()" preserveAspectRatio="none" aria-hidden="true"><path [attr.d]="l.sparsePath" /></svg>
             }
             @if (l.tickCount) {
-              <svg class="ticks" viewBox="0 0 1000 6" preserveAspectRatio="none" role="img" [attr.aria-label]="tickAria(l.tickCount)">
+              <!-- conformance: svg-ok — tick strip chart --><svg class="ticks" viewBox="0 0 1000 6" preserveAspectRatio="none" role="img" [attr.aria-label]="tickAria(l.tickCount)">
                 <title>{{ tickTitle(l.tickCount) }}</title>
                 <path [attr.d]="l.ticksPath" />
               </svg>

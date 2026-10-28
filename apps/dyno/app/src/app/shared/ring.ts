@@ -9,7 +9,7 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { role: 'img', '[attr.aria-label]': 'label()' },
   template: `
-    <svg viewBox="0 0 120 120" aria-hidden="true">
+    <!-- conformance: svg-ok — ring chart --><svg viewBox="0 0 120 120" aria-hidden="true">
       <circle class="track" cx="60" cy="60" [attr.r]="r" />
       <circle class="arc" cx="60" cy="60" [attr.r]="r" [attr.data-tone]="tone()" [style.stroke-dasharray]="circumference" [style.stroke-dashoffset]="offset()" transform="rotate(-90 60 60)" />
     </svg>

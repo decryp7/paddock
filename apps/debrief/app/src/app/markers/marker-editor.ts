@@ -72,7 +72,7 @@ import { RegexAssist } from './regex/regex-assist';
         @else { <ng-container i18n="@@markers.editor.counting">Counting…</ng-container> }
       </div>
       @if (preview().result; as r) {
-        <svg class="strip" viewBox="0 0 48 12" preserveAspectRatio="none" role="img" aria-label="Where the matches are in time" i18n-aria-label="@@markers.editor.strip">
+        <!-- conformance: svg-ok — match position strip chart --><svg class="strip" viewBox="0 0 48 12" preserveAspectRatio="none" role="img" aria-label="Where the matches are in time" i18n-aria-label="@@markers.editor.strip">
           @for (v of r.strip; track $index) {
             @if (v) { <rect [attr.x]="$index" [attr.y]="12 - h(v, r.strip)" width="0.8" [attr.height]="h(v, r.strip)" /> }
           }

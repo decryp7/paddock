@@ -25,6 +25,7 @@ import { DOCK_STYLES } from './dock-styles';
 import { DockViews } from './dock-views';
 import { WorkbenchDock } from './dock.service';
 import { DockSwitcher } from './switcher-overlay';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 /** What a slid-out panel keeps open when it is pressed or focused: itself, its bar, menus, and overlays and dialogs it opened. */
 const KEEP_OPEN = '.pd-dock-ah-flyout, .pd-dock-ah-bar, .pd-dock-menu, .cdk-overlay-container';
@@ -41,7 +42,7 @@ export const HOVER_HIDE_MS = 300;
   selector: 'pd-dock',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [DockSwitcher, PdIcon],
+  imports: [PdGlyph, DockSwitcher, PdIcon],
   host: { 'data-testid': 'pd-dock', '[attr.data-ready]': 'dock.ready() ? "" : null', '[attr.aria-busy]': 'dock.ready() ? null : "true"', '[attr.data-perspective]': 'dock.activePerspective()' },
   template: `
     @for (side of sides; track side) {
@@ -98,7 +99,7 @@ export const HOVER_HIDE_MS = 300;
               <pd-icon name="pd:pin" />
             </button>
             <button type="button" class="pd-dock-action" [attr.aria-label]="hideLabel(item.title)" title="Hide (Esc)" i18n-title="@@pd.wb.dock.host.hideTitle" (click)="escape()">
-              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+              <pd-glyph name="close" [size]="14" />
             </button>
           </header>
           <div #flyoutBody class="pd-dock-ah-body"></div>

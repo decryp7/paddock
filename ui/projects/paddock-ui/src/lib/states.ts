@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { PdGlyph } from '@decryp7/paddock-ui/icons';
+import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 
 /** Empty state: icon, what is missing (title), why or what happens next, and one next-step action in `[slot=action]`. */
 @Component({
@@ -13,9 +13,7 @@ import { PdGlyph } from '@decryp7/paddock-ui/icons';
         @if (icon()) {
           <pd-glyph [name]="icon()" [size]="32" />
         } @else {
-        <!-- conformance: svg-ok — 32 px state illustration, not a 16 px icon --><svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
-          <path d="M3.5 13.5 6 5.5h12l2.5 8M3.5 13.5v5h17v-5M3.5 13.5h5l1 2h5l1-2h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <pd-glyph name="inbox" [size]="32" />
         }
       </ng-content>
     </span>
@@ -50,12 +48,11 @@ export class SuEmptyState {
 @Component({
   selector: 'pd-error-state',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdStatusGlyph],
   host: { role: 'alert' },
   template: `
     <span class="pd-icon">
-      <!-- conformance: svg-ok — 32 px state illustration, not a 16 px icon --><svg viewBox="0 0 24 24" width="32" height="32" aria-hidden="true" focusable="false">
-        <path d="M8 2.75h8L21.25 8v8L16 21.25H8L2.75 16V8L8 2.75ZM9 9l6 6M15 9l-6 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
+      <pd-status-glyph status="error" [size]="32" />
     </span>
     <h3 class="pd-title">{{ heading() }}</h3>
     @if (cause()) {

@@ -10,7 +10,7 @@ import { HW_TOKENS } from '../inventory/hardware-tokens';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (kind() === 'memory') {
-      <svg viewBox="0 0 240 70" aria-hidden="true" focusable="false">
+      <!-- conformance: svg-ok — benchmark illustration --><svg viewBox="0 0 240 70" aria-hidden="true" focusable="false">
         <rect class="pcb" x="0.5" y="0.5" width="239" height="56" rx="4" />
         <path class="notch" d="M112 56 a6 6 0 0 0 12 0" />
         @for (i of chips; track i) {
@@ -22,7 +22,7 @@ import { HW_TOKENS } from '../inventory/hardware-tokens';
         }
       </svg>
     } @else {
-      <svg viewBox="0 0 240 90" aria-hidden="true" focusable="false">
+      <!-- conformance: svg-ok — benchmark illustration --><svg viewBox="0 0 240 90" aria-hidden="true" focusable="false">
         <rect class="pcb" x="0.5" y="0.5" width="239" height="70" rx="5" />
         <rect class="sink" x="22.5" y="8.5" width="150" height="54" rx="4" />
         @for (i of fins; track i) {

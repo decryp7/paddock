@@ -63,7 +63,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
         <h2 id="h-card">Card / tile</h2>
         <div class="gal-grid">
           <pd-card heading="CPU">
-            <svg slot="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+            <pd-glyph slot="icon" name="stop" [size]="16" />
             <pd-status-pill slot="status" status="success" label="Normal" />
             <pd-metric value="45" unit="%" [delta]="3" deltaUnit=" pts" deltaLabel="vs last hour" goodDirection="down" />
             <pd-sparkline slot="sparkline" label="CPU, last hour" [values]="cpu" [area]="true" [min]="0" [max]="100" />

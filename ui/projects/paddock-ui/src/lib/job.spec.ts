@@ -119,7 +119,7 @@ describe('SuJob', () => {
     f.componentRef.setInput('elapsedMs', 14_000);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.pd-detail svg.pd-warn')).not.toBeNull();
+    expect(el.querySelector('.pd-detail .pd-warn svg')).not.toBeNull();
     expect(text(el)).toContain('14 s elapsed');
   });
   it('formats elapsed time', () => {
@@ -159,10 +159,10 @@ describe('SuJob', () => {
   });
   it('done and failed show an icon next to the word (never colour alone); Retry only where the host offers it', () => {
     const done = render({ ...base, state: 'done' } as SuJobSnapshot).nativeElement as HTMLElement;
-    expect(done.querySelector('svg.pd-state--ok')).not.toBeNull();
+    expect(done.querySelector('pd-glyph.pd-state--ok svg')).not.toBeNull();
     const f = render({ ...base, state: 'failed', message: 'Disk full' } as SuJobSnapshot);
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('svg.pd-state--bad')).not.toBeNull();
+    expect(el.querySelector('pd-glyph.pd-state--bad svg')).not.toBeNull();
     expect(el.querySelector('button')).toBeNull();
     f.componentRef.setInput('retryable', true);
     f.detectChanges();
