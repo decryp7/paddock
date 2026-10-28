@@ -44,9 +44,10 @@ describe('the graph of this tree', () => {
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
-    // Spotter maps @decryp7/paddock-ui to ui/dist in its tsconfig (a path edge, no npm edge).
-    assert.deepEqual(r.apps, ['shell-demo', 'spotter', 'workbench-demo']);
+    // Spotter and Debrief map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge).
+    assert.deepEqual(r.apps, ['debrief', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
+    assert.deepEqual(r.kinds.debrief, ['ui']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
   });
 
@@ -517,6 +518,9 @@ describe('contracts', () => {
     assert.deepEqual(run('apps/debrief/app/src/main.ts').kinds.debrief, ['ui']);
     assert.ok(run('crates/paddock-proc/src/lib.rs').apps.includes('debrief'), 'debrief-store-worker uses paddock-proc by path');
     assert.deepEqual(run('crates/paddock-proc/src/lib.rs').kinds.debrief, ['rust']);
+    // The shared UI reaches Debrief's frontend through its tsconfig paths (ui/dist and the e2e helpers' source), as for Spotter.
+    assert.ok(run('ui/projects/paddock-ui/src/public-api.ts').kinds.debrief?.includes('ui'), 'tsconfig paths make paddock-ui an edge');
+    assert.ok(run('ui/projects/paddock-e2e/src/index.ts').kinds.debrief?.includes('ui'), 'tsconfig paths make paddock-e2e an edge');
     assert.deepEqual(run('apps/debrief/docs/ai/sql-views.md').apps, ['debrief']);
     assert.deepEqual(run('apps/debrief/docs/adr/0001-x.md').apps, []);
   });

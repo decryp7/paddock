@@ -14,7 +14,12 @@
     "experimentalDecorators": true,
     "importHelpers": true,
     "target": "ES2022",
-    "module": "preserve"
+    "module": "preserve",
+    "paths": {
+      "@decryp7/paddock-ui": ["../../../ui/dist/paddock-ui"],
+      "@decryp7/paddock-ui/*": ["../../../ui/dist/paddock-ui/*"],
+      "@decryp7/paddock-e2e": ["../../../ui/projects/paddock-e2e/src/index.ts"]
+    }
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
