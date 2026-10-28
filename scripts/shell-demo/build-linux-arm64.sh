@@ -42,7 +42,8 @@ for t in /src1/apps/shell-demo/src-tauri/Cargo.toml /src1/apps/shell-demo/src-ta
   sed -i "s/^version = \"$v_old\"/version = \"$v_new\"/" "$t"
 done
 build /src1 /out/n1/paddock-shell-demo
-[ "$(/out/n1/paddock-shell-demo/shell-demo-agent --self-test | awk '{print $2}')" = "$v_new" ] || { echo "::error::N+1's agent is not $v_new"; exit 1; }
+# --self-test prints "<name> <version> self-test" and then one line per check: the version is the header's.
+[ "$(/out/n1/paddock-shell-demo/shell-demo-agent --self-test | awk 'NR == 1 {print $2}')" = "$v_new" ] || { echo "::error::N+1's agent is not $v_new"; exit 1; }
 echo "$v_old $v_new" > /out/versions
 IN
 cat "$out/versions"

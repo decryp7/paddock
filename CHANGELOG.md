@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### service-smoke: the N+1 agent check read every line of the self-test
+- The nightly update smoke failed in its build step on every run (6394, 6410, 6540): the check took the second word of
+  every line of `shell-demo-agent --self-test` ("0.1.1", "executable", "service"), not the version in its header line,
+  so build N+1 never matched although its agent reported the bumped version. The macOS N and N+1 builds moved into
+  `scripts/shell-demo/build-macos-n-n1.sh`, which reads the header only, checks both builds and undoes the version bump
+  on every exit (`tools/test/shell-demo-builds.test.mjs`); the Linux arm64 build reads the header too.
+
 ### Spotter on the shared CI kit (WP-C3)
 - Spotter is a leg of `ci.yml` (`apps/spotter/paddock.ci.json`) and releases through the shared `app-release.yml` from a thin
   `spotter-release.yml`; `spotter.yml` and Spotter's copies of `scripts/release/*`, `macos-verify-bundle.sh`, `commit-lint`,
