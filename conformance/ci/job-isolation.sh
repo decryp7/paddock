@@ -8,6 +8,7 @@
 #   job-isolation.sh release                 gives the slot back (last step, if: always()); fails when the slot's holder
 #                                            died during the job (its isolation was then not guaranteed)
 #   job-isolation.sh status                  which slots are held, by which job folder (the stalled-holder recovery)
+#   job-isolation.sh slots                   PADDOCK_CI_SLOTS with its default (setup-rust divides sccache's cap by it)
 #   job-isolation.sh path <kind> [<name>]    a kept folder of kept-folders.txt (created, its time stamp renewed), for this slot
 #   job-isolation.sh temp                    the job's own temp folder (the runner's $RUNNER_TEMP)
 #   job-isolation.sh owns <folder> [<kind>]  exit 0 when <folder> is a kept folder (of that kind) of this job's slot
@@ -384,11 +385,12 @@ case "${1:-}" in
   acquire) cmd_acquire ;;
   release) cmd_release ;;
   status) cmd_status ;;
+  slots) max_slots ;;
   sweep-slot) shift; cmd_sweep_slot "$@" ;;
   path) shift; cmd_path "$@" ;;
   temp) job_temp ;;
   owns) shift; cmd_owns "$@" ;;
   port) shift; cmd_port "$@" ;;
   pattern) shift; cmd_pattern "$@" ;;
-  *) echo "usage: job-isolation.sh acquire|release|status|path <kind> [<name>]|temp|owns <folder>|port <name>|pattern <regex>" >&2; exit 2 ;;
+  *) echo "usage: job-isolation.sh acquire|release|status|slots|path <kind> [<name>]|temp|owns <folder>|port <name>|pattern <regex>" >&2; exit 2 ;;
 esac

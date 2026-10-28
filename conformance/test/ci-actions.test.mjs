@@ -159,8 +159,9 @@ test('setup-rust declares the sccache backend inputs: local disk by default, Red
 
 test('the sccache step uses the local disk: the runner home on a host, /sccache in a container, a cache that never fails a build', () => {
   const host = runSccacheStep({});
-  assert.match(host, /^SCCACHE_DIR=.*\/\.paddock-ci\/sccache$/m);
-  assert.match(host, /^SCCACHE_CACHE_SIZE=20G$/m);
+  assert.match(host, /^SCCACHE_DIR=.*\/\.paddock-ci\/sccache-s1$/m, 'the slot\'s own cache: one sccache server per local cache');
+  assert.match(host, /^SCCACHE_CACHE_SIZE=10G$/m, 'the host budget (40 GB) divided between the 4 slots');
+  assert.match(runSccacheStep({ PADDOCK_CI_SLOT: 's2', PADDOCK_CI_SLOTS: '3', PADDOCK_CI_SCCACHE_GB: '60' }), /^SCCACHE_DIR=.*\/sccache-s2$\n(?:.*\n)*?^SCCACHE_CACHE_SIZE=20G$/m);
   assert.match(host, /^SCCACHE_SERVER_PORT=4227$/m);
   assert.match(runSccacheStep({ PADDOCK_CI_SLOT: 's2' }), /^SCCACHE_SERVER_PORT=4228$/m, "a concurrent job's slot has a server of its own");
   assert.match(host, /^SCCACHE_IGNORE_SERVER_IO_ERROR=1$/m);
@@ -173,6 +174,7 @@ test('the sccache step uses the local disk: the runner home on a host, /sccache 
   const mount = mkdtempSync(join(tmpdir(), 'paddock-mount-'));
   const mounted = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: nomount, PADDOCK_SCCACHE_MOUNT: mount });
   assert.match(mounted, new RegExp(`^SCCACHE_DIR=${mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), 'a writable mount is used');
+  assert.match(mounted, /^SCCACHE_CACHE_SIZE=20G$/m);
   const redis = runSccacheStep({ BACKEND: 'auto', REDIS_ENDPOINT: 'redis://h:6379', REDIS_DB: '' });
   assert.match(redis, /^SCCACHE_REDIS_ENDPOINT=redis:\/\/h:6379$/m);
   assert.match(redis, /^SCCACHE_REDIS_DB=5$/m);
