@@ -2,6 +2,7 @@ import { DOCUMENT } from '@angular/common';
 import { Title } from '@angular/platform-browser';
 import { afterNextRender, ChangeDetectionStrategy, Component, DestroyRef, ElementRef, inject } from '@angular/core';
 import { PdCopyMenuHost } from '@decryp7/paddock-ui';
+import { PdSash, type SashLimits } from '@decryp7/paddock-ui/sash';
 import { cycleRegions, PdStatusBar, PdTitleBar, regionKey } from '@decryp7/paddock-ui/shell';
 import { DialogHost } from '@decryp7/paddock-ui/shell/dialogs';
 import { MENU_MODE, PdMenuBar } from '@decryp7/paddock-ui/shell/menu';
@@ -27,7 +28,7 @@ import { WORKBENCH_CONFIG } from './provide-workbench';
   selector: 'pd-workbench',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    PdTitleBar, PdMenuBar, PdStatusBar, PdNotificationHost, DialogHost, PdRecoveryNotice, PdSafeModeBadge, PdCopyMenuHost, PdActivityBar, PdExplorer, PdCommandPalette,
+    PdTitleBar, PdMenuBar, PdStatusBar, PdNotificationHost, DialogHost, PdRecoveryNotice, PdSafeModeBadge, PdCopyMenuHost, PdActivityBar, PdExplorer, PdCommandPalette, PdSash,
   ],
   providers: [RecoveryStore],
   host: {
@@ -50,22 +51,19 @@ import { WORKBENCH_CONFIG } from './provide-workbench';
         <div class="pd-side-scrim" data-testid="sidebar-scrim" aria-hidden="true" (click)="frame.dismissOverlay()"></div>
       }
       @if (frame.explorerShown()) {
-        <aside class="pd-side" [class.pd-side-overlay]="frame.overlay()" role="complementary" [attr.aria-label]="t.sidebar" data-pd-region="sidebar" tabindex="-1" data-testid="workbench-sidebar" [style.width.px]="frame.explorerWidth()">
+        <aside id="pd-sidebar" class="pd-side" [class.pd-side-overlay]="frame.overlay()" role="complementary" [attr.aria-label]="t.sidebar" data-pd-region="sidebar" tabindex="-1" data-testid="workbench-sidebar" [style.width.px]="frame.explorerWidth()">
           <pd-explorer />
         </aside>
         @if (!frame.overlay()) {
         <div
           class="pd-sash"
-          role="separator"
-          aria-orientation="vertical"
-          tabindex="0"
+          [pdSash]="frame.explorerWidth()"
+          [pdSashLimits]="limits"
+          pdSashControls="pd-sidebar"
           [attr.aria-label]="t.resize"
-          [attr.aria-valuenow]="frame.explorerWidth()"
-          [attr.aria-valuemin]="minWidth"
-          [attr.aria-valuemax]="maxWidth"
           data-testid="sidebar-sash"
-          (pointerdown)="startResize($event)"
-          (keydown)="resizeKey($event)"
+          (pdSashMove)="frame.setWidth($event)"
+          (pdSashCommit)="frame.evaluate(el.clientWidth)"
         ></div>
         }
       }
@@ -115,9 +113,8 @@ export class PdWorkbench {
   protected readonly frame = inject(WorkbenchFrameStore);
   protected readonly config = inject(WORKBENCH_CONFIG);
   protected readonly menuMode = inject(MENU_MODE);
-  protected readonly minWidth = EXPLORER_MIN_PX;
-  protected readonly maxWidth = EXPLORER_MAX_PX;
-  private readonly el = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  protected readonly limits = (): SashLimits => ({ min: EXPLORER_MIN_PX, max: EXPLORER_MAX_PX });
+  protected readonly el = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly doc = inject(DOCUMENT);
 
   constructor() {
@@ -155,36 +152,5 @@ export class PdWorkbench {
   protected skip(e: Event): void {
     e.preventDefault();
     this.el.querySelector<HTMLElement>('#pd-stage')?.focus();
-  }
-
-  /** Drags the sash: the width follows the pointer until it is released. */
-  protected startResize(e: PointerEvent): void {
-    const sash = e.currentTarget as HTMLElement;
-    const startX = e.clientX;
-    const startWidth = this.frame.explorerWidth();
-    const rtl = this.doc.dir === 'rtl';
-    sash.setPointerCapture?.(e.pointerId);
-    const move = (m: PointerEvent) => this.frame.setWidth(startWidth + (rtl ? startX - m.clientX : m.clientX - startX));
-    const up = () => {
-      sash.removeEventListener('pointermove', move);
-      sash.removeEventListener('pointerup', up);
-      sash.removeEventListener('pointercancel', up);
-      this.frame.evaluate(this.el.clientWidth);
-    };
-    sash.addEventListener('pointermove', move);
-    sash.addEventListener('pointerup', up);
-    sash.addEventListener('pointercancel', up);
-    e.preventDefault();
-  }
-
-  /** Arrow keys resize by 16 px (Shift: 64), Home and End go to the limits. */
-  protected resizeKey(e: KeyboardEvent): void {
-    const step = e.shiftKey ? 64 : 16;
-    const w = this.frame.explorerWidth();
-    const next = e.key === 'ArrowLeft' ? w - step : e.key === 'ArrowRight' ? w + step : e.key === 'Home' ? EXPLORER_MIN_PX : e.key === 'End' ? EXPLORER_MAX_PX : null;
-    if (next === null) return;
-    e.preventDefault();
-    this.frame.setWidth(next);
-    this.frame.evaluate(this.el.clientWidth);
   }
 }

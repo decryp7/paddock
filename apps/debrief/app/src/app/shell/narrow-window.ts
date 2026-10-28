@@ -1,7 +1,7 @@
-import { DOCUMENT } from '@angular/common';
-import { DestroyRef, inject, Injectable } from '@angular/core';
+import { computed, DestroyRef, inject, Injectable } from '@angular/core';
+import { ShellUiStore } from '../core/workspace/shell-ui.store';
+import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { WorkspaceStore } from '../core/workspace.store';
-import { EXPLORER_LAYOUT } from '../dock/dock-layout';
 import { DockService } from '../dock/dock.service';
 
 /**
@@ -15,13 +15,16 @@ import { DockService } from '../dock/dock.service';
 export class NarrowWindow {
   private readonly store = inject(WorkspaceStore);
   private readonly dock = inject(DockService);
-  private readonly doc = inject(DOCUMENT);
+  private readonly prefs = inject(UiPrefsStore);
+  private readonly shell = inject(ShellUiStore);
   private readonly destroyRef = inject(DestroyRef);
   /** The sidebar was open when the window narrowed and was closed by this service. */
   private closedByNarrowing = false;
   /** The user opened the Explorer by hand while there was no room: leave it open until it fits again. */
   private keptByUser = false;
   private started = false;
+  /** The user is dragging the Explorer's sash: it is not judged until the drag ends. */
+  private held = false;
 
   /** Starts following the dock's re-plans (idempotent). */
   start(): void {
@@ -31,10 +34,32 @@ export class NarrowWindow {
     this.evaluate();
   }
 
-  /** Asks the plan whether the Explorer fits and closes or reopens it accordingly; exposed for tests. */
+  /** The width the Explorer is shown at, px: the user's, within the room the plan has now. */
+  readonly width = computed(() => Math.min(this.prefs.explorerWidth(), this.shell.explorerRoom()));
+
+  /** A drag of the Explorer's sash began: the plan is not asked about the Explorer until `release`. */
+  hold(): void {
+    this.held = true;
+  }
+
+  /** The drag ended (or a key press finished): the Explorer is judged once, now. */
+  release(): void {
+    this.held = false;
+    this.evaluate();
+  }
+
+  /**
+   * Asks the plan whether the Explorer fits and closes or reopens it accordingly; exposed for tests. The width it is asked
+   * about is the user's (`UiPrefsStore.explorerWidth`), shown within the room the plan has: the plan shrinks the Explorer
+   * towards its declared minimum before it closes it.
+   */
   evaluate(): void {
+    if (this.held) return;
     const open = this.store.sidebarOpen();
-    const verdict = this.dock.explorerVerdict(open, this.width());
+    const wish = this.prefs.explorerWidth();
+    const shown = this.width();
+    const verdict = this.dock.explorerVerdict(open, open ? shown : wish);
+    if (open) this.shell.setExplorerRoom(this.dock.explorerRoom(true, shown));
     if (open) {
       if (this.closedByNarrowing) {
         // It was closed by this service and is open again: the user opened it.
@@ -51,10 +76,5 @@ export class NarrowWindow {
       this.closedByNarrowing = false;
       this.store.toggleSidebar();
     }
-  }
-
-  private width(): number {
-    const w = this.doc.querySelector('debrief-sidebar')?.getBoundingClientRect().width ?? 0;
-    return w > 0 ? w : EXPLORER_LAYOUT.pref.width;
   }
 }

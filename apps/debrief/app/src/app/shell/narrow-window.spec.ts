@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WorkspaceStore } from '../core/workspace.store';
 import { provideTinyBackend } from '../../testing/helpers';
 import { DockService } from '../dock/dock.service';
+import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { NarrowWindow } from './narrow-window';
 
 type Verdict = 'hide' | 'show' | 'keep';
@@ -70,5 +71,28 @@ describe('NarrowWindow (the Explorer follows the layout plan)', () => {
     listeners[0]?.();
     expect(store.sidebarOpen()).toBe(false);
     expect(verdicts).toHaveBeenCalled();
+  });
+
+  it('asks the plan about the width the user chose, open or closed (a closed Explorer must not be judged at the default width)', () => {
+    const { narrow, store, verdicts } = setup();
+    TestBed.inject(UiPrefsStore).setExplorerWidth(640);
+    narrow.evaluate();
+    expect(verdicts).toHaveBeenLastCalledWith(true, 640);
+    store.toggleSidebar();
+    narrow.evaluate();
+    expect(verdicts).toHaveBeenLastCalledWith(false, 640);
+  });
+
+  it('does not judge the Explorer in the middle of a drag, only once on release', () => {
+    const { narrow, store, set, verdicts } = setup();
+    set('hide');
+    narrow.hold();
+    narrow.evaluate();
+    narrow.evaluate();
+    expect(verdicts).not.toHaveBeenCalled();
+    expect(store.sidebarOpen()).toBe(true);
+    narrow.release();
+    expect(verdicts).toHaveBeenCalledTimes(1);
+    expect(store.sidebarOpen()).toBe(false);
   });
 });

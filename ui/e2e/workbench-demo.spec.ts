@@ -381,12 +381,14 @@ test('the Explorer pane is resized by dragging its sash, keeps the width across 
   await expect.poll(width).toBe(before + 80);
   // A window resize and a re-plan keep what the user dragged.
   await page.setViewportSize({ width: 1200, height: 800 });
+  await expect.poll(async () => Math.round((await wb.frame.stage.boundingBox())!.width)).toBe(1200 - 48 - (before + 80));
   await page.setViewportSize({ width: 1280, height: 800 });
+  await expect.poll(async () => Math.round((await wb.frame.stage.boundingBox())!.width)).toBe(1280 - 48 - (before + 80));
   await expect.poll(() => wb.frame.explorer()).toBe('wd.files');
-  expect(await width()).toBe(before + 80);
+  await expect.poll(width).toBe(before + 80);
   // The declared minimum holds.
   await drag(-2000);
   await expect.poll(width).toBe(min);
   await drag(2000);
-  await expect.poll(async () => (await width()) <= max).toBe(true);
+  await expect.poll(width).toBe(max);
 });

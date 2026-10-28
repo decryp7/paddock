@@ -1,3 +1,4 @@
+import { EXPLORER_WIDTH } from '../core/workspace/ui-prefs.store';
 import { TestBed } from '@angular/core/testing';
 import type { DockviewApi } from 'dockview';
 import { provideDebriefBuiltins } from '../builtin/provide-builtins';
@@ -243,9 +244,9 @@ describe('displaced views and grow-back', () => {
     expect(layout.explorerVerdict(narrow.api, true, 300)).toBe('hide');
     const roomy = fakeDock(1200, 900, { 'timeline+events': { width: 1200, height: 900 } });
     expect(layout.explorerVerdict(roomy.api, true, 300)).toBe('keep');
-    // Closed: the dock has the Explorer's room too; it needs 300 + 560 + the margin.
-    expect(layout.explorerVerdict(fakeDock(923, 900, { 'timeline+events': { width: 923, height: 900 } }).api, false, 300)).toBe('keep');
-    expect(layout.explorerVerdict(fakeDock(925, 900, { 'timeline+events': { width: 925, height: 900 } }).api, false, 300)).toBe('show');
+    // Closed: the dock has the Explorer's room too; it needs its declared minimum (240) + 560 + the margin.
+    expect(layout.explorerVerdict(fakeDock(863, 900, { 'timeline+events': { width: 863, height: 900 } }).api, false, 300)).toBe('keep');
+    expect(layout.explorerVerdict(fakeDock(865, 900, { 'timeline+events': { width: 865, height: 900 } }).api, false, 300)).toBe('show');
   });
 });
 
@@ -304,5 +305,21 @@ describe('watchResize', () => {
     fire();
     vi.advanceTimersByTime(150 + 50 * 20 + 50);
     expect(onResize).toHaveBeenCalledTimes(1);
+  });
+
+  it('the Explorer room: the widest width the plan still keeps the Explorer at, within its declared limits', () => {
+    const layout = setup();
+    const dock = fakeDock(1000 - 272, 900, { 'timeline+events': { width: 1000 - 272, height: 900 } });
+    const room = layout.explorerRoom(dock.api, true, 272);
+    expect(room).toBeGreaterThan(EXPLORER_WIDTH.min);
+    expect(room).toBeLessThan(EXPLORER_WIDTH.max);
+    expect(layout.explorerVerdict(dock.api, true, room)).toBe('keep');
+    // Wider than the room: the plan shrinks the Explorer towards its minimum before it closes it.
+    expect(layout.explorerVerdict(dock.api, true, room + 1)).toBe('keep');
+    expect(layout.explorerVerdict(dock.api, true, EXPLORER_WIDTH.max)).toBe('keep');
+    const wide = fakeDock(2400 - 272, 900, { 'timeline+events': { width: 2400 - 272, height: 900 } });
+    expect(layout.explorerRoom(wide.api, true, 272)).toBe(EXPLORER_WIDTH.max);
+    // Never below the declared minimum, even where nothing fits.
+    expect(layout.explorerRoom(fakeDock(300, 900, { 'timeline+events': { width: 300, height: 900 } }).api, true, 272)).toBe(EXPLORER_WIDTH.min);
   });
 });

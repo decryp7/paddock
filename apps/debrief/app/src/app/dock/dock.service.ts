@@ -12,6 +12,7 @@ import { DockContext } from './dock-context';
 import { keepGroupsUnscrolled, labelTabOverflow, observeFloatingAria } from './dock-dom';
 import { DockSlot, isLayoutTarget, Point, Rect, resolveGuideDrop, Side } from './dock-geometry';
 import { DockLayout } from './dock-layout';
+import { EXPLORER_WIDTH } from '../core/workspace/ui-prefs.store';
 import { DockPersistence } from './dock-persistence';
 import { DockPlacement } from './dock-placement';
 import { DockPolicy } from './dock-policy';
@@ -915,6 +916,12 @@ export class DockService {
     const api = this.api;
     if (!api) return 'keep';
     return this.layout.explorerVerdict(api, open, explorerWidth);
+  }
+
+  /** The widest the Explorer may be now without being shrunk or closed by the plan (see `DockLayout.explorerRoom`). */
+  explorerRoom(open: boolean, explorerWidth: number): number {
+    const api = this.api;
+    return api ? this.layout.explorerRoom(api, open, explorerWidth) : EXPLORER_WIDTH.max;
   }
 
   /** Undo of "Some panes were tabbed to fit": the saved arrangement, unclamped, for this session. */

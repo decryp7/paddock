@@ -347,10 +347,35 @@ export class DockLayout {
     };
   }
 
-  /** The Explorer's declaration at the width it has now: the plan never resizes it, so what it needs is the width it is (never below its declared minimum). */
+  /** The Explorer's declaration for the user's width: it keeps its declared minimum, and the width asked for is its preference, so the plan shrinks it before it closes it. */
   private explorerAt(width: number): ViewLayout {
-    const w = Math.max(EXPLORER_LAYOUT.min.width, width);
-    return { ...EXPLORER_LAYOUT, min: { ...EXPLORER_LAYOUT.min, width: w }, pref: { ...EXPLORER_LAYOUT.pref, width: w } };
+    return { ...EXPLORER_LAYOUT, pref: { ...EXPLORER_LAYOUT.pref, width: Math.max(EXPLORER_LAYOUT.min.width, width) } };
+  }
+
+  /**
+   * The widest the Explorer can be right now without the plan shrinking it or closing it, within its declared limits (never
+   * below the minimum): the cap of a drag, and the width it is shown at when the window cannot hold the user's width.
+   * `explorerWidth` is the width it has now (it is part of the room when open).
+   */
+  explorerRoom(api: DockviewApi, open: boolean, explorerWidth: number): number {
+    if (!(api.width > 0 && api.height > 0)) return EXPLORER_WIDTH.max;
+    const box = this.ctx.container?.getBoundingClientRect();
+    if (box && (box.width <= 0 || box.height <= 0)) return EXPLORER_WIDTH.max;
+    const viewport = { width: api.width + (open ? explorerWidth : 0), height: api.height };
+    const docked = this.openViews(api);
+    const fits = (w: number): boolean => {
+      const explorer: OpenView = { id: EXPLORER_ID, layout: this.explorerAt(w), group: EXPLORER_ID };
+      const plan = planLayout(viewport, [...docked, explorer], this.hints());
+      return (plan.columns.find((c) => c.kind === 'left')?.width ?? 0) >= w;
+    };
+    let lo: number = EXPLORER_WIDTH.min;
+    let hi: number = EXPLORER_WIDTH.max;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (fits(mid)) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
   }
 
   /** The verdict for the Explorer (see `DockService.explorerVerdict`). */

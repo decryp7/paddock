@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared sash directive; Debrief's Explorer can be resized
+- New entry point `@decryp7/paddock-ui/sash`: `PdSash` (`[pdSash]`), the one splitter behaviour for a pane the user resizes by hand. It owns the
+  pointer drag (primary button, pointer capture), the keys (arrows by 16 px, Shift by 64, Home and End, flipped in right-to-left text), the
+  `separator` aria (`aria-valuenow`, `aria-valuemin`, a dynamic `aria-valuemax` from `pdSashLimits`, `aria-controls`) and three outputs:
+  `pdSashStart`, `pdSashMove` (the clamped width) and `pdSashCommit` (once, on release, which is when a layout evaluates). The workbench
+  frame's Explorer sash uses it unchanged in behaviour (it gains `aria-controls="pd-sidebar"` and the right-to-left key flip).
+- Debrief: the Explorer pane had no sash (a fixed 272 px column outside the dock). It now declares 240 to 640 px (default 272), is
+  resized with `PdSash`, keeps the user's width as a view preference, is shown within the room the layout plan has (the plan shrinks it
+  towards 240 before it closes it), is not judged by the plan while a drag is in progress, and follows the main window in pop-outs.
+
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
   (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the
