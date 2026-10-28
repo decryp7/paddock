@@ -17,6 +17,8 @@ install = ["tauri", "dep:tauri-plugin-updater"]
 
 [dependencies]
 paddock-commands = { workspace = true }
+# The dialog contracts of this crate (`dialogs!`, ADR 0026 §3).
+paddock-dialogs = { workspace = true }
 paddock-download = { workspace = true }
 paddock-jobs = { workspace = true }
 serde = { version = "1", features = ["derive"] }

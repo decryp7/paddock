@@ -1,7 +1,7 @@
 [package]
 name = "paddock-dialogs"
 version = "0.2.0"
-description = "Dialogs as OS windows for the Paddock apps: the dialog contract schema and `allows(dialog, command)`, pure placement on the parent's monitor, window creation by kind, fit/grow and bounds."
+description = "Dialogs as OS windows for the Paddock apps: the dialog contracts as static tables and `allows(dialog, command)`, pure placement on the parent's monitor, window creation by kind, fit/grow and bounds."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -22,8 +22,6 @@ log = { version = "0.4", features = ["kv"], optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
-# The never-panics test of the parsers (conformance check C36).
-paddock-testkit = { workspace = true }
 # The Tauri adapter is tested on Tauri's mock runtime; `tauri-runtime` builds monitors for the placement on it.
 tauri = { workspace = true, features = ["test"] }
 tauri-runtime = "2.12"

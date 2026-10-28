@@ -1,8 +1,8 @@
 import { ErrorHandler, Injector, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideContributions } from '@decryp7/paddock-ui/shell';
+import { DISMISSED, provideContributions } from '@decryp7/paddock-ui/shell';
 import { DIALOG_REF } from '@decryp7/paddock-ui/shell/dialogs';
-import { assertContributionsValid } from '@decryp7/paddock-ui/shell/testing';
+import { assertContributionsValid, createFramed } from '@decryp7/paddock-ui/shell/testing';
 import type { Preview, PreviewReply, RedactionCounts, Saved, SaveOutcome } from '../generated/diagnostics';
 import { DIAGNOSTICS_COMMANDS } from '../generated/diagnostics-commands';
 import { DiagnosticsBackend, MemoryDiagnosticsBackend, TauriDiagnosticsBackend, type DiagnosticsIpc } from './backend';
@@ -47,7 +47,7 @@ function bed(options: Partial<ConstructorParameters<typeof MemoryDiagnosticsBack
     providers: [
       provideZonelessChangeDetection(),
       provideShellDiagnostics({ backend: () => backend ?? memory }),
-      { provide: DIALOG_REF, useValue: { close: (r?: Saved) => closed.push(r), closed: Promise.resolve(undefined) } },
+      { provide: DIALOG_REF, useValue: { answer: (r?: Saved) => closed.push(r), dismiss: () => closed.push(undefined), closed: Promise.resolve(DISMISSED) } },
     ],
   });
   return { memory, closed, flush };
@@ -298,7 +298,7 @@ describe('DiagnosticsStore', () => {
 describe('the Report a Problem dialog', () => {
   async function open(options: Parameters<typeof bed>[0] = {}) {
     const rig = bed(options);
-    const fixture = TestBed.createComponent(PdReportProblemDialog);
+    const fixture = createFramed(PdReportProblemDialog, { kind: "form" });
     await fixture.whenStable();
     await settle();
     await fixture.whenStable();
@@ -315,7 +315,7 @@ describe('the Report a Problem dialog', () => {
     expect(rows[3]).toContain('182 KB');
     expect(text(el.querySelector('[data-testid="diag-total"]') as HTMLElement)).toMatch(/^4 files, .* before compression$/);
     expect(el.querySelector('table')?.querySelectorAll('th[scope="col"]')).toHaveLength(3);
-    expect((el.querySelector('[data-testid="diag-save"]') as HTMLButtonElement).disabled).toBe(false);
+    expect((el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).disabled).toBe(false);
     expect(el.querySelector('[data-testid="diag-removed"]')).not.toBeNull();
   });
 
@@ -329,39 +329,41 @@ describe('the Report a Problem dialog', () => {
     await fixture.whenStable();
     expect(text(el.querySelector('[data-testid="diag-files"] tbody tr:nth-child(2)') as HTMLElement)).toContain('Your description (24 characters)');
     expect(memory.collections).toBe(1);
-    (el.querySelector('[data-testid="diag-save"]') as HTMLButtonElement).click();
+    (el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).click();
     await fixture.whenStable();
     expect(text(el.querySelector('[data-testid="diag-saving"]') as HTMLElement)).toContain('Saving the report…');
     expect(box.disabled).toBe(true);
     await answer();
     expect(text(el.querySelector('[data-testid="diag-saved"]') as HTMLElement)).toContain('The report is saved.');
     expect(el.querySelector('[data-testid="diag-saved-path"]')?.getAttribute('title')).toContain('demo-diagnostics');
-    expect(el.querySelector('[data-testid="diag-save"]')).toBeNull();
-    (el.querySelector('[data-testid="diag-done"]') as HTMLButtonElement).click();
-    expect(closed).toHaveLength(1);
-    expect(closed[0]).toMatchObject({ files: 4 });
+    expect(el.querySelector('[data-testid="dialog-action-save"]')).toBeNull();
+    (el.querySelector('[data-testid="dialog-action-done"]') as HTMLButtonElement).click();
+    await settle();
+    expect(closed).toHaveLength(0);
+    expect(fixture.componentInstance.answers).toHaveLength(1);
+    expect(fixture.componentInstance.answers[0]).toMatchObject({ files: 4 });
   });
 
   it('shows a save that is stopped, closed or failed, and the next step', async () => {
     const dismissed = await open({ save: 'dismiss' });
-    (dismissed.el.querySelector('[data-testid="diag-save"]') as HTMLButtonElement).click();
+    (dismissed.el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).click();
     await dismissed.answer();
     expect(text(dismissed.el.querySelector('[data-testid="diag-dismissed"]') as HTMLElement)).toContain('Nothing was saved.');
     TestBed.resetTestingModule();
     const failed = await open({ save: 'fail' });
-    (failed.el.querySelector('[data-testid="diag-save"]') as HTMLButtonElement).click();
+    (failed.el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).click();
     await failed.answer();
     const alert = failed.el.querySelector('[data-testid="diag-save-error"]') as HTMLElement;
     expect(alert.getAttribute('role')).toBe('alert');
     expect(text(alert)).toContain('No space left on device. Choose another folder or free some space.');
     TestBed.resetTestingModule();
     const hanging = await open({ save: 'hang' });
-    (hanging.el.querySelector('[data-testid="diag-save"]') as HTMLButtonElement).click();
+    (hanging.el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).click();
     await hanging.fixture.whenStable();
     button(hanging.el, 'Stop saving').click();
     await hanging.answer();
     expect(text(hanging.el.querySelector('[data-testid="diag-cancelled"]') as HTMLElement)).toContain('Nothing was written.');
-    expect((hanging.el.querySelector('[data-testid="diag-save"]') as HTMLButtonElement).disabled).toBe(false);
+    expect((hanging.el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('shows the collection in progress, and an error with Retry that works', async () => {
@@ -369,9 +371,9 @@ describe('the Report a Problem dialog', () => {
     let fail = true;
     vi.spyOn(memory, 'preview').mockImplementation(() => (fail ? Promise.reject(new Error('the engine is gone')) : MemoryDiagnosticsBackend.prototype.preview.call(memory, null, '')));
     TestBed.configureTestingModule({
-      providers: [provideZonelessChangeDetection(), provideShellDiagnostics({ backend: () => memory }), { provide: DIALOG_REF, useValue: { close: () => undefined, closed: Promise.resolve(undefined) } }],
+      providers: [provideZonelessChangeDetection(), provideShellDiagnostics({ backend: () => memory }), { provide: DIALOG_REF, useValue: { answer: () => undefined, dismiss: () => undefined, closed: Promise.resolve(DISMISSED) } }],
     });
-    const fixture = TestBed.createComponent(PdReportProblemDialog);
+    const fixture = createFramed(PdReportProblemDialog, { kind: "form" });
     const el: HTMLElement = fixture.nativeElement;
     await fixture.whenStable();
     await settle();
@@ -379,7 +381,7 @@ describe('the Report a Problem dialog', () => {
     const alert = el.querySelector('[data-testid="diag-error"]') as HTMLElement;
     expect(alert.getAttribute('role')).toBe('alert');
     expect(text(alert)).toContain('the engine is gone');
-    expect((el.querySelector('[data-testid="diag-save"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).disabled).toBe(true);
     fail = false;
     button(el, 'Retry').click();
     await settle();
@@ -393,9 +395,9 @@ describe('the Report a Problem dialog', () => {
     const reply = await memory.preview(null, '');
     vi.spyOn(memory, 'preview').mockResolvedValue({ ...reply, preview: { ...reply.preview, notes: ['There are no log files yet.'] } });
     TestBed.configureTestingModule({
-      providers: [provideZonelessChangeDetection(), provideShellDiagnostics({ backend: () => memory }), { provide: DIALOG_REF, useValue: { close: () => undefined, closed: Promise.resolve(undefined) } }],
+      providers: [provideZonelessChangeDetection(), provideShellDiagnostics({ backend: () => memory }), { provide: DIALOG_REF, useValue: { answer: () => undefined, dismiss: () => undefined, closed: Promise.resolve(DISMISSED) } }],
     });
-    const fixture = TestBed.createComponent(PdReportProblemDialog);
+    const fixture = createFramed(PdReportProblemDialog, { kind: "form" });
     await fixture.whenStable();
     await settle();
     await fixture.whenStable();
@@ -406,7 +408,7 @@ describe('the Report a Problem dialog', () => {
 describe('the contributions', () => {
   it('are valid, open the dialog from Help, and name only commands the dialog may call', async () => {
     const dialog = defineDiagnosticsDialog({ providers: () => Promise.resolve([]) });
-    expect(dialog).toMatchObject({ id: DIAGNOSTICS_DIALOG_ID, kind: 'decision', modality: 'modal' });
+    expect(dialog).toMatchObject({ id: DIAGNOSTICS_DIALOG_ID, kind: 'form', modality: 'modeless', width: 720 });
     expect(dialog.commands).toEqual([...DIAGNOSTICS_DIALOG_COMMANDS]);
     const batch = diagnosticsContributions([dialog]);
     TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection(), provideContributions(batch)] });

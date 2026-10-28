@@ -471,11 +471,11 @@ export class PdChannelsPage {
     this.open.set(false);
   }
 
-  /** Asks in the remove dialog's window; Remove (true) deletes the channel and its secret, anything else keeps it. */
+  /** Asks in the remove dialog's window; Remove channel (answered `true`) deletes the channel and its secret, Keep keeps it. */
   protected async remove(c: ChannelConfig): Promise<void> {
     const id = c.id;
-    const confirmed = await this.dialogs.open<boolean>(CHANNELS_REMOVE_DIALOG_ID, { inputs: { channelId: id, name: c.name } }).closed;
-    if (confirmed !== true) return;
+    const outcome = await this.dialogs.open<boolean>(CHANNELS_REMOVE_DIALOG_ID, { inputs: { channelId: id, name: c.name } }).closed;
+    if (outcome.kind !== 'answered' || outcome.value !== true) return;
     // after-await: the form may have moved to another channel while the dialog was open.
     if (this.editingId() === id) this.open.set(false);
     await this.store.remove(id);
@@ -491,8 +491,8 @@ export class PdChannelsPage {
     this.patch({ id: channel.id });
     const label = channel.name || channel.id;
     const kind = secretKind(channel);
-    const stored = await this.dialogs.open<boolean>(CHANNELS_SECRET_DIALOG_ID, { inputs: { channelId: channel.id, label, kind } }).closed;
-    if (stored !== true) return;
+    const outcome = await this.dialogs.open<boolean>(CHANNELS_SECRET_DIALOG_ID, { inputs: { channelId: channel.id, label, kind } }).closed;
+    if (outcome.kind !== 'answered' || outcome.value !== true) return;
     this.sessionSecrets.update((l) => (l.includes(channel.id) ? l : [...l, channel.id]));
     await this.store.refresh();
   }

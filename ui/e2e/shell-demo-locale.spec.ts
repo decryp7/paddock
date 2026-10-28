@@ -165,18 +165,17 @@ test.describe('pseudo-locale (plan S15)', () => {
     await page.goto('/#/dialogs');
     await page.locator('[data-dialog-open="sd.about"]').click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByTestId('dialog-close')).toHaveAttribute('aria-label', PSEUDO);
+    await expect(dialog.getByTestId('dialog-action-dismiss')).toHaveText(PSEUDO);
     await expect(dialog.locator('.pd-title')).toHaveText(PSEUDO);
     expect(await unmarkedEnglish(dialog.locator('.pd-head'))).toEqual([]);
-    await dialog.getByTestId('dialog-close').click();
+    await dialog.getByTestId('dialog-action-dismiss').click();
 
     // A dialog window (the desktop build's OS window, opened by URL in the browser build): the shell's own Close.
     await app.dialogs.openWindow('sd.about', {}, { title: 'About' });
     await expect(page.locator('html')).toHaveAttribute('lang', 'en-XA');
     const shell = app.dialogs.shell;
     await expect(shell.getByTestId('dialog-loading')).toHaveCount(0);
-    const foot = shell.getByTestId('dialog-shell-foot');
-    if (await foot.count()) expect(await unmarkedEnglish(foot)).toEqual([]);
+    expect(await unmarkedEnglish(shell.getByTestId('dialog-footer'))).toEqual([]);
   });
 
   test('no unmarked English in the Settings window (the engine’s field labels and descriptions are data)', async ({ page }) => {

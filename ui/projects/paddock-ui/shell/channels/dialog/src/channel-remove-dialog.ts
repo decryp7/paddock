@@ -1,11 +1,11 @@
-import { afterNextRender, ChangeDetectionStrategy, Component, effect, ElementRef, inject, Injector, input, viewChild } from '@angular/core';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
+import { DIALOG_REF, type DialogAction, type DialogContent, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
 
 /**
  * The remove confirmation (a modal decision, one window per channel): it names the channel and says its stored secret goes
- * too. Keep is the default (Enter, Escape, focus on opening); Remove is the danger action and is never the default. It calls
- * nothing: it resolves `true` for Remove and `false` for Keep, and the page removes the channel. A window opened without a
- * channel says so inline, with a Close button, instead of showing a question about nothing.
+ * too. Its actions are declared (ADR 0026 §2): Keep is the way out and has the focus and Enter; Remove channel is the
+ * destructive answer and is never the Enter target. It calls nothing: it answers `true` for Remove channel and is
+ * dismissed by Keep, and the page removes the channel. A window opened without a channel says so inline, with a Close.
  */
 @Component({
   selector: 'pd-channel-remove-dialog',
@@ -14,17 +14,10 @@ import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
     @if (valid()) {
       <div class="pd-rm">
         <p class="pd-rm__text" data-testid="channel-remove-text">{{ question() }} {{ t.secretGoes }}</p>
-        <div class="pd-rm__actions">
-          <button type="button" class="pd-rm__btn pd-rm__btn--danger" data-testid="channel-remove-yes" (click)="ref.close(true)">{{ t.remove }}</button>
-          <button #keep type="button" class="pd-rm__btn" data-default data-dialog-close data-testid="channel-remove-keep" (click)="ref.close(false)">{{ t.keep }}</button>
-        </div>
       </div>
     } @else {
       <div class="pd-rm">
         <p class="pd-rm__error" role="alert" data-testid="channel-remove-invalid">{{ t.invalid }}</p>
-        <div class="pd-rm__actions">
-          <button type="button" class="pd-rm__btn" data-dialog-close data-testid="channel-remove-close" (click)="ref.close()">{{ t.close }}</button>
-        </div>
       </div>
     }
   `,
@@ -33,16 +26,10 @@ import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
     .pd-rm { display: flex; flex-direction: column; gap: var(--pd-space-3); }
     .pd-rm__text, .pd-rm__error { margin: 0; overflow-wrap: anywhere; }
     .pd-rm__error { padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); }
-    .pd-rm__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--pd-space-2); }
-    .pd-rm__btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-rm__btn--danger { background: var(--pd-danger-fill); border-color: var(--pd-danger-fill); color: var(--pd-on-danger); }
-    .pd-rm__btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
   `,
 })
-export class PdChannelRemoveDialog {
+export class PdChannelRemoveDialog implements DialogContent<boolean> {
   protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
-  private readonly injector = inject(Injector);
-  private readonly keep = viewChild<ElementRef<HTMLButtonElement>>('keep');
 
   /** The channel to remove. */
   readonly channelId = input('');
@@ -50,7 +37,7 @@ export class PdChannelRemoveDialog {
   readonly name = input('');
 
   protected readonly t = {
-    remove: $localize`:@@pd.channels.remove-yes:Remove`,
+    remove: $localize`:@@pd.channels.remove-yes:Remove channel`,
     keep: $localize`:@@pd.channels.remove-keep:Keep`,
     close: $localize`:@@pd.channels.remove-close:Close`,
     secretGoes: $localize`:@@pd.channels.remove-secret-goes:Its stored secret is deleted too.`,
@@ -61,6 +48,16 @@ export class PdChannelRemoveDialog {
     return this.channelId().trim() !== '';
   }
 
+  /** Keep and Remove channel; a window without a channel offers only Close. */
+  readonly dialogActions = computed<readonly DialogAction<boolean>[]>(() =>
+    this.valid()
+      ? [
+          { kind: 'dismiss', id: 'keep', label: this.t.keep },
+          { kind: 'answer', id: 'remove', label: this.t.remove, role: 'destructive', answer: () => true },
+        ]
+      : [{ kind: 'dismiss', id: 'close', label: this.t.close }],
+  );
+
   protected question(): string {
     const name = this.name().trim() || this.channelId();
     return $localize`:@@pd.channels.remove-question:Remove "${name}:name:"?`;
@@ -70,10 +67,6 @@ export class PdChannelRemoveDialog {
     // The title names the channel; it is known only once the opener's inputs are set (a side effect on the window's title).
     effect(() => {
       if (this.valid()) this.ref.setTitle?.(this.question());
-    });
-    // Keep has the focus: a stray Enter never removes anything.
-    effect(() => {
-      if (this.valid()) afterNextRender(() => this.keep()?.nativeElement.focus(), { injector: this.injector });
     });
   }
 }

@@ -96,3 +96,13 @@ fn the_table_has_the_updater_and_about_commands() {
         paddock_commands::Kind::Query
     );
 }
+
+/// The dialog contracts of this crate as TypeScript (ADR 0026 §3), beside its other generated files.
+#[test]
+fn generated_dialog_contracts_are_current() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../ui/projects/paddock-ui/shell/about/generated/dialog-contracts.ts");
+    let text =
+        paddock_dialogs::ts::contracts_module("paddock-updater", &crate::DIALOGS, REGENERATE);
+    testing::sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}

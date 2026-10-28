@@ -9,7 +9,7 @@ import {
   type Provider,
   type Type,
 } from '@angular/core';
-import { SHELL_PORTS, type ShellNotice, type ShellPorts } from '@decryp7/paddock-ui/shell';
+import { DISMISSED, SHELL_PORTS, type ShellNotice, type ShellPorts } from '@decryp7/paddock-ui/shell';
 import { NotificationsBackend, ServiceHealthBackend } from './backends';
 import { NOTIFICATION_SOURCES, type NotificationSource } from './notification-host.model';
 import { PdNotificationHost } from './notification-host';
@@ -54,7 +54,7 @@ const warnPorts = (): Pick<ShellPorts, 'showPage' | 'openDialog'> => ({
   showPage: (id) => console.warn(`[paddock-shell] no pages frame in this window; cannot show page ${id}`),
   openDialog: (id) => {
     console.warn(`[paddock-shell] no dialog service in this window; cannot open dialog ${id}`);
-    return Promise.resolve(undefined);
+    return Promise.resolve(DISMISSED);
   },
 });
 

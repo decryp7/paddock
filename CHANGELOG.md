@@ -4,6 +4,79 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, part 4: test kit and checks (ADR 0026 §6; package 1.2b, first part)
+- ESLint `paddock/dialog-frame-footer` (in the preset for the templates of `*dialog*` components): no `footer`, foot or
+  actions row, and no Close, Cancel or OK button in a dialog content.
+- The boot harness reports a content that draws its own footer (`ownFooter`), a missing ready handshake and a ready
+  measure whose minimum exceeds its content.
+- `@decryp7/paddock-e2e`: `dialogFitProblems` (ADR 0016 check 1: scales 1, 1.25 and 1.5 on 1920x1080 and 1366x768; footer
+  buttons inside the window, on top, at most 24 px above its bottom); the shell demo runs it over every dialog.
+
+### Shared dialog API, part 2: DialogFrame, declared actions and pd.confirm (ADR 0026 §2, §4.8, §5; packages 1.2a and 1.2c)
+- **Breaking.** Every dialog renders in `DialogFrame` (`@decryp7/paddock-ui/shell/dialogs`): an optional header, a body that
+  alone scrolls and a footer the frame draws from the content's declared actions (`DialogContent.dialogActions`, a signal of
+  `AnswerAction | RunAction | DismissAction`; `dialogStatus`, `dialogMinBodyHeight`, `dialogHeader`). `layoutActions` (pure,
+  tested as a table) orders them natively per OS (macOS and Linux: Cancel left of the primary; Windows: primary, then
+  Cancel), allows one primary, one destructive and one dismiss (none for a required choice; the frame adds Cancel/Close),
+  never makes a destructive action the Enter target, and picks the first focus (a form's first field, marked
+  `data-autofocus`; a destructive decision's Cancel). Busy (spinner, `aria-busy`, inert body; abortable work is aborted on a
+  dismissal, other work finishes first, "Finishing…") and rejected states (`DialogActionError`'s message, Try again) are the
+  frame's. An invalid declaration renders one Close and is logged.
+- **Breaking.** Outcomes: `DialogRef` (what a content injects) has `answer(value)` and `dismiss()`; the opener's
+  `DialogHandle.closed` and `ShellCore.openDialog` resolve a `DialogOutcome` (`answered` with a value, or `dismissed`),
+  never an ambiguous `undefined` (`answerOf`, `answered`, `DISMISSED`). On the wire an answer is `{ answered: true, value }`.
+- A dialog window measures itself synchronously once the content and `document.fonts.ready` are there (no frame wait,
+  the 1.1-0 spike) and sends `DialogIo.ready`, then `fit` at most once per frame when its natural size, the fonts, theme or
+  density change; decisions and forms shrink as well as grow. In the page a dialog stays hidden until ready or the show
+  deadline (Loading with Close), and a modal traps the focus (CDK). Focus returns to the opener. The `keys.ts`
+  heuristics (`hasCloseAction`, `findDefaultAction`) are gone.
+- The 13 shared dialogs and the shell demo's 5 and the workbench demo's 2 declare their actions and lose their footers.
+  Destructive actions say what they destroy (Remove channel, Revoke key, Clear cache / Delete data); Updates' job controls
+  read Stop checking / Stop download.
+- New `@decryp7/paddock-ui/shell/confirm` (`pd.confirm`, `defineConfirmDialog`, `confirm()`; contract
+  `paddock_shell::DIALOGS`): the one shared confirmation (heading, message, details, a primary or destructive affirmative).
+- `shell/testing`: `renderFramed` and `createFramed` render a content in the real frame for its spec.
+
+### Shared dialog API, part 1: contracts in Rust (ADR 0026 §1, §3; package 1.1a)
+- **Breaking.** Dialog contracts are Rust tables: `paddock_dialogs::dialogs!` (a `Shape` for kind and modality, the width
+  steps `Narrow` 400 / `Medium` 560 / `Wide` 720, a tool's `Px(n)`, a viewer's or tool's preferred `height`, `instanced`,
+  `required_choice`, `commands`). `command_table!` emits a `dialog_callable` module beside each leaf table (one leaf table per
+  module) with a marker per command open to dialogs and `ALL`; `paddock_commands::prefix` and `plugin` build the other entries.
+  A misspelt or closed command, a prefix matching nothing, a modal viewer or a required choice that is not modal does not compile.
+- **Breaking.** `Contracts::parse`, `ContractFile`, `Dialogs::from_json` and `paddock_shell::Builder::dialog_contracts` are gone:
+  `Contracts::from_tables`, `Dialogs::from_tables` and `Builder::dialogs(&[&app::DIALOGS])`; the shell registers its own tables
+  (`paddock_shell::SHELL_DIALOGS`: channels, MCP, storage, diagnostics, updater, set-up) and the workbench has
+  `paddock_workbench::DIALOGS`. `paddock_shell::dialog_commands` re-exports every shell crate's markers for an app's table.
+- **Breaking.** `defineDialog(contract, ui)`: the contract is the generated `DIALOG_CONTRACTS['<id>']` of the owner
+  (`generated/dialog-contracts.ts`), the second argument the title, result, providers and loader. `DialogSpec`, `minWidth`/`minHeight`,
+  `dialogMinSize`, `KIND_POLICY`, `FALLBACK_WIDTH`, `dialogContract`, `dialogContractFile`, `serializeDialogContracts` and the
+  JSON contract files are gone; `DialogRequest` carries no sizes (Rust takes them from the contract). The kind table is generated
+  (`DIALOG_KIND_TABLE`, `DIALOG_WIDTH_STEPS`; `fitsContent` and the new `growsOnly` read it), so TypeScript and Rust agree on
+  which kinds are fitted. `fakeDialogContract` (`shell/testing`) makes contracts for specs.
+- `pd.report-problem` is a modeless form, 720 wide; the shared decisions and forms take the width steps (400 or 560).
+- The manifest's dialogs carry `width` and `height` instead of `minSize`.
+- `@decryp7/paddock-e2e`: `dialogContracts(...paths)` and `axeEveryDialog(page, paths)` read generated `dialog-contracts.ts` files
+  (`parseDialogContractsModule`); conformance C33 reads an app's generated file (or the legacy JSON until Debrief moves).
+- The package bin `paddock-check-dialog-commands` and `npm run check:dialogs` are deleted (ADR 0026 §3: the compiler checks
+  that a command exists and is open to dialogs; the invoke-layer recorder of package 1.2b replaces the rest).
+
+### Shared dialog API, part 3: the window lifecycle (package 1.1b)
+- **Breaking.** `dialog_fit_height` is gone: a dialog window reports `dialog_ready { measure }` once and `dialog_fit { measure }`
+  after that, with `measure = { content, minContent }` (the dialog's own inner logical size; the wire type `DialogMeasureWire`
+  in `shell/generated/dialogs.ts`). `tauriDialogIo.ready` and `.fit` send them. `BASE_COMMANDS` lists `dialog_ready` and
+  `dialog_fit`; apps list the two commands in their table instead of `dialog_fit_height`.
+- A dialog window is created hidden (pending), at the placed size, on the dialog shell's surface colour, and shown and
+  focused when its page is ready, so the user never sees the 520 px guess or the jump. If the page has not reported within
+  `Dialogs::show_deadline` (1 s, `with_show_deadline`; `paddock-startup` `Config::dialog_show_deadline`) it is shown at the
+  placed size and a late ready fits it once. The deadline runs through an injectable `Scheduler`.
+- The show mechanism per OS is chosen in one function, `paddock_dialogs::show_mechanism(os)`: method d (hidden, show on ready)
+  everywhere today, from the 1.1-0 spike (macOS and Linux measured; a Windows result flips one line to the off-screen method).
+- The minimum content becomes the OS minimum. The size cap is 75 % of the work area less the dialog window's own
+  outer-minus-inner decorations, applies to the preferred size only and never pushes below the minimum content. Physical
+  sizes are rounded up once. A decision keeps its offset only, a form its width and offset, a viewer and a tool their size.
+- A modal's parent is disabled when the dialog is shown, not when it is created; opening a dialog that is still pending
+  creates no window and does not show it early. A scale-factor change refits the window from its last measure.
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly

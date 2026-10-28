@@ -25,6 +25,11 @@ pub struct Config {
     pub max_boot_errors: u32,
     /// Longest boot error message logged, in characters (the rest is cut).
     pub max_error_len: usize,
+    /// How long after its window is created a dialog may take to report `dialog_ready` before it is shown anyway at its
+    /// placed size (ADR 0026 §4.4). `paddock-startup` does not use it; the app hands it to
+    /// `paddock_dialogs::Dialogs::with_show_deadline` (its default, `paddock_dialogs::SHOW_DEADLINE`, is the same
+    /// second). A dialog window is created hidden, so the ping rules above never see it before it shows.
+    pub dialog_show_deadline: Duration,
 }
 
 impl Default for Config {
@@ -39,6 +44,7 @@ impl Default for Config {
             terminate_window: Duration::from_secs(60),
             max_boot_errors: 10,
             max_error_len: 500,
+            dialog_show_deadline: Duration::from_secs(1),
         }
     }
 }
@@ -56,6 +62,9 @@ pub enum ConfigError {
     PingIntervalNotBelowPauseGap,
     /// No missed ping, no terminate reload, no boot error or no error text allowed: the limit must be at least one.
     ZeroLimit,
+    /// The dialog show deadline is zero (the window would show before its page could answer) or not shorter than the
+    /// ready timeout (the watchdog would give up first).
+    BadDialogShowDeadline,
 }
 
 impl fmt::Display for ConfigError {
@@ -68,6 +77,9 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::PingIntervalNotBelowPauseGap => {
                 "the ping interval must be shorter than the pause gap"
+            }
+            ConfigError::BadDialogShowDeadline => {
+                "the dialog show deadline must be longer than zero and shorter than the ready timeout"
             }
             ConfigError::ZeroLimit => {
                 "missed pings, terminate reloads, boot errors and error length must be at least 1"
@@ -99,6 +111,9 @@ impl Config {
             || self.max_error_len == 0
         {
             return Err(ConfigError::ZeroLimit);
+        }
+        if self.dialog_show_deadline.is_zero() || self.dialog_show_deadline >= self.ready_timeout {
+            return Err(ConfigError::BadDialogShowDeadline);
         }
         Ok(self)
     }
@@ -179,6 +194,20 @@ mod tests {
                     ..d
                 },
                 ConfigError::ZeroLimit,
+            ),
+            (
+                Config {
+                    dialog_show_deadline: Duration::ZERO,
+                    ..d
+                },
+                ConfigError::BadDialogShowDeadline,
+            ),
+            (
+                Config {
+                    dialog_show_deadline: d.ready_timeout,
+                    ..d
+                },
+                ConfigError::BadDialogShowDeadline,
             ),
         ];
         for (config, error) in cases {

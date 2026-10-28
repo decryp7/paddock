@@ -1,15 +1,16 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { form, FormField } from '@angular/forms/signals';
 import { copyText } from '@decryp7/paddock-ui';
 import { McpBackend, mcpMessage } from '@decryp7/paddock-ui/shell/mcp';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
 /**
  * The key dialog (a modal form, the credential dialog of the AI access page): step one names the client; Create asks the engine
  * for a key (`mcp_issue_key`); step two shows the key once, with Copy and Done. The key lives in this component's state only:
  * it is in no store, event, log or URL, it is dropped as soon as the dialog closes, and the engine keeps only its hash. The page re-reads its list
- * whenever this dialog closes, however it closed. Enter creates, Escape cancels (the dialog
- * shell handles both: Create is the default action, Cancel closes).
+ * whenever this dialog closes, however it closed. Its actions are declared (ADR 0026 §2): step one has Create key (the
+ * primary, a run: busy while the engine issues it, a refusal shown with Try again) and Cancel; step two has Copy at the
+ * leading edge, Close and Done (the primary, answering `true`).
  */
 @Component({
   selector: 'pd-mcp-key-dialog',
@@ -27,13 +28,9 @@ import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
         @if (copyStatus(); as c) {
           <p class="pd-key__hint" role="status" data-testid="mcp-key-copy-status">{{ c }}</p>
         }
-        <div class="pd-key__actions">
-          <button type="button" class="pd-key__btn" data-testid="mcp-key-copy" (click)="copy(issued)">{{ t.copy }}</button>
-          <button type="button" class="pd-key__btn primary" data-default data-dialog-close data-testid="mcp-key-done" (click)="done()">{{ t.done }}</button>
-        </div>
       </div>
     } @else {
-      <form class="pd-key" (submit)="$event.preventDefault(); create()" data-testid="mcp-key-form">
+      <form class="pd-key" (submit)="$event.preventDefault()" data-testid="mcp-key-form">
         <p class="pd-key__lede">{{ t.lede }}</p>
         <label class="pd-key__field">
           <span>{{ t.client }}</span>
@@ -43,18 +40,9 @@ import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
             autocomplete="off"
             spellcheck="false"
             data-testid="mcp-key-client"
-            [attr.aria-invalid]="error() ? true : null"
-            [attr.aria-describedby]="error() ? 'pd-key-error' : null"
-            [readOnly]="busy()"
+            data-autofocus
           />
         </label>
-        @if (error(); as e) {
-          <p id="pd-key-error" class="pd-key__error" role="alert" data-testid="mcp-key-error">{{ e }}</p>
-        }
-        <div class="pd-key__actions">
-          <button type="button" class="pd-key__btn" data-dialog-close data-testid="mcp-key-cancel" (click)="ref.close()">{{ t.cancel }}</button>
-          <button type="submit" class="pd-key__btn primary" data-testid="mcp-key-create" [disabled]="!canCreate()">{{ t.create }}</button>
-        </div>
       </form>
     }
   `,
@@ -66,22 +54,14 @@ import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
     .pd-key__field { display: flex; flex-direction: column; gap: var(--pd-space-1); font-weight: var(--pd-weight-medium); }
     input { box-sizing: border-box; width: 100%; min-width: 0; min-height: var(--pd-control-height); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: normal; }
     input[readonly] { font-family: var(--pd-font-mono, monospace); font-size: var(--pd-text-caption); }
-    input:focus-visible, .pd-key__btn:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
-    .pd-key__error { margin: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); overflow-wrap: anywhere; }
-    .pd-key__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--pd-space-2); }
-    .pd-key__btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-key__btn.primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
-    .pd-key__btn:disabled { opacity: 0.6; cursor: default; }
+    input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
   `,
 })
-export class PdMcpKeyDialog {
+export class PdMcpKeyDialog implements DialogContent<boolean> {
   private readonly backend = inject(McpBackend);
-  protected readonly ref = inject<DialogRef<boolean>>(DIALOG_REF);
 
   protected readonly model = signal({ client: '' });
   protected readonly f = form(this.model);
-  protected readonly busy = signal(false);
-  protected readonly error = signal<string | null>(null);
   /** The issued key: shown once, held only here. */
   protected readonly key = signal<string | null>(null);
   protected readonly copyStatus = signal<string | null>(null);
@@ -89,7 +69,7 @@ export class PdMcpKeyDialog {
   protected readonly t = {
     lede: $localize`:@@pd.mcp.key.lede:Name the program that will connect, for example "Pitwall". It gets its own key, which you can revoke at any time.`,
     client: $localize`:@@pd.mcp.key.client:Client name`,
-    cancel: $localize`:@@pd.mcp.key.cancel:Cancel`,
+    close: $localize`:@@pd.mcp.key.close:Close`,
     create: $localize`:@@pd.mcp.key.create:Create key`,
     once: $localize`:@@pd.mcp.key.once:This is the only time the key is shown. Copy it now; the app keeps only a fingerprint and cannot show it again.`,
     keyLabel: $localize`:@@pd.mcp.key.key-label:Key`,
@@ -101,30 +81,34 @@ export class PdMcpKeyDialog {
     failed: $localize`:@@pd.mcp.key.failed:The engine could not issue a key.`,
   };
 
-  protected canCreate(): boolean {
-    return !this.busy() && this.model().client.trim().length > 0;
-  }
+  /** Step one: Create key (enabled once a client is named). Step two: Copy, Close and Done. */
+  readonly dialogActions = computed<readonly DialogAction<boolean>[]>(() => {
+    const issued = this.key();
+    if (issued === null) {
+      return [{ kind: 'run', id: 'create', label: this.t.create, role: 'primary', enabled: this.model().client.trim().length > 0, run: () => this.create() }];
+    }
+    return [
+      { kind: 'run', id: 'copy', label: this.t.copy, role: 'secondary', lead: true, run: () => this.copy(issued) },
+      { kind: 'dismiss', id: 'close', label: this.t.close },
+      { kind: 'answer', id: 'done', label: this.t.done, role: 'primary', answer: () => this.done() },
+    ];
+  });
 
-  protected async create(): Promise<void> {
-    if (!this.canCreate()) return;
-    const client = this.model().client;
-    this.busy.set(true);
-    this.error.set(null);
+  private async create(): Promise<void> {
     try {
-      const issued = await this.backend.issueKey(client);
+      const issued = await this.backend.issueKey(this.model().client);
       this.key.set(issued.key);
     } catch (e) {
-      this.error.set(mcpMessage(e, this.t.failed));
+      throw new DialogActionError(mcpMessage(e, this.t.failed));
     }
-    this.busy.set(false);
   }
 
-  protected async copy(key: string): Promise<void> {
+  private async copy(key: string): Promise<void> {
     this.copyStatus.set((await copyText(key)) ? this.t.copied : this.t.notCopied);
   }
 
-  protected done(): void {
+  private done(): boolean {
     this.key.set(null);
-    this.ref.close(true);
+    return true;
   }
 }

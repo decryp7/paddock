@@ -54,11 +54,13 @@ export {
   ShellDialogs,
   ShellSettings,
   dialogContracts,
+  parseDialogContractsModule,
   dialogWindowUrl,
   DIALOG_RESULT_KEY,
   CLOSE_NAMES,
   type DialogContractEntry,
 } from './shell.ts';
+export { dialogFitProblems, FIT_SCALES, FIT_WORK_AREAS, MAX_FOOTER_GAP, type DialogFitOptions } from './dialog-fits.ts';
 export { WorkbenchApp, WorkbenchFrame, WorkbenchActivityBar, WorkbenchExplorer, WorkbenchPalette } from './workbench.ts';
 export { renderFlaky, type Flaky } from './retried-reporter.ts';
 export { readVersion, RELEASE_VERSION } from './version.ts';

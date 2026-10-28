@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import type { SuJobPhase } from '@decryp7/paddock-ui';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { UpdatesStore } from './updates.store';
 import { ABOUT_STYLES } from './styles';
 import { formatBytes } from './format';
@@ -92,37 +93,6 @@ import { formatBytes } from './format';
         }
         <p class="pd-muted">{{ checkedText() }}</p>
       }
-      <div class="pd-actions">
-        @switch (s.phase.kind) {
-          @case ('checking') {
-            <button type="button" class="pd-btn" (click)="store.cancel()">{{ t.cancel }}</button>
-          }
-          @case ('downloading') {
-            <button type="button" class="pd-btn" (click)="store.cancel()">{{ t.cancel }}</button>
-          }
-          @case ('ready') {
-            <button type="button" class="pd-btn" (click)="store.cancel()">{{ t.discard }}</button>
-            <button type="button" class="pd-btn pd-primary" (click)="store.restart()">{{ t.restart }}</button>
-          }
-          @case ('available') {
-            <button type="button" class="pd-btn" (click)="store.check()">{{ t.checkAgain }}</button>
-            <button type="button" class="pd-btn pd-primary" (click)="store.download()">{{ t.download }}</button>
-          }
-          @case ('failed') {
-            @if (store.canDownload()) {
-              <button type="button" class="pd-btn pd-primary" (click)="store.download()">{{ t.tryAgain }}</button>
-            } @else {
-              <button type="button" class="pd-btn pd-primary" (click)="store.check()">{{ t.checkAgain }}</button>
-            }
-          }
-          @case ('idle') {
-            <button type="button" class="pd-btn pd-primary" (click)="store.check()">{{ t.checkNow }}</button>
-          }
-          @case ('upToDate') {
-            <button type="button" class="pd-btn pd-primary" (click)="store.check()">{{ t.checkNow }}</button>
-          }
-        }
-      </div>
     } @else if (store.requestError(); as error) {
       <p role="alert">{{ error }} <button type="button" class="pd-btn" (click)="store.load()">{{ t.retry }}</button></p>
     } @else {
@@ -131,7 +101,7 @@ import { formatBytes } from './format';
   `,
   styles: ABOUT_STYLES,
 })
-export class PdUpdatesDialog {
+export class PdUpdatesDialog implements DialogContent {
   /** The component's texts in the window's language (plan S15). The engine's errors and next steps arrive as they are. */
   protected readonly t = {
     unavailable: $localize`:@@pd.updates.unavailable:Updates are not available in this build.`,
@@ -145,7 +115,8 @@ export class PdUpdatesDialog {
     autoCheck: $localize`:@@pd.updates.auto-check:Check for updates automatically`,
     channel: $localize`:@@pd.updates.channel:Channel`,
     installOnQuit: $localize`:@@pd.updates.install-on-quit:Install when the app quits`,
-    cancel: $localize`:@@pd.updates.cancel:Cancel`,
+    stopChecking: $localize`:@@pd.updates.stop-checking:Stop checking`,
+    stopDownload: $localize`:@@pd.updates.stop-download:Stop download`,
     discard: $localize`:@@pd.updates.discard:Discard`,
     restart: $localize`:@@pd.updates.restart:Restart to update`,
     checkAgain: $localize`:@@pd.updates.check-again:Check again`,
@@ -160,6 +131,33 @@ export class PdUpdatesDialog {
   private readonly jobs = inject(JobsStore, { optional: true });
 
   private readonly version = computed(() => this.store.info()?.version ?? '');
+
+  /**
+   * The footer by phase (ADR 0026 §2): what moves the update on is the primary, the rest secondary; the frame adds Close.
+   * They start or stop the updater's jobs and return at once.
+   */
+  readonly dialogActions = computed<readonly DialogAction[]>(() => {
+    const s = this.store.status();
+    if (!s) return [];
+    const run = (id: string, label: string, role: 'primary' | 'secondary', go: () => unknown): DialogAction => ({ kind: 'run', id, label, role, run: () => void go() });
+    switch (s.phase.kind) {
+      case 'checking':
+        return [run('stop', this.t.stopChecking, 'secondary', () => this.store.cancel())];
+      case 'downloading':
+        return [run('stop', this.t.stopDownload, 'secondary', () => this.store.cancel())];
+      case 'ready':
+        return [run('discard', this.t.discard, 'secondary', () => this.store.cancel()), run('restart', this.t.restart, 'primary', () => this.store.restart())];
+      case 'available':
+        return [run('check', this.t.checkAgain, 'secondary', () => this.store.check()), run('download', this.t.download, 'primary', () => this.store.download())];
+      case 'failed':
+        return this.store.canDownload() ? [run('download', this.t.tryAgain, 'primary', () => this.store.download())] : [run('check', this.t.checkAgain, 'primary', () => this.store.check())];
+      case 'idle':
+      case 'upToDate':
+        return [run('check', this.t.checkNow, 'primary', () => this.store.check())];
+      default:
+        return [];
+    }
+  });
 
   protected current(version: string): string {
     return $localize`:@@pd.updates.current:You have version ${version}:version:.`;

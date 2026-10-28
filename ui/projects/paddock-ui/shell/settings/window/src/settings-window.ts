@@ -151,12 +151,6 @@ interface LoadedPage {
         }
       </section>
     </div>
-
-    <div class="pd-foot">
-      <span class="pd-status" role="status" aria-live="polite">{{ store.notice() ?? '' }}</span>
-      <span class="pd-spacer"></span>
-      <button type="button" class="pd-btn" data-dialog-close (click)="close()">{{ t.close }}</button>
-    </div>
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); height: 100%; min-height: 0; container-type: inline-size; }
@@ -188,9 +182,6 @@ interface LoadedPage {
     .pd-link { border: 0; padding: 0; background: none; color: var(--pd-text); font: inherit; text-decoration: underline; cursor: pointer; }
     .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-2); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
     .pd-btn.pd-primary { background: var(--pd-accent); border-color: var(--pd-accent); color: var(--pd-on-accent); }
-    .pd-foot { display: flex; align-items: center; gap: var(--pd-space-2); padding-top: var(--pd-space-2); border-top: 1px solid var(--pd-hairline); }
-    .pd-status { min-width: 0; color: var(--pd-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-spacer { flex: 1; }
     @container (max-width: 560px) {
       .pd-main { flex-direction: column; }
       .pd-nav { width: auto; max-height: 40%; border-inline-end: 0; border-bottom: 1px solid var(--pd-hairline); padding: 0 0 var(--pd-space-2); }
@@ -214,7 +205,6 @@ export class PdSettingsWindow implements DialogContent {
     loadingSettings: $localize`:@@pd.settings.loading:Loading settings…`,
     pageFailed: $localize`:@@pd.settings.page-failed:This page could not be opened.`,
     loading: $localize`:@@pd.settings.loading-page:Loading…`,
-    close: $localize`:@@pd.settings.close:Close`,
   };
   protected readonly store = inject(SettingsStore);
   private readonly drafts = inject(SettingsDrafts);
@@ -346,6 +336,9 @@ export class PdSettingsWindow implements DialogContent {
   }
 
   protected close(): void {
-    this.ref?.close();
+    this.ref?.dismiss();
   }
+
+  /** The footer's status line (the frame draws the footer and its Close; ADR 0026 §2). */
+  readonly dialogStatus = computed(() => this.store.notice() ?? null);
 }

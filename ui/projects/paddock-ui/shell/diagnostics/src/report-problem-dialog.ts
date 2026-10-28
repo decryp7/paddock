@@ -1,12 +1,14 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { DIALOG_REF, type DialogRef } from '@decryp7/paddock-ui/shell/dialogs';
+import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { Saved } from '../generated/diagnostics';
 import { DiagnosticsStore } from './diagnostics.store';
 import { formatBytes, truncateMiddle } from './format';
 import { DIAGNOSTICS_STYLES } from './styles';
 
 /**
- * Report a problem (a decision: modal, with a Cancel of the dialog shell's). The engine collects the logs, the system facts
+ * Report a problem (ADR 0026: a modeless form, wide, so the user can look at the app while writing). Its actions are declared:
+ * Save report… (the primary, a run that starts the save job), then Done (answering the saved report), and the frame's
+ * Close. The engine collects the logs, the system facts
  * and the settings, removes secrets and personal details, and the user sees **every file with its size** before choosing
  * Save; a native dialog then asks where the zip goes. Nothing is sent anywhere: the user attaches the file to their report.
  */
@@ -106,18 +108,10 @@ import { DIAGNOSTICS_STYLES } from './styles';
         </div>
       }
     }
-
-    <div class="pd-diag__actions">
-      @if (savedResult(); as saved) {
-        <button type="button" class="pd-diag__btn pd-diag__btn--primary" data-default data-testid="diag-done" (click)="ref.close(saved)">{{ t.done }}</button>
-      } @else {
-        <button type="button" class="pd-diag__btn pd-diag__btn--primary" data-default data-testid="diag-save" [disabled]="!store.isLoaded() || store.saving()" (click)="save()">{{ t.save }}</button>
-      }
-    </div>
   `,
   styles: DIAGNOSTICS_STYLES,
 })
-export class PdReportProblemDialog {
+export class PdReportProblemDialog implements DialogContent<Saved> {
   protected readonly t = {
     lede: $localize`:@@pd.diag.lede:Nothing is sent anywhere. This makes a file on your computer that you can look through, and attach to your report yourself.`,
     describe: $localize`:@@pd.diag.describe:What went wrong? (optional)`,
@@ -142,7 +136,6 @@ export class PdReportProblemDialog {
   };
 
   protected readonly store = inject(DiagnosticsStore);
-  protected readonly ref = inject<DialogRef<Saved>>(DIALOG_REF);
 
   protected readonly total = computed(() => {
     const files = this.store.files().length;
@@ -185,7 +178,15 @@ export class PdReportProblemDialog {
     this.store.setDescription((event.target as HTMLTextAreaElement).value);
   }
 
-  protected save(): void {
+  /** Save report… until the report is saved, then Done; the frame adds Close. */
+  readonly dialogActions = computed<readonly DialogAction<Saved>[]>(() => {
+    const saved = this.savedResult();
+    if (saved) return [{ kind: 'answer', id: 'done', label: this.t.done, role: 'primary', answer: () => saved }];
+    // Save starts the engine's save job and returns at once; its progress and Stop saving are in the body.
+    return [{ kind: 'run', id: 'save', label: this.t.save, role: 'primary', enabled: this.store.isLoaded() && !this.store.saving(), run: () => this.save() }];
+  });
+
+  private save(): void {
     // The description may still be unfocused (typed, then Save by keyboard): the engine gets the store's current text.
     void this.store.save();
   }

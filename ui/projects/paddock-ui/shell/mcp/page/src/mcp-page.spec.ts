@@ -1,3 +1,4 @@
+import { answered, DISMISSED } from '@decryp7/paddock-ui/shell';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MAX_KEYS, MCP_KEY_DIALOG_ID, MCP_REVOKE_DIALOG_ID, MemoryMcpBackend, provideShellMcp, type MemoryMcpOptions } from '@decryp7/paddock-ui/shell/mcp';
@@ -19,11 +20,11 @@ class FakeDialogs {
   open(id: string, options: { inputs?: Record<string, unknown> } = {}) {
     this.opened.push({ id, inputs: options.inputs ?? {} });
     const closed = (async () => {
-      if (id === MCP_REVOKE_DIALOG_ID) return this.revokeAnswer;
+      if (id === MCP_REVOKE_DIALOG_ID) return this.revokeAnswer === undefined ? DISMISSED : answered(this.revokeAnswer);
       await this.memory.issueKey('Pitwall');
-      return true;
+      return answered(true);
     })();
-    return { closed, close: () => undefined };
+    return { closed, dismiss: () => undefined };
   }
 }
 

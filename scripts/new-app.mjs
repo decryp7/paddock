@@ -27,9 +27,7 @@ import { isMain } from '../conformance/src/util/is-main.mjs';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * What is never copied: build output, installed packages, Tauri's generated schemas, the demo's own lock file, and the
- * dialog command check's config (paddock-check-dialog-commands walks the shell's TypeScript sources, which the npm
- * package does not ship: outside this repository it cannot follow a dialog into the shell yet).
+ * What is never copied: build output, installed packages, Tauri's generated schemas and the demo's own lock file.
  */
 const TEMPLATES = {
   'shell-demo': { id: 'shell-demo', title: 'Paddock Shell Demo', readme: 'apps/shell-demo/README.md', section: 'Start a new app from the demo' },
@@ -38,7 +36,7 @@ const TEMPLATES = {
 /** The window accents an app can name (`SU_ACCENTS` of `@decryp7/paddock-ui`). */
 const ACCENTS = ['debrief', 'pitcrew', 'pitwall', 'dyno', 'spotter', 'pacenotes', 'sighter', 'graphite'];
 
-const SKIP = new Set(['node_modules', 'target', 'gen', 'dist', 'Cargo.lock', '.angular', 'paddock-dialog-commands.json']);
+const SKIP = new Set(['node_modules', 'target', 'gen', 'dist', 'Cargo.lock', '.angular']);
 
 // ---------------------------------------------------------------------------------------------------------------- pure
 
@@ -154,7 +152,6 @@ export function rustRewrites({ id, name, identifier }, versions) {
       ['pub const APP_NAME: &str = "Paddock Shell Demo";', `pub const APP_NAME: &str = "${name}";`],
       ['"https://dev.decryptology.net/decryp7/paddock/releases"', `"https://dev.decryptology.net/decryp7/${id}/releases"`],
       ['.homepage("https://dev.decryptology.net/decryp7/paddock")', `.homepage("https://dev.decryptology.net/decryp7/${id}")`],
-      ['include_str!("../../../../ui/projects/shell-demo/dialog-contracts.json")', 'include_str!("../../dialog-contracts.json")'],
       ['include_str!("../../../../ui/projects/shell-demo/paddock-manifest.json")', 'include_str!("../../paddock-manifest.json")'],
       ['include_str!("../../CHANGELOG.md")', 'include_str!("../../../CHANGELOG.md")'],
       ['include_str!("../../../../LICENSE-MIT")', 'include_str!("../../../LICENSE-MIT")'],
@@ -197,6 +194,9 @@ export function uiRewrites({ id, name }) {
       ["'https://dev.decryptology.net/decryp7/paddock/releases'", `'https://dev.decryptology.net/decryp7/${id}/releases'`],
     ],
     'src/app/generated/app-commands.ts': [['cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app']],
+    'src/app/generated/dialog-contracts.ts': [
+      ['cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app', 'cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app'],
+    ],
     'src/index.html': [['<title>Paddock Shell Demo</title>', `<title>${name}</title>`], ['Starting shell demo&hellip;', `Starting ${name}&hellip;`]],
     'tsconfig.app.json': [
       ['"extends": "../../tsconfig.json"', '"extends": "./tsconfig.json"'],
@@ -227,7 +227,6 @@ export function workbenchRustRewrites({ id, name, identifier }, versions) {
       ['pub const APP_ID: &str = "workbench-demo";', `pub const APP_ID: &str = "${id}";`],
       ['pub const APP_NAME: &str = "Paddock Workbench Demo";', `pub const APP_NAME: &str = "${name}";`],
       ['`WORKBENCH_DEMO_HOME`', `\`${id.toUpperCase().replaceAll('-', '_')}_HOME\``],
-      ['include_str!("../../../../ui/projects/workbench-demo/dialog-contracts.json")', 'include_str!("../../dialog-contracts.json")'],
     ],
     'tests/app.rs': [
       ['use paddock_workbench_demo::', `use ${lib}::`],

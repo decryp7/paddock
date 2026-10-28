@@ -195,21 +195,45 @@ export class ShellMenus {
   }
 }
 
-/** A dialog's contract, as the contract file holds it (ADR 0009). */
+/** A dialog's contract, as Rust declares it and the generated `dialog-contracts.ts` holds it (ADR 0026 §3). */
 export interface DialogContractEntry {
+  readonly id: string;
   readonly kind: 'decision' | 'form' | 'viewer' | 'tool';
   readonly modality: 'modal' | 'modeless';
+  readonly width: number;
+  readonly widthStep: 'narrow' | 'medium' | 'wide' | null;
+  readonly height: number | null;
   readonly requiredChoice: boolean;
-  readonly instanced?: boolean;
-  readonly minSize?: { readonly width: number; readonly height: number };
-  readonly commands?: readonly string[];
+  readonly instanced: boolean;
+  readonly commands: readonly string[];
 }
 
-/** The dialogs of an app's contract file (`dialog-contracts.json`, generated from its registry), by id. */
-export function dialogContracts(path: string): Readonly<Record<string, DialogContractEntry>> {
-  const dialogs = (JSON.parse(readFileSync(path, 'utf8')) as { dialogs?: Record<string, DialogContractEntry> }).dialogs;
-  if (typeof dialogs !== 'object' || dialogs === null) throw new Error(`${path} has no "dialogs": regenerate the dialog contracts`);
-  return dialogs;
+/**
+ * The `DIALOG_CONTRACTS` object literal of a generated `dialog-contracts.ts` as JSON. The file is written by
+ * `paddock_dialogs::ts::contracts_module` in one fixed shape (single-quoted strings without quotes inside, bare keys,
+ * trailing commas), so this conversion is exact for it and refuses anything else.
+ */
+export function parseDialogContractsModule(text: string, path = 'dialog-contracts.ts'): Readonly<Record<string, DialogContractEntry>> {
+  const start = text.indexOf('export const DIALOG_CONTRACTS = ');
+  const end = text.indexOf('} as const;', start);
+  if (start < 0 || end < 0) throw new Error(`${path} is not a generated dialog-contracts.ts: regenerate it (PADDOCK_WRITE_TS=1)`);
+  const literal = text.slice(start + 'export const DIALOG_CONTRACTS = '.length, end + 1);
+  const json = literal
+    .replace(/'([^'\\]*)'/g, '"$1"')
+    .replace(/^(\s*)([A-Za-z][A-Za-z0-9]*):/gm, '$1"$2":')
+    .replace(/,(\s*[}\]])/g, '$1');
+  try {
+    return JSON.parse(json) as Record<string, DialogContractEntry>;
+  } catch (e) {
+    throw new Error(`${path} could not be read (${String(e)}): regenerate it (PADDOCK_WRITE_TS=1)`, { cause: e });
+  }
+}
+
+/** The dialogs of the generated `dialog-contracts.ts` files at `paths` (an app's own and the shared owners' it registers), by id. */
+export function dialogContracts(...paths: string[]): Readonly<Record<string, DialogContractEntry>> {
+  const out: Record<string, DialogContractEntry> = {};
+  for (const path of paths) Object.assign(out, parseDialogContractsModule(readFileSync(path, 'utf8'), path));
+  return out;
 }
 
 /** Where the browser build of a dialog window leaves its answer (`localStorage`). */
@@ -242,13 +266,17 @@ export class ShellDialogs {
   get shell(): Locator {
     return this.page.locator('pd-dialog-shell');
   }
-  /** The shell's own Close (when the content has none). */
+  /** The frame's own Cancel/Close (when the content declares no dismiss action of its own; ADR 0026 §2). */
   get shellClose(): Locator {
-    return this.page.getByTestId('dialog-shell-close');
+    return this.shell.getByTestId('dialog-action-dismiss');
   }
-  /** A way out of the dialog: the shell's Close or the content's Close/Cancel. */
+  /** The way out of the dialog: the footer's dismiss action, the frame's or the content's own. */
   get wayOut(): Locator {
-    return this.shell.locator('[data-dialog-close]').or(this.shell.getByRole('button', { name: CLOSE_NAMES })).first();
+    return this.shell.locator('[data-testid=dialog-footer] [data-role=dismiss]').first();
+  }
+  /** The footer button of action `id` (`dialog-action-<id>`). */
+  action(id: string): Locator {
+    return this.shell.getByTestId(`dialog-action-${id}`);
   }
   /** Resolves once the window has left Loading without an error. */
   async loaded(): Promise<void> {
@@ -257,7 +285,7 @@ export class ShellDialogs {
     await expect(this.shell.getByTestId('dialog-loading')).toHaveCount(0);
     await expect(this.shell.getByTestId('dialog-error')).toHaveCount(0);
   }
-  /** What the window answered (`{"result":…}`), or null while it has not. */
+  /** What the window answered (`{"result":…}`: `null` dismissed, `{"answered":true,"value":…}` answered), or null while it has not. */
   result(): Promise<string | null> {
     return this.page.evaluate((k) => localStorage.getItem(k), DIALOG_RESULT_KEY);
   }

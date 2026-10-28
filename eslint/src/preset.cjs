@@ -85,6 +85,14 @@ function preset(options) {
         ...(options.templateRules ?? {}),
       },
     },
+    {
+      // ADR 0026 §2: a dialog content declares its actions; the frame draws the footer (inline templates of `*dialog*.ts`).
+      files: ['**/*dialog*.ts/*.html', '**/*dialog*.html'],
+      // The frame itself draws the footer; specs plant footers on purpose.
+      ignores: ['**/dialog-frame.ts/*.html', '**/*.spec.ts/*.html'],
+      plugins: { paddock: plugin },
+      rules: { 'paddock/dialog-frame-footer': 'error' },
+    },
   ];
 }
 
