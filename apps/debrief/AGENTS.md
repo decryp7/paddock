@@ -181,8 +181,8 @@ The app reads untrusted, possibly huge files and renders their content:
   light), accessible markup (real buttons, labels, aria-labels on icon buttons).
 - UI building blocks: use **Angular CDK** (`@angular/cdk`: menu, overlay, dialog, a11y, listbox,
   scrolling, drag-drop) for behaviour and accessibility instead of hand-rolling them, and
-  **Angular Material** selectively for complex inputs (e.g. slide toggle, tooltip, datepicker,
-  autocomplete), themed through Debrief's CSS tokens so the look stays consistent. Icons use Angular
+  **Angular Material first** (rule 47: a Material component wherever one fits, e.g. table, menu, tooltip, tabs,
+  select, slide toggle, datepicker, autocomplete), themed through Debrief's CSS tokens so the look stays consistent. Icons use Angular
   Material's `MatIconRegistry` with Debrief's own themed SVG icon set registered as literals in the
   `debrief` namespace (`<mat-icon svgIcon="debrief:timeline">`, wrapped by `<debrief-icon>`); no icon fonts
   and no icon URLs fetched at runtime (the CSP forbids it).

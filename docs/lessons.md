@@ -549,3 +549,8 @@ render rounds to leave Loading. On a busy CI runner a first `import()` of the se
 reported "never leaves Loading" for a dialog that was fine. **Rule:** a test waits on the condition itself (the promise the
 code awaits, `whenStable` over pending tasks), never on a count of turns, rounds or milliseconds; a wait that can hang is
 left to the runner's test timeout, which names the test (rule 5).
+
+## Material first, because it is tested (2026-10-28)
+Hand-rolled components (for example `pd-table`'s sticky header over virtual scroll) cost us bugs that the Angular
+Material and CDK equivalents already solve and test. **Rule:** use a Material component wherever one fits and CDK for
+the behaviour Material lacks; hand-roll only what neither provides, with the reason in the doc comment (rule 47).
