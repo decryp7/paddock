@@ -12,7 +12,14 @@ async function open(page: Page, theme: string): Promise<void> {
 for (const theme of ['dark', 'light'] as const) {
   test(`pd-table: the virtual table's header stays on top while it scrolls and a row is hovered (${theme})`, async ({ page }) => {
     await open(page, theme);
-    await expectHeaderOnTop(page.locator('[data-testid="table-virtual"] [role="grid"]'));
+    await expectHeaderOnTop(page.locator('[data-testid="table-virtual"] .pd-grid'));
+  });
+
+  // Deep in the 5,000 rows the viewport draws a window far from the top and moves it under the sticky header (the CDK
+  // table keeps the header at the top by its rendered offset): the header must stay on top there too.
+  test(`pd-table: deep in 5,000 virtual rows the header stays on top while scrolled and hovered (${theme})`, async ({ page }) => {
+    await open(page, theme);
+    await expectHeaderOnTop(page.locator('[data-testid="table-virtual"] .pd-grid'), { from: 2500 * 32, steps: 8 });
   });
 }
 

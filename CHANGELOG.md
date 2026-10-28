@@ -4,6 +4,21 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `pd-table` on Angular Material's table (ADR 0027, decision 5)
+- `pd-table` is built on `mat-table` with Material's sticky header row inside the CDK virtual scroll viewport, `matSort` and
+  `mat-sort-header` for sorting (`aria-sort`; the arrow is Material's, hidden at rest, a hint on hover, solid when sorted),
+  `mat-menu` for the column and row menus (the "..." button, right-click and Shift+F10), `matTooltip` for a cell's full text
+  and the icon buttons, and `matIconButton` for the row actions. Group rows, middle truncation, `hideBelow`, the row heights
+  and the grid keyboard stay the family's own. The public API is unchanged.
+- Every table is drawn in the viewport: above 100 lines only the rows in view; below, or with `virtual="false"`, every row.
+  Moving with the keyboard scrolls only when the row is out of view.
+- A sortable header's accessible name is its label (the button inside the column header); "Sort by …" is its description.
+  Tests that looked for a "Sort by …" button look for the column header's button instead.
+- `@angular/material` is an optional peer dependency of `@decryp7/paddock-ui` (for `/table`); the gallery and the demos load
+  the Material bridge (`css/material.css`) like the apps. Popup menus built with `mat-menu` keep the family's item size and
+  2 px keyboard ring (`_controls.scss`).
+- The gallery's sizes are decimal (KB), as the family's byte formatter writes them.
+
 ### Sticky table headers stay above their rows (ADR 0027)
 - New tokens `--pd-z-table-corner` (4), `--pd-z-table-header` (3), `--pd-z-table-sticky-column` (2) and
   `--pd-z-table-row-action` (1): the layers inside a table, header on top, a sticky column's header cell above both. `pd-table`'s grid is its own stacking context and its header uses `--pd-z-table-header`;

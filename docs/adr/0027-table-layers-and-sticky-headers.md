@@ -1,8 +1,9 @@
 # 27. Table layers: sticky headers stay above their rows (z-index ladder, C43, headerStaysOnTop)
 
-- Status: Accepted for the ladder, C43 and the e2e check (2026-10-28). The rebuild of `pd-table` on Angular Material's
-  table (decision 5) is **proposed**: the user decided it on 2026-10-28 on the assumption that `pd-table` caused the bug,
-  which the investigation below did not confirm; it waits for the user's go-ahead as its own change
+- Status: Accepted (2026-10-28). Decisions 1-4 shipped with the fix (`fix/grid-header-on-top`). Decision 5, `pd-table` on
+  Angular Material's table, was accepted by the user the same day after reading the findings below ("full mat-table
+  rebuild", knowing that Material's sticky header sits inside the virtual-scroll content) and built as its own change
+  (`feat/pd-table-mat-table`)
 - Date: 2026-10-28
 - Related: rule 40 (recurring bugs mean a missing design rule), rules 39, 42, 43; ADR 0012 (app shell); plan X21 (`pd-table`)
 
@@ -66,33 +67,42 @@ above are fixed wherever they occur.
    first frame after the scroll, and once a drawn row reaches the header's bottom edge with the row under it hovered; it also fails on a header with a
    translucent background and on a body that never scrolled. The gallery runs it over `pd-table`'s virtual table in both
    themes and engines; apps add it to their main grids' e2e when they move onto `@decryp7/paddock-e2e`.
-5. **Proposed: `pd-table` on Angular Material's table** (the user's decisions of 2026-10-28: "rebuild pd-table on CDK's
-   table", then "use Material components as much as possible since they are tested"). What the investigation found for it:
-   - `mat-table` (CDK table) 22 supports virtual scrolling natively when it sits inside a `cdk-virtual-scroll-viewport`
-     (`CdkTable._setupVirtualScrolling`, `@angular/cdk/fesm2022/table.mjs`). The header row then lives **inside** the
-     viewport's translated content wrapper, and CDK keeps it in place by rewriting each header cell's `top` one animation
-     frame after every render (`renderedContentOffset` + `auditTime(0, animationFrameScheduler)`): the fragile pattern the
-     coordinator warned of; on WebKit's threaded scrolling the header can lag a frame. To keep the header outside the
-     scrolling content, the table would be two `mat-table`s (a header-only one above, a body-only one in the viewport)
-     under one `role="grid"`, with both tables `role="rowgroup"` and the cells' role bound to `gridcell` (CDK derives
-     `cell` from a non-grid table role).
-   - Conditional row definitions (`when`, needed for group rows) throw when virtual scrolling is on ("not supported when
-     virtual scrolling is enabled, at the moment"), so group rows stay hand-rolled inside one row definition.
-   - Material provides: `matSort`/`mat-sort-header` (sorting with `aria-sort`, the same ascending, descending, none
-     cycle), `mat-menu` with `matMenuTriggerFor` and `matContextMenuTriggerFor` (row and column menus, Shift+F10),
-     `matTooltip`, `mat-icon-button`. Hand-rolled because Material lacks them: group rows (above), middle truncation
-     (`pd-middle-text`), container-width column dropping (`hideBelow`, `fitColumns`), uniform densities, and the roving
-     one-tab-stop grid keyboard (`mat-table` has no grid keyboard model).
-   - `@angular/material` becomes a peer dependency of `@decryp7/paddock-ui` (every app already has it; the `ui` workspace
-     does not), themed through `--pd-*` tokens (`--mat-table-*` system variables).
-   It does not fix the reported bug (decision 2 does), so it is a separate change with its own tests (100 % for the
-   component), the same public API, and before/after screenshots.
+5. **`pd-table` is built on Angular Material's table** (the user's decisions of 2026-10-28: "rebuild pd-table on CDK's
+   table", "use Material components as much as possible since they are tested", then the full `mat-table` rebuild with
+   Material's own sticky header). The public API (inputs, outputs, `PdCell`, `PdTableEmpty`, `moveTo`) is unchanged.
+   - **Material's parts:** `mat-table` with a sticky header row (`matHeaderRowDef … sticky: true`); `matSort` and
+     `mat-sort-header` (sorting, `aria-sort`, the ascending, descending, none cycle, the sort described as "Sort by …");
+     `mat-menu` for the column menu (`menuitemcheckbox` items) and the row menu, opened by the "..." button
+     (`matMenuTriggerFor`), a right-click and Shift+F10 (`matContextMenuTriggerFor`); `matTooltip` for a cell's full text
+     and the icon buttons' names; `matIconButton` for the row actions. The menus keep the family's popup-menu classes
+     (`pd-popmenu`, `pd-popmenu__item`); Material's component tokens are set to `--pd-*` tokens on the table's host, and
+     the menus and tooltips use the Material bridge (`css/material.css`, now in the gallery and the demos as in the apps).
+   - **Sticky header under virtual scroll (Material's documented way):** the table sits inside the CDK
+     `cdk-virtual-scroll-viewport`; CDK 22's table attaches to the viewport (`CdkTable._setupVirtualScrolling`) and keeps
+     its sticky header row at the top of the viewport while the rows' wrapper is translated, by setting the header's `top`
+     from the viewport's rendered offset. The header is an opaque surface, the grid is its own stacking context, and CDK
+     puts the header at z-index 100 above the rows. `expectHeaderOnTop` checks it on the gallery's 5,000-row grouped table,
+     scrolled in steps and hovered, in both themes, in Chromium and WebKit.
+   - **Always in the viewport:** every table is drawn in the viewport, so there is one template and one header. Above 100
+     lines (`virtual="auto"`) the viewport draws the rows in view plus 8; below that, or with `virtual="false"`, its buffer
+     covers every line and all rows are drawn. The viewport is as tall as the header plus the rows, up to `maxHeight` for
+     the rows.
+   - **Built on top, because Material has no equivalent:** group rows (Material's conditional row definitions, `when`,
+     throw under virtual scrolling, so a group heading is drawn by the one row definition: one cell across the row, or the
+     group's own cells under the columns); text shortened in the middle (`pd-middle-text`); columns dropped by the table's
+     own width (`hideBelow`, `fitColumns`, a CSS grid over shared tracks instead of Material's flex cells); the family's
+     uniform row heights (24, 32 or 36 px and a 28 px header, also the virtual scroll's item size); the roving one-tab-stop
+     grid keyboard (Up, Down, Page Up, Page Down, Home, End, Enter; `mat-table` has no keyboard model), which now scrolls
+     a row into view below the header only when it is out of view; the loading placeholders, empty and error states.
+   - `@angular/material` is an optional peer dependency of `@decryp7/paddock-ui` (needed by `@decryp7/paddock-ui/table`;
+     every app already has it) and a dev dependency of the `ui` workspace.
 
 ## Consequences
 
 - A new sticky header without a z-index, or a sticky column at the header's level, fails C43 in CI before it ships.
 - Apps' own grids keep their own markup; moving them onto `pd-table` is not part of this change.
-- `pd-table`'s header still does not stay in view when the table is taller than its `maxHeight` is set to and the
-  surrounding pane scrolls (the workbench demo's Problems view sets `maxHeight` 2000): `.pd-grid` clips with
-  `overflow: hidden`, so the header scrolls away with the rows. It is never covered; whether it should stick to the pane
-  belongs to decision 5.
+- `pd-table`'s header stays in view while its own body scrolls. When an app sets a `maxHeight` taller than its pane and
+  lets the pane scroll (the workbench demo's Problems view sets 2000), the header scrolls away with the rows, never
+  covered; such an app should give the table a `maxHeight` that fits.
+- Material's sort arrow and menu items replace the family's own chevron glyphs and CDK menus in `pd-table`; a sortable
+  header's accessible name is its label (the button inside the column header), with "Sort by …" as its description.

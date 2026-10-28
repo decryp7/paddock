@@ -37,7 +37,7 @@ test.describe('contact sheet: data parts', () => {
       await open(page, theme);
       const small = page.locator('[data-testid="table-small"]');
       await shoot(page, theme, 'Table at rest (sentence-case headers, tabular numbers, middle-ellipsis paths)', 'table-rest', small);
-      await small.getByRole('button', { name: 'Sort by Size (KiB)' }).click();
+      await small.getByRole('columnheader', { name: 'Size (KB)' }).getByRole('button').click();
       await small.locator('[role=row][data-index]').nth(1).hover();
       await shoot(page, theme, 'Sorted by size; the hovered row is highlighted and shows its icon actions and the "..." button', 'table-hover', small);
       await small.locator('[role=row][data-index]').nth(1).getByRole('button', { name: 'More actions' }).click();
@@ -61,7 +61,7 @@ test.describe('contact sheet: data parts', () => {
       await small.locator('[role=row][data-index]').first().focus();
       await page.keyboard.press('ArrowDown');
       await shoot(page, theme, 'Focused row (2 px ring)', 'table-focus-row', small.locator('.pd-grid'));
-      await small.locator('.pd-sort').nth(1).focus();
+      await small.locator('.pd-sort .mat-sort-header-container').nth(1).focus();
       await page.keyboard.press('Tab');
       await page.keyboard.press('Shift+Tab');
       await shoot(page, theme, 'Focused sortable header (focus ring, quiet chevron)', 'table-focus-header', small.locator('.pd-header'));

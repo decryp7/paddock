@@ -38,7 +38,7 @@ const COLUMNS: PdColumn<Plugin>[] = [
   { key: 'name', header: 'Name', value: (p) => p.name, required: true, width: 'minmax(0, 2fr)' },
   { key: 'kind', header: 'Kind', value: (p) => p.kind, hideBelow: 420, width: '96px' },
   { key: 'version', header: 'Version', value: (p) => p.version, hideBelow: 560, width: '80px' },
-  { key: 'size', header: 'Size (KiB)', value: (p) => p.size, align: 'end', width: '96px' },
+  { key: 'size', header: 'Size (KB)', value: (p) => p.size, align: 'end', width: '96px' },
   { key: 'state', header: 'State', value: (p) => p.state, hidden: true, width: '96px' },
   { key: 'path', header: 'Location', value: (p) => p.path, truncate: 'middle', hideBelow: 760, width: 'minmax(0, 3fr)' },
 ];

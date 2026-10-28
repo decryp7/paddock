@@ -19,7 +19,7 @@ const DATA: Plugin[] = [
 ];
 const COLUMNS: PdColumn<Plugin>[] = [
   { key: 'name', header: 'Name', value: (r) => r.name, required: true },
-  { key: 'size', header: 'Size (KiB)', value: (r) => r.size, align: 'end' },
+  { key: 'size', header: 'Size (KB)', value: (r) => r.size, align: 'end' },
   { key: 'kind', header: 'Kind', value: (r) => r.kind, hidden: true },
   { key: 'path', header: 'Path', value: (r) => r.path, truncate: 'middle', hideBelow: 500 },
 ];
@@ -56,7 +56,7 @@ const ACTIONS: PdRowAction[] = [
       (rowActivate)="opened.push($event.id)"
       (action)="chosen.push($event)"
     >
-      <ng-template pdCell="size" let-row><b class="custom">{{ row.size }} KiB</b></ng-template>
+      <ng-template pdCell="size" let-row><b class="custom">{{ row.size }} KB</b></ng-template>
       <div pdTableEmpty class="next-step"><button type="button">Install a plugin</button></div>
     </pd-table>
   `,
@@ -86,8 +86,36 @@ class Host {
   readonly chosen: PdRowActionEvent<Plugin>[] = [];
 }
 
+/** A plain table: no row actions, no empty slot, rows whose group is empty and actions without icons. */
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdTable],
+  template: `
+    @if (actions(); as a) {
+      <pd-table [rows]="rows()" [columns]="columns" [rowKey]="key" label="Plain" [rowActions]="a" (action)="chosen.push($event.id)" />
+    } @else {
+      <pd-table [rows]="rows()" [columns]="columns" [rowKey]="key" label="Plain" [groupBy]="groupBy()" [state]="state()" />
+    }
+  `,
+})
+class PlainHost {
+  readonly rows = signal<{ id: string; group: string }[]>([]);
+  readonly columns: PdColumn<{ id: string; group: string }>[] = [
+    { key: 'id', header: 'Id', value: (r) => r.id },
+    { key: 'group', header: 'Group', value: (r) => r.group },
+  ];
+  readonly key = (r: { id: string }): string => r.id;
+  readonly groupBy = signal<string | null>(null);
+  readonly state = signal<'ready' | 'loading' | 'error'>('ready');
+  readonly actions = signal<((r: { id: string }) => readonly PdRowAction[]) | undefined>(undefined);
+  readonly chosen: string[] = [];
+}
+
+/** Waits for the table to settle: change detection, then the frame in which the CDK table draws the rows of the viewport's range. */
 async function settle(f: { whenStable(): Promise<unknown> }): Promise<void> {
   await f.whenStable();
+  TestBed.tick();
+  await new Promise<void>((done) => requestAnimationFrame(() => done()));
   TestBed.tick();
   await f.whenStable();
 }
@@ -106,7 +134,7 @@ describe('pd-table', () => {
     return f;
   }
   const el = (f: { nativeElement: HTMLElement }) => f.nativeElement;
-  const rowEls = (f: { nativeElement: HTMLElement }) => [...el(f).querySelectorAll<HTMLElement>('.pd-body [role=row]')];
+  const rowEls = (f: { nativeElement: HTMLElement }) => [...el(f).querySelectorAll<HTMLElement>('.pd-body [role=row][data-index]')];
   const names = (f: { nativeElement: HTMLElement }) => rowEls(f).map((r) => r.querySelector('[role=gridcell]')?.textContent?.trim());
   const press = (target: Element, key: string, init: KeyboardEventInit = {}) => target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
 
@@ -115,11 +143,11 @@ describe('pd-table', () => {
     const grid = el(f).querySelector('[role=grid]')!;
     expect(grid.getAttribute('aria-label')).toBe('Plugins');
     expect(grid.getAttribute('aria-rowcount')).toBe('4');
-    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Path', 'Actions']);
+    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KB)', 'Path', 'Actions']);
     expect(names(f)).toEqual(['Zeta', 'alpha', 'Mid']);
     expect(rowEls(f)[1]?.getAttribute('aria-rowindex')).toBe('3');
     expect(el(f).querySelector('[data-testid=table-count]')?.textContent).toBe('3 rows');
-    expect(el(f).querySelector('.custom')?.textContent).toBe('30 KiB');
+    expect(el(f).querySelector('.custom')?.textContent).toBe('30 KB');
     // Paths are shortened in the middle with the full value as the tooltip.
     expect(el(f).querySelector('pd-middle-text')?.getAttribute('title')).toBe('/opt/plugins/zeta/plugin.so');
   });
@@ -131,13 +159,13 @@ describe('pd-table', () => {
     document.body.appendChild(f.nativeElement);
     await settle(f);
     const hidden = [...el(f).querySelectorAll('[role=columnheader] .pd-th-text.pd-sr')].map((h) => h.textContent?.trim());
-    expect(hidden).toEqual(['Name', 'Size (KiB)']);
+    expect(hidden).toEqual(['Name', 'Size (KB)']);
     expect(el(f).querySelector('[role=columnheader]')?.textContent?.trim()).toBe('Name');
   });
 
   it('sorts by a header: ascending, descending, none, with aria-sort', async () => {
     const f = await setup();
-    const sortBtn = (name: string) => [...el(f).querySelectorAll<HTMLButtonElement>('.pd-sort')].find((b) => b.textContent?.includes(name))!;
+    const sortBtn = (name: string) => [...el(f).querySelectorAll<HTMLElement>('.pd-sort')].find((b) => b.textContent?.includes(name))!;
     sortBtn('Name').click();
     await settle(f);
     expect(names(f)).toEqual(['alpha', 'Mid', 'Zeta']);
@@ -175,14 +203,14 @@ describe('pd-table', () => {
     el(f).querySelector<HTMLButtonElement>('[data-testid=table-columns]')!.click();
     await settle(f);
     const items = [...document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=menuitemcheckbox]')];
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Size (KiB)', 'Kind', 'Path']);
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Size (KB)', 'Kind', 'Path']);
     expect(items.map((i) => i.getAttribute('aria-checked'))).toEqual(['true', 'false', 'true']);
     items[1]!.click();
     await settle(f);
     expect(f.componentInstance.hidden()).toEqual([]);
     expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toContain('Kind');
     // Switching one off from the list the user now has (the menu closed when an item was chosen).
-    document.querySelectorAll('.cdk-overlay-container').forEach((c) => (c.innerHTML = ''));
+    expect(el(f).querySelector('[data-testid=table-columns]')?.getAttribute('aria-expanded')).toBe('false');
     el(f).querySelector<HTMLButtonElement>('[data-testid=table-columns]')!.click();
     await settle(f);
     document.querySelectorAll<HTMLElement>('.cdk-overlay-container [role=menuitemcheckbox]').forEach((i) => i.textContent?.includes('Path') && i.click());
@@ -203,7 +231,7 @@ describe('pd-table', () => {
       },
     );
     const f = await setup();
-    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Actions']);
+    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KB)', 'Actions']);
     // No column folds: rows keep one line.
     expect(rowEls(f).some((r) => r.classList.contains('pd-folded'))).toBe(false);
     expect(getComputedStyle(el(f).querySelector('.pd-grid')!).overflow).not.toBe('scroll');
@@ -327,7 +355,7 @@ describe('pd-table', () => {
     expect(group.querySelector('.pd-group-name')?.classList.contains('pd-mono')).toBe(true);
     const cells = [...group.querySelectorAll<HTMLElement>('.pd-group-summary')];
     expect(cells.map((c) => c.textContent?.trim()).filter(Boolean)).toHaveLength(1);
-    expect(cells.some((c) => /total$/.test(c.textContent ?? '') && c.classList.contains('pd-end'))).toBe(true);
+    expect(cells.some((c) => /total$/.test(c.textContent?.trim() ?? '') && c.classList.contains('pd-end'))).toBe(true);
     expect(el(f).textContent).toContain('3 of 3 things');
     // A predicate sets only the groups it names in mono (a label such as "Other items" is not a name).
     f.componentInstance.mono.set((g) => g === 'format');
@@ -364,17 +392,29 @@ describe('pd-table', () => {
     const table = f.debugElement.children[0]!.componentInstance as PdTable<Plugin>;
     table.moveTo(400);
     await settle(f);
-    expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ top: 400 * 32 }));
+    // Row 400 is below the view: it is scrolled to the bottom edge of the 480 px body, under the sticky header.
+    expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ top: 401 * 32 - 480 }));
+    // A row above the view is scrolled to the top, right below the header; a row in view does not move the view.
+    scrolled.mockClear();
+    vi.spyOn(el(f).querySelector('cdk-virtual-scroll-viewport')!, 'scrollTop', 'get').mockReturnValue(320 * 32);
+    table.moveTo(10);
+    await settle(f);
+    expect(scrolled).toHaveBeenCalledWith(expect.objectContaining({ top: 10 * 32 }));
+    scrolled.mockClear();
+    table.moveTo(321);
+    await settle(f);
+    expect(scrolled).not.toHaveBeenCalled();
   });
 
-  it('can be forced to draw everything or to virtualise a short table', async () => {
+  it('can be forced to draw every row of a long table, or to virtualise a short one', async () => {
     const f = await setup();
     f.componentInstance.virtual.set(true);
     await settle(f);
-    expect(el(f).querySelector('cdk-virtual-scroll-viewport')).not.toBeNull();
+    expect(rowEls(f)).toHaveLength(3);
+    f.componentInstance.rows.set(Array.from({ length: PD_TABLE_VIRTUAL_FROM * 2 }, (_, i): Plugin => ({ id: `r${i}`, name: `Row ${i}`, size: i, kind: 'k', path: `/p/${i}` })));
     f.componentInstance.virtual.set(false);
     await settle(f);
-    expect(el(f).querySelector('cdk-virtual-scroll-viewport')).toBeNull();
+    expect(rowEls(f)).toHaveLength(PD_TABLE_VIRTUAL_FROM * 2);
   });
 
   it('uses the family row heights: the density by default, 24, 32 or 36, a 28 px header, and nothing else', async () => {
@@ -398,19 +438,21 @@ describe('pd-table', () => {
     document.documentElement.removeAttribute('data-density');
   });
 
-  it('shows a quiet sort chevron on every sortable header, before the label in end-aligned columns, and solid on the sorted one', async () => {
+  it('sorts with Material\'s sort header: an arrow before the label in end-aligned columns, the sorted header marked, and a sort description', async () => {
     const f = await setup();
     const sorts = [...el(f).querySelectorAll<HTMLElement>('.pd-sort')];
     expect(sorts).toHaveLength(3);
-    expect(sorts.every((b) => b.querySelector('.pd-sort-icon'))).toBe(true);
-    sorts[0]!.click();
+    expect(sorts.map((s) => s.querySelector('.mat-sort-header-container')?.classList.contains('mat-sort-header-position-before'))).toEqual([false, true, false]);
+    sorts[1]!.click();
     await settle(f);
-    expect(el(f).querySelector('.pd-sorted .pd-sort-icon')?.querySelector('svg path')?.getAttribute('d')).toBe('M6 15l6-6 6 6');
-    // An unsorted header shows the two-way glyph, which a descending sort never uses.
-    expect(el(f).querySelectorAll('.pd-sort:not(.pd-sorted) .pd-sort-icon svg path')[0]?.getAttribute('d')).toBe('M8 9l4-4 4 4M8 15l4 4 4-4');
-    sorts[0]!.click();
+    expect(f.componentInstance.sort()).toEqual({ key: 'size', direction: 'asc' });
+    expect(el(f).querySelector('.pd-sorted')?.textContent).toContain('Size');
+    expect(el(f).querySelector('.pd-sorted .mat-sort-header-container')?.classList.contains('mat-sort-header-sorted')).toBe(true);
+    // An app's sort shows on the header (two-way), and a column that does not sort has no sort header and no aria-sort.
+    f.componentInstance.sort.set({ key: 'name', direction: 'desc' });
     await settle(f);
-    expect(el(f).querySelector('.pd-sorted .pd-sort-icon')?.querySelector('svg path')?.getAttribute('d')).toBe('M6 9l6 6 6-6');
+    expect(el(f).querySelector('[role=columnheader][aria-sort=descending]')?.textContent).toContain('Name');
+    expect(document.body.textContent).toContain('Sort by Name');
   });
 
   it('reserves the icon slot for every menu item when one has an icon and puts a rule before the destructive item', async () => {
@@ -477,7 +519,49 @@ describe('pd-table', () => {
     const f = await setup();
     f.componentInstance.rows.set([DATA[2]!]);
     await settle(f);
-    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KiB)', 'Path']);
+    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Name', 'Size (KB)', 'Path']);
     expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-cols')).not.toContain('px 28px');
   });
+  it('says the default empty text without a next step, draws no action column without actions, and ignores clicks on placeholders', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(PlainHost);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    expect(el(f).querySelector('.pd-empty')?.textContent).toContain('Nothing to show yet.');
+    f.componentInstance.state.set('loading');
+    await settle(f);
+    el(f).querySelector<HTMLElement>('.pd-skeleton')!.click();
+    await settle(f);
+    expect(el(f).querySelector('.pd-selected')).toBeNull();
+    f.componentInstance.state.set('ready');
+    f.componentInstance.rows.set([{ id: 'a', group: '' }]);
+    f.componentInstance.groupBy.set('group');
+    await settle(f);
+    expect([...el(f).querySelectorAll('[role=columnheader]')].map((h) => h.textContent?.trim())).toEqual(['Id', 'Group']);
+    // A group without a name is called "None".
+    expect(el(f).querySelector('.pd-group-name')?.textContent).toBe('None');
+  });
+
+  it('draws actions without icons in a menu without an icon slot, and a disabled action does nothing', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(PlainHost);
+    f.componentInstance.rows.set([{ id: 'a', group: 'g' }]);
+    f.componentInstance.actions.set(() => [
+      { id: 'go', label: 'Go', inline: true },
+      { id: 'off', label: 'Off', disabled: true },
+    ]);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    // An inline action needs an icon: without one it is in the menu only.
+    expect(rowEls(f)[0]!.querySelector('.pd-inline')).toBeNull();
+    rowEls(f)[0]!.querySelector<HTMLButtonElement>('.pd-more')!.click();
+    await settle(f);
+    const menu = document.querySelector('.cdk-overlay-container .pd-popmenu')!;
+    expect(menu.querySelector('.pd-popmenu__icon')).toBeNull();
+    const off = [...menu.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find((b) => b.textContent?.includes('Off'))!;
+    expect(off.disabled || off.getAttribute('aria-disabled') === 'true').toBe(true);
+    (f.debugElement.query((d) => d.name === 'pd-table').componentInstance as unknown as { emit(a: PdRowAction, row: unknown): void }).emit({ id: 'off', label: 'Off', disabled: true }, { id: 'a' });
+    expect(f.componentInstance.chosen).toEqual([]);
+  });
 });
+

@@ -28,7 +28,7 @@ test('table: sorting cycles ascending, descending, none and sets aria-sort', asy
   await open(page);
   const first = async () => (await names(page).first().innerText()).trim();
   const original = await first();
-  const header = small(page).getByRole('button', { name: 'Sort by Name' });
+  const header = small(page).getByRole('columnheader', { name: 'Name' }).getByRole('button');
   await header.click();
   await expect(small(page).getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending');
   const asc = await first();
@@ -138,10 +138,11 @@ test('table: rows are 32 px with a 28 px header, and a sortable header shows its
   const row = small(page).locator('[role=row][data-index]').first();
   expect((await row.boundingBox())!.height).toBeCloseTo(32, 0);
   expect((await small(page).locator('.pd-header').boundingBox())!.height).toBeCloseTo(28, 0);
-  const icon = small(page).locator('.pd-sort').first().locator('.pd-sort-icon');
-  await expect(icon).toHaveCSS('opacity', '0');
+  // Material's sort arrow: hidden at rest, a quiet hint on hover.
+  const arrow = small(page).locator('.pd-sort').first().locator('.mat-sort-header-arrow');
+  await expect(arrow).toHaveCSS('opacity', '0');
   await small(page).locator('.pd-sort').first().hover();
-  await expect(icon).toHaveCSS('opacity', '1');
+  await expect(arrow).not.toHaveCSS('opacity', '0');
 });
 
 test('table: the keyboard focus in a menu is a 2 px ring with 3:1 contrast, and the icon slot lines the labels up', async ({ page }) => {
@@ -159,14 +160,14 @@ test('table: the keyboard focus in a menu is a 2 px ring with 3:1 contrast, and 
     const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
     const lin = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
     const lum = (c: number[]) => 0.2126 * lin(c[0]!) + 0.7152 * lin(c[1]!) + 0.0722 * lin(c[2]!);
-    const menuBg = getComputedStyle(e.parentElement!).backgroundColor;
+    const menuBg = getComputedStyle(e.closest('.pd-popmenu')!).backgroundColor;
     const [a, b] = [lum(rgb(cs.outlineColor)), lum(rgb(menuBg))];
     return { width: cs.outlineWidth, style: cs.outlineStyle, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) };
   });
   expect(ring.width).toBe('2px');
   expect(ring.style).toBe('solid');
   expect(ring.ratio).toBeGreaterThanOrEqual(3);
-  const lefts = await page.locator('.pd-popmenu__item > span:last-child').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
+  const lefts = await page.locator('.pd-popmenu__item .mat-mdc-menu-item-text > span:last-child').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
   expect(new Set(lefts).size).toBe(1);
   await expect(page.locator('.pd-popmenu__sep')).toHaveCount(1);
   await page.keyboard.press('Escape');
@@ -191,18 +192,16 @@ test('table: loading and empty say no count, and the columns do not move when ro
   await open(page);
   await expect(page.locator('[data-testid="box-loading"] [data-testid="table-count"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="box-empty"] [data-testid="table-count"]')).toHaveCount(0);
-  const left = (id: string) => page.locator(`[data-testid="${id}"]`).getByRole('columnheader', { name: 'Size (KiB)' }).evaluate((e) => Math.round(e.getBoundingClientRect().left - (e.closest('.pd-grid') as HTMLElement).getBoundingClientRect().left));
+  const left = (id: string) => page.locator(`[data-testid="${id}"]`).getByRole('columnheader', { name: 'Size (KB)' }).evaluate((e) => Math.round(e.getBoundingClientRect().left - (e.closest('.pd-grid') as HTMLElement).getBoundingClientRect().left));
   const loaded = await left('box-selected');
   for (const id of ['box-loading', 'box-empty', 'box-error']) expect(await left(id), id).toBe(loaded);
 });
 
-test('table: the sortable hint is a two-way glyph, never the one a descending sort uses', async ({ page }) => {
+test('table: an unsorted header hides its arrow, the sorted one shows it solid', async ({ page }) => {
   await open(page);
   const grid = page.locator('[data-testid="box-selected"]');
-  const desc = await grid.getByRole('columnheader', { name: 'Size (KiB)' }).locator('.pd-sort-icon path').first().getAttribute('d');
-  const hint = await grid.getByRole('columnheader', { name: 'Kind' }).locator('.pd-sort-icon path').first().getAttribute('d');
-  expect(hint).not.toBe(desc);
-  expect(hint).toContain('M8 9l4-4 4 4');
+  await expect(grid.getByRole('columnheader', { name: 'Size (KB)' }).locator('.mat-sort-header-arrow')).toHaveCSS('opacity', '1');
+  await expect(grid.getByRole('columnheader', { name: 'Kind' }).locator('.mat-sort-header-arrow')).toHaveCSS('opacity', '0');
 });
 
 test('table: the resting "..." button is visible in its own colour, not faded', async ({ page }) => {
@@ -218,7 +217,7 @@ test('table: selected row, descending sort, empty, loading and error states are 
   await open(page);
   const selected = page.locator('[data-testid="box-selected"]');
   await expect(selected.locator('[role=row][aria-selected=true]')).toHaveCount(1);
-  await expect(selected.getByRole('columnheader', { name: 'Size (KiB)' })).toHaveAttribute('aria-sort', 'descending');
+  await expect(selected.getByRole('columnheader', { name: 'Size (KB)' })).toHaveAttribute('aria-sort', 'descending');
   await expect(page.locator('[data-testid="box-empty"]').getByRole('button', { name: 'Install a plugin' })).toBeVisible();
   await expect(page.locator('[data-testid="box-loading"] .pd-skel').first()).toBeVisible();
   await expect(page.locator('[data-testid="box-error"]').getByRole('alert')).toContainText('could not be read');

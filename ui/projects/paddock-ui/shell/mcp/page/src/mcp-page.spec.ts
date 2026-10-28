@@ -8,6 +8,9 @@ async function settle(rounds = 12): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
 }
 
+/** The frame in which pd-table (Material's table in the CDK viewport) draws the rows of its range. */
+const nextFrame = (): Promise<void> => new Promise((done) => requestAnimationFrame(() => done()));
+
 const text = (el: Element): string => (el.textContent ?? '').replace(/\s+/g, ' ').trim();
 
 /** The dialog service as the page uses it: records what was opened and answers like the dialogs (the key dialog's window issues the key). */
@@ -38,6 +41,8 @@ describe('the AI access page', () => {
       await settle();
       await fixture.whenStable();
       await settle();
+      await fixture.whenStable();
+      await nextFrame();
       await fixture.whenStable();
     };
     await flush();

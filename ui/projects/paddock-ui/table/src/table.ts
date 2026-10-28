@@ -1,8 +1,6 @@
-import { CdkContextMenuTrigger, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger } from '@angular/cdk/menu';
-import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
+import { CdkFixedSizeVirtualScroll, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { NgTemplateOutlet } from '@angular/common';
 import {
-  afterEveryRender,
   afterNextRender,
   ChangeDetectionStrategy,
   Component,
@@ -21,6 +19,11 @@ import {
   TemplateRef,
   viewChild,
 } from '@angular/core';
+import { MatIconButton } from '@angular/material/button';
+import { MatContextMenuTrigger, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
+import { MatSort, MatSortHeader, type Sort } from '@angular/material/sort';
+import { MatCell, MatCellDef, MatColumnDef, MatHeaderCell, MatHeaderCellDef, MatHeaderRow, MatHeaderRowDef, MatRow, MatRowDef, MatTable } from '@angular/material/table';
+import { MatTooltip } from '@angular/material/tooltip';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdMiddleText } from './middle-text';
 import {
@@ -35,7 +38,6 @@ import {
   isMenuKey,
   menuActions,
   nextIndex,
-  nextSort,
   PD_HEADER_HEIGHT,
   rowHeightFor,
   PD_FOLD_EXTRA,
@@ -76,22 +78,38 @@ function readDensity(): number {
 
 const NO_ACTIONS = (): readonly PdRowAction[] => [];
 
-/** Above this many lines the rows are drawn by a virtual scroll viewport (`virtual="auto"`). */
+/** Above this many lines only the rows in view are drawn (`virtual="auto"`). */
 export const PD_TABLE_VIRTUAL_FROM = 100;
 
+/** A line the table draws: a row or a group heading, or a placeholder while the rows load. */
+type PdLine<T> = PdTableItem<T> | { readonly kind: 'skeleton'; readonly n: number };
+
+/** The five placeholder lines of the loading state. */
+const SKELETON: readonly PdLine<never>[] = [0, 1, 2, 3, 4].map((n) => ({ kind: 'skeleton', n }));
+
+/** The column id of the row actions (not a key an app gives its columns). */
+const ACTIONS_COLUMN = 'pd-actions';
+
+/** How many rows the virtual viewport draws beyond the visible ones. */
+const VIRTUAL_BUFFER_ROWS = 8;
+
 /**
- * The family's data table (plan X21; the UI review's rules 2, 5, 6, 7, 8, 9): one sticky header with sentence-case, sortable
- * columns (ascending, descending, none: `aria-sort`), a filter field, a column menu, optional group rows, uniform rows
- * (32, 40 or 48 px), numbers right-aligned in tabular figures, text that never wraps (truncated with the full value as the
- * tooltip, or shortened in the middle for paths and ids) and no horizontal scroll at any width: columns with `hideBelow`
- * drop out as the table narrows (it follows its own width, not the window's).
+ * The family's data table (plan X21; the UI review's rules 2, 5, 6, 7, 8, 9; ADR 0027), built on Angular Material's table
+ * (`mat-table`, the CDK table) with its sticky header row, `matSort` for sorting (`aria-sort` on the headers), `mat-menu` for the
+ * column and row menus (also on right-click, `matContextMenuTriggerFor`), `matTooltip` for the full text of a cell and
+ * `matIconButton` for the row actions. What Material does not have is built on top: group rows, text shortened in the middle,
+ * columns that drop out as the table narrows (`hideBelow`: it follows its own width, not the window's), the family's uniform row
+ * heights (24, 32 or 36 px, a 28 px header) and the grid keyboard.
+ *
+ * The rows are always drawn in the CDK virtual scroll viewport, with the header row stuck to its top the way Material documents
+ * it (the CDK table keeps its sticky header in place while the viewport moves the rows). Above 100 lines (`virtual="auto"`) only
+ * the rows in view are drawn; below, or with `virtual="false"`, the viewport's buffer covers every row, so all are drawn.
  *
  * Rows are a `grid` with one tab stop (roving): Up, Down, Page Up, Page Down, Home and End move between rows, Enter opens
- * the row (`rowActivate`; on a group row it folds the group), and Shift+F10 or the Menu key (the browser's `contextmenu`)
- * opens the row's menu at the row, like a right-click. Row actions: up to two icon buttons on hover and focus, a "..." button
- * (40 % opacity at rest, so touch and keyboard can reach it) and the same list as the menu; destructive items only in the
- * menu, in danger text (`action` carries the choice, the app confirms). Long tables (above 100 lines) are drawn by the CDK
- * virtual scroll viewport; keyboard navigation scrolls to rows that are not drawn.
+ * the row (`rowActivate`; on a group row it folds the group), and Shift+F10 or the Menu key opens the row's menu at the row,
+ * like a right-click. Row actions: up to two icon buttons on hover and focus, a "..." button (always visible in its resting
+ * colour, so touch and keyboard can reach it) and the same list as the menu; destructive items only in the menu, in danger text
+ * (`action` carries the choice, the app confirms).
  *
  * ```html
  * <pd-table [rows]="plugins()" [columns]="columns" [rowKey]="key" [rowActions]="actions" label="Plugins" (rowActivate)="open($event)" (action)="run($event)" />
@@ -100,7 +118,33 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
 @Component({
   selector: 'pd-table',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, NgTemplateOutlet, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkMenu, CdkMenuItem, CdkMenuItemCheckbox, CdkMenuTrigger, CdkContextMenuTrigger, PdGlyph, PdMiddleText],
+  imports: [
+    PdStatusGlyph,
+    NgTemplateOutlet,
+    CdkVirtualScrollViewport,
+    CdkFixedSizeVirtualScroll,
+    MatTable,
+    MatColumnDef,
+    MatHeaderCellDef,
+    MatHeaderCell,
+    MatCellDef,
+    MatCell,
+    MatHeaderRowDef,
+    MatHeaderRow,
+    MatRowDef,
+    MatRow,
+    MatSort,
+    MatSortHeader,
+    MatMenu,
+    MatMenuItem,
+    MatMenuTrigger,
+    MatMenuContent,
+    MatContextMenuTrigger,
+    MatTooltip,
+    MatIconButton,
+    PdGlyph,
+    PdMiddleText,
+  ],
   host: { '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"' },
   template: `
     <div class="pd-toolbar">
@@ -119,186 +163,173 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
       <span class="pd-spacer"></span>
       <ng-content select="[pdTableToolbar]" />
       @if (choosable().length) {
-        <button type="button" class="pd-tool" [cdkMenuTriggerFor]="columnsMenu" [attr.aria-label]="t.columns" [attr.title]="t.columns" data-testid="table-columns">
+        <button type="button" class="pd-tool" [matMenuTriggerFor]="columnsMenu" [attr.aria-label]="t.columns" [matTooltip]="t.columns" data-testid="table-columns">
           <pd-glyph name="columns" [size]="14" /><span class="pd-tool-text">{{ t.columns }}</span>
         </button>
       }
     </div>
-    <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the grid only receives keydown bubbling from its rows and cells, which are the focus stops (roving tabindex) -->
-    <div #grid class="pd-grid" role="grid" [attr.aria-label]="label()" [attr.aria-busy]="state() === 'loading'" [attr.aria-rowcount]="items().length + 1" [style.--pd-cols]="gridTemplate()" [style.--pd-gutter.px]="gutter()" (keydown)="onKeydown($event)">
-      <div class="pd-header" role="row" aria-rowindex="1">
-        @for (c of columns2(); track c.key) {
-          <div role="columnheader" class="pd-th" [class.pd-end]="c.align === 'end'" [attr.aria-sort]="ariaSort(c)">
-            @if (c.sortable !== false) {
-              <button type="button" class="pd-sort" [class.pd-sorted]="sort()?.key === c.key" (click)="sortBy(c.key)" [attr.aria-label]="sortLabel(c)">
-                <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
-                <pd-glyph class="pd-sort-icon" [name]="sort()?.key !== c.key ? 'sort' : sort()?.direction === 'asc' ? 'chevron-up' : 'chevron-down'" [size]="14" />
-              </button>
-            } @else {
-              <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
-            }
-          </div>
-        }
-        @if (actionWidth()) {
-          <div role="columnheader" class="pd-th pd-actions-th"><span class="pd-sr">{{ t.actions }}</span></div>
-        }
-      </div>
-      @switch (state()) {
-        @case ('loading') {
-          <div class="pd-body" role="rowgroup" data-testid="table-loading">
-            @for (n of [0, 1, 2, 3, 4]; track n) {
-              <div role="row" class="pd-row pd-skeleton">
-                @for (c of columns2(); track c.key) {
-                  <div role="gridcell" class="pd-cell"><span class="pd-skel" [class.pd-skel-end]="c.align === 'end'" [style.width.%]="40 + ((n * 17 + c.key.length * 11) % 50)"></span></div>
-                }
-                @if (actionWidth()) { <div role="gridcell" class="pd-cell"></div> }
-              </div>
-            }
-          </div>
-        }
-        @case ('error') {
-          <div class="pd-body" role="rowgroup">
-            <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty pd-error" data-testid="table-error">
-              <pd-status-glyph status="error" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
-              <button type="button" class="pd-retry" (click)="retry.emit()">{{ t.retry }}</button>
-            </div></div>
-          </div>
-        }
-        @default {
-          @if (isVirtual()) {
-            <cdk-virtual-scroll-viewport class="pd-body" role="rowgroup" [itemSize]="rowPx()" [style.height.px]="bodyHeight()">
-              <ng-container *cdkVirtualFor="let item of items(); let i = index; trackBy: trackItem">
-                <ng-container *ngTemplateOutlet="line; context: { $implicit: item, index: i }" />
-              </ng-container>
-            </cdk-virtual-scroll-viewport>
-          } @else {
-            <div class="pd-body" role="rowgroup" [style.max-height.px]="maxHeight()">
-              @for (item of items(); track trackItem($index, item)) {
-                <ng-container *ngTemplateOutlet="line; context: { $implicit: item, index: $index }" />
-              }
-            </div>
-          }
-          @if (!items().length) {
-            <div class="pd-body" role="rowgroup">
-              <div role="row" class="pd-msg-row"><div role="gridcell" class="pd-empty">
-                @if (rows().length) {
-                  <p role="status">{{ t.noMatch }}</p>
-                } @else if (emptySlot()) {
-                  <ng-content select="[pdTableEmpty]" />
-                } @else {
-                  <p role="status">{{ emptyText() }}</p>
-                }
-              </div></div>
-            </div>
-          }
-        }
-      }
-    </div>
-
-    <ng-template #line let-item let-i="index">
-      @if (item.kind === 'group') {
-        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -- a group row is toggled from the keyboard by the grid keydown handler (Enter and arrows), and its tabindex is bound -->
-        <div role="row" class="pd-row pd-group" [class.pd-group-grid]="!!item.cells" [attr.aria-rowindex]="i + 2" [attr.data-index]="i" [attr.tabindex]="i === active() ? 0 : -1" (click)="toggleGroup(item.key)">
-          <div role="gridcell" class="pd-group-cell">
-            <button type="button" class="pd-group-toggle" tabindex="-1" [attr.aria-expanded]="!item.collapsed" [attr.aria-label]="item.label || t.none">
-              <pd-glyph [name]="item.collapsed ? 'chevron-right' : 'chevron-down'" [size]="14" />
-            </button>
-            <span class="pd-group-name" [class.pd-mono]="isMono(item.key)">{{ item.label || t.none }}</span>
-            <span class="pd-group-count">{{ formatCount(item.count) }}</span>
-          </div>
-          @if (item.cells) {
-            @for (c of columns2(); track c.key; let k = $index) {
-              @if (k > 0) {
-                <div role="gridcell" class="pd-cell pd-group-summary" [class.pd-end]="c.align === 'end'">{{ item.cells[c.key] ?? '' }}</div>
-              }
-            }
-            @if (actionWidth()) {
-              <div role="gridcell" class="pd-cell"></div>
-            }
-          }
-        </div>
-      } @else {
-        @let row = item.row;
-        @let actions = actionsOf(row);
-        <!-- eslint-disable-next-line @angular-eslint/template/click-events-have-key-events -- a row is activated from the keyboard by the grid keydown handler (Enter), and its tabindex is bound -->
-        <div
-          role="row"
-          class="pd-row"
-          [class.pd-folded]="folded()"
-          [class.pd-selected]="selectedKey() === rowKey()(row)"
-          [attr.aria-rowindex]="i + 2"
-          [attr.aria-selected]="selectedKey() === rowKey()(row)"
-          [attr.data-index]="i"
-          [attr.data-key]="rowKey()(row)"
-          [attr.tabindex]="i === active() ? 0 : -1"
-          [cdkContextMenuTriggerFor]="rowMenu"
-          [cdkContextMenuDisabled]="!actions.length"
-          [cdkContextMenuTriggerData]="{ row }"
-          (click)="onRowClick(row, $event, i)"
+    <div class="pd-grid" [style.--pd-cols]="gridTemplate()">
+      <cdk-virtual-scroll-viewport class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="viewportHeight()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
+        <mat-table
+          role="grid"
+          class="pd-mat-table"
+          [dataSource]="lines()"
+          [trackBy]="trackLine"
+          matSort
+          [matSortActive]="sort()?.key ?? ''"
+          [matSortDirection]="sort()?.direction ?? ''"
+          (matSortChange)="onSort($event)"
+          [attr.aria-label]="label()"
+          [attr.aria-busy]="state() === 'loading'"
+          [attr.aria-rowcount]="items().length + 1"
+          (keydown)="onKeydown($event)"
         >
-          @for (c of columns2(); track c.key) {
-            <div role="gridcell" class="pd-cell" [class.pd-end]="c.align === 'end'" [class.pd-first]="$first">
-              @let custom = customCells().get(c.key);
-              @if (custom) {
-                <ng-container *ngTemplateOutlet="custom; context: { $implicit: row, column: c, folded: folded() }" />
-              } @else if (c.truncate === 'middle') {
-                <pd-middle-text [value]="text(c, row)" />
+          @for (c of columns2(); track c.key; let k = $index) {
+            <ng-container [matColumnDef]="c.key">
+              @if (c.sortable !== false) {
+                <mat-header-cell *matHeaderCellDef mat-sort-header class="pd-th pd-sort" [class.pd-end]="c.align === 'end'" [class.pd-sorted]="sort()?.key === c.key" [arrowPosition]="c.align === 'end' ? 'before' : 'after'" [sortActionDescription]="sortLabel(c)">
+                  <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
+                </mat-header-cell>
               } @else {
-                <span class="pd-text" [attr.title]="text(c, row)">{{ text(c, row) }}</span>
+                <mat-header-cell *matHeaderCellDef class="pd-th" [class.pd-end]="c.align === 'end'">
+                  <span class="pd-th-text" [class.pd-sr]="c.headerHidden">{{ c.header }}</span>
+                </mat-header-cell>
               }
-            </div>
+              <mat-cell *matCellDef="let line" class="pd-cell" [class.pd-end]="c.align === 'end'" [class.pd-first]="k === 0" [class.pd-group-cell]="line.kind === 'group' && k === 0" [class.pd-group-summary]="line.kind === 'group' && k > 0">
+                @switch (line.kind) {
+                  @case ('skeleton') {
+                    <span class="pd-skel" [class.pd-skel-end]="c.align === 'end'" [style.width.%]="40 + ((line.n * 17 + c.key.length * 11) % 50)"></span>
+                  }
+                  @case ('group') {
+                    @if (k === 0) {
+                      <button type="button" class="pd-group-toggle" tabindex="-1" [attr.aria-expanded]="!line.collapsed" [attr.aria-label]="line.label || t.none">
+                        <pd-glyph [name]="line.collapsed ? 'chevron-right' : 'chevron-down'" [size]="14" />
+                      </button>
+                      <span class="pd-group-name" [class.pd-mono]="isMono(line.key)">{{ line.label || t.none }}</span>
+                      <span class="pd-group-count">{{ formatCount(line.count) }}</span>
+                    } @else {
+                      {{ line.cells?.[c.key] ?? '' }}
+                    }
+                  }
+                  @default {
+                    @let custom = customCells().get(c.key);
+                    @if (custom) {
+                      <ng-container *ngTemplateOutlet="custom; context: { $implicit: line.row, column: c, folded: folded() }" />
+                    } @else if (c.truncate === 'middle') {
+                      <pd-middle-text [value]="text(c, line.row)" />
+                    } @else {
+                      <span class="pd-text" [matTooltip]="text(c, line.row)" matTooltipShowDelay="500">{{ text(c, line.row) }}</span>
+                    }
+                  }
+                }
+              </mat-cell>
+            </ng-container>
           }
           @if (actionWidth()) {
-            <div role="gridcell" class="pd-cell pd-actions">
-              @if (actions.length) {
-                @if (!narrow()) {
-                  @for (a of inline(actions); track a.id) {
-                    <button type="button" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [attr.title]="a.label" [disabled]="a.disabled" (click)="act(a, row, $event)">
-                      <pd-glyph [name]="a.icon ?? ''" [size]="14" />
+            <ng-container [matColumnDef]="actionsColumn">
+              <mat-header-cell *matHeaderCellDef class="pd-th pd-actions-th"><span class="pd-sr">{{ t.actions }}</span></mat-header-cell>
+              <mat-cell *matCellDef="let line" class="pd-cell pd-actions">
+                @if (line.kind === 'row') {
+                  @let actions = actionsOf(line.row);
+                  @if (actions.length) {
+                    @if (!narrow()) {
+                      @for (a of inline(actions); track a.id) {
+                        <button type="button" matIconButton class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [matTooltip]="a.label" [disabled]="a.disabled" (click)="act(a, line.row, $event)">
+                          <pd-glyph [name]="a.icon ?? ''" [size]="14" />
+                        </button>
+                      }
+                    }
+                    <button type="button" matIconButton class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [matTooltip]="t.more" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ row: line.row }">
+                      <pd-glyph name="more" [size]="16" />
                     </button>
                   }
                 }
-                <button type="button" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [attr.title]="t.more" aria-haspopup="menu" [cdkMenuTriggerFor]="rowMenu" [cdkMenuTriggerData]="{ row }" (click)="$event.stopPropagation()">
-                  <pd-glyph name="more" [size]="16" />
-                </button>
-              }
-            </div>
+              </mat-cell>
+            </ng-container>
+          }
+          <mat-header-row *matHeaderRowDef="displayed(); sticky: true" class="pd-header" />
+          <mat-row
+            *matRowDef="let line; columns: displayed()"
+            class="pd-row"
+            [class.pd-group]="line.kind === 'group'"
+            [class.pd-group-grid]="line.kind === 'group' && !!line.cells"
+            [class.pd-skeleton]="line.kind === 'skeleton'"
+            [class.pd-folded]="folded() && line.kind === 'row'"
+            [class.pd-selected]="isSelected(line)"
+            [attr.aria-rowindex]="line.kind === 'skeleton' ? null : indexOf(line) + 2"
+            [attr.data-index]="line.kind === 'skeleton' ? null : indexOf(line)"
+            [attr.data-key]="line.kind === 'row' ? rowKey()(line.row) : null"
+            [attr.aria-selected]="line.kind === 'row' ? isSelected(line) : null"
+            [attr.tabindex]="line.kind === 'skeleton' ? null : indexOf(line) === active() ? 0 : -1"
+            [matContextMenuTriggerFor]="rowMenu"
+            [matContextMenuTriggerData]="{ row: line.row }"
+            [matContextMenuTriggerDisabled]="line.kind !== 'row' || !actionsOf(line.row).length"
+            (click)="onLineClick(line, $event)"
+          />
+        </mat-table>
+      </cdk-virtual-scroll-viewport>
+      @if (state() === 'error') {
+        <div class="pd-empty pd-error" data-testid="table-error">
+          <pd-status-glyph status="error" [size]="14" /><span role="alert">{{ errorText() || t.error }}</span>
+          <button type="button" class="pd-retry" (click)="retry.emit()">{{ t.retry }}</button>
+        </div>
+      } @else if (state() === 'ready' && !items().length) {
+        <div class="pd-empty">
+          @if (rows().length) {
+            <p role="status">{{ t.noMatch }}</p>
+          } @else if (emptySlot()) {
+            <ng-content select="[pdTableEmpty]" />
+          } @else {
+            <p role="status">{{ emptyText() }}</p>
           }
         </div>
       }
-    </ng-template>
+    </div>
 
-    <ng-template #rowMenu let-row="row">
-      <div cdkMenu class="pd-popmenu" [attr.aria-label]="t.actions">
+    <mat-menu #rowMenu="matMenu" class="pd-popmenu" [aria-label]="t.actions">
+      <ng-template matMenuContent let-row="row">
         @let items = menuOf(row);
         @let icons = hasIcon(items);
         @for (a of items; track a.id; let k = $index) {
           @if (a.danger && k > 0 && !items[k - 1]?.danger) {
             <div class="pd-popmenu__sep" role="separator"></div>
           }
-          <button type="button" cdkMenuItem class="pd-popmenu__item" [class.pd-popmenu__item--danger]="a.danger" [disabled]="a.disabled" (cdkMenuItemTriggered)="emit(a, row)">
+          <button type="button" mat-menu-item class="pd-popmenu__item" [class.pd-popmenu__item--danger]="a.danger" [disabled]="a.disabled" (click)="emit(a, row)">
             @if (icons) {
               <span class="pd-popmenu__icon">@if (a.icon) { <pd-glyph [name]="a.icon" [size]="14" /> }</span>
             }
             <span>{{ a.label }}</span>
           </button>
         }
-      </div>
-    </ng-template>
+      </ng-template>
+    </mat-menu>
 
-    <ng-template #columnsMenu>
-      <div cdkMenu class="pd-popmenu" [attr.aria-label]="t.columns">
-        @for (c of choosable(); track c.key) {
-          <button type="button" cdkMenuItemCheckbox class="pd-popmenu__item" [cdkMenuItemChecked]="isShown(c)" (cdkMenuItemTriggered)="toggleColumn(c.key)">
-            <span class="pd-popmenu__icon">@if (isShown(c)) { <pd-glyph name="check" [size]="14" /> }</span>
-            <span>{{ c.header }}</span>
-          </button>
-        }
-      </div>
-    </ng-template>
+    <mat-menu #columnsMenu="matMenu" class="pd-popmenu" [aria-label]="t.columns">
+      @for (c of choosable(); track c.key) {
+        <button type="button" mat-menu-item role="menuitemcheckbox" class="pd-popmenu__item" [attr.aria-checked]="isShown(c)" (click)="toggleColumn(c.key)">
+          <span class="pd-popmenu__icon">@if (isShown(c)) { <pd-glyph name="check" [size]="14" /> }</span>
+          <span>{{ c.header }}</span>
+        </button>
+      }
+    </mat-menu>
   `,
   styles: `
-    :host { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; container-type: inline-size; }
+    /* Material's table, sort header and icon button take the family's sizes and colours here (their component tokens); the menus
+       and tooltips are themed by the Material bridge (css/material.css) and the shared popup-menu classes. */
+    :host {
+      display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; container-type: inline-size;
+      --mat-table-background-color: transparent;
+      --mat-table-header-container-height: var(--pd-table-head);
+      --mat-table-row-item-container-height: var(--pd-table-row);
+      --mat-table-row-item-outline-color: var(--pd-hairline);
+      --mat-sort-arrow-color: var(--pd-text-subtle);
+      --mat-icon-button-state-layer-size: 24px;
+      --mat-icon-button-icon-size: 16px;
+      --mat-icon-button-icon-color: var(--pd-text-muted);
+      --mat-icon-button-state-layer-color: var(--pd-text);
+      /* The row is the touch target: the 48 px invisible target of an icon button would reach out of a 24 to 36 px row. */
+      --mat-icon-button-touch-target-display: none;
+    }
     .pd-toolbar { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 44px; min-width: 0; }
     .pd-filter { display: flex; align-items: center; gap: var(--pd-space-2); flex: 1 1 8rem; max-width: 24rem; min-width: 8rem; height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-input); background: var(--pd-surface-1); color: var(--pd-text-muted); }
     .pd-filter:focus-within { border-color: var(--pd-focus-ring); outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
@@ -306,68 +337,68 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-count { color: var(--pd-text-muted); font-size: var(--pd-text-label); white-space: nowrap; font-variant-numeric: tabular-nums; }
     .pd-spacer { flex: 1; }
     .pd-tool { display: inline-flex; align-items: center; gap: var(--pd-space-1); height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid transparent; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
-    .pd-tool:hover { background: var(--pd-hover); color: var(--pd-text); }
-    .pd-tool:focus-visible, .pd-sort:focus-visible, .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-tool:hover, .pd-tool[aria-expanded='true'] { background: var(--pd-hover); color: var(--pd-text); }
+    .pd-tool:focus-visible, .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
     /* A narrow table keeps the filter and an icon-only Columns button; the count goes (the grid says how many rows it has). */
     @container (max-width: 400px) { .pd-tool-text, .pd-count { display: none; } .pd-tool { padding: 0 var(--pd-space-2); } }
-    /* Its own stacking context: the table's layers (--pd-z-table-*) stay local and never compete with the page's. */
+    /* Its own stacking context: the table's layers (the sticky header above the rows) stay local and never compete with the page's. */
     .pd-grid { position: relative; isolation: isolate; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
-    .pd-header, .pd-row { display: grid; grid-template-columns: var(--pd-cols); align-items: center; column-gap: var(--pd-space-3); padding: 0 var(--pd-space-3); min-width: 0; }
-    .pd-header { position: sticky; top: 0; z-index: var(--pd-z-table-header); height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
-    .pd-th { display: flex; min-width: 0; }
-    .pd-th.pd-end, .pd-cell.pd-end { justify-content: flex-end; text-align: end; }
-    .pd-sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; padding: 0 4px; margin-inline: -4px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: var(--pd-radius-tag); }
-    .pd-th.pd-end .pd-sort { flex-direction: row-reverse; }
-    .pd-sort:hover { color: var(--pd-text); }
-    /* The sort affordance: a quiet chevron on hover and focus, solid once the column is the sort. */
-    .pd-sort-icon { color: var(--pd-text-subtle); opacity: 0; }
-    .pd-sort:hover .pd-sort-icon, .pd-sort:focus-visible .pd-sort-icon { opacity: 1; }
-    .pd-sorted .pd-sort-icon { opacity: 1; color: var(--pd-text); }
+    .pd-body { display: block; min-width: 0; overflow-x: hidden; overflow-y: auto; }
+    .pd-grid .pd-mat-table { display: block; min-width: 0; }
+    /* Every line is a CSS grid over the same tracks (--pd-cols), so the header and the rows share their columns. */
+    .pd-grid .pd-header, .pd-grid .pd-row { display: grid; grid-template-columns: var(--pd-cols); align-items: center; column-gap: var(--pd-space-3); box-sizing: border-box; padding: 0 var(--pd-space-3); min-width: 0; border: 0; }
+    /* The sticky header (the CDK table sets its position and layer): an opaque surface, so nothing shows through it. */
+    .pd-grid .pd-header { height: var(--pd-table-head); min-height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); font-family: inherit; letter-spacing: normal; }
+    .pd-grid .pd-th, .pd-grid .pd-cell { display: flex; align-items: center; flex: none; min-width: 0; min-height: 0; padding: 0; border: 0; overflow: hidden; white-space: nowrap; background: none; color: inherit; font: inherit; letter-spacing: normal; align-self: stretch; }
+    .pd-grid .pd-th.pd-end, .pd-grid .pd-cell.pd-end { justify-content: flex-end; text-align: end; }
+    .pd-grid .pd-sort { cursor: pointer; }
+    .pd-grid .pd-sort:hover, .pd-grid .pd-sorted { color: var(--pd-text); }
+    .pd-grid .pd-th .mat-sort-header-container { min-width: 0; max-width: 100%; gap: var(--pd-space-1); border-radius: var(--pd-radius-tag); }
+    .pd-grid .pd-th.pd-end .mat-sort-header-container { margin-inline-start: auto; }
+    .pd-grid .pd-th .mat-sort-header-content { min-width: 0; }
+    .pd-grid .pd-th .mat-sort-header-container:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
+    .pd-grid .pd-th .mat-sort-header-arrow { margin: 0; }
+    .pd-grid .pd-sorted .mat-sort-header-arrow { color: var(--pd-text); }
     .pd-th-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-body { display: block; overflow-y: auto; overflow-x: hidden; min-width: 0; }
-    /* The header keeps the width of the body's scrollbar (measured), so a column's header and its values share one right edge whether or not the body scrolls. */
-    .pd-header { padding-inline-end: calc(var(--pd-space-3) + var(--pd-gutter, 0px)); }
-    .pd-row { height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); cursor: default; }
-    .pd-row:last-child { border-bottom: 0; }
-    .pd-row.pd-folded { align-items: start; padding-block: 6px; box-sizing: border-box; }
-    .pd-row:hover { background: var(--pd-hover); }
-    .pd-row:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
+    .pd-grid .pd-row { height: var(--pd-table-row); min-height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); cursor: default; }
+    .pd-grid .pd-row.pd-folded { align-items: start; padding-block: 6px; }
+    .pd-grid .pd-row:hover { background: var(--pd-hover); }
+    .pd-grid .pd-row:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     /* Selected: the accent tint with a 2 px accent bar on the left (the guide). */
-    .pd-row.pd-selected { background: var(--pd-accent-tint, var(--pd-hover)); box-shadow: inset 2px 0 0 var(--pd-accent); }
-    .pd-cell { display: flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; }
-    .pd-cell.pd-end { font-variant-numeric: tabular-nums; }
-    .pd-cell.pd-first { font-weight: var(--pd-weight-medium); }
+    .pd-grid .pd-row.pd-selected { background: var(--pd-accent-tint, var(--pd-hover)); box-shadow: inset 2px 0 0 var(--pd-accent); }
+    .pd-grid .pd-cell.pd-end { font-variant-numeric: tabular-nums; }
+    .pd-grid .pd-cell.pd-first { font-weight: var(--pd-weight-medium); }
     .pd-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pd-group.pd-group-grid { display: grid; }
-    .pd-group-summary { color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    /* A group row is one heading cell across the row; with the group's own cells (groupSummary) it uses the columns beneath. */
+    .pd-grid .pd-group { background: var(--pd-surface-2); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); cursor: pointer; }
+    .pd-grid .pd-group:not(.pd-group-grid) { grid-template-columns: minmax(0, 1fr); }
+    .pd-grid .pd-group:not(.pd-group-grid) .pd-cell:not(.pd-group-cell) { display: none; }
+    .pd-grid .pd-group-summary { color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    .pd-grid .pd-group-cell { gap: var(--pd-space-2); }
     .pd-group-name.pd-mono { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
-    .pd-group { display: block; background: var(--pd-surface-2); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); cursor: pointer; }
-    .pd-group-cell { display: flex; align-items: center; gap: var(--pd-space-2); height: 100%; min-width: 0; }
     .pd-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-group-toggle { display: inline-flex; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
     .pd-group-count { color: var(--pd-text-subtle); font-variant-numeric: tabular-nums; }
-    .pd-actions { justify-content: flex-end; gap: 4px; overflow: visible; }
-    .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text-muted); cursor: pointer; }
-    .pd-icon-btn:hover:not(:disabled) { background: var(--pd-hover); color: var(--pd-text); }
-    .pd-icon-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); }
-    .pd-icon-btn:disabled { opacity: 0.4; cursor: default; }
-    .pd-inline { opacity: 0; }
+    .pd-grid .pd-actions { justify-content: flex-end; gap: 4px; overflow: visible; }
+    .pd-grid .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); }
+    .pd-grid .pd-icon-btn:hover:not(:disabled) { color: var(--pd-text); }
+    .pd-grid .pd-icon-btn:focus-visible { outline: 2px solid var(--pd-focus-ring); }
+    .pd-grid .pd-inline { opacity: 0; }
     /* Always visible in its own resting colour (3:1, SC 1.4.11), so touch and keyboard users can find it (UI patterns, rule 2). */
-    .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
-    .pd-row:hover .pd-inline, .pd-row:focus-within .pd-inline { opacity: 1; }
-    .pd-row:hover .pd-more, .pd-row:focus-within .pd-more, .pd-more[aria-expanded='true'] { color: var(--pd-text); }
+    .pd-grid .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
+    .pd-grid .pd-row:hover .pd-inline, .pd-grid .pd-row:focus-within .pd-inline { opacity: 1; }
+    .pd-grid .pd-row:hover .pd-more, .pd-grid .pd-row:focus-within .pd-more, .pd-grid .pd-more[aria-expanded='true'] { color: var(--pd-text); }
     /* On the selected row's tint the rest colour (mixed against the plain surface) is not 3:1: use the full subtle text there. */
-    .pd-row.pd-selected .pd-more { color: var(--pd-text-subtle); }
-    .pd-row.pd-selected:hover .pd-more, .pd-row.pd-selected:focus-within .pd-more, .pd-row.pd-selected .pd-more[aria-expanded='true'] { color: var(--pd-text); }
-    @media (hover: none) { .pd-inline { opacity: 0.6; } }
+    .pd-grid .pd-row.pd-selected .pd-more { color: var(--pd-text-subtle); }
+    .pd-grid .pd-row.pd-selected:hover .pd-more, .pd-grid .pd-row.pd-selected:focus-within .pd-more, .pd-grid .pd-row.pd-selected .pd-more[aria-expanded='true'] { color: var(--pd-text); }
+    @media (hover: none) { .pd-grid .pd-inline { opacity: 0.6; } }
     .pd-empty { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-2); margin: 0; padding: var(--pd-space-6, 32px) var(--pd-space-3); color: var(--pd-text-muted); text-align: center; font-size: var(--pd-text-body); }
-    .pd-msg-row { display: block; }
     .pd-empty p { margin: 0; }
     .pd-empty.pd-error { flex-direction: row; justify-content: center; }
-    .pd-empty.pd-error pd-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
+    .pd-empty.pd-error pd-status-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
     .pd-retry { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
     .pd-retry:hover { background: var(--pd-hover); }
-    .pd-skeleton { pointer-events: none; }
+    .pd-grid .pd-skeleton { pointer-events: none; }
     .pd-skel-end { margin-inline-start: auto; }
     .pd-skel { display: block; height: 10px; border-radius: 3px; background: var(--pd-hover); animation: pd-pulse 1.4s ease-in-out infinite; }
     @keyframes pd-pulse { 50% { opacity: 0.5; } }
@@ -398,7 +429,7 @@ export class PdTable<T> {
   readonly retry = output<void>();
   /** The tallest the table body grows before it scrolls. */
   readonly maxHeight = input(480);
-  /** Draw rows with the virtual scroll viewport: `auto` from {@link PD_TABLE_VIRTUAL_FROM} lines. */
+  /** Draw only the rows in view (virtual scroll): `auto` from {@link PD_TABLE_VIRTUAL_FROM} lines; `false` draws every row. */
   readonly virtual = input<boolean | 'auto'>('auto');
   /** The column rows are grouped by (its text), or null. */
   readonly groupBy = input<string | null>(null);
@@ -439,17 +470,16 @@ export class PdTable<T> {
     error: $localize`:@@pd.table.error:The rows could not be loaded.`,
     retry: $localize`:@@pd.table.retry:Retry`,
   };
+  protected readonly actionsColumn = ACTIONS_COLUMN;
 
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly injector = inject(Injector);
-  private readonly viewport = viewChild(CdkVirtualScrollViewport);
+  private readonly viewport = viewChild.required(CdkVirtualScrollViewport);
   private readonly cells = contentChildren(PdCell);
   protected readonly emptySlot = contentChild(PdTableEmpty);
   protected readonly customCells = computed(() => new Map(this.cells().map((c) => [c.key(), c.template] as const)));
 
   private readonly width = signal(1024);
-  /** The width of the body's scrollbar in pixels (0 when it does not scroll or the bar overlays). */
-  protected readonly gutter = signal(0);
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
   protected readonly active = signal(0);
 
@@ -480,6 +510,8 @@ export class PdTable<T> {
   /** The columns the user may switch (all but the required ones). */
   protected readonly choosable = computed(() => this.columns().filter((c) => !c.required));
   protected readonly gridTemplate = computed(() => [...this.columns2().map(columnTrack), ...(this.actionWidth() ? [`${this.actionWidth()}px`] : [])].join(' '));
+  /** The column ids the header and every row draw, in order. */
+  protected readonly displayed = computed(() => [...this.columns2().map((c) => c.key), ...(this.actionWidth() ? [ACTIONS_COLUMN] : [])]);
 
   private readonly filtered = computed(() => filterRows(this.rows(), this.columns(), this.query()));
   /** The rows after filtering and sorting. */
@@ -489,8 +521,16 @@ export class PdTable<T> {
     const key = this.groupBy();
     return groupItems(this.ordered(), key ? this.columns().find((c) => c.key === key) : undefined, this.collapsed(), this.groupSummary());
   });
+  /** What the table draws: the lines, five placeholders while loading, nothing on an error (the message is below the header). */
+  protected readonly lines = computed<readonly PdLine<T>[]>(() => (this.state() === 'loading' ? SKELETON : this.state() === 'error' ? [] : this.items()));
+  private readonly positions = computed(() => new Map<PdLine<T>, number>(this.lines().map((l, i) => [l, i])));
   protected readonly isVirtual = computed(() => (this.virtual() === 'auto' ? this.items().length > PD_TABLE_VIRTUAL_FROM : this.virtual()));
-  protected readonly bodyHeight = computed(() => Math.min(this.items().length * this.rowPx(), this.maxHeight()));
+  /** The rows' part of the viewport: as tall as the lines, up to `maxHeight`. */
+  private readonly bodyHeight = computed(() => Math.min(this.lines().length * this.rowPx(), this.maxHeight()));
+  /** The viewport holds the sticky header row and the rows. */
+  protected readonly viewportHeight = computed(() => this.headerPx + this.bodyHeight());
+  /** Virtual: a few rows beyond the visible ones; otherwise a buffer that covers every row, so all are drawn. */
+  protected readonly bufferPx = computed(() => (this.isVirtual() ? VIRTUAL_BUFFER_ROWS * this.rowPx() : (this.lines().length + 1) * this.rowPx()));
   /** "N rows" (thousands separated by the locale), "M of N rows" when filtered; empty while loading or when there are no rows (nothing to count). */
   protected readonly countText = computed(() => {
     if (this.state() !== 'ready' || !this.rows().length) return '';
@@ -510,18 +550,20 @@ export class PdTable<T> {
     observer?.observe(this.host);
     const mutation = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => this.density.set(readDensity()));
     mutation?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
-    afterEveryRender(() => {
-      const body = this.host.querySelector<HTMLElement>('.pd-body');
-      const bar = body ? Math.max(0, body.offsetWidth - body.clientWidth) : 0;
-      if (bar !== this.gutter()) this.gutter.set(bar);
-    });
     inject(DestroyRef).onDestroy(() => {
       observer?.disconnect();
       mutation?.disconnect();
     });
   }
 
-  protected trackItem = (_: number, item: PdTableItem<T>): string => (item.kind === 'group' ? `g:${item.key}` : this.rowKey()(item.row));
+  protected trackLine = (_: number, line: PdLine<T>): string => (line.kind === 'skeleton' ? `s:${line.n}` : line.kind === 'group' ? `g:${line.key}` : this.rowKey()(line.row));
+  /** The line's place in the table (a virtual table draws only a window of them). */
+  protected indexOf(line: PdLine<T>): number {
+    return this.positions().get(line) as number;
+  }
+  protected isSelected(line: PdLine<T>): boolean {
+    return line.kind === 'row' && this.selectedKey() === this.rowKey()(line.row);
+  }
   protected text(c: PdColumn<T>, row: T): string {
     return cellText(c, row);
   }
@@ -543,15 +585,12 @@ export class PdTable<T> {
   protected isShown(c: PdColumn<T>): boolean {
     return this.columns2().some((s) => s.key === c.key);
   }
-  protected ariaSort(c: PdColumn<T>): 'ascending' | 'descending' | 'none' | null {
-    const s = this.sort();
-    return c.sortable === false ? null : s?.key === c.key ? (s.direction === 'asc' ? 'ascending' : 'descending') : 'none';
-  }
   protected sortLabel(c: PdColumn<T>): string {
     return $localize`:@@pd.table.sortBy:Sort by ${c.header}`;
   }
-  protected sortBy(key: string): void {
-    this.sort.set(nextSort(this.sort(), key));
+  /** Material's sort header cycles ascending, descending, none; the table keeps the result as its two-way `sort`. */
+  protected onSort(e: Sort): void {
+    this.sort.set(e.direction ? { key: e.active, direction: e.direction } : null);
   }
   protected toggleGroup(key: string): void {
     this.collapsed.update((set) => {
@@ -575,10 +614,12 @@ export class PdTable<T> {
     if (!a.disabled) this.action.emit({ id: a.id, row });
   }
 
-  protected onRowClick(row: T, e: Event, index: number): void {
-    this.active.set(index);
+  protected onLineClick(line: PdLine<T>, e: Event): void {
+    if (line.kind === 'skeleton') return;
+    this.active.set(this.indexOf(line));
+    if (line.kind === 'group') return this.toggleGroup(line.key);
     if (fromControl(e)) return;
-    this.open(row);
+    this.open(line.row);
   }
   private open(row: T): void {
     this.selectedKey.set(this.rowKey()(row));
@@ -603,17 +644,25 @@ export class PdTable<T> {
       else if (item) this.open(item.row);
       return;
     }
-    const page = Math.max(1, Math.floor((this.bodyHeight() || this.maxHeight()) / this.rowPx()) - 1);
+    const page = Math.max(1, Math.floor(this.bodyHeight() / this.rowPx()) - 1);
     const to = nextIndex(this.items().length, index, e.key, page);
     if (to === null) return;
     e.preventDefault();
     this.moveTo(to);
   }
 
-  /** Makes row `index` the tab stop and focuses it, scrolling to it first when it is not drawn. */
+  /**
+   * Makes row `index` the tab stop and focuses it, first scrolling it into view below the sticky header when it is not in view
+   * (or not drawn: a virtual table draws only the rows in view).
+   */
   moveTo(index: number): void {
     this.active.set(index);
-    this.viewport()?.scrollToIndex(index);
-    afterNextRender(() => this.host.querySelector<HTMLElement>(`[role="row"][data-index="${index}"]`)?.focus(), { injector: this.injector });
+    const viewport = this.viewport();
+    const top = index * this.rowPx();
+    const offset = viewport.measureScrollOffset('top');
+    const visible = this.bodyHeight();
+    if (top < offset) viewport.scrollToOffset(top);
+    else if (top + this.rowPx() > offset + visible) viewport.scrollToOffset(top + this.rowPx() - visible);
+    afterNextRender(() => this.host.querySelector<HTMLElement>(`[role="row"][data-index="${index}"]`)?.focus({ preventScroll: true }), { injector: this.injector });
   }
 }
