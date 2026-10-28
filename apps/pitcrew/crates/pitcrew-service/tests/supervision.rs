@@ -423,6 +423,24 @@ fn runners_start_with_the_login_path_and_their_own_env() {
 }
 
 #[test]
+fn the_environment_dump_is_never_seen_half_written() {
+    // The CI flake: the test saw `env.txt` exist and read it before the fake runner had written into it.
+    let mut h = Harness::new("envgate", "mode=ok\nenv_gate=1\n", true);
+    let held = h.runner_dir.join("env.held");
+    h.until("the runner is part way through writing", Duration::from_millis(100), |_| {
+        held.exists()
+    });
+    let dump = h.runner_dir.join("env.txt");
+    assert!(!dump.exists(), "not there until complete: {:?}", std::fs::read_to_string(&dump));
+    std::fs::write(h.runner_dir.join("env.go"), "").unwrap();
+    h.until("the runner wrote its environment", Duration::from_millis(100), |_| dump.exists());
+    assert!(std::fs::read_to_string(&dump)
+        .unwrap()
+        .contains("PATH=/pitcrew/test-path:/usr/bin:/bin\n"));
+    h.finish();
+}
+
+#[test]
 fn a_stalled_runner_is_stopped_gracefully_and_restarted() {
     let mut h = Harness::new("stally", "mode=stall\n", true);
     h.until("stall", Duration::from_millis(200), |h| {

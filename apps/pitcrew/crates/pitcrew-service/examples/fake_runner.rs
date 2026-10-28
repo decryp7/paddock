@@ -19,7 +19,8 @@
 //!   `fake.txt` declares those instead (a runner whose registration disagrees with the file).
 //! - `--version` prints `gitea-runner version v<version>`, where the version is the text after `FAKEVER:` at the end
 //!   of the executable file (tests append it to their copy), else 5.2.0.
-//! - Writes `PATH` and `CI_FLAG` from its environment to `env.txt` next to the configuration file.
+//! - Writes `PATH` and `CI_FLAG` from its environment to `env.txt` next to the configuration file, whole (written aside,
+//!   then renamed); `env_gate=1` holds it part way (`env.held`) until the test creates `env.go`.
 //! - Ctrl+Break / SIGTERM: logs the shutdown line and exits 0 (waiting for a running job first, a held one until it is
 //!   released).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
@@ -114,6 +115,30 @@ fn exec_done(pid: &str) -> bool {
     comm.is_empty() || !(comm == "sh" || comm.ends_with("/sh"))
 }
 
+/// With `env_gate=1`: says it is part way through writing `env.txt` (`env.held`) and goes on once the test lets it
+/// (`env.go`), so a test can look at the file in the middle of the write.
+fn gate(dir: &std::path::Path) {
+    std::fs::write(dir.join("env.held"), "").unwrap();
+    // A fake helper process waiting on a file the test creates; bounded so a broken test never leaves it running.
+    for _ in 0..6000 {
+        if dir.join("env.go").exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Writes the environment dump to `env.txt` whole: written beside it, then renamed, so a test that sees the file never
+/// reads it empty or half written (it polls for the file to exist).
+fn publish_env(dir: &std::path::Path, dump: &str, held: bool) {
+    let part = dir.join("env.txt.part");
+    let _ = std::fs::write(&part, dump);
+    if held {
+        gate(dir);
+    }
+    let _ = std::fs::rename(&part, dir.join("env.txt"));
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let config = args.iter().position(|a| a == "--config").and_then(|i| args.get(i + 1)).cloned();
@@ -157,7 +182,7 @@ fn main() {
             .iter()
             .map(|k| format!("{k}={}\n", std::env::var(k).unwrap_or_default()))
             .collect();
-        let _ = std::fs::write(dir.join("env.txt"), dump);
+        publish_env(dir, &dump, s.get("env_gate").is_some_and(|v| v == "1"));
         let _ = std::fs::remove_file(dir.join("job.started"));
     }
     let mode = s.get("mode").cloned().unwrap_or_else(|| "ok".into());
