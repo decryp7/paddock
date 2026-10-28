@@ -18,7 +18,9 @@ runs:
         if [ -L "$GITHUB_WORKSPACE" ]; then echo "stable-workspace: already linked"; exit 0; fi
         ws=$(cd "$GITHUB_WORKSPACE" && pwd -P)
         folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
-        root="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}/src"
+        ci_home="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}"
+        if [ -n "${PADDOCK_CI_HOME:-}" ] && [ ! -d "$ci_home" ]; then echo "::error::PADDOCK_CI_HOME ($ci_home) does not exist: is its disk mounted? The job stops here rather than fill the internal disk." >&2; exit 1; fi
+        root="$ci_home/src"
         stable="$root/$folder"
         # The folder later steps build from: PADDOCK_WORKSPACE, which a step uses as its working-directory (falling back to the
         # workspace when the variable is unset).

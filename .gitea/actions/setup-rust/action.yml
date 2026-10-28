@@ -135,7 +135,9 @@ runs:
             if [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then DIR="$MOUNT"
             else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
           else
-            DIR="$HOME/.paddock-ci/sccache"
+            ci_home="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}"
+            if [ -n "${PADDOCK_CI_HOME:-}" ] && [ ! -d "$ci_home" ]; then echo "::error::PADDOCK_CI_HOME ($ci_home) does not exist: is its disk mounted? The job stops here rather than fill the internal disk." >&2; exit 1; fi
+            DIR="$ci_home/sccache"
           fi
           mkdir -p "$DIR"
           if [ "$RUNNER_OS" = Windows ]; then DIR="$(cygpath -w "$DIR")"; fi

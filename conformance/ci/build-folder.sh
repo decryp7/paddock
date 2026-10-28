@@ -27,7 +27,7 @@ case "${RUNNER_OS:?}" in
     dir="$ws/target"
     ;;
   *)
-    dir="${PADDOCK_CI_HOME:-$HOME/.paddock-ci}/target-$name"
+    dir="$(bash "$(dirname "$0")/ci-home.sh")/target-$name"
     mkdir -p "$dir"
     # Cargo on Windows wants a native path; forward slashes work in cargo, Node and Git bash alike.
     if [ "$RUNNER_OS" = Windows ] && command -v cygpath >/dev/null 2>&1; then dir=$(cygpath -m "$dir"); fi

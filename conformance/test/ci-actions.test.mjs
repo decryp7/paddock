@@ -553,7 +553,8 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
   assert.equal(runStableWorkspace('Linux', root).status, 0);
   assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink());
   // The stable root cannot be created (a file is in the way): warn and build in place.
-  writeFileSync(join(root, 'blocked'), '');
+  mkdirSync(join(root, 'blocked'));
+  writeFileSync(join(root, 'blocked', 'src'), '');
   const r = runStableWorkspace('macOS', root, { PADDOCK_CI_HOME: join(root, 'blocked') });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /::warning::stable-workspace: could not move/);
@@ -577,11 +578,11 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
 
 test('the test browser of a host job lives in a kept folder of the runner user, outside the checkout that stable-workspace moves', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
-  const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
+  const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=([^"]*?)(?:"|>>| >>)/g)].map((m) => m[1]);
   assert.equal(dirs.length, 3, 'one per host OS in the crate job, and the app leg\'s own (per app, under $HOME)');
   for (const d of dirs) {
     assert.doesNotMatch(d, /GITHUB_WORKSPACE|\.\./, `${d}: a path relative to the checkout dies when the checkout moves`);
-    assert.match(d, /\.paddock-ci[\\/]test-browser/, d);
+    assert.match(d, /(\.paddock-ci|ci-home\.sh\)|\$home)[\\/]test-browser/, d);
   }
   assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
@@ -1088,4 +1089,37 @@ test('no cmd echo puts a digit directly before a redirect in a workflow or an ac
     });
   }
   assert.deepEqual(bad, [], 'write (echo NAME=8)>>"%GITHUB_ENV%" so cmd does not read 8>> as a handle redirect');
+});
+
+test('ci-home: PADDOCK_CI_HOME relocates the CI home, a missing relocated home stops the job, and nothing hard-codes the default', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-ci-home-')));
+  const run = (env) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'ci-home.sh')], { env: { PATH: '/usr/bin:/bin', ...env }, encoding: 'utf8' });
+  const def = run({ HOME: join(root, 'home') });
+  assert.equal(def.status, 0, def.stderr);
+  assert.equal(def.stdout.trim(), join(root, 'home', '.paddock-ci'));
+  assert.ok(existsSync(join(root, 'home', '.paddock-ci')), 'the default home is created on first use');
+  const disk = join(root, 'disk');
+  const gone = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: disk });
+  assert.notEqual(gone.status, 0, 'an unmounted relocated home must stop the job');
+  assert.match(gone.stderr, /PADDOCK_CI_HOME .* does not exist: is its disk mounted/);
+  assert.equal(gone.stdout, '', 'nothing is printed for a later step to use');
+  assert.ok(!existsSync(disk), 'the relocated home is not recreated');
+  mkdirSync(disk);
+  const there = run({ HOME: join(root, 'home'), PADDOCK_CI_HOME: disk });
+  assert.equal(there.stdout.trim(), disk);
+  // build-folder follows it (and fails the same way).
+  const ws = join(root, 'ws');
+  mkdirSync(join(ws, '.cargo'), { recursive: true });
+  writeFileSync(join(ws, '.cargo', 'config.toml'), 'include = [{ path = "ci.toml", optional = true }]\n');
+  const bf = (home) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'build-folder.sh'), ws, 'x-app'], {
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', GITHUB_ENV: join(root, 'env'), PADDOCK_CI_HOME: home }, encoding: 'utf8' });
+  assert.equal(bf(disk).status, 0);
+  assert.ok(existsSync(join(disk, 'target-x-app')));
+  assert.notEqual(bf(join(root, 'unmounted')).status, 0);
+  assert.ok(!existsSync(join(root, 'unmounted')));
+  // The kit's host steps all ask ci-home.sh; none spells out $HOME/.paddock-ci in a script line.
+  for (const f of ['actions/host-tools/action.yml', 'actions/node-caches/action.yml', 'actions/stable-workspace/action.yml', 'actions/setup-rust/action.yml', 'workflows/ci.yml', 'workflows/debrief.yml']) {
+    const lines = read(join(PADDOCK, '.gitea', f)).split('\n').filter((l) => !/^\s*(#|description:)/.test(l) && /\$HOME\/\.paddock-ci/.test(l.replaceAll('${PADDOCK_CI_HOME:-$HOME/.paddock-ci}', '')));
+    assert.deepEqual(lines, [], `${f} hard-codes $HOME/.paddock-ci`);
+  }
 });

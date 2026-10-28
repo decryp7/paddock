@@ -265,7 +265,7 @@ jobs:
         run: |
           echo "CARGO_BUILD_JOBS=4" >> "$GITHUB_ENV"
           # Outside the checkout, which stable-workspace moves; the installer stamps the pinned version in it.
-          echo "DEBRIEF_TEST_BROWSER_DIR=$HOME/.paddock-ci/test-browser-debrief" >> "$GITHUB_ENV"
+          echo "DEBRIEF_TEST_BROWSER_DIR=$(bash ../../conformance/ci/ci-home.sh)/test-browser-debrief" >> "$GITHUB_ENV"
 
       - name: libduckdb
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
