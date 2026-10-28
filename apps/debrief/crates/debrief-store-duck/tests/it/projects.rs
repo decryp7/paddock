@@ -231,3 +231,47 @@ fn projects_open_without_their_files_and_degrade_source_context() {
         Ok(_) => panic!("opened a collector bundle as a project"),
     }
 }
+
+/// `tests/fixtures/store-written-by-duckdb-1.5.6/data.duckdb` is a real catalog written by the DuckDB 1.5.6 CLI (storage
+/// version 64): an empty store (`COPY FROM DATABASE` of a fresh Debrief catalog). A user's project from Debrief 1.1 is
+/// such a file, and Debrief on DuckDB 2.0 must open it, keep it readable for 1.x and not rewrite it in the new format.
+#[test]
+fn a_store_written_by_duckdb_1_x_opens_and_stays_readable_for_it() {
+    let dir = TempDir::new("old-store");
+    let store_dir = dir.0.join("store");
+    std::fs::create_dir_all(&store_dir).unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/store-written-by-duckdb-1.5.6/data.duckdb");
+    let db = store_dir.join(debrief_store_duck::DB_FILE);
+    std::fs::copy(&fixture, &db).unwrap();
+    let version = |file: &std::path::Path| {
+        let mut header = [0u8; 20];
+        std::io::Read::read_exact(&mut std::fs::File::open(file).unwrap(), &mut header).unwrap();
+        assert_eq!(&header[8..12], b"DUCK");
+        u64::from_le_bytes(header[12..20].try_into().unwrap())
+    };
+    assert_eq!(version(&db), 64, "the fixture is a DuckDB 1.5 file");
+    let store = DuckStore::open(&store_dir, Profile::default_profile(), PluginRegistry::new()).expect("a 1.x store opens");
+    assert!(store.summary().unwrap().total == 0, "an empty store");
+    // Importing writes to the catalog (a checkpoint included): the old storage version stays, so Debrief 1.1 still opens it.
+    store.open(&[logs(&dir)]).unwrap().wait().unwrap();
+    let found = |store: &DuckStore| {
+        let query = Filter {
+            text: "started".into(),
+            ..Filter::default()
+        };
+        store
+            .page(&PageQuery {
+                query,
+                limit: 5,
+                ..PageQuery::default()
+            })
+            .unwrap()
+            .rows
+            .len()
+    };
+    assert!(found(&store) > 0);
+    drop(store);
+    assert!((64..=68).contains(&version(&db)), "storage version {} after use", version(&db));
+    let again = DuckStore::open(&store_dir, Profile::default_profile(), PluginRegistry::new()).expect("and reopens");
+    assert!(found(&again) > 0);
+}

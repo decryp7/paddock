@@ -22,7 +22,7 @@ Machine setup shared by every Paddock app (tools, build cache, worktrees, test r
   - *macOS:* Xcode Command Line Tools.
   - *Windows:* Microsoft C++ Build Tools and the WebView2 runtime. The installer is NSIS only (`tauri build`
     fetches NSIS itself).
-- **libduckdb 1.5.6** (the store, ADR 0014), the official prebuilt library, never compiled (the `bundled` feature
+- **libduckdb 2.0.0** (the store, ADR 0014), the official prebuilt library, never compiled (the `bundled` feature
   needs several GB of RAM). The pins (version, assets, SHA-256) live in
   `crates/debrief-store-duck/scripts/fetch-libduckdb.sh`. Every cargo build of the workspace needs
   `DUCKDB_LIB_DIR`/`DUCKDB_INCLUDE_DIR`. Once per checkout (and again after `cargo clean` or a version bump), on any
