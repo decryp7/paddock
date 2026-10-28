@@ -30,6 +30,7 @@ mod redaction;
 mod reuse;
 mod schema;
 pub mod segments;
+mod shutdown;
 mod skew;
 mod spans;
 mod sql;
@@ -277,6 +278,8 @@ pub(crate) struct Conn<'a> {
     _interrupt: Option<debrief_core::ql::HookGuard>,
     /// Relays DuckDB's query progress to the same control while the connection is borrowed.
     relay: Option<progress::Relay>,
+    /// Counts this connection as running, for the exit handler (`shutdown`).
+    _active: shutdown::Active,
 }
 
 impl std::ops::Deref for Conn<'_> {
@@ -359,6 +362,7 @@ impl Inner {
     }
 
     pub(crate) fn conn(&self) -> StoreResult<Conn<'_>> {
+        let active = shutdown::Active::enter().ok_or(StoreError::Cancelled)?;
         let pooled = lock(&self.pool).pop();
         let conn = match pooled {
             Some(c) => c,
@@ -379,6 +383,7 @@ impl Inner {
             conn: Some(conn),
             _interrupt: interrupt,
             relay,
+            _active: active,
         })
     }
 
@@ -638,6 +643,7 @@ pub struct DuckStore {
 }
 
 fn open_db(dir: &Path, opts: &StoreOptions) -> StoreResult<Connection> {
+    shutdown::install();
     let tmp = match &opts.spill_dir {
         Some(base) => spill_folder(base, dir),
         None => dir.join("tmp"),
