@@ -24,14 +24,7 @@ const MAX_SIGNATURE_CHECKS: usize = 3;
 const MAX_LINES_PER_LOOK: usize = 3;
 
 /// Dyno's own executables: never listed as unusual.
-const DYNO_OWN: &[&str] = &[
-    "dyno.exe",
-    "dyno",
-    "dyno-app.exe",
-    "dyno-app",
-    "dyno-agent.exe",
-    "dyno-agent",
-];
+const DYNO_OWN: &[&str] = &["dyno.exe", "dyno", "dyno-app.exe", "dyno-app", "dyno-agent.exe", "dyno-agent"];
 
 /// The OS this build runs on, for the pure rules that depend on path conventions.
 pub fn current_os() -> Os {

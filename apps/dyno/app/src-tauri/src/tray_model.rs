@@ -282,7 +282,10 @@ impl TrayItems {
             }),
             Metric::Battery => s.battery.value().map(|b| percent(b.charge)),
             Metric::Process(name) => Some(percent(
-                u.top_cpu.iter().find(|g| g.name.eq_ignore_ascii_case(name)).map_or(0.0, |g| g.cpu_read()),
+                u.top_cpu
+                    .iter()
+                    .find(|g| g.name.eq_ignore_ascii_case(name))
+                    .map_or(0.0, |g| g.cpu_read()),
             )),
             Metric::Fan | Metric::PerfCounter(_) => None,
         }
