@@ -68,11 +68,15 @@ describe('layoutActions: Enter and the first focus', () => {
   it('runs the primary on Enter and focuses it in a decision', () => {
     expect([lay([answer('ok', 'primary')]).enterTarget, lay([answer('ok', 'primary')]).focus]).toEqual(['ok', 'ok']);
   });
-  it('never makes a destructive action the Enter target: a destructive decision’s Enter and focus are Cancel', () => {
+  it('never makes a destructive action the Enter target: when it is the sole affirmative, Enter and focus are Cancel and the tone is danger', () => {
     const l = lay([answer('delete', 'destructive')]);
-    expect([l.enterTarget, l.focus]).toEqual(['dismiss', 'dismiss']);
+    expect([l.enterTarget, l.focus, l.tone]).toEqual(['dismiss', 'dismiss', 'danger']);
+  });
+  it('a primary beside a destructive (the save prompt) focuses the primary and is not a danger decision', () => {
     const both = lay([answer('save', 'primary'), answer('discard', 'destructive')]);
-    expect([both.enterTarget, both.focus]).toEqual(['save', 'dismiss']);
+    expect([both.enterTarget, both.focus, both.tone]).toEqual(['save', 'save', 'info']);
+    expect(lay([answer('ok', 'primary')]).tone).toBe('info');
+    expect(lay([], 'viewer').tone).toBe('info');
   });
   it('focuses a form’s first field and a viewer’s Close', () => {
     expect(lay([answer('create', 'primary')], 'form').focus).toBe('field');

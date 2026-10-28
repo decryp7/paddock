@@ -257,12 +257,8 @@ export class DialogFrame {
   });
   /** The question a decision asks (or a content's heading), drawn as the body's `h2`. */
   protected readonly heading = computed(() => (this.state() === 'ready' ? (this.content()?.dialogHeading?.() ?? null) : null));
-  /** A decision with a heading draws its icon: `danger` when it has a destructive action, else `info`. */
-  protected readonly decision = computed<'danger' | 'info' | null>(() => {
-    if (this.kind() !== 'decision' || !this.heading()) return null;
-    const l = this.layout();
-    return [...l.lead, ...l.trail].some((p) => p.action.kind === 'answer' && p.action.role === 'destructive') ? 'danger' : 'info';
-  });
+  /** A decision with a heading draws its icon in the layout's tone (`danger` only for a sole destructive answer). */
+  protected readonly decision = computed<'danger' | 'info' | null>(() => (this.kind() !== 'decision' || !this.heading() ? null : this.layout().tone));
   protected readonly header = computed(() => (this.state() === 'ready' ? (this.content()?.dialogHeader?.() ?? null) : null));
   protected readonly statusLine = computed(() => (this.finishing() ? this.t.finishing : this.state() === 'ready' ? (this.content()?.dialogStatus?.() ?? null) : null));
 
