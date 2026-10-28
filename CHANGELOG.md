@@ -4,6 +4,27 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### One shared Material theme (WP-0 of the Material migration, rule 47)
+- `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
+  and component tokens all resolve to `--pd-*`, so theme, accent, contrast and density follow our tokens and an app carries no
+  Material theme of its own. New bridge tokens: table, sort header, paginator, tree, button toggle, badge, list, expansion, timepicker,
+  slider, chips, tabs, progress bar and every `matButton` variant (filled = primary, outlined = secondary with the surface-2 fill, text,
+  tonal, elevated; danger is the class `pd-button-danger` on any of them; no ripple).
+- New secondary entry `@decryp7/paddock-ui/material`: `providePaddockMaterial()` makes every `mat-form-field` `appearance="outline"` with
+  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.3`) of `@decryp7/paddock-ui`.
+- `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
+  icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
+  surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.
+- Review fixes: keyboard focus is Material's strong indicator in `--pd-focus-ring` (2 px, 2 px outside; no more hidden rings), the shape
+  rules win over Material's own CSS (28 px menu items and options, 4 px panel padding, popover radius), form fields get a 12 px floated
+  label, a centred input and room for the suffix icons; type scale without tracking and with the family's line heights, family font
+  stack; muted hints; segmented-look button toggle; `@angular/material` and `@angular/cdk` are 22.2.4 in every workspace.
+- Round 2: the floated label now renders at 12 px (Material scales it by 0.75, so the size is asked for / 0.75; the e2e measures the rendered
+  width), the field's own 2 px outline in `--pd-focus-ring` is the keyboard ring (no ring over the floated label), calendar month names
+  are sentence case (`monthLabel` in `providePaddockMaterial`, the heading's upper-casing undone in CSS), icon buttons and the paginator select
+  follow the density, and `@angular/material` / `@angular/cdk` are hoisted to one root copy again in `package-lock.json`.
+- Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
+
 ### Shell: About, health chip, notices and jobs popover fixes
 - About, Updates and What's new are styled again: `ABOUT_STYLES` selected the pre-`pd-` class names (b88a387a1). A new spec
   (`shell/testing/src/template-classes.spec.ts`) checks that every class a shell template uses has a selector in its styles, so the
