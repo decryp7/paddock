@@ -238,13 +238,13 @@ The frame also measures and refits, as ADR 0016 decision 5 describes:
    Placement is on the parent's monitor (mixed DPI and negative coordinates included). A remembered offset is used only
    when the whole dialog stays on that monitor. A second open of the same id (or instance key) focuses the open window;
    while the first is still pending, it is a no-op that marks the window to be focused when it shows.
-2. **Ready handshake.** The dialog webview boots (rule 34). Once its content is mounted and `document.fonts.ready` has
-   resolved, the frame is laid out at the contract's width and read **synchronously, without waiting for a frame** (a
-   hidden window may never run one; amended after the 1.1-0 spike); a font that started loading meanwhile is waited for
-   and the frame read once more. It sends `dialog_ready { content, minContent, viewportHeight }`. This replaces
-   `window_ready` for dialog windows and is also the first fit.
-   - `viewportHeight` is the page's `innerHeight`. Rust adds what the window's own inner height has beyond it (the
-     viewport delta: the spike saw a Mac page 32 px shorter than its window, which cut off the footer).
+2. **Ready handshake.** The dialog webview boots (rule 34). The ready handshake must not wait for a frame
+   (`afterNextRender`, rAF): the frame reports `dialog_ready { content, minContent, viewportHeight }` after the content
+   and `document.fonts.ready`, from a synchronous layout read with the frame at the declared width, re-reading once if
+   the read started a font load (amended after the 1.1-0 spike, research note 2026-10-28). This replaces `window_ready`
+   for dialog windows and is also the first fit.
+   - The fit adds the viewport delta (the window's inner height minus the page's `innerHeight`, read hidden; the page
+     sends `viewportHeight`) to the content height.
    - Sizes are the dialog's own **inner** logical size. Rust sets them through `set_size`/`set_min_size` with
      `LogicalSize` (Tauri's sizes are inner sizes), converting once and rounding the physical size up.
    - The cap is checked against the work area minus the dialog window's own decorations: its outer minus inner size,
@@ -257,19 +257,18 @@ The frame also measures and refits, as ADR 0016 decision 5 describes:
    `loading`). A later `dialog_ready` fits it (one resize, accepted in this fallback only). The deadline is separate
    from `paddock-startup`'s reload watchdog: that one still reloads a page that never reports ready (about 10 s) and
    asks the user after a failed reload. The UI never times out the content itself (ER-19).
-4. **The show mechanism (spike 1.1-0, done).** The spike measured macOS and Linux
-   (`docs/research/2026-10-28-dialog-hidden-windows.md`): nothing that waits for a frame runs in a hidden window, and a
-   synchronous read after `fonts.ready` (method d) is exact after show. **Method d is used on every OS**: the window is
-   created hidden and shown on `dialog_ready`. Should Windows disagree, method b (a visible window off-screen, moved into
-   place on ready) is the fallback for Windows only; `show_mechanism(os)` in `paddock-dialogs` is the one place that
-   chooses. The contract above (show on ready or at the deadline, parent disabled at show) holds for both.
+4. **The show mechanism.** Method d on all three OS (research note 2026-10-28,
+   `docs/research/2026-10-28-dialog-hidden-windows.md`): the window is created hidden and shown on `dialog_ready`. The
+   declared width is dropped at show by a class or attribute, never by rewriting a stylesheet (rewriting the style that
+   declares the font reloaded it at show on Windows). `show_mechanism(os)` in `paddock-dialogs` is the one place that
+   chooses.
 5. **Refit.** `dialog_fit { content, minContent }` (renamed from `dialog_fit_height`) runs on the triggers in §2.
    Moving to a monitor with another scale refits.
 6. **Parent and modality.**
    - A modal is owned by its parent. The parent is disabled natively on Windows and Linux. On macOS the host draws a
      scrim instead, because a sheet would block key focus; the scrim appears when the dialog shows.
-   - On macOS the parent is **attached at show** (`addChildWindow:ordered:`), not at create: AppKit orders a child
-     window in with its parent as soon as it exists, even one created hidden (amended after the spike).
+   - On macOS the parent is attached at show, not at create (tao orders a child window in at creation;
+     `addChildWindow:ordered:`).
    - A modal opened from a modal is owned by the top one.
    - Modeless dialogs are owned on Windows and Linux. They are independent on macOS so that they can move to another
      display.

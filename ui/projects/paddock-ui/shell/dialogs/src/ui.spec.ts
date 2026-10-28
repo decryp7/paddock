@@ -641,7 +641,7 @@ describe('a dialog window', () => {
     // Method d: measured at the contract's width, whatever the (hidden) window's viewport was; released once shown.
     expect(io.readied!.content.width).toBe(DECISION.width);
     expect(io.readied!.viewportHeight).toBe(window.innerHeight);
-    expect(root.querySelector<HTMLElement>('pd-dialog-frame')!.style.width).toBe('');
+    expect(root.querySelector<HTMLElement>('pd-dialog-frame')!.classList).not.toContain('pd-frame--pinned');
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
     await settle();
@@ -667,7 +667,11 @@ describe('a dialog window', () => {
       const widths: string[] = [];
       const { io, root, settle } = boot(DECISION);
       const original = io.ready.bind(io);
-      io.ready = (m) => (widths.push(root.querySelector<HTMLElement>('pd-dialog-frame')!.style.width), original(m));
+      io.ready = (m) => {
+        const el = root.querySelector<HTMLElement>('pd-dialog-frame')!;
+        widths.push(el.classList.contains('pd-frame--pinned') ? el.style.getPropertyValue('--pd-frame-pinned-width') : 'unpinned');
+        return original(m);
+      };
       // The start is a pending task until the handshake: whenStable would wait for the font.
       await tick(5);
       expect(io.readied).toBeNull();

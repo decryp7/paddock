@@ -542,7 +542,7 @@ test.describe('dialogs (plan S6)', () => {
       const html = page.locator('html');
       await expect(html).toHaveAttribute('data-content-width', String(CONTRACTS['sd.rename']!.width));
       expect(Number(await html.getAttribute('data-fitted-height'))).toBeLessThan(400);
-      await expect(page.locator('pd-dialog-frame')).not.toHaveAttribute('style', /width/);
+      await expect(page.locator('pd-dialog-frame')).not.toHaveClass(/pd-frame--pinned/);
     });
   });
 
