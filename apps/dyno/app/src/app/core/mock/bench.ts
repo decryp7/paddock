@@ -5,7 +5,7 @@ const NOISE_PERCENT = 3;
 const m = (id: string, label: string, value: number, unit: string, higherIsBetter = true): BenchMetric => ({ id, label, value, unit, higherIsBetter });
 
 /** Plausible numbers for one kind; `scale` moves them together (1 = baseline) so a "tuned" run differs from a baseline. */
-export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean): BenchKindResult {
+export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean, cores = 14): BenchKindResult {
   switch (kind) {
     case 'cpu':
       return {
@@ -13,7 +13,7 @@ export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean): Be
         millis: 3400,
         status: {
           state: 'done',
-          metrics: [m('cpu-single', 'Single core', 612 * scale, 'M rounds/s'), m('cpu-multi', 'All 10 cores', 5320 * scale, 'M rounds/s'), m('cpu-scaling', 'Multi-core scaling', 8.7, 'x')],
+          metrics: [m('cpu-single', 'Single core', 612 * scale, 'M rounds/s'), m('cpu-multi', `All ${cores} cores`, 612 * cores * 0.62 * scale, 'M rounds/s'), m('cpu-scaling', 'Multi-core scaling', Math.round(cores * 62) / 10, 'x')],
         },
       };
     case 'memory':
@@ -42,7 +42,7 @@ export function mockKindResult(kind: BenchKind, scale: number, gpu: boolean): Be
   }
 }
 
-export function mockRun(id: string, startedAt: number, label: string, scale: number, extra: Partial<BenchRun> = {}): BenchRun {
+export function mockRun(id: string, startedAt: number, label: string, scale: number, extra: Partial<BenchRun> = {}, cores = 14): BenchRun {
   return {
     id,
     startedAt,
@@ -50,8 +50,8 @@ export function mockRun(id: string, startedAt: number, label: string, scale: num
     group: null,
     phase: null,
     load: { cpuPercent: 6, memoryPercent: 52, onBattery: false },
-    machine: 'macOS 15 · Apple M4',
-    results: (['cpu', 'memory', 'disk', 'gpu'] as BenchKind[]).map((k) => mockKindResult(k, scale, false)),
+    machine: 'macOS 15 · Apple M4 Pro',
+    results: (['cpu', 'memory', 'disk', 'gpu'] as BenchKind[]).map((k) => mockKindResult(k, scale, false, cores)),
     ...extra,
   };
 }

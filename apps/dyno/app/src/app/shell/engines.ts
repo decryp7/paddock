@@ -65,7 +65,9 @@ export function updatesBackend(): UpdatesBackend {
   updates ??= new MemoryUpdatesBackend({
     currentVersion: BROWSER_VERSION,
     server: 'none',
-    release: { version: '99.0.0', notes: 'A sample release of the fake update server.', pubDate: null, size: 41_000_000 },
+    host: 'dev.decryptology.net',
+    releasesPage: 'https://dev.decryptology.net/decryp7/paddock/releases?q=dyno-v',
+    release: { version: '1.1.0', notes: 'Disk map, faster history charts and fixes.', pubDate: null, size: 41_000_000 },
     channels: [{ id: 'stable', label: 'Stable' }],
   });
   return updates;

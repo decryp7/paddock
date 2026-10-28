@@ -32,7 +32,7 @@ const toggle = (el: HTMLElement, label: string) => el.querySelector<HTMLButtonEl
 describe('SettingsPage', () => {
   it('renders the sections once loaded and shows no save bar while clean', async () => {
     const { el, saveButton, store } = await make();
-    expect(el.querySelector('h1')?.textContent).toBe('Dyno settings');
+    expect(el.querySelector('h2.pd-title')?.textContent).toBe('Dyno');
     // Appearance, Updates and About are the shell's pages of the Settings window, not Dyno's.
     for (const name of ['Start-up', 'Measuring', 'Menu bar items', 'Alerts', 'Plugins']) expect(el.querySelector(`section[aria-label="${name}"]`)).not.toBeNull();
     expect(saveButton()).toBeUndefined();

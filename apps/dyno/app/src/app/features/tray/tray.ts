@@ -143,6 +143,8 @@ export class Tray implements OnInit {
   ngOnInit(): void {
     // A score the engine does not provide yet is simply left out (the card only renders with a report).
     void this.health.loadReport();
+    // A popover opens in a fresh webview: its graphs start from the engine's recent history, not empty, then follow live.
+    void this.backend.history('hour', null).then((h) => this.live.seed(h.points)).catch(() => undefined);
   }
 
   protected close(): void {

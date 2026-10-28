@@ -53,7 +53,7 @@ const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
 /** Whether the OS owns the entry (the Windows rules of the engine; the mock's startup list is a Windows one). */
 export function mockIsOs(e: StartupEntry): boolean {
   const exe = norm(e.exe ?? '');
-  return /^[a-z]:\/windows\//.test(exe) || norm(e.name).startsWith('/microsoft/windows/') || e.publisher === 'Microsoft Windows';
+  return /^[a-z]:\/windows\//.test(exe) || /^\/(system\/|usr\/libexec\/)/.test(exe) || norm(e.name).startsWith('/microsoft/windows/') || e.publisher === 'Microsoft Windows';
 }
 
 /** The startup list after the filter, with counts that do not depend on it. */
