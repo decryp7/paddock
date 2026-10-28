@@ -52,7 +52,8 @@ const btnWidth = (label, busy = false) => Math.round(tw(label, 13, 500) + 28 + (
 
 /** A footer button. `role`: primary | secondary | cancel | destructive; `focus` draws the ring; `disabled`; `busy` a spinner. */
 function button(c, ac, x, y, a) {
-  const { label, role, focus = false, disabled = false, busy = false } = a;
+  const { label, focus = false, disabled = false, busy = false } = a;
+  const role = a.plain ? 'secondary' : a.role;
   const w = btnWidth(label, busy), h = 32;
   const filled = role === 'primary' || role === 'destructive';
   const fill = role === 'primary' ? ac.fill : role === 'destructive' ? c.dangerFill : c.field;
@@ -73,12 +74,16 @@ function button(c, ac, x, y, a) {
 /**
  * Lays out declared actions as `layoutActions` does (ADR 0026 §2, D1). macOS and Linux: [lead] … [secondary] [cancel]
  * [primary|destructive]. Windows: [lead] … [primary|destructive] [secondary] [cancel]. A destructive action beside a
- * primary is a lead action on every OS.
+ * primary is a plain outlined button: a lead action on macOS and Linux, between the primary and Cancel on Windows.
  */
 function footer(c, ac, x, y, width, actions, os = 'mac') {
+  // Beside a primary, a destructive action is a plain outlined button (one filled button per dialog). On macOS and
+  // Linux it is a lead action; on Windows it sits between the primary and Cancel (Save, Don't save, Cancel).
+  const hasPrimary = actions.some((a) => a.role === 'primary');
+  actions = actions.map((a) => (a.role === 'destructive' && hasPrimary ? { ...a, plain: true, lead: os !== 'win' } : a));
   const lead = actions.filter((a) => a.lead);
   const rank = os === 'win'
-    ? { primary: 0, destructive: 0, secondary: 1, cancel: 2 }
+    ? { primary: 0, destructive: hasPrimary ? 1 : 0, secondary: 1, cancel: 2 }
     : { secondary: 0, cancel: 1, primary: 2, destructive: 2 };
   const trail = actions.filter((a) => !a.lead).sort((p, q) => rank[p.role] - rank[q.role]);
   let s = '', lx = x;
@@ -99,7 +104,7 @@ function footer(c, ac, x, y, width, actions, os = 'mac') {
 let clipSeq = 0;
 /**
  * A dialog window (no title-bar buttons, ADR 0009 §1): content `w` x `h` on a padded backdrop. `os`: 'mac' draws a
- * centred title in a 28 px bar and 10 px corners; 'win' a left-aligned title in a 32 px bar and 8 px corners. Ids are
+ * centred title in a 28 px bar and 10 px corners; 'win' a left-aligned title (no icon) in a 32 px bar and 8 px corners. Ids are
  * sequential per file, so the output is deterministic.
  */
 function windowFrame(c, title, w, h, body, { pad = 40, left = pad, right = pad, top = pad, bottom = pad, extra = '', os = 'mac' } = {}) {
@@ -107,7 +112,7 @@ function windowFrame(c, title, w, h, body, { pad = 40, left = pad, right = pad, 
   const W = w + left + right, H = h + TB + top + bottom;
   const id = `w${++clipSeq}`;
   const titleSvg = os === 'win'
-    ? rect(left + 12, top + 10, 12, 12, c.subtle, { rx: 3 }) + text(left + 32, top + 20.5, title, { size: 12, fill: c.titleText })
+    ? text(left + 12, top + 20.5, title, { size: 12, fill: c.titleText })
     : text(left + w / 2, top + 18.5, title, { size: 13, w: 600, fill: c.titleText, anchor: 'middle' });
   return {
     W, H,

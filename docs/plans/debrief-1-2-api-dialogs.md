@@ -110,12 +110,12 @@ Notes:
 - The table counts 51 rows across the kinds because `report-problem` and `about`/`updates` are listed with the shared
   dialogs that replace them. The registry has 50 ids.
 - ADR 0016's "28 forms" includes ai-query, which moves to tool here.
-- `unsaved-changes` and `close-prompt` use Save / Cancel / Don't save, with D lead.
+- `unsaved-changes` and `close-prompt` use Save, Cancel and Don't save. Don't save is a plain outlined button: lead on macOS and Linux; on Windows the order is Save, Don't save, Cancel.
 
 #### Debrief's widths on the three steps (D2)
 
 The registry declares 13 different widths, and 640 is the default for those that declare none, so 14 in all. The rule:
-480 and below → `narrow` 400; 481-680 → `medium` 560; above 680 → `wide` 720. A tool keeps a number.
+480 and below → `narrow` 400; 481-679 → `medium` 560; 680 and above → `wide` 720. A tool keeps a number.
 
 | Today | Step | Ids |
 |---|---|---|

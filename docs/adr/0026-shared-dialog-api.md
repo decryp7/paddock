@@ -1,7 +1,8 @@
 # 26. The shared dialog API: Rust-owned contracts, DialogFrame with declared actions, windows that open fitted
 
-- Status: Proposed (2026-10-28); the user answered its four open questions on 2026-10-28 (button order native per OS,
-  three width steps, Dyno is monitoring-only, `unexercised` commands under a ratchet), recorded below
+- Status: Accepted (2026-10-28, after an independent review). The user answered its four open questions the same day
+  (button order native per OS, three width steps, Dyno is monitoring-only, `unexercised` commands under a ratchet),
+  recorded below
 - Date: 2026-10-28
 - Related: rule 17 (every dialog is a real OS window), rules 39, 40, 42, 43; ADR 0008 (long operations), ADR 0009
   (dialog kinds and declared contracts; this ADR amends its §2 and §3), ADR 0012 (app shell), ADR 0016 (dialog window
@@ -135,8 +136,10 @@ tested as a table. It defines:
   - Windows: `[lead secondaries] … [primary | destructive] [secondary] [cancel]`, primary first and Cancel last,
     right-aligned.
 
-  When a dialog has both a primary and a destructive action, the destructive one moves to the leading edge on every OS
-  (Save / Cancel / Don't save). The mockups show both orders. Tests read the order from
+  When a dialog has both a primary and a destructive action, the destructive one is drawn as a plain outlined button
+  (one filled button per dialog: the primary). On macOS and Linux it moves to the leading edge (Don't save … Cancel,
+  Save). On Windows the three stay together on the right: Save, Don't save, Cancel. A destructive action that is the
+  only affirmative keeps the danger fill and the primary's place. The mockups show both orders. Tests read the order from
   `layoutActions(…, platform)` and never assume one.
 - **Counts.**
   - At most one primary.
