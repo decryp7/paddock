@@ -266,6 +266,13 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Toasts**: bottom-right, kept clear of the status bar and of the page footer (`--pd-page-footer-safe`, 56 px: a footer up to 56 px
   tall, such as a wizard's Next, is not covered), 360 max, auto-dismiss 5 s (errors persist until dismissed), at most 3 stacked, with Undo
   where the action is reversible; `role=status` (errors `role=alert`).
+  **One toast area**: the notification host and the undo toast (a Material snack bar, rule 47) share it. Both are 360 px, bottom right,
+  on the same baseline with the same look (surface-3, hairline, shadow); the undo toast is the lowest and the host lifts itself by its
+  height (`ToastArea`), so they stack and never overlap at any width. The snack bar is announced by its own polite live region
+  (`aria-live="polite"`, the equivalent of `role=status`) and never takes focus; a snack bar shows one at a time, so another one
+  replaces the undo toast (the edit stays undoable). Known Material limit: for about 150 ms after it opens, the snack bar's content
+  is `aria-hidden` while its buttons are focusable (it moves the content into the live region after that delay); axe's
+  `aria-hidden-focus` can flag that window, so tests wait for the live region before running axe.
 - **Badges**: 20 px high, 12/500, pill, tint bg + status colour text + 12 px icon + word. Counts in nav: neutral
   surface-3 pill; use status tint only if the count means a problem. Never more than 2 badges in one table cell.
 - **Skeletons**: 1.6 s shimmer on surface-2 (static in reduced motion), same geometry as content.

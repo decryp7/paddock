@@ -29,7 +29,6 @@ export const ABOUT_STYLES = `
   label.pd-check { display: inline-flex; align-items: center; gap: var(--pd-space-2); }
   label.pd-field { display: flex; flex-direction: column; align-items: flex-start; gap: var(--pd-space-1); }
   select { min-height: var(--pd-button-height); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
-  progress { width: 100%; }
   ul { margin: 0; padding-left: var(--pd-space-6); }
   li + li { margin-top: var(--pd-space-1); }
 `;

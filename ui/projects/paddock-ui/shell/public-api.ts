@@ -108,6 +108,7 @@ export {
   type ContextPrefetch,
 } from './src/context';
 export { CommandService, evaluate, provideShellCore } from './src/commands';
+export { ToastArea } from './src/toast-area';
 export {
   buildManifest,
   serializeManifest,
