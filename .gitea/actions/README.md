@@ -77,7 +77,7 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
 
 - `app-release.yml`: **`cargo-dir` is now required** (the Cargo workspace whose `.cargo/config.toml` includes `ci.toml`; the build folder is the
   `build-folder` action's, `CARGO_TARGET_DIR` is gone). New inputs: `root`, `tag-prefix`, `latest-tag`, `notes-extra`, `cliff-config`,
-  `cliff-paths`, `setup-node`; new optional secret `APPLE_SIGNING_IDENTITY`. The release job runs for `<tag-prefix>v*` tags (was `v*`), and the
+  `cliff-paths`, `setup-node`, `bundle-check` (an app's own script run on Linux and macOS with the bundle folder, e.g. Dyno's run paths); new optional secret `APPLE_SIGNING_IDENTITY`. The release job runs for `<tag-prefix>v*` tags (was `v*`), and the
   bundle job checks the tag's version against the app's `tauri.conf.json` first (`conformance/ci/check-tag.mjs`). Artifacts are uploaded
   from `$PADDOCK_WORKSPACE/dist` (a contract test pins this for every job that uses `stable-workspace`).
 - `plan` action: inputs `app`, `tag-pattern`, `nightly-marker`, `token`. `macos-verify`: `tauri-conf`. `host-cleanup`: `process-patterns`

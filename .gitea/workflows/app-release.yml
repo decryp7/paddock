@@ -88,6 +88,10 @@ on:
         description: "Sidecar programs started from the built macOS app, one per line: name or name:args (default argument --self-test)."
         type: string
         default: ""
+      bundle-check:
+        description: "An app's own check of the built bundle: a script from the repository root, run on Linux and macOS after the installers are built with the bundle folder ($PADDOCK_BUILD_FOLDER/dist/bundle) as its argument (Dyno's run paths of the packaged binaries). Empty: none."
+        type: string
+        default: ""
       image:
         type: string
         default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -214,6 +218,14 @@ jobs:
           signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           signing-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           updater-pubkey: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+
+      # The app's own look at what was built (run paths and the executables a package must carry), before the seal check.
+      - name: The app's own bundle check
+        if: inputs.bundle-check != '' && runner.os != 'Windows'
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          CHECK: ${{ inputs.bundle-check }}
+        run: bash "$CHECK" "$PADDOCK_BUILD_FOLDER/dist/bundle"
 
       # Rule 23: sealed ad-hoc, hardened runtime off, `codesign --verify --deep --strict` on the .app and the app inside the
       # DMG, every sidecar started from the built app; the app is never started here.
