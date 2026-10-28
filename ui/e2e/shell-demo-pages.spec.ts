@@ -98,7 +98,7 @@ test.describe('pages frame (plan S14)', () => {
     await expect(bar.getByRole('button', { name: 'Jobs' })).toBeVisible();
     await expect(app.statusBar.bell).toBeVisible();
     await page.getByRole('button', { name: 'Break the demo engine' }).click();
-    await expect(app.statusBar.chip).toHaveText('Demo engine: Stopped');
+    await expect(app.statusBar.chip).toHaveText('Demo engine: stopped');
   });
 
   test('narrowing the window never drops the running job from the status bar, whatever has focus (review N1)', async ({ app, page }) => {
@@ -163,7 +163,7 @@ test.describe('pages frame (plan S14)', () => {
     // Compact forms: the chip says the state, the jobs item the count; the full text is their name and tooltip.
     const chip = app.statusBar.chip;
     await expect(chip).toHaveText('Engine stopped');
-    await expect(chip).toHaveAttribute('aria-label', 'Demo engine: Stopped');
+    await expect(chip).toHaveAttribute('aria-label', 'Demo engine: stopped');
     await expect(bar.getByRole('button', { name: '1 running: Update runner' })).toHaveText('1 job');
     // The bell and its count are pinned. The commands run asynchronously (the app context loads first), so the count is
     // asserted once settled: two unread, the engine's failure and the three identical notices merged into one message.
@@ -179,13 +179,13 @@ test.describe('pages frame (plan S14)', () => {
     await more.click();
     await expect(more).toHaveAttribute('aria-expanded', 'true');
     await expect(bar.getByTestId('runners-status')).toBeVisible();
-    await expect(chip).toHaveText('Demo engine: Stopped');
+    await expect(chip).toHaveText('Demo engine: stopped');
     await expectNoHorizontalScroll(page);
     await more.click();
     await expect(bar.getByTestId('runners-status')).toBeHidden();
     // Wide again: the full forms come back.
     await page.setViewportSize({ width: 1280, height: 800 });
-    await expect(chip).toHaveText('Demo engine: Stopped');
+    await expect(chip).toHaveText('Demo engine: stopped');
     await expect(bar.getByTestId('runners-status')).toBeVisible();
   });
 

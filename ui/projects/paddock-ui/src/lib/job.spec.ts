@@ -212,4 +212,10 @@ describe('pd-job, a card or a flat row', () => {
     expect(getComputedStyle(f.nativeElement).borderTopWidth).toBe('0px');
     expect(render(discovering).nativeElement.classList.contains('pd-job--flat')).toBe(false);
   });
+
+  it('announces "Downloading" once, not "Downloading: Downloading"', () => {
+    const v = jobView(running({ id: 'dl', label: 'Downloading', unit: 'bytes', total: 100, done: 40 }, { title: 'Downloading' }));
+    expect(v.announcement).toBe('Downloading');
+    expect(jobView(running({ id: 'r', label: 'Reading', unit: 'items', total: 100, done: 4 }, { title: 'Downloading' })).announcement).toBe('Downloading: Reading');
+  });
 });

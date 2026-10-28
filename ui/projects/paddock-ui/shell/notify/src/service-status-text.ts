@@ -42,12 +42,15 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'service.needsApproval': () => $localize`:@@pd.health.state.needs-approval:needs approval`,
   'service.unavailable': () => $localize`:@@pd.health.state.unavailable:not available`,
   'service.newerOwner': () => $localize`:@@pd.health.state.limited:limited`,
+  'pitwall.notInstalled': () => $localize`:@@pd.health.state.not-installed:not installed`,
+  'pitwall.notRunning': () => $localize`:@@pd.health.state.not-running:not running`,
+  'pitwall.incompatible': () => $localize`:@@pd.health.state.incompatible:incompatible`,
+  'pitwall.needsPairing': () => $localize`:@@pd.health.state.needs-pairing:needs pairing`,
+  'pitwall.paused': () => $localize`:@@pd.health.state.paused:paused`,
+  'pitwall.noModel': () => $localize`:@@pd.health.state.no-model:no suitable model`,
+  'pitwall.unavailable': () => $localize`:@@pd.health.state.unavailable:not available`,
   'service.switchOn': () => $localize`:@@pd.health.state.stopped:stopped`,
   'service.repairFailed': () => $localize`:@@pd.health.state.stopped:stopped`,
-  'ai.switched': () => $localize`:@@pd.health.state.quarantined:switched off`,
-  'plugin.quarantined': () => $localize`:@@pd.health.state.quarantined:switched off`,
-  'store.crashed': () => $localize`:@@pd.health.state.stopped:stopped`,
-  'engine.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
   'packs.refused': () => $localize`:@@pd.health.state.stopped:stopped`,
   'pd.settings.file-problem': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.engine.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
@@ -66,19 +69,16 @@ export function stateWord(state: ServiceState, cause?: Pick<Cause, 'code'> | nul
     case 'repairing':
       return $localize`:@@pd.health.state.repairing:repairing`;
     case 'degraded':
-      return $localize`:@@pd.health.state.degraded:limited`;
+      return CAUSE_WORDS[cause?.code ?? '']?.() ?? $localize`:@@pd.health.state.degraded:limited`;
     default:
       return CAUSE_WORDS[cause?.code ?? '']?.() ?? $localize`:@@pd.health.state.stopped:stopped`;
   }
 }
 
-/** A state word after the chip's colon starts a sentence: "Log store: Stopped". */
-const afterColon = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
-
 /** What the chip says: one service by name and state, or how many need attention. */
 export function chipText(problems: readonly ChipService[]): string {
   const p = problems[0];
-  if (problems.length === 1 && p) return $localize`:@@pd.health.chip.one:${shortName(p.label)}:service:: ${afterColon(stateWord(p.state, p.cause))}:state:`;
+  if (problems.length === 1 && p) return $localize`:@@pd.health.chip.one:${shortName(p.label)}:service:: ${stateWord(p.state, p.cause)}:state:`;
   return $localize`:@@pd.health.chip.many:${problems.length}:count: services need attention`;
 }
 

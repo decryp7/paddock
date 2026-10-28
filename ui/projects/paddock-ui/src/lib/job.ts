@@ -74,7 +74,7 @@ import { jobView, type SuJobSnapshot } from './job-view';
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-2); padding: var(--pd-space-3) var(--pd-space-4); background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); font-size: var(--pd-text-body); line-height: var(--pd-lh-body); }
     /* Flat: a row of a list inside a bordered container, no card of its own. */
-    :host(.pd-job--flat) { padding: var(--pd-space-3) 0; background: transparent; border: 0; border-radius: 0; }
+    :host(.pd-job--flat) { padding: var(--pd-space-3) var(--pd-space-2); background: transparent; border: 0; border-radius: 0; }
     .pd-head { display: flex; align-items: baseline; gap: var(--pd-space-2); min-width: 0; }
     .pd-title { font-weight: var(--pd-weight-semibold); }
     .pd-subject { color: var(--pd-text-muted); font-size: var(--pd-text-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -74,7 +74,7 @@ test('a service failure comes from the engine, and Repair asks the shell plugin'
   // Nothing changes until Rust reports it.
   await expect(chip).toHaveCount(0);
   expect(await ipc.emit('paddock://service-health', health(2, service('sd.engine', 'the demo engine', 'down', ENGINE_DOWN, 'restart')))).toBeGreaterThan(0);
-  await expect(chip).toHaveText('Demo engine: Stopped');
+  await expect(chip).toHaveText('Demo engine: stopped');
   // The engine-bound panel stops showing its data and waits with the chip's cause (a designed state, not stale data).
   await expect(page.getByTestId('waiting-for-sd.engine')).toContainText('Demo engine stopped');
   await expect(page.getByTestId('engine-data')).toHaveCount(0);
