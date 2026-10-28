@@ -228,8 +228,8 @@ first, "the default whenever available") and every statement that Qwen3-Embeddin
 default. The cost measured above: Qwen about 28 minutes and about 1.9 GB resident per 1M lines (Metal), against seconds and
 tens of MB for Model2Vec.
 
-**Trade-off.** Pure-meaning recall (doc and concept queries) is weaker with Model2Vec than with Qwen (Model2Vec 0.33 versus
-Qwen 0.77 recall@1 on doc queries in the tables above). Re-ranking the top ~50 hits with Qwen, and the opt-in deep index for
+**Trade-off.** Pure-meaning recall (doc and concept queries) is weaker with Model2Vec than with Qwen (recall@5 on doc queries, Model2Vec 0.33
+versus Qwen 0.77 in the table above). Re-ranking the top ~50 hits with Qwen, and the opt-in deep index for
 repositories where it matters, make up the difference.
 
 **Measurement plan.** On real repositories (invented-data fixtures in the repo, never user logs) run the benchmark harness
