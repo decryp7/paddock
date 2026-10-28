@@ -30,8 +30,14 @@ test('keyboard: arrows move the segmented control and Tab shows a focus ring', a
   // (Material's toggles wrap with the arrows; they have no Home key)
   await page.keyboard.press('ArrowRight');
   await expect(seg.getByRole('radio', { name: '1 h' })).toHaveAttribute('aria-checked', 'true');
-  const outline = await seg.getByRole('radio', { name: '1 h' }).evaluate((e) => getComputedStyle(e).outlineStyle);
-  expect(outline).toBe('solid');
+  // Material's focus indicator (the bridge draws it as a solid border on ::before)
+  const ring = await seg.getByRole('radio', { name: '1 h' }).evaluate((e) => {
+    const cs = getComputedStyle(e, '::before');
+    return [cs.display, cs.borderTopStyle, cs.borderTopWidth];
+  });
+  expect(ring[0]).not.toBe('none');
+  expect(ring[1]).toBe('solid');
+  expect(parseFloat(ring[2]!)).toBeGreaterThanOrEqual(2);
 });
 
 test('interactive card activates with Enter and Space', async ({ page }) => {

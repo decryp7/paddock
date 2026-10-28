@@ -32,8 +32,6 @@ export interface SuSegment {
     </mat-button-toggle-group>
   `,
   styles: `
-    /* Material draws no ring on the toggle button: the family's, inset so the group's rounded edge does not clip it. */
-    :host ::ng-deep .mat-button-toggle-button:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     :host { display: inline-flex; }
     .pd-count { margin-inline-start: var(--pd-space-1); font-size: var(--pd-text-caption); font-variant-numeric: tabular-nums; color: var(--pd-text-muted); }
   `,

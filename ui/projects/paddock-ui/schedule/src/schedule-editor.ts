@@ -121,8 +121,6 @@ export function presetLabel(secs: number): string {
     </section>
   `,
   styles: `
-    /* Material draws no ring on the toggle button: the family's, inset so the group's rounded edge does not clip it. */
-    :host ::ng-deep .mat-button-toggle-button:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: -2px; }
     /* The list is wider than the short field it opens from, so a time such as 10:00 AM stays on one line. */
     ::ng-deep .pd-timepicker-panel { min-width: 8.5rem; }
     :host { display: grid; gap: var(--pd-space-3); min-width: 0; }
