@@ -8,7 +8,7 @@
      §4.3 M1-M5, §14-16).
   2. ADRs 0016 (dialog sizing contract), 0017 (viewport and selection survive refreshes, scrollbar markers), 0018
      (bounded loading, virtualization by default, Lanes picker and "All", streaming imports), 0019 (limits explain
-     themselves). Accepted 2026-10-27; on branch `docs/adr-rule40`, not yet on `monorepo/apps`.
+     themselves). Accepted 2026-10-27.
   3. Debrief moves onto the shared plugin platform (`paddock-ipc`, `-guard`, `-plugin-package`, `-plugin-api`,
      `-plugin-host`): ADR 0003 phases 0-4 (protocol 2 with the compatibility shim), decided for 1.2 (D1).
   4. The plugin research ([2026-10-plugins-memory-and-manager.md](../research/2026-10-plugins-memory-and-manager.md),
@@ -17,7 +17,7 @@
      `docs/research-duckdb-2`) L1, L2, L3, L4, L5, L7, plus ADR 0018's CSV and JSON-array streaming (L6).
   5. DuckDB 2.0 is migrated on `feat/debrief-duckdb-2` (WIP commit `0b610df48`), without waiting for 2.0.1 (D3). The
      remaining items are package D-a; the budget run on the large corpus is D-b.
-- Rules read: 1, 3, 5, 40, 42, 43 and the proposed 44 and 45 (`docs/rules.md` on `docs/adr-rule40`).
+- Rules read: 1, 3, 5, 40, 42, 43 44, 45 and 46 (`docs/rules.md`).
 
 ## 0. Facts this plan starts from (checked 2026-10-27)
 
@@ -303,7 +303,7 @@ All of it runs once on the combined result before the local build and the tag (r
 
 ### Estimate
 
-The LLM-use packages N0-N8 (about 10.5 agent-days after dropping the names curation) are listed in section 2 and are not yet in the totals below.
+The LLM-use packages N0-N8 (about 10.5 agent-days after dropping the names curation) are listed in section 2 and are not in the per-wave totals below; they add about 10.5 agent-days to the 143.
 
 | Wave | Packages | Agent-days | Longest package (days) |
 |---|---|---|---|
@@ -333,6 +333,17 @@ filling (a package starts when its dependencies are merged and a slot is free) a
 time, about 29-31 working days: **about 6 to 6.5 weeks**, i.e. a tag in the middle of December 2026. The two critical
 paths are about equal: the plugin chain 0.5 → 1.4 → 2.6 → PH2b → PH4 → 3.4 → 4.4 → M5 → R (about 25 days of serial
 work), and the shell chain 0.5 → 1.2 → M2b → M3a → M3b → M4 → M5 → R (about 19 days, waiting on the dialog work).
+
+### Deadlines and gates found by the 2026-10-28 doc audit
+
+- **Waivers expire 2026-12-31** (`paddock.waivers.toml`): the C39 port waiver (ADR 0023) has 4 sites in Debrief, and C36
+  (parser crates without never-panics tests) and C37 (one integration-test binary per file) apply to Debrief's crates.
+  Schedule these packages inside 1.2, before the tag and well before 2026-12-31, or ask the user to extend the waivers.
+  The plan did not mention ADR 0023 or C39 before this.
+- **ADRs 0001 and 0003 are still Proposed.** The plugin platform (ADR 0001) and PH1-PH4 (ADR 0003 phases 0-4, D1) build
+  on them, so both need acceptance before the 1.2 work that builds on them starts.
+- The calendar above predates the consolidation, Dyno 1.0.0, Spotter 1.0.0 and Pitwall 1.1, which now come first; the
+  mid-December tag is no longer a safe estimate and needs re-estimating when 1.2 starts.
 
 ## 6. Decisions
 

@@ -5,7 +5,8 @@ decision or a lesson; the reasons are in [lessons.md](lessons.md). Each app's `A
 changes here, every app's copy is updated in the same change.
 
 ## Way of working
-1. **One app at a time.** Finish the current app before starting another; parallel agents only within that app.
+1. **One large app at a time.** Finish the current large app before starting another; parallel agents only within that
+   app. Small, independent releases (separate app folders, serialized tags) may run alongside it (amended 2026-10-28).
 2. **Every agent works in its own git worktree** with its own `CARGO_TARGET_DIR` and its own e2e port; the main checkout
    stays on `main` for the coordinator.
 3. **Tests in a branch: only the affected ones** (touched crates, touched specs, related Playwright files), with
@@ -143,4 +144,5 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
   try is fine but is never published. Never tag a `[skip ci]` commit.
 - **Rules 39 and 42:** shared code is moved to `crates/` or `ui/` and adopted by the app **in the same change**; there is
   no publish-and-consume step. "Consume the published version" becomes "use the in-tree version".
-- Rule 1 is unchanged: one app at a time is about attention and load, not repos.
+- Rule 1 is about attention and load, not repos (amended 2026-10-28: one large app at a time; small, independent releases
+  may run alongside it).

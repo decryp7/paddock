@@ -529,3 +529,9 @@ Debrief's background "Learning human names" ran the local model over up to 2,000
 8 GB on the Mac and made a Windows PC sluggish for the whole run, for a result that rules, a names pack and the logs' own
 metadata match or beat. **Rule:** work over many items never calls an LLM automatically or once per item; it uses
 deterministic rules, TOML packs and static embeddings, and an LLM only answers bounded requests the user starts (rule 46).
+
+## Rule 1 allows small releases alongside a large app (2026-10-28)
+Consolidating CI, Dyno 1.0.0 and Spotter 1.0.0 had to run together, which "one app at a time" forbade, though the two
+releases are small, finished apps in their own folders with their own tags. The rule's reason is attention and machine
+load, and a release prep of a finished app costs little of either. **Rule:** one *large* app at a time; small,
+independent releases (separate app folders, serialized tags) may run alongside it (rule 1, amended 2026-10-28).
