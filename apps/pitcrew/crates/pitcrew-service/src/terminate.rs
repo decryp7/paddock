@@ -79,30 +79,53 @@ fn taskkill(pid: u32, force: bool) -> Result<(), String> {
 mod tests {
     #[allow(unused_imports)]
     use super::*;
+
+    /// Kills and reaps its process when dropped, so a failing assertion leaves nothing running.
     #[cfg(unix)]
-    use std::time::Duration;
+    struct Reaped(std::process::Child);
+
+    #[cfg(unix)]
+    impl Drop for Reaped {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
 
     #[cfg(unix)]
     #[test]
     fn a_process_is_asked_then_ended() {
+        use std::io::BufRead;
+        use std::os::unix::process::ExitStatusExt;
         let mut c = crate::process::quiet_command(std::path::Path::new("sleep"));
-        c.arg("60");
-        let mut child = c.spawn().unwrap();
-        let pid = child.id();
-        assert!(OsTerminator.ask(pid).is_ok());
-        let status = child.wait().unwrap();
-        assert!(!status.success());
-        // Ending one that ignores SIGTERM: a shell with a trap.
+        c.arg("60").stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        let mut child = Reaped(c.spawn().unwrap());
+        assert!(OsTerminator.ask(child.0.id()).is_ok());
+        let status = child.0.wait().unwrap();
+        assert_eq!(status.signal(), Some(nix::sys::signal::Signal::SIGTERM as i32));
+        // Ending one that ignores SIGTERM: a shell that ignores it and then becomes `sleep` (an ignored signal stays
+        // ignored across exec), so it is one process with no children of its own to leave behind. It says when the
+        // signal is ignored; the test waits for that line instead of a fixed time.
         let mut sh = crate::process::quiet_command(std::path::Path::new("sh"));
-        sh.args(["-c", "trap '' TERM; while :; do sleep 1; done"]);
-        let mut child = sh.spawn().unwrap();
-        std::thread::sleep(Duration::from_millis(200));
-        let pid = child.id();
+        sh.args(["-c", "trap '' TERM; echo ready; exec sleep 60"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+        let mut child = Reaped(sh.spawn().unwrap());
+        let mut ready = String::new();
+        std::io::BufReader::new(child.0.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        assert_eq!(ready.trim(), "ready");
+        let pid = child.0.id();
         OsTerminator.ask(pid).unwrap();
-        std::thread::sleep(Duration::from_millis(300));
-        assert!(child.try_wait().unwrap().is_none(), "it ignored the request");
         OsTerminator.end(pid);
-        assert!(child.wait().is_ok());
+        // Had the request not been ignored, SIGTERM (sent first) would have ended it.
+        let status = child.0.wait().unwrap();
+        assert_eq!(
+            status.signal(),
+            Some(nix::sys::signal::Signal::SIGKILL as i32),
+            "it ignored the request"
+        );
         // A process that is not there is an error, not a panic.
         assert!(OsTerminator.ask(i32::MAX as u32).is_err());
         OsTerminator.end(i32::MAX as u32);

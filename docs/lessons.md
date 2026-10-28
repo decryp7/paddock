@@ -542,3 +542,18 @@ single-job CI runners, the machine's load and conflicts in shared code (Dyno and
 API). **Rule:** one release at a time; release-critical work first; other apps progress in parallel only while load and
 CI capacity allow and only if they don't change shared code the release depends on (rule 1 and ER-1, amended
 2026-10-28).
+
+## A fake clock next to real processes must not run away from the real one (2026-10-28, Pitcrew)
+Pitcrew's supervision tests drive the supervisor with a fake clock but real runner processes, and failed or timed out
+only on a loaded CI runner (run 6628): (1) a test took the runner's "task started" line for the job's process, then
+jumped the clock 120 s with no look at the processes in between, so the job counted as over (its process started
+after the line under load); (2) the job's start is the fake clock's time while its processes' start times come from
+the real clock, so a clock that ran ahead while the machine was slow put the leftovers outside the job
+(`ATTRIBUTION_SLACK`, 10 s) and they were never found; (3) a 60 s clock step during a leftover's stop passed the stop
+timeout before a slow process could exit; (4) real-time job lengths (`sleep 3`) and 80 clock steps, each a full
+process-table read, scaled with the load. **Rule:** a test double's job lasts until the test releases it, never a real
+time; a test waits for what the system under test has *seen* (its usage, its list), not for the input it was given;
+while the system compares the fake clock with real OS timestamps, the clock follows the real one (`until_real`) and
+holds still while a real process reacts to a signal; a tool's timeout ends its whole process tree, or `cmd /c`'s and a
+login shell's children outlive it (nextest's "leaky"). Reproduce with a delay knob in the fake (`spawn_delay_ms`), not
+by hoping for load.

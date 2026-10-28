@@ -57,14 +57,18 @@ fn drain(stream: Option<impl Read + Send + 'static>) -> Drain {
     })
 }
 
-/// Runs `cmd` to completion, stopping it after `timeout`. Error messages name the program only, never its
-/// arguments (a registration token is an argument).
+/// Runs `cmd` to completion, stopping it after `timeout`, together with every program it started (a login shell's
+/// `~/.zshrc`, `cmd /c`). Error messages name the program only, never its arguments (a registration token is an
+/// argument).
 pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<ToolOutput, Error> {
     let program = Path::new(cmd.get_program())
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // A process group of its own, so a timeout ends the programs it started too (`end_tree`).
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|e| Error::Os {
         what: "starting a program",
         reason: format!("{program}: {e}"),
@@ -76,8 +80,7 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<ToolOutpu
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
+                end_tree(&mut child);
                 return Err(Error::TimedOut {
                     program,
                     secs: timeout.as_secs(),
@@ -99,6 +102,37 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> Result<ToolOutpu
         stdout: text(out),
         stderr: text(err),
     })
+}
+
+/// Ends a timed-out tool and everything it started, and reaps it.
+fn end_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        // The tool leads its own process group (`run_with_timeout`).
+        if let Ok(pid) = i32::try_from(child.id()) {
+            let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid), nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        // `taskkill /T` ends the tool's descendants; it runs directly (not through `run_with_timeout`, which would
+        // recurse) and is not waited for longer than a few seconds.
+        let mut kill = quiet_command(Path::new("taskkill.exe"));
+        kill.args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Ok(mut k) = kill.spawn() {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while matches!(k.try_wait(), Ok(None)) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            let _ = k.kill();
+            let _ = k.wait();
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]
@@ -133,6 +167,47 @@ pub(crate) mod tests {
         let err = run_with_timeout(shell(hang), Duration::from_millis(500)).unwrap_err();
         assert!(matches!(err, Error::TimedOut { .. }), "{err}");
         assert!(started.elapsed() < Duration::from_secs(15));
+    }
+
+    /// A tool that started programs of its own (a login shell running `~/.zshrc`, `cmd /c`) is stopped with all of
+    /// them: killing only the tool left its children running, holding its output pipes open.
+    #[cfg(unix)]
+    #[test]
+    fn a_tool_that_hangs_is_stopped_with_the_programs_it_started() {
+        let dir = std::env::temp_dir().join(format!("pitcrew-tree-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_file = dir.join("pid");
+        // `; wait` keeps the shell from replacing itself with `sleep`: the shell has a child of its own.
+        let script = format!("sleep 30 & echo $! > '{}'; wait", pid_file.display());
+        let err = run_with_timeout(shell(&script), Duration::from_millis(500)).unwrap_err();
+        assert!(matches!(err, Error::TimedOut { .. }), "{err}");
+        let pid: i32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let gone = wait_gone(pid);
+        if !gone {
+            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), nix::sys::signal::Signal::SIGKILL);
+        }
+        assert!(gone, "the tool's own child {pid} still runs");
+    }
+
+    /// Whether `pid` is gone (or a zombie) within a few seconds of being killed: a condition, not a fixed wait.
+    #[cfg(unix)]
+    fn wait_gone(pid: i32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let out = quiet_command(Path::new("ps"))
+                .args(["-o", "stat=", "-p", &pid.to_string()])
+                .output()
+                .unwrap();
+            let stat = String::from_utf8_lossy(&out.stdout);
+            if stat.trim().is_empty() || stat.trim().starts_with('Z') {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]
