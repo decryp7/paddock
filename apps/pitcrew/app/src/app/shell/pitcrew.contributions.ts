@@ -26,6 +26,8 @@ import { REGISTER_DIALOG_ID } from './register-launcher';
 /** The service's id in Rust (`health::SERVICE`). */
 export const SERVICE_ID = 'pc.service';
 
+// TODO(ADR 0026 §7, Pitcrew row): `pc.confirm` (shared/ui/confirm-dialog.ts, six callers) and `pc.stop-process` become `pd.confirm`
+// of the shared dialog API (the callers pass the same inputs); delete both definitions and their components then.
 /** A confirmation of something that cannot be undone: modal, fitted to its content. */
 export const CONFIRM_DIALOG = defineDialog({
   id: CONFIRM_DIALOG_ID,
@@ -48,6 +50,7 @@ export const STOP_PROCESS_DIALOG = defineDialog({
   load: () => import('../features/runners/stop-process-dialog').then((m) => m.StopProcessDialog),
 });
 
+// TODO(ADR 0026 §7, Pitcrew row): the configuration diff becomes a wide decision of the shared dialog API.
 /** What saving a runner's configuration would change: a modal form with Cancel and Save and apply. */
 export const CONFIG_DIFF_DIALOG = defineDialog({
   id: CONFIG_DIFF_DIALOG_ID,
@@ -91,9 +94,9 @@ export const SETTINGS_COMMANDS = [
   'install_service',
   'uninstall_service',
   'repair_service',
-  'open_login_items',
-  'channels_get',
-  'channels_save',
+  'pitcrew_open_login_items',
+  'notification_channels_get',
+  'notification_channels_save',
   'channel_secret_set',
   'channel_secret_clear',
   'channel_secret_present',
@@ -105,6 +108,7 @@ export const SETTINGS_COMMANDS = [
   'open_url',
 ] as const;
 
+// TODO(ADR 0026 §7): settings, About and Updates become the shared dialogs; the pages above stay Pitcrew's sections.
 /** The Settings window (the shell's) as the app's own dialog, so its contract is in this registry. */
 export const SETTINGS_DIALOG = defineDialog({
   id: 'pd.settings',

@@ -646,9 +646,9 @@ pub async fn repair_service<R: Runtime>(app: AppHandle<R>) -> Result<(), Command
     blocking(move || service_install::request_repair(&dir)).await
 }
 
-/// `open_login_items`: opens System Settings ▸ General ▸ Login Items (macOS).
+/// `pitcrew_open_login_items`: opens System Settings ▸ General ▸ Login Items (macOS).
 #[tauri::command]
-pub async fn open_login_items() -> Result<(), CommandError> {
+pub async fn pitcrew_open_login_items() -> Result<(), CommandError> {
     blocking(service_install::open_login_items).await
 }
 

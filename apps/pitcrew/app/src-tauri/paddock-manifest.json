@@ -171,8 +171,8 @@
         "channel_secret_present",
         "channel_secret_set",
         "channel_test",
-        "channels_get",
-        "channels_save",
+        "notification_channels_get",
+        "notification_channels_save",
         "clear_api_token",
         "connection_state",
         "dialog_open",
@@ -181,7 +181,7 @@
         "get_settings",
         "has_api_token",
         "install_service",
-        "open_login_items",
+        "pitcrew_open_login_items",
         "open_url",
         "platform_name",
         "repair_service",
@@ -265,9 +265,9 @@
     "pd.settings.open": "Settings…",
     "pd.settings.title": "Settings",
     "pd.updates.notification.available": "Update available",
-    "pd.updates.open": "Check for Updates…",
+    "pd.updates.open": "Check for updates…",
     "pd.updates.title": "Updates",
-    "pd.whats-new.open": "What’s New",
-    "pd.whats-new.title": "What’s New"
+    "pd.whats-new.open": "What’s new",
+    "pd.whats-new.title": "What’s new"
   }
 }

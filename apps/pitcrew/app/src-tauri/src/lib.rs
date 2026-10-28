@@ -35,8 +35,12 @@ pub const APP_ID: &str = "pitcrew";
 pub const APP_NAME: &str = "Pitcrew";
 /// The app's version: the workspace's (Cargo is the single source).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// Where the releases are (About, Updates).
-pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/Pitcrew/releases";
+/// Where the releases are (About's "Release notes", Updates' "Open the releases page"): the family's page filtered to
+/// Pitcrew's tags.
+pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=pitcrew-v";
+/// The update feed: the moving release that pitcrew-release.yml publishes `latest.json` on (`tests/shell.rs` ties it to the
+/// workflow's `latest-tag`; `tauri.conf.json` names the same address for the updater plugin).
+pub const UPDATE_FEED: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download/pitcrew-latest/latest.json";
 /// The dialog contracts and the manifest, written by the UI's specs from its registry (`app/src/app/shell/`).
 pub const DIALOG_CONTRACTS: &str = include_str!("../dialog-contracts.json");
 /// The UI's `paddock-manifest.json` (checked against the plugin in `tests/shell.rs`).
@@ -78,7 +82,7 @@ paddock_commands::command_table! {
     Mutation [MAIN | DIALOG] => commands::install_service,
     Mutation [MAIN | DIALOG] => commands::uninstall_service,
     Mutation [MAIN | DIALOG] => commands::repair_service,
-    Mutation [MAIN | DIALOG] => commands::open_login_items,
+    Mutation [MAIN | DIALOG] => commands::pitcrew_open_login_items,
     Query [MAIN | DIALOG] => commands::get_autostart,
     Mutation [MAIN | DIALOG] => commands::set_autostart,
     Mutation [MAIN | DIALOG] => commands::export_diagnostics,
@@ -94,8 +98,8 @@ paddock_commands::command_table! {
     Mutation [MAIN] => ops::cache_clean,
     Query [MAIN] => ops::debrief_status,
     Mutation [MAIN] => ops::open_in_debrief,
-    Query [MAIN | DIALOG] => ops::channels_get,
-    Mutation [MAIN | DIALOG] => ops::channels_save,
+    Query [MAIN | DIALOG] => ops::notification_channels_get,
+    Mutation [MAIN | DIALOG] => ops::notification_channels_save,
     Mutation [MAIN | DIALOG] => ops::channel_secret_set,
     Mutation [MAIN | DIALOG] => ops::channel_secret_clear,
     Query [MAIN | DIALOG] => ops::channel_secret_present,
@@ -152,9 +156,10 @@ pub fn shell<R: Runtime>(client: SharedClient, place: Place) -> Builder<R> {
 /// says so.
 fn updater(test_dir: Option<std::path::PathBuf>) -> UpdatesBuilder {
     let b = UpdatesBuilder::new(APP_NAME)
+        .channel("stable", "Stable", UPDATE_FEED)
         .public_key(option_env!("TAURI_UPDATER_PUBKEY"))
         .releases_page(RELEASES_PAGE)
-        .homepage("https://dev.decryptology.net/decryp7/Pitcrew")
+        .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
         .legal("licence-mit", "MIT licence", include_str!("../../../LICENSE-MIT"))
         .legal("licence-apache", "Apache licence 2.0", include_str!("../../../LICENSE-APACHE"))

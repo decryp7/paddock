@@ -246,10 +246,10 @@ export class TauriBackend implements PitcrewBackend {
     return this.run('open_in_debrief', { runner, label, startedAt, finishedAt });
   }
   channels(): Promise<ChannelSettings> {
-    return this.run('channels_get');
+    return this.run('notification_channels_get');
   }
   saveChannels(settings: ChannelSettings): Promise<void> {
-    return this.run('channels_save', { settings });
+    return this.run('notification_channels_save', { settings });
   }
   setChannelSecret(key: string, value: string): Promise<void> {
     return this.run('channel_secret_set', { key, value });
@@ -303,7 +303,7 @@ export class TauriBackend implements PitcrewBackend {
     return this.run('repair_service');
   }
   openLoginItems(): Promise<void> {
-    return this.run('open_login_items');
+    return this.run('pitcrew_open_login_items');
   }
 
   autostart(): Promise<boolean> {

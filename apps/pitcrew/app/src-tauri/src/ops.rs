@@ -250,16 +250,16 @@ fn data_dir<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, Comman
     app.path().app_data_dir().map_err(|e| CommandError::internal(e.to_string()))
 }
 
-/// `channels_get`: the notification channels (none by default).
+/// `notification_channels_get`: the notification channels (none by default).
 #[tauri::command]
-pub async fn channels_get<R: Runtime>(app: AppHandle<R>) -> Result<notify_channels::Settings, CommandError> {
+pub async fn notification_channels_get<R: Runtime>(app: AppHandle<R>) -> Result<notify_channels::Settings, CommandError> {
     let dir = data_dir(&app)?;
     blocking(move || Ok(crate::channels::load(&dir))).await
 }
 
-/// `channels_save`: validates and saves the channels. Secrets are set separately and never travel in the settings.
+/// `notification_channels_save`: validates and saves the channels. Secrets are set separately and never travel in the settings.
 #[tauri::command]
-pub async fn channels_save<R: Runtime>(app: AppHandle<R>, settings: notify_channels::Settings) -> Result<(), CommandError> {
+pub async fn notification_channels_save<R: Runtime>(app: AppHandle<R>, settings: notify_channels::Settings) -> Result<(), CommandError> {
     let dir = data_dir(&app)?;
     blocking(move || crate::channels::save(&dir, &settings).map_err(CommandError::bad)).await
 }

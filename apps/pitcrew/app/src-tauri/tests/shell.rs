@@ -8,7 +8,7 @@ use paddock_commands::testing::{sync_generated, WriteMode};
 use paddock_shell::{AppIdentity, PLUGIN_NAME};
 use pitcrew_app_lib::dto::ConnectionState;
 use pitcrew_app_lib::service_client::{ClientError, ServiceClient};
-use pitcrew_app_lib::{health, invoke_handler, shell, Place, APP_ID, APP_NAME, COMMANDS, MANIFEST, VERSION};
+use pitcrew_app_lib::{health, invoke_handler, shell, Place, APP_ID, APP_NAME, COMMANDS, MANIFEST, RELEASES_PAGE, UPDATE_FEED, VERSION};
 use pitcrew_core::protocol::{Request, Response};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -291,4 +291,36 @@ fn a_job_returns_its_id_at_once_and_its_result_is_read_once() {
 fn the_tray_menu_is_valid_and_uses_the_shells_items() {
     let v = pitcrew_app_lib::tray::view(&[], false);
     assert!(paddock_window::tray::validate(&v.menu).is_ok());
+}
+
+fn release_workflow() -> String {
+    std::fs::read_to_string(app_dir().join("../../../../.gitea/workflows/pitcrew-release.yml")).unwrap()
+}
+
+/// The update feed is the moving release that pitcrew-release.yml publishes `latest.json` on (installed copies read it),
+/// and the updater plugin's configured endpoint is the same address.
+#[test]
+fn the_update_feed_is_the_release_the_workflow_publishes_latest_json_on() {
+    let workflow = release_workflow();
+    let tag = workflow
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("latest-tag:"))
+        .map(|t| t.trim().to_string())
+        .expect("the workflow names the moving release");
+    let feed = format!("https://dev.decryptology.net/decryp7/paddock/releases/download/{tag}/latest.json");
+    assert_eq!(UPDATE_FEED, feed);
+    let conf: Value = serde_json::from_str(&std::fs::read_to_string(app_dir().join("tauri.conf.json")).unwrap()).unwrap();
+    assert_eq!(conf["plugins"]["updater"]["endpoints"], json!([feed]));
+}
+
+/// The releases page is the family's, filtered to the tags the workflow releases from.
+#[test]
+fn the_releases_page_lists_the_tags_the_workflow_releases_from() {
+    let workflow = release_workflow();
+    let prefix = workflow
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("tags: [\"")?.strip_suffix("*\"]"))
+        .expect("the workflow releases from a tag pattern");
+    assert_eq!(prefix, "pitcrew-v");
+    assert_eq!(RELEASES_PAGE, format!("https://dev.decryptology.net/decryp7/paddock/releases?q={prefix}"));
 }
