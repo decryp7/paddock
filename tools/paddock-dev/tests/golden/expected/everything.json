@@ -1,0 +1,63 @@
+{
+ "all": true,
+ "crates": true,
+ "ui": true,
+ "eslint": true,
+ "conformance": true,
+ "tools": true,
+ "icons": true,
+ "ciImage": true,
+ "docs": false,
+ "apps": [
+  "x",
+  "y",
+  "z"
+ ],
+ "kinds": {
+  "x": [
+   "rust",
+   "ui"
+  ],
+  "y": [
+   "rust",
+   "ui"
+  ],
+  "z": [
+   "rust",
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   "everything (no base)"
+  ],
+  "app:y": [
+   "everything (no base)"
+  ],
+  "app:z": [
+   "everything (no base)"
+  ],
+  "ci-image": [
+   "everything (no base)"
+  ],
+  "conformance": [
+   "everything (no base)"
+  ],
+  "crates": [
+   "everything (no base)"
+  ],
+  "eslint": [
+   "everything (no base)"
+  ],
+  "icons": [
+   "everything (no base)"
+  ],
+  "tools": [
+   "everything (no base)"
+  ],
+  "ui": [
+   "everything (no base)"
+  ]
+ }
+}

@@ -13,11 +13,23 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this insid
 tool="$root/tools/paddock-dev"
 inputs=$(grep -v '^[[:space:]]*#' "$tool/inputs.txt" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
 
-# The compiler cargo will use: RUSTC, CARGO_BUILD_RUSTC, `rustc =` under [build] in a .cargo/config.toml on the tool's path
-# (closest first) or in $CARGO_HOME, else rustc run from the tool's folder (so a rustup override applies).
+# runs <file>: an executable that answers --version with some text (an empty or truncated file is not a tool; sh would run an
+# empty file as an empty script and call that success).
+runs() { [ -x "$1" ] && v=$("$1" --version 2>/dev/null) && [ -n "$v" ]; }
+
+# Where cargo reads configuration for the tool, closest first (the tool's folder, tools/, the root, $CARGO_HOME).
+config_dirs="$tool/.cargo|$root/tools/.cargo|$root/.cargo|${CARGO_HOME:-${HOME:-}/.cargo}"
+home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
+exe=
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
+
+# The compiler cargo will use: RUSTC, CARGO_BUILD_RUSTC, `rustc =` under [build] in a config.toml (closest first), else rustc
+# run from the tool's folder (so a rustup override applies).
 rustc_cmd=${RUSTC:-${CARGO_BUILD_RUSTC:-}}
 if [ -z "$rustc_cmd" ]; then
-  for dir in "$tool/.cargo" "$root/tools/.cargo" "$root/.cargo" "${CARGO_HOME:-${HOME:-}/.cargo}"; do
+  old_ifs=$IFS
+  IFS='|'
+  for dir in $config_dirs; do
     [ -f "$dir/config.toml" ] || continue
     rustc_cmd=$(awk '
       /^[ \t]*\[/ { sec = $0; gsub(/[ \t]/, "", sec); next }
@@ -26,13 +38,35 @@ if [ -z "$rustc_cmd" ]; then
       }' "$dir/config.toml")
     [ -n "$rustc_cmd" ] && break
   done
+  IFS=$old_ifs
 fi
-vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV | tr -d '\r')
+if ! vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r') || [ -z "$vv" ]; then
+  # Without a compiler the hash cannot be computed, but a binary built earlier still works.
+  newest=$(ls -t "$home"/bin/*/paddock-dev-*"$exe" 2>/dev/null | head -n 1)
+  if [ -n "$newest" ] && runs "$newest"; then
+    echo "dev: rustc is not available; running the newest cached tool binary ($newest)." >&2
+    exec "$newest" "$@"
+  fi
+  echo "dev: rustc was not found (${rustc_cmd:-rustc}). Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2
+  exit 2
+fi
 compiler=$(printf '%s\n' "$vv" | grep -E '^(commit-hash|release):')
 host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
 
+# What else changes the compiled code: RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS and every `rustflags =` line (build or target tables)
+# in the configs above.
+flags=$(
+  printf 'RUSTFLAGS=%s\nCARGO_ENCODED_RUSTFLAGS=%s\n' "${RUSTFLAGS:-}" "${CARGO_ENCODED_RUSTFLAGS:-}"
+  old_ifs=$IFS
+  IFS='|'
+  for dir in $config_dirs; do
+    [ -f "$dir/config.toml" ] && grep -h '^[[:space:]]*rustflags[[:space:]]*=' "$dir/config.toml" | tr -d '\r'
+  done
+  IFS=$old_ifs
+)
+
 # shellcheck disable=SC2086 # inputs.txt holds paths without spaces
-hash=$({ git -C "$root" ls-tree HEAD -- $inputs; printf '%s\n' "$compiler"; } | git -C "$root" hash-object --stdin)
+hash=$({ git -C "$root" ls-tree HEAD -- $inputs; printf '%s\n%s\n' "$compiler" "$flags"; } | git -C "$root" hash-object --stdin)
 # shellcheck disable=SC2086
 dirty=$(git -C "$root" status --porcelain --untracked-files=all -- $inputs)
 
@@ -42,8 +76,6 @@ if [ "${1:-}" = "--wrapper-hash" ]; then
   exit 0
 fi
 
-exe=
-case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
 name="paddock-dev-$host$exe"
 export PADDOCK_DEV_WRAPPER_HASH="$hash"
 
@@ -64,7 +96,12 @@ if [ -n "$dirty" ]; then
   exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
 fi
 
-cache="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}/bin/$hash"
+cache="$home/bin/$hash"
+# A cached binary must run: an empty or damaged file (a copy that was cut short) is removed and rebuilt.
+if [ -e "$cache/$name" ] && ! runs "$cache/$name"; then
+  echo "dev: the cached tool binary $cache/$name does not run; rebuilding it." >&2
+  rm -f "$cache/$name"
+fi
 if [ ! -x "$cache/$name" ]; then
   # R0b: download the published binary for this hash (Gitea generic package `paddock-dev`, version <hash>) and check its
   # .sha256 here. Until the publishing workflow exists, every miss builds.

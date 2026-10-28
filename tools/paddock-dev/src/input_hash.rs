@@ -1,7 +1,8 @@
 //! `dev self hash`: the content address of the tool's binary (ADR 0022 §3.3).
 //!
 //! The hash is `git hash-object --stdin` over `git ls-tree HEAD -- <inputs>` followed by the `commit-hash:` and `release:`
-//! lines of `<rustc> -vV` (in rustc's order), where `<inputs>` are the paths in `tools/paddock-dev/inputs.txt` and `<rustc>`
+//! lines of `<rustc> -vV` (in rustc's order) and [`flag_lines`] (`RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS` and the `rustflags`
+//! lines of cargo's configs), where `<inputs>` are the paths in `tools/paddock-dev/inputs.txt` and `<rustc>`
 //! is the compiler cargo will use. The `./dev` wrapper computes the same value in shell (`./dev --wrapper-hash`); a test
 //! runs both on one repository. When an input has uncommitted changes (`git status --porcelain --untracked-files=all`), the
 //! hash cannot describe the files and the wrapper builds.
@@ -45,6 +46,27 @@ pub fn compiler_lines(vv: &str) -> String {
             acc.push('\n');
             acc
         })
+}
+
+/// What else changes the compiled code, as lines: `RUSTFLAGS=` and `CARGO_ENCODED_RUSTFLAGS=` (empty when unset), then every
+/// `rustflags =` line (any table: `[build]` or `[target.*]`) of the configs, closest first, as the wrapper's `grep` finds them.
+pub fn flag_lines(env: &dyn Fn(&str) -> Option<String>, configs: &[String]) -> String {
+    let mut out = format!(
+        "RUSTFLAGS={}\nCARGO_ENCODED_RUSTFLAGS={}\n",
+        env("RUSTFLAGS").unwrap_or_default(),
+        env("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default()
+    );
+    for line in configs.iter().flat_map(|c| c.lines()).map(|l| l.trim_end_matches('\r')) {
+        let rest = line.trim_start_matches(char::is_whitespace);
+        if rest
+            .strip_prefix("rustflags")
+            .is_some_and(|r| r.trim_start_matches(char::is_whitespace).starts_with('='))
+        {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 /// The `rustc = "..."` of a `[build]` table in a cargo config, read line by line exactly as the wrapper's awk does (so a
@@ -112,6 +134,15 @@ pub trait Exec {
     fn run(&self, program: &str, args: &[&str], cwd: &Path, stdin: Option<&[u8]>) -> Result<String, CliError>;
 }
 
+/// Writes `bytes` to the child's standard input, closes it and waits for the child.
+fn pipe_in(mut child: std::process::Child, bytes: &[u8]) -> std::io::Result<std::process::Output> {
+    child
+        .stdin
+        .take()
+        .map_or(Ok(()), |mut pipe| pipe.write_all(bytes))
+        .and_then(|()| child.wait_with_output())
+}
+
 /// The real thing, through `paddock-proc` (stdin only for `git hash-object`, which reads it and ends).
 pub struct Real;
 
@@ -133,11 +164,10 @@ impl Exec for Real {
             }
             Some(bytes) => {
                 cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-                let mut child = cmd.spawn().map_err(|e| fail(e.to_string()))?;
-                if let Some(mut pipe) = child.stdin.take() {
-                    pipe.write_all(bytes).map_err(|e| fail(e.to_string()))?;
-                }
-                let out = child.wait_with_output().map_err(|e| fail(e.to_string()))?;
+                let out = cmd
+                    .spawn()
+                    .and_then(|child| pipe_in(child, bytes))
+                    .map_err(|e| fail(e.to_string()))?;
                 if !out.status.success() {
                     return Err(fail(String::from_utf8_lossy(&out.stderr).trim().to_string()));
                 }
@@ -178,12 +208,13 @@ pub fn compute(exec: &dyn Exec, env: &dyn Fn(&str) -> Option<String>, root: &Pat
     let mut git_args: Vec<&str> = vec!["ls-tree", "HEAD", "--"];
     git_args.extend(inputs.iter().map(String::as_str));
     let tree = exec.run("git", &git_args, root, None)?;
+    let flags = flag_lines(env, &configs);
     let hash = exec
         .run(
             "git",
             &["hash-object", "--stdin"],
             root,
-            Some(format!("{tree}{compiler}").as_bytes()),
+            Some(format!("{tree}{compiler}{flags}").as_bytes()),
         )?
         .trim()
         .to_string();
@@ -200,7 +231,8 @@ pub fn compute(exec: &dyn Exec, env: &dyn Fn(&str) -> Option<String>, root: &Pat
 
 /// `dev self hash`.
 pub fn command() -> Result<Report, CliError> {
-    let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
+    // An unreadable current folder is an empty path: git then runs in the folder it inherited.
+    let cwd = std::env::current_dir().unwrap_or_default();
     let env = |k: &str| std::env::var(k).ok();
     let root = Real
         .run("git", &["rev-parse", "--show-toplevel"], &cwd, None)
@@ -258,6 +290,24 @@ mod tests {
     }
 
     #[test]
+    fn flags_in_the_environment_and_in_any_config_table_change_the_hashed_text() {
+        let none = |_: &str| None;
+        assert_eq!(flag_lines(&none, &[]), "RUSTFLAGS=\nCARGO_ENCODED_RUSTFLAGS=\n");
+        let env = |k: &str| (k == "RUSTFLAGS").then(|| "-C target-cpu=native".to_string());
+        assert_eq!(flag_lines(&env, &[]), "RUSTFLAGS=-C target-cpu=native\nCARGO_ENCODED_RUSTFLAGS=\n");
+        let encoded = |k: &str| (k == "CARGO_ENCODED_RUSTFLAGS").then(|| "-Ca\x1f-Cb".to_string());
+        assert!(flag_lines(&encoded, &[]).contains("CARGO_ENCODED_RUSTFLAGS=-Ca\x1f-Cb\n"));
+        let configs = vec![
+            "[build]\nrustflags = [\"-D\", \"warnings\"]\njobs = 2\n".to_string(),
+            "[target.x86_64-pc-windows-msvc]\r\n  rustflags=[\"-C\", \"x\"]\r\nrustflags-not = 1\n# rustflags = []\n".to_string(),
+        ];
+        assert_eq!(
+            flag_lines(&none, &configs),
+            "RUSTFLAGS=\nCARGO_ENCODED_RUSTFLAGS=\nrustflags = [\"-D\", \"warnings\"]\n  rustflags=[\"-C\", \"x\"]\n"
+        );
+    }
+
+    #[test]
     fn rustc_resolution_order_is_env_then_config_then_path() {
         let env =
             |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
@@ -277,11 +327,7 @@ mod tests {
 
     #[test]
     fn config_paths_go_closest_first_and_cargo_home_wins_over_home() {
-        let env = |k: &str| match k {
-            "CARGO_HOME" => Some("/ch".to_string()),
-            "HOME" => Some("/h".to_string()),
-            _ => None,
-        };
+        let env = |k: &str| (k == "CARGO_HOME").then(|| "/ch".to_string());
         let p = config_paths(Path::new("/r"), &env);
         assert!(p[0].ends_with("tools/paddock-dev/.cargo/config.toml") && p[2].ends_with(".cargo/config.toml"));
         assert_eq!(p[3], Path::new("/ch/config.toml"));
@@ -331,7 +377,10 @@ mod tests {
             stdin_seen: RefCell::default(),
         };
         let h = compute(&fake, &|_: &str| None, d.path()).unwrap();
-        assert_eq!(fake.stdin_seen.borrow()[0], "T\ncommit-hash: c1\nrelease: 1.0\n");
+        assert_eq!(
+            fake.stdin_seen.borrow()[0],
+            "T\ncommit-hash: c1\nrelease: 1.0\nRUSTFLAGS=\nCARGO_ENCODED_RUSTFLAGS=\n"
+        );
         assert!(h.dirty && h.inputs == ["tools/paddock-dev", "crates/a"] && h.hash.starts_with("hash-of-"));
         let clean = Fake {
             status: "\n".into(),
@@ -371,6 +420,45 @@ mod tests {
             blob.trim(),
             "ce013625030ba8dba906f756967f9e9ca394464a",
             "git's blob id of \"hello\\n\""
+        );
+    }
+
+    #[test]
+    fn every_step_that_fails_stops_the_hash_with_that_error() {
+        let d = repo();
+        let ok = Fake {
+            rustc: "rustc".into(),
+            tree: "T\n".into(),
+            status: String::new(),
+            stdin_seen: RefCell::default(),
+        };
+        assert!(compute(&ok, &|_: &str| None, d.path()).is_ok());
+        // Each program fails in turn.
+        struct FailOn(&'static str);
+        impl Exec for FailOn {
+            fn run(&self, program: &str, args: &[&str], _: &Path, _: Option<&[u8]>) -> Result<String, CliError> {
+                let step = if args.first() == Some(&"-vV") {
+                    "rustc"
+                } else {
+                    args.first().copied().unwrap_or(program)
+                };
+                if step == self.0 {
+                    Err(CliError::failure(format!("{step} failed")))
+                } else {
+                    Ok("x\n".to_string())
+                }
+            }
+        }
+        for step in ["rustc", "ls-tree", "hash-object", "status"] {
+            let err = compute(&FailOn(step), &|_: &str| None, d.path()).unwrap_err();
+            assert_eq!(err.message, format!("{step} failed"));
+        }
+        std::fs::write(d.path().join("tools/paddock-dev/inputs.txt"), "has space\n").unwrap();
+        assert!(
+            compute(&ok, &|_: &str| None, d.path())
+                .unwrap_err()
+                .text()
+                .contains("not a plain repository-relative path")
         );
     }
 

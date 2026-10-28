@@ -219,3 +219,117 @@ fn the_wrapper_finds_the_root_from_a_subfolder_and_refuses_to_run_outside_a_repo
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("inside the Paddock repository"));
 }
+
+#[test]
+fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
+    let f = Fixture::new();
+    let plain = f.both(&[]).0;
+    let rustflags = f.both(&[("RUSTFLAGS", "-C target-cpu=native".to_string())]).0;
+    let encoded = f.both(&[("CARGO_ENCODED_RUSTFLAGS", "-Ca\u{1f}-Cb".to_string())]).0;
+    assert!(plain != rustflags && plain != encoded && rustflags != encoded);
+    // A `rustflags` line in a committed config (a target table) and in $CARGO_HOME's config.
+    std::fs::write(
+        f.root().join(".cargo/config.toml"),
+        "[target.x86_64-pc-windows-msvc]\nrustflags = [\"-C\", \"target-feature=+crt-static\"]\n",
+    )
+    .unwrap();
+    git(f.root(), &["commit", "-qam", "chore: static crt"]);
+    let committed = f.both(&[]).0;
+    assert_ne!(committed, plain);
+    std::fs::write(
+        f.cargo_home.path().join("config.toml"),
+        "[build]\nrustflags = [\"-D\", \"warnings\"]\n",
+    )
+    .unwrap();
+    let with_home = f.both(&[]).0;
+    assert_ne!(with_home, committed);
+    // Lines that merely look similar do not count.
+    std::fs::write(
+        f.cargo_home.path().join("config.toml"),
+        "[build]\n# rustflags = []\nrustflags-x = 1\njobs = 2\n",
+    )
+    .unwrap();
+    assert_eq!(f.both(&[]).0, committed);
+}
+
+/// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
+#[cfg(unix)]
+fn write_script(path: &Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Runs the whole wrapper (not just `--wrapper-hash`) with a scratch cache and a stand-in `cargo` that "builds" a script.
+#[cfg(unix)]
+fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
+    let shims = f.cargo_home.path().join("shims");
+    write_script(
+        &shims.join("cargo"),
+        r#"mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\necho built-by-shim\n' > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev""#,
+    );
+    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let mut cmd = Command::new("sh");
+    cmd.arg(f.root().join("dev"))
+        .arg("hello")
+        .current_dir(f.root())
+        .env("PATH", path)
+        .env("PADDOCK_DEV_HOME", home)
+        .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
+        .env("CARGO_HOME", f.cargo_home.path())
+        .env_remove("RUSTC")
+        .env_remove("CARGO_BUILD_RUSTC");
+    cmd.envs(extra_env.iter().map(|(k, v)| (*k, v.as_str())));
+    let out = cmd.output().unwrap();
+    (
+        out.status.code().unwrap(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cached_binary_that_does_not_run_is_replaced_and_a_good_one_is_used_as_it_is() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let env = [("RUSTC", rustc.clone())];
+    let (hash, _) = f.both(&env);
+    let home = scratch.path().join("home");
+    let cached = home.join("bin").join(&hash).join("paddock-dev-test-host");
+    // A damaged cache entry: an empty file that is executable.
+    write_script(&cached, "");
+    std::fs::write(&cached, "").unwrap();
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    assert!(err.contains("does not run; rebuilding"), "{err}");
+    // The rebuilt copy is cached and answers --version, so the next run uses it without building.
+    std::fs::remove_dir_all(f.cargo_home.path().join("target")).unwrap();
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim(), err.as_str()), (0, "built-by-shim", ""));
+    assert!(!f.cargo_home.path().join("target").exists(), "no second build");
+}
+
+#[cfg(unix)]
+#[test]
+fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let missing = [("RUSTC", scratch.path().join("no-such-rustc").display().to_string())];
+    let (code, _, err) = run_wrapper(&f, &home, &missing);
+    assert_eq!(code, 2);
+    assert!(err.contains("rustup") && err.contains("rustc was not found"), "{err}");
+    write_script(
+        &home.join("bin/some-hash/paddock-dev-test-host"),
+        r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#,
+    );
+    let (code, out, err) = run_wrapper(&f, &home, &missing);
+    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
+    assert!(err.contains("running the newest cached tool binary"), "{err}");
+    // A cached file that does not run is not used either.
+    write_script(&home.join("bin/some-hash/paddock-dev-test-host"), "exit 1");
+    assert_eq!(run_wrapper(&f, &home, &missing).0, 2);
+}

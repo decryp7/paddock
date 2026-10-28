@@ -33,6 +33,10 @@ paddock-slots = { path = "../../crates/paddock-slots" }
 # fds.rs: the holder closes the descriptors it inherited.
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+# fds.rs: the standard handles are made non-inheritable before the holder starts.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
 [dev-dependencies]
 tempfile = "3"
 

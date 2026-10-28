@@ -1,0 +1,25 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": false,
+ "eslint": false,
+ "conformance": false,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "docs": false,
+ "apps": [
+  "x"
+ ],
+ "kinds": {
+  "x": [
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   "apps/x/app/src/main.ts"
+  ]
+ }
+}

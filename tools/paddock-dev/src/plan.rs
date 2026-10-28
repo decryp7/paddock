@@ -511,6 +511,7 @@ mod tests {
     fn rule_tables_compile_and_own_paths() {
         assert_eq!(owners("apps/dyno/x"), Some(vec!["app:dyno".to_string()]));
         assert_eq!(owners("scripts/a.mjs"), Some(vec!["tools".to_string(), "ui".to_string()]));
+        assert_eq!(owners("tools/bootstrap.sh"), Some(vec!["tools".to_string()]));
         assert_eq!(owners("Cargo.lock.unknown"), None);
         assert_eq!(owners("apps/loose-file"), None);
         let apps: BTreeSet<String> = ["debrief", "debrief-ai"].map(String::from).into();

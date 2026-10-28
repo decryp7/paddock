@@ -1,0 +1,58 @@
+{
+ "all": false,
+ "crates": true,
+ "ui": true,
+ "eslint": false,
+ "conformance": false,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "docs": true,
+ "apps": [
+  "x",
+  "y",
+  "z"
+ ],
+ "kinds": {
+  "x": [
+   "rust",
+   "ui"
+  ],
+  "y": [
+   "ui"
+  ],
+  "z": [
+   "rust",
+   "ui"
+  ]
+ },
+ "packages": {
+  "crates": [
+   "fx-a",
+   "fx-b"
+  ],
+  "apps/x/app/src-tauri": [
+   "x"
+  ]
+ },
+ "why": {
+  "app:x": [
+   "lock apps/x/app",
+   "cargo apps/x/app/src-tauri reaches crates/a"
+  ],
+  "app:y": [
+   "npm apps/y/app"
+  ],
+  "app:z": [
+   "npm apps/z/app/src-tauri"
+  ],
+  "crates": [
+   "crates/a/src/lib.rs",
+   "crates/a/src/removed.rs",
+   "cargo crates/b reaches crates/a"
+  ],
+  "ui": [
+   "lock ui"
+  ]
+ }
+}

@@ -1,0 +1,51 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": true,
+ "eslint": false,
+ "conformance": true,
+ "tools": true,
+ "icons": false,
+ "ciImage": false,
+ "docs": false,
+ "apps": [
+  "x",
+  "y",
+  "z"
+ ],
+ "kinds": {
+  "x": [
+   "rust",
+   "ui"
+  ],
+  "y": [
+   "rust",
+   "ui"
+  ],
+  "z": [
+   "rust",
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   "conformance conformance/src/a.mjs"
+  ],
+  "app:y": [
+   "conformance conformance/src/a.mjs"
+  ],
+  "app:z": [
+   "conformance conformance/src/a.mjs"
+  ],
+  "conformance": [
+   "conformance/src/a.mjs"
+  ],
+  "tools": [
+   "scripts/a.mjs"
+  ],
+  "ui": [
+   "scripts/a.mjs"
+  ]
+ }
+}

@@ -17,7 +17,7 @@
 
 use clap::Args;
 use paddock_cli::{CliError, Report};
-use paddock_slots::{FsLocks, SlotError, SlotId, SlotLocks, release as release_slot, slot_states};
+use paddock_slots::{Announcement, FsLocks, SlotError, SlotId, release as release_slot, slot_states};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -51,6 +51,9 @@ pub struct ReleaseArgs {
     /// The slot to let go (`s1`...).
     #[arg(long)]
     slot: String,
+    /// The token `acquire` printed (second word of its output, `token` with --json): only the holder it belongs to is released.
+    #[arg(long)]
+    token: String,
     /// The CI home that holds `slots/`.
     #[arg(long)]
     root: PathBuf,
@@ -102,24 +105,9 @@ fn failure(e: SlotError) -> CliError {
     }
 }
 
-/// What the holder said on its pipe.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Announcement {
-    /// It holds this slot.
-    Slot(SlotId),
-    /// All slots were busy.
-    None,
-}
-
 /// Reads the holder's one line.
 pub fn parse_announcement(line: &str) -> Result<Announcement, CliError> {
-    match line.trim() {
-        "none" => Ok(Announcement::None),
-        other => other
-            .parse::<SlotId>()
-            .map(Announcement::Slot)
-            .map_err(|_| CliError::failure(format!("The slot holder said {other:?}, not a slot name."))),
-    }
+    Announcement::parse(line).map_err(|_| CliError::failure(format!("The slot holder said {:?}, not a slot and a token.", line.trim())))
 }
 
 /// The holder's command line.
@@ -139,11 +127,50 @@ pub fn holder_args(a: &AcquireArgs, owner: &Path) -> Vec<String> {
     ]
 }
 
-/// Starts the holder detached, with a pipe for its announcement and nothing else attached to this process.
-fn spawn_holder(args: &[String]) -> Result<std::process::Child, CliError> {
-    let exe = std::env::current_exe().map_err(|e| CliError::failure(format!("Cannot find the dev binary: {e}.")))?;
+/// The holder must run from somewhere that does not stand in the job folder's way: a process whose working folder or program
+/// file is inside `owner` stops Windows from deleting the folder when the job ends (and the slot would stay held). The
+/// program is refused when it lies under the job folder (a dirty `tools/paddock-dev/target` or a `PADDOCK_DEV_FRESH` build
+/// folder inside the job).
+pub fn check_program_outside_owner(exe: &Path, owner: &Path) -> Result<(), CliError> {
+    let (exe, owner) = (canonical_even_if_missing(exe), canonical_even_if_missing(owner));
+    if exe.starts_with(&owner) {
+        return Err(CliError::usage(format!(
+            "The dev program {} is inside the job folder {}, so the slot holder would keep that folder from being deleted.",
+            exe.display(),
+            owner.display()
+        ))
+        .with_hint("Build or copy the tool outside the job folder (PADDOCK_DEV_TARGET_DIR, PADDOCK_DEV_HOME) and run it from there."));
+    }
+    Ok(())
+}
+
+/// `path` with symbolic links resolved, also when its last parts do not exist yet (the nearest existing folder is resolved).
+fn canonical_even_if_missing(path: &Path) -> PathBuf {
+    let mut missing = Vec::new();
+    let mut at = path;
+    loop {
+        if let Ok(real) = at.canonicalize() {
+            return missing.iter().rev().fold(real, |acc, part| acc.join(part));
+        }
+        match (at.parent(), at.file_name()) {
+            (Some(parent), Some(name)) => {
+                missing.push(name.to_os_string());
+                at = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// The holder's command: detached, with a pipe for its announcement and nothing else attached to this process, started in
+/// the CI home (never inside the job folder).
+pub fn holder_command(exe: &Path, args: &[String], root: &Path) -> std::process::Command {
     let mut cmd = paddock_proc::command(exe);
-    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(args)
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -155,43 +182,59 @@ fn spawn_holder(args: &[String]) -> Result<std::process::Child, CliError> {
         // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
         cmd.creation_flags(0x0800_0000 | 0x0000_0200);
     }
-    cmd.spawn().map_err(|e| {
-        CliError::failure(format!("The slot holder could not be started: {e}.")).with_hint("Check that the dev binary can run.")
-    })
+    cmd
 }
 
 /// `dev ci slot acquire`.
 pub fn acquire(a: &AcquireArgs) -> Result<Report, CliError> {
+    let exe = std::env::current_exe().unwrap_or_default();
+    acquire_with(a, &exe)
+}
+
+/// What the holder said first, or an empty string when it ended without saying anything.
+fn first_line(child: &mut std::process::Child) -> String {
+    let mut line = String::new();
+    if let Some(out) = child.stdout.take() {
+        let _ = BufReader::new(out).read_line(&mut line);
+    }
+    line
+}
+
+/// `acquire` with the program that will hold the slot named (the running binary in production).
+pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
     check_max(a.max)?;
     let owner = a.owner.canonicalize().map_err(|e| {
         CliError::usage(format!("--owner {} does not exist: {e}.", a.owner.display()))
             .with_hint("Pass the job's own folder; it must exist.")
     })?;
-    let mut child = spawn_holder(&holder_args(a, &owner))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| CliError::failure("The slot holder has no output."))?;
-    let mut line = String::new();
-    let read = BufReader::new(stdout).read_line(&mut line);
-    match (read, line.as_str()) {
-        (Ok(n), l) if n > 0 => match parse_announcement(l)? {
-            Announcement::Slot(id) => {
-                // The holder lives on by itself; reap nothing, wait for nothing.
-                drop(child);
-                Ok(Report::new(
-                    json!({"slot": id.to_string(), "max": a.max, "holder_pid": holder_pid(&a.root, id)}),
-                    id.to_string(),
-                ))
-            }
-            Announcement::None => {
-                let _ = child.wait();
-                Err(CliError::refused(format!("All {} slots are busy.", a.max)).with_hint("Wait for a job to finish or raise --max."))
-            }
-        },
-        _ => {
+    check_program_outside_owner(exe, &owner)?;
+    std::fs::create_dir_all(&a.root).map_err(|e| {
+        CliError::failure(format!("{} cannot be created: {e}.", a.root.display())).with_hint("Pass a writable CI home with --root.")
+    })?;
+    // The holder must not inherit the runner's pipes (Windows hands every inheritable handle to a child).
+    crate::fds::keep_standard_handles_from_children();
+    let mut child = holder_command(exe, &holder_args(a, &owner), &a.root).spawn().map_err(|e| {
+        CliError::failure(format!("The slot holder could not be started: {e}.")).with_hint("Check that the dev binary can run.")
+    })?;
+    let line = first_line(&mut child);
+    if line.is_empty() {
+        let _ = child.wait();
+        return Err(
+            CliError::failure("The slot holder ended before it took a slot.").with_hint("Run `./dev ci slot hold` by hand to see why.")
+        );
+    }
+    match parse_announcement(&line)? {
+        Announcement::Slot(id, token) => {
+            // The holder lives on by itself; reap nothing, wait for nothing.
+            drop(child);
+            Ok(Report::new(
+                json!({"slot": id.to_string(), "token": token, "max": a.max, "holder_pid": holder_pid(&a.root, id)}),
+                format!("{id} {token}"),
+            ))
+        }
+        Announcement::None => {
             let _ = child.wait();
-            Err(CliError::failure("The slot holder ended before it took a slot.").with_hint("Run `./dev ci slot hold` by hand to see why."))
+            Err(CliError::refused(format!("All {} slots are busy.", a.max)).with_hint("Wait for a job to finish or raise --max."))
         }
     }
 }
@@ -206,7 +249,14 @@ pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
     // Before anything else: descriptors inherited from the job (a pipe the runner waits on) must not outlive the step.
     crate::fds::close_inherited();
     let locks = FsLocks::new(&a.root);
-    let end = paddock_slots::hold(&locks, a.max, &a.owner, Duration::from_millis(a.poll_ms.max(1)), std::io::stdout()).map_err(failure)?;
+    let end = paddock_slots::hold(
+        &locks,
+        a.max,
+        &a.owner,
+        Duration::from_millis(a.poll_ms.max(1)),
+        &mut std::io::stdout(),
+    )
+    .map_err(failure)?;
     Ok(Report::new(json!({"ended": end.map(|(id, why)| format!("{id} {why:?}"))}), ""))
 }
 
@@ -216,6 +266,7 @@ pub fn release(a: &ReleaseArgs) -> Result<Report, CliError> {
     release_slot(
         &FsLocks::new(&a.root),
         id,
+        &a.token,
         Duration::from_secs(a.timeout_secs),
         Duration::from_millis(20),
     )
@@ -251,19 +302,18 @@ pub fn status(a: &StatusArgs) -> Result<Report, CliError> {
     Ok(Report::new(json!({"slots": rows}), text))
 }
 
-/// Whether slot `id` can be taken right now (the lock is released again at once). For tests.
-pub fn is_free(root: &Path, id: SlotId) -> Result<bool, SlotError> {
-    Ok(FsLocks::new(root).try_lock(id)?.is_some())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn announcements_are_a_slot_or_none() {
-        assert_eq!(parse_announcement("s3\n").unwrap(), Announcement::Slot(SlotId::new(3).unwrap()));
+        assert_eq!(
+            parse_announcement("s3 tok-1\n").unwrap(),
+            Announcement::Slot(SlotId::new(3).unwrap(), "tok-1".into())
+        );
         assert_eq!(parse_announcement("none\n").unwrap(), Announcement::None);
+        assert!(parse_announcement("s3").is_err(), "a slot without its token is refused");
         assert!(parse_announcement("hello").is_err());
     }
 
@@ -285,6 +335,70 @@ mod tests {
         assert_eq!(args[..3], ["ci", "slot", "hold"]);
         assert!(args.windows(2).any(|w| w == ["--owner", "/abs/o"]));
         assert!(args.windows(2).any(|w| w == ["--poll-ms", "7"]));
+    }
+
+    #[test]
+    fn the_holder_starts_in_the_ci_home_with_its_own_pipe_and_nothing_else() {
+        let cmd = holder_command(Path::new("dev"), &["ci".to_string()], Path::new("ci-home"));
+        assert_eq!(cmd.get_current_dir(), Some(Path::new("ci-home")));
+        assert_eq!(cmd.get_args().collect::<Vec<_>>(), ["ci"]);
+    }
+
+    #[test]
+    fn a_program_inside_the_job_folder_is_refused_and_one_outside_is_fine() {
+        let d = tempfile::tempdir().unwrap();
+        let (job, tools) = (d.path().join("job"), d.path().join("tools"));
+        std::fs::create_dir_all(job.join("target/release")).unwrap();
+        std::fs::create_dir_all(&tools).unwrap();
+        let inside = job.join("target/release/paddock-dev");
+        let outside = tools.join("paddock-dev");
+        std::fs::write(&inside, "x").unwrap();
+        std::fs::write(&outside, "x").unwrap();
+        let err = check_program_outside_owner(&inside, &job).unwrap_err();
+        assert_eq!(err.exit, paddock_cli::Exit::Usage);
+        assert!(err.text().contains("inside the job folder") && err.text().contains("PADDOCK_DEV_TARGET_DIR"));
+        assert!(check_program_outside_owner(&outside, &job).is_ok());
+        // A path that does not exist (yet) is still judged by where it would be.
+        assert!(check_program_outside_owner(&job.join("not-built-yet"), &job).is_err());
+        assert!(check_program_outside_owner(&tools.join("not-built-yet"), &job).is_ok());
+    }
+
+    #[test]
+    fn a_path_with_nothing_existing_in_it_is_taken_as_it_is() {
+        assert_eq!(
+            canonical_even_if_missing(Path::new("no-such-relative-path")),
+            Path::new("no-such-relative-path")
+        );
+    }
+
+    fn args(root: &Path, owner: &Path) -> AcquireArgs {
+        AcquireArgs {
+            max: 1,
+            owner: owner.to_path_buf(),
+            root: root.to_path_buf(),
+            poll_ms: 20,
+        }
+    }
+
+    #[test]
+    fn a_program_that_cannot_start_is_a_failure_that_names_the_next_step() {
+        let d = tempfile::tempdir().unwrap();
+        let job = d.path().join("job");
+        std::fs::create_dir(&job).unwrap();
+        let err = acquire_with(&args(&d.path().join("ci"), &job), &d.path().join("no-such-dev")).unwrap_err();
+        assert_eq!(err.exit, paddock_cli::Exit::Failure);
+        assert!(err.text().contains("could not be started") && err.text().contains("dev binary"));
+    }
+
+    #[test]
+    fn a_ci_home_that_cannot_be_created_is_reported_before_anything_starts() {
+        let d = tempfile::tempdir().unwrap();
+        let job = d.path().join("job");
+        std::fs::create_dir(&job).unwrap();
+        let file = d.path().join("a-file");
+        std::fs::write(&file, "x").unwrap();
+        let err = acquire_with(&args(&file.join("ci"), &job), &d.path().join("dev")).unwrap_err();
+        assert!(err.text().contains("cannot be created") && err.text().contains("--root"));
     }
 
     #[test]

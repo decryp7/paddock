@@ -1,0 +1,43 @@
+{
+ "all": false,
+ "crates": true,
+ "ui": false,
+ "eslint": false,
+ "conformance": true,
+ "tools": true,
+ "icons": false,
+ "ciImage": false,
+ "docs": false,
+ "apps": [
+  "x"
+ ],
+ "kinds": {
+  "x": [
+   "rust"
+  ]
+ },
+ "packages": {
+  "crates": [
+   "fx-a",
+   "fx-b"
+  ],
+  "apps/x/app/src-tauri": [
+   "x"
+  ]
+ },
+ "why": {
+  "app:x": [
+   "cargo apps/x/app/src-tauri reaches crates/a"
+  ],
+  "conformance": [
+   "docs/rules.md"
+  ],
+  "crates": [
+   "crates/a/CHANGELOG.md",
+   "cargo crates/b reaches crates/a"
+  ],
+  "tools": [
+   "docs/rules.md"
+  ]
+ }
+}

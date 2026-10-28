@@ -107,3 +107,26 @@ fn graph_affected_with_nothing_to_plan_is_usage() {
     assert_eq!(code, 2);
     assert!(err.contains("--files"));
 }
+
+#[test]
+fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step() {
+    let d = tempfile::tempdir().unwrap();
+    let run = |dir: &std::path::Path| {
+        let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+            .args(["self", "hash"])
+            .current_dir(dir)
+            .env("GIT_CEILING_DIRECTORIES", d.path().parent().unwrap())
+            .output()
+            .unwrap();
+        (out.status.code().unwrap(), String::from_utf8_lossy(&out.stderr).into_owned())
+    };
+    let (code, err) = run(d.path());
+    assert_eq!(code, 1);
+    assert!(err.contains("Paddock repository"), "{err}");
+    // A repository that is not Paddock's: no tools/paddock-dev/inputs.txt.
+    let init = Command::new("git").args(["init", "-q"]).current_dir(d.path()).status().unwrap();
+    assert!(init.success());
+    let (code, err) = run(d.path());
+    assert_eq!(code, 1);
+    assert!(err.contains("inputs.txt"), "{err}");
+}
