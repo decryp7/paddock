@@ -2,12 +2,14 @@ import { MemoryMcpBackend, TauriMcpBackend, type McpBackend, type MemoryMcpOptio
 import { tauriIpc } from './demo-ipc';
 
 /**
- * What the browser build starts with (`?mcp=error|calls|many-keys`; nothing by default: off, no clients, an empty log).
+ * What the browser build starts with (`?mcp=error|calls|many-keys|refuse|slow`; nothing by default: off, no clients, an empty log).
  * `calls` has a few recorded calls, `error` fails the first ask once, `many-keys` has the key limit nearly reached.
  */
 export function fakeMcp(search: string = globalThis.location?.search ?? ''): MemoryMcpOptions {
   const wanted = new URLSearchParams(search).get('mcp');
   if (wanted === 'error') return { getFailures: 1 };
+  // The key dialog's rejected state: issuing a key is refused with the engine's message.
+  if (wanted === 'refuse') return { issueError: { code: 'invalid', message: '16 keys are in use. Revoke one you no longer need first.', retryable: false } };
   if (wanted === 'calls') {
     return {
       calls: [
@@ -31,6 +33,8 @@ export function demoMcpBackend(): McpBackend {
   if (ipc) return new TauriMcpBackend(ipc);
   if (!memory) {
     const engine = new MemoryMcpBackend(fakeMcp());
+    // The key dialog's busy state (`?mcp=slow`): issuing a key never answers.
+    if (new URLSearchParams(globalThis.location?.search ?? '').get('mcp') === 'slow') engine.issueKey = () => new Promise(() => undefined);
     memory = engine;
     // Demo only: the browser build has no client to call a tool, so a spec (or a person in the console) plays one.
     (globalThis as { __pdDemoMcp?: MemoryMcpBackend }).__pdDemoMcp = engine;
