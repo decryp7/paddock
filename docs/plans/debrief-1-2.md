@@ -201,8 +201,8 @@ conventions (failing test first, wave-0 markers, own worktree, one declared line
 not duplicate 4.3 (import footprint), 2.6/4.4 (plugin lifecycle), PH4/3.4 (evtx streaming) or 5.2 (deferral), which stay
 as they are; P2 is ADR 0020 WP-8's store-duck item, done now. Updated 2026-10-28 after the user's decisions: D7 (the
 budgets are gates) and D11 (one family ADR) taken; the background alias job is removed, `autoload` is off by default and
-rule 46 forbids LLMs for large jobs, so the naming-model tuning packages are dropped (the names pack, about 1,500
-entries for all OS, is the LLM research's N3 on `docs/research-debrief-llm`, not repeated here). Ids `NR`/`BP` avoid the
+rule 46 forbids LLMs for large jobs, so the naming-model tuning packages are dropped (the names-pack mechanism, with no large curated pack,
+is the LLM research's N3 on `docs/research-debrief-llm`, not repeated here). Ids `NR`/`BP` avoid the
 LLM research's `N` ids.
 
 | # | Package | Owned files | Role | Depends on | Acceptance | Days | Wave |
@@ -232,7 +232,7 @@ confirmation that shows the count and the estimated time.
 | N1 | **Remove the automatic alias job**: `schedule_alias_job` calls, the `name_aliases` setting, `Polite`, `LocalAliasModel`'s background use and an unused `background_provider`; old `AiEntry` aliases still load (labelled, removable) | implementer | none | 0.5 | 2 |
 | N6 | **Video describe confirmation**: "describe all frames" kept, but a job over a selection or over all frames first shows the frame count and the estimated time and needs a confirm; no request is sent before it | implementer | none | 0.5 | 2 |
 | N2 | **Abbreviation rule in layer 1** (`How::Abbreviation`), no layer 2 needed (top-1 >= 95 %) | implementer | none | 1.5 | 3 |
-| N3 | **Names pack** (`names` `PackKind` on `paddock-packs`; built-in windows, macos, linux and exceptions packs of about 1,500 entries for all OS; user `packs/`, hot reload, health line); 2 days code + 3 days curation | designer, then implementer | none | 5 | 3 |
+| N3 | **Names pack mechanism** (`names` `PackKind` on `paddock-packs`; user `packs/`, hot reload, health line); built-in packs ship empty or with at most a few dozen entries, added only for gaps measured on real imports after 1.2; the 3-day curation of about 1,500 entries is dropped | designer, then implementer | none | 2 | 3 |
 | N4 | **Log-name harvest** during the catalogue build as `How::LogName` aliases with evidence (feeds P4's tally) | implementer | N3 | 2 | 4 |
 | N5 | **Explicit "Suggest names with AI"** (at most 16 names, one interactive request, review list, accepted names stored as user facts) | implementer | N1 | 1.5 | 5 |
 | N0 | **Local names coverage report** in Diagnostics (counts per layer, nothing leaves the machine) | implementer | N3, N4 | 0.5 | 6 |
@@ -303,6 +303,8 @@ All of it runs once on the combined result before the local build and the tag (r
 
 ### Estimate
 
+The LLM-use packages N0-N8 (about 10.5 agent-days after dropping the names curation) are listed in section 2 and are not yet in the totals below.
+
 | Wave | Packages | Agent-days | Longest package (days) |
 |---|---|---|---|
 | 0 | 0.1-0.5 | 7.5 | 2 |
@@ -357,6 +359,6 @@ From the performance research (its section 7), decided 2026-10-28:
 | D7 | The performance budgets (idle ≤ 0.5 % of a core and ≤ 1 wake-up/s per process; worker ≤ 768 MB at 7.6 GB; ≤ 6 s and ≤ 32 CPU-s per GB; post-import ≤ 20 CPU-s per GB) | **Gates**: counting tests on PRs, the nightly regression gate in `debrief-bench.yml` (B1) |
 | D8 | The background alias job and the `name_aliases` setting | **Removed** (LLM research N1) |
 | D9 | Rule 46 (no LLM for large or background jobs; explicit, bounded, interactive use only) | **Adopted** in `docs/rules.md` (N8) |
-| D10 | Names | `autoload` is **off by default** (the model loads on first AI use); the names pack has about **1,500 entries for all OS** (N3) |
+| D10 | Names | `autoload` is **off by default** (the model loads on first AI use); there is **no large curated names pack**: 1.2 builds names from log metadata (Sysmon Description/Product, Service Control Manager display names, msinfo32, journald), the abbreviation and splitting rules, Model2Vec "did you mean" and persisted user corrections; the pack mechanism ships empty or with a few dozen entries (N3, N4, N2, N7) |
 | D12 | Video "describe all frames" | **Kept**, behind a confirmation that shows the frame count and the estimated time (N6) |
 | D11 | One family ADR for the background-work patterns | **Yes**: ADR 0024 (Accepted 2026-10-28, A1) |
