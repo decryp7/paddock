@@ -131,6 +131,13 @@ changes here, every app's copy is updated in the same change.
     8 GB model to name 2,000 log names after every import), its answers change with the model and cannot be explained, and
     rules, packs and the logs' own metadata were measured as good or better for the same job.
 
+## Components (user, 2026-10-28)
+47. **Material first.** Use Angular Material components wherever one fits (tables, menus, tooltips, tabs, selects,
+    toggles, chips, steppers, trees, progress, snack bars…), and Angular CDK for behaviour Material doesn't cover;
+    hand-roll only what neither provides, with the reason in the component's doc comment. Material is themed through the
+    `--pd-*` tokens (one shared theme), CSP-safe. *Why:* Material is widely used and tested; hand-rolled components cost
+    bugs it already solves.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:

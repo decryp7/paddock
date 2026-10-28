@@ -549,3 +549,21 @@ render rounds to leave Loading. On a busy CI runner a first `import()` of the se
 reported "never leaves Loading" for a dialog that was fine. **Rule:** a test waits on the condition itself (the promise the
 code awaits, `whenStable` over pending tasks), never on a count of turns, rounds or milliseconds; a wait that can hang is
 left to the runner's test timeout, which names the test (rule 5).
+
+## Material first, because it is tested (2026-10-28)
+Hand-rolled components (for example `pd-table`'s sticky header over virtual scroll) cost us bugs that the Angular
+Material and CDK equivalents already solve and test. **Rule:** use a Material component wherever one fits and CDK for
+the behaviour Material lacks; hand-roll only what neither provides, with the reason in the doc comment (rule 47).
+
+## aws-lc's jitter entropy aborts on Windows VMs; build with AWS_LC_SYS_NO_JITTER_ENTROPY=1 (2026-10-28, Spotter)
+
+Spotter's one test that completes a TLS ClientHello died twice on the Windows runner (a VM) with 0xc0000409, no panic
+and an empty stderr (runs 6457 and 6628). The probable cause: the first random draw in a process seeds aws-lc's
+generator from CPU Jitter Entropy, which calls `abort()` when the jitter source fails its health tests three times
+(aws/aws-lc-rs#1072, open, seen on Windows VMs and at early boot), and the MSVC CRT turns `abort()` into a fast fail
+with that code, which reads like a stack overrun. Not caught in a dump; on the Mac 8,680 fresh processes under load
+never failed. The shipped app takes the same path for mail and HTTPS. **Rule:** an app that links aws-lc (rustls'
+default provider, reqwest's `rustls`) sets `AWS_LC_SYS_NO_JITTER_ENTROPY = { value = "1", force = true }` in its
+`.cargo/config.toml` `[env]`, with a test that reads it through `option_env!`, and never sets the target-suffixed
+variant, which the build script reads first. Windows 0xc0000409 is any self-triggered abort (`abort()`, `__fastfail`,
+`/GS`), not proof of a buffer overrun: look for a C `abort()` first.
