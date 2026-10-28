@@ -28,8 +28,8 @@ const d: Dashboard = {
   watches: [num('a', [3, 3, 3], [0, 1, 0]), num('b', [2, 2], [1, 0])],
   downloads: [
     { count: 0, failed: 0, bytes: 0 },
-    { count: 3, failed: 1, bytes: 3 * 1048576 + 52429 },
-    { count: 1, failed: 0, bytes: 10 * 1048576 },
+    { count: 3, failed: 1, bytes: 3_100_000 },
+    { count: 1, failed: 0, bytes: 10_000_000 },
   ],
   computeMicros: 1,
 };
