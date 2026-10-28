@@ -5,7 +5,9 @@ decision or a lesson; the reasons are in [lessons.md](lessons.md). Each app's `A
 changes here, every app's copy is updated in the same change.
 
 ## Way of working
-1. **One app at a time.** Finish the current app before starting another; parallel agents only within that app.
+1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and
+   CI capacity allow, and only if they don't change shared code (`crates/`, `ui/`) the release depends on; tags stay
+   serialized (amended twice on 2026-10-28; ER-1).
 2. **Every agent works in its own git worktree** with its own `CARGO_TARGET_DIR` and its own e2e port; the main checkout
    stays on `main` for the coordinator.
 3. **Tests in a branch: only the affected ones** (touched crates, touched specs, related Playwright files), with
@@ -119,6 +121,16 @@ changes here, every app's copy is updated in the same change.
     zoom as explicit choices; the viewer fits before its first paint rather than after measuring. A shared viewer in
     `paddock-ui` (rule 39) owns the default; `notes/image/note-image-view.ts` in Debrief starts at scale 1 and must adopt it.
 
+**Large jobs (user, 2026-10-28; Debrief research note 2026-10-28)**
+46. **No LLM for large jobs.** Work over many items (imports, catalogues, name tables, indexing, classification, tagging
+    or summaries per item) uses deterministic rules, shipped TOML knowledge packs (rule 21) and static embeddings; an LLM
+    is used only for bounded requests the user starts (a chat turn, a chosen range, an explicit "Suggest with AI" over a
+    small selection), never automatically and never once per item. An exception (for example describing all frames of a
+    video) needs an explicit confirmation that states the item count and the expected time. *Why:* a local model per item
+    turns a cheap background task into hours of GPU and gigabytes of memory on the user's machine (Debrief 1.1 loaded an
+    8 GB model to name 2,000 log names after every import), its answers change with the model and cannot be explained, and
+    rules, packs and the logs' own metadata were measured as good or better for the same job.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
@@ -133,4 +145,5 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
   try is fine but is never published. Never tag a `[skip ci]` commit.
 - **Rules 39 and 42:** shared code is moved to `crates/` or `ui/` and adopted by the app **in the same change**; there is
   no publish-and-consume step. "Consume the published version" becomes "use the in-tree version".
-- Rule 1 is unchanged: one app at a time is about attention and load, not repos.
+- Rule 1 is about attention, load, CI capacity and shared-code conflicts, not repos (amended 2026-10-28: one release at a
+  time; other apps only within those limits).

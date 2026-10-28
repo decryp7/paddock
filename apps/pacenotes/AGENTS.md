@@ -64,7 +64,9 @@ Apply these deliberately. They are not decoration:
   regenerating merges with hand edits (positions, styles, added shapes) and never overwrites them; stale elements are
   flagged, not silently deleted.
 - **Pitwall is optional.** Every function works without it, or says clearly that it needs local AI and links to setting
-  up Pitwall. Use the shared Paddock Pitwall client and batch priority for bulk AI work.
+  up Pitwall. Use the shared Paddock Pitwall client. No LLM per item for bulk work (family rule 46): indexing is Model2Vec + BM25 on the CPU;
+  Qwen only re-ranks a query's top hits and, as the opt-in per-repository "Deep index with Qwen" job, embeds a whole
+  repository after a confirmation showing the time and size estimate (ADR 0001, amended 2026-10-28).
 - **Boundary with Sighter.** Sighter owns UI test execution; Pacenotes owns requirements and traceability and may draft
   test plans for Sighter, never run them.
 

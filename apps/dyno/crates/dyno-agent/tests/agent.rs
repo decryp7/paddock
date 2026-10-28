@@ -10,6 +10,7 @@ use dyno_core::protocol::{ErrorCode, LiveDetail, LiveUpdate, Message, Reply, Req
 use dyno_core::time::Timestamp;
 use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
+use dyno_platform::Platform;
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 
@@ -22,13 +23,18 @@ struct Harness {
 
 impl Harness {
     fn start() -> Harness {
+        Harness::start_with(|platform| platform)
+    }
+
+    /// Starts the agent over the fake, with `adapt` free to replace ports of the platform first.
+    fn start_with(adapt: impl FnOnce(Platform) -> Platform) -> Harness {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         for (pid, name, cpu) in [(100, "busy", 60.0), (101, "calm", 1.0), (102, "launchd", 0.1)] {
             fake.add_process(process(pid, name, cpu));
         }
-        let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
+        let running = Running::start(dirs.clone(), adapt(fake.platform()), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
         Harness {
             running: Some(running),
             fake,

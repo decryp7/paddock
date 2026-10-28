@@ -3207,6 +3207,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-net",
  "paddock-secrets",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "proptest",
  "serde",
@@ -3505,6 +3506,7 @@ version = "0.1.0"
 dependencies = [
  "paddock-download",
  "paddock-jobs",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "proptest",
  "rustls",
@@ -3824,6 +3826,7 @@ version = "0.1.0"
 dependencies = [
  "paddock-jobs",
  "paddock-workspace-hack",
+ "socket2",
  "tempfile",
 ]
 

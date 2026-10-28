@@ -190,11 +190,10 @@ fn the_address_the_socket_connects_to_is_checked_even_when_the_name_looked_publi
 }
 
 #[test]
-fn a_closed_port_is_a_connect_error_and_a_silent_server_ends_at_the_time_limit() {
-    let port = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+fn a_reset_connection_is_a_connect_error_and_a_silent_server_ends_at_the_time_limit() {
+    // A held port that resets every connection, not a port read off a dropped listener (ADR 0023).
+    let held = paddock_testkit::net::HeldPort::reset();
+    let port = held.port();
     let (egress, _) = local();
     let e = egress
         .send(
@@ -273,11 +272,10 @@ fn the_download_transport_streams_a_range() {
 }
 
 #[test]
-fn a_proxy_that_cannot_be_reached_is_reported_and_proxy_settings_reload() {
-    let port = {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+fn a_proxy_that_resets_the_connection_is_reported_and_proxy_settings_reload() {
+    // A held port that resets every connection, not a port read off a dropped listener (ADR 0023).
+    let held = paddock_testkit::net::HeldPort::reset();
+    let port = held.port();
     let proxy = ProxyServer::parse(&format!("http://127.0.0.1:{port}"))
         .unwrap()
         .with_credentials("user", "s3cret");

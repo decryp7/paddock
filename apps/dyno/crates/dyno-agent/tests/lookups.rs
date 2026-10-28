@@ -9,13 +9,14 @@ use dyno_agent::Running;
 use dyno_core::history::HistoryRange;
 use dyno_core::netchange::{Link, LinkKind, NetState};
 use dyno_core::process::ProcessRef;
-use dyno_core::protocol::{Message, Reply, Request, TimelineEventKind};
+use dyno_core::protocol::{LiveDetail, Message, Reply, Request, TimelineEventKind};
 use dyno_core::startup::{ImpactRating, StartupEntry, StartupFilter, StartupImpact, StartupLocation, StartupState};
 use dyno_core::time::Timestamp;
 use dyno_core::weblinks::HashSource;
-use dyno_ipc::Peer;
+use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
 use std::path::PathBuf;
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,6 +45,38 @@ impl Harness {
 
     fn client(&self) -> Peer<Message> {
         connect(&self.dirs).unwrap().0
+    }
+
+    /// Waits until the agent's process table holds `pid`: the sampler fills it on its own thread after the start, and
+    /// the agent answers only for processes it has sampled.
+    fn wait_for_process(&self, pid: u32) {
+        let d = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()).unwrap();
+        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let (tx, rx) = channel();
+        let peer = Peer::start(
+            conn,
+            PeerOptions::new().on_push(move |m| {
+                if let Message::Live(l) = m {
+                    let _ = tx.send(*l);
+                }
+            }),
+        )
+        .unwrap();
+        ask(
+            &peer,
+            Request::Subscribe {
+                detail: LiveDetail::Processes,
+            },
+        )
+        .unwrap();
+        loop {
+            let live = rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("a live update with the process table");
+            if live.processes.is_some_and(|ps| ps.iter().any(|p| p.pid == pid)) {
+                return;
+            }
+        }
     }
 
     fn shared(&self) -> Arc<dyno_agent::agent::Shared> {
@@ -158,26 +191,17 @@ fn a_running_process_is_hashed_from_the_file_it_runs_from() {
     let target = p.reference();
     let h = Harness::start(|f| f.add_process(p));
     let peer = h.client();
-    // The sampler fills the process table within a tick or two.
-    let mut answer = None;
-    for _ in 0..40 {
-        match ask(
-            &peer,
-            Request::FileHash {
-                source: HashSource::Process(target),
-            },
-        ) {
-            Ok(Reply::FileHash(i)) => {
-                answer = Some(i);
-                break;
-            }
-            _ => std::thread::sleep(Duration::from_millis(100)),
-        }
-    }
-    assert_eq!(
-        answer.unwrap().sha256,
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    );
+    h.wait_for_process(300);
+    let Reply::FileHash(answer) = ask(
+        &peer,
+        Request::FileHash {
+            source: HashSource::Process(target),
+        },
+    )
+    .unwrap() else {
+        panic!("hash")
+    };
+    assert_eq!(answer.sha256, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
 fn startup(name: &str, exe: &str, publisher: Option<&str>) -> StartupEntry {
