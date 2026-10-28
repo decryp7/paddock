@@ -25,6 +25,7 @@ import { PitcrewIcon } from './pitcrew-icon';
 import { PitcrewRoot } from './pitcrew-root';
 import { ABOUT_CONTRIBUTIONS, PITCREW_CONTRIBUTIONS, PITCREW_ROUTES } from './pitcrew.contributions';
 import { settingsBackend } from './settings';
+import { followJobsStartedElsewhere } from './window-jobs';
 
 const SCENARIOS: MockScenario[] = ['demo', 'empty', 'unavailable', 'notInstalled', 'mismatch'];
 
@@ -70,6 +71,8 @@ export function bootMainWindow(): Promise<unknown> {
           return new TauriBackend(undefined, undefined, (id) => injector.get(JobsStore).follow(id));
         },
       },
+      // A registration the register window starts is not announced a second time here: its wizard says how it ended.
+      provideAppInitializer(() => followJobsStartedElsewhere()),
       provideAppInitializer(() => {
         const backend = inject(BACKEND);
         if (backend instanceof TauriBackend) void backend.init();
