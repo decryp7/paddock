@@ -122,6 +122,9 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
+| `paddock-repo-files` | a bounded, `.gitignore`-aware repository walk and SHA-256 hashing with deterministic results (ADR 0022 §6) | yes (`paddock-dev`; Pacenotes' index later); built |
+| `paddock-repo-graph` | the project graph: Cargo and npm projects and edges (Tauri `frontendDist`, tsconfig, angular.json, ESLint config references), file to project, the affected closure, lockfile differences and a `History` port; git and `cargo metadata` adapters behind features (ADR 0022 §6) | yes (`paddock-dev`; Pacenotes later); built |
+| `paddock-slots` | numbered slots over OS file locks the kernel releases when the holder dies, a holder protocol and a typed API: no stale reclaim, so no reclaim race (ADR 0022, the CI kit's job isolation) | yes (`paddock-dev ci slot`); built |
 | `paddock-siblings` | hand-off between the family's apps: the apps and what each accepts (`docs/ecosystem.md`), a typed `Handoff` (open, import files, show an item), discovery of an installed sibling per OS, starting it detached with paths or a deep link, plain "not installed" and "needs update" answers, the receiving side's parsers (plan X45; from Pitcrew's `debrief_link.rs` and `handoff.rs`) | yes (Pitcrew, Dyno, Debrief, Spotter); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
 | `paddock-channels` | outbound notification channels: webhook, ntfy and e-mail (STARTTLS, TLS, none), secrets from `paddock-secrets` (scope `channel:<id>`), bounded payloads, retries with the family's back-off on an injected clock, test send before and after saving; ports `HttpPoster`/`MailSender` with real adapters and in-process fakes (plan X17) | yes (Pitcrew, Spotter; Dyno, Debrief later); built |
@@ -1847,3 +1850,27 @@ let answer = plugin.invoke("collector", "start", json!({ "folder": path }))?;   
 - **Not here:** Debrief's profile/document importers, dumps, the old `PluginRequest` enum (it becomes the `debrief.*`
   contract bodies, ADR 0003 phase 2), the elevated *process* (the app starts it and runs `Invoke` with the `elevated` role),
   the OS sandbox. The author's tool is `cargo-paddock-plugin` (below).
+
+
+## `paddock-repo-files`, `paddock-repo-graph` and `paddock-slots` (ADR 0022 R0)
+
+The shared layers under `tools/paddock-dev` (`./dev`), each with a pure core and a thin adapter:
+
+- `paddock-repo-files`: `walk(root, WalkLimits)` lists the files below a folder, sorted, `/`-separated, `.gitignore`-aware
+  also outside a git repository, `.git` skipped, links not followed, bounded by `max_files` and `max_depth`;
+  `hash_file`/`hash_bytes`/`hash_files`/`hash_listing` give SHA-256 hex (files streamed and capped, many files on a bounded
+  number of threads in the order given). Typed `RepoFilesError`.
+- `paddock-repo-graph`: `Graph` (projects by folder; `node_of` the deepest project containing a path; `dependents` the reverse
+  closure), `npm_graph` (`FileSource` port), `cargo_graph`/`parse_metadata` (`CargoMetadata` port), `lock_diff` (npm
+  workspaces whose resolution changed between two `package-lock.json` texts) and the `History` port (tracked files, changed
+  files, a file at a revision, the log). Features, both off by default: `git-history` (`GitHistory`) and `cargo-metadata`
+  (`CargoCli`), which run `git` and `cargo` through `paddock-proc`. **`cargo-metadata` is never enabled under
+  `apps/pacenotes/`** (cargo reads the repository's `.cargo/config.toml`, which can name programs to run; ADR 0022 §6, and the
+  extended WP-C6 check will fail on it). Paddock's own rules (global inputs, doc inputs, owners) are `paddock-dev`'s `plan`
+  module, not this crate's.
+- `paddock-slots`: `SlotId` (`s1`...), the `SlotLocks` port and `acquire_first`/`slot_states` (pure), `FsLocks` over
+  `<root>/slots/sN.lock` (`File::try_lock`: `flock`, `LockFileEx`), and the holder protocol `hold` (take a slot, announce it
+  on a writer, keep it until the owner folder is gone or `release` asks), `release`, `wait_free`. The lock file is never read
+  or written (Windows locks block other handles); `sN.owner` and `sN.release` are information and a request. Reading
+  `slot_states` tries each lock for an instant, so a status call can make a concurrent acquirer skip a slot once.
+  Used by `./dev ci slot acquire|release|status` (see `tools/paddock-dev/src/slots.rs` for the detached-holder design).
