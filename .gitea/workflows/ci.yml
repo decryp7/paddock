@@ -445,7 +445,8 @@ jobs:
           workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
           name: paddock-${{ github.job }}
 
-      # Toolchain and sccache on every OS: sccache's local disk cache (host runners: ~/.paddock-ci/sccache, containers: the /sccache mount).
+      # Toolchain and sccache on every OS: sccache's local disk cache (host runners: the job slot's kept folder sccache-s<n>,
+      # containers: the /sccache mount).
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
@@ -455,7 +456,7 @@ jobs:
           rustc --version && cargo --version
           cargo clippy --version || { echo "::error::clippy is missing on this runner (rustup component add clippy)"; exit 1; }
 
-      # The pinned cargo-nextest: the image's on Linux, a copy kept under ~/.paddock-ci/tools on the hosts (downloaded once
+      # The pinned cargo-nextest: the image's on Linux, a copy in the hosts' shared kept folder tools (downloaded once
       # per version); the step fails when the runner has another version.
       - uses: ./.gitea/actions/host-tools
 

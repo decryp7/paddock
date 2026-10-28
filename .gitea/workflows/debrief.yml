@@ -11,7 +11,7 @@
 #
 # Speed (Paddock lessons, "Test and build speed"): Linux jobs run in the paddock-ci image (Rust, nextest, Tauri's libraries,
 # Node, Playwright's browsers, Chrome for Testing and libduckdb baked in); every Rust job compiles through sccache on local
-# disk (setup-rust: the runner's /sccache mount in a container, ~/.paddock-ci/sccache on a host); host runners build from a
+# disk (setup-rust: the runner's /sccache mount in a container, the job slot's sccache-s<n> on a host); host runners build from a
 # fixed checkout path (stable-workspace) into a kept build folder set as cargo configuration (the build-folder action),
 # never CARGO_TARGET_DIR, which sccache hashes; npm's and Angular's caches are kept (node-caches).
 #
@@ -634,7 +634,7 @@ jobs:
           fi
           node --version
 
-      # npm's and Angular's caches (the /sccache mount on Linux, ~/.paddock-ci on macOS). Windows reuses a whole
+      # npm's and Angular's caches (the /sccache mount on Linux, the CI home's kept folders on macOS). Windows reuses a whole
       # node_modules instead (below).
       - uses: ./.gitea/actions/node-caches
         if: runner.os != 'Windows'
@@ -659,7 +659,7 @@ jobs:
         run: node e2e-tauri/scripts/fetch-msedgedriver.mjs
 
       # Windows host: unpacking ~900 packages into a fresh node_modules took 7–14 min per job even with the npm cache
-      # on disk. A finished node_modules per package-lock.json lives in %USERPROFILE%\.debrief-ci and is linked into the
+      # on disk. A finished node_modules per package-lock.json lives in the job slot's kept folder node-modules and is linked into the
       # job's checkout (a directory junction); npm ci runs only when the lockfile changed. The last step removes the
       # junction, so no cleanup ever walks into the shared copy (a junction a killed job left is removed here first).
       - name: Reuse node_modules for this lockfile (Windows)

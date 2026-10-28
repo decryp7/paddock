@@ -88,59 +88,72 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
 
 ## Job isolation (ADR 0025)
 
-Any number of jobs may run on one host runner at once (its capacity: 2 on the Mac and Windows hosts, more later without a
-code change), so no job may touch another's folders, processes or ports. `conformance/ci/job-isolation.sh` is the one way
-to them; a conformance test (`conformance/test/job-isolation.test.mjs`) fails when a workflow, action or CI script spells
-a CI-home path itself, or when a host job does not take and release a slot.
+Any number of jobs may run on one host at once: Pitcrew's pool of capacity-1 runners (Pitcrew ADR 0021: `mac-1` ...
+`mac-N`, each its own runner folder and `.runner`), all running as one user and so sharing **one CI home**. No job may
+touch another's folders, processes or ports; the job's slot derives its folders and ports. `conformance/ci/job-isolation.sh`
+is the one way to them; a conformance test (`conformance/test/job-isolation.test.mjs`) fails when a workflow, action or CI
+script spells a CI-home path itself, or when a host job does not take and release a slot. Do not raise a runner's
+`capacity` instead: add runners to the pool.
 
 **The runner's job folder** (verified 2026-10-28 on the Mac's `gitea-runner` v5.2.3, host mode, `workdir_parent:
-~/gitea-runner/work`): every job gets `<workdir_parent>/<16 random hex>/` with `hostexecutor/` (the checkout), `tmp/`
-(`$RUNNER_TEMP`), `tool_cache/` and `act/`, distinct for concurrent jobs and removed when the job ends
+~/gitea-runner/work`, and from the Windows runner's job log: v5.2.2, `C:\gitea-runner\work\<16 hex>\{hostexecutor,tmp}`):
+every job gets `<workdir_parent>/<16 random hex>/` with `hostexecutor/` (the checkout), `tmp/` (`$RUNNER_TEMP`),
+`tool_cache/` and `act/`, distinct for concurrent jobs and removed when the job ends
 (sources: [act/runner/run_context.go](https://gitea.com/gitea/runner/src/branch/main/act/runner/run_context.go),
 `startHostEnvironment`: the folder from 8 random bytes, `CleanUp` removes it;
 [act/container/host_environment.go](https://gitea.com/gitea/runner/src/branch/main/act/container/host_environment.go),
 `GetRunnerContext`: `"temp": e.TmpDir`, so `RUNNER_TEMP` is the job's own `tmp/`, and `Remove` ends the job's process
-group before deleting the folder; observed on the Mac: one such folder during a running job, its `tmp/` holding that job's
-files). The Mac's `config.yaml` sets no `runner.timeout`, so a job may run 3 h (the runner's default, and Gitea's own job
-timeout: [config.example.yaml](https://gitea.com/gitea/runner/src/branch/main/internal/pkg/config/config.example.yaml)).
-The Windows runner's version, work folder and timeout are **not verified**: check them before raising its capacity.
+group before deleting the folder). The Mac's `config.yaml` sets no `runner.timeout`, so a job may run 3 h (the runner's
+default, and Gitea's own job timeout:
+[config.example.yaml](https://gitea.com/gitea/runner/src/branch/main/internal/pkg/config/config.example.yaml)). The
+Windows runner's `runner.timeout` is not verified. Linux jobs run in a container on a Docker network of their own
+(`GITEA-ACTIONS-TASK-<n>-...-network`, created and removed per job: the Linux job logs), so their ports never collide.
 
 **What goes where, and why:**
 
 | State | Where | Why |
 |---|---|---|
 | Test temp folders, the clean-up's temp sweep, `{tmp}` process patterns | the job's `$RUNNER_TEMP` (the action sets `TMPDIR`, and `TMP`/`TEMP` on Windows, and `PADDOCK_JOB_TEMP` to it) | it need not outlive the job; the runner gives each job its own and deletes it after |
-| Build folder (`target`), stable checkout (`src`), Angular cache, test browser, libduckdb, Debrief's Windows `node_modules` | kept folders of the job's **slot**: `<ci-home>/<layout>-s<n>` (process patterns name one as `[/\\]<kept folder name>-{slot}`, at the end of the pattern; `{slot}` becomes `s<n>([^0-9]\|$)`) | a stable absolute path keeps them warm (cargo fingerprints and sccache keys hold absolute paths); a fresh per-job path would rebuild cold every run; one slot per concurrent job means no two jobs write one |
-| npm's download cache, sccache's disk cache, pinned tools | **shared** kept folders | safe for concurrent writers (content-addressed or renamed into place) |
+| Build folder (`target`), stable checkout (`src`), Angular cache, test browser, libduckdb, Debrief's Windows `node_modules`, sccache's disk cache | kept folders of the job's **slot**: `<ci-home>/<layout>-s<n>` (process patterns name one as `[/\\]<kept folder name>-{slot}`, at the end of the pattern; `{slot}` becomes `s<n>([^0-9]\|$)`) | a stable absolute path keeps them warm (cargo fingerprints and sccache keys hold absolute paths); one slot per concurrent job means no two jobs write one. sccache's local storage takes one server at a time ([docs/Local.md](https://github.com/mozilla/sccache/blob/main/docs/Local.md): "Multiple concurrent servers will race and cause spurious build failures"), so each slot has its own, sized `PADDOCK_CI_SCCACHE_GB` (40) / `PADDOCK_CI_SLOTS` |
+| npm's download cache, pinned tools, the paddock-dev binary | **shared** kept folders | safe for concurrent writers (content-addressed, or renamed into place) |
 | sccache server port, the WebKit job's ports | `job-isolation.sh port <name>`, declared in `conformance/ci/ports.txt` (base, width, stride) | one block per slot; a test checks no two blocks overlap each other or any end-to-end port, for every slot up to `PADDOCK_CI_SLOTS` |
+| Tart VMs (service-smoke) | a host-wide VM slot under `TART_HOME` (`tools/macos-vm-smoke.sh`), VM names with the job's `PADDOCK_VM_PREFIX` | one VM at a time on the Mac (two at most, macOS's limit); the leftover check sees only the job's own VMs |
 
 The kept folders are declared once, in `conformance/ci/kept-folders.txt` (kind, layout, `slot` or `shared`). A new cache is
 one line there and `bash conformance/ci/job-isolation.sh path <kind> [<name>]` where it is used.
 
 **Slots.** The `job-isolation` action (`acquire`, the first bash step of a host job: after Git bash on Windows, before
-`stable-workspace`, `build-folder` and any kept folder) takes the first free `s1..s$PADDOCK_CI_SLOTS` (default 8) with an
-atomic `mkdir <ci-home>/slots/s<n>` and records the job's `RUNNER_TEMP` as the owner (to be replaced by the Rust command
-`./dev ci slot acquire|release|status` on an OS file lock, which the kernel releases when the job dies: ADR 0025); it
-exports `PADDOCK_CI_SLOT`. The
-job's last step is `job-isolation` with `mode: release` and `if: always()` (after `host-cleanup`, `prune-build-folder` and
-`sccache-stats`, which use the slot's folders and port). A slot whose owner is gone (its runner folder removed, older than
-`PADDOCK_SLOT_MAX_AGE_MIN`, default 360, or no owner after 5 minutes) is reclaimed; a live job's never is. In a Linux
-container acquire and release do nothing yet and everything uses the single slot `s1`; a container is a new file system per
-job, but all containers of a host share the runner's `/sccache` mount, so two runs of the same job on one Linux host share
-its Angular cache folder until containers get slots from the Rust lock (keying it per run instead would make it cold on
-every run and grow the mount without bound). Without a slot a
-host job's `build-folder`, `setup-rust` and `node-caches` fail and `stable-workspace` builds in place with a warning.
+`stable-workspace`, `build-folder` and any kept folder) runs `./dev ci slot acquire` (ADR 0022's `paddock-dev`, built once
+per host and input hash into the shared `tools` kept folder): a detached holder process takes the first free
+`s1..s$PADDOCK_CI_SLOTS` (default 4) as an OS file lock on `<ci-home>/slots/s<n>.lock` and keeps it until the job's
+`RUNNER_TEMP` is gone or the release asks it to stop. The kernel drops the lock when the holder dies, so there is no
+stale lock and nothing is ever reclaimed. The action exports `PADDOCK_CI_SLOT` and `PADDOCK_CI_SLOT_TOKEN`. The job's last
+step is `job-isolation` with `mode: release` and `if: always()` (after `host-cleanup`, `prune-build-folder` and
+`sccache-stats`, which use the slot's folders and port); it fails the job when the holder died before the job ended (its
+isolation was then not guaranteed). A full house waits about 2 minutes, then fails and lists the holders. Linux containers
+take no slot (one job per Linux host today): acquire and release do nothing there and everything uses `s1`. Without a slot
+a host job's `build-folder`, `setup-rust` and `node-caches` fail and `stable-workspace` builds in place with a warning.
+
+**Stalled holder.** `bash conformance/ci/job-isolation.sh status` (or `./dev ci slot status --max N --root <ci-home>`)
+lists each slot, the job folder its holder watches and the holder's pid. A holder whose job folder still exists after its
+job ended (the runner did not delete it) keeps its slot: delete that job folder (the holder ends within a second) or end
+the holder's pid. Never delete `slots/*.lock` by hand while a holder runs.
 
 **The CI home** is `ci-home.sh`'s (`PADDOCK_CI_HOME`, else `~/.paddock-ci`); a relocated home that is missing stops the job.
+Every runner of a host uses the same CI home (same user, or the same `PADDOCK_CI_HOME`).
 
-**Raising a host's capacity:** merge the change that adds this, then raise the runner's `capacity` (Pitcrew's
-Configuration tab or its `SaveRunnerConfig`, which backs up the config and restarts the runner after the current job).
-`PADDOCK_CI_SLOTS` in the runner's `runner.envs` is needed only above 8; set `PADDOCK_CI_KEEP_SLOTS` there to the
-capacity when it is above 2.
+**Adding runners to a host:** merge the change that adds this; set `PADDOCK_CI_SLOTS` in every runner's `runner.envs` to
+the pool's maximum (only above 4); then register the extra runners (Pitcrew, capacity 1 each). Keep each runner's
+`capacity: 1`.
 
-**How disk is bounded.** Kept folders exist for at most `PADDOCK_CI_KEEP_SLOTS` slots (default 2): a job in a higher slot
-removes that slot's folders when it releases it, and every acquire sweeps the folders of higher slots no job holds. Each
-build folder is capped by `prune-build-folder` (20 GB by default, its own slot only). The first job in slot `s1` renames a
-kept folder of the old unslotted layout (`target-<name>`, `src/<name>`, `angular/<name>`, `test-browser-<name>`,
-`libduckdb/<name>`) to its `-s1` name, so the switch keeps the caches warm and adds no copy. Left for a one-time manual
-removal: the crate job's old `test-browser` folder and Debrief's old `~/.debrief-ci` on Windows (other names now).
+**How disk is bounded.** A slot's kept folders are deleted only under `./dev ci slot idle-run`, which holds that slot's
+lock for the whole deletion, so no job can take the slot meanwhile and a held slot is never touched. At every acquire and
+release: the folders of idle slots above `PADDOCK_CI_KEEP_SLOTS` (default `PADDOCK_CI_SLOTS`), and kept folders no job
+asked for in `PADDOCK_CI_ORPHAN_DAYS` (default 14; `path` renews a folder's time stamp, so folders no workflow names any
+more age out, old-layout ones too). At acquire, below `PADDOCK_CI_MIN_FREE_GB` (default 30) free on the CI home's disk,
+idle slots' folders go from the highest slot down until the floor is met; if it cannot be, the job fails with that
+message. Each build folder is capped by `prune-build-folder` (20 GB by default, its own slot only). The first job in slot
+`s1` renames a kept folder of the old unslotted layout (`target-<name>`, `src/<name>`, `angular/<name>`,
+`test-browser-<name>`, `libduckdb/<name>`, `sccache`) to its `-s1` name, so the switch keeps the caches warm and adds no
+copy. Left for a one-time manual removal: the crate job's old `test-browser` folder and Debrief's old `~/.debrief-ci` on
+Windows (other names now).

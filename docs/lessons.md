@@ -568,12 +568,21 @@ default provider, reqwest's `rustls`) sets `AWS_LC_SYS_NO_JITTER_ENTROPY = { val
 variant, which the build script reads first. Windows 0xc0000409 is any self-triggered abort (`abort()`, `__fastfail`,
 `/GS`), not proof of a buffer overrun: look for a C `abort()` first.
 
-## Per-host CI state keyed by app and job breaks at runner capacity 2 (2026-10-28, CI kit)
+## Per-host CI state keyed by app and job breaks with two jobs on one host (2026-10-28, CI kit)
 
-Raising the host runners to two jobs at once showed that every kept folder of the kit was named after the app and job
-only: a second run of the same job would have replaced the first one's checkout (`stable-workspace`), killed its test
-processes and deleted its temp folders (`host-cleanup`), pruned its build folder, and stopped its sccache server (one
-fixed port). The runner already gives every job a folder of its own (`<workdir_parent>/<16 hex>/`, `RUNNER_TEMP` in it,
-removed after the job). **Rule (ADR 0025):** what need not outlive the job goes in the runner's job folder; what must stay
-warm is a kept folder of the job's slot, declared once in `conformance/ci/kept-folders.txt` and reached only through
-`conformance/ci/job-isolation.sh`; process patterns are anchored on `{tmp}`, `{build}` or `{slot}`, never on a shared name.
+Planning several jobs at once on one host (more runners per host) showed that every kept folder of the kit was named
+after the app and job only: a second run of the same job would have replaced the first one's checkout
+(`stable-workspace`), killed its test processes and deleted its temp folders (`host-cleanup`), pruned its build folder,
+and stopped its sccache server (one fixed port). The runner already gives every job a folder of its own
+(`<workdir_parent>/<16 hex>/`, `RUNNER_TEMP` in it, removed after the job). **Rule (ADR 0025):** what need not outlive the
+job goes in the runner's job folder; what must stay warm is a kept folder of the job's slot, declared once in
+`conformance/ci/kept-folders.txt` and reached only through `conformance/ci/job-isolation.sh`; process patterns are
+anchored on `{tmp}`, `{build}` or `{slot}`, never on a shared name.
+
+## A lock that can be reclaimed races; take an OS lock and act while holding it (2026-10-28, CI kit)
+
+The first job-slot lock was a `mkdir` with an owner file and a reclaim when the owner looked dead; the review found two
+jobs could both hold a slot (rename away, check, move back), and the disk sweep checked "slot idle" and then deleted, so a
+job could take the slot in between. **Rule:** a lock between processes is an OS file lock held by a process that lives as
+long as the owner (`paddock-slots`, `./dev ci slot`: the kernel frees it when the holder dies, so nothing is reclaimed),
+and work that needs "nobody holds X" runs while holding X's lock (`./dev ci slot idle-run`), never after a check.
