@@ -33,7 +33,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 use tantivy::collector::{Collector, Count, SegmentCollector, TopDocs};
 use tantivy::query::{BooleanQuery, EmptyQuery, Occur, Query, RangeQuery, TermQuery};
-use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, FAST, INDEXED};
+use tantivy::schema::{Field, IndexRecordOption, NumericOptions, Schema, TextFieldIndexing, TextOptions, FAST};
 use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
 use tantivy::{doc, DocId, Index, IndexReader, IndexWriter, Order, ReloadPolicy, Score, SegmentReader, Term};
 
@@ -217,14 +217,17 @@ struct Fields {
 fn schema() -> (Schema, Fields) {
     let mut b = Schema::builder();
     let id = b.add_u64_field("id", FAST);
-    let source = b.add_u64_field("source", INDEXED);
-    let seg = b.add_u64_field("seg", INDEXED);
+    // Nothing is scored (hits come in time order), so no field keeps what only BM25 reads: no fieldnorms, and the words
+    // keep neither their counts nor their positions (phrases are checked on the rows).
+    let key = NumericOptions::default().set_indexed();
+    let source = b.add_u64_field("source", key.clone());
+    let seg = b.add_u64_field("seg", key);
     b.add_i64_field("ts", FAST);
-    // Words and their counts, no positions (half the size): phrases are checked on the rows.
     let words = TextOptions::default().set_indexing_options(
         TextFieldIndexing::default()
             .set_tokenizer(TOKENIZER)
-            .set_index_option(IndexRecordOption::WithFreqs),
+            .set_index_option(IndexRecordOption::Basic)
+            .set_fieldnorms(false),
     );
     let text = b.add_text_field("text", words);
     (b.build(), Fields { id, source, seg, text })
@@ -246,9 +249,9 @@ pub fn segment_key(file: &str) -> u64 {
         .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
 }
 
-/// Layout version of the index (2: no positions; 3: smart-search words of message, exception and template; 4: joined parts of names);
-/// an index of another version is rebuilt.
-const LAYOUT: u32 = 4;
+/// Layout version of the index (2: no positions; 3: smart-search words of message, exception and template; 4: joined parts of names;
+/// 5: no counts or fieldnorms); an index of another version is rebuilt.
+const LAYOUT: u32 = 5;
 
 fn payload(epoch: u64) -> String {
     format!("fts_epoch={epoch};layout={LAYOUT}")
