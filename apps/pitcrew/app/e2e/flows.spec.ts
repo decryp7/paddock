@@ -245,6 +245,27 @@ test.describe('native feel (ADR 0008)', () => {
     await expect(page.getByRole('heading', { name: 'Review changes' })).toHaveCount(0);
   });
 
+  test('the register window keeps its buttons fully visible on every step, the fields scroll above them', async ({ page, app }) => {
+    await page.setViewportSize({ width: 660, height: 640 });
+    await app.dialogs.openWindow('pc.register', {});
+    await app.dialogs.loaded();
+    const dialog = page.locator('pd-dialog-shell');
+    const buttonsInside = async (name: RegExp) => {
+      const b = (await dialog.getByRole('button', { name }).last().boundingBox())!;
+      expect(b.y + b.height, `${name}`).toBeLessThanOrEqual(640);
+    };
+    await dialog.getByLabel('Server URL').fill('https://git.example.com');
+    await dialog.getByLabel('Registration token').fill('demo-registration-token');
+    await buttonsInside(/Continue/);
+    await dialog.getByRole('button', { name: 'Continue' }).click();
+    await dialog.getByLabel('Name in Pitcrew').fill('nightly');
+    await buttonsInside(/Continue/);
+    await dialog.getByRole('button', { name: 'Continue' }).click();
+    await dialog.getByText('Run as the service account').click();
+    await buttonsInside(/Continue|Register/);
+    expect(await page.locator('main.pd-body').evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
+  });
+
   test('edits the runner configuration, reviews the diff and saves', async ({ page }) => {
     await page.goto(`${APP}/runners/build-win?tab=config`);
     await expect(page.getByRole('heading', { name: 'Runner configuration' })).toBeVisible();

@@ -22,6 +22,7 @@
   </ol>
 
   <form class="body" (submit)="$event.preventDefault(); step() === steps.length - 1 ? submit() : next()">
+    <div class="fields">
     @switch (step()) {
       @case (0) {
         <div class="field">
@@ -140,6 +141,8 @@
         }
       </ul>
     }
+
+    </div>
 
     <footer class="actions">
       @if (step() > 0) {
