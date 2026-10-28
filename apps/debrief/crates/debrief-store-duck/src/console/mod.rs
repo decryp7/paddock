@@ -191,6 +191,8 @@ struct Stopper {
     timed_out: Arc<AtomicBool>,
     done: Option<mpsc::Sender<()>>,
     _cancel: Option<debrief_core::ql::HookGuard>,
+    /// DuckDB's progress estimate, relayed to the run's control while the statement runs.
+    _progress: Option<crate::progress::Relay>,
 }
 
 impl Stopper {
@@ -200,6 +202,9 @@ impl Stopper {
         if control.as_ref().is_some_and(QueryControl::is_cancelled) {
             return Err(StoreError::Cancelled);
         }
+        let progress = control
+            .clone()
+            .and_then(|c| crate::progress::Relay::start(conn, c, crate::progress::POLL));
         let on_cancel = control.map(|c| {
             let h = handle.clone();
             c.on_cancel(Box::new(move || h.interrupt()))
@@ -220,6 +225,7 @@ impl Stopper {
             timed_out,
             done: Some(done),
             _cancel: on_cancel,
+            _progress: progress,
         })
     }
 

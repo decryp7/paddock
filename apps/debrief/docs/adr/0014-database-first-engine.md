@@ -920,14 +920,14 @@ cover. The duckdb-rs `CHANGELOG.md` path returned 404; the release notes were us
 | Partition-aware planning, partial aggregates below joins | Facets, histograms | Automatic, nothing to do |
 | Zone maps and Bloom filters for more types, `IN` and function predicates | id lookups, source filters over many segments | Automatic |
 | Lazy column metadata | Wide `events_wide` views, many segments | Automatic |
-| Aggregations spill to disk (#24499) | Old out-of-memory work-arounds in ADR 0014 (distinct counts, lanes) | **Later**: re-test each work-around under the 183 MB limit before removing any; ORDER BY LIMIT/OFFSET still runs out of memory (reviewer, 2026-10-28) |
+| Aggregations spill to disk (#24499) | Old out-of-memory work-arounds in ADR 0014 (distinct counts, lanes) | **Now, re-tested** (below): the all-keys distinct count no longer runs out of memory but peaks 70 to 100 MB higher, so the one-key-per-statement work-around stays; the window-operator and lane work-arounds were not re-tested |
 | `DICT_FSST` string compression, compact deletes, storage v2.0.0 | Only the small catalog is DuckDB storage | **Later**: lifting the `v1.5.0` pin with a `FORMAT_VERSION` bump; the catalog is too small to gain |
 | Non-blocking checkpoints (1.5) | Catalog checkpoints are tiny | Not relevant |
 | Native time zones instead of ICU (2.2x on `AT TIME ZONE`) | Few time-zone expressions | Automatic |
 | `VARIANT` with shredding, `variant_*` functions, VARIANT in Parquet | `extra` is a `MAP(VARCHAR, VARCHAR)` | **Later**: research whether typed shredded extras beat promoted columns |
 | ART index checkpoint remap, buffer-managed ART (planned) | The catalog has few indexes | Not relevant |
 | Arrow 60 (duckdb-rs), `MapFieldNames` | Event batches reach the store as Arrow | Done (this change) |
-| duckdb-rs: `Config::set` returns errors, progress on `Connection`, `Appender: Sync` | Settings go through `Config::with`; the catalog uses prepared statements, not the appender (events are Parquet) | **Later**: query progress for the SQL console and long analyses (ER-18) |
+| duckdb-rs: `Config::set` returns errors, progress on `Connection`, `Appender: Sync` | Settings go through `Config::with`; the catalog uses prepared statements, not the appender (events are Parquet) | **Now**: query progress is relayed to the run's `QueryControl` (`progress.rs`) for every pooled connection and the SQL console sandbox, as stage Evaluating with rows done of rows expected; cancel is unchanged |
 | Prepared statements, interrupt | Cancellation is already `QueryControl` plus interrupt | Not relevant (nothing new) |
 | C API v2, loadable extensions, `quack`, extension repositories, parser extensions | Debrief bundles and loads no extension (ADR 0030) | Not relevant |
 | PEG parser (default), lambda syntax, `MERGE`, `//`, `~`, `!` changes | SQL console users' queries; generated SQL uses none | Release note written (CHANGELOG) |
@@ -958,3 +958,42 @@ benchmark was made (it needs a second release build on a loaded machine).
 
 **Follow-ups**: re-test the spill work-arounds; lift the storage pin with a catalog migration; query progress for the SQL console; shredded
 VARIANT for `extra`; static linking of libduckdb (research WP-D1b).
+
+### Import speed and memory, 1.5.6 against 2.0 (2026-10-28)
+
+What the earlier 182,545 events/s measured, and what it did not. It was `tests/bench.rs` on a 3,000,000-event CLEF corpus
+(365 bytes per event, JSON), imported in process on a machine at load 20 to 60, with the process still holding the 1.1 GB it
+used to generate the corpus (so "peak RSS 1,142 MB" is mostly that baseline, not the import). It is not Debrief's import speed:
+events per second depends on bytes per event, and the load was 3 to 6 times the core count. The real pipeline is the release CLI
+plus store worker (parse threads writing zstd Parquet segments); the numbers below come from it.
+
+**Real pipeline, interleaved pairs** (invented log folder from `gen_large.py` scale 0.3: 16,847,461 events, 2.42 GB, CLEF, log4net
+text, compressed files; M4 Pro 14 cores at load 33 to 65; 1.5.6 binaries built earlier from the same sources, 2.0 binaries from this
+branch; footprint = macOS physical footprint, RSS = resident size, both of the store worker):
+
+| Pair | 1.5.6 events/s | 2.0 events/s | 1.5.6 CPU (s) | 2.0 CPU (s) | 1.5.6 peak footprint / RSS | 2.0 peak footprint / RSS |
+|---|---|---|---|---|---|---|
+| 1 | 707,000 | 685,000 | 93.0 | 79.1 | 932 / 1,461 MB | 945 / 1,449 MB |
+| 2 | 687,000 | 738,000 | 91.5 | 81.0 | 979 / 1,455 MB | 905 / 1,418 MB |
+| 3 | 855,000 | 991,000 | 94.2 | 81.2 | 941 / 1,495 MB | 912 / 1,425 MB |
+
+2.0 is not slower: 685,000 to 991,000 events/s against 687,000 to 855,000, and about 13% less CPU for the same work. Both are below the
+research's 1.3 to 1.55 million (a quiet machine and a mix of shorter events, 8 GB); under this load neither version reaches it. The
+peak physical footprint of the worker while importing is 905 to 979 MB on both, above the 768 MB importing budget on both: that overrun is not
+new with 2.0 (the research measured 0.9 to 1.05 GB on 1.5.6) and belongs to the parse and write stages; the larger RSS (1.4 to 1.5 GB) is
+the macOS overstatement rule 26 describes. **One difference to follow up**: the worker's footprint at the end of the import is higher on
+2.0 (452, 528, 536 MB) than on 1.5.6 (335, 319, 344 MB), about 190 MB more, in all three pairs. Its cause is not found; DuckDB 2.0 adds
+the settings `fsync_mode`, `operator_memory_limit`, `max_streaming_buffer_size` and the file cache ones, none set by Debrief. The
+worker query-budget tests (idle 144, querying 219 MB, debug build) pass, but the idle figure after a large import needs its own measurement
+before release.
+
+**Writer variants** (`layout_bakeoff`, 20 copies of the samples, release build, 2.0 only; the 1.5.6 figures of the R2b notes were
+not reproduced): one long-lived Arrow appender into a native table 387,515 events/s (peak +526 MB); one Parquet writer 725,432 events/s (peak
++2 MB); 8 Parquet writers 5,087,660 events/s on this small sample (115 ms, so the figure is rough). A single writer is therefore about 2x
+the appender at a fraction of its memory, and eight writers scale it further; the appender is what the architecture avoids.
+
+**Spill re-test** (all-keys distinct count of the 3M-event store, ten `count(DISTINCT ...)` in one statement, `memory_limit` 183 MB,
+4 threads, two runs each): 1.5.6 ran out of memory in both runs (1.1 to 1.2 s until the error); 2.0 completed (1.7 to 1.9 s) with a peak
+footprint of 396 to 418 MB, against the 283 to 303 MB of the existing one-key-per-statement form on 1.5.6 and 329 to 344 MB on 2.0.
+So 2.0 spills instead of failing, but at 70 to 100 MB more resident memory and slower; the work-around stays because the query budget is
+300 MB. The window-operator gap work-around (anomalies) and the lane work-arounds were not re-tested here and stay.

@@ -21,6 +21,7 @@ mod mining;
 mod parsers;
 mod pos;
 mod profiles;
+mod progress;
 mod project;
 pub mod promote;
 mod qlang;
@@ -274,6 +275,8 @@ pub(crate) struct Conn<'a> {
     conn: Option<Connection>,
     /// Interrupts this connection's statement when the thread's current control (`QueryControl::scope`) is cancelled.
     _interrupt: Option<debrief_core::ql::HookGuard>,
+    /// Relays DuckDB's query progress to the same control while the connection is borrowed.
+    relay: Option<progress::Relay>,
 }
 
 impl std::ops::Deref for Conn<'_> {
@@ -286,6 +289,9 @@ impl std::ops::Deref for Conn<'_> {
 impl Drop for Conn<'_> {
     fn drop(&mut self) {
         if let Some(c) = self.conn.take() {
+            if let Some(relay) = self.relay.take() {
+                relay.finish(&c);
+            }
             let mut pool = lock(&self.inner.pool);
             if pool.len() < POOL {
                 pool.push(c);
@@ -358,10 +364,12 @@ impl Inner {
             Some(c) => c,
             None => lock(&self.db).try_clone().map_err(engine)?,
         };
+        let mut relay = None;
         let interrupt = match debrief_core::ql::QueryControl::current() {
             Some(control) if control.is_cancelled() => return Err(StoreError::Cancelled),
             Some(control) => {
                 let handle = conn.interrupt_handle();
+                relay = progress::Relay::start(&conn, control.clone(), progress::POLL);
                 Some(control.on_cancel(Box::new(move || handle.interrupt())))
             }
             None => None,
@@ -370,6 +378,7 @@ impl Inner {
             inner: self,
             conn: Some(conn),
             _interrupt: interrupt,
+            relay,
         })
     }
 
@@ -1313,6 +1322,28 @@ mod tests {
             matches!(&e, StoreError::Invalid(m) if m.contains("saved by a newer Debrief")),
             "{e:?}"
         );
+    }
+
+    #[test]
+    fn a_borrowed_connection_relays_duckdbs_progress_to_the_runs_control() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = DuckStore::create(&tmp.path().join("s"), Profile::default_profile(), PluginRegistry::new()).unwrap();
+        let control = debrief_core::ql::QueryControl::new();
+        control.scope(|| {
+            let conn = store.inner.conn().unwrap();
+            conn.execute_batch("CREATE TEMP TABLE big AS SELECT range AS i FROM range(100000000)")
+                .unwrap();
+            let sum: i64 = conn
+                .query_row("SELECT sum(hash(i) % 7) FROM big WHERE i % 3 <> 5", [], |r| r.get(0))
+                .unwrap();
+            assert!(sum > 0);
+        });
+        let p = control.progress();
+        assert_eq!(p.stage, debrief_core::ql::QueryStage::Evaluating);
+        assert!(p.total > 0 && p.done <= p.total, "{p:?}");
+        // Pooled connections go back with tracking off, and a run without a control starts no relay.
+        let conn = store.inner.conn().unwrap();
+        assert!(conn.relay.is_none());
     }
 
     #[test]
