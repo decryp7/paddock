@@ -639,7 +639,7 @@ mod tests {
     }
 
     fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("dyno-tuning-test-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("dyno-it-tuning-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

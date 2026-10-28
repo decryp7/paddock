@@ -55,21 +55,21 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.prepare }}
-      run: bash -euo pipefail -c "$COMMANDS"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     - name: Checks (${{ inputs.app }})
       if: inputs.checks != ''
       shell: bash
       env:
         COMMANDS: ${{ inputs.checks }}
-      run: bash -euo pipefail -c "$COMMANDS"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     - name: Rust checks (${{ inputs.app }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.rust-checks != '' && inputs.rust == 'true' }}
       shell: bash
       env:
         COMMANDS: ${{ inputs.rust-checks }}
-      run: bash -euo pipefail -c "$COMMANDS"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke), and the steps after a
     # failed check (`checks`, `rust-checks`) still run, so one run reports every failure (`!cancelled()`).
@@ -112,7 +112,7 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.ui-checks }}
-      run: bash -euo pipefail -c "$COMMANDS"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     - name: End-to-end tests (${{ inputs.app }} ${{ inputs.e2e-shard }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.e2e-checks != '' }}
@@ -122,4 +122,4 @@ runs:
         E2E_SHARD: ${{ inputs.e2e-shard }}
       run: |
         export E2E_INDEX="${E2E_SHARD%%/*}"
-        bash -euo pipefail -c "$COMMANDS"
+        bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"

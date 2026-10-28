@@ -154,7 +154,7 @@ mod tests {
     use pitcrew_core::time::Timestamp;
 
     fn temp(name: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-channels-{name}-{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("pitcrew-it-channels-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         p
     }

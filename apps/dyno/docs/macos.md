@@ -19,7 +19,7 @@ npx tauri build --bundles app,dmg -- --profile dist
 
 ```sh
 codesign -dv --verbose=2 target/dist/bundle/macos/Dyno.app 2>&1 | grep -E 'Signature|Identifier'   # Signature=adhoc
-bash scripts/check-bundle.sh target/dist/bundle                                                      # run paths, seal, Team IDs, sidecars start
+bash scripts/check-bundle.sh target/dist/bundle                                                      # run paths, the seal, the agent measures once (Team IDs and sidecar starts: the shared macos-verify action)
 ```
 
 ## 2. Install

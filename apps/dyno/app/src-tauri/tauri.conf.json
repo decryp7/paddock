@@ -7,7 +7,7 @@
     "frontendDist": "../dist/dyno-app/browser",
     "devUrl": "http://localhost:4200",
     "beforeDevCommand": "node src-tauri/scripts/sidecar.mjs --dev && npm run start",
-    "beforeBuildCommand": "node src-tauri/scripts/sidecar.mjs && npm run build && node scripts/check-index.mjs dist/dyno-app/browser/index.html"
+    "beforeBuildCommand": "node src-tauri/scripts/sidecar.mjs && npm run build && node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html"
   },
   "app": {
     "macOSPrivateApi": true,
