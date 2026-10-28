@@ -19,7 +19,8 @@ fn add_plugin(root: &Path, id: &str) {
 }
 
 fn host_with(ids: &[&str], tweak: impl FnOnce(&mut HostConfig)) -> (PluginHost, tempfile::TempDir) {
-    let root = tempfile::tempdir().unwrap();
+    // The `dyno-it-` prefix is what CI's host clean-up anchors on to end a plugin a failed run left behind.
+    let root = tempfile::Builder::new().prefix("dyno-it-plugins-").tempdir().unwrap();
     for id in ids {
         add_plugin(root.path(), id);
     }

@@ -303,7 +303,7 @@ mod tests {
             latest(&src, RunnerKind::GiteaRunner, Channel::Prerelease).unwrap().to_string(),
             "5.3.0-rc.1"
         );
-        let dir = std::env::temp_dir().join(format!("pitcrew-work-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pitcrew-it-work-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let binary = dir.join("bin/gitea-runner");
         download(&src, RunnerKind::GiteaRunner, &v, platform(), &binary).unwrap();
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn swaps_and_restores_binaries() {
-        let dir = std::env::temp_dir().join(format!("pitcrew-swap-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("pitcrew-it-swap-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let binary = dir.join("gitea-runner");

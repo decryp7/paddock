@@ -287,6 +287,7 @@ describe('matrix legs', () => {
   test("an app's host-cleanup patterns match its own paths and never the real runner (every app that has them)", () => {
     const real = ['gitea-runner daemon', '/usr/local/bin/gitea-runner daemon', '/Users/x/runners/main/bin/gitea-runner daemon', '/opt/act_runner/act_runner daemon', 'C:\\runner\\act_runner.exe daemon', '/Users/x/actions-runner/Runner.Listener run'];
     const ours = {
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app/debug/dyno-ipc-test-child echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app\\debug\\dyno-test-plugin.exe', '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin'],
       pitwall: ['/Users/x/.paddock-ci/target-pitwall-app/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
       pitcrew: ['/var/folders/ab/T/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon', 'C:\\Users\\x\\AppData\\Local\\Temp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter\\chrome-win64\\chrome.exe --headless'],
@@ -298,10 +299,10 @@ describe('matrix legs', () => {
     for (const [name, app] of graph.apps) {
       if (!app.processPatterns?.length) continue;
       assert.ok(ours[name], `${name} has process patterns: list its own command lines here`);
-      for (const pat of app.processPatterns) {
-        const re = new RegExp(pat);
-        for (const line of ours[name]) assert.match(line, re, `${name}: ${pat} misses ${line}`);
-        for (const line of [...real, ...(near[name] ?? [])]) assert.doesNotMatch(line, re, `${name}: ${pat} would kill ${line}`);
+      const res = app.processPatterns.map((pat) => new RegExp(pat));
+      for (const line of ours[name]) assert.ok(res.some((re) => re.test(line)), `${name}: no pattern matches ${line}`);
+      for (const re of res) {
+        for (const line of [...real, ...(near[name] ?? [])]) assert.doesNotMatch(line, re, `${name}: ${re} would kill ${line}`);
         checked += 1;
       }
     }
@@ -365,7 +366,7 @@ describe('contracts', () => {
   test("every process pattern is anchored on a folder of this job, and Pitwall's never reaches an installed app, another job or the user's own engine", () => {
     for (const [name, app] of graph.apps) {
       for (const pat of app.processPatterns ?? []) {
-        assert.match(pat, /pitcrew-it-|test-browser-|\.paddock-ci|target-/, `${name}: ${pat} names no temp or build folder of the job`);
+        assert.match(pat, /pitcrew-it-|dyno-it-|test-browser-|\.paddock-ci|target-/, `${name}: ${pat} names no temp or build folder of the job`);
       }
     }
     const pitwall = graph.apps.get('pitwall');
@@ -385,6 +386,29 @@ describe('contracts', () => {
       for (const line of ours) assert.match(line, re, `${pat} misses ${line}`);
       for (const line of near) assert.doesNotMatch(line, re, `${pat} would kill ${line}`);
     }
+  });
+
+  test("Dyno's process pattern ends only test programs of its own build folder: never the installed app, its agent, another job's folder or the user's tools", () => {
+    const dyno = graph.apps.get('dyno');
+    assert.deepEqual(dyno.processes ?? [], [], "no exact process names: they would kill the user's installed Dyno and its agent");
+    const ours = ['/Users/x/.paddock-ci/target-dyno-app/debug/dyno-ipc-test-child echo', '/Users/x/.paddock-ci/target-dyno-app/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app\\debug\\dyno-test-plugin.exe', '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin', 'C:\\Users\\x\\AppData\\Local\\Temp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
+    const near = [
+      '/Users/x/Library/Application Support/Dyno/plugins/p1/plugin',
+      '/var/folders/ab/T/other-it-plugins-Xk3a9Q/p1/plugin',
+      '/var/folders/ab/T/dyno-it-plugins-Xk3a9Q/p1/plugin.toml',
+      '/Applications/Dyno.app/Contents/MacOS/dyno-agent run',
+      '/Applications/Dyno.app/Contents/MacOS/dyno-helper',
+      '/Applications/Dyno.app/Contents/MacOS/dyno-bench',
+      '/Users/x/.paddock-ci/target-dyno-bundle/debug/dyno-ipc-test-child echo',
+      '/Users/x/.paddock-ci/target-spotter-app/debug/dyno-ipc-test-child echo',
+      '/Users/x/.paddock-ci/target-dyno-app/debug/dyno-agent run',
+      '/Users/x/.paddock-ci/target-dyno-app2/debug/dyno-bench cpu',
+      '/Users/x/dev/dyno/target/debug/dyno-ipc-test-child echo',
+      'C:\\Program Files\\Dyno\\dyno-agent.exe',
+    ];
+    const res = dyno.processPatterns.map((pat) => new RegExp(pat));
+    for (const line of ours) assert.ok(res.some((re) => re.test(line)), `no pattern matches ${line}`);
+    for (const re of res) for (const line of near) assert.doesNotMatch(line, re, `${re} would kill ${line}`);
   });
 
   test('every markdown file that code reads is a declared doc input', () => {

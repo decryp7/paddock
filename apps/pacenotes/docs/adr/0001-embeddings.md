@@ -1,6 +1,7 @@
 # 1. Where Pacenotes' embeddings come from
 
-Status: accepted (2026-10-25, by the user). Proposed the same day.
+Status: accepted (2026-10-25, by the user). Proposed the same day. Amended 2026-10-28 (see the end): Model2Vec + BM25 is
+the default indexer; Qwen re-ranks at query time and is an opt-in deep index.
 
 ## Context
 
@@ -153,9 +154,9 @@ enough** when, fused with BM25, it (1) finds a right chunk in the top 5 for at l
 The `Embedder` port gets three implementations, chosen in this order:
 
 1. **Pitwall** when it is running and has an embedding model: `paddock-pitwall`'s `embed` (batches of 64) with
-   Qwen3-Embedding-0.6B, at batch priority while Pitwall is idle (section 21.4). It is the quality option and the default
-   whenever available.
-2. **Model2Vec, built in**: `model2vec-rs` (pinned, `default-features = false`, feature `fancy-regex`, so no `hf-hub`, no
+   Qwen3-Embedding-0.6B. **Amended 2026-10-28:** not the default indexer; used for query-time re-ranking and for the opt-in
+   per-repository "Deep index with Qwen" job (see the amendment).
+2. **Model2Vec, built in (the default indexer, amended 2026-10-28)**: `model2vec-rs` (pinned, `default-features = false`, feature `fancy-regex`, so no `hf-hub`, no
    network, no Oniguruma C build) with **potion-code-16M-v2** (MIT, 32 MB). It meets the bar in hybrid with BM25 and is the
    lightest option that does: no model server, no native runtime, start in milliseconds, a full re-embed of a large repository
    in seconds. The model file is either bundled or downloaded once on the user's click with a hash check; given its size,
@@ -204,6 +205,37 @@ quality; the UI should say that semantic search is better with Pitwall and link 
   `docs/research/2026-10-embeddings-for-logs.md` (branch `docs/embeddings-for-logs`); Debrief keeps its no-vector-search decision.
 - Open: whether int8 or smaller Model2Vec variants keep the quality (not measured), multilingual code comments (not tested;
   potion-code is English), and fusion weights for Model2Vec versus Qwen3 vectors.
+
+## Amendment 2026-10-28: Model2Vec + BM25 by default, Qwen only as an opt-in deep index
+
+Status of the ADR is unchanged (accepted). This amendment supersedes the order of implementations in "Decision" (Pitwall
+first, "the default whenever available") and every statement that Qwen3-Embedding through Pitwall is the default indexer.
+
+**Decision (user, 2026-10-28: "B + opt-in deep index").**
+
+- **Default indexing:** Model2Vec static embeddings (potion-code-16M-v2) plus a BM25 keyword index, on the CPU,
+  incremental. No GPU and no Pitwall needed.
+- **Query time:** Qwen (through Pitwall) only re-ranks a query's top ~50 hits. Optional; takes seconds.
+- **No per-chunk LLM summaries.** Summaries are generated on click for the code being viewed. Chunk text gets deterministic
+  context only (doc comment, signature, path, split identifiers).
+- **Setting "Deep index with Qwen"**, per repository, off by default. It runs a full Qwen3-Embedding pass as a visible job
+  (phase-labelled progress, Cancel, a time and size estimate shown before starting; ER-17, ER-18, ADR 0024). It is the
+  explicit, confirmed exception that family rule 46 allows.
+- **Shared code:** the reusable parts (BM25, RRF fusion, cosine search, index records, a benchmark harness) belong in a family
+  crate `paddock-embed`, shared with Debrief (ER-22). Planned, not yet built.
+
+**Reason.** Family rule 46 (docs/rules.md: no LLM for large jobs) forbids a model per item over a whole repository by
+default. The cost measured above: Qwen about 28 minutes and about 1.9 GB resident per 1M lines (Metal), against seconds and
+tens of MB for Model2Vec.
+
+**Trade-off.** Pure-meaning recall (doc and concept queries) is weaker with Model2Vec than with Qwen (recall@5 on doc queries, Model2Vec 0.33
+versus Qwen 0.77 in the table above). Re-ranking the top ~50 hits with Qwen, and the opt-in deep index for
+repositories where it matters, make up the difference.
+
+**Measurement plan.** On real repositories (invented-data fixtures in the repo, never user logs) run the benchmark harness
+for: (1) BM25 + Model2Vec versus BM25 + Model2Vec + Qwen re-rank of the top 50 versus the deep index, on recall@5, MRR and
+latency; (2) indexing time, peak memory and index size per 1M lines; (3) the re-rank latency on CPU-only machines. Record the
+results here; revisit the default only if (1) shows the re-ranked default failing the bar.
 
 ## Sources (checked 2026-10-25)
 

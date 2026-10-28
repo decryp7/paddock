@@ -11,6 +11,7 @@ a bad option and never touches anything outside what it names.
 | `linux-container.sh --id dyno --packages dyno-platform` | cargo test and clippy in a Linux container; labelled containers and volumes only; `--clean` | Dyno `linux-container.sh`; Pitwall `linux-container-verify.sh` |
 | `macos-vm-smoke.sh --old <N> --new <N+1> [--guest macos\|linux]` | run a smoke that registers real services (launch agent, systemd user unit) in a fresh, always-deleted Tart VM from a pinned image; disk, load and one-VM-at-a-time checks | the C21 service-after-update smoke (rule 7) |
 | `prune-build-folders.sh <folder> <max-gb>` | keep a persistent CI build folder under a cap (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
+| `prune-ci-build-folder.sh <folder> <max-gb> [--drop-bundles]` | the CI form: caps only a `target-*` folder directly in `${PADDOCK_CI_HOME:-~/.paddock-ci}` (resolved, no symlinks), else leaves it alone | the `prune-build-folder` action |
 | `prune-build-folders.ps1 -App debrief [-Remove -Keep 6c]` | list and remove build folders of finished worktrees (Windows) | Debrief `clean-build-dirs.ps1` |
 | `host-cleanup.sh --id pitwall --process pitwall-server` | stray test processes and temp folders on a host runner; used by the `host-cleanup` CI action | Pitwall `ci/macos-cleanup.sh` |
 
