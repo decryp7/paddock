@@ -561,7 +561,7 @@ export class PdTable<T> {
   /** What the table draws: the lines, five placeholders while loading, nothing on an error (the message is below the header). */
   protected readonly lines = computed<readonly PdLine<T>[]>(() => (this.state() === 'loading' ? SKELETON : this.state() === 'error' ? [] : this.items()));
   private readonly positions = computed(() => new Map<PdLine<T>, number>(this.lines().map((l, i) => [l, i])));
-  /** Each line's place by its key (a row's key, `g:` and a group's name): a line keeps its key when lines come and go above it. */
+  /** Each line's place by its key ({@link trackLine}): a line keeps its key when lines come and go above it. */
   private readonly keyIndex = computed(() => new Map(this.lines().map((l, i) => [this.trackLine(i, l), i] as const)));
   /**
    * Where each line sits in the tree of a grouped table (a virtual table draws only some of the rows, so the tree grid says
@@ -638,7 +638,8 @@ export class PdTable<T> {
     });
   }
 
-  protected trackLine = (_: number, line: PdLine<T>): string => (line.kind === 'skeleton' ? `s:${line.n}` : line.kind === 'group' ? `g:${line.key}` : this.rowKey()(line.row));
+  /** A line's key: its kind as a prefix (`r:` a row's own key, `g:` a group's name, `s:` a placeholder), so an app's row key never equals a group's. */
+  protected trackLine = (_: number, line: PdLine<T>): string => (line.kind === 'skeleton' ? `s:${line.n}` : line.kind === 'group' ? `g:${line.key}` : `r:${this.rowKey()(line.row)}`);
   /** The line's place in the table (a virtual table draws only a window of them). */
   protected indexOf(line: PdLine<T>): number {
     return this.positions().get(line) as number;
@@ -698,6 +699,8 @@ export class PdTable<T> {
 
   protected onLineClick(line: PdLine<T>, e: Event): void {
     if (line.kind === 'skeleton') return;
+    // A click takes over from a row the keyboard was still waiting for (End or Page Down in a virtual table).
+    this.pendingFocus = null;
     this.active.set(this.indexOf(line));
     if (line.kind === 'group') return this.toggleGroup(line.key);
     if (fromControl(e)) return;

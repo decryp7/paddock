@@ -842,5 +842,40 @@ describe('pd-table', () => {
     await settle(f);
     expect(document.activeElement).toBe(rowEls(f)[0]);
   });
+
+  it('forgets a row the keyboard was waiting for when a row is clicked meanwhile', async () => {
+    const f = await setup();
+    const many = Array.from({ length: PD_TABLE_VIRTUAL_FROM * 5 }, (_, i): Plugin => ({ id: `r${i}`, name: `Row ${i}`, size: i, kind: 'k', path: `/p/${i}` }));
+    f.componentInstance.rows.set(many);
+    await settle(f);
+    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as PdTable<Plugin>;
+    table.moveTo(499);
+    rowEls(f)[0]!.querySelector<HTMLElement>('.pd-text')!.click();
+    rowEls(f)[0]!.focus();
+    f.debugElement.query((d) => d.name === 'cdk-virtual-scroll-viewport').injector.get(CdkVirtualScrollViewport).setRenderedRange({ start: 480, end: 500 });
+    await settle(f);
+    await settle(f);
+    // Row 499 is drawn now, and it did not take the focus.
+    const late = el(f).querySelector('[data-index="499"]');
+    expect(late).not.toBeNull();
+    expect(document.activeElement).not.toBe(late);
+  });
+
+  it('keeps a group apart from a row whose key looks like a group\'s, when the keyboard folds the group', async () => {
+    const f = await setup();
+    f.componentInstance.rows.set([{ id: 'g:format', name: 'Odd key', size: 1, kind: 'format', path: '/x' }, DATA[1]!]);
+    f.componentInstance.groupBy.set('kind');
+    await settle(f);
+    const group = el(f).querySelector<HTMLElement>('[role=row][data-index="0"]')!;
+    group.focus();
+    press(group, 'ArrowLeft');
+    await settle(f);
+    // Unfolded again, the row with the look-alike key is back below the group: the focus stays on the group.
+    press(document.activeElement!, 'ArrowRight');
+    await settle(f);
+    await settle(f);
+    expect((document.activeElement as HTMLElement).classList.contains('pd-group')).toBe(true);
+    expect((document.activeElement as HTMLElement).dataset['index']).toBe('0');
+  });
 });
 
