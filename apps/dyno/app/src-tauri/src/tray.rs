@@ -110,7 +110,7 @@ fn create_item(app: &AppHandle<Wry>, spec: &ItemSpec) -> tauri::Result<()> {
 }
 
 /// Makes the tray icons match `specs`: every existing one is replaced (a click handler holds what its item opened when it
-/// was made, so a changed `opens` needs a new icon). Called only when the items changed. Returns the first error.
+/// was made, so a changed item needs a new icon). Called only when the items changed. Returns the first error.
 pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec]) -> tauri::Result<()> {
     if app.try_state::<TrayState>().is_none() {
         app.manage(TrayState::default());
