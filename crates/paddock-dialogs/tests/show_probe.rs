@@ -157,6 +157,8 @@ fn probe_context<A: Assets<Wry>>(assets: A) -> Result<tauri::Context<Wry>, Strin
             SHELL_PLUGIN.to_string(),
             Manifest::new(shell_permission_files()?, None),
         ),
+        // Names Tauri's `event` plugin in the ACL (an empty manifest: its permissions are not resolved here, see above), so
+        // a refusal of its commands reads "not allowed" rather than "Plugin not found".
         ("event".to_string(), Manifest::new(Vec::new(), None)),
     ]);
     let mut resolved = Resolved::resolve(
