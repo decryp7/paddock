@@ -2,7 +2,7 @@
 //! built-in up as the app does at start, then idles for `DEBRIEF_PERF_IDLE_S` seconds (default 60), printing
 //! `PHASE <name> <unix ms>` lines so an outside sampler (physical footprint, CPU time and wake-ups of this process and
 //! its children) can attribute its samples. This process stands in for the app: it runs the host's memory watchers.
-//! Does nothing without `DEBRIEF_PERF_PLUGINS`.
+//! Ignored by default; the bench workflow runs it with `--ignored` under the sampler.
 
 use crate::common;
 use debrief_plugin_host::Builtins;
@@ -14,11 +14,8 @@ fn phase(name: &str) {
 }
 
 #[test]
+#[ignore = "measurement, run by the bench workflow (--ignored)"]
 fn idle_plugins() {
-    if std::env::var_os("DEBRIEF_PERF_PLUGINS").is_none() {
-        eprintln!("skipped: set DEBRIEF_PERF_PLUGINS=1 to measure");
-        return;
-    }
     let idle = Duration::from_secs(std::env::var("DEBRIEF_PERF_IDLE_S").ok().and_then(|v| v.parse().ok()).unwrap_or(60));
     eprintln!("PID {}", std::process::id());
     phase("warm-up");

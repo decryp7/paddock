@@ -1,7 +1,8 @@
 //! CPU and memory after an import (research note `docs/research/2026-10-28-cpu-memory.md`): reopens a store that an
 //! import wrote (`DEBRIEF_PERF_STORE=<folder>`), then times the background phases and the idle loops one after the
 //! other, printing a `PHASE <name> <unix ms>` line at each boundary so an outside sampler (physical footprint and CPU
-//! time of this process) can attribute its samples. Without `DEBRIEF_PERF_STORE` it does nothing.
+//! time of this process) can attribute its samples. Ignored by default; run with `--ignored` and `DEBRIEF_PERF_STORE`
+//! (it fails without it, so it never passes silently).
 //!
 //! `DEBRIEF_PERF_IDLE_S` sets the idle and watcher windows (default 60 s).
 
@@ -29,11 +30,11 @@ fn ms(d: Duration) -> f64 {
 }
 
 #[test]
+#[ignore = "measurement, run by the bench workflow with DEBRIEF_PERF_STORE set (--ignored)"]
 fn background_phases_and_idle_loops() {
-    let Some(dir) = std::env::var_os("DEBRIEF_PERF_STORE").map(PathBuf::from) else {
-        eprintln!("skipped: set DEBRIEF_PERF_STORE to a store folder an import wrote");
-        return;
-    };
+    let dir = std::env::var_os("DEBRIEF_PERF_STORE")
+        .map(PathBuf::from)
+        .expect("set DEBRIEF_PERF_STORE to a store folder an import wrote");
     let idle = Duration::from_secs(std::env::var("DEBRIEF_PERF_IDLE_S").ok().and_then(|v| v.parse().ok()).unwrap_or(60));
     debrief_alloc::tune();
     eprintln!("PID {}", std::process::id());

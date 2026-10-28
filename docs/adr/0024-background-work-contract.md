@@ -1,6 +1,7 @@
 # 24. Background work: background priority, wake-ups instead of polls, jobs for long work, per-pid monitoring
 
-- Status: Proposed (2026-10-28); the user decided on 2026-10-28 that there is one family ADR for background work (D11)
+- Status: Proposed (2026-10-28). **Amends ADR 0020** (its `Class` and tiers now also govern child processes; its WP-12
+  lint becomes checks C40-C42), ADR 0008 (every long job has a key) and ADR 0018 (section 5). The user decided on 2026-10-28 that there is one family ADR for background work (D11)
   and that the measured budgets are gates (D7)
 - Date: 2026-10-28
 - Related: ER-17 to ER-21 (long operations off the UI thread, live progress and Cancel, no UI timeouts, bounded
@@ -36,47 +37,68 @@ instance, and fix the instances through it.
 
 ## Decision
 
-Four binding rules for every Paddock app and shared crate. Each has one mechanism, a check that covers every instance,
-and the list of today's instances.
+Four binding rules for every Paddock app and shared crate, and one amendment to ADR 0018 (section 5). Each rule has one
+mechanism, a check that covers every instance, and the list of today's instances.
 
 ### 1. Background work runs at background priority, threads bounded (ER-20)
 
-**Mechanism.** `paddock-proc` owns a `Priority` enum `{ Interactive, User, Background, Idle }` and applies it in one place,
-both to a child process at launch (`Command` extension: `.priority(p)`) and to the current thread
-(`priority::apply_current`, the ADR 0020 helper, moved here so the executor and process launch share it):
+**Mechanism.** One priority model: ADR 0020's `Class` (`Interactive`, `User`, `Background`, `Idle`) and its two OS tiers.
+No second enum. ADR 0020's `priority::apply_current(Class)` sets the current thread; this ADR adds the same `Class` to
+child-process launch (`paddock_proc::command(...).class(c)`), so a launch site states its class like a task does. (If the
+dependency direction needs it, `Class` moves to the lower crate and `paddock-jobs` re-exports it; it stays one type.)
 
-| OS | Background / Idle (process) | Background / Idle (thread) | I/O |
+**Which class a child gets.** A process that serves interactive requests (the store worker answering UI queries, an
+inference server answering chat) is **never launched below `User`**; it tiers its work per thread, as ADR 0020 decides
+(tiered workers, WP-9: the class travels with the IPC call). Only a child that does nothing but background work is
+launched at `Background` or `Idle`. A child's class is fixed at launch: on Linux an unprivileged process cannot lower its
+nice value again (setpriority(2); the reason ADR 0020 fixes worker tiers), so switching a child's class per request is
+not portable and is not done. A second instance of a server for the other kind of work is not an option either: for an
+inference server it doubles 7-8 GB. Under rule 46 an inference server only serves user-started work, so it is launched
+at `User` with bounded threads.
+
+| OS | Child at `Background` / `Idle` (set from the parent on the child handle) | Thread (`apply_current`, ADR 0020) | I/O and memory |
 |---|---|---|---|
-| macOS | `posix_spawnattr` / `setpriority(PRIO_DARWIN_PROCESS, pid, PRIO_DARWIN_BG)` (the `taskpolicy -b` behaviour: CPU, I/O and GPU throttled) | `pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND / UTILITY)` | included in `PRIO_DARWIN_BG` |
-| Linux | `nice 10` (Background) or `19` + `SCHED_IDLE` (Idle) in `pre_exec` | `setpriority(PRIO_PROCESS, tid, …)`, `SCHED_IDLE` for Idle | `ioprio_set(IOPRIO_CLASS_IDLE)` for Idle, best-effort 7 for Background |
-| Windows | `IDLE_PRIORITY_CLASS` (Idle) or `BELOW_NORMAL_PRIORITY_CLASS` (Background) at `CreateProcess`, and `PROCESS_MODE_BACKGROUND_BEGIN` from inside the child (`SetPriorityClass(GetCurrentProcess(), …)`), which also lowers I/O and memory priority | `SetThreadPriority(THREAD_MODE_BACKGROUND_BEGIN)` | included in background mode |
+| macOS | `setpriority(PRIO_DARWIN_PROCESS, pid, PRIO_DARWIN_BG)` (the `taskpolicy -b` behaviour: CPU on efficiency cores, I/O and GPU throttled) | `pthread_set_qos_class_self_np(QOS_CLASS_UTILITY / BACKGROUND)` | included in `PRIO_DARWIN_BG` |
+| Linux | nice 10 (`Background`) or nice 19 + `SCHED_IDLE` (`Idle`) in `pre_exec`; never raised again | `setpriority(PRIO_PROCESS, tid, …)`, `SCHED_IDLE` for `Idle` | `ioprio_set` best-effort 7 (`Background`), idle class (`Idle`) |
+| Windows | `BELOW_NORMAL_PRIORITY_CLASS` (`Background`) or `IDLE_PRIORITY_CLASS` (`Idle`) at `CreateProcess`, then `SetProcessInformation(child, ProcessMemoryPriority, MEMORY_PRIORITY_LOW / VERY_LOW)` and `SetProcessInformation(child, ProcessPowerThrottling, EXECUTION_SPEED)` (EcoQoS) | `SetThreadPriority(THREAD_MODE_BACKGROUND_BEGIN)` | memory priority as set; I/O priority of *another* process has no public API |
 
-A child that serves both kinds of work (an inference server, a store worker) takes the class per request where the
-protocol allows it (ADR 0020 WP-9 for the store worker), otherwise runs at the class of its most common work and gets a
-separate instance for the other. **Thread counts** come from one function, `paddock_proc::threads(kind, class)`: CPU work
-`physical cores − 1` for User, `physical cores / 2` for Background, 1 for Idle; never logical cores (SMT siblings share
-the core the user is typing on). A child's thread argument (`--threads`, pool sizes) is taken from it.
+`PROCESS_MODE_BACKGROUND_BEGIN` applies only to the calling process, so it cannot be set on llama-server or any other
+third-party child; our own Rust children that do only background work may call it on themselves at start (through
+`apply_current`'s process variant), which also lowers their I/O priority.
+
+**Thread counts** come from one function, `paddock_proc::threads(kind, class)`, which counts cores by kind, never logical
+CPUs (SMT siblings share the core the user is typing on):
+
+- Apple silicon: performance cores (`hw.perflevel0.physicalcpu`) and efficiency cores (`hw.perflevel1.physicalcpu`).
+  `User` CPU work: performance cores − 1 (at least 1). `Background`/`Idle`: the efficiency-core count (at least 1),
+  because background QoS runs on those cores anyway and more threads only queue there.
+- Hybrid x86 (Intel P/E): the same split from `GetLogicalProcessorInformationEx` (`EfficiencyClass`) on Windows and
+  `/sys/devices/system/cpu/types` (or `cpu_capacity`) on Linux.
+- Uniform CPUs: physical cores − 1 for `User`, physical cores / 2 for `Background`, 1 for `Idle`.
+- The ADR 0020 running bound and the app's Performance setting cap the result. A child's thread argument (`--threads`,
+  `--threads-batch`, pool sizes) is taken from it.
 
 **Check.** Conformance **C40** (`conformance/src/priority.mjs`, `paddock-rules` once ADR 0022 phase 4 lands): every
 `Command::new`/`std::process::Command` in non-test code of `crates/` and `apps/` goes through `paddock_proc::command` with
-an explicit `.priority(...)`, or is on a reviewed allow-list with a reason; direct `setpriority`, `SetPriorityClass`,
+an explicit `.class(...)`, or carries a dated waiver (below); direct `setpriority`, `SetPriorityClass`,
 `pthread_set_qos_class_self_np`, `*_PRIORITY_CLASS` outside `paddock-proc` fail. Tests in `paddock-proc` per OS: a child
-launched as Background reports the class (`getpriority`/`proc_pidinfo` `PROC_PIDTASKINFO` policy, `GetPriorityClass`)
-and its thread count, on each OS's CI runner.
+launched as `Background` reports the class (`getpriority(PRIO_DARWIN_PROCESS)`, `getpriority` on Linux,
+`GetPriorityClass` and `GetProcessInformation` on Windows) and its thread count, on each OS's CI runner; a launch of a
+process registered as serving interactive requests below `User` fails a unit test.
 
 **Instances today** (grep at `2d2fdaadf`):
 
 | App | Site | What it does | Change |
 |---|---|---|---|
-| shared | `crates/paddock-proc/src/command.rs:9,63`; `sys.rs:44-47` | `BELOW_NORMAL` / nice 10 for every quiet command | becomes `Priority::Background`; callers state it |
-| Debrief | `crates/debrief-ai-worker/src/main.rs:12-19`, `child.rs:193-194` | AI worker and llama-server: below-normal / nice 10 for chat and background alike | `User` for chat, `Background` for confirmed batch jobs (rule 46) |
+| shared | `crates/paddock-proc/src/command.rs:9,63`; `sys.rs:44-47` | `BELOW_NORMAL` / nice 10 for every quiet command | callers state a `Class` |
+| Debrief | `crates/debrief-ai-worker/src/main.rs:12-19`, `child.rs:193-194` | AI worker and llama-server: below-normal / nice 10 for chat and background alike | `User` (it serves chat; rule 46 leaves it no background work) with bounded threads |
 | Debrief | `crates/debrief-ai-worker/src/server.rs:283-287` | `--threads` = all logical cores | `threads(Cpu, class)` |
 | Debrief | `crates/debrief-ipc/src/process.rs:382-385`, `contain.rs:469` | sandboxed children: nice / below-normal | `paddock-proc` (PH1 moves these anyway) |
 | Debrief | `crates/debrief-plugin-api/src/process.rs:15,52-53` | its own copy of the below-normal constant | deleted (PH1) |
 | Debrief | `crates/debrief-core/src/threads.rs:116,126`; `crates/debrief-ai/src/models/priority.rs:17,29` | two thread helpers (QoS background vs utility) | `priority::apply_current` |
-| Dyno | `crates/dyno-core/src/process.rs:75`; `dyno-platform/src/{unix_control,macos/control,linux/os_control,linux/sys,windows/control}.rs` | priority control *of other processes* (the user's tool) | out of scope (it is the product), allow-listed |
-| Pitwall | `crates/pitwall-server/src/process.rs:42` | llama-server below-normal | `Priority` per request kind |
-| Pitcrew, Spotter, Sighter, Pacenotes | – | no priority set on children (Spotter's renderer, Pitcrew's services) | C40 lists them; Background for Spotter's scheduled renders |
+| Dyno | `crates/dyno-core/src/process.rs:75`; `dyno-platform/src/{unix_control,macos/control,linux/os_control,linux/sys,windows/control}.rs` | priority control *of other processes* (the user's tool) | out of scope (it is the product), waiver kind `product` |
+| Pitwall | `crates/pitwall-server/src/process.rs:42` | llama-server below-normal | `User` with bounded threads (it serves interactive requests) |
+| Pitcrew, Spotter, Sighter, Pacenotes | – | no priority set on children (Spotter's renderer, Pitcrew's services) | C40 lists them; `Background` for Spotter's renderer only if it serves no interactive render |
 
 ### 2. No polling without a wake-up
 
@@ -87,11 +109,23 @@ an OS without events) is an ADR 0020 mode-2 check: a declared interval, backoff 
 maximum), **demand** (paused without subscribers or a visible window) and **idle stop** (it ends when its purpose is met
 or after a declared maximum). A store or OS call inside a loop body is work for the check, never for a `sleep` loop.
 
-**Check.** ADR 0020 WP-12's lint, made binding and widened: **C41** flags `thread::sleep`, `sleep(` and `wait_timeout`
-in non-test code outside `paddock-jobs::exec` and the allow-list (each entry with interval, backoff, demand and idle
-stop); frontend `setInterval`/`timer(`/`interval(` outside the shared live feed likewise. A PR test per fixed instance
-counts its work on a `ManualExecutor`/fake clock: **0 statements, 0 OS calls, 0 wake-ups across N idle turns** (the
-budget D7 adopted: ≤ 1 wake-up/s and ≤ 0.5 % of a core per idle process, also measured nightly in `debrief-bench.yml`).
+**Check.** ADR 0020 WP-12's lint, made binding and widened: **C41** finds sleeps and timed waits in non-test code
+outside `paddock-jobs::exec` and sorts each into one of these kinds; only the first is a finding:
+
+| Kind | Example | Verdict |
+|---|---|---|
+| Loop that sleeps and looks | `loop { sleep(500ms); query(); }` | finding: use a wake-up or an executor check |
+| Condvar or `Clock::wait` with a timeout as a *deadline* | `wait_timeout(guard, deadline)` on a condvar that is notified on change (what this ADR prescribes) | allowed when the loop body does no store or OS call on timeout; a timeout that leads to work is a finding |
+| One-shot delay | a debounce, a fade, a single retry after a failure | waiver kind `delay` (duration, why not an `after()`) |
+| Bounded backoff | reconnecting to a peer: ×2 up to a cap, a maximum number of tries or a deadline | waiver kind `backoff` (start, cap, stop) |
+| UI clocks | Angular `setInterval`, RxJS `timer(`/`interval(` | finding outside the shared live feed and outside visual clocks (a running "elapsed" label, an animation frame), which get waiver kind `ui-clock` and must stop when hidden |
+
+Waivers are dated entries in `paddock.waivers.toml` with the check id, path, kind, reason and expiry, as ADR 0023 does for
+C39; a waiver without a reason or past its expiry is itself an error. A **ratchet** keeps each app's finding count and
+waiver count in a committed baseline that may only fall. A PR test per fixed instance counts its work on a
+`ManualExecutor`/fake clock: **0 statements, 0 OS calls, 0 wake-ups across N idle turns** (the budget D7 adopted: ≤ 1
+wake-up/s and ≤ 0.5 % of a core per idle process; nightly in `debrief-bench.yml` the gate is CPU seconds and wake-ups
+over 60 s, never wall time).
 
 **Instances today.** Classified (survey): 44 periodic polls, 17 frontend polls, ~30 copies of a `try_wait`-sleep loop.
 Raw grep of `thread::sleep(` in non-test paths (includes inline test modules; the C41 first run gives the exact list):
@@ -114,10 +148,13 @@ otherwise run inline is submitted to the ADR 0020 executor (mode 1, a class and 
 and an **idempotency key** (`JobSpec::key`: kind + scope + canonical request; `submit` returns the queued or running job
 with the same key). Requests read the last finished result and never wait for a rebuild; a rebuild is single-flight.
 
-**Check.** **C42**: `thread::spawn`/`Builder::spawn` in non-test code outside `paddock-jobs` and the lease allow-list
-(ADR 0020's mode-3 exemptions: pipe readers, lifelines, OS consumers) fails; every job kind registered with the jobs
-registry declares its key function and its phases (a registry test enumerates kinds and asserts both); a PR test per
-kind submits the same request twice and gets one id.
+**Check.** **C42**: `thread::spawn`/`Builder::spawn` in non-test code outside `paddock-jobs` fails unless it is one of
+ADR 0020's mode-3 lease kinds (pipe readers, lifelines, OS consumers) with a dated waiver of kind `lease`; every job kind
+registered with the jobs registry declares its key function and its phases (a registry test enumerates kinds and
+asserts both); a PR test per kind submits the same request twice and gets one id. **Inline work on request threads** is
+caught by counting, not by the lint: each request command that reads a derived table (Debrief's `find_values` and chat
+turn reading the name table) has a test with a counting store and a stale table that asserts the command returns the
+last table, makes **0 rebuild calls** itself, and that exactly one rebuild job is queued.
 
 **Instances today.** Raw grep of thread spawns in non-test paths: shared 71, Debrief 127, Dyno 49, Pitcrew 24, Spotter
 10, Pitwall 7, Sighter 0, Pacenotes 0 (the survey classifies ~65 as one-shot tasks that belong in the executor and ~67 as
@@ -146,7 +183,7 @@ the name. One watcher serves all of an app's children (an ADR 0020 mode-2 check 
 call's end), not one thread per child.
 
 **Check.** A `paddock-proc` test with a counting OS shim: watching 14 children for 10 fake-clock seconds makes 14 per-pid
-reads per tick and 0 machine snapshots; C41/C42's allow-list names the only callers of `machine_snapshot()`; nightly, the
+reads per tick and 0 machine snapshots; dated waivers of kind `machine-table` name the only callers of `machine_snapshot()`; nightly, the
 plugin idle harness (`crates/debrief-plugins/tests/it/perf_plugins.rs`) asserts the host's idle CPU within the D7 budget.
 
 **Instances today:**
@@ -160,23 +197,44 @@ plugin idle harness (`crates/debrief-plugins/tests/it/perf_plugins.rs`) asserts 
 | Debrief | `app/src-tauri/src/ai/core.rs:1247` (`worker_rss_bytes`) | whole table, and RSS (rule 26) | tree probe from the worker's pid |
 | Spotter | `crates/spotter-render/src/process.rs:117, 125, 196`; `launch.rs:298` (render watchdog every 4th tick) | whole table | tree probe |
 | Pitcrew | `crates/pitcrew-service/src/probe.rs:49` | whole table for its supervised services | tree probe per service, or `machine_snapshot` where it lists all |
-| Dyno | `crates/dyno-platform/src/processes.rs:123`; Debrief `crates/debrief-monitor/src/source.rs:85` | whole table, by design (process lists) | allow-listed, `machine_snapshot` |
+| Dyno | `crates/dyno-platform/src/processes.rs:123`; Debrief `crates/debrief-monitor/src/source.rs:85` | whole table, by design (process lists) | waiver kind `machine-table`, `machine_snapshot` |
 | Pitwall, Sighter, Pacenotes | – | none found | – |
+
+### 5. Amendment to ADR 0018: bounds hold memory, not only rows; post-import phases stream too
+
+Patterns 6 and 7 of the research note, listed in D11, are recorded here as an amendment to ADR 0018 rather than as new
+rules, because ADR 0018 already owns bounded loading and streaming imports; they are not background-work rules.
+
+- **A bounded query bounds memory.** `catalogue(all)` has a 50,000-row limit and still runs out of DuckDB's 192 MB at a
+  7.6 GB store (1.58 M catalogue rows; 24 of 24 calls failed). Mechanism: ADR 0018's `bounded_query` test helper runs
+  every bounded port method on a large synthetic store (`paddock-testkit` large-fixture generator) under the worker's
+  memory limit. Check: the helper's table covers every method in the port table (a test enumerates them). Instance:
+  Debrief `crates/debrief-store-duck/src/catalogue.rs:262-268` (1.2 plan P3).
+- **Memory caps per process hold for every phase, with streaming.** ADR 0018 and the 1.2 plan cover imports (4.3, 3.5) and
+  plugins (2.6, PH4); the store's post-import phases are added: the catalogue phase peaked at 911 MB at 7.6 GB. Check:
+  the nightly footprint gate is per phase (budget 512 MB for post-import work). Instance:
+  `crates/debrief-store-duck/src/catalogue.rs:59-92` (1.2 plan P4).
 
 ## Rollout
 
-1. **Paddock, now (with Debrief 1.2's wave 2):** `paddock-proc` `Priority`, `threads()`, per-pid and tree probes, one
-   watcher for all children (Debrief 1.2 package P1 with 2.2); C40-C42 land in **warning** mode with their generated
-   instance lists committed.
-2. **Debrief 1.2:** packages P0-P4, NR1, BP1, J1 and B1 of the 1.2 plan (section "Performance packages"); PH1 moves its
+1. **Paddock, now (with Debrief 1.2's wave 2):** `Class` on child launch in `paddock-proc`, `threads()`, per-pid and tree
+   probes, one watcher for all children (Debrief 1.2 package P1 with 2.2); C40-C42 land in **warning** mode with their
+   waivers and ratchet baselines committed.
+2. **Debrief 1.2:** packages P0-P5, NR1, BP1, J1 and B1 of the 1.2 plan (section "Performance packages"); PH1 moves its
    children onto `paddock-proc`, which takes rules 1 and 4 with it; C40-C42 become **errors for `apps/debrief`** when its
-   lists are empty or reasoned.
-3. **Other apps, each with its next release** (rule 1, one app at a time): Pitwall (llama-server priority per request,
+   findings are fixed or waived.
+3. **Other apps, each with its next release** (rule 1, one app at a time): Pitwall (llama-server at `User` with bounded threads,
    ADR 0020 WP-11), Pacenotes and Sighter (born compliant: the checks are errors for them from their first code), Pitcrew
    (`probe.rs`, ADR 0020 WP-10), Spotter (render watchdog and priority), Dyno (agent loops, ADR 0020 WP-5/6). Each turns
    the checks into errors for its folder when its lists are clean.
 4. Lessons and rules: on acceptance, rule 13 gains "child processes included" and the four rules here become rules 47-50
    in `docs/rules.md` (with the reasons in `docs/lessons.md`).
+
+**Tooling (ADR 0022).** ADR 0022 §3(a) bans new `.mjs`, `.sh` and `.py` tooling files from the start of its phase 1,
+and its phases start after Debrief 1.2 (the agreed order). So C40-C42 are written now as `.mjs` conformance checks
+(`conformance/src/{priority,polls,threads}.mjs`), like C1-C39; they join ADR 0022's counted baseline of tooling files and
+move to `paddock-repo-rules` in its rules phase. The measurement scripts committed with the evidence
+(`apps/debrief/scripts/perf/*.py`, `*.sh`) go on the same baseline and move to `paddock-dev` (or `paddock-bench`) with it.
 
 ## Consequences
 
@@ -193,7 +251,7 @@ plugin idle harness (`crates/debrief-plugins/tests/it/perf_plugins.rs`) asserts 
 | Windows background mode can starve a background job on a busy machine for a long time | jobs show "Still working"; a user-started job is `User`, never `Background`; a test of progress under load on the Windows runner |
 | `PRIO_DARWIN_BG` throttles GPU work too (Metal inference for a confirmed batch job) | measured on the Mac runner when the first background inference job lands; the class is per request, so chat is unaffected |
 | The tree probe misses grandchildren that re-parent (daemonising helpers) | Windows: the job object holds them; macOS and Linux: children of supervised processes are not allowed to daemonise (contain), tested |
-| Lints flood with legitimate instances | warning mode first, generated allow-lists with reasons, errors per app only when its list is clean |
+| Lints flood with legitimate instances | warning mode first, dated waivers with reasons and expiry, a ratchet that only lets counts fall, errors per app only when its findings are fixed or waived |
 
 ## Alternatives considered
 

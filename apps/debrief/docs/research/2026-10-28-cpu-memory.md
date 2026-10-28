@@ -18,7 +18,7 @@ nightly regression gate in `debrief-bench.yml`). D11 taken: the patterns of sect
 off by default and the names pack (~1,500 entries, all OS) is that research's package. So section 3 is kept as the
 record of the estimate but no longer drives work, D8-D10 are superseded, and the packages N2-N7 of section 5 are
 replaced in the plan by **NR1** (this note's N1), **BP1** (background priority and thread bounds, ADR 0024 rule 1) and
-the unchanged P0-P4, J1, B1 and A1: 10 packages, about 18 agent-days. The plan's table is the current one.
+the unchanged P0-P4, J1, B1 and A1, plus P5 (plugin idle wake-ups, from the review): 11 packages, about 19 agent-days. The plan's table is the current one.
 
 ## 0. Method and reproduction
 
@@ -36,14 +36,15 @@ the unchanged P0-P4, J1, B1 and A1: 10 packages, about 18 agent-days. The plan's
   next to it only to show how far apart they are. `scripts/perf/procsample.py` samples a process and its children every
   250 ms (footprint, lifetime peak footprint, RSS, user+system CPU time, idle and interrupt wake-ups);
   `scripts/perf/perfsum.py` summarises per process and per phase.
-- **Harnesses** (committed on this branch, do nothing without their environment variable):
+- **Harnesses** (committed on this branch; the Rust ones are `#[ignore]` and run with `--ignored`; the scripts read
+  `DEBRIEF_PERF_BIN` (release target folder), `DEBRIEF_LIB_DIR` (libduckdb) and `DEBRIEF_PERF_OUT` (results folder)):
   - Import: `scripts/perf/perf-import.sh LABEL CORPUS STORE` runs the release `debrief import ... --json` (the headless
     CLI, ADR 0044) with the release `debrief-store-worker`, exactly the process split of the app.
   - After the import: `crates/debrief-store-duck/tests/perf_idle.rs` (`DEBRIEF_PERF_STORE=<store>`) reopens the store and
     runs, one after the other, the catalogue build (the full-text index builds concurrently), 60 s idle, 60 s of the name
     watcher's calls, and the name-table rebuild step by step; `scripts/perf/perf-post.sh` samples it.
   - Names: `crates/debrief-core/tests/it/names_perf.rs` `merge_scaling` (ignored; `--ignored --nocapture`).
-  - Plugins: `crates/debrief-plugins/tests/it/perf_plugins.rs` (`DEBRIEF_PERF_PLUGINS=1`) warms the 12 built-ins up as
+  - Plugins: `crates/debrief-plugins/tests/it/perf_plugins.rs` (`--ignored`) warms the 12 built-ins up as
     the app does and idles 60 s; this process stands in for the app (it runs the host's memory watchers); `sample(1)`
     attributed its CPU.
 - Not measured: the app process with a window (no GUI in agent runs), llama-server (no model on the machine; read from
@@ -59,7 +60,7 @@ scripts/perf/perf-import.sh large  <data>/large  <data>/stores/large
 scripts/perf/perf-post.sh   mid550 <data>/stores/mid550 60
 scripts/perf/perf-post.sh   large  <data>/stores/large  60         # then large2 with 30 s (see 1.3)
 <release it binary of debrief-core> names_perf:: --ignored --nocapture --test-threads 1
-DEBRIEF_PERF_PLUGINS=1 <release it binary of debrief-plugins> perf_plugins:: --nocapture   # + sample <pid> 5
+<release it binary of debrief-plugins> perf_plugins:: --ignored --nocapture   # + sample <pid> 5
 ```
 
 ## 1. Baseline
@@ -140,7 +141,7 @@ the measurement when the fix removes the work, else estimated.
 | # | Hotspot | Measured cost | Root cause | Fix | Expected gain |
 |---|---|---|---|---|---|
 | H1 | **Child memory watchers enumerate every process** | 1.16 cores, 55 wake-ups/s in the app for as long as it runs, with 12 plugins (14 children with the store and AI workers) | `paddock_proc::process_memory(pid)` calls `snapshot()`, a full OS process table, for one pid (`crates/paddock-proc/src/usage.rs:40-53, 122-125`); `debrief-ipc` calls it every 200 ms per child on its own thread (`apps/debrief/crates/debrief-ipc/src/process.rs:225-241`) | Per-pid probe (macOS `proc_pid_rusage(pid)`, Linux `/proc/<pid>/smaps_rollup`, Windows `GetProcessMemoryInfo`), one watcher for all children, 1 s cadence plus a check on each call's end (ADR 0020 mode 2) | ~1.15 cores → < 0.01; 14 threads → 1 |
-| H2 | **Name watcher polls the whole catalogue** | 1.04 cores (550 MB) to 2.08 cores (7.6 GB) while the catalogue builds: 20 s and 5 min; at 7.6 GB, for the full 10 min `WATCH_MAX` because the rebuild never succeeds: **~1,250 CPU-s per import** | `watch_catalogue` sleeps 500 ms and calls `ensure_fresh` (`app/src-tauri/src/names.rs:38-40, 271-293`); `Names::refresh` fetches `catalogue(all)` before it looks at `built` (`crates/debrief-core/src/names/build.rs:103-111`); the store runs the 50,000-row aggregate even when not built (`crates/debrief-store-duck/src/catalogue.rs:256-277`); `summary()` each tick | A blocking `catalogue_status(after_generation, deadline)` call or an event from the store; never fetch candidates while `built` is false; the watcher becomes the rebuild job's first phase | 1-2 cores for minutes → ~0 |
+| H2 | **Name watcher polls the whole catalogue** | 1.04 cores (550 MB) to 2.08 cores (7.6 GB) while the catalogue builds: 20 s and 5 min; at 7.6 GB, for the full 10 min `WATCH_MAX` because the rebuild never succeeds: **~1,250 CPU-s per import** (*estimate*: 2.08 cores measured over a 30 s run, extrapolated to the 10 min `WATCH_MAX`) | `watch_catalogue` sleeps 500 ms and calls `ensure_fresh` (`app/src-tauri/src/names.rs:38-40, 271-293`); `Names::refresh` fetches `catalogue(all)` before it looks at `built` (`crates/debrief-core/src/names/build.rs:103-111`); the store runs the 50,000-row aggregate even when not built (`crates/debrief-store-duck/src/catalogue.rs:256-277`); `summary()` each tick | A blocking `catalogue_status(after_generation, deadline)` call or an event from the store; never fetch candidates while `built` is false; the watcher becomes the rebuild job's first phase | 1-2 cores for minutes → ~0 |
 | H3 | **`catalogue(all)` runs out of memory at 7.6 GB** | Name layer never built at the user's size; every search and chat turn pays `summary` (429 ms) + a failing 350 ms aggregate | `GROUP BY e.scope, e.name ... list(DISTINCT s.name) ... ORDER BY sum(e.n) DESC LIMIT 50000` over 1.58 M catalogue rows joined to sources, under the 192 MB limit (`catalogue.rs:262-268`); the result limit bounds rows, not memory (an ADR 0018 gap) | Pre-aggregate per source at build time (a `catalogue_totals` table kept by `commit`) and read the top 50,000 from it; `seen_in` as the first 5 source ids (`arg_min`/bounded list), names joined afterwards; a memory budget test at 1.6 M rows | Rebuild works at 7.6 GB; catalogue(all) < 100 ms (estimate) |
 | H4 | **Catalogue build re-reads and re-parses every event** | 39 CPU-s / 20 s (550 MB), **652 CPU-s / 5 min** (7.6 GB), 911 MB peak; no job, no progress, no Cancel | `catalogue::build` scans `events` per source and runs `entities::extract` on message and exception (`catalogue.rs:59-92`), after the parse threads had that text in hand | Extract entities in the import pipeline (per batch, in the parse threads, into a bounded per-source tally committed with the segment), so the catalogue is ready when the import ends; until then run the build as a background-priority job with phase progress (rule 11) | −600 CPU-s and −5 min at 7.6 GB (the extractor's own CPU moves into the import: estimate +10-20 % import CPU) |
 | H5 | **Name-table rebuild: quadratic merge, page queries, on the request thread** | 16.3 s / 31 CPU-s at 550 MB for 38 groups (14 full-text page queries); `merge_cooccurring` 44 s at 8,000 groups, ~29 min at the 50,000 cap; runs synchronously inside `find_values` and chat turns, no Cancel, rebuilt whenever `(total, sources)` changes (live tail: every search) | `merge_cooccurring` compares every pair of same-scope groups and builds two trigram sets per comparison (`crates/debrief-core/src/names/group.rs:180-199, 230-240`), although only groups present in the co-occurrence data (≤ 200 look-alikes × 30 events) can merge; `merge_by_cooccurrence` runs one page query with a total per look-alike (`build.rs:50-81`); `ensure_fresh` keys on the event total (`app/src-tauri/src/names.rs:118-131`), called from `search_everything.rs:151` and `ai/commands.rs:490` | Merge only candidates that occur in `cooc` (k ≤ a few hundred) and block by trigram (precomputed per group); co-occurrence from bounded, total-free queries (or the catalogue's event ids); rebuild keyed on the catalogue generation, single-flight, as a job with progress and Cancel; requests use the last table and never wait | 44 s at 8,000 → < 0.1 s (estimate O(k²) with k ≤ 300); 16 s → < 2 s at 550 MB |
@@ -155,7 +156,7 @@ the measurement when the fix removes the work, else estimated.
 | H14 | `.evtx` import memory | 11 MB per MB of log | Whole file twice plus all records | Plan PH4/3.4, unchanged | constant ~50-70 MB |
 
 H1 and H2 are the user's "Debrief uses CPU when it does nothing": together about **1.2 cores for the app's lifetime and
-another 1-2 cores for minutes after every import**. H4 is the largest single cost per import. H3 is a correctness bug at
+another 1-2 cores for minutes after every import** (H2's ~1,250 CPU-s per 7.6 GB import is an estimate extrapolated from a 30 s run; even so it outranks H4's measured 652 CPU-s). H4 is the largest single cost per import. H3 is a correctness bug at
 the user's data size (the name layer silently never exists). H8-H10 are the follow-ups about the names job.
 
 ## 3. "Learning human names": options and estimates
@@ -193,7 +194,7 @@ night is reported and two in a row fail).
 
 | Budget | Value | Measured today | Gate |
 |---|---|---|---|
-| Idle CPU, every Debrief process, no job running | **≤ 0.5 % of one core and ≤ 1 wake-up/s per process** (target ≈ 0) | app 116 %; store 5.8-11.7 %, 4.4 wake-ups/s; plugins 0 % but 5 wake-ups/s each | PR: catalogue and full-text loops execute 0 statements across N idle turns on a `ManualExecutor`/fake clock; the child watcher reads only the watched pids (a counting `ProcessProbe`: 0 `snapshot()` calls); the name watcher makes 0 `catalogue(all)` calls while `built` is false. Nightly: 60 s idle of the store harness and the plugin harness, CPU-s and wake-ups/s from `proc_pid_rusage` (Linux `/proc/<pid>/stat`), budget 0.3 CPU-s per 60 s per process |
+| Idle CPU, every Debrief process, no job running | **≤ 0.5 % of one core and ≤ 1 wake-up/s per process** (target ≈ 0) | app 116 %; store 5.8-11.7 %, 4.4 wake-ups/s; plugins 0 % but 5 wake-ups/s each | PR: catalogue and full-text loops execute 0 statements across N idle turns on a `ManualExecutor`/fake clock; the child watcher reads only the watched pids (a counting `ProcessProbe`: 0 `snapshot()` calls); the name watcher makes 0 `catalogue(all)` calls while `built` is false. Nightly: 60 s idle of the store harness and the plugin harness, gated on CPU seconds and wake-ups (never wall time): macOS `proc_pid_rusage` (CPU time, `ri_pkg_idle_wkups` + `ri_interrupt_wkups`), Linux CPU time from `/proc/<pid>/stat` and wake-ups from `/proc/<pid>/task/*/sched` (`nr_wakeups`) or `schedstat`; budget 0.3 CPU-s per 60 s per process. The plugin processes' own 5 wake-ups/s against the 1/s budget get package P5 |
 | Peak footprint, store worker, import | **≤ 768 MB** at 550 MB and at 7.6 GB (ADR 0014) | 805 / 1,268 MB | Nightly: plan 4.3's corpus run, footprint (rule 26) |
 | Peak footprint, store worker, catalogue phase | **≤ 512 MB** | 390 / 911 MB | Nightly (same run, phase-tagged) |
 | `catalogue(all)` memory | within the 192 MB DuckDB limit at 1.6 M catalogue rows | OOM | PR: a generated catalogue of 1.6 M rows (synthetic names, written straight into the tables) answers `catalogue(all)` (`debrief-store-duck/tests/regress_1_2.rs`) |
@@ -226,9 +227,10 @@ Each package starts with its failing test or bench (rule 5; the wave-0 markers c
 | N7 | **Model memory for background naming** (H8): a separate optional naming model (D9) or the chat model at `-c 2048`; unload when the job loaded it and it stayed unused; autoload default per D9 | `crates/debrief-ai/src/{settings.rs,llm/lazy.rs}`, `app/src-tauri/src/ai/core.rs` | lazy-provider test: a load started by the background job is unloaded at its end when nothing else used it; settings migration test | 1.5 | N2 | 6 |
 | J1 | **Idempotency key on jobs** (H11): `JobSpec::key`, `submit` returns the existing queued or running job; Summarize, Explain, Root causes, imports, exports keyed; built in `paddock-jobs` (rule 42) and adopted | `crates/paddock-jobs/src/` (queue), `app/src-tauri/src/ai/requests.rs`, Debrief job call sites | two identical submits give one id; a different range gives two | 1.5 | M2a (jobs move to `paddock-jobs`) | 3 |
 | B1 | **Bench gates** (section 4): the harnesses into `debrief-bench.yml` through `paddock-bench` (idle CPU and wake-ups, phase footprints, s/GB, CPU-s/GB, names timings); Linux numbers recorded first, macOS footprint on the Mac runner | `.gitea/workflows/debrief-bench.yml`, `apps/debrief/bench/budgets.toml`, the harness tests | `paddock-bench check` fails on a planted 2× regression | 1.5 | 4.3 (Debrief adopts `paddock-bench`), P1-P4 | 8 |
-| A1 | **ADR (rule 40)**: the patterns of section 6 as one family ADR amending 0008 and 0020; the lint of ADR 0020 WP-12 extended | `docs/adr/0023-background-work-contract.md` | reviewed independently | 1 | – | 0 |
+| P5 | **Plugin processes idle without waking** (5 wake-ups/s each, measured): find the plugin-side timer (serve loop, liveness or IPC read timeout) in the shared `paddock-plugin-api` serve loop after PH2b and replace it with a blocking read plus the host's liveness deadline | `crates/paddock-plugin-api/src/serve.rs`, `crates/paddock-ipc/` | a plugin idle for 60 fake-clock seconds wakes ≤ 1/s (counting clock) | 1 | PH2b | 5 |
+| A1 | **ADR (rule 40)**: the patterns of section 6 as one family ADR amending 0008 and 0020; the lint of ADR 0020 WP-12 extended | `docs/adr/0024-background-work-contract.md` | reviewed independently | 1 | – | 0 |
 
-**Total: 15 packages, about 25 agent-days** (P0 1.5, P1 1.5, P2 1, P3 2, P4 3, N1 2.5, N2 2, N3 1.5, N4 2.5, N5 1, N6 1,
+**Total (first version): 15 packages, about 25 agent-days** (P0 1.5, P1 1.5, P2 1, P3 2, P4 3, N1 2.5, N2 2, N3 1.5, N4 2.5, N5 1, N6 1,
 N7 1.5, J1 1.5, B1 1.5, A1 1 = 25.0), plus ±20 % for review rounds: **about 30 agent-days**. On the plan's critical paths
 only P4 (wave 7, after 4.3) and B1 (wave 8) are late; the rest fill free slots in waves 0-6. Expected outcome: idle CPU
 from ~1.3 cores to ≈ 0; ~1,900 CPU-s and ~5 min less per 7.6 GB import (watcher plus catalogue scan); a name layer that
