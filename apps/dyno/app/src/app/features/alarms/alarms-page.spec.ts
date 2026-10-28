@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 describe('dy-alarms-page, Active', () => {
-  it('lists the open alarms newest first with calm severity and the state as dot and word', async () => {
+  it('lists the open alarms newest first with the severity and the state as dot and word', async () => {
     const { f, el } = render();
     await settle(f);
     expect(el.querySelector('h1')?.textContent).toBe('Alarms');
@@ -48,7 +48,7 @@ describe('dy-alarms-page, Active', () => {
     expect(list).toHaveLength(5);
     expect(text(list[0]!)).toContain('GPU limit is past its limit');
     expect(text(list[0]!)).toContain('Active');
-    expect(text(list[0]!)).not.toContain('Warning');
+    expect(text(list[0]!)).toContain('Warning');
     expect(el.textContent).toContain('Returned, not acknowledged');
     expect(el.textContent).toContain('Acknowledged');
     expect(list.filter((r) => text(r).includes('Critical'))).toHaveLength(1);

@@ -107,7 +107,7 @@
       "instanced": false,
       "requiredChoice": false,
       "width": 720,
-      "height": null,
+      "height": 560,
       "commands": [
         "dyno"
       ]
