@@ -76,6 +76,30 @@ describe('the key dialog', () => {
     expect(d.outcome()).toBeNull();
   });
 
+  it('shows the key limit as a validation message on the name field and keeps Create key disabled', async () => {
+    const memory = new MemoryMcpBackend();
+    for (let i = 0; i < 16; i++) await memory.issueKey(`client ${i}`);
+    const d = await renderFramed(PdMcpKeyDialog, { id: 'pd.mcp.key', kind: 'form', modality: 'modal', providers: [provideMcpBackend({ backend: () => memory })] });
+    await d.stable();
+    expect(text(d.q('mcp-key-limit')!)).toBe('16 keys are in use. Revoke one you no longer need first.');
+    expect(d.q('mcp-key-client')!.getAttribute('aria-invalid')).toBe('true');
+    const input = d.q<HTMLInputElement>('mcp-key-client')!;
+    input.value = 'Pitwall';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await d.stable();
+    expect(d.action('create')!.disabled).toBe(true);
+    expect(d.q('dialog-alert-text')).toBeNull();
+  });
+
+  it('uses curly quotes in its lede and the shared muted label style', async () => {
+    const d = await open();
+    expect(text(d.el)).toContain('“Pitwall”');
+    expect(text(d.el)).not.toContain('"Pitwall"');
+    const src = (await import('./mcp-key-dialog')).PdMcpKeyDialog as unknown as { ɵcmp: { styles: string[] } };
+    const css = src.ɵcmp.styles.join('').replace(/\s+/g, ' ');
+    expect(css).toMatch(/\.pd-key__field(?:\[_ngcontent-%COMP%\])? \{[^}]*color: var\(--(?:%NS%)?pd-text-muted\)[^}]*font-size: var\(--(?:%NS%)?pd-text-label\)[^}]*font-weight: var\(--(?:%NS%)?pd-weight-medium\)/);
+  });
+
   it('is dismissed by Cancel and never issues a key', async () => {
     const d = await open();
     await d.press('dismiss');
