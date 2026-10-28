@@ -88,7 +88,7 @@ export class PdSidebarLink implements FocusableOption {
     .pd-item .pd-icon { width: 20px; height: 20px; flex: none; margin: 0 var(--pd-space-3) 0 0; color: inherit; }
     .pd-item .pd-count { flex: none; display: inline-flex; margin: 0 0 0 var(--pd-space-2); }
     .pd-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    /* In the rail the count sits at the icon's top-right corner, ringed in the sidebar's colour; it overlaps the corner by a few pixels, which holds no stroke. */
+    /* In the rail the count sits on the icon's top-right corner, ringed in the sidebar's colour: it covers that corner of the glyph (about 10 px square) on purpose, as a badge does. */
     .pd-icon, .pd-count {
       --mat-badge-background-color: var(--pd-surface-3);
       --mat-badge-text-color: var(--pd-text);
@@ -104,6 +104,8 @@ export class PdSidebarLink implements FocusableOption {
     :host ::ng-deep .pd-icon .mat-badge-content { box-shadow: 0 0 0 2px var(--pd-surface-1), inset 0 0 0 1px var(--pd-border-strong); font-variant-numeric: tabular-nums; }
     :host(.pd-rail) .pd-item.mdc-list-item { justify-content: center; padding: 0; }
     :host(.pd-rail) .pd-item .pd-icon { margin: 0; }
+    /* Lowered 2 px in the rail so the badge's ring does not cut the top of the focus outline. */
+    :host(.pd-rail) ::ng-deep .pd-icon .mat-badge-content { margin-top: 2px; }
     /* The name's slot (drawn by the list item, outside this template) takes no room in the rail, so the icon is centred. */
     :host(.pd-rail) ::ng-deep .mdc-list-item__content { flex: none; width: 0; min-width: 0; overflow: hidden; }
     :host(.pd-rail) .pd-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
