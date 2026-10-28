@@ -31,8 +31,6 @@ const DYNO_OWN: &[&str] = &[
     "dyno-app",
     "dyno-agent.exe",
     "dyno-agent",
-    "dyno-helper.exe",
-    "dyno-helper",
 ];
 
 /// The OS this build runs on, for the pure rules that depend on path conventions.

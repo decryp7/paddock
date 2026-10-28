@@ -3,7 +3,6 @@
 
 pub mod activity;
 pub mod counters;
-pub mod elevate;
 pub mod net;
 pub mod nt_query;
 pub mod pdh;
