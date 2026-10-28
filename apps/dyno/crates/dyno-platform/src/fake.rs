@@ -6,7 +6,7 @@
 //! use dyno_core::ports::PlatformError;
 //! let fake = Fake::new();
 //! fake.add_process(dyno_platform::fake::process(42, "busy.exe", 80.0));
-//! fake.fail(FakeOp::Apply, PlatformError::AccessDenied("no".into()));
+//! fake.fail(FakeOp::Details, PlatformError::AccessDenied("no".into()));
 //! let mut p = fake.platform();
 //! assert_eq!(p.processes.processes().len(), 1);
 //! ```
