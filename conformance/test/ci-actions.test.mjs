@@ -397,7 +397,7 @@ test('every job that builds Rust on a host sets its build folder with the build-
       assert.equal(ignored.status, 0, `${ws[1]}/.cargo/ci.toml is git-ignored`);
     }
   }
-  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle', ...['dyno'].flatMap((a) => [`${a}.yml:rust`, `${a}.yml:bundle`])]) {
+  for (const want of ['ci.yml:crate', 'ci.yml:app', 'app-release.yml:bundle', 'debrief.yml:rust-test-macos', 'debrief.yml:tauri-smoke', 'debrief.yml:bundle']) {
     assert.ok(uses.includes(want), `${want} sets its build folder with the action (found: ${uses.join(', ')})`);
   }
   const copies = spawnSync('git', ['ls-files', 'apps/*/scripts/ci/build-folder.sh'], { cwd: PADDOCK, encoding: 'utf8' });
@@ -668,9 +668,9 @@ test('the host-tools pin is a release version with SHA-256 sums', () => {
 // installers and the real-app smoke only on full runs, and the family's signing keys stripped before the bundler.
 import { parseJobs } from '../src/util/workflows.mjs';
 
-const APP_WORKFLOWS = ['dyno'];
+const APP_WORKFLOWS = [];
 // Apps on the shared kit (ci.yml's app leg through paddock.ci.json, <app>-release.yml through app-release.yml), not yet every app.
-const KIT_APPS = ['pitcrew', 'spotter', 'pitwall'];
+const KIT_APPS = ['pitcrew', 'spotter', 'pitwall', 'dyno'];
 const ciContract = (app) => JSON.parse(read(join(PADDOCK, 'apps', app, 'paddock.ci.json')));
 const appWorkflow = (app) => read(join(WORKFLOWS, `${app}.yml`));
 const appJob = (app, id) => parseJobs(appWorkflow(app)).find((j) => j.id === id);
@@ -884,7 +884,9 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
     assert.match(wf, /cancel-in-progress: true/, `${app}: a newer push supersedes (a tag has its own ref)`);
     // Every sidecar the bundle carries (bundle.externalBin) is started from the built macOS app.
     const tauriConf = JSON.parse(read(join(PADDOCK, 'apps', app, 'app', 'src-tauri', 'tauri.conf.json')));
-    const listed = (/sidecars: (.+)/.exec(wf)?.[1] ?? '').split(/\s+/).map((x) => x.split(':')[0]);
+    // One name:args per line (a block) or a single one.
+    const block = /sidecars: \|\n((?:[ ]{8,}\S.*\n)+)/.exec(wf)?.[1] ?? /sidecars: (.+)/.exec(wf)?.[1] ?? '';
+    const listed = block.split(/\s+/).filter(Boolean).map((x) => x.split(':')[0]);
     for (const bin of tauriConf.bundle.externalBin ?? []) assert.ok(listed.includes(bin.split('/').pop()), `${app}: ${bin} is started by the macOS verify (sidecars: ${listed})`);
     assert.match(wf, new RegExp(`tags: \\["${app}-v\\*"\\]`), `${app}: its own tag`);
     assert.match(wf, /uses: \.\/\.gitea\/workflows\/app-release\.yml\n\s+with:\n\s+paddock-ref: \$\{\{ github\.sha \}\}/, `${app}: the shared release, from this commit`);
@@ -1088,4 +1090,16 @@ test('no cmd echo puts a digit directly before a redirect in a workflow or an ac
     });
   }
   assert.deepEqual(bad, [], 'write (echo NAME=8)>>"%GITHUB_ENV%" so cmd does not read 8>> as a handle redirect');
+});
+
+test("app-release runs an app's own bundle check on Linux and macOS, after the installers and before the seal check, with the bundle folder", () => {
+  const wf = read(join(WORKFLOWS, 'app-release.yml'));
+  const at = wf.indexOf("- name: The app's own bundle check");
+  assert.ok(at > wf.indexOf('actions/tauri-bundle') && at < wf.indexOf('actions/macos-verify'), 'between the build and the seal check');
+  const step = wf.slice(at, wf.indexOf('\n\n', at));
+  assert.match(step, /if: inputs\.bundle-check != '' && runner\.os != 'Windows'/, 'Windows has no run paths to check');
+  assert.match(step, /run: bash "\$CHECK" "\$PADDOCK_BUILD_FOLDER\/dist\/bundle"/, 'the folder the installers were built in');
+  const dyno = read(join(WORKFLOWS, 'dyno-release.yml'));
+  const script = /bundle-check: (\S+)/.exec(dyno)?.[1];
+  assert.ok(script && existsSync(join(PADDOCK, script)), "Dyno's check script exists");
 });
