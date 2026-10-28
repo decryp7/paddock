@@ -132,7 +132,7 @@
                 @if (usageNow(); as u) {
                   <div class="hero">
                     <p class="big num">{{ u.cpu }}</p>
-                    <p class="cap faint">CPU now, peak {{ u.peakCpu }}</p>
+                    <p class="cap faint">CPU now, peak {{ usagePeak()?.cpu ?? '—' }} in 24 h</p>
                   </div>
                   <div class="hero">
                     <p class="big num">{{ u.mem }}</p>
@@ -147,10 +147,10 @@
                 }
                 @if (usagePeak()) {
                   <div class="chart cpu">
-                    <pc-usage-chart style="color: var(--chart-4)" [values]="usageCpu()" [max]="1000" [peak]="cpuPeak()" [peakLabel]="cpuPeakLabel()" topLabel="100%" />
+                    <pc-usage-chart [style.color]="'var(--chart-4)'" [values]="usageCpu()" [max]="1000" [peak]="cpuPeak()" [peakLabel]="cpuPeakLabel()" topLabel="100%" />
                   </div>
                   <div class="chart mem">
-                    <pc-usage-chart style="color: var(--chart-1)" [values]="usageMem()" [max]="memPeak() ?? 1" [peak]="memPeak()" [peakLabel]="memPeakLabel()" [topLabel]="memTop()" />
+                    <pc-usage-chart [style.color]="'var(--chart-1)'" [values]="usageMem()" [max]="memPeak() ?? 1" [peak]="memPeak()" [peakLabel]="memPeakLabel()" />
                   </div>
                 }
               </div>

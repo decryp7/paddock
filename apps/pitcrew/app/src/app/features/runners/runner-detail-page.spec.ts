@@ -28,7 +28,16 @@ describe('RunnerDetailPage resource use', () => {
     expect(text(card)).toContain('23');
     expect(card?.querySelectorAll('pc-usage-chart')).toHaveLength(2);
     expect(text(card)).toMatch(/CPU now, peak \d/);
+    // One definition of the peak: the caption says the same figure as the chart (the 24 h maximum).
+    const chartPeak = text(card?.querySelector('.chart.cpu .peak-label')).match(/peak (\S+)/)![1];
+    expect(text(card)).toContain(`CPU now, peak ${chartPeak} in 24 h`);
     expect(text(card)).not.toContain('Memory now Processes');
+  });
+
+  it('does not say the memory peak twice: the scale top is the peak line, not a second label', async () => {
+    const el = await mount('build-win');
+    const mem = el.querySelector('.chart.mem pc-usage-chart');
+    expect(text(mem).match(/\d+(\.\d)? GB/g)).toHaveLength(1);
   });
 
   it('draws the CPU chart from 0 to 100 % with a dashed peak line and its label', async () => {
