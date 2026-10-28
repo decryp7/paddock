@@ -1,5 +1,5 @@
 import { DIALOG_EVENTS, type DialogInfo, type DialogRemembered, type DialogRequest, type DialogStart } from '@decryp7/paddock-ui/shell';
-import type { DialogIo, Unlisten } from '@decryp7/paddock-ui/shell/dialogs';
+import type { DialogIo, DialogMeasure, Unlisten } from '@decryp7/paddock-ui/shell/dialogs';
 
 /** A scripted `DialogIo` for specs: records every call and plays the dialog layer's events. */
 export class FakeDialogIo implements DialogIo {
@@ -9,8 +9,17 @@ export class FakeDialogIo implements DialogIo {
   readonly closedWith: unknown[] = [];
   /** The titles the dialog set at run time, in order. */
   readonly titles: string[] = [];
-  /** The heights the dialog asked its window to fit. */
+  /** The heights the dialog asked its window to fit (the ready handshake's first), in order. */
   readonly fitted: number[] = [];
+  /** The ready handshake's measure (`null` until the frame sent it). */
+  readied: DialogMeasure | null = null;
+  /** Every measure sent (ready, then each fit), with its minimum content. */
+  readonly measures: DialogMeasure[] = [];
+  /**
+   * When true, `ready` never settles: the window system has not answered, as when the webview is paused, so a spec can
+   * drive the show deadline (ADR 0026 §4.3).
+   */
+  withholdReady = false;
   private readonly handlers = new Map<string, Set<(p: unknown) => void>>();
   private readonly labels = new Map<string, string>();
   private next = 1;
@@ -46,8 +55,15 @@ export class FakeDialogIo implements DialogIo {
   async setTitle(title: string): Promise<void> {
     this.titles.push(title);
   }
-  async fitHeight(px: number): Promise<void> {
-    this.fitted.push(px);
+  ready(measure: DialogMeasure): Promise<void> {
+    this.readied = measure;
+    this.measures.push(measure);
+    this.fitted.push(measure.content.height);
+    return this.withholdReady ? new Promise<void>(() => undefined) : Promise.resolve();
+  }
+  async fit(measure: DialogMeasure): Promise<void> {
+    this.measures.push(measure);
+    this.fitted.push(measure.content.height);
   }
 
   /** Plays an event of the dialog layer. */

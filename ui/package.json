@@ -21,7 +21,6 @@
     "test:scripts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test ../scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs projects/paddock-e2e/src/*.test.ts",
     "i18n": "node projects/paddock-ui/bin/paddock-i18n.mjs build",
     "i18n:check": "node projects/paddock-ui/bin/paddock-i18n.mjs build --check",
-    "check:dialogs": "node projects/paddock-ui/bin/paddock-check-dialog-commands.mjs --config projects/shell-demo/paddock-dialog-commands.json",
     "release": "node ../scripts/publish.mjs",
     "lint": "eslint projects e2e"
   },

@@ -8,6 +8,7 @@ use paddock_commands::testing::{WriteMode, sync_generated};
 use paddock_health::ServiceSpec;
 use paddock_shell::{AppIdentity, PLUGIN_NAME};
 use paddock_shell_demo::agent;
+use paddock_shell_demo::dialogs::DIALOGS;
 use paddock_shell_demo::engine::{self, DemoJob, Engine};
 use paddock_shell_demo::{
     APP_ID, APP_NAME, COMMANDS, MANIFEST, Place, VERSION, invoke_handler, shell, shell_with_log,
@@ -191,6 +192,13 @@ fn the_uis_command_names_are_generated_from_the_apps_table() {
 }
 
 #[test]
+fn the_uis_dialog_contracts_are_generated_from_the_apps_table() {
+    let text = paddock_dialogs::ts::contracts_module("the app", &DIALOGS, REGENERATE);
+    let path = ui_dir().join("src/app/generated/dialog-contracts.ts");
+    sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
 fn every_command_of_the_app_is_async() {
     paddock_commands::testing::assert_async(&COMMANDS, &[&app_dir().join("src")]);
 }
@@ -222,9 +230,9 @@ fn a_drifted_ui_is_reported() {
     let p = shell::<MockRuntime>(Place::Test { dir: dir.clone() }).problems(Some(&renamed));
     assert!(p.iter().any(|x| x.contains("about_infos")), "{p:?}");
     let bad = shell::<MockRuntime>(Place::Test { dir })
-        .dialog_contracts("{")
+        .dialogs(&[&DIALOGS])
         .problems(None);
-    assert!(bad[0].contains("not valid"), "{bad:?}");
+    assert!(bad[0].contains("do not fit together"), "{bad:?}");
 }
 
 #[test]

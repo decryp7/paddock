@@ -1,5 +1,6 @@
 'use strict';
 const templateRules = require('./template-rules.cjs');
+const dialogRules = require('./dialog-frame.cjs');
 
 module.exports = {
   'onpush-explicit': require('./onpush-explicit.cjs'),
@@ -9,4 +10,5 @@ module.exports = {
   'store-rules': require('./store-rules.cjs'),
   'no-raw-style-values': require('./no-raw-style-values.cjs'),
   ...templateRules,
+  ...dialogRules,
 };

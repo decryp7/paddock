@@ -22,7 +22,7 @@ test.describe('settings (plan S10)', () => {
     await page.getByRole('button', { name: 'Say hello' }).focus();
     await page.keyboard.press('ControlOrMeta+Comma');
     await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(1);
-    // The window's own Close (the page's dialog frame has one too).
+    // The frame's Close (ADR 0026: the window declares no footer of its own).
     await win.getByText('Close', { exact: true }).click();
     await expect(win).toHaveCount(0);
     expect(pageErrors).toEqual([]);

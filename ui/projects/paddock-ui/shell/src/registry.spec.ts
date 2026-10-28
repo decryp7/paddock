@@ -148,7 +148,7 @@ describe('ShellContextHost', () => {
     const ctx = await TestBed.inject(ShellContextHost).load();
     await expect(ctx.runCommand('sd.hello')).resolves.toBe(false);
     ctx.showPage('sd.home');
-    await expect(ctx.openDialog('sd.ask')).resolves.toBeUndefined();
+    await expect(ctx.openDialog('sd.ask')).resolves.toEqual({ kind: 'dismissed' });
     ctx.notify({ level: 'warning', message: 'w' });
     ctx.notify({ level: 'error', message: 'e' });
     expect(warn).toHaveBeenCalledTimes(4);

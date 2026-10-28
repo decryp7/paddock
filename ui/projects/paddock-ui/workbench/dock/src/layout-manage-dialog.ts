@@ -68,9 +68,6 @@ export interface LayoutManageResult {
           <button type="button" class="pd-lmd__btn" data-testid="layout-manage-undo-button" (click)="restore()">{{ t.undo }}</button>
         </div>
       }
-      <div class="pd-lmd__actions">
-        <button type="button" class="pd-lmd__btn" data-dialog-close data-testid="layout-manage-close" (click)="ref.close()">{{ t.close }}</button>
-      </div>
     </div>
   `,
   styles: `
@@ -88,7 +85,6 @@ export interface LayoutManageResult {
     .pd-lmd__btn--danger { color: var(--pd-danger-text, var(--pd-danger)); }
     .pd-lmd__btn:focus-visible, .pd-lmd__input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-lmd__undo { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-surface-3); }
-    .pd-lmd__actions { display: flex; justify-content: flex-end; }
   `,
 })
 export class PdLayoutManageDialog {
@@ -105,7 +101,6 @@ export class PdLayoutManageDialog {
     cancel: $localize`:@@pd.wb.dock.layout.manage-cancel:Cancel`,
     delete: $localize`:@@pd.wb.dock.layout.manage-delete:Delete`,
     undo: $localize`:@@pd.wb.dock.layout.manage-undo:Undo`,
-    close: $localize`:@@pd.wb.dock.layout.manage-close:Close`,
     applyLabel: (name: string) => $localize`:@@pd.wb.dock.layout.manage-apply-for:Apply layout ${name}:name:`,
     renameFor: (name: string) => $localize`:@@pd.wb.dock.layout.manage-rename-for:Rename layout ${name}:name:`,
     deleteFor: (name: string) => $localize`:@@pd.wb.dock.layout.manage-delete-for:Delete layout ${name}:name:`,
@@ -133,7 +128,7 @@ export class PdLayoutManageDialog {
   }
 
   protected apply(name: string): void {
-    this.ref.close({ apply: name });
+    this.ref.answer({ apply: name });
   }
 
   protected startRename(name: string): void {

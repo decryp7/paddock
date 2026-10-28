@@ -43,9 +43,6 @@ impl AppIdentity {
     }
 }
 
-/// An empty contract file: no dialog of the app's own (the shell's dialogs still need the app's contract file).
-const NO_CONTRACTS: &str = r#"{"version":1,"base":[],"dialogs":{}}"#;
-
 type BoxError = Box<dyn Error + Send + Sync>;
 type Part<R, T> = Box<dyn FnOnce(&AppHandle<R>) -> T + Send>;
 type DiagSetup<R> =
@@ -75,7 +72,7 @@ type HealthAdjust<R> = Box<dyn FnOnce(&AppHandle<R>, HealthSetup<R>) -> HealthSe
 pub struct Builder<R: Runtime> {
     identity: AppIdentity,
     app_commands: &'static Table,
-    contracts: Option<String>,
+    dialogs: Vec<&'static paddock_dialogs::DialogTable>,
     services: Vec<ServiceSpec>,
     health_setup: Option<HealthAdjust<R>>,
     settings: Option<Part<R, Settings>>,
@@ -103,7 +100,7 @@ impl<R: Runtime> Builder<R> {
         Builder {
             identity,
             app_commands: &Table::EMPTY,
-            contracts: None,
+            dialogs: Vec::new(),
             services: Vec::new(),
             health_setup: None,
             settings: None,
@@ -133,11 +130,21 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
-    /// The app's generated dialog contract file (`dialog-contracts.json`, ADR 0009). Without one only the shell's base
-    /// commands reach dialogs.
-    pub fn dialog_contracts(mut self, json: impl Into<String>) -> Self {
-        self.contracts = Some(json.into());
+    /// The dialog tables of the app's own dialogs and of the non-shell features it uses (the workbench's), ADR 0026 §3.
+    /// The shell's own tables ([`crate::SHELL_DIALOGS`]) are always registered; two tables declaring one id fail the
+    /// build of the plugin.
+    pub fn dialogs(mut self, tables: &[&'static paddock_dialogs::DialogTable]) -> Self {
+        self.dialogs.extend_from_slice(tables);
         self
+    }
+
+    /// Every dialog table: the shell's, then the app's.
+    fn dialog_tables(&self) -> Vec<&'static paddock_dialogs::DialogTable> {
+        crate::SHELL_DIALOGS
+            .iter()
+            .copied()
+            .chain(self.dialogs.iter().copied())
+            .collect()
     }
 
     /// The app's services, in the order the status bar lists them (their repairs are the shell's code, rule 19).
@@ -349,14 +356,19 @@ impl<R: Runtime> Builder<R> {
     /// they agree. With `manifest` (the app's `paddock-manifest.json`), also [`crate::manifest::check`].
     pub fn problems(&self, manifest: Option<&str>) -> Vec<String> {
         let mut out = crate::manifest::table_problems(self.app_commands);
-        match paddock_dialogs::Contracts::parse(self.contracts.as_deref().unwrap_or(NO_CONTRACTS)) {
+        match paddock_dialogs::Contracts::from_tables(&self.dialog_tables()) {
             Ok(c) => {
                 out.extend(crate::manifest::contract_problems(&c, self.app_commands));
                 if let Some(json) = manifest {
-                    out.extend(crate::manifest::contract_drift(json, &c));
+                    let own: Vec<&str> = self
+                        .dialogs
+                        .iter()
+                        .flat_map(|t| t.entries().iter().map(|e| e.id))
+                        .collect();
+                    out.extend(crate::manifest::contract_drift(json, &c, &own));
                 }
             }
-            Err(e) => out.push(format!("the dialog contract file is not valid: {e}")),
+            Err(e) => out.push(format!("the dialog tables do not fit together: {e}")),
         }
         if let Some(json) = manifest {
             let sections = self.section_ids();
@@ -556,8 +568,13 @@ impl<R: Runtime> Builder<R> {
                 .map_err(|e| named("the AI access settings", e))?;
         }
 
-        let dialogs = Dialogs::from_json(self.contracts.as_deref().unwrap_or(NO_CONTRACTS))
-            .map_err(|e| named("the dialog contracts", e))?;
+        let tables: Vec<_> = crate::SHELL_DIALOGS
+            .iter()
+            .copied()
+            .chain(self.dialogs.iter().copied())
+            .collect();
+        let dialogs =
+            Dialogs::from_tables(&tables).map_err(|e| named("the dialog contracts", e))?;
         app.manage(dialogs);
 
         let startup = match self.startup {

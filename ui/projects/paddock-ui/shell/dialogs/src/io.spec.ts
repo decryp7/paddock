@@ -15,7 +15,8 @@ describe('tauriDialogIo', () => {
     await io.take();
     await io.close(undefined);
     await io.close({ ok: 1 });
-    await io.fitHeight(321);
+    await io.ready({ content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 } });
+    await io.fit({ content: { width: 400, height: 330 }, minContent: { width: 300, height: 150 } });
     await io.requestClose('d-main-1');
     const got: unknown[] = [];
     await io.listen(DIALOG_EVENTS.result, (p) => got.push(p));
@@ -26,7 +27,8 @@ describe('tauriDialogIo', () => {
       ['dialog_take_input', undefined],
       ['dialog_close', { result: null }],
       ['dialog_close', { result: { ok: 1 } }],
-      ['dialog_fit_height', { content: 321 }],
+      ['dialog_ready', { measure: { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 } } }],
+      ['dialog_fit', { measure: { content: { width: 400, height: 330 }, minContent: { width: 300, height: 150 } } }],
       ['emitTo', 'd-main-1', DIALOG_EVENTS.closeRequested, null],
       ['listen', DIALOG_EVENTS.result],
     ]);
@@ -38,6 +40,8 @@ describe('browserDialogIo', () => {
     localStorage.clear();
     delete document.documentElement.dataset['fittedHeight'];
     delete document.documentElement.dataset['fitHistory'];
+    delete document.documentElement.dataset['dialogReady'];
+    delete document.documentElement.dataset['minContent'];
   });
 
   it('reads its start from the route and leaves the answer for e2e', async () => {
@@ -53,10 +57,10 @@ describe('browserDialogIo', () => {
     await expect(io.open({ dialogId: 'x', title: 't' })).rejects.toThrow(/in the page/);
     (await io.listen('e', () => undefined))();
     await io.requestClose('d-main-1');
-    await io.fitHeight(200);
-    await io.fitHeight(260);
-    expect(document.documentElement.dataset['fittedHeight']).toBe('260');
-    expect(document.documentElement.dataset['fitHistory']).toBe('200,260');
+    await io.ready({ content: { width: 400, height: 200 }, minContent: { width: 320, height: 120 } });
+    await io.fit({ content: { width: 400, height: 260 }, minContent: { width: 330, height: 120 } });
+    const data = document.documentElement.dataset;
+    expect([data['dialogReady'], data['fittedHeight'], data['fitHistory'], data['minContent']]).toEqual(['true', '260', '200,260', '330x120']);
   });
 
   it('tolerates a route without input, a bad input and a full storage', async () => {

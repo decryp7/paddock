@@ -1,0 +1,77 @@
+// Generated from the dialog table of the app (paddock-dialogs `dialogs!`, ADR 0026 §3). Do not edit: cd apps/shell-demo/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test app.
+
+/** Every dialog's contract as Rust declares it: `defineDialog(DIALOG_CONTRACTS['<id>'], { title, result, load })`. */
+export const DIALOG_CONTRACTS = {
+  'sd.confirm-reset': {
+    id: 'sd.confirm-reset',
+    kind: 'decision',
+    modality: 'modal',
+    width: 400,
+    widthStep: 'narrow',
+    height: null,
+    instanced: false,
+    requiredChoice: false,
+    commands: [],
+  },
+  'sd.rename': {
+    id: 'sd.rename',
+    kind: 'form',
+    modality: 'modal',
+    width: 400,
+    widthStep: 'narrow',
+    height: null,
+    instanced: false,
+    requiredChoice: false,
+    commands: [],
+  },
+  'sd.about': {
+    id: 'sd.about',
+    kind: 'viewer',
+    modality: 'modeless',
+    width: 720,
+    widthStep: 'wide',
+    height: 560,
+    instanced: false,
+    requiredChoice: false,
+    commands: [],
+  },
+  'sd.inspector': {
+    id: 'sd.inspector',
+    kind: 'tool',
+    modality: 'modeless',
+    width: 720,
+    widthStep: null,
+    height: 480,
+    instanced: false,
+    requiredChoice: false,
+    commands: ['demo_status'],
+  },
+  'sd.choose-style': {
+    id: 'sd.choose-style',
+    kind: 'decision',
+    modality: 'modal',
+    width: 400,
+    widthStep: 'narrow',
+    height: null,
+    instanced: false,
+    requiredChoice: true,
+    commands: [],
+  },
+  'pd.settings': {
+    id: 'pd.settings',
+    kind: 'tool',
+    modality: 'modeless',
+    width: 880,
+    widthStep: null,
+    height: 620,
+    instanced: false,
+    requiredChoice: false,
+    commands: ['app_relaunch', 'channels_clear_secret', 'channels_get', 'channels_save', 'channels_test', 'dialog_open', 'mcp_audit', 'mcp_audit_clear', 'mcp_get', 'mcp_revoke_key', 'mcp_save', 'open_login_items', 'packs_*', 'service_*', 'settings_*', 'setup_*', 'storage_*'],
+  },
+} as const;
+
+export type DialogId = keyof typeof DIALOG_CONTRACTS;
+export type DialogCommandOf<Id extends DialogId> = (typeof DIALOG_CONTRACTS)[Id]['commands'][number];
+
+/** The commands every dialog window of this owner's app may call besides the shell's base set. */
+export const DIALOG_BASE = ['window_pong', 'window_ready'] as const;

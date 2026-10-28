@@ -1,18 +1,32 @@
-import { inject, InjectionToken, Injector, type InputSignalWithTransform } from '@angular/core';
-import { ContributionRegistry, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { inject, InjectionToken, Injector, type InputSignalWithTransform, type Signal, type TemplateRef } from '@angular/core';
+import { ContributionRegistry, type DialogDef, type DialogOutcome } from '@decryp7/paddock-ui/shell';
+import type { DialogAction } from './actions';
 
-/** What a dialog's content injects to answer: closing it resolves the opener's promise with the result. */
+/**
+ * What a dialog's content injects (`DIALOG_REF`). Most content never calls it: its declared actions answer and dismiss
+ * (ADR 0026 §2). A content whose body holds the choice itself (a required choice's options) answers through it.
+ */
 export interface DialogRef<R = unknown> {
-  /** Closes the dialog with `result` (none: dismissed), unless the content refuses (`dialogCanClose`). */
-  close(result?: R): void;
-  /** Resolves when the dialog is gone, with its result (`undefined` when dismissed). Never rejects. */
-  readonly closed: Promise<R | undefined>;
+  /** Closes the dialog answered with `value`. */
+  answer(value: R): void;
+  /** Closes the dialog without an answer, unless the content refuses (`dialogCanClose`); a required choice ignores it. */
+  dismiss(): void;
+  /** Resolves when the dialog is gone, with its outcome. Never rejects. */
+  readonly closed: Promise<DialogOutcome<R>>;
   /**
    * Sets the dialog's title (the OS window's title bar, or the in-page header, and the accessible name) to what the content
-   * knows only after it loaded: "Delete 3 runners?" for a decision about three runners. Only the dialog's own content
-   * has it (the `DIALOG_REF` it injects); the opener's ref does not. Plain text, never markup.
+   * knows only after it loaded: "Delete 3 runners?" for a decision about three runners. Plain text, never markup.
    */
   setTitle?(title: string): void;
+  /** Asks the frame to measure the content again (it changed what it shows without the frame seeing a resize). */
+  requestFit?(): void;
+}
+
+/** What the opener of a dialog holds: its outcome, and a way to ask it to close (the dialog may refuse). */
+export interface DialogHandle<R = unknown> {
+  readonly closed: Promise<DialogOutcome<R>>;
+  /** Asks the dialog to close without an answer, as its own dismiss action would. */
+  dismiss(): void;
 }
 
 export const DIALOG_REF = new InjectionToken<DialogRef>('PADDOCK_DIALOG_REF');
@@ -20,13 +34,21 @@ export const DIALOG_REF = new InjectionToken<DialogRef>('PADDOCK_DIALOG_REF');
 /** The dialog's input as given to `open` (plain data; it crosses to another window). Each key also sets the component input of that name. */
 export const DIALOG_INPUT = new InjectionToken<Readonly<Record<string, unknown>>>('PADDOCK_DIALOG_INPUT');
 
-/** What a dialog component may declare about itself. */
-export interface DialogContent {
-  /** Asked before the dialog closes by any route; `false` keeps it open (unsaved edits). Runs in the dialog's own window. */
+/** What a dialog component may declare about itself (ADR 0026 §2). */
+export interface DialogContent<R = unknown> {
+  /** Asked before the dialog is dismissed by any route; `false` keeps it open (unsaved edits). Runs in the dialog's own window. */
   dialogCanClose?(injector: Injector): boolean;
+  /** The footer's buttons: the frame lays them out (order per OS, Enter, focus, busy, rejected). */
+  readonly dialogActions?: Signal<readonly DialogAction<R>[]>;
+  /** The footer's leading status line (a tool's "3 layouts"). */
+  readonly dialogStatus?: Signal<string | null>;
+  /** The body's declared minimum height, px (default two lines): with the header and footer, the window's OS minimum. */
+  readonly dialogMinBodyHeight?: number;
+  /** A header above the body that does not scroll (a stepper, a toolbar). */
+  readonly dialogHeader?: Signal<TemplateRef<unknown> | null>;
 }
 
-/** What the opener's promise of dialog `D` resolves to. */
+/** The answer type of dialog `D` (its outcome is `DialogOutcome<DialogResultOf<D>>`). */
 export type DialogResultOf<D> = D extends DialogDef<string, infer R, string> ? R : unknown;
 
 /** The inputs a content component takes, from its `input()` signals: `{ current?: string }` for `current = input('')`. */
@@ -63,14 +85,14 @@ export interface DialogShowRequest {
 
 /** An open dialog, however it is shown. */
 export interface DialogSession {
-  /** Resolves when the dialog is gone, with its result (`undefined` when dismissed). Never rejects. */
-  readonly closed: Promise<unknown>;
+  /** Resolves when the dialog is gone, with its outcome. Never rejects. */
+  readonly closed: Promise<DialogOutcome<unknown>>;
   /** False once the dialog is gone, before `closed` has been observed. */
   isOpen(): boolean;
   /** Brings the dialog to the front. */
   focus(): void;
-  /** Asks the dialog to close with a result; it may refuse (unsaved edits). */
-  close(result?: unknown): void;
+  /** Asks the dialog to close without an answer; it may refuse (unsaved edits, a required choice, busy work). */
+  dismiss(): void;
 }
 
 /** Shows dialogs: as OS windows (desktop) or in the page (browser build, e2e, a window that could not be opened). */

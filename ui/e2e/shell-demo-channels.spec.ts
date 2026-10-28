@@ -29,7 +29,7 @@ test.describe('notification channels (plan X17)', () => {
     await expect(dialog).toBeVisible();
     const input = dialog.getByTestId('channel-secret-input');
     await expect(input).toHaveAttribute('type', 'password');
-    await expect(dialog.getByTestId('channel-secret-save')).toBeDisabled();
+    await expect(dialog.getByTestId('dialog-action-save')).toBeDisabled();
     await input.fill('xoxb-secret-token');
     await dialog.getByTestId('channel-secret-toggle').click();
     await expect(input).toHaveAttribute('type', 'text');
@@ -66,7 +66,7 @@ test.describe('notification channels (plan X17)', () => {
     await expect(confirm).toHaveCount(0);
     await expect(page.getByTestId('channel-row-Build-Hook')).toBeVisible();
     await page.getByTestId('channel-row-Build-Hook').getByRole('button', { name: 'Remove Ops Hook' }).click();
-    await page.getByRole('dialog', { name: 'Remove "Ops Hook"?' }).getByRole('button', { name: 'Remove', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Remove "Ops Hook"?' }).getByRole('button', { name: 'Remove channel', exact: true }).click();
     await expect(page.locator('tbody tr')).toHaveCount(2);
     await expect(page.getByTestId('channel-row-Build-Hook')).toHaveCount(0);
     expect(pageErrors).toEqual([]);

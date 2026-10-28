@@ -1,5 +1,6 @@
 import { defineDialog, defineSettingsPage, msg, type, type ContributionBatch, type DialogDef, type ProvidersLoader, type SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import type { StorageCommand } from '../generated/storage-commands';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
 // The storage part's contributions: static data and loaders only (lazy by construction, plan §9). The page's component, the
 // confirmation dialog's component and the providers are chunks of their own, loaded when their window opens.
@@ -46,14 +47,9 @@ export interface StorageConfirmDialogOptions {
  * kept everything. Keep is the default; Clear is the danger action.
  */
 export function defineStorageConfirmDialog(options: StorageConfirmDialogOptions): DialogDef<typeof STORAGE_CONFIRM_DIALOG_ID, boolean, StorageCommand> {
-  return defineDialog({
-    id: STORAGE_CONFIRM_DIALOG_ID,
-    kind: 'decision',
+  return defineDialog(DIALOG_CONTRACTS[STORAGE_CONFIRM_DIALOG_ID], {
     title: msg('pd.storage.confirm.title', 'Clear storage'),
-    width: 440,
-    instanced: true,
     result: type<boolean>(),
-    commands: [],
     load: options.load,
   });
 }

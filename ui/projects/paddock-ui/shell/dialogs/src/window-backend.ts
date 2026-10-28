@@ -1,9 +1,10 @@
 import { inject, Injectable } from '@angular/core';
-import { DIALOG_EVENTS, type DialogClosed, type DialogRequest, type DialogResult } from '@decryp7/paddock-ui/shell';
+import { DIALOG_EVENTS, type DialogClosed, type DialogOutcome, type DialogRequest, type DialogResult } from '@decryp7/paddock-ui/shell';
+import { decodeOutcome } from './outcome';
 import { isRememberedPlace, loadDialogBounds, rememberDialogBounds } from './bounds';
 import { InPageDialogBackend } from './in-page';
 import { DIALOG_IO } from './io';
-import { raiseToKindMinimum, resolveSize } from './kind';
+import { raiseToKindMinimum } from './kind';
 import { errorText, isRecord } from './mount';
 import { DialogPresenter, type DialogSession, type DialogShowRequest } from './types';
 
@@ -19,19 +20,14 @@ export function parseClosed(p: unknown): DialogClosed | null {
   return { label: p['label'], dialogId: p['dialogId'], remembered: isRememberedPlace(r) ? { dx: r.dx, dy: r.dy, width: r.width, height: r.height } : null };
 }
 
-/** What a dialog window is opened with: its id, title and input, the size its kind gives it, and what was remembered. */
+/** What a dialog window is opened with: its id, title and input, and what was remembered. Its size is the Rust contract's. */
 export function windowRequest(request: DialogShowRequest, remembered = loadDialogBounds()[request.def.id]): DialogRequest {
   const def = request.def;
-  const size = resolveSize(def);
   return {
     dialogId: def.id,
     instance: request.instance,
     title: request.title,
     input: request.inputs,
-    width: size.width,
-    height: size.height,
-    minWidth: size.minWidth,
-    minHeight: size.minHeight,
     // Where it goes is Rust's decision (on the parent's monitor); the kind's floor applies to a remembered size.
     remembered: remembered ? raiseToKindMinimum(def.kind, remembered) : undefined,
   };
@@ -39,7 +35,8 @@ export function windowRequest(request: DialogShowRequest, remembered = loadDialo
 
 interface Pending {
   readonly dialogId: string;
-  readonly resolve: (r: unknown) => void;
+  readonly resolve: (r: DialogOutcome<unknown>) => void;
+  /** What the dialog closed with, on the wire (`null`: dismissed, also when Rust closed a page that did not answer). */
   result: unknown;
 }
 
@@ -58,8 +55,8 @@ export class WindowDialogBackend extends DialogPresenter {
   readonly windowed = true;
 
   show(request: DialogShowRequest): DialogSession {
-    let resolve!: (r: unknown) => void;
-    const closed = new Promise<unknown>((r) => (resolve = r));
+    let resolve!: (r: DialogOutcome<unknown>) => void;
+    const closed = new Promise<DialogOutcome<unknown>>((r) => (resolve = r));
     let label: string | null = null;
     let open = true;
     let fallback: DialogSession | null = null;
@@ -69,7 +66,7 @@ export class WindowDialogBackend extends DialogPresenter {
         await this.listen();
         const info = await this.io.open(sent);
         label = info.label;
-        this.pending.set(info.label, { dialogId: request.def.id, resolve, result: undefined });
+        this.pending.set(info.label, { dialogId: request.def.id, resolve, result: null });
       } catch (e) {
         console.warn(`[paddock-dialogs] the window of dialog ${request.def.id} could not open; shown in the page: ${errorText(e)}`);
         fallback = this.inPage.show(request);
@@ -82,7 +79,7 @@ export class WindowDialogBackend extends DialogPresenter {
       isOpen: () => open,
       // Opening it again focuses the window Rust has open for it.
       focus: () => void opened.then(() => (fallback ? fallback.focus() : label ? this.io.open(sent).then(() => undefined, () => undefined) : undefined)),
-      close: (result) => void opened.then(() => (fallback ? fallback.close(result) : label ? this.io.requestClose(label).catch(() => undefined) : undefined)),
+      dismiss: () => void opened.then(() => (fallback ? fallback.dismiss() : label ? this.io.requestClose(label).catch(() => undefined) : undefined)),
     };
   }
 
@@ -91,7 +88,7 @@ export class WindowDialogBackend extends DialogPresenter {
       this.io.listen(DIALOG_EVENTS.result, (p) => {
         const e = parseResult(p);
         const entry = e && this.pending.get(e.label);
-        if (e && entry) entry.result = e.result ?? undefined;
+        if (e && entry) entry.result = e.result ?? null;
       }),
       this.io.listen(DIALOG_EVENTS.closed, (p) => {
         const e = parseClosed(p);
@@ -99,7 +96,7 @@ export class WindowDialogBackend extends DialogPresenter {
         if (!e || !entry) return;
         this.pending.delete(e.label);
         if (e.remembered) rememberDialogBounds(entry.dialogId, e.remembered);
-        entry.resolve(entry.result === null ? undefined : entry.result);
+        entry.resolve(decodeOutcome(entry.result));
       }),
     ]).then(
       () => undefined,

@@ -1,6 +1,7 @@
 import { defineCommand, defineDialog, defineMenuItem, defineSettingsPage, msg, type, type ContributionBatch, type DialogDef, type ProvidersLoader } from '@decryp7/paddock-ui/shell';
 import type { Saved } from '../generated/diagnostics';
 import type { DiagnosticsCommand } from '../generated/diagnostics-commands';
+import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 
 // The diagnostics part's contributions: static data and loaders only (lazy by construction, plan §9). The dialog's component
 // and the providers its window needs are chunks of their own.
@@ -12,7 +13,7 @@ export const DIAGNOSTICS_DIALOG_ID = 'pd.report-problem';
  * What the Report a Problem window may call (its contract; Rust's guard allows exactly these): the three report commands
  * and the webview's log command, so the window's own errors reach the log too.
  */
-export const DIAGNOSTICS_DIALOG_COMMANDS = ['diagnostics_preview', 'diagnostics_save', 'diagnostics_cancel', 'log_from_webview'] as const satisfies readonly DiagnosticsCommand[];
+export const DIAGNOSTICS_DIALOG_COMMANDS = DIALOG_CONTRACTS[DIAGNOSTICS_DIALOG_ID].commands satisfies readonly DiagnosticsCommand[];
 
 /** The id of the "Logging" settings page; the Rust section of the same id is `paddock_diag::logging::LOGGING`. */
 export const LOGGING_SETTINGS_PAGE = 'pd.logging';
@@ -25,15 +26,11 @@ export interface DiagnosticsDialogOptions {
   readonly providers: ProvidersLoader;
 }
 
-/** The Report a Problem dialog (ADR 0009): a decision, modal, fitted to its content; it resolves with the saved report or nothing. */
+/** The Report a Problem dialog (ADR 0026): a modeless form, wide, fitted to its content; it resolves with the saved report or nothing. */
 export function defineDiagnosticsDialog(options: DiagnosticsDialogOptions): DialogDef {
-  return defineDialog({
-    id: DIAGNOSTICS_DIALOG_ID,
-    kind: 'decision',
+  return defineDialog(DIALOG_CONTRACTS[DIAGNOSTICS_DIALOG_ID], {
     title: msg('pd.diag.title', 'Report a problem'),
-    width: 680,
     result: type<Saved>(),
-    commands: DIAGNOSTICS_DIALOG_COMMANDS,
     providers: options.providers,
     load: () => import('./report-problem-dialog').then((m) => m.PdReportProblemDialog),
   });

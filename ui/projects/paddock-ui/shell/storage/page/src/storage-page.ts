@@ -3,6 +3,7 @@ import { PdPathText } from '@decryp7/paddock-ui';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { formatBytes } from '@decryp7/paddock-ui/format';
 import { PdCell, PdMiddleText, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
+import { answerOf } from '@decryp7/paddock-ui/shell';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { fileIcon } from '@decryp7/paddock-ui/shell/files';
 import { STORAGE_CONFIRM_DIALOG_ID, StorageStore, floorBytes, inSentence, treeTable, type StorageCategory, type TreeRow } from '@decryp7/paddock-ui/shell/storage';
@@ -321,14 +322,14 @@ export class PdStoragePage {
     const { ids, bytes } = this.store.cache();
     if (ids.length === 0) return;
     const what = ids.length === 1 ? this.label(ids[0]!) : $localize`:@@pd.storage.the-cache:the cache`;
-    const ok = await this.dialogs.open<boolean>(STORAGE_CONFIRM_DIALOG_ID, { inputs: { what, bytes, data: false } }).closed;
+    const ok = answerOf(await this.dialogs.open<boolean>(STORAGE_CONFIRM_DIALOG_ID, { inputs: { what, bytes, data: false } }).closed);
     if (ok === true) await this.store.clear(ids.map((id) => ({ id, confirmed: false })));
   }
 
   /** Asks first, naming what goes (and that it is the user's own data when it is), then clears this category. */
   protected async clearCategory(c: StorageCategory): Promise<void> {
     const data = c.kind === 'data';
-    const ok = await this.dialogs.open<boolean>(STORAGE_CONFIRM_DIALOG_ID, { inputs: { what: c.label, bytes: c.clearableBytes, data } }).closed;
+    const ok = answerOf(await this.dialogs.open<boolean>(STORAGE_CONFIRM_DIALOG_ID, { inputs: { what: c.label, bytes: c.clearableBytes, data } }).closed);
     if (ok === true) await this.store.clear([{ id: c.id, confirmed: data }]);
   }
 }
