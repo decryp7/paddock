@@ -127,6 +127,7 @@ fn open_sandbox(segments: &std::path::Path) -> StoreResult<Connection> {
          SET autoinstall_known_extensions = false;
          SET memory_limit = '{SQL_MEMORY_LIMIT}';
          SET threads = {SQL_THREADS};
+         SET async_threads = {SQL_THREADS};
          SET preserve_insertion_order = true;
          CREATE SCHEMA debrief;
          {}
@@ -695,6 +696,8 @@ mod tests {
         };
         assert_eq!(setting("enable_external_access"), "false");
         assert_eq!(setting("threads"), SQL_THREADS.to_string());
+        // DuckDB 2.0's I/O pool defaults to four threads per core and does not follow `threads`.
+        assert_eq!(setting("async_threads"), SQL_THREADS.to_string());
         assert_eq!(setting("lock_configuration"), "true");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
@@ -709,5 +712,40 @@ mod tests {
         assert!(
             matches!(query_error("Catalog Error: Table with name nope does not exist!\n\nLINE 1: select"), StoreError::Query(q) if q.message == "Catalog Error: Table with name nope does not exist!")
         );
+    }
+
+    /// The guard reads the tree of DuckDB's own parser (the shape changed in 2.0: `qualified_name`, `arguments[]`, a
+    /// `query_location` of u64::MAX on some functions), so its verdicts are checked against the real thing.
+    #[test]
+    fn the_guard_judges_the_trees_the_real_parser_makes() {
+        let conn = Connection::open_in_memory().unwrap();
+        let parse = |sql: &str| -> Value {
+            let text: String = conn.query_row("SELECT json_serialize_sql(?::VARCHAR)", [sql], |r| r.get(0)).unwrap();
+            serde_json::from_str(&text).unwrap()
+        };
+        for ok in [
+            "SELECT 1",
+            "SELECT * FROM range(10) WHERE range ~ '1' AND NOT range % 2 = 0",
+            "SELECT list_filter([1, 2, 3], lambda x: x > 1), regexp_matches('abc', 'b')",
+            "SELECT * FROM events e JOIN events f USING (id) WHERE e.message ILIKE '%x%'",
+        ] {
+            let tree = parse(ok);
+            // `events` does not exist here, but the parser does not need it: the guard sees a view name.
+            guard::tree(ok, &tree).unwrap_or_else(|e| panic!("{ok}: {}", e.message));
+        }
+        for (bad, name) in [
+            ("SELECT * FROM read_csv('/etc/passwd')", "read_csv"),
+            ("SELECT 1 WHERE 1 IN (SELECT 1 FROM glob('/*'))", "glob"),
+            ("SELECT * FROM read_parquet('x.parquet')", "read_parquet"),
+        ] {
+            let e = guard::tree(bad, &parse(bad)).expect_err(bad);
+            assert!(e.message.contains(name), "{bad}: {}", e.message);
+            assert!(e.offset <= bad.len(), "{bad}: offset {} past the text", e.offset);
+        }
+        let e = guard::tree("SELECT * FROM 'x.csv'", &parse("SELECT * FROM 'x.csv'")).expect_err("a file name as a table");
+        assert!(e.message.contains("Files cannot be read"), "{}", e.message);
+        // A syntax error: the parser's `position` is a string, and is clamped to the text.
+        let e = guard::tree("SELEC 1", &parse("SELEC 1")).expect_err("syntax");
+        assert!(e.offset <= 7);
     }
 }

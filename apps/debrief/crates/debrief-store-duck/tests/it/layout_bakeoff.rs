@@ -289,31 +289,8 @@ fn storage_layouts() {
         }
     }
 
-    // A': Arrow scan (duckdb-rs ArrowVTab) bulk insert, 16 batches per statement.
-    {
-        use duckdb::arrow::compute::concat_batches;
-        use duckdb::vtab::arrow::{arrow_recordbatch_to_query_params, ArrowVTab};
-        let dir = TempDir::new("layout-as");
-        let c = open(&dir.0.join("data.duckdb"));
-        c.execute_batch(DDL).unwrap();
-        c.register_table_function::<ArrowVTab>("arrow").unwrap();
-        let sample: Vec<_> = batches.iter().take(64).collect();
-        let n: u64 = sample.iter().map(|b| b.num_rows() as u64).sum();
-        let (_, ms) = time(|| {
-            c.execute_batch("BEGIN").unwrap();
-            for chunk in sample.chunks(16) {
-                let rbs: Vec<_> = chunk.iter().map(|b| b.record_batch().clone()).collect();
-                let rb = concat_batches(&rbs[0].schema(), &rbs).unwrap();
-                let p = arrow_recordbatch_to_query_params(rb);
-                c.execute("INSERT INTO events SELECT * FROM arrow(?, ?)", p).unwrap();
-            }
-            c.execute_batch("COMMIT; CHECKPOINT;").unwrap();
-        });
-        eprintln!(
-            "A' Arrow-scan insert ({n} events; leaks every batch in a process-global arena): {:.0} events/s",
-            n as f64 / (ms / 1000.0)
-        );
-    }
+    // A' (the duckdb-rs Arrow-scan insert, 21 to 25k events/s) was measured on DuckDB 1.x and is gone: duckdb-rs 2.0 changed
+    // that API, and ADR 0014 R2b records why the speed ruled it out.
 
     // B: zstd Parquet segments of 16 batches (~131k rows), written by `threads` workers in parallel.
     for threads in [1usize, threads] {

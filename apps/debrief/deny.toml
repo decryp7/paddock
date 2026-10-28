@@ -9,14 +9,6 @@ all-features = false
 # dependencies only, transitive ones are Renovate's job.
 unmaintained = "workspace"
 yanked = "deny"
-# Temporary (2026-10-27, user decision): zstd 0.13 / zstd-safe 7 come in through parquet 58, which is pinned
-# by arrow 58 and duckdb 1.x. The DuckDB 2 migration (duckdb 1.20000 + arrow 60 + parquet 60) brings the fixed
-# zstd 0.14 / zstd-safe 8 and must delete these entries; Debrief 1.2.0 ships only after that migration.
-ignore = [
-  { id = "RUSTSEC-2026-0391", reason = "zstd 0.13 via parquet 58; removed by the DuckDB 2 migration" },
-  { id = "RUSTSEC-2026-0398", reason = "zstd-safe 7 via parquet 58; removed by the DuckDB 2 migration" },
-  { id = "RUSTSEC-2026-0403", reason = "zstd-safe 7 via parquet 58; removed by the DuckDB 2 migration" },
-]
 
 [licenses]
 confidence-threshold = 0.9

@@ -244,13 +244,13 @@ fn fixed_after_id() -> Vec<Field> {
     ]
 }
 
-/// `extra`: `MAP(VARCHAR, VARCHAR)` as Arrow's map builder lays it out.
+/// `extra`: `MAP(VARCHAR, VARCHAR)` as Arrow's map builder lays it out (entry fields `key` and `value` since Arrow 60).
 pub(crate) fn extra_field() -> Field {
     let entries = Field::new(
         "entries",
         DataType::Struct(Fields::from(vec![
-            Field::new("keys", DataType::Utf8, false),
-            Field::new("values", DataType::Utf8, true),
+            Field::new("key", DataType::Utf8, false),
+            Field::new("value", DataType::Utf8, true),
         ])),
         false,
     );
