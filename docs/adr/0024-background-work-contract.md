@@ -1,6 +1,6 @@
 # 24. Background work: background priority, wake-ups instead of polls, jobs for long work, per-pid monitoring
 
-- Status: Proposed (2026-10-28). **Amends ADR 0020** (its `Class` and tiers now also govern child processes; its WP-12
+- Status: Accepted (2026-10-28, after an independent review). **Amends ADR 0020** (its `Class` and tiers now also govern child processes; its WP-12
   lint becomes checks C40-C42), ADR 0008 (every long job has a key) and ADR 0018 (section 5). The user decided on 2026-10-28 that there is one family ADR for background work (D11)
   and that the measured budgets are gates (D7)
 - Date: 2026-10-28

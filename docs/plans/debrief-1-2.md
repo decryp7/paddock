@@ -219,6 +219,26 @@ LLM research's `N` ids.
 | P5 | **Plugin processes idle without waking** (measured 5 wake-ups/s each against the 1/s budget): the serve loop's timer replaced by a blocking read and the host's liveness deadline, in the shared `paddock-plugin-api` | `crates/paddock-plugin-api/src/serve.rs` (after PH2b; today's suspects are the 100 ms timed waits in `apps/debrief/crates/debrief-plugin-api/src/output.rs:242, 357`, attributed with `sample` first) | implementer | PH2b | a plugin idle for 60 fake-clock seconds wakes ≤ 1/s (counting clock) | 1 | 5 |
 | B1 | **Bench gates** (section 4 of the note) in `debrief-bench.yml` through `paddock-bench`: idle CPU and wake-ups, phase footprints, s/GB and CPU-s/GB, names timings | `.gitea/workflows/debrief-bench.yml`, `apps/debrief/bench/budgets.toml`, the harness tests | implementer | 4.3, P1-P4 | `paddock-bench check` fails on a planted 2x regression | 1.5 | 8 |
 
+### LLM-use and names packages (from the LLM research, N0-N8)
+
+Source: [apps/debrief/docs/research/2026-10-28-llm-use-and-names.md](../../apps/debrief/docs/research/2026-10-28-llm-use-and-names.md)
+(branch `docs/research-debrief-llm`; section 3 has the full acceptance text and the failing test of each package). The
+note orders them N1 and N6 first (they remove cost now), then N2, N3, N4, N5, N0, and N7 after X55; the waves below follow
+that order and the dependencies. N6 follows the user's decision of 2026-10-28: "describe all frames" stays, behind a
+confirmation that shows the count and the estimated time.
+
+| # | Package | Role | Depends on | Days | Wave |
+|---|---|---|---|---|---|
+| N1 | **Remove the automatic alias job**: `schedule_alias_job` calls, the `name_aliases` setting, `Polite`, `LocalAliasModel`'s background use and an unused `background_provider`; old `AiEntry` aliases still load (labelled, removable) | implementer | none | 0.5 | 2 |
+| N6 | **Video describe confirmation**: "describe all frames" kept, but a job over a selection or over all frames first shows the frame count and the estimated time and needs a confirm; no request is sent before it | implementer | none | 0.5 | 2 |
+| N2 | **Abbreviation rule in layer 1** (`How::Abbreviation`), no layer 2 needed (top-1 >= 95 %) | implementer | none | 1.5 | 3 |
+| N3 | **Names pack** (`names` `PackKind` on `paddock-packs`; built-in windows, macos, linux and exceptions packs of about 1,500 entries for all OS; user `packs/`, hot reload, health line); 2 days code + 3 days curation | designer, then implementer | none | 5 | 3 |
+| N4 | **Log-name harvest** during the catalogue build as `How::LogName` aliases with evidence (feeds P4's tally) | implementer | N3 | 2 | 4 |
+| N5 | **Explicit "Suggest names with AI"** (at most 16 names, one interactive request, review list, accepted names stored as user facts) | implementer | N1 | 1.5 | 5 |
+| N0 | **Local names coverage report** in Diagnostics (counts per layer, nothing leaves the machine) | implementer | N3, N4 | 0.5 | 6 |
+| N7 | **Synonym suggestions with Model2Vec** (questions only) | implementer | X55 `paddock-embed` (may slip to 1.3) | 1.5 | 7 |
+| N8 | **Docs**: ADR amendments (Debrief ADR 0033 section 6 now: confirmation instead of a cap), rule 46, lessons, user guide | implementer | N1-N6 | 0.5 | 8 |
+
 ## 3. The safety net
 
 All of it runs once on the combined result before the local build and the tag (rule 3), and in CI.
@@ -335,5 +355,8 @@ From the performance research (its section 7), decided 2026-10-28:
 | # | Decision | Taken |
 |---|---|---|
 | D7 | The performance budgets (idle ≤ 0.5 % of a core and ≤ 1 wake-up/s per process; worker ≤ 768 MB at 7.6 GB; ≤ 6 s and ≤ 32 CPU-s per GB; post-import ≤ 20 CPU-s per GB) | **Gates**: counting tests on PRs, the nightly regression gate in `debrief-bench.yml` (B1) |
-| D8-D10 | Naming defaults, naming model, names pack | Superseded by the LLM research and rule 46: no background alias job, `autoload` off, a ~1,500-entry names pack for all OS |
-| D11 | One family ADR for the background-work patterns | **Yes**: ADR 0024 (Proposed, A1) |
+| D8 | The background alias job and the `name_aliases` setting | **Removed** (LLM research N1) |
+| D9 | Rule 46 (no LLM for large or background jobs; explicit, bounded, interactive use only) | **Adopted** in `docs/rules.md` (N8) |
+| D10 | Names | `autoload` is **off by default** (the model loads on first AI use); the names pack has about **1,500 entries for all OS** (N3) |
+| D12 | Video "describe all frames" | **Kept**, behind a confirmation that shows the frame count and the estimated time (N6) |
+| D11 | One family ADR for the background-work patterns | **Yes**: ADR 0024 (Accepted 2026-10-28, A1) |
