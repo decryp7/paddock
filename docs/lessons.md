@@ -589,3 +589,11 @@ Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for lo
 ## 2026-10-28: Chromium tests that compared a loaded machine with a wall-clock budget
 
 Three `paddock-chromium` tests failed on CI runs of several branches and never on a quiet machine: (1) `a_real_browser_reads_a_page_and_closes_cleanly` and `a_cancelled_load_says_whether_it_was_a_download_or_replaced` asserted `Browser.close()`, whose 5 s grace (`CLOSE_GRACE`, the product's bound before it kills the tree) is a fine product choice but a time budget as a test assertion: a loaded runner let Chrome take longer (macOS 6662, Windows 6726, 13 s test); (2) `a_page_is_read_snapshot_by_snapshot` pushed a 16 MiB page (`MAX_HTML` + 1) through the fake browser in a debug build to see the size cap refuse it, which outlasted the 10 s call timeout on a macOS runner and gave `Timeout` instead of "larger". **Rule:** a test asserts the mechanism (the browser exits by itself and is not killed; the cap refuses a page one byte over it), never that it happened within a product timeout; give the code under test the cap as a parameter so a few bytes prove it; wait on the condition (`close_gracefully` returns the moment Chrome exits) with a hang guard that only stops a browser that never exits. A failing wait names what the thing it waited for reported (the load's own result), so the next failure carries its cause.
+
+## Unrecorded benchmark conditions made 182k and 1.3M events/s look like a contradiction (2026-10-29)
+Two quoted ingest numbers, about 182k and 1.3M events/s, were argued over as if one was wrong. Neither came with machine,
+load, build profile, corpus or command, so nobody could tell whether they differed by a release build, a quiet machine, a
+different corpus or a real regression, and stale figures kept being quoted from ADRs and old job logs. **Rule:** record
+every benchmark you quote as a results block (date, commit, machine, load, build, corpus and generator, exact command,
+runs, numbers with budget and verdict, physical-footprint memory) in the owning `docs/performance.md` or
+`docs/benchmarks.md`, and link it from wherever the number is quoted; a number without a block is not evidence (rule 48).
