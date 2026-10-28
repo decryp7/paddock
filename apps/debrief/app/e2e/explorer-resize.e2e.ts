@@ -71,18 +71,25 @@ async function flipsDuring(page: Page, body: () => Promise<void>): Promise<numbe
 const planRuns = async (page: Page): Promise<number> =>
   Number((await page.locator('[data-plan-runs]').first().getAttribute('data-plan-runs').catch(() => null)) ?? 0);
 
-/** Resolves once the dock's plans have gone quiet: the count is the same on two reads a re-plan's debounce (150 ms) apart. A layout that fights itself keeps planning and never gets there. */
+/** Whether a re-plan is scheduled and has not run yet (`data-plan-pending` on the dock's element: the debounce and dockview's settle retries). */
+const planPending = async (page: Page): Promise<boolean> => (await page.locator('[data-plan-runs]').first().getAttribute('data-plan-pending').catch(() => null)) === '1';
+
+/**
+ * Resolves once the dock is quiet: no re-plan is scheduled, and the count of plans run is the same on two reads a frame or more
+ * apart (the polling interval). A layout that fights itself always has a re-plan pending or a count that moves, so it never gets there.
+ */
 async function planIdle(page: Page): Promise<void> {
   let last = -1;
   await expect
     .poll(
       async () => {
+        const pending = await planPending(page);
         const now = await planRuns(page);
-        const quiet = now > 0 && now === last;
-        last = now;
+        const quiet = !pending && now > 0 && now === last;
+        last = pending ? -1 : now;
         return quiet;
       },
-      { intervals: [200], timeout: 10_000, message: 'the dock keeps re-planning' },
+      { intervals: [100], timeout: 15_000, message: 'the dock keeps re-planning' },
     )
     .toBe(true);
 }
@@ -142,7 +149,7 @@ test('dragging the Explorer wide in a 1440 px window tabs the lower-priority pan
   });
   expect(Number(await sash.getAttribute('aria-valuemax'))).toBeGreaterThanOrEqual(600);
   await expect.poll(() => sidebarWidth(page)).toBe(600);
-  // The assistant (lower priority than the Explorer) yielded: it is a tab of another group now, as when the window shrinks.
+  // The assistant (lower priority than the Explorer) yielded: it is auto-hidden to the side rail now, as when the window shrinks.
   await expect.poll(groups).toBeLessThan(before);
   // A re-plan (a small window resize and back) keeps the width, and nothing flaps.
   await page.setViewportSize({ width: 1400, height: 900 });

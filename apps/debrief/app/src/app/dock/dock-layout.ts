@@ -294,14 +294,19 @@ export class DockLayout {
     // The size the dock had when watching began: the observer's first callback (same size) is not a resize.
     const start = container.getBoundingClientRect();
     let last = `${Math.round(start.width)}x${Math.round(start.height)}`;
+    // `data-plan-pending` on the container: a re-plan is scheduled and has not run (or been dropped) yet. The end-to-end tests wait on it.
+    const pending = (on: boolean): void => {
+      container.dataset['planPending'] = on ? '1' : '0';
+    };
     const observer = new ResizeObserver(() => {
       const box = container.getBoundingClientRect();
       const now = `${Math.round(box.width)}x${Math.round(box.height)}`;
       if (now === last) return;
       last = now;
       clearTimeout(timer);
+      pending(true);
       const run = (retries: number) => {
-        if (this.ctx.api !== api) return;
+        if (this.ctx.api !== api) return pending(false);
         // dockview measures the container with an observer of its own: planning before it has caught up would fit the
         // old size, and no later resize event comes to correct it (WebKit sometimes delivers ours first and is slow with
         // the other). Wait until it agrees with the container, a bounded number of times.
@@ -310,13 +315,18 @@ export class DockLayout {
           timer = setTimeout(() => run(retries - 1), RESIZE_SETTLE_MS);
           return;
         }
-        if (!this.ctx.restoring) onResize();
+        try {
+          if (!this.ctx.restoring) onResize();
+        } finally {
+          pending(false);
+        }
       };
       timer = setTimeout(() => run(RESIZE_SETTLE_TRIES), delayMs);
     });
     observer.observe(container);
     return () => {
       clearTimeout(timer);
+      pending(false);
       observer.disconnect();
     };
   }
