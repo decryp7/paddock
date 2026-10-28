@@ -14,7 +14,7 @@ const CAP = 0.75;
 const LOADED: Record<string, string> = {
   'dy.web-search': 'input[name=query]',
   'dy.file-hash': 'code[aria-label="SHA-256 hash"]',
-  'dy.alert-rule': '#rule-name',
+  'dy.alert-rule': '[aria-label="Name"]',
 };
 
 test.describe('Dyno dialog screenshots', () => {

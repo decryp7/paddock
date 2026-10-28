@@ -82,9 +82,9 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
       await page.getByRole('searchbox', { name: 'Search counters' }).fill('bytes');
       await page.clock.runFor(300);
       await expect(page.getByRole('list', { name: 'Search results' })).toBeVisible();
-      await page.getByRole('button', { name: /Chart Bytes Received \(en0\)/ }).click();
-      await page.getByRole('button', { name: /Chart Bytes Sent \(en0\)/ }).click();
-      await page.getByRole('button', { name: /Chart Bytes Transferred \(disk0\)/ }).click();
+      await page.getByRole('button', { name: /Chart Bytes Received \(en0\)/ }).click({ force: true });
+      await page.getByRole('button', { name: /Chart Bytes Sent \(en0\)/ }).click({ force: true });
+      await page.getByRole('button', { name: /Chart Bytes Transferred \(disk0\)/ }).click({ force: true });
       await expect(page.locator('dy-chart canvas').first()).toBeVisible();
       await page.clock.runFor(2_500);
     },
@@ -289,7 +289,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; read
     path: '/#/issues',
     ready: async (page) => {
       await page.getByRole('table', { name: 'Issues', exact: true }).getByRole('row', { name: /Safari/ }).first().click({ button: 'right' });
-      await page.getByRole('menuitem', { name: 'Search the web…' }).click();
+      await page.getByRole('menuitem', { name: 'Search the web…' }).click({ force: true });
       await expect(page.getByRole('dialog', { name: 'Search the web' }).getByText(/Removed from the text/)).toBeVisible();
     },
   },
