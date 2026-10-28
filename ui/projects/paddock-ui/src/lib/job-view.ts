@@ -160,7 +160,7 @@ export function jobView(job: SuJobSnapshot, stalled = false, elapsedMs: number =
         canCancel: true,
         cancelHint: job.cancellable ? '' : stopsAfter(job.notCancellableReason),
         detail: stalled ? $localize`:@@pd.ui.job.stalled:Still working. This step is taking longer than usual.` : '',
-        announcement: $localize`:@@pd.ui.job.announce.running:${job.title}:title:: ${headline}:phase:`,
+        announcement: headline.trim().toLowerCase() === job.title.trim().toLowerCase() ? job.title : $localize`:@@pd.ui.job.announce.running:${job.title}:title:: ${headline}:phase:`,
       };
     }
     case 'done':

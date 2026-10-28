@@ -567,3 +567,21 @@ default provider, reqwest's `rustls`) sets `AWS_LC_SYS_NO_JITTER_ENTROPY = { val
 `.cargo/config.toml` `[env]`, with a test that reads it through `option_env!`, and never sets the target-suffixed
 variant, which the build script reads first. Windows 0xc0000409 is any self-triggered abort (`abort()`, `__fastfail`,
 `/GS`), not proof of a buffer overrun: look for a C `abort()` first.
+
+## A fake clock next to real processes must not run away from the real one (2026-10-28, Pitcrew)
+Pitcrew's supervision tests drive the supervisor with a fake clock but real runner processes, and failed or timed out
+only on a loaded CI runner (run 6628): (1) a test took the runner's "task started" line for the job's process, then
+jumped the clock 120 s with no look at the processes in between, so the job counted as over (its process started
+after the line under load); (2) the job's start is the fake clock's time while its processes' start times come from
+the real clock, so a clock that ran ahead while the machine was slow put the leftovers outside the job
+(`ATTRIBUTION_SLACK`, 10 s) and they were never found; (3) a 60 s clock step during a leftover's stop passed the stop
+timeout before a slow process could exit; (4) real-time job lengths (`sleep 3`) and 80 clock steps, each a full
+process-table read, scaled with the load. **Rule:** a test double's job lasts until the test releases it, never a real
+time; a test waits for what the system under test has *seen* (its usage, its list), not for the input it was given;
+while the system compares the fake clock with real OS timestamps, the clock follows the real one (`until_real`) and
+holds still while a real process reacts to a signal (step it only where the product needs time to pass, such as a
+job's end after `IDLE_CONFIRM`); a tool's timeout ends its whole tree: on Unix its own session (`setsid`, so an
+interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kill-on-close job object, which also holds
+helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
+(nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
+Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
