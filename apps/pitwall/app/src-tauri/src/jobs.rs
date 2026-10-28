@@ -83,6 +83,9 @@ pub enum JobEvent {
     Cancelled {
         /// The job's id.
         job_id: u64,
+        /// The user stopped waiting (`job_stop_waiting`): the server's cancel did not take effect, so it may still be
+        /// working on this. False for a cancel the server carried out.
+        stopped_waiting: bool,
     },
 }
 
@@ -122,6 +125,7 @@ struct Route {
     sink: JobSink,
     started: bool,
     outcome: Option<Result<Value, CommandError>>,
+    stopped_waiting: bool,
 }
 
 /// The registry's event sink: sends each snapshot to the channel of the command that started the job.
@@ -137,8 +141,15 @@ impl Router {
                 sink,
                 started: false,
                 outcome: None,
+                stopped_waiting: false,
             },
         );
+    }
+
+    fn set_stopped_waiting(&self, id: u64) {
+        if let Some(r) = lock(&self.routes).get_mut(&id) {
+            r.stopped_waiting = true;
+        }
     }
 
     fn set_outcome(&self, id: u64, outcome: Result<Value, CommandError>) {
@@ -195,7 +206,10 @@ impl EventSink for Router {
                         _ => CommandError::new(ErrorCode::Internal, message.clone()),
                     },
                 },
-                JobState::Cancelled { .. } => JobEvent::Cancelled { job_id },
+                JobState::Cancelled { .. } => JobEvent::Cancelled {
+                    job_id,
+                    stopped_waiting: route.stopped_waiting,
+                },
             };
             let sink = route.sink.clone();
             if s.state.is_terminal() {
@@ -220,9 +234,13 @@ pub struct Jobs {
 struct Signals {
     cancel: tokio::sync::watch::Sender<u64>,
     stop: tokio::sync::watch::Sender<u64>,
+    /// Receivers made when the job was registered, before its id was returned: a press that comes before the body first
+    /// runs is seen by them (a receiver made later would start from the current count and miss it).
+    first: Presses,
 }
 
 /// What a job body receives to react to presses of Cancel and "Stop waiting".
+#[derive(Clone)]
 pub struct Presses {
     /// Cancel was pressed (again).
     pub cancel: tokio::sync::watch::Receiver<u64>,
@@ -252,11 +270,17 @@ impl Jobs {
         // The queued snapshot registering emits has no route yet and tells the UI nothing; the first running one does.
         let ctx = self.registry.register(spec.kind, &spec.title, None);
         self.router.route(ctx.id().0, sink.clone());
+        let (cancel, cancel_rx) = tokio::sync::watch::channel(0);
+        let (stop, stop_rx) = tokio::sync::watch::channel(0);
         lock(&self.signals).insert(
             ctx.id().0,
             Signals {
-                cancel: tokio::sync::watch::channel(0).0,
-                stop: tokio::sync::watch::channel(0).0,
+                cancel,
+                stop,
+                first: Presses {
+                    cancel: cancel_rx,
+                    stop: stop_rx,
+                },
             },
         );
         ctx
@@ -298,12 +322,15 @@ impl Jobs {
         offered
     }
 
-    /// The presses of a running job, for its body. `None` for an unknown or ended job.
+    /// The presses of a running job, for its body: they include any press made since the job was registered. `None` for an
+    /// unknown or ended job.
     pub fn presses(&self, id: u64) -> Option<Presses> {
-        lock(&self.signals).get(&id).map(|s| Presses {
-            cancel: s.cancel.subscribe(),
-            stop: s.stop.subscribe(),
-        })
+        lock(&self.signals).get(&id).map(|s| s.first.clone())
+    }
+
+    /// The body is ending the job because the user stopped waiting: its `Cancelled` event says so.
+    pub fn note_stopped_waiting(&self, id: u64) {
+        self.router.set_stopped_waiting(id);
     }
 
     /// How many jobs have not ended.
@@ -596,6 +623,16 @@ mod tests {
         assert!(lock(&b).iter().all(|e| !format!("{e:?}").contains(&format!("job_id: {ida}"))));
         assert_eq!(kinds(&a).last().map(String::as_str), Some("done"));
         assert_eq!(kinds(&b).last().map(String::as_str), Some("done"));
+    }
+
+    #[test]
+    fn the_cancelled_event_says_whether_the_user_stopped_waiting() {
+        let v = serde_json::to_value(JobEvent::Cancelled {
+            job_id: 3,
+            stopped_waiting: true,
+        })
+        .unwrap();
+        assert_eq!(v, serde_json::json!({ "kind": "cancelled", "jobId": 3, "stoppedWaiting": true }));
     }
 
     #[test]
