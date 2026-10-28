@@ -29,6 +29,9 @@ Conventional Commits; one semver tag for the whole repo.
 - `scripts/affected.mjs` maps a change to a generated file under `ui/**/generated/` (`.ts`, `.json`) to the crates that
   name it (all crates when none does), so a stale generated file fails branch CI, not the merge.
 
+- `paddock-dialogs/tests/show_probe.rs`: the ADR 0026 section 6 real-window probe as a test target (`harness = false`,
+  runs only with `PADDOCK_REAL_WINDOWS=1`; `tauri` gets the `wry` feature in this crate's dev-dependencies).
+
 ### Shared dialog API, part 5: macOS attach at show and the configured deadline
 - macOS: an owned dialog window is built without a parent and attached with `addChildWindow:ordered:` when it is shown
   (`objc2-app-kit`, a macOS-only dependency of `paddock-dialogs`, already in every app's tree through Tauri), instead of

@@ -322,6 +322,14 @@ tauri::Builder::default()
 
 Wire types are generated into `ui/projects/paddock-ui/shell/generated/dialogs.ts` (`DialogKind`, `DialogRequest`, `DialogMeasureWire`, `DialogStart`, `DialogResult`, `DialogClosed`, `DialogError`, `DIALOG_EVENTS`,
 `DIALOG_BASE_COMMANDS`; `PADDOCK_WRITE_TS=1 cargo test -p paddock-dialogs --lib generated`).
+
+**The real-window probe** (ADR 0026 §6): `tests/show_probe.rs` (`harness = false`: a Tauri app owns the main thread) opens
+a real dialog window hidden on the real webview, lets its page measure itself synchronously and send `dialog_ready`, and
+checks that the window was shown by that ready and not by the deadline (set to 300 s) and that after the show the frame is
+its measured height and the page's viewport equals it (no cut-off footer, no scroll bar). It exits 0 at once unless
+`PADDOCK_REAL_WINDOWS=1`, so the ordinary run skips it; the full suite sets the variable on each OS (a display or Xvfb on
+Linux): `PADDOCK_REAL_WINDOWS=1 cargo test -p paddock-dialogs --all-features --test show_probe`. Exit 0 passes, 1 fails
+(the reason is printed), 2 means no report within 90 s. It opens a window on the desktop, so run it on purpose.
 ## `paddock-health` (plan S3)
 
 Service health and the cause-key notification centre (ADR 0010, ADR 0012 §3), ported from Debrief ADR 0055
