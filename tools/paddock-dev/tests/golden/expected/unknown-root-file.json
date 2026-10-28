@@ -7,6 +7,7 @@
  "tools": true,
  "icons": true,
  "ciImage": true,
+ "paddockDev": true,
  "docs": false,
  "apps": [
   "x",
@@ -51,6 +52,9 @@
    "unknown root file Mystery"
   ],
   "icons": [
+   "unknown root file Mystery"
+  ],
+  "paddock-dev": [
    "unknown root file Mystery"
   ],
   "tools": [

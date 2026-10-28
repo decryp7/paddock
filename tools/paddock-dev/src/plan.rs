@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
-const PROJECTS: [&str; 7] = ["crates", "ui", "eslint", "conformance", "tools", "icons", "ci-image"];
+const PROJECTS: [&str; 8] = ["crates", "ui", "eslint", "conformance", "tools", "icons", "ci-image", "paddock-dev"];
 
 fn re(pattern: &str) -> Regex {
     // The patterns are literals of this file, checked by the tests below.
@@ -91,6 +91,7 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^eslint/"), &["eslint"]),
         (re(r"^conformance/"), &["conformance"]),
         (re(r"^paddock\.(conformance\.json|waivers\.toml)$"), &["conformance"]),
+        (re(r"^(tools/paddock-dev/|dev$|dev\.cmd$)"), &["paddock-dev"]),
         (re(r"^(tools|templates)/"), &["tools"]),
         (re(r"^scripts/"), &["tools", "ui"]),
         (re(r"^icons/"), &["icons"]),
@@ -349,6 +350,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         ("tools", "tools"),
         ("icons", "icons"),
         ("ciImage", "ci-image"),
+        ("paddockDev", "paddock-dev"),
     ] {
         out.insert(key.into(), json!(has(project)));
     }
@@ -511,6 +513,8 @@ mod tests {
     fn rule_tables_compile_and_own_paths() {
         assert_eq!(owners("apps/dyno/x"), Some(vec!["app:dyno".to_string()]));
         assert_eq!(owners("scripts/a.mjs"), Some(vec!["tools".to_string(), "ui".to_string()]));
+        assert_eq!(owners("tools/paddock-dev/src/lib.rs"), Some(vec!["paddock-dev".to_string()]));
+        assert_eq!(owners("dev"), Some(vec!["paddock-dev".to_string()]));
         assert_eq!(owners("tools/bootstrap.sh"), Some(vec!["tools".to_string()]));
         assert_eq!(owners("Cargo.lock.unknown"), None);
         assert_eq!(owners("apps/loose-file"), None);

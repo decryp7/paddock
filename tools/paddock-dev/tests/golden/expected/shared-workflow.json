@@ -7,6 +7,7 @@
  "tools": true,
  "icons": true,
  "ciImage": true,
+ "paddockDev": true,
  "docs": false,
  "apps": [
   "x",
@@ -51,6 +52,9 @@
    "global .gitea/workflows/ci.yml"
   ],
   "icons": [
+   "global .gitea/workflows/ci.yml"
+  ],
+  "paddock-dev": [
    "global .gitea/workflows/ci.yml"
   ],
   "tools": [

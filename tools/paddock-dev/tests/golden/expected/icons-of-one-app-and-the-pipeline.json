@@ -7,6 +7,7 @@
  "tools": false,
  "icons": true,
  "ciImage": false,
+ "paddockDev": false,
  "docs": false,
  "apps": [
   "x",

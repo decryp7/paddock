@@ -8,7 +8,7 @@
 //   options: --explain   the reason for every project
 //
 // Projects: `crates` (the shared Cargo workspace), `ui` (the shared Angular workspace), `eslint`, `conformance`, `tools`
-// (tools/, templates/ and the scripts' tests), `icons`, `ci-image` and `app:<name>` for every apps/<name>/ with a
+// (tools/, templates/ and the scripts' tests), `paddock-dev` (tools/paddock-dev/ and the ./dev wrapper), `icons`, `ci-image` and `app:<name>` for every apps/<name>/ with a
 // paddock.ci.json. A changed file marks the project that owns it, then every project that reaches it through the graph,
 // read from the working tree:
 //   - Cargo path dependencies of every Cargo workspace (`cargo metadata --no-deps`, run inside the repo: cargo reads
@@ -93,6 +93,7 @@ const OWNERS = [
   [/^eslint\//, ['eslint']],
   [/^conformance\//, ['conformance']],
   [/^paddock\.(conformance\.json|waivers\.toml)$/, ['conformance']],
+  [/^(tools\/paddock-dev\/|dev$|dev\.cmd$)/, ['paddock-dev']], // the developer tool (ADR 0022): its own three-OS leg
   [/^(tools|templates)\//, ['tools']],
   // The scripts' tests run in the ui job (`npm run test:scripts`) and in the tools job.
   [/^scripts\//, ['tools', 'ui']],
@@ -248,11 +249,11 @@ export function lockDiff(before, after) {
 
 // ------------------------------------------------------------------------------------------------------------- plan
 
-const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image'];
+const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image', 'paddock-dev'];
 
 /**
  * The plan for a list of changed files. `graph` is { cargo, npm, apps } from the readers above; `all` selects everything.
- * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, docs, apps: [name], kinds: { app: ['rust','ui'] },
+ * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
  * packages: { workspace: [crate] } } and `why` with `explain`.
  */
 export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false } = {}) {
@@ -367,6 +368,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     tools: set.has('tools'),
     icons: set.has('icons'),
     ciImage: set.has('ci-image'),
+    paddockDev: set.has('paddock-dev'),
     docs,
     apps: [...set].filter((p) => p.startsWith('app:') && apps.has(p.slice(4))).map((p) => p.slice(4)).sort(),
     kinds: Object.fromEntries([...kinds].filter(([p]) => apps.has(p.slice(4))).map(([p, k]) => [p.slice(4), [...k].sort()]).sort()),
@@ -481,6 +483,7 @@ export function onlyApp(plan, app) {
     tools: false,
     icons: false,
     ciImage: false,
+    paddockDev: false,
     docs: false,
     apps: [app],
     kinds: { [app]: ['rust', 'ui'] },
@@ -567,7 +570,7 @@ export function summary(plan, reason, legs) {
     '',
     '| Project | Runs |',
     '|---|---|',
-    ...['crates', 'ui', 'eslint', 'conformance', 'tools'].map((p) => `| ${p} | ${yes(plan[p])} |`),
+    ...['crates', 'ui', 'eslint', 'conformance', 'tools', 'paddockDev'].map((p) => `| ${p} | ${yes(plan[p])} |`),
     ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${l.e2e_leg ? `${l.e2e_leg.replace('-', ' ')}${l.e2e_shard ? ` ${l.e2e_shard}` : ''}` : [l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
   ];
   if (plan.docs && !legs.length && !plan.crates && !plan.ui) lines.push('', 'Docs only: nothing to build.');
@@ -621,6 +624,7 @@ async function ci(env, { app = null } = {}) {
     conformance: plan.conformance,
     tools: plan.tools,
     icons: plan.icons,
+    paddock_dev: plan.paddockDev,
     apps: JSON.stringify(legs),
     any_app: legs.length > 0,
   };

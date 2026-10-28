@@ -7,6 +7,7 @@
  "tools": true,
  "icons": true,
  "ciImage": true,
+ "paddockDev": true,
  "docs": false,
  "apps": [
   "x",
@@ -51,6 +52,9 @@
    "everything (no base)"
   ],
   "icons": [
+   "everything (no base)"
+  ],
+  "paddock-dev": [
    "everything (no base)"
   ],
   "tools": [

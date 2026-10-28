@@ -14,6 +14,7 @@ node_modules/
 # The paddock-dev tool's local build folder (./dev builds it there on a cache miss).
 /tools/paddock-dev/target/
 /crates/.cargo/ci.toml
+/tools/paddock-dev/.cargo/ci.toml
 .DS_Store
 
 # Icon set build deps
