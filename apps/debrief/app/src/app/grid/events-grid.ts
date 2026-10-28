@@ -239,7 +239,7 @@ export type GridRowVm = RowVm | PlaceholderVm;
     .x { border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 0 2px; }
     .viewport { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative; outline: none; }
     .viewport:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
-    .layer { position: sticky; top: ${HEADER_H}px; overflow: hidden; }
+    .layer { /* conformance: not-a-header */ position: sticky; top: ${HEADER_H}px; overflow: hidden; }
     .row { position: absolute; left: 0; right: 0; height: var(--row-h, 26px); display: grid; align-items: center; column-gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--grid-line); cursor: default; }
     .row:hover { background: var(--bg-hover); }
     .row.sel { background-color: var(--bg-sel); box-shadow: inset 2px 0 0 var(--accent); }

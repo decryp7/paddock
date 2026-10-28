@@ -4,6 +4,19 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Sticky table headers stay above their rows (ADR 0027)
+- New tokens `--pd-z-table-header` (3), `--pd-z-table-sticky-column` (2) and `--pd-z-table-row-action` (1): the layers inside
+  a table, header on top. `pd-table`'s grid is its own stacking context and its header uses `--pd-z-table-header`;
+  `pd-view-table`'s header and `pd-view-matrix`'s sticky row headings and the shell's diagnostics tables use the ladder.
+- The apps' tables whose sticky header had no z-index (Debrief: alerts, tail status, query results, SQL console, store pane,
+  markers, keyboard settings, runs, dashboard tiles, parser editor, format wizard; Dyno: Charted counters) set one, so
+  muted or translucent rows and hover actions no longer paint over the header; Pitwall's model library keeps its sticky
+  action column (2) below the header (3).
+- Conformance C43: a rule that sticks to the top must set a z-index, and a sticky column must sit below the app's lowest
+  header (`/* conformance: not-a-header */` for sticky panels); run on Paddock's CI with the other repo-wide checks.
+- `@decryp7/paddock-e2e`: `headerCovers`, `expectHeaderOnTop` and `isOpaqueColor` (scroll, hover, `elementFromPoint`
+  across the header row, opaque background); the gallery runs it over `pd-table` in both themes, Chromium and WebKit.
+
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
   Chromium e2e in two shards, WebKit e2e) and releases through the shared `app-release.yml` from a thin `dyno-release.yml` (nightly

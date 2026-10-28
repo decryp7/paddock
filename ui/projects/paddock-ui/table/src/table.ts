@@ -310,9 +310,10 @@ export const PD_TABLE_VIRTUAL_FROM = 100;
     .pd-tool:focus-visible, .pd-sort:focus-visible, .pd-retry:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 2px; }
     /* A narrow table keeps the filter and an icon-only Columns button; the count goes (the grid says how many rows it has). */
     @container (max-width: 400px) { .pd-tool-text, .pd-count { display: none; } .pd-tool { padding: 0 var(--pd-space-2); } }
-    .pd-grid { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
+    /* Its own stacking context: the table's layers (--pd-z-table-*) stay local and never compete with the page's. */
+    .pd-grid { position: relative; isolation: isolate; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
     .pd-header, .pd-row { display: grid; grid-template-columns: var(--pd-cols); align-items: center; column-gap: var(--pd-space-3); padding: 0 var(--pd-space-3); min-width: 0; }
-    .pd-header { position: sticky; top: 0; z-index: var(--pd-z-sticky); height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
+    .pd-header { position: sticky; top: 0; z-index: var(--pd-z-table-header); height: var(--pd-table-head); border-bottom: 1px solid var(--pd-hairline); background: var(--pd-surface-2); color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
     .pd-th { display: flex; min-width: 0; }
     .pd-th.pd-end, .pd-cell.pd-end { justify-content: flex-end; text-align: end; }
     .pd-sort { display: inline-flex; align-items: center; gap: var(--pd-space-1); min-width: 0; max-width: 100%; padding: 0 4px; margin-inline: -4px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; border-radius: var(--pd-radius-tag); }

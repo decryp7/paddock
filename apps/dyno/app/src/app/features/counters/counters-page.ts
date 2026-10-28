@@ -281,7 +281,7 @@ import { MAX_SET_NAME, MAX_WATCHED, counterChartOption, counterTitle, formatCoun
     .faint { color: var(--text-3); font-size: var(--fs-xs); }
     .grid { display: grid; }
     .head, .row { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 120px 92px; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-3); }
-    .head { height: 30px; border-block: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; }
+    .head { height: 30px; border-block: 1px solid var(--border); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-xs); position: sticky; top: 0; z-index: 3; }
     .row { height: 36px; border-bottom: 1px solid var(--border-subtle); font-size: var(--fs-sm); }
     .row:hover { background: var(--surface-hover); }
     .cell { min-width: 0; display: flex; align-items: center; gap: var(--sp-2); white-space: nowrap; overflow: hidden; }

@@ -549,3 +549,13 @@ render rounds to leave Loading. On a busy CI runner a first `import()` of the se
 reported "never leaves Loading" for a dialog that was fine. **Rule:** a test waits on the condition itself (the promise the
 code awaits, `whenStable` over pending tasks), never on a count of turns, rounds or milliseconds; a wait that can hang is
 left to the runner's test timeout, which names the test (rule 5).
+
+## A sticky header needs a z-index above everything that scrolls under it (2026-10-28, all apps)
+"The cell covers the header when scrolling": a `position: sticky` header with `z-index: auto` paints in tree order with the
+rows, so a later cell that is positioned or makes a stacking context (opacity on muted rows or hover actions, a relative
+badge, a transform) paints over it, and a sticky column at the header's own z-index wins the tie. Fourteen tables in three
+apps and the shared shell had it (ADR 0027 lists them); none showed with the mock data, so a run-time sweep alone would not have found them.
+**Rule:** every sticky header sets a z-index from the table ladder (`--pd-z-table-header` above sticky columns above row
+actions) and an opaque background; C43 checks every instance and `expectHeaderOnTop` checks a grid at run time (ADR 0027,
+rule 40).
+

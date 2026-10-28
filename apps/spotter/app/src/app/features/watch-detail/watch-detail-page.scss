@@ -261,6 +261,7 @@
   }
 }
 .panel {
+  /* conformance: not-a-header */
   position: sticky;
   top: var(--pd-space-6);
   display: grid;

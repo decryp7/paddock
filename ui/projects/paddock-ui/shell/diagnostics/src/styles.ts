@@ -11,7 +11,7 @@ export const DIAGNOSTICS_STYLES = `
   .pd-diag__scroller { max-height: 300px; overflow: auto; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); }
   table { width: 100%; border-collapse: collapse; }
   th, td { padding: var(--pd-space-1) var(--pd-space-3); text-align: left; vertical-align: top; }
-  thead th { position: sticky; top: 0; background: var(--pd-surface-1); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); border-bottom: 1px solid var(--pd-border-control); }
+  thead th { position: sticky; top: 0; z-index: var(--pd-z-table-header); background: var(--pd-surface-1); color: var(--pd-text-muted); font-weight: var(--pd-weight-medium); border-bottom: 1px solid var(--pd-border-control); }
   tbody tr + tr > * { border-top: 1px solid var(--pd-border-subtle); }
   tbody th { font-weight: var(--pd-weight-medium); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); white-space: nowrap; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
