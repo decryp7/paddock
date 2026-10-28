@@ -216,6 +216,7 @@ export class MockBackend implements DynoBackend {
     this.profile =
       options.cpu === 'uniform' ? { ...base, hybrid: null } : options.cpu === 'hybrid' && !base.hybrid ? { ...base, hybrid: { efficiency: 8, performance: 8, efficiencyFirst: false } } : base;
     this.kinds = coreKindsOf(this.profile.hybrid);
+    this.startup = demoStartup(this.profile.os);
     this.counters = new MockCounters(this.profile.os);
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
@@ -875,9 +876,9 @@ export class MockBackend implements DynoBackend {
 
   private runs(): BenchRun[] {
     return (this.benchRuns ??= [
-      mockRun('r3', this.start - 2 * 60 * MIN, 'Power mode: High performance (after)', 1.12, { group: 'Power mode: High performance', phase: 'after' }),
-      mockRun('r2', this.start - 3 * 60 * MIN, 'Power mode: High performance (before)', 1, { group: 'Power mode: High performance', phase: 'before' }),
-      mockRun('r1', this.start - 2 * DAY, 'Baseline', 0.99, { load: { cpuPercent: 31, memoryPercent: 61, onBattery: false } }),
+      mockRun('r3', this.start - 2 * 60 * MIN, 'Power mode: High performance (after)', 1.12, { group: 'Power mode: High performance', phase: 'after' }, this.profile.cores),
+      mockRun('r2', this.start - 3 * 60 * MIN, 'Power mode: High performance (before)', 1, { group: 'Power mode: High performance', phase: 'before' }, this.profile.cores),
+      mockRun('r1', this.start - 2 * DAY, 'Baseline', 0.99, { load: { cpuPercent: 31, memoryPercent: 61, onBattery: false } }, this.profile.cores),
     ]);
   }
 
@@ -899,8 +900,8 @@ export class MockBackend implements DynoBackend {
           const run = mockRun(p.runId, this.start, r.label || 'Benchmark', r.phase === 'after' ? 1.12 : 1, {
             group: r.group ?? null,
             phase: r.phase ?? null,
-            results: kinds.map((k) => mockKindResult(k, r.phase === 'after' ? 1.12 : 1, false)),
-          });
+            results: kinds.map((k) => mockKindResult(k, r.phase === 'after' ? 1.12 : 1, false, this.profile.cores)),
+          }, this.profile.cores);
           this.runs().unshift(run);
           this.benchRunning = null;
           return;

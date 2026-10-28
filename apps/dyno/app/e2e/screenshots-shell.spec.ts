@@ -34,7 +34,7 @@ test.describe('Dyno shell screenshots', () => {
       for (const [name, page] of [['appearance', 'Appearance'], ['dyno', 'Dyno']] as const) {
         test(`settings window, ${name} page`, async ({ page: p }) => {
           mkdirSync(OUT, { recursive: true });
-          await p.setViewportSize({ width: 880, height: 640 });
+          await p.setViewportSize({ width: 880, height: 700 });
           await p.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
           await p.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
           await p.getByText(page, { exact: true }).first().click();

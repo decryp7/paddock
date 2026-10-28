@@ -22,6 +22,9 @@ import { MatInput } from '@angular/material/input';
       @if (error(); as e) {
         <div class="err" role="alert"><dy-icon name="alert" /><span>{{ e.message }} @if (hint(); as h) {<small>{{ h }}</small>}</span></div>
       }
+      @if (!results() && !error() && !busy()) {
+        <p class="empty" data-testid="lockers-empty">Enter a path and choose Find.</p>
+      }
       @if (results(); as list) {
         @if (list.length === 0) {
           <p class="none"><dy-icon name="check" /> Nothing has it open right now.</p>
@@ -42,6 +45,7 @@ import { MatInput } from '@angular/material/input';
     .grow { flex: 1; }
     .err { display: flex; gap: var(--sp-2); color: var(--bad); }
     .err small { display: block; color: var(--text-2); }
+    .empty { color: var(--text-3); }
     .none { display: flex; align-items: center; gap: var(--sp-2); color: var(--ok); }
     ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-1); }
     li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); }

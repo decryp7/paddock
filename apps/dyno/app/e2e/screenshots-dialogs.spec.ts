@@ -10,6 +10,12 @@ const OUT = process.env['DIALOG_SHOTS_DIR'] ?? '';
 const PLATFORMS = { mac: { platform: 'MacIntel', ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130 Safari/537.36' }, win: { platform: 'Win32', ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36' } } as const;
 const FIXTURES: Record<string, unknown> = Object.fromEntries(Object.entries(DIALOG_FIXTURES).map(([id, list]) => [id, list[0]]));
 const CAP = 0.75;
+/** What shows that a dialog has its content (not the loading skeleton): the shot waits for it, then for the refit it causes. */
+const LOADED: Record<string, string> = {
+  'dy.web-search': 'input[name=query]',
+  'dy.file-hash': 'code[aria-label="SHA-256 hash"]',
+  'dy.alert-rule': '#rule-name',
+};
 
 test.describe('Dyno dialog screenshots', () => {
   test.skip(!OUT, 'set DIALOG_SHOTS_DIR');
@@ -26,6 +32,18 @@ test.describe('Dyno dialog screenshots', () => {
             const page = await context.newPage();
             await page.goto(dialogWindowUrl(id, FIXTURES[id] ?? {}, { title: id }));
             await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+            const loaded = LOADED[id];
+            if (loaded) {
+              await expect(page.locator(loaded).first()).toBeVisible({ timeout: 15_000 });
+              // The frame refits after the content arrives (one frame per fit): wait until the fitted height stops changing.
+              let last = -1;
+              await expect(async () => {
+                const h = await page.evaluate(() => Number(document.documentElement.dataset['fittedHeight'] ?? '0'));
+                const previous = last;
+                last = h;
+                expect(h).toBe(previous);
+              }).toPass({ timeout: 10_000, intervals: [200, 200, 300] });
+            }
             const asked = await page.evaluate(() => ({ h: Number(document.documentElement.dataset['fittedHeight'] ?? '0'), min: document.documentElement.dataset['minContent'] ?? '0x0' }));
             const minH = Number(asked.min.split('x')[1] ?? '0');
             const height = contract.kind === 'tool' ? Math.min(contract.height ?? capH, capH) : Math.max(Math.min(asked.h, capH), minH);
