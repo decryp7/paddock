@@ -1,6 +1,7 @@
 # 26. The shared dialog API: Rust-owned contracts, DialogFrame with declared actions, windows that open fitted
 
-- Status: Proposed (2026-10-28)
+- Status: Proposed (2026-10-28); the user answered its four open questions on 2026-10-28 (button order native per OS,
+  three width steps, Dyno is monitoring-only, `unexercised` commands under a ratchet), recorded below
 - Date: 2026-10-28
 - Related: rule 17 (every dialog is a real OS window), rules 39, 40, 42, 43; ADR 0008 (long operations), ADR 0009
   (dialog kinds and declared contracts; this ADR amends its §2 and §3), ADR 0012 (app shell), ADR 0016 (dialog window
@@ -46,8 +47,8 @@ Today (read on `origin/main`, 2026-10-28):
 | `viewer` | modeless | `wide` 720 | preferred 560, grows to the cap; never shrinks below the smaller of its content and the preferred height | size and offset, clamped | Close | Close |
 | `tool` | modeless | preferred 960 x 680 | user-sized; OS minimum = measured minimum content | size and offset, clamped | Close | Close |
 
-- Widths are named steps from the design guide (400 / 560 / 720), plus a number only for a `tool`. This keeps forms
-  from inventing 437 px.
+- Widths are three named steps (user, 2026-10-28): `narrow` 400, `medium` 560, `wide` 720, defaulted by kind as in
+  the table; a `tool` alone may declare a number. No dialog declares another width.
 - The cap is 75 % of the work area. It applies to the preferred size only and never pushes below the minimum content
   size (ADR 0016 decision 4).
 - The minimum content size becomes the OS minimum (`set_min_size`):
@@ -89,12 +90,19 @@ export interface DialogContent<R = unknown> {
 }
 ```
 
-The frame applies one pure function, `layoutActions(kind, modality, requiredChoice, actions)`, which is tested as a
-table. It defines:
+The frame applies one pure function, `layoutActions(kind, modality, requiredChoice, actions, platform)`, which is
+tested as a table. It defines:
 
-- **Order.** `[lead secondaries] … [secondary] [cancel] [primary | destructive]`. Primary sits on the right with Cancel
-  to its left (design guide §Dialogs), on every OS. When a dialog has both a primary and a destructive action, the
-  destructive one moves to the leading edge (Save / Cancel / Don't save).
+- **Order, native per OS** (user, 2026-10-28). Apps declare roles only; the frame orders them for the OS it runs on
+  (`data-platform`, from the shell):
+  - macOS and Linux: `[lead secondaries] … [secondary] [cancel] [primary | destructive]`, primary on the right with
+    Cancel to its left (the design guide's order);
+  - Windows: `[lead secondaries] … [primary | destructive] [secondary] [cancel]`, primary first and Cancel last,
+    right-aligned.
+
+  When a dialog has both a primary and a destructive action, the destructive one moves to the leading edge on every OS
+  (Save / Cancel / Don't save). The mockups show the macOS and Linux order. Tests read the order from
+  `layoutActions(…, platform)` and never assume one.
 - **Counts.**
   - At most one primary.
   - At most one destructive.
@@ -164,7 +172,9 @@ The frame also measures and refits, as ADR 0016 decision 5 describes:
   | 4. The base providers reach a command the base lists do not name | The harness |
 
   The analysis is then deleted (ADR 0022 phase 6). This is weaker than the static walk for a path that no test drives.
-  ADR 0022 accepted that trade-off, and the `unexercised` reasons make every such gap visible and reviewed.
+  **`unexercised` is allowed under a ratchet** (user, 2026-10-28): each one carries a written reason, which a reviewer
+  reads like any other change; `dev check dialog-commands` counts them per app and fails when the count rises above the
+  committed baseline (`dialog-commands-unexercised.count`), so the count may only fall.
 
 ### 4. Dialogs as OS windows: lifecycle (rule 17; ADR 0009 §1; amends ADR 0012 §3's start-up for dialog windows)
 
@@ -239,7 +249,7 @@ commands: it answers `true`/`false` and the opener acts.
 | shell-demo (5 own), workbench-demo (2) | package 1.2 | First adopters, screenshots for the independent review |
 | Pitwall 1.1 | its shell move, after 1.2 | 5 dialogs (`pw.confirm` becomes `pd.confirm`) plus the shared ones; the slots panel stays an in-app popover |
 | Spotter 1.0 | its shell move, after 1.2 | `sp-confirm-dialog` becomes `pd.confirm`; settings, about and updates are shared; native pickers stay native |
-| Dyno 1.0 | its shell move, after 1.2 | 8 dialogs on `dyno/monitoring-only` move (the list is in the plan); orphans of removed backends are deleted |
+| Dyno 1.0 | its shell move, after 1.2 | Dyno is monitoring-only (Dyno ADR 0021): 6 dialogs plus `pd.confirm` move (the list is in the plan); the rule editor, rule end time, CPU affinity and CPU cap dialogs and the orphans of removed backends are deleted |
 | Debrief 1.2 | M2b | 50 dialogs; commands lists move to `src-tauri/src/dialogs.rs`; the TS analysis and Debrief's copies are deleted |
 
 ## Consequences
@@ -259,7 +269,7 @@ commands: it answers `true`/`false` and the opener acts.
   of every Rust build. It is the opposite of ADR 0022, and the command names would not be checked by the compiler.
 - **Actions as content-projected buttons with a role attribute.** This keeps markup in every component and needs a DOM
   query to find the default. Declared data can be laid out, tested as a table and linted.
-- **Button order per OS (Windows: OK, Cancel).** The design guide fixes one order for the family. The apps' own
-  surfaces already differ from the OS conventions in other ways, and one order is what the tests can pin.
+- **One button order on every OS** (primary right, Cancel to its left). Rejected by the user on 2026-10-28: dialogs are
+  OS windows and should feel native; the frame owns the order, so apps still declare roles only.
 - **Show the window at once with a skeleton and fit later.** The jump is the defect users report. A hidden window that
   is shown at the ready handshake costs one frame of latency, and the watchdog covers the failure case.
