@@ -180,21 +180,11 @@ pub fn parse_pss(smaps_rollup: &str) -> Option<u64> {
     kb.checked_mul(1024)
 }
 
-/// The proportional set size of `pid`, where the platform offers it and the process may be read.
-#[cfg(target_os = "linux")]
-fn proportional_size(pid: u32) -> Option<u64> {
-    parse_pss(&std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn proportional_size(_pid: u32) -> Option<u64> {
-    None
-}
-
-/// A live read of [`tree_memory_with`] for the process tree at `root`: proportional sizes on Linux, falling back to
-/// the resident size of any process that cannot be read, resident sizes elsewhere.
+/// A live read of the memory of the process tree at `root`: the shared real-memory figure (PSS on Linux, physical
+/// footprint on macOS, private working set on Windows), reading the pids of the tree only and never the machine's whole
+/// process table (ADR 0024 rule 4: the watchdog calls this every few seconds).
 pub fn current_tree_memory(root: u32) -> u64 {
-    tree_memory_with(&table_of(&snapshot()), root, proportional_size)
+    paddock_proc::tree_memory(root)
 }
 
 /// Process ids whose command line mentions `needle` (leak checks: a throwaway profile path is unique to a run).

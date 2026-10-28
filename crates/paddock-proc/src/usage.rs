@@ -117,16 +117,145 @@ fn proportional(_pid: u32) -> Option<u64> {
     None
 }
 
-/// What `pid` really uses, in bytes: PSS on Linux, the physical footprint on macOS, the private working set on Windows (the
-/// resident size if that cannot be read). `None` when there is no such process (or it is a thread id).
-pub fn process_memory(pid: u32) -> Option<u64> {
-    let table = snapshot();
-    proportional(pid).or_else(|| table.get(&pid).map(|e| e.1))
+/// Where the figures of a process come from. A watcher tick asks only [`ProcessSource::memory`] and
+/// [`ProcessSource::children`], which read one pid each; [`ProcessSource::table`] reads the whole machine's process list
+/// and belongs to one-off work (ending a tree, leak checks), never to a per-tick path (ADR 0024 rule 4).
+pub trait ProcessSource {
+    /// What `pid` really uses (see [`process_memory`]); `None` when there is no such process.
+    fn memory(&self, pid: u32) -> Option<u64>;
+    /// The direct children of `pid`.
+    fn children(&self, pid: u32) -> Vec<u32>;
+    /// The whole process table (every process of the machine: the expensive read).
+    fn table(&self) -> Table;
 }
 
-/// The memory of the tree at `root` (see [`process_memory`]), 0 when it is gone.
+/// The operating system as a [`ProcessSource`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OsSource;
+
+impl ProcessSource for OsSource {
+    fn memory(&self, pid: u32) -> Option<u64> {
+        proportional(pid).or_else(|| resident(pid))
+    }
+
+    fn children(&self, pid: u32) -> Vec<u32> {
+        children_or_scan(children_of(pid), pid, || self.table())
+    }
+
+    fn table(&self) -> Table {
+        snapshot()
+    }
+}
+
+/// `listed` when the platform can list the children of one pid; otherwise one scan of the table (the fallback only).
+fn children_or_scan(listed: Option<Vec<u32>>, pid: u32, table: impl FnOnce() -> Table) -> Vec<u32> {
+    listed.unwrap_or_else(|| direct_children(&table(), pid))
+}
+
+fn direct_children(table: &Table, pid: u32) -> Vec<u32> {
+    table
+        .iter()
+        .filter(|(kid, (parent, _))| **kid != pid && *parent == Some(pid))
+        .map(|(kid, _)| *kid)
+        .collect()
+}
+
+/// The resident size of one process (the last resort when its real memory cannot be read), from a refresh of that pid
+/// only; `None` when it is gone or is a thread entry.
+fn resident(pid: u32) -> Option<u64> {
+    let id = Pid::from_u32(pid);
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[id]),
+        true,
+        ProcessRefreshKind::nothing().with_memory(),
+    );
+    sys.process(id)
+        .filter(|p| p.thread_kind().is_none())
+        .map(sysinfo::Process::memory)
+}
+
+/// The most processes one tree walk visits (a parent cycle or a fork bomb cannot keep a watcher busy).
+pub const MAX_TREE: usize = 4096;
+
+/// Memory of `root` and everything below it, reading one pid at a time through `source` and never its whole table.
+pub fn tree_memory_from(source: &impl ProcessSource, root: u32) -> u64 {
+    let Some(first) = source.memory(root) else {
+        return 0;
+    };
+    let mut total = first;
+    let mut seen = std::collections::HashSet::from([root]);
+    let mut frontier = vec![root];
+    while let Some(p) = frontier.pop() {
+        for kid in source.children(p) {
+            if seen.len() >= MAX_TREE {
+                return total;
+            }
+            if seen.insert(kid) {
+                total = total.saturating_add(source.memory(kid).unwrap_or(0));
+                frontier.push(kid);
+            }
+        }
+    }
+    total
+}
+
+/// What `pid` really uses, in bytes: PSS on Linux, the physical footprint on macOS, the private working set on Windows (the
+/// resident size if that cannot be read). `None` when there is no such process (or it is a thread id). Reads that pid only.
+pub fn process_memory(pid: u32) -> Option<u64> {
+    OsSource.memory(pid)
+}
+
+/// The memory of the tree at `root` (see [`process_memory`]), 0 when it is gone. Reads the pids of the tree only; the
+/// children of each come from the OS per pid (`proc_listchildpids` on macOS, `/proc/<pid>/task/*/children` on Linux, one
+/// light process-id snapshot on Windows, which has no per-parent call).
 pub fn tree_memory(root: u32) -> u64 {
-    tree_memory_with(&snapshot(), root, proportional)
+    tree_memory_from(&OsSource, root)
+}
+
+/// The direct children of `pid` read for that pid only, `None` when the platform has no such call.
+#[cfg(target_os = "macos")]
+fn children_of(pid: u32) -> Option<Vec<u32>> {
+    crate::sys::child_pids(pid)
+}
+
+#[cfg(target_os = "linux")]
+fn children_of(pid: u32) -> Option<Vec<u32>> {
+    read_children(Path::new("/proc"), pid)
+}
+
+#[cfg(windows)]
+fn children_of(pid: u32) -> Option<Vec<u32>> {
+    crate::sys::child_pids(pid)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn children_of(_pid: u32) -> Option<Vec<u32>> {
+    None
+}
+
+/// The children of `pid` from `<proc_root>/<pid>/task/<tid>/children` (every thread lists the children it forked).
+/// `Some(empty)` when the process is gone, `None` when the kernel has no `children` files (CONFIG_PROC_CHILDREN off).
+pub fn read_children(proc_root: &Path, pid: u32) -> Option<Vec<u32>> {
+    let Ok(tasks) = std::fs::read_dir(proc_root.join(pid.to_string()).join("task")) else {
+        return Some(Vec::new());
+    };
+    let mut kids = Vec::new();
+    for task in tasks.flatten() {
+        match std::fs::read_to_string(task.path().join("children")) {
+            Ok(text) => kids.extend(
+                text.split_whitespace()
+                    .filter_map(|t| t.parse::<u32>().ok()),
+            ),
+            // No `children` file in a task that is still there: the kernel does not offer them. A thread that ended while
+            // listing, or an unreadable entry, is skipped.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && task.path().exists() => {
+                return None;
+            }
+            Err(_) => {}
+        }
+    }
+    Some(kids)
 }
 
 #[cfg(test)]
@@ -235,6 +364,159 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         assert!(tree_memory(std::process::id()) > 0);
         assert_eq!(process_memory(u32::MAX - 1), None);
         assert_eq!(tree_memory(u32::MAX - 1), 0);
+    }
+
+    /// A process source that counts what a tick reads: the tree is `pid -> (children, memory)`.
+    struct Counting {
+        tree: HashMap<u32, (Vec<u32>, u64)>,
+        table_reads: std::cell::Cell<usize>,
+        memory_reads: std::cell::Cell<usize>,
+        children_reads: std::cell::Cell<usize>,
+    }
+
+    impl Counting {
+        fn new(rows: &[(u32, &[u32], u64)]) -> Counting {
+            Counting {
+                tree: rows
+                    .iter()
+                    .map(|(p, k, m)| (*p, (k.to_vec(), *m)))
+                    .collect(),
+                table_reads: 0.into(),
+                memory_reads: 0.into(),
+                children_reads: 0.into(),
+            }
+        }
+    }
+
+    impl ProcessSource for Counting {
+        fn memory(&self, pid: u32) -> Option<u64> {
+            self.memory_reads.set(self.memory_reads.get() + 1);
+            self.tree.get(&pid).map(|e| e.1)
+        }
+        fn children(&self, pid: u32) -> Vec<u32> {
+            self.children_reads.set(self.children_reads.get() + 1);
+            self.tree.get(&pid).map(|e| e.0.clone()).unwrap_or_default()
+        }
+        fn table(&self) -> Table {
+            self.table_reads.set(self.table_reads.get() + 1);
+            Table::new()
+        }
+    }
+
+    /// ADR 0024 rule 4: one watcher tick for one child reads no whole process table, and one memory read and one children
+    /// read per process of its tree.
+    #[test]
+    fn a_tick_reads_no_whole_table_and_one_read_per_process_of_the_tree() {
+        let src = Counting::new(&[
+            (1, &[2, 3], 10),
+            (2, &[4], 20),
+            (3, &[], 30),
+            (4, &[], 40),
+            (9, &[], 999),
+        ]);
+        assert_eq!(tree_memory_from(&src, 1), 100);
+        assert_eq!(src.table_reads.get(), 0, "a whole-table read per tick");
+        assert_eq!(src.memory_reads.get(), 4);
+        assert_eq!(src.children_reads.get(), 4);
+        let single = Counting::new(&[(5, &[], 7)]);
+        assert_eq!(tree_memory_from(&single, 5), 7);
+        assert_eq!(
+            (
+                single.table_reads.get(),
+                single.memory_reads.get(),
+                single.children_reads.get()
+            ),
+            (0, 1, 1)
+        );
+    }
+
+    #[test]
+    fn a_gone_root_reads_nothing_more_and_cycles_and_unreadable_children_are_bounded() {
+        let src = Counting::new(&[(2, &[3], 5)]);
+        assert_eq!(tree_memory_from(&src, 1), 0);
+        assert_eq!((src.children_reads.get(), src.table_reads.get()), (0, 0));
+        assert!(
+            src.table().is_empty() && src.table_reads.get() == 1,
+            "the counter counts"
+        );
+        // 1 -> 2 -> 1 (a cycle) and a child that vanished between the listing and the read.
+        let src = Counting::new(&[(1, &[2, 8], 10), (2, &[1], 20)]);
+        assert_eq!(tree_memory_from(&src, 1), 30);
+        // A very wide tree stops at the bound.
+        let kids: Vec<u32> = (2..(MAX_TREE as u32 + 100)).collect();
+        let mut rows: Vec<(u32, &[u32], u64)> = vec![(1, &kids, 1)];
+        rows.extend(kids.iter().map(|k| (*k, &[][..], 1)));
+        let src = Counting::new(&rows);
+        assert_eq!(tree_memory_from(&src, 1), MAX_TREE as u64);
+    }
+
+    #[test]
+    fn children_are_read_from_the_task_folders_of_a_proc_fixture() {
+        let proc = tempfile::tempdir().unwrap();
+        for (tid, kids) in [("10", "11 12 \n"), ("14", "13\n"), ("15", "\n")] {
+            let dir = proc.path().join("10/task").join(tid);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("children"), kids).unwrap();
+        }
+        let mut kids = read_children(proc.path(), 10).unwrap();
+        kids.sort();
+        assert_eq!(kids, vec![11, 12, 13]);
+        assert_eq!(
+            read_children(proc.path(), 99),
+            Some(vec![]),
+            "a process that is gone has no children"
+        );
+        // A kernel without the files.
+        std::fs::create_dir_all(proc.path().join("20/task/20")).unwrap();
+        assert_eq!(read_children(proc.path(), 20), None);
+        // A thread that ended while listing, and an unreadable entry, are skipped.
+        std::fs::create_dir_all(proc.path().join("30/task/30/children")).unwrap();
+        assert_eq!(read_children(proc.path(), 30), Some(vec![]));
+    }
+
+    #[test]
+    fn direct_children_come_from_a_table() {
+        let table = table_from([
+            entry(1, None, 1, false),
+            entry(2, Some(1), 1, false),
+            entry(3, Some(1), 1, false),
+            entry(4, Some(2), 1, false),
+            entry(5, Some(5), 1, false),
+        ]);
+        let mut k = direct_children(&table, 1);
+        k.sort();
+        assert_eq!(k, vec![2, 3]);
+        assert!(direct_children(&table, 5).is_empty());
+        assert_eq!(
+            children_or_scan(Some(vec![7]), 1, || panic!(
+                "no scan when the platform lists"
+            )),
+            vec![7]
+        );
+        assert_eq!(
+            children_or_scan(None, 5, || table.clone()),
+            Vec::<u32>::new()
+        );
+        assert_eq!(children_or_scan(None, 1, || table.clone()).len(), 2);
+        assert!(OsSource.table().contains_key(&std::process::id()));
+    }
+
+    #[test]
+    fn the_resident_size_of_one_pid_is_read_and_a_missing_pid_has_none() {
+        assert!(resident(std::process::id()).is_some_and(|m| m > 0));
+        assert_eq!(resident(u32::MAX - 1), None);
+    }
+
+    #[test]
+    fn the_os_source_lists_the_children_of_one_pid_without_a_table() {
+        use crate::testchild::{Mode, child};
+        let me = std::process::id();
+        let c = crate::Supervised::spawn(child(Mode::Sleep)).unwrap();
+        let pid = c.id().unwrap();
+        assert!(OsSource.children(me).contains(&pid));
+        assert!(OsSource.children(pid).is_empty());
+        assert!(OsSource.children(u32::MAX - 1).is_empty());
+        assert!(tree_memory(me) >= process_memory(pid).unwrap());
     }
 
     #[cfg(target_os = "linux")]
