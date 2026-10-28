@@ -585,3 +585,11 @@ interactive login shell gets no `SIGTTIN` either) and `killpg`, on Windows a kil
 helpers that left the tree (`taskkill /T` misses those); otherwise `cmd /c`'s and a login shell's children outlive it
 (nextest's "leaky"). A test of a timeout gives up on a condition (the tree is complete), never on a time budget.
 Reproduce with a delay knob in the fake (`spawn_delay_ms`), not by hoping for load.
+
+## Unrecorded benchmark conditions made 182k and 1.3M events/s look like a contradiction (2026-10-29)
+Two quoted ingest numbers, about 182k and 1.3M events/s, were argued over as if one was wrong. Neither came with machine,
+load, build profile, corpus or command, so nobody could tell whether they differed by a release build, a quiet machine, a
+different corpus or a real regression, and stale figures kept being quoted from ADRs and old job logs. **Rule:** record
+every benchmark you quote as a results block (date, commit, machine, load, build, corpus and generator, exact command,
+runs, numbers with budget and verdict, physical-footprint memory) in the owning `docs/performance.md` or
+`docs/benchmarks.md`, and link it from wherever the number is quoted; a number without a block is not evidence (rule 48).
