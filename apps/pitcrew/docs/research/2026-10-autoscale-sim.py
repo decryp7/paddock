@@ -1,6 +1,9 @@
+import random, math, statistics, sys
 # Synthetic CI queue: bursts of jobs (a push fans out to several jobs), lognormal durations.
 # Compares static capacity with an autoscaler with and without hysteresis. Time step 5 s, 8 simulated hours.
-import random, math, statistics, sys
+# CONTENTION: each job runs (1 + CONTENTION * (jobs running at once - 1)) times slower on a shared host; 0 = no contention
+# (an upper bound on the gain). Usage: python3 -I sim.py [contention], e.g. 0.25.
+CONTENTION = float(sys.argv[1]) if len(sys.argv) > 1 else 0.0
 def workload(seed):
     r=random.Random(seed); jobs=[]; t=0
     while t<8*3600:
@@ -16,9 +19,11 @@ def run(jobs, mode, mn=1, mx=4, up_delay=20, down_delay=600, start_gap=15, boot=
     while t<9*3600:
         while ji<len(jobs) and jobs[ji][0]<=t: q.append(jobs[ji]); ji+=1
         if mode!='static' and t-last_poll>=poll: qlen=len(q); last_poll=t
+        running=sum(1 for s in slots if s['busy']>0)
+        slow=1+CONTENTION*max(0,running-1)
         for s in slots:
             if s['busy']>0:
-                s['busy']-=dt
+                s['busy']-=dt/slow
                 if s['busy']<=0: s['idle_since']=t
         for s in slots:
             if s['on'] and s['boot']<=t and s['busy']<=0 and q:

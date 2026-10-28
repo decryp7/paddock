@@ -1,237 +1,247 @@
 # Runbook: add runners to a CI host (the interim before auto-scale)
 
-- Why: [ADR 0021](../adr/0021-auto-scale.md), decision D8 (the owner, 2026-10-28). Until the scaler is built, each host
-  gets 2-3 more runners that always run. When the scaler lands, these runners become its pools' slots: nothing is
-  registered twice.
+- Why: [ADR 0021](../adr/0021-auto-scale.md), decision D8 (the owner, 2026-10-28). Until the scaler is built, hosts get
+  extra runners that always run. When the scaler lands, these runners become its pools' slots: nothing is registered
+  twice.
 - Who: the owner. Registering needs a registration token, and the hosts are only reachable by the owner.
-- Checked on 2026-10-28 against the Mac's runner (`gitea-runner` 5.2.0): `register --token-file`, `config set` (map keys
-  such as `runner.envs.X` included) and the defaults `runner.timeout: 3h` and `runner.shutdown_timeout: 0s`. The steps
-  for the Linux host and the Windows VM follow the same runner CLI but were not run there.
+- Checked on 2026-10-28 on the Mac's runner (`gitea-runner --version`: v5.2.3): `register --token-file`; `config set`,
+  including map keys such as `runner.envs.X`; `config get runner.labels`, which prints one label per line; and the
+  defaults `runner.timeout: 3h` and `runner.shutdown_timeout: 0s`. **Not run on d-gtr9 or the Windows VM.** The d-gtr9
+  layout below comes from the review, not from a look at the host.
 
-## Read this first: jobs on one host share folders
+## The gate: family ADR 0025 first for the Mac and Windows
 
-Two jobs that run at once on one host can get in each other's way.
+**Do not add runners on the Mac mini or the Windows VM before family ADR 0025 (CI job isolation) is merged with its
+Rust slot lock.** On 2026-10-28 it is Proposed on branch `ci/concurrent-jobs`, not merged. On main, two host jobs on one
+machine break each other, and a separate CI home per runner does not prevent it:
 
-- **Linux (d-gtr9):** the jobs run in containers with their own workspace. Extra runners are safe.
-- **Mac mini and Windows VM:** the jobs run on the host (`:host` labels), and the CI kit keeps folders under
-  `${PADDOCK_CI_HOME:-~/.paddock-ci}`. These are the stable checkout `src/<repo>-<job>`, the build folders
-  `target-<app>-<job>`, and the node and tool caches (`.gitea/actions/stable-workspace`, `conformance/ci/build-folder.sh`,
-  `node-caches`, `host-tools`). If two runners run the same job of two branches at once, the second one replaces the
-  first one's checkout while that job is still building. That is why this runbook gives **every extra runner its own
-  `PADDOCK_CI_HOME` and its own temp folder** through the runner's `runner.envs`.
+- Several CI files hard-code CI-home paths instead of following `PADDOCK_CI_HOME`. Examples: `setup-rust/action.yml`,
+  `ci.yml`, `debrief.yml`, `conformance/ci/windows-node-modules.sh`, and the shell and workbench demo release workflows.
+- `host-cleanup` kills test processes by exact name (`paddock.ci.json` `processes`). Dyno's and Pitwall's process
+  patterns are anchored on `.paddock-ci/`, so they match every runner's jobs.
+- sccache runs on one fixed port (4227) and is restarted by every job.
 
-Two risks are left that this runbook cannot remove:
+**d-gtr9 (Linux, container jobs)** is not fully safe either. The job containers of one host share the runner's
+`/sccache` mount, which holds the compile, npm and Angular caches (family ADR 0025 §7). Two runs of the same Angular job
+at once share one Angular cache and can spoil each other's build; re-run such a job. Adding Linux runners now means
+accepting that risk; the alternative is to wait for ADR 0025, which gives containers slots too.
 
-- At the end of a job, `host-cleanup` kills the app's test processes by exact name (`paddock.ci.json` `processes`). If two
-  jobs of the same app run on one host, one job's cleanup can kill the other's tests.
-- `setup-rust` uses a fixed sccache port (4227) and restarts the server. A concurrent job then misses the cache, but it
-  does not fail (`SCCACHE_IGNORE_SERVER_IO_ERROR=1`).
+So the order is:
 
-Both are fixed by family ADR 0025 (CI job isolation, branch `ci/concurrent-jobs`, Proposed, not merged on 2026-10-28).
-**Recommended order:** add the Linux runners now. Add the Mac and Windows runners now with the isolation below, and
-accept a rare failed test run until ADR 0025 is merged; re-run such a job.
+1. **Now, every host:** give the existing runner `runner.shutdown_timeout: 3h` (next section).
+2. **Now, d-gtr9, if the owner accepts the Angular-cache risk:** add up to three runners.
+3. **After family ADR 0025 is merged:** add runners on the Mac and the Windows VM, all sharing the host's one CI home.
 
-Disk: each extra host runner grows its own CI home. On the Mac, `~/.paddock-ci` is about 80 GB today (`src` 22 GB plus
-the build folders). Check the free space first; 310 GB were free on 2026-10-28.
+## Step 1 (every host, now): stop cancelling jobs on a stop
 
-Load: these runners always run. Nothing yet keeps them from starting jobs on a busy machine (rule 41). On the Mac, drain
-the extra runners in Pitcrew (**Drain**) while agents do heavy work, and resume them afterwards.
+With the default `shutdown_timeout: 0s`, a runner that is stopped while a job runs cancels it. The Mac's runner log
+shows 9 shutdowns that "cancelled in progress jobs" (counted on 2026-10-28). Set it to the job timeout:
+
+- **Pitcrew** (the Mac, and the Windows VM if Pitcrew runs there): runner page ▸ Settings ▸ `runner.shutdown_timeout` =
+  `3h`, Save. Pitcrew restarts the runner after its job.
+- **By hand:** `<runner binary> config -c <its config.yaml> set runner.shutdown_timeout 3h`, then restart the runner
+  between jobs.
+- **d-gtr9 (Docker Compose):** set it in the runner's `config.yaml` under its `/data` folder, and give the service
+  `stop_grace_period: 3h` in the compose file. Otherwise Docker kills the container after 10 s, whatever the runner's
+  setting. Then `docker compose up -d <service>` between jobs.
+
+A stop that catches a running job now waits for it (up to 3 h) instead of cancelling it.
 
 ## How many, and their names
 
-| Host | Existing runner | Add | New names | Total |
-|---|---|---|---|---|
-| Mac mini | `d7-mac-mini`, folder `/Users/decryp7/gitea-runner`, labels `macos-latest:host`, `macos-arm64:host` | 2 | `d7-mac-mini-2`, `d7-mac-mini-3` | 3 (the scaler's max will be 4) |
-| Linux `d-gtr9` | its current runner (`<existing>`) | 3 | `<existing>-2` … `<existing>-4` | 4 |
-| Windows VM `decryp7ology-dev` | its current runner (`<existing>`) | 1 | `<existing>-2` | 2 (the decided max) |
+| Host | Existing runner | Add | New names | Total | When |
+|---|---|---|---|---|---|
+| Linux `d-gtr9` | its current Compose service (`<existing>`) | up to 3 | `<existing>-2` … `<existing>-4` | 4 | now, if the risk above is accepted |
+| Mac mini | `d7-mac-mini`, folder `/Users/decryp7/gitea-runner` | 2 | `d7-mac-mini-2`, `d7-mac-mini-3` | 3 (the scaler's max will be 4) | after family ADR 0025 |
+| Windows VM `decryp7ology-dev` | its current runner (`<existing>`) | 1 | `<existing>-2` | 2 (the decided max) | after family ADR 0025 |
 
-On the Mac the third extra runner is left out on purpose: without load control the Mac also carries the agents. Add
-`d7-mac-mini-4` the same way if the queue still builds up.
+On d-gtr9, check `runner.capacity` in the existing runner's `config.yaml` first. If it is already above 1, add runners
+only until runners × capacity is 4.
 
-Every new runner gets **exactly the labels of the existing runner on that host.** Read them from the existing
-`config.yaml` (`runner.labels`), from the Pitcrew card, or from Gitea's runner list. Never from `.runner`, which holds
-the runner's credentials.
+Every new runner gets exactly the labels of the existing runner on that host. The commands below read them from its
+`config.yaml`; never take them from `.runner`, which holds the runner's credentials.
 
-## Common steps (every host)
+**Disk.** On the Mac, `~/.paddock-ci` holds 103 GB today (measured 2026-10-28); 308 GB were free. All but about 10 GB of
+it (sccache, npm, tools) is kept per slot under family ADR 0025, so plan for about 90 GB per extra host runner,
+bounded by `PADDOCK_CI_KEEP_SLOTS`.
 
-1. **Get the user-level registration token** (the runners are registered at user level, ADR 0021 D2): in Gitea, open
-   **User settings ▸ Actions ▸ Runners ▸ Create new runner** and copy the token. One token registers any number of
-   runners until it is reset.
-2. **Put it in a file only you can read.** Delete the file when done (step 6 of each host). Never paste the token on a
-   command line, into Pitcrew's files or into a chat.
-3. **Find the server URL the existing runner uses** (the Pitcrew card or `server_url` in `pitcrew.toml`) and use the
-   same one for `--instance`.
-4. For each new runner, create its own folder with its own `work/` and `cache/`, a copy of the existing binary and
-   `config.yaml`, then change these keys in the copy:
-   - `runner.file`: the new folder's `.runner`
-   - `host.workdir_parent`: the new folder's `work`
-   - `cache.dir`: the new folder's `cache` (the `external_server` and its secret file stay shared)
-   - `runner.timeout: 3h` and `runner.shutdown_timeout: 3h`. A stop then waits for a job the runner has just taken
-     instead of cancelling it (ADR 0021 §4; the default `0s` cancels it).
-   - host runners only (the Mac, Windows): `runner.envs.PADDOCK_CI_HOME`, a CI home of its own, and a temp folder of
-     its own: `runner.envs.TMPDIR` on macOS, `runner.envs.TMP` and `runner.envs.TEMP` on Windows. Not for container
-     runners: a host path in a job container's environment points nowhere.
-5. Register it from its folder with `--token-file`, then let Pitcrew run it (Runners ▸ Register runner ▸ **An existing
-   runner folder**: "a folder with a `.runner` file is used as it is and the token is not sent").
+## The token (every host)
 
-Also give the **existing** runner `runner.shutdown_timeout: 3h`, with Pitcrew's config editor (runner page ▸ Settings)
-or `config set`. It has the same race on every stop.
+1. In Gitea, open **User settings ▸ Actions ▸ Runners ▸ Create new runner** and copy the registration token. The
+   runners are user-level (ADR 0021 D2). One token registers any number of runners until it is reset.
+2. The commands below put it in a file only you can read and delete that file even when a step fails (`trap` /
+   `finally`). Never paste the token on a command line, into Pitcrew's files or into a chat.
+3. When done, clear the clipboard: copy something else, or on the Mac `pbcopy </dev/null`.
 
-## Mac mini
+## d-gtr9 (Linux, Docker Compose): now, if the risk is accepted
 
-In Terminal, as the user `decryp7`:
+Not verified on the host. According to the review, the runners run as Docker Compose services under
+`/root/docker-data/act_runner`, one service and one `/data` volume per runner. The runner image registers itself on first
+start when `/data/.runner` is missing. It reads the server, name, labels and token from its environment
+(`GITEA_INSTANCE_URL`, `GITEA_RUNNER_NAME`, `GITEA_RUNNER_LABELS`, `GITEA_RUNNER_REGISTRATION_TOKEN` or
+`GITEA_RUNNER_REGISTRATION_TOKEN_FILE`, `CONFIG_FILE`). Those names are from the runner's compose example, read in
+secondary sources; **use whatever names the existing service uses.**
+
+1. Look at the existing setup (as root):
+
+   ```sh
+   cd /root/docker-data/act_runner
+   docker compose config --services          # the existing service's name
+   docker compose config                     # its image, environment, volumes, labels; note the CONFIG_FILE path
+   docker compose ps
+   ```
+
+2. Prepare the token file, which is deleted again on exit:
+
+   ```sh
+   umask 077
+   TOKEN_FILE=$(mktemp /root/docker-data/act_runner/regtoken.XXXXXX)
+   trap 'rm -f "$TOKEN_FILE"' EXIT
+   ${EDITOR:-nano} "$TOKEN_FILE"              # paste the token, save
+   ```
+
+3. For each new runner `N` in 2 3 4, copy the existing service's block in `compose.yaml` (or `docker-compose.yml`) to a
+   new service `<existing>-N` and change only these things:
+   - its data volume: `./data-N:/data` (a new folder; `mkdir -p data-N`);
+   - `GITEA_RUNNER_NAME=<existing>-N`;
+   - the token: `GITEA_RUNNER_REGISTRATION_TOKEN_FILE=/run/regtoken`, with the volume `<TOKEN_FILE>:/run/regtoken:ro`.
+     Remove a plain `GITEA_RUNNER_REGISTRATION_TOKEN` from the copy;
+   - `stop_grace_period: 3h`.
+
+   Keep the image, `GITEA_INSTANCE_URL`, the labels and the Docker socket. Copy the existing `config.yaml` into
+   `data-N/` (if `CONFIG_FILE` points into `/data`) and, with a text editor, set in the copy under `runner:`
+   `file: /data/.runner`, `timeout: 3h` and `shutdown_timeout: 3h`. No `PADDOCK_CI_HOME` here: container jobs have
+   their own file system.
+
+4. Start them and let them register: `docker compose up -d <existing>-2 <existing>-3 <existing>-4`, then
+   `docker compose logs <existing>-2 | tail` (look for the registration and "Starting runner daemon").
+5. Remove the token: delete the `GITEA_RUNNER_REGISTRATION_TOKEN_FILE` line and the token volume from the new services.
+   They keep their registration in `data-N/.runner`. Run `docker compose up -d` again; the `trap` deletes the file when
+   the shell exits.
+
+Each running container job takes a Docker network from the daemon's address pool; four at once fit the default pools.
+
+## Mac mini: after family ADR 0025 is merged
+
+All runners on the Mac **share one CI home** (`~/.paddock-ci`). ADR 0025 gives each job a slot with its own kept folders
+and ports, and `PADDOCK_CI_KEEP_SLOTS` bounds them: set it to the number of runners on the host.
 
 ```sh
 set -eu
 SRC=/Users/decryp7/gitea-runner
-SERVER='<the server URL d7-mac-mini uses>'        # step 3 above
-TOKEN_FILE=$(mktemp); chmod 600 "$TOKEN_FILE"
-pbpaste > "$TOKEN_FILE"                            # copy the token first; check: wc -c "$TOKEN_FILE"
+SERVER='<the server URL d7-mac-mini uses: Pitcrew card or server_url in pitcrew.toml>'
+TOTAL=3                                            # runners on this Mac after this step
+LABELS="$("$SRC/gitea-runner" config -c "$SRC/config.yaml" get runner.labels | paste -sd, -)"
+echo "labels: $LABELS"                             # check before going on
+umask 077
+TOKEN_FILE=$(mktemp); trap 'rm -f "$TOKEN_FILE"' EXIT
+pbpaste > "$TOKEN_FILE"; pbcopy </dev/null         # token copied first; clipboard cleared
 
+"$SRC/gitea-runner" config -c "$SRC/config.yaml" set runner.envs.PADDOCK_CI_KEEP_SLOTS "$TOTAL"
 for N in 2 3; do
   NAME="d7-mac-mini-$N"
   D="/Users/decryp7/gitea-runner-$N"
-  HOME_CI="/Users/decryp7/.paddock-ci-$N"
-  mkdir -m 700 "$D" "$D/work" "$D/cache" "$D/tmp"
-  mkdir -p "$HOME_CI"
-  cp -p "$SRC/gitea-runner" "$SRC/config.yaml" "$D/"
+  mkdir -p "$D/work" "$D/cache"; chmod 700 "$D"
+  [ -e "$D/config.yaml" ] || cp -p "$SRC/config.yaml" "$D/config.yaml"
+  cp -p "$SRC/gitea-runner" "$D/"
   R="$D/gitea-runner"; C="$D/config.yaml"
   "$R" config -c "$C" set runner.file "$D/.runner"
   "$R" config -c "$C" set host.workdir_parent "$D/work"
   "$R" config -c "$C" set cache.dir "$D/cache"
   "$R" config -c "$C" set runner.timeout 3h
   "$R" config -c "$C" set runner.shutdown_timeout 3h
-  "$R" config -c "$C" set runner.envs.PADDOCK_CI_HOME "$HOME_CI"
-  "$R" config -c "$C" set runner.envs.TMPDIR "$D/tmp"
-  (cd "$D" && "$R" register -c "$C" --no-interactive --instance "$SERVER" --token-file "$TOKEN_FILE" \
-      --name "$NAME" --labels "macos-latest:host,macos-arm64:host")
+  "$R" config -c "$C" set runner.envs.PADDOCK_CI_KEEP_SLOTS "$TOTAL"
+  if [ ! -s "$D/.runner" ]; then
+    (cd "$D" && "$R" register -c "$C" --no-interactive --instance "$SERVER" --token-file "$TOKEN_FILE" \
+        --name "$NAME" --labels "$LABELS")
+  fi
   chmod 600 "$D/.runner" "$C"
 done
-
-rm -f "$TOKEN_FILE"
 ```
 
-Then, in Pitcrew, for each folder: **Runners ▸ Register runner**. Use the server URL above. Name it `d7-mac-mini-2`
-(then `-3`) with the same labels, choose **An existing runner folder**, and enter `/Users/decryp7/gitea-runner-2` (then
-`-3`). The card shows **Idle** once the server accepts it.
+The script can be run again: it keeps folders and registrations that already exist. Then, in Pitcrew, for each folder:
+**Runners ▸ Register runner**, the same server, name `d7-mac-mini-N`, the same labels, **An existing runner folder** =
+`/Users/decryp7/gitea-runner-N`. A folder with a `.runner` is adopted as it is, and no token is sent. Restart
+`d7-mac-mini` after its job so that it picks up `PADDOCK_CI_KEEP_SLOTS`.
 
-## Linux runner host `d-gtr9`
-
-Check first: `runner.capacity` in the existing `config.yaml`. If it is already above 1, that runner already runs several
-container jobs; add runners only until the total number of jobs at once (runners × capacity) is 4.
-
-As the account that runs the existing runner (`<SRC>` is its folder, `<binary>` its file name, usually `gitea-runner`):
-
-```sh
-set -eu
-SRC='<existing runner folder>'
-BIN='<binary>'
-EXISTING='<existing runner name>'
-SERVER='<the server URL the existing runner uses>'
-LABELS="$("$SRC/$BIN" config -c "$SRC/config.yaml" get runner.labels | paste -sd, -)"   # check that it prints the labels
-TOKEN_FILE=$(mktemp); chmod 600 "$TOKEN_FILE"
-${EDITOR:-nano} "$TOKEN_FILE"                      # paste the token, save
-
-for N in 2 3 4; do
-  NAME="$EXISTING-$N"
-  D="$SRC-$N"
-  mkdir -m 700 "$D" "$D/work" "$D/cache"
-  cp -p "$SRC/$BIN" "$SRC/config.yaml" "$D/"
-  R="$D/$BIN"; C="$D/config.yaml"
-  "$R" config -c "$C" set runner.file "$D/.runner"
-  "$R" config -c "$C" set host.workdir_parent "$D/work"
-  "$R" config -c "$C" set cache.dir "$D/cache"
-  "$R" config -c "$C" set runner.timeout 3h
-  "$R" config -c "$C" set runner.shutdown_timeout 3h
-  (cd "$D" && "$R" register -c "$C" --no-interactive --instance "$SERVER" --token-file "$TOKEN_FILE" \
-      --name "$NAME" --labels "$LABELS")
-  chmod 600 "$D/.runner" "$C"
-done
-rm -f "$TOKEN_FILE"
-```
-
-`config get runner.labels` prints one label per line (checked with 5.2.0); `paste` joins them with commas. If any label
-ends in `:host`, that runner runs jobs on the host: add `PADDOCK_CI_HOME` and `TMPDIR` as on the Mac.
-
-**Run them:**
-
-- **If Pitcrew runs on d-gtr9:** adopt each folder as on the Mac.
-- **If not:** start each runner the way the existing one is started. For a systemd user service, copy its unit to
-  `gitea-runner-N.service` with `WorkingDirectory=$D` and `ExecStart=$D/$BIN daemon --config $D/config.yaml`. Then run
-  `systemctl --user daemon-reload` and `systemctl --user enable --now gitea-runner-N`, and check
-  `systemctl --user status gitea-runner-N`. Set `TimeoutStopSec=3h` in the unit, so that systemd does not kill the runner
-  while `shutdown_timeout` lets a job finish.
-
-Container jobs: each running job takes a Docker network from the daemon's address pool. Four at once fit the default
-pools. Pitcrew's config check warns above that.
-
-## Windows VM `decryp7ology-dev`
+## Windows VM `decryp7ology-dev`: after family ADR 0025 is merged
 
 In PowerShell, as the user that owns the existing runner's folder:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$Src      = '<existing runner folder>'          # e.g. the folder on its Pitcrew card
+$Src      = '<existing runner folder>'           # the folder on its Pitcrew card
 $Existing = '<existing runner name>'
 $Server   = '<the server URL the existing runner uses>'
-$Labels   = '<labels of the existing runner, comma-separated>'
+$Total    = 2
+$Bin      = Join-Path $Src 'gitea-runner.exe'    # or act_runner.exe: use the existing name
+$Labels   = (& $Bin config -c "$Src\config.yaml" get runner.labels) -join ','
+"labels: $Labels"                                 # check before going on
 $TokenFile = Join-Path $env:TEMP ("rt-" + [guid]::NewGuid() + '.txt')
-New-Item -ItemType File -Path $TokenFile | Out-Null
-icacls $TokenFile /inheritance:r /grant:r "${env:USERNAME}:F" | Out-Null
-notepad $TokenFile                               # paste the token, save, close
+try {
+  New-Item -ItemType File -Path $TokenFile | Out-Null
+  icacls $TokenFile /inheritance:r /grant:r "${env:USERNAME}:F" | Out-Null
+  Get-Clipboard | Set-Content -NoNewline $TokenFile; Set-Clipboard -Value ' '   # token copied first
 
-$N = 2
-$D = "$Src-$N"; $Name = "$Existing-$N"; $HomeCi = "$env:USERPROFILE\.paddock-ci-$N"
-New-Item -ItemType Directory -Path $D, "$D\work", "$D\cache", "$D\tmp", $HomeCi -Force | Out-Null
-Copy-Item "$Src\gitea-runner.exe", "$Src\config.yaml" $D
-$R = "$D\gitea-runner.exe"; $C = "$D\config.yaml"
-& $R config -c $C set runner.file "$D\.runner"
-& $R config -c $C set host.workdir_parent "$D\work"
-& $R config -c $C set cache.dir "$D\cache"
-& $R config -c $C set runner.timeout 3h
-& $R config -c $C set runner.shutdown_timeout 3h
-& $R config -c $C set runner.envs.PADDOCK_CI_HOME $HomeCi
-& $R config -c $C set runner.envs.TMP "$D\tmp"
-& $R config -c $C set runner.envs.TEMP "$D\tmp"
-Push-Location $D
-& $R register -c $C --no-interactive --instance $Server --token-file $TokenFile --name $Name --labels $Labels
-Pop-Location
-Remove-Item $TokenFile
+  & $Bin config -c "$Src\config.yaml" set runner.envs.PADDOCK_CI_KEEP_SLOTS $Total
+  $N = 2
+  $D = "$Src-$N"; $R = Join-Path $D (Split-Path $Bin -Leaf); $C = "$D\config.yaml"
+  New-Item -ItemType Directory -Path $D, "$D\work", "$D\cache" -Force | Out-Null
+  if (-not (Test-Path $C)) { Copy-Item "$Src\config.yaml" $C }
+  Copy-Item $Bin $D -Force
+  & $R config -c $C set runner.file "$D\.runner"
+  & $R config -c $C set host.workdir_parent "$D\work"
+  & $R config -c $C set cache.dir "$D\cache"
+  & $R config -c $C set runner.timeout 3h
+  & $R config -c $C set runner.shutdown_timeout 3h
+  & $R config -c $C set runner.envs.PADDOCK_CI_KEEP_SLOTS $Total
+  if (-not (Test-Path "$D\.runner")) {
+    Push-Location $D
+    try { & $R register -c $C --no-interactive --instance $Server --token-file $TokenFile --name "$Existing-$N" --labels $Labels }
+    finally { Pop-Location }
+  }
+} finally {
+  Remove-Item $TokenFile -ErrorAction SilentlyContinue
+}
 ```
 
-Then adopt the folder in Pitcrew as on the Mac. In step 4 of the wizard, choose the same session as the existing runner
-(the logged-on user's desktop if its jobs need a desktop). Pitcrew's own per-runner `env` is not applied on Windows yet
-(roadmap); `runner.envs` is the runner's own setting and does apply.
+Then adopt the folder in Pitcrew as on the Mac. In step 4 of the wizard, choose the same session as the existing runner.
+`runner.envs` is the runner's own setting and applies on Windows; Pitcrew's per-runner `env` does not yet (roadmap).
 
-If the binary has another name (`act_runner.exe`), use that name.
+## Migration: from a separate CI home per runner to the shared one
+
+An earlier draft of this runbook gave each extra runner its own `runner.envs.PADDOCK_CI_HOME`. Under family ADR 0025,
+all runners of a host share one CI home, and the scaler rejects a per-runner one (ADR 0021 §1). If a runner has it:
+
+1. Drain the runner in Pitcrew and wait for *Paused*.
+2. Remove the `PADDOCK_CI_HOME:` line under `runner.envs` in its `config.yaml`, with Pitcrew's Advanced editor or a text
+   editor (`config set` cannot delete a key). Add `PADDOCK_CI_KEEP_SLOTS` as above.
+3. Resume the runner, and delete its old CI home (`~/.paddock-ci-N`) to free the disk.
 
 ## Verify that they take jobs
 
 1. **Gitea:** User settings ▸ Actions ▸ Runners lists the new runners as online (Idle) with the same labels as the
    existing one.
-2. **Pitcrew:** every card reads Idle. The Logs page of a new runner shows its `supervisor:` start line and no
-   registration error.
+2. **Pitcrew** (where it runs): every card reads Idle, and the runner's Logs show its `supervisor:` start line with no
+   registration error. **d-gtr9:** `docker compose ps` shows the new services up.
 3. **A real job:** at the next busy period (or dispatch `ci.yml` for an app as usual), two or more runners of one host
-   read **Busy** at once.
-   - The job log's first step prints `runner: <name>`.
-   - On the Mac and Windows, `stable-workspace` prints `building from <PADDOCK_CI_HOME of that runner>/src/…`. If it
-     names `~/.paddock-ci` for a new runner, `runner.envs` did not reach the job: drain that runner and check its
-     `config.yaml`.
+   are busy at once (Gitea's runner list, Pitcrew's cards). The job log's first step prints `runner: <name>`. On the Mac
+   and Windows, the job's isolation step names its slot (`s1`, `s2`, …), and two concurrent jobs never have the same one.
 4. **Queue:** the Insights page (ADR 0015) shows the queue wait falling over the next day.
-5. **Stop safety (once per host):** while a new runner runs a short job, press **Stop** in Pitcrew. The card reads
-   *Stopping* until the job ends, and the job finishes green.
+5. **Stop safety (once per host):** while a runner runs a short job, stop it (Pitcrew **Stop**, or
+   `docker compose stop <service>`). It waits for the job, and the job finishes green.
 
 ## Roll back
 
 For each added runner:
 
-1. In Pitcrew: **Drain**, wait for *Paused*, then remove the runner. It stops after its job, and Pitcrew forgets it but
-   keeps the folder. Without Pitcrew: `systemctl --user disable --now gitea-runner-N`, or stop it the way it was
-   started.
+1. Stop it after its job. In Pitcrew: **Drain**, wait for *Paused*, then remove the runner (the folder stays). On d-gtr9:
+   `docker compose stop <existing>-N`, then delete its service block and run `docker compose up -d --remove-orphans`.
 2. In Gitea: User settings ▸ Actions ▸ Runners ▸ the runner ▸ **Delete**. A runner still running exits when its
    registration is removed.
-3. Delete its folder (`gitea-runner-N`, which holds its `.runner`) and its CI home (`~/.paddock-ci-N`) to free the disk.
-4. If the token may have leaked (a file not deleted, a paste in the wrong place): **Reset** the registration token on
+3. Delete its folder (`gitea-runner-N`, or `data-N` on d-gtr9), which holds its `.runner`. Lower
+   `PADDOCK_CI_KEEP_SLOTS` on the remaining runners of the host; ADR 0025 sweeps the kept folders of slots above it.
+4. If the token may have leaked (a file left behind, a paste in the wrong place): **Reset** the registration token on
    the same Gitea page. Registered runners keep working; the old token stops registering new ones.
 
-Leave the existing runner's `runner.shutdown_timeout: 3h` in place; it only makes stops safer.
+Leave `runner.shutdown_timeout: 3h` (and `stop_grace_period: 3h` on d-gtr9) in place; they only make stops safer.
