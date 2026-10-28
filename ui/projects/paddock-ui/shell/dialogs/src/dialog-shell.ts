@@ -49,6 +49,7 @@ import { DIALOG_LOOKUP, type DialogContent, type DialogRef } from './types';
         [state]="state()"
         [failure]="failure()"
         [content]="content()"
+        [declaredWidth]="def?.width ?? 0"
         (answered)="answer($event.value)"
         (dismissed)="dismiss()"
         (refit)="fit($event)"
@@ -151,11 +152,21 @@ export class DialogShell implements AfterViewInit {
     await (fonts ?? Promise.resolve()).catch(() => undefined);
     if (this.closing || this.readied) return;
     this.cdr.detectChanges();
+    // Method d (the 1.1-0 spike): the frame is laid out at the contract's width and read synchronously, with no frame
+    // wait; a font the content started to load meanwhile is waited for and the frame read once more.
+    frame.pinWidth(this.def?.width ?? null);
     frame.render();
     frame.describe();
     frame.focusFirst();
+    let measure = frame.measure();
+    if (typeof document !== 'undefined' && document.fonts?.status === 'loading') {
+      await document.fonts.ready.catch(() => undefined);
+      measure = frame.measure();
+    }
     this.readied = true;
-    await this.io.ready(frame.measure()).catch(() => undefined);
+    await this.io.ready(measure).catch(() => undefined);
+    // Shown at its size now: the window's own width rules again.
+    frame.pinWidth(null);
     frame.watch();
   }
 

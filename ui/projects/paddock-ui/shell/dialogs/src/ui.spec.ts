@@ -638,10 +638,48 @@ describe('a dialog window', () => {
     expect(io.measures).toHaveLength(1);
     expect(io.readied!.minContent.width).toBeGreaterThanOrEqual(320);
     expect(io.readied!.minContent.height).toBeLessThanOrEqual(io.readied!.content.height);
+    // Method d: measured at the contract's width, whatever the (hidden) window's viewport was; released once shown.
+    expect(io.readied!.content.width).toBe(DECISION.width);
+    expect(io.readied!.viewportHeight).toBe(window.innerHeight);
+    expect(root.querySelector<HTMLElement>('pd-dialog-frame')!.style.width).toBe('');
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
     root.querySelector<HTMLElement>('[data-testid=dialog-action-ok]')!.click();
     await settle();
     expect(io.closedWith).toEqual([{ answered: true, value: 'yes' }]);
+  });
+
+  it('lays the frame out at the contract width while it measures, and reads again when a font loads meanwhile', async () => {
+    // The fonts are ready at first; the content then starts loading one, which the handshake waits for.
+    const late = deferred<unknown>();
+    let reads = 0;
+    const fake = {
+      get status() {
+        return reads > 1 ? 'loaded' : 'loading';
+      },
+      get ready() {
+        reads++;
+        return reads === 1 ? Promise.resolve() : late.promise;
+      },
+    };
+    const had = Object.getOwnPropertyDescriptor(document, 'fonts');
+    Object.defineProperty(document, 'fonts', { configurable: true, value: fake });
+    try {
+      const widths: string[] = [];
+      const { io, root, settle } = boot(DECISION);
+      const original = io.ready.bind(io);
+      io.ready = (m) => (widths.push(root.querySelector<HTMLElement>('pd-dialog-frame')!.style.width), original(m));
+      // The start is a pending task until the handshake: whenStable would wait for the font.
+      await tick(5);
+      expect(io.readied).toBeNull();
+      late.resolve(undefined);
+      await settle();
+      expect(io.readied!.content.width).toBe(400);
+      expect(widths).toEqual(['400px']);
+      expect(reads).toBe(2);
+    } finally {
+      if (had) Object.defineProperty(document, 'fonts', had);
+      else delete (document as { fonts?: unknown }).fonts;
+    }
   });
 
   it('takes the title the content sets at run time: heading, page title and the OS title bar; blank titles are ignored', async () => {
