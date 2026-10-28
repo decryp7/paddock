@@ -3,6 +3,12 @@
  * adapter (`jobs_snapshot`, `job_cancel`, events on `paddock://jobs`): the `JobsBackend` port (Tauri and in-memory), the
  * per-window `JobsStore` (newest snapshot per job, request status, "Still working" for a quiet job, notices when a job
  * ends), the Jobs list and the status item, and `JobFollow` for work a dialog starts. Nothing here times out a job.
+ *
+ * Apps wait for their jobs through the shell, never through `paddock://jobs`: `JobsStore` is the window's one listener
+ * and announces every job's end as a notice, so an app listener (or a success toast of its own for the same job) says
+ * it twice. Start the work with `JobFollow.run(start, owner)` (or `JobsStore.follow(id)`) and act on the terminal snapshot
+ * it resolves with; show no extra "done" toast for it, and none at all for a trivial action. Only paddock-ui may name
+ * `JOBS_EVENT`; conformance check C40 fails an app that does.
  */
 export { JOBS_EVENT, parseJobSnapshot, parseJobSnapshots, isActiveJob, isFinishedJob } from './src/wire';
 export { JobsBackend, TauriJobsBackend, MemoryJobsBackend, type JobsIpc, type Unlisten } from './src/jobs-backend';

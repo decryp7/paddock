@@ -4,6 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shell adoption checks (ER-21: Spotter and Pitcrew moves hit the same review findings)
+- `@decryp7/paddock-e2e`: `captureScreen` (waits for no skeleton or busy marker, fonts, decoded images, no running animation in
+  main, a stable layout; scrolls only the main scroller; refuses a cut-off bottom edge, a scrolled frame and an opaque cover;
+  `fullPage: 'main'` grows the window by the hidden height), `waitForCapturable`, `expectFullyVisible` (in the window, not
+  clipped by an ancestor's overflow, not covered) and `expectPageFillsHost` (the page fills the host, no collapsed
+  `cdk-virtual-scroll-viewport`). Tested against fixture pages in `selftest/capture.spec.ts`.
+- `pd-page-host` is a flex column that fills `<main>` (`height: 100%`, `min-height: 0`), and the loaded page's box is a shrinkable
+  flex item, so `height: 100%` inside a routed page resolves instead of collapsing to 0.
+- Conformance C40: an app TypeScript file must not name `paddock://jobs` / `JOBS_EVENT`; apps wait for jobs through
+  `JobFollow` / `JobsStore.follow` (documented in `shell/jobs`), which avoids doubled announcements.
+- New [docs/plans/shell-adoption-checklist.md](docs/plans/shell-adoption-checklist.md), linked from AGENTS.md.
+
 ### Shell toasts keep a page-footer safe area
 - New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
   longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.

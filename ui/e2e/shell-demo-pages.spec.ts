@@ -1,6 +1,7 @@
 import {
   axeViolations,
   expect,
+  expectPageFillsHost,
   expectNoHorizontalScroll,
   expectWithinWidth,
   installTauriFake,
@@ -19,6 +20,16 @@ import {
 const asMacApp = (page: Page) => installTauriFake(page, { platform: 'mac', otherwise: 'null' });
 
 test.describe('pages frame (plan S14)', () => {
+  test('every routed page fills the host: height 100% inside a page resolves (shell page host guard)', async ({ app, page }) => {
+    await app.frame.open();
+    for (const name of ['Overview', 'Runners', 'Dialogs', 'Keyboard', 'About']) {
+      await app.sidebar.link(name).click();
+      await expect(app.sidebar.link(name)).toHaveAttribute('aria-current', 'page');
+      await expect(page.locator('pd-part-outlet.pd-page[data-part-status=loaded]')).toBeVisible();
+      await expectPageFillsHost(page, { page: 'pd-part-outlet.pd-page' });
+    }
+  });
+
   test('the sidebar navigates between routed pages, with the current page marked, the URL and the window title', async ({ app, page, pageErrors }) => {
     await app.frame.open();
     await expect(page).toHaveURL(/#\/home$/);

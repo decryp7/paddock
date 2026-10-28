@@ -78,3 +78,12 @@ for (const colorScheme of THEMES) {
 
 Build: `npm run build:e2e` in `ui/` (writes `ui/dist/paddock-e2e`). Its unit tests run with `npm run test:scripts`; the screenshot runner is
 also run for real on `data:` pages: `npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=screenshots`.
+
+## Screenshots and layout checks (`capture.ts`)
+
+`captureScreen(page, path, { fullPage?: 'viewport' | 'main', scrollTop?, allow?, busy? })` is the only way to take a review or
+documentation image of an app page: it waits until nothing is loading (`pd-skeleton`, `.skeleton`, `[aria-busy=true]`), fonts are
+ready, every `img` is decoded, no animation runs in main and the layout holds for two looks; it scrolls only the main scroller,
+fails when the frame scrolled, an element is cut at the bottom edge, or an opaque cover sits over the app. `expectFullyVisible(locator)`
+(for primary actions) and `expectPageFillsHost(page)` (after navigating to a page with a list or virtual viewport) are the assertions
+behind it. See [docs/plans/shell-adoption-checklist.md](../../../docs/plans/shell-adoption-checklist.md).

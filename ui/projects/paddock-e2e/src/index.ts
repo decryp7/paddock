@@ -42,6 +42,18 @@ export {
 } from './keyboard.ts';
 export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize } from './layout.ts';
 export { waitForStableFrame, captureStable, type StableFrameOptions } from './screenshot.ts';
+export {
+  captureScreen,
+  waitForCapturable,
+  expectFullyVisible,
+  expectPageFillsHost,
+  problemsOf,
+  MAIN_SELECTOR,
+  BUSY_SELECTOR,
+  type CaptureOptions,
+  type FillsHostOptions,
+  type PageProbe,
+} from './capture.ts';
 export { installTauriFake, TauriFake, START_REPLIES, SHELL_PLUGIN_PREFIX, type IpcCall, type TauriFakeOptions } from './ipc.ts';
 export {
   ShellApp,
