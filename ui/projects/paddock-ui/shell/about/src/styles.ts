@@ -4,21 +4,21 @@ export const ABOUT_STYLES = `
   h2 { margin: 0; font-size: var(--pd-text-title); font-weight: var(--pd-weight-semibold); }
   h3 { margin: 0 0 var(--pd-space-2); font-size: var(--pd-text-subtitle); font-weight: var(--pd-weight-semibold); }
   p { margin: 0; }
-  .muted { color: var(--pd-text-muted); }
-  .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--pd-space-1) var(--pd-space-4); margin: 0; }
-  .facts dt { color: var(--pd-text-muted); }
-  .facts dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); }
-  .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--pd-space-2); }
-  .btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
-  .btn.primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
-  .btn[aria-pressed='true'] { border-color: var(--pd-accent-fill); }
-  .btn:disabled { opacity: 0.6; cursor: default; }
-  .text { margin: 0; padding: var(--pd-space-3); max-height: 320px; overflow: auto; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .problem { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); }
-  .problem .message { font-weight: var(--pd-weight-medium); }
-  .problem .detail { color: var(--pd-text-muted); overflow-wrap: anywhere; }
-  label.check { display: inline-flex; align-items: center; gap: var(--pd-space-2); }
+  .pd-muted { color: var(--pd-text-muted); }
+  .pd-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--pd-space-1) var(--pd-space-4); margin: 0; }
+  .pd-facts dt { color: var(--pd-text-muted); }
+  .pd-facts dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pd-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); }
+  .pd-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--pd-space-2); }
+  .pd-btn { min-height: var(--pd-button-height); padding: 0 var(--pd-space-3); border-radius: var(--pd-radius-control); border: 1px solid var(--pd-border-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; font-weight: var(--pd-weight-medium); cursor: pointer; }
+  .pd-btn.pd-primary { background: var(--pd-accent-fill); border-color: var(--pd-accent-fill); color: var(--pd-on-accent); }
+  .pd-btn[aria-pressed='true'] { border-color: var(--pd-accent-fill); }
+  .pd-btn:disabled { opacity: 0.6; cursor: default; }
+  .pd-text { margin: 0; padding: var(--pd-space-3); max-height: 320px; overflow: auto; border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); font-family: var(--pd-font-mono); font-size: var(--pd-text-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .pd-problem { display: flex; flex-direction: column; gap: var(--pd-space-1); padding: var(--pd-space-3); border-radius: var(--pd-radius-control); background: var(--pd-danger-tint); }
+  .pd-problem .pd-message { font-weight: var(--pd-weight-medium); }
+  .pd-problem .pd-detail { color: var(--pd-text-muted); overflow-wrap: anywhere; }
+  label.pd-check { display: inline-flex; align-items: center; gap: var(--pd-space-2); }
   select { min-height: var(--pd-button-height); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }
   progress { width: 100%; }
   ul { margin: 0; padding-left: var(--pd-space-6); }
