@@ -205,7 +205,7 @@ const TICK_MS = 30_000;
     .path { font-size: 12px; }
     .size { text-align: right; font-variant-numeric: tabular-nums; }
     .viewport { display: block; }
-    .bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
+    .bar { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--r-lg) var(--r-lg); }
     .summary { font-variant-numeric: tabular-nums; }
     .spacer { flex: 1; }
     .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

@@ -142,6 +142,7 @@
 .nav {
   position: sticky;
   bottom: 0;
+  z-index: var(--pd-z-table-header);
   display: flex;
   gap: var(--pd-space-2);
   padding: var(--pd-space-3) 0;

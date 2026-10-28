@@ -78,6 +78,8 @@
   --pd-z-table-row-action: 1;
   --pd-z-table-sticky-column: 2;
   --pd-z-table-header: 3;
+  // The header cell of a sticky column sticks both ways: above the header row and the column.
+  --pd-z-table-corner: 4;
 
   // Layout.
   --pd-sidebar-width: 216px;
