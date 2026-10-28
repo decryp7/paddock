@@ -42,6 +42,10 @@ class ChoiceContent {
   readonly dialogActions = signal<readonly DialogAction[]>([{ kind: 'answer', id: 'a', label: 'A', role: 'primary', answer: () => 'a' }]);
 }
 
+/** Today's shape of a content that predates the frame: its own actions row with Cancel. */
+@Component({ selector: 'pd-test-footer', changeDetection: ChangeDetectionStrategy.OnPush, template: `<p>Remove?</p><div class="pd-rm__actions"><button type="button">Cancel</button></div>` })
+class OwnFooterContent {}
+
 @Component({ selector: 'pd-test-empty', changeDetection: ChangeDetectionStrategy.OnPush, template: `` })
 class EmptyContent {}
 
@@ -64,7 +68,8 @@ const SNEAKY = dialog('t.sneaky', 'viewer', () => Promise.resolve(UndeclaredComm
 const CHOICE = dialog('t.choice', 'decision', () => Promise.resolve(ChoiceContent), { requiredChoice: true });
 const EMPTY = dialog('t.empty', 'form', () => Promise.resolve(EmptyContent));
 const LOGS = dialog('t.logs', 'viewer', () => Promise.resolve(LogsContent));
-const ALL = [OK, OK_TOOL, MISSING, SNEAKY, CHOICE, EMPTY, LOGS];
+const FOOTER = dialog('t.footer', 'decision', () => Promise.resolve(OwnFooterContent));
+const ALL = [OK, OK_TOOL, MISSING, SNEAKY, CHOICE, EMPTY, LOGS, FOOTER];
 
 describe('the boot-every-dialog harness', () => {
   it('passes a dialog that boots, sends only declared commands, has a Cancel and closes on Escape', async () => {
@@ -91,6 +96,11 @@ describe('the boot-every-dialog harness', () => {
 
   it('keeps a required choice open on Escape and needs no Cancel', async () => {
     expect((await bootDialog(CHOICE, { dialogs: ALL })).problems).toEqual([]);
+  });
+
+  it('fails a content that draws its own footer (ADR 0026 §2)', async () => {
+    const report = await bootDialog(FOOTER, { dialogs: ALL });
+    expect(report.problems).toEqual(['draws its own footer: .pd-rm__actions', 'draws its own footer: a "Cancel" button']);
   });
 
   it('fails an empty body', async () => {

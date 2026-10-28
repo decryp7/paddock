@@ -124,6 +124,10 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
 
     // The ready handshake (ADR 0026 §4.2): sent once, whatever the kind; Rust sizes the window by the kind.
     if (io.readied === null) problems.push('never sent the ready handshake');
+    else if (io.readied.minContent.height > io.readied.content.height || io.readied.minContent.width <= 0) problems.push(`sent a ready measure whose minimum exceeds its content: ${safeJson(io.readied)}`);
+
+    // The frame draws the footer from the declared actions (ADR 0026 §2): a content that draws its own is reported.
+    if (box) for (const f of ownFooter(box)) problems.push(`draws its own footer: ${f}`);
 
     // A visible way out, and Escape per kind: a modal's Cancel, a modeless window's Close; a required choice keeps both.
     const wayOut = root.querySelector('[data-testid=dialog-footer] [data-role=dismiss]');
@@ -144,6 +148,22 @@ export async function bootDialog(def: DialogDef, options: DialogHarnessOptions):
     console.error = consoleError;
   }
   return { id: def.id, kind: def.kind, problems, sent: [...ipc.sent], fitted: [...io.fitted] };
+}
+
+const FOOT_CLASS = /(^|[-_])(foot|footer|actions)$/;
+const WAY_OUT = /^(close|cancel|ok)$/i;
+
+/** What a content draws that belongs to the frame's footer: a footer, a foot or actions row, a Close/Cancel/OK button. */
+export function ownFooter(content: Element): string[] {
+  const out: string[] = [];
+  for (const el of content.querySelectorAll('*')) {
+    if (el.closest('pd-dialog-frame') !== content.closest('pd-dialog-frame')) continue;
+    if (el.tagName === 'FOOTER') out.push('<footer>');
+    const token = [...el.classList].find((c) => FOOT_CLASS.test(c));
+    if (token) out.push(`.${token}`);
+    if (el.tagName === 'BUTTON' && WAY_OUT.test((el.textContent ?? '').replace(/\s+/g, ' ').trim())) out.push(`a "${(el.textContent ?? '').trim()}" button`);
+  }
+  return out;
 }
 
 /** Boots `def` and throws one error listing every problem (for an `it` per dialog). */

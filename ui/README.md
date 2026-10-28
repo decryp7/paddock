@@ -442,8 +442,12 @@ export const RENAME_DIALOG = defineDialog({
   modality, width, preferred height, instancing, required choice, commands) is Rust's `dialogs!` table, generated into the
   owner's `generated/dialog-contracts.ts` (ADR 0026 §3); TypeScript adds only what it alone knows. Specs make made-up
   contracts with `fakeDialogContract` (`shell/testing`).
-- Content: inject `DIALOG_REF` and call `close(result)`; inputs set the component's `input()`s; `dialogCanClose()` may
-  keep it open; mark a Close/Cancel with `data-dialog-close` (else the shell adds one) and the default with `data-default`.
+- Content: declares its footer as `dialogActions` (answer, run and dismiss actions with roles; the frame orders them per OS,
+  runs Enter, gives the first focus, shows busy and rejected states; ADR 0026 §2), and optionally `dialogStatus`,
+  `dialogMinBodyHeight`, `dialogHeader`. It draws no footer (`paddock/dialog-frame-footer`). Inputs set the component's
+  `input()`s; `dialogCanClose()` may keep it open; a form marks its first field `data-autofocus`; a body that holds the
+  choice answers through `DIALOG_REF.answer`. The opener's `closed` resolves a `DialogOutcome`. Shared confirmation:
+  `pd.confirm` (`@decryp7/paddock-ui/shell/confirm`). Specs: `renderFramed`, `createFramed` (`shell/testing`).
 - Dialog window: in `main.ts`, `parseDialogRoute(location.hash)`; for a dialog route `mountDialogWindowHost()` and
   `bootstrapApplication(DialogShell, dialogWindowConfig({ dialogs, providers: dialogBase(), io, route }))`.
 - Contracts: Rust's (`paddock_dialogs::dialogs!`), registered with `paddock_shell::Builder::dialogs(&[&dialogs::DIALOGS])`; a

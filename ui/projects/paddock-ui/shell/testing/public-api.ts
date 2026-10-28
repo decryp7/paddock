@@ -14,6 +14,7 @@ export {
   bootEveryDialog,
   dialogsOf,
   dialogTableProblems,
+  ownFooter,
   type DialogHarnessOptions,
   type DialogBootReport,
   type CommandTable,

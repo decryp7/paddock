@@ -1,4 +1,4 @@
-import { axeViolations, dialogContracts, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, dialogContracts, dialogFitProblems, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.
@@ -567,6 +567,23 @@ test.describe('dialogs (plan S6)', () => {
       await expect.poll(fitted).toBe(before);
       await check();
     });
+  });
+
+  test('every dialog fits at 1, 1.25 and 1.5 on 1920x1080 and 1366x768: its footer in view, on top, no gap (ADR 0026 §6)', async ({ browser, baseURL }) => {
+    test.setTimeout(600_000);
+    const fixtures: Record<string, unknown[]> = {
+      'pd.channels.secret': [{ channelId: 'slack', label: 'Team Slack', kind: 'token' }],
+      'pd.channels.remove': [{ channelId: 'slack', name: 'Team Slack' }],
+      'pd.mcp.revoke': [{ keyId: 1, client: 'Pitwall' }],
+      'pd.storage.confirm': [{ what: 'Logs', bytes: 5000000, data: true }],
+      'pd.confirm': [
+        { heading: 'Forget?', message: 'It goes.', confirm: { label: 'Forget greetings', destructive: true } },
+        { heading: 'Forget the greetings?', message: 'The greeting count and the log go back to empty. '.repeat(12), details: Array.from({ length: 12 }, (_, i) => `Greeting ${i + 1}`), confirm: { label: 'Forget greetings', destructive: true } },
+      ],
+    };
+    const problems: string[] = [];
+    for (const [id, contract] of Object.entries(CONTRACTS)) problems.push(...(await dialogFitProblems(browser, id, contract, { baseURL: baseURL!, inputs: fixtures[id] ?? [{}] })));
+    expect(problems).toEqual([]);
   });
 
   test('the tool window loads its own providers and asks the engine', async ({ app, page }) => {

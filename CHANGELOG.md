@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Shared dialog API, part 4: test kit and checks (ADR 0026 §6; package 1.2b, first part)
+- ESLint `paddock/dialog-frame-footer` (in the preset for the templates of `*dialog*` components): no `footer`, foot or
+  actions row, and no Close, Cancel or OK button in a dialog content.
+- The boot harness reports a content that draws its own footer (`ownFooter`), a missing ready handshake and a ready
+  measure whose minimum exceeds its content.
+- `@decryp7/paddock-e2e`: `dialogFitProblems` (ADR 0016 check 1: scales 1, 1.25 and 1.5 on 1920x1080 and 1366x768; footer
+  buttons inside the window, on top, at most 24 px above its bottom); the shell demo runs it over every dialog.
+
 ### Shared dialog API, part 2: DialogFrame, declared actions and pd.confirm (ADR 0026 §2, §4.8, §5; packages 1.2a and 1.2c)
 - **Breaking.** Every dialog renders in `DialogFrame` (`@decryp7/paddock-ui/shell/dialogs`): an optional header, a body that
   alone scrolls and a footer the frame draws from the content's declared actions (`DialogContent.dialogActions`, a signal of
