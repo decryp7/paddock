@@ -101,7 +101,7 @@ test('table: 5,000 rows are drawn by the virtual viewport, a few at a time', asy
   const drawn = await big.locator('[role=row][data-index]').count();
   expect(drawn).toBeGreaterThan(0);
   expect(drawn).toBeLessThan(100);
-  await expect(big.locator('[role=grid]')).toHaveAttribute('aria-rowcount', /^5\d{3}$/);
+  await expect(big.locator('[role=treegrid]')).toHaveAttribute('aria-rowcount', /^5\d{3}$/);
   // Grouped: the groups are rows of the table.
   await expect(big.locator('.pd-group').first()).toBeVisible();
 });
@@ -320,9 +320,34 @@ test('table: End and Home in the 5,000-row virtual table move the focus to the l
   const grid = page.locator('[data-testid="table-virtual"]');
   await grid.locator('[role=row][data-index]').first().focus();
   await page.keyboard.press('End');
-  const last = await grid.locator('[role=grid]').getAttribute('aria-rowcount');
+  const last = await grid.locator('[role=treegrid]').getAttribute('aria-rowcount');
   await expect(page.locator(':focus')).toHaveAttribute('aria-rowindex', String(last));
   await page.keyboard.press('Home');
   await expect(page.locator(':focus')).toHaveAttribute('data-index', '0');
 });
 
+
+test('table: the row is the one tab stop: Right reaches its buttons, a focused button has exactly one ring, Tab leaves the grid', async ({ page }) => {
+  await open(page);
+  const grid = small(page).locator('[role=grid]');
+  const row = grid.locator('[role=row][data-index]').first();
+  await row.focus();
+  await page.keyboard.press('ArrowRight');
+  const button = row.locator('.pd-icon-btn').first();
+  await expect(button).toBeFocused();
+  const rings = await button.evaluate((b) => {
+    // The button's own outline, and Material's focus indicator (a ::before on the button or on its indicator span).
+    const own = getComputedStyle(b);
+    const outline = own.outlineStyle !== 'none' && parseFloat(own.outlineWidth) > 0 ? 1 : 0;
+    const indicators = [b, ...b.querySelectorAll('.mat-focus-indicator')].filter((e) => {
+      const before = getComputedStyle(e, '::before');
+      return before.content !== 'none' && before.content !== 'normal' && before.display !== 'none' && parseFloat(before.borderTopWidth) > 0;
+    }).length;
+    return outline + indicators;
+  });
+  expect(rings).toBe(1);
+  await page.keyboard.press('ArrowLeft');
+  await expect(row).toBeFocused();
+  await page.keyboard.press('Tab');
+  expect(await grid.evaluate((g) => g.contains(document.activeElement))).toBe(false);
+});

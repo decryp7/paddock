@@ -1,7 +1,6 @@
 import { CdkFixedSizeVirtualScroll, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { NgTemplateOutlet } from '@angular/common';
 import {
-  afterEveryRender,
   afterNextRender,
   ChangeDetectionStrategy,
   Component,
@@ -9,6 +8,7 @@ import {
   contentChild,
   contentChildren,
   DestroyRef,
+  effect,
   Directive,
   ElementRef,
   inject,
@@ -18,6 +18,7 @@ import {
   output,
   signal,
   TemplateRef,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { MatIconButton } from '@angular/material/button';
@@ -169,19 +170,20 @@ const VIRTUAL_BUFFER_ROWS = 8;
         </button>
       }
     </div>
-    <!-- One grid: a header-only table above the scrolling body, so the header never moves with the rows (ADR 0027). There is no
+    <!-- One grid (a tree grid when grouped: group rows expand, their rows are a level below): a header-only table above the scrolling body, so the header never moves with the rows (ADR 0027). There is no
          horizontal scroll (columns drop out instead), so the two tables share their tracks (--pd-cols) and need no syncing
          sideways; the header keeps the width of the body's scrollbar (--pd-gutter). -->
     <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the grid only receives keydown bubbling from its rows and sort headers, which are the focus stops (roving tabindex) -->
     <div
       class="pd-grid"
-      role="grid"
+      [attr.role]="groupBy() ? 'treegrid' : 'grid'"
       [style.--pd-cols]="gridTemplate()"
       [style.--pd-gutter.px]="gutter()"
       [attr.aria-label]="label()"
       [attr.aria-busy]="state() === 'loading'"
       [attr.aria-rowcount]="items().length + 1"
       (keydown)="onKeydown($event)"
+      (focusout)="onFocusOut($event)"
     >
       <mat-table role="rowgroup" class="pd-head-table" [dataSource]="noLines" matSort [matSortActive]="sort()?.key ?? ''" [matSortDirection]="sort()?.direction ?? ''" (matSortChange)="onSort($event)">
         @for (c of columns2(); track c.key) {
@@ -205,8 +207,8 @@ const VIRTUAL_BUFFER_ROWS = 8;
         <mat-header-row *matHeaderRowDef="displayed()" class="pd-header" aria-rowindex="1" />
       </mat-table>
       <cdk-virtual-scroll-viewport class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
-        <!-- A row group only while it has rows: an empty one would be a group without rows (the state is said below). -->
-        <mat-table class="pd-body-table" [attr.role]="lines().length ? 'rowgroup' : null" [dataSource]="lines()" [trackBy]="trackLine" (contentChanged)="focusPending()">
+        <!-- A row group only while it has rows anyone can read: not when empty (the state is said below) or loading (placeholders are hidden). -->
+        <mat-table class="pd-body-table" [attr.role]="state() === 'ready' && lines().length ? 'rowgroup' : null" [dataSource]="lines()" [trackBy]="trackLine" (contentChanged)="onRowsDrawn()">
           @for (c of columns2(); track c.key; let k = $index) {
             <ng-container [matColumnDef]="c.key">
               <mat-cell *matCellDef="let line" class="pd-cell" [attr.role]="cellRole" [class.pd-end]="c.align === 'end'" [class.pd-first]="k === 0" [class.pd-group-cell]="line.kind === 'group' && k === 0" [class.pd-group-summary]="line.kind === 'group' && k > 0">
@@ -232,7 +234,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
                     } @else if (c.truncate === 'middle') {
                       <pd-middle-text [value]="text(c, line.row)" />
                     } @else {
-                      <span class="pd-text" [matTooltip]="text(c, line.row)" matTooltipShowDelay="500" #tip="matTooltip" (mouseenter)="tip.disabled = !isTruncated($event)">{{ text(c, line.row) }}</span>
+                      <span class="pd-text" [matTooltip]="text(c, line.row)" [matTooltipDisabled]="true" matTooltipShowDelay="500" #tip="matTooltip" (mouseenter)="tip.disabled = !isTruncated($event)" (mouseleave)="tip.disabled = true">{{ text(c, line.row) }}</span>
                     }
                   }
                 }
@@ -247,12 +249,12 @@ const VIRTUAL_BUFFER_ROWS = 8;
                   @if (actions.length) {
                     @if (!narrow()) {
                       @for (a of inline(actions); track a.id) {
-                        <button type="button" matIconButton class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [matTooltip]="a.label" [disabled]="a.disabled" (click)="act(a, line.row, $event)">
+                        <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-inline" [attr.aria-label]="a.label" [matTooltip]="a.label" [disabled]="a.disabled" (click)="act(a, line.row, $event)">
                           <pd-glyph [name]="a.icon ?? ''" [size]="14" />
                         </button>
                       }
                     }
-                    <button type="button" matIconButton class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [matTooltip]="t.more" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ row: line.row }">
+                    <button type="button" matIconButton tabindex="-1" class="pd-icon-btn pd-more" [attr.aria-label]="t.more" [matTooltip]="t.more" [matMenuTriggerFor]="rowMenu" [matMenuTriggerData]="{ row: line.row }">
                       <pd-glyph name="more" [size]="16" />
                     </button>
                   }
@@ -268,6 +270,10 @@ const VIRTUAL_BUFFER_ROWS = 8;
             [class.pd-skeleton]="line.kind === 'skeleton'"
             [class.pd-folded]="folded() && line.kind === 'row'"
             [class.pd-selected]="isSelected(line)"
+            [class.pd-menu-open]="line.kind === 'row' && menuKey() === rowKey()(line.row)"
+            [attr.aria-hidden]="line.kind === 'skeleton' ? 'true' : null"
+            [attr.aria-expanded]="line.kind === 'group' ? !line.collapsed : null"
+            [attr.aria-level]="!groupBy() || line.kind === 'skeleton' ? null : line.kind === 'group' ? 1 : 2"
             [attr.aria-rowindex]="line.kind === 'skeleton' ? null : indexOf(line) + 2"
             [attr.data-index]="line.kind === 'skeleton' ? null : indexOf(line)"
             [attr.data-key]="line.kind === 'row' ? rowKey()(line.row) : null"
@@ -276,6 +282,8 @@ const VIRTUAL_BUFFER_ROWS = 8;
             [matContextMenuTriggerFor]="rowMenu"
             [matContextMenuTriggerData]="{ row: line.row }"
             [matContextMenuTriggerDisabled]="line.kind !== 'row' || !actionsOf(line.row).length"
+            (menuOpened)="menuKey.set(line.kind === 'row' ? rowKey()(line.row) : null)"
+            (menuClosed)="menuKey.set(null)"
             (click)="onLineClick(line, $event)"
           />
         </mat-table>
@@ -327,16 +335,18 @@ const VIRTUAL_BUFFER_ROWS = 8;
     </mat-menu>
   `,
   styles: `
-    /* Material's parts take the family's theme (css/material.css: colours, the sort arrow, type); the table sets only what is its
-       own: its row and header heights, 24 px row action buttons whose state layer is the family's hover fill in a 6 px shape
-       (not Material's solid disc), and no 48 px touch target reaching out of a 24 to 36 px row (the row is the target). */
+    /* Material's parts take the family's theme (css/material.css: colours, the sort arrow, type, the focus indicator); the table
+       sets only what is its own: its row and header heights, row action buttons of the smallest hit size with a state layer in the
+       control radius, and no 48 px touch target reaching out of the row
+       (the row is the target). The keyboard ring of a button is Material's focus indicator alone. */
     :host {
       display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; container-type: inline-size;
       --mat-table-background-color: transparent;
       --mat-table-header-container-height: var(--pd-table-head);
       --mat-table-row-item-container-height: var(--pd-table-row);
-      --mat-icon-button-state-layer-size: 24px;
+      --mat-icon-button-state-layer-size: var(--pd-hit-min);
       --mat-icon-button-container-shape: var(--pd-radius-control);
+      /* Until fix/material-state-layer merges (the bridge then sets the state-layer opacities): the hover fill and opacities. Drop these five then. */
       --mat-icon-button-state-layer-color: var(--pd-hover);
       --mat-icon-button-ripple-color: var(--pd-hover);
       --mat-icon-button-hover-state-layer-opacity: 1;
@@ -344,7 +354,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
       --mat-icon-button-pressed-state-layer-opacity: 1;
       --mat-icon-button-touch-target-display: none;
     }
-    .pd-toolbar { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 44px; min-width: 0; }
+    .pd-toolbar { display: flex; align-items: center; gap: var(--pd-space-2); min-height: var(--pd-toolbar-height); min-width: 0; }
     .pd-filter { display: flex; align-items: center; gap: var(--pd-space-2); flex: 1 1 8rem; max-width: 24rem; min-width: 8rem; height: var(--pd-control-height, 28px); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-input); background: var(--pd-surface-1); color: var(--pd-text-muted); }
     .pd-filter:focus-within { border-color: var(--pd-focus-ring); outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: 1px; }
     .pd-filter-input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-body); }
@@ -376,9 +386,9 @@ const VIRTUAL_BUFFER_ROWS = 8;
     .pd-grid .pd-sorted .mat-sort-header-arrow { color: var(--pd-text); }
     .pd-th-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-grid .pd-row { height: var(--pd-table-row); min-height: var(--pd-table-row); border-bottom: 1px solid var(--pd-hairline); color: var(--pd-text); font-size: var(--pd-text-body); font-weight: var(--pd-weight-regular); cursor: default; }
-    .pd-grid .pd-row.pd-folded { align-items: start; padding-block: 6px; }
+    .pd-grid .pd-row.pd-folded { align-items: start; padding-block: calc(var(--pd-space-1) + var(--pd-space-0)); }
     /* Hovered, and while its menu is open (the "..." button's or the right-click one), so the menu's row stays marked. */
-    .pd-grid .pd-row:hover, .pd-grid .pd-row[aria-expanded='true'], .pd-grid .pd-row:has(.pd-more[aria-expanded='true']) { background: var(--pd-hover); }
+    .pd-grid .pd-row:hover, .pd-grid .pd-row.pd-menu-open, .pd-grid .pd-row:has(.pd-more[aria-expanded='true']) { background: var(--pd-hover); }
     .pd-grid .pd-row:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); outline-offset: -2px; }
     /* Selected: the accent tint with a 2 px accent bar on the left (the guide). */
     .pd-grid .pd-row.pd-selected { background: var(--pd-accent-tint, var(--pd-hover)); box-shadow: inset 2px 0 0 var(--pd-accent); }
@@ -395,10 +405,9 @@ const VIRTUAL_BUFFER_ROWS = 8;
     .pd-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pd-group-toggle { display: inline-flex; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
     .pd-group-count { color: var(--pd-text-subtle); font-variant-numeric: tabular-nums; }
-    .pd-grid .pd-actions { justify-content: flex-end; gap: 4px; overflow: visible; }
-    .pd-grid .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); }
+    .pd-grid .pd-actions { justify-content: flex-end; gap: var(--pd-space-1); overflow: visible; }
+    .pd-grid .pd-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: var(--pd-hit-min); height: var(--pd-hit-min); padding: 0; border-radius: var(--pd-radius-control); color: var(--pd-text-muted); }
     .pd-grid .pd-icon-btn:hover:not(:disabled), .pd-grid .pd-icon-btn:focus-visible { color: var(--pd-text); }
-    .pd-grid .pd-icon-btn:focus-visible { outline: var(--pd-focus-width, 2px) solid var(--pd-focus-ring); }
     .pd-grid .pd-inline { opacity: 0; }
     /* Always visible in its own resting colour (3:1, SC 1.4.11), so touch and keyboard users can find it (UI patterns, rule 2). */
     .pd-grid .pd-more { color: var(--pd-row-action-rest, var(--pd-text-muted)); }
@@ -412,7 +421,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     .pd-empty p { margin: 0; }
     .pd-empty.pd-error { flex-direction: row; justify-content: center; }
     .pd-empty.pd-error pd-status-glyph { color: var(--pd-danger-text, var(--pd-danger)); }
-    .pd-retry { height: 24px; padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
+    .pd-retry { height: var(--pd-hit-min); padding: 0 var(--pd-space-2); border: 1px solid var(--pd-border-control, var(--pd-hairline)); border-radius: var(--pd-radius-control); background: transparent; color: var(--pd-text); font: inherit; font-size: var(--pd-text-label); cursor: pointer; }
     .pd-retry:hover { background: var(--pd-hover); }
     .pd-grid .pd-skeleton { pointer-events: none; }
     .pd-skel-end { margin-inline-start: auto; }
@@ -504,6 +513,8 @@ export class PdTable<T> {
   protected readonly gutter = signal(0);
   /** The row to focus once the table has drawn it (a virtual table draws a row a frame after it scrolls there). */
   private pendingFocus: number | null = null;
+  /** The key of the row whose right-click menu is open (the row stays marked meanwhile). */
+  protected readonly menuKey = signal<string | null>(null);
   private readonly collapsed = signal<ReadonlySet<string>>(new Set());
   protected readonly active = signal(0);
 
@@ -572,19 +583,27 @@ export class PdTable<T> {
     observer?.observe(this.host);
     const mutation = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => this.density.set(readDensity()));
     mutation?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-density'] });
-    afterEveryRender(() => {
+    // The header keeps the width of the body's scrollbar: measured when the body resizes (a scrollbar appearing changes its
+    // content box), not on every render of the app.
+    const bodyObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.measureGutter());
+    afterNextRender(() => {
       const body = this.host.querySelector<HTMLElement>('.pd-body');
-      const bar = body ? Math.max(0, body.offsetWidth - body.clientWidth) : 0;
-      if (bar !== this.gutter()) this.gutter.set(bar);
-      // One tab stop for the grid: the active row. The sort headers are reached with the arrow keys from the rows (Up from the
-      // first row); they keep the stop only while there are no rows to stop on.
-      const hasRows = !!this.host.querySelector('.pd-body [role="row"][data-index]');
-      this.host.querySelectorAll<HTMLElement>('.pd-head-table .mat-sort-header-container').forEach((h, i) => h.setAttribute('tabindex', !hasRows && i === 0 ? '0' : '-1'));
-      this.focusPending();
+      if (body) bodyObserver?.observe(body);
+      this.updateTabStops();
+    });
+    // The lines changed: a row the keyboard was waiting for is not that row any more, and the sort headers' stops follow the rows.
+    effect(() => {
+      this.lines();
+      this.columns2();
+      untracked(() => {
+        this.pendingFocus = null;
+        afterNextRender(() => this.updateTabStops(), { injector: this.injector });
+      });
     });
     inject(DestroyRef).onDestroy(() => {
       observer?.disconnect();
       mutation?.disconnect();
+      bodyObserver?.disconnect();
     });
   }
 
@@ -658,10 +677,44 @@ export class PdTable<T> {
     this.rowActivate.emit(row);
   }
 
+  private measureGutter(): void {
+    const body = this.host.querySelector<HTMLElement>('.pd-body');
+    const bar = body ? Math.max(0, body.offsetWidth - body.clientWidth) : 0;
+    if (bar !== this.gutter()) this.gutter.set(bar);
+  }
+
+  /**
+   * One tab stop for the grid: the active row. The sort headers are reached with the arrow keys from the rows (Up from the
+   * first row) and keep the stop only while there are no rows to stop on; Material gives each sort header its own stop.
+   */
+  private updateTabStops(): void {
+    const hasRows = !!this.host.querySelector('.pd-body [role="row"][data-index]');
+    this.sortHeaders().forEach((h, i) => h.setAttribute('tabindex', !hasRows && i === 0 ? '0' : '-1'));
+  }
+
+  /** The body table drew its rows (their bindings are set in the render that follows): the row the keyboard asked for may be there now, and the stops follow. */
+  protected onRowsDrawn(): void {
+    afterNextRender(
+      () => {
+        this.updateTabStops();
+        this.focusPending();
+      },
+      { injector: this.injector },
+    );
+  }
+
+  /** The focus left the grid for another element: forget a row still waiting to be focused, so it never takes the focus back. */
+  protected onFocusOut(e: FocusEvent): void {
+    const to = e.relatedTarget;
+    if (to instanceof Node && !this.host.querySelector('.pd-grid')?.contains(to)) this.pendingFocus = null;
+  }
+
   protected onKeydown(e: KeyboardEvent): void {
     if (!(e.target instanceof Element)) return;
     const head = e.target.closest<HTMLElement>('.pd-head-table [role="columnheader"]');
     if (head) return this.onHeaderKeydown(e, head);
+    const button = e.target.closest<HTMLElement>('.pd-icon-btn');
+    if (button) return this.onButtonKeydown(e, button);
     const target = e.target.closest<HTMLElement>('[role="row"][data-index]');
     if (!target || e.target !== target) return;
     const index = Number(target.dataset['index']);
@@ -677,6 +730,15 @@ export class PdTable<T> {
       e.preventDefault();
       if (item?.kind === 'group') this.toggleGroup(item.key);
       else if (item) this.open(item.row);
+      return;
+    }
+    if (e.key === 'ArrowRight') {
+      // The row's action buttons are not tab stops: Right reaches them from the row.
+      const first = target.querySelector<HTMLElement>('.pd-icon-btn');
+      if (first) {
+        e.preventDefault();
+        first.focus();
+      }
       return;
     }
     if (e.key === 'ArrowUp' && index === 0 && this.focusHeader(this.sortHeaders().findIndex((h) => h.closest('.pd-sorted')))) {
@@ -714,6 +776,17 @@ export class PdTable<T> {
     if (to === null || to < 0 || to >= headers.length) return;
     e.preventDefault();
     this.focusHeader(to);
+  }
+
+  /** On a row's action button: Left and Right move between the buttons (Left from the first goes back to the row), Escape returns to the row. */
+  private onButtonKeydown(e: KeyboardEvent, button: HTMLElement): void {
+    const row = button.closest<HTMLElement>('[role="row"]')!;
+    const buttons = [...row.querySelectorAll<HTMLElement>('.pd-icon-btn')];
+    const at = buttons.indexOf(button);
+    const to = e.key === 'ArrowRight' ? buttons[Math.min(at + 1, buttons.length - 1)] : e.key === 'ArrowLeft' ? (at > 0 ? buttons[at - 1] : row) : e.key === 'Escape' ? row : null;
+    if (!to) return;
+    e.preventDefault();
+    to.focus();
   }
 
   /** Whether a cell's text is cut (its tooltip shows the full text only then). */

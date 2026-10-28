@@ -646,14 +646,124 @@ describe('pd-table', () => {
     expect(tip.disabled).toBe(false);
   });
 
-  it('keeps the header as wide as the body above its scrollbar', async () => {
+  it('keeps the header as wide as the body above its scrollbar, measured when the body resizes (not on every render of the app)', async () => {
+    const watched: { target: Element; cb: ResizeObserverCallback }[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly cb: ResizeObserverCallback) {}
+        observe(target: Element): void {
+          watched.push({ target, cb: this.cb });
+        }
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
     const f = await setup();
     const body = el(f).querySelector<HTMLElement>('.pd-body')!;
     Object.defineProperty(body, 'offsetWidth', { configurable: true, value: 415 });
     Object.defineProperty(body, 'clientWidth', { configurable: true, value: 400 });
+    // Another render of the page does not measure.
     f.componentInstance.query.set('a');
     await settle(f);
+    expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-gutter')).not.toBe('15px');
+    // The body's resize does.
+    const entry = watched.find((w) => w.target === body)!;
+    entry.cb([{ target: body, contentRect: { width: 400 } } as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    await settle(f);
     expect(el(f).querySelector<HTMLElement>('.pd-grid')!.style.getPropertyValue('--pd-gutter')).toBe('15px');
+  });
+
+  it('describes a cell by its tooltip only while its text is cut and the pointer is on it (no description at rest)', async () => {
+    const f = await setup();
+    const text = rowEls(f)[0]!.querySelector<HTMLElement>('.pd-text')!;
+    await settle(f);
+    expect(text.hasAttribute('aria-describedby')).toBe(false);
+    Object.defineProperty(text, 'scrollWidth', { configurable: true, value: 50 });
+    Object.defineProperty(text, 'clientWidth', { configurable: true, value: 10 });
+    text.dispatchEvent(new MouseEvent('mouseenter'));
+    const tip = f.debugElement.query((d) => d.nativeElement === text).injector.get(MatTooltip);
+    expect(tip.disabled).toBe(false);
+    text.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(tip.disabled).toBe(true);
+  });
+
+  it('keeps the row buttons out of the tab order: Right reaches them from the row, Left goes back, Escape returns to the row', async () => {
+    const f = await setup();
+    const row = rowEls(f)[0]!;
+    const buttons = [...row.querySelectorAll<HTMLButtonElement>('.pd-icon-btn')];
+    expect(buttons.map((b) => b.getAttribute('tabindex'))).toEqual(['-1', '-1', '-1']);
+    row.focus();
+    press(row, 'ArrowRight');
+    expect(document.activeElement).toBe(buttons[0]);
+    press(buttons[0]!, 'ArrowRight');
+    press(buttons[1]!, 'ArrowRight');
+    expect(document.activeElement).toBe(buttons[2]);
+    press(buttons[2]!, 'ArrowRight');
+    expect(document.activeElement).toBe(buttons[2]);
+    press(buttons[2]!, 'ArrowLeft');
+    expect(document.activeElement).toBe(buttons[1]);
+    press(buttons[1]!, 'Escape');
+    expect(document.activeElement).toBe(row);
+    press(row, 'ArrowRight');
+    press(buttons[0]!, 'ArrowLeft');
+    expect(document.activeElement).toBe(row);
+    // Other keys on a button are the button's; a row without actions has nothing to the right.
+    press(buttons[0]!, 'a');
+    rowEls(f)[2]!.focus();
+    press(rowEls(f)[2]!, 'ArrowRight');
+    expect(document.activeElement).toBe(rowEls(f)[2]);
+  });
+
+  it('hides the loading placeholders from assistive technology and says whether a group row is expanded', async () => {
+    const f = await setup();
+    f.componentInstance.state.set('loading');
+    await settle(f);
+    const skeletons = [...el(f).querySelectorAll('.pd-skeleton')];
+    expect(skeletons.length).toBeGreaterThan(0);
+    expect(skeletons.every((r) => r.getAttribute('aria-hidden') === 'true')).toBe(true);
+    // Placeholders only: the body is no row group (it has no rows anyone can read).
+    expect(el(f).querySelector('.pd-body-table')?.getAttribute('role')).toBeNull();
+    f.componentInstance.state.set('ready');
+    f.componentInstance.groupBy.set('kind');
+    await settle(f);
+    const group = el(f).querySelector<HTMLElement>('.pd-group')!;
+    expect(group.getAttribute('aria-expanded')).toBe('true');
+    // Grouped, the grid is a tree grid: the group rows at level 1, their rows at level 2.
+    expect(el(f).querySelector('.pd-grid')?.getAttribute('role')).toBe('treegrid');
+    expect(group.getAttribute('aria-level')).toBe('1');
+    expect(rowEls(f).find((r) => !r.classList.contains('pd-group'))?.getAttribute('aria-level')).toBe('2');
+    group.click();
+    await settle(f);
+    expect(el(f).querySelector('.pd-group')?.getAttribute('aria-expanded')).toBe('false');
+    expect(rowEls(f).filter((r) => !r.classList.contains('pd-group')).every((r) => !r.hasAttribute('aria-expanded'))).toBe(true);
+  });
+
+  it('forgets a row it was waiting to focus when the lines change or the focus moves out of the grid, so it never steals the focus later', async () => {
+    const f = await setup();
+    const many = Array.from({ length: PD_TABLE_VIRTUAL_FROM * 5 }, (_, i): Plugin => ({ id: `r${i}`, name: `Row ${i}`, size: i, kind: 'k', path: `/p/${i}` }));
+    f.componentInstance.rows.set(many);
+    await settle(f);
+    const table = f.debugElement.query((d) => d.name === 'pd-table').componentInstance as PdTable<Plugin>;
+    const viewport = f.debugElement.query((d) => d.name === 'cdk-virtual-scroll-viewport').injector.get(CdkVirtualScrollViewport);
+    const input = el(f).querySelector<HTMLInputElement>('input[type=search]')!;
+    // The focus leaves for the filter while a far row is pending.
+    table.moveTo(499);
+    rowEls(f)[0]!.focus();
+    rowEls(f)[0]!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: input }));
+    input.focus();
+    viewport.setRenderedRange({ start: 480, end: 500 });
+    await settle(f);
+    await settle(f);
+    expect(document.activeElement).toBe(input);
+    // The lines change while a far row is pending.
+    table.moveTo(450);
+    f.componentInstance.query.set('Row 45');
+    await settle(f);
+    viewport.setRenderedRange({ start: 0, end: 20 });
+    await settle(f);
+    await settle(f);
+    expect(document.activeElement).toBe(input);
   });
 });
 

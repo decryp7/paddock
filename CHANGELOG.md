@@ -11,8 +11,13 @@ Conventional Commits; one semver tag for the whole repo.
   "..." button, right-click and Shift+F10), `matTooltip` the full text of a cut cell and the buttons' names, `matIconButton`
   the row actions (24 px, the family's hover fill in a 6 px shape). Group rows, middle truncation, `hideBelow`, the row
   heights and the grid keyboard stay the family's own. The public API is unchanged.
-- One tab stop for the grid (the active row); Up from the first row reaches the sort headers, the arrows move along them.
-  The keyboard focus follows End and Home in a virtual table once the row is drawn. A row stays marked while its menu is open.
+- One tab stop for the grid (the active row): the sort headers and the row's buttons are not tab stops. Up from the first row
+  reaches the sort headers and the arrows move along them; Right reaches the row's buttons, Left and Escape go back;
+  Shift+F10 or the Menu key opens the row's menu. A grouped table is a tree grid (group rows say whether they are expanded).
+  The keyboard focus follows End and Home in a virtual table once the row is drawn, and a pending focus is dropped when the
+  lines change or the focus leaves the grid. A row stays marked while its menu is open. A focused button shows Material's
+  focus indicator alone; a cut cell's tooltip (and its description) exists only while the pointer is on it; the loading
+  placeholders are hidden from assistive technology.
 - Every body is drawn in the viewport: above 100 lines only the rows in view; below, or with `virtual="false"`, every row,
   a frame after a change.
 - A sortable header's accessible name is its label (the button inside the column header); "Sort by …" is its description.

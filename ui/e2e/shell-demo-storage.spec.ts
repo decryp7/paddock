@@ -106,7 +106,7 @@ test.describe('storage (plan X32)', () => {
     await expect(page.getByTestId('storage-working')).toBeVisible();
     const tree = page.getByTestId('storage-tree');
     await expect(tree).toContainText('What is in Cache');
-    await expect(tree.getByRole('grid', { name: 'What is in Cache' })).toBeVisible();
+    await expect(tree.getByRole('treegrid', { name: 'What is in Cache' })).toBeVisible();
     // The biggest folder first, with its contents below its heading; the smallest items are one line.
     await expect(tree).toContainText('thumbnails');
     await expect(tree).toContainText('7 smaller items');

@@ -100,12 +100,15 @@ above are fixed wherever they occur.
      uniform row heights (24, 32 or 36 px and a 28 px header, also the virtual scroll's item size); the grid keyboard
      (`mat-table` has no keyboard model): one tab stop for the whole grid, the active row; Up, Down, Page Up, Page Down,
      Home, End and Enter on the rows; Up from the first row into the sort headers (not tab stops of their own), Left,
-     Right, Home and End along them, Down back. A row the keyboard moves to is scrolled into view only when it is out of
+     Right, Home and End along them, Down back; Right from a row into its action buttons (not tab stops either), Left and
+     Escape back; Shift+F10 or the Menu key for the row's menu. Grouped, the grid is a `treegrid`: group rows at
+     `aria-level` 1 say `aria-expanded`, their rows are at level 2 (axe allows `aria-expanded` on a row only in a tree grid). A row the keyboard moves to is scrolled into view only when it is out of
      view, and focused once the virtual table has drawn it (End and Home in 5,000 rows); the loading placeholders, empty
      and error states (a row of the grid).
-   - **Smaller choices:** a cell's tooltip shows only when its text is cut; the row stays marked while its menu is open; the
-     row action buttons are 24 px with the family's hover fill as their state layer in a 6 px shape (Material's state layer
-     needs opacity tokens the theme does not set, which drew a solid disc) and no 48 px touch target; the sort arrow is
+   - **Smaller choices:** a cell's tooltip is disabled at rest and enabled only while the pointer is on a cut text (so a cell
+     is not described by its own text); the row stays marked while its menu is open; the
+     row action buttons are 24 px with the family's hover fill as their state layer in a 6 px shape (the solid disc came from the Material bridge loaded without `mat.theme`, which left the state-layer opacity undefined, so it computed to 1; the theme sets the opacity tokens, and `fix/material-state-layer` makes the bridge set them too. Until that merges the table sets its own hover fill and opacities; afterwards only the shape, size and touch target stay the table's), Material's focus indicator as their only keyboard
+     ring, and no 48 px touch target; the sort arrow is
      Material's (hidden at rest, a hint on hover and focus, solid when sorted), which replaces the family's two-way hint
      glyph and its "never the descending arrow" guard (a decision, not a regression: Material's arrow is hidden at rest).
    - `@angular/material` is an optional peer dependency of `@decryp7/paddock-ui` (needed by `@decryp7/paddock-ui/table`;
