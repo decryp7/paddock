@@ -57,3 +57,10 @@
 .gal-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .gal-metric { display: flex; flex-direction: column; gap: var(--pd-space-1); }
 .gal-cap { color: var(--pd-text-muted); font-size: var(--pd-text-caption); }
+
+/* Material controls section (static copies of the overlay panels, so the page shows them at rest). */
+.gal-badge-host { display: inline-block; padding-right: var(--pd-space-4); }
+.gal-progress { width: 200px; }
+.gal-tab-body { padding: var(--pd-space-3); }
+.gal-section .gal-open-panel { position: static; width: 200px; align-self: flex-start; }
+.gal-calendar { width: 296px; }

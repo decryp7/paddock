@@ -4,9 +4,28 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Frame navigation on Material and the CDK (WP-4 of the Material migration, rule 47)
+- The pages sidebar is a `mat-nav-list`; the CDK `FocusKeyManager` moves focus with Up, Down, Home and End (wrapping). Tab still reaches every link.
+- Count badges (sidebar and activity bar) are `matBadge` (aria-hidden: the count stays in the link's name). The sidebar badge sits on the page icon in both modes; tones set `--mat-badge-background-color`.
+- Tooltips are `matTooltip`, not `title`: the rail's page names, the activity bar and its More menu, the status bar's More button, the part Retry button, the path text's Copy button. `pd-path-text` shows the full value only when the text on screen is shorter than it; the title bar no longer repeats the app name as a native title.
+- The Copy menu (`PdCopyMenuHost`) is a CDK context menu (`cdkContextMenuTrigger` and `cdkMenu`), opened at the pointer by `PdCopyMenu` as before. The `.pd-badge`/`.pd-act-badge` classes and `[data-testid="page-badge"]` are gone: the e2e page object `badges` finds `.mat-badge-content`.
+
 ### Shell toasts keep a page-footer safe area
 - New token `--pd-page-footer-safe` (56 px). `pd-notification-host` now sits above the status bar plus this safe area, so a toast no
   longer covers a page footer's primary action (a wizard's Next); the status-bar fallback is 24 px like the token.
+
+### One shared Material theme (WP-0 of the Material migration, rule 47)
+- `css/material.css` (`scss/entry-material.scss`) is now the whole Material look: one Material 3 `mat.theme` (density -3) whose system
+  and component tokens all resolve to `--pd-*`, so theme, accent, contrast and density follow our tokens and an app carries no
+  Material theme of its own. New bridge tokens: table, sort header, paginator, tree, button toggle, badge, list, expansion, timepicker,
+  slider, chips, tabs, progress bar and every `matButton` variant (filled = primary, outlined = secondary with the surface-2 fill, text,
+  tonal, elevated; danger is the class `pd-button-danger` on any of them; no ripple).
+- New secondary entry `@decryp7/paddock-ui/material`: `providePaddockMaterial()` makes every `mat-form-field` `appearance="outline"` with
+  `floatLabel="always"` and turns ripples off. `@angular/material` is an optional peer dependency (`^22.2.3`) of `@decryp7/paddock-ui`.
+- `npm run test:tokens` measures the contrast of every bridged Material component in light and dark for all accents (text 4.5:1,
+  icons, borders and indicators 3:1). It found the snack bar action (accent on the inverse surface, 1.9:1 to 2.4:1): it now takes the
+  surface ink. `npm run build:css` resolves `@angular/material` from the repo's `node_modules`.
+- Gallery: a "Material controls" section shows every bridged component (`e2e/material.spec.ts`: axe, token checks, real overlays).
 
 ### Dyno on the shared CI kit (WP-C4)
 - Dyno is a leg of `ci.yml` (`apps/dyno/paddock.ci.json`: Rust on Linux, Windows and macOS with clippy on Windows too, the frontend,
