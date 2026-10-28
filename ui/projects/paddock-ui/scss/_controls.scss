@@ -163,7 +163,7 @@
   // translucent halo alone measured 1.7:1 and is not an indicator.
   &:focus-visible {
     border-color: var(--pd-accent);
-    outline: 2px solid var(--pd-focus-ring);
+    outline: var(--pd-focus-width) solid var(--pd-focus-ring);
     outline-offset: 2px;
   }
 
@@ -353,7 +353,7 @@
     }
 
     &:focus-visible {
-      outline: 2px solid var(--pd-focus-ring);
+      outline: var(--pd-focus-width) solid var(--pd-focus-ring);
       outline-offset: 2px;
     }
 
@@ -412,7 +412,7 @@
   }
 
   &:focus-visible {
-    outline: 2px solid var(--pd-focus-ring);
+    outline: var(--pd-focus-width) solid var(--pd-focus-ring);
     outline-offset: 2px;
   }
 
@@ -611,7 +611,7 @@
 
   &:focus-visible {
     background: var(--pd-hover);
-    outline: 2px solid var(--pd-focus-ring);
+    outline: var(--pd-focus-width) solid var(--pd-focus-ring);
     outline-offset: -2px;
   }
 

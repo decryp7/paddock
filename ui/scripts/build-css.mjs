@@ -8,7 +8,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'projects', 'pa
 const out = join(root, 'css');
 mkdirSync(out, { recursive: true });
 for (const name of ['tokens', 'paddock', 'controls', 'material']) {
-  const { css } = compile(join(root, 'scss', `entry-${name}.scss`), { style: 'expanded', loadPaths: [join(root, '..', '..', '..', 'node_modules')] });
+  const { css } = compile(join(root, 'scss', `entry-${name}.scss`), { style: 'expanded', loadPaths: [join(root, '..', '..', 'node_modules'), join(root, '..', '..', '..', 'node_modules')] });
   writeFileSync(join(out, `${name}.css`), css);
 }
 console.log('css built');

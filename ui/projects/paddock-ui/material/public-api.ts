@@ -3,4 +3,4 @@
  * `css/material.css` (one Material 3 theme mapped to the --pd-* tokens); this entry sets the behaviour defaults that go with
  * it. Needs `@angular/material` (an optional peer of the package).
  */
-export { providePaddockMaterial, PADDOCK_FORM_FIELD_OPTIONS } from './src/provide';
+export { providePaddockMaterial, PADDOCK_FORM_FIELD_OPTIONS, PADDOCK_DATE_FORMATS } from './src/provide';
